@@ -12,10 +12,23 @@ Use `kiln build`, `kiln check`, `kiln test`, `kiln clippy` and `kiln analyze`
 for development. Lash uses the checksum-pinned official Buck2 executable and
 the existing NativeLink pool. `kiln test` runs the cacheable developer partition;
 it does not run every correctness gate. While editing, prefer an owning target
-and `--test_arg=<filter>`. Run `python3 scripts/dev-test.py --dependents` before
-landing: it runs affected dev-suite tests and leaves dev-deferred tests to the
-hourly main run. Add `--include-deferred` to run those too. See [the build guide](docs/agents/hermetic-build.md) for partitions,
-reports, features and service gates.
+and `--test_arg=<filter>`.
+
+The proof a change needs is minimal and fast; main's hourly full run covers
+the rest and reds are fixed forward:
+
+- the tests the change adds or changes, run once on the cheapest tier
+  (SQLite stores, the in-process Restate server double), by full test path;
+- for a bug, a law that fails once on the unfixed code;
+- one `kiln clippy`;
+- only when they apply: `//crates/lash:ui_fixtures` and
+  `//crates/lash:facade_completeness` when exports change, and
+  `kiln build //:schema_checks` when a serialized shape changes.
+
+`python3 scripts/dev-test.py --dependents` is an optional local tool for a
+wider affected-tests selection, not a required gate. See [the build
+guide](docs/agents/hermetic-build.md) for partitions, reports, features and
+service gates.
 Prefer `kiln check` for compiler feedback: it checks metadata without linking.
 Use `kiln build` when you need full libraries or executables.
 

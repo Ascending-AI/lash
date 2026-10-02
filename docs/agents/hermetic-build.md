@@ -57,24 +57,36 @@ silently added by package wildcards. Shared build inputs and unknown tooling
 widen selection. A docs-only diff does not run Rust tests. Known Python test
 edits run the exact repository-gate command CI uses.
 
-The pre-land gate is one command, run in the fork:
+The proof a change needs is minimal and fast; main's hourly full run covers
+the rest and reds are fixed forward:
+
+- the tests the change adds or changes, run once on the cheapest tier
+  (SQLite stores, the in-process Restate server double), by full test path;
+- for a bug, a law that fails once on the unfixed code;
+- one `kiln clippy`;
+- only when they apply: `//crates/lash:ui_fixtures` and
+  `//crates/lash:facade_completeness` when exports change, and
+  `kiln build //:schema_checks` when a serialized shape changes.
+
+`python3 scripts/dev-test.py --dependents` is an optional local tool for a
+wider affected-tests selection, not a required gate:
 
 ```sh
-kiln gate lash <fork> -- python3 scripts/dev-test.py --dependents
+python3 scripts/dev-test.py --dependents
 ```
 
 It diffs the merge base with `origin/main` against the commits, the working
 tree and untracked files together. A Buck2 `rdeps` query over the touched
 packages selects every dev-suite test that depends on them; a shared input,
 a package manifest or a failed query selects `//:dev_tests` instead.
-The gate names the affected `dev-deferred` labels it skips, which run hourly on
+It names the affected `dev-deferred` labels it skips, which run hourly on
 main. Add `--include-deferred` to restore their selection, including all deferred
 labels on a broad plan. CI's PR selection still includes the tail labels.
 The tests run through `kiln test` on the
 pool at the default `--jobs`, never serially, and cached verdicts bound the
 cost, so there is no sampling. Every planned command runs, also after one
 fails. The closing lines give the target count and name
-every `FAIL`, `TIMEOUT` and `INFRA_FAILURE`, then the affected tests the gate
+every `FAIL`, `TIMEOUT` and `INFRA_FAILURE`, then the affected tests it
 never runs (`manual` service and Cargo-owned labels, `pr-deferred` suites). The
 exit code is non-zero for any of the first three and for a build, script or
 infrastructure error.
@@ -569,14 +581,13 @@ milliseconds.
 
 ## Repeating a test
 
-Prove a concurrency, timing, crash or replay law by executing one exact case
-repeatedly:
+To diagnose a flake, execute one exact case repeatedly:
 
 ```sh
 kiln test //crates/lash-store-sql:lash-store-sql__unit_test \
   --test_arg=--exact \
   --test_arg=render::tests::a_vocabulary_token_expands_once_for_both_backends \
-  --test_sharding_strategy=disabled --runs_per_test=20
+  --test_sharding_strategy=disabled --runs_per_test=10
 ```
 
 `--runs_per_test=N` runs `buck2 test` N times with `--no-test-cache`, so every
