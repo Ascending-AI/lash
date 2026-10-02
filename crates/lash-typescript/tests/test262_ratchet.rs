@@ -1,8 +1,6 @@
-//! Test262 conformance, whole-selection ratchet (FIG-3646): every vendored
-//! test keeps its recorded outcome in one case, so the documented
-//! `TEST262_BLESS=1` recipe can rewrite the record from the run it makes
-//! (see README.md). `test262_full.rs` carries the same per-test assertion as
-//! shardable corpus partitions.
+//! Test262 ratchet bookkeeping (FIG-4761): the complete selection listing
+//! equals the record's keys. Corpus partitions check each observed verdict
+//! in `test262_full.rs`; this binary never executes the corpus.
 #![expect(
     clippy::expect_used,
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the helpers around them in this target are test code too"
@@ -16,46 +14,33 @@
 #[allow(dead_code, reason = "not every ingest helper is used in this shard")]
 mod ingest;
 #[path = "test262/support/metadata.rs"]
-#[allow(
-    dead_code,
-    reason = "the full run reads the metadata the runner needs, not the census fields"
-)]
+#[allow(dead_code, reason = "bookkeeping does not read test metadata")]
 mod metadata;
 #[path = "test262/support/runner.rs"]
 #[allow(
     dead_code,
-    reason = "the full run uses the runner, not the census helpers"
+    reason = "bookkeeping only reads the selection and recorded outcomes"
 )]
 mod runner;
 
 #[test]
-fn full_selection_matches_the_ratchet() {
+fn selection_listing_matches_the_ratchet() {
+    assert!(
+        std::env::var_os("TEST262_BLESS").is_none(),
+        "TEST262_BLESS requires test262_full's bless_full_selection (see README.md)"
+    );
     let recorded = runner::recorded_outcomes();
-    let vendored = runner::vendored_tests().into_iter().collect::<Vec<_>>();
-    let paths = match runner::quick_selection(&vendored) {
-        Some(subset) => {
-            eprintln!(
-                "LASH_QUICK: running {} of {} selected tests",
-                subset.len(),
-                vendored.len()
-            );
-            subset
-        }
-        None => vendored,
-    };
-    let observed = runner::run_all(&paths);
-    if runner::bless(&paths, &observed, &recorded) {
-        eprintln!("blessed the outcomes shards from the run");
-        return;
-    }
-    let mismatches = runner::compare(&paths, &observed, &recorded);
+    let selected = runner::vendored_tests();
+    let recorded_paths = recorded
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let missing = selected.difference(&recorded_paths).collect::<Vec<_>>();
+    let stale = recorded_paths.difference(&selected).collect::<Vec<_>>();
+    assert!(
+        missing.is_empty() && stale.is_empty(),
+        "the ratchet must cover the complete selection exactly; missing: {missing:?}; stale: {stale:?}"
+    );
     eprintln!("{}", runner::summary(&recorded));
     eprintln!("{}", runner::tally_lines(&recorded));
-    assert!(
-        mismatches.is_empty(),
-        "{} Test262 outcomes changed; a new pass must be promoted, a new failure \
-         fixed or owned, a changed refusal re-recorded (see README.md):\n{}",
-        mismatches.len(),
-        mismatches.join("\n")
-    );
 }

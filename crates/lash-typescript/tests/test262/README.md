@@ -95,16 +95,17 @@ a deterministic instruction budget. The ratchet has three layers:
 - **Each outcome.** `test262` (the sample, in `//:dev_tests`), `test262_full`
   (the whole selection as corpus-partition cases the Buck2 shards spread, in
   the `//:workspace_tests` tail and the nightly `Test262 nightly` workflow)
-  and `test262_ratchet` (the same check as one whole-selection case, in the
-  tail; FIG-4733) fail when a test's outcome changes from its record in any
+  fail when a test's outcome changes from its record in any
   of three ways:
   - a new failure;
   - a pass that is not promoted;
   - a refusal whose code changed.
 
   A recorded failure matches any divergence; its evidence is not pinned. The
-  record's tallies are derived — both binaries print them rather than pinning
-  a second copy.
+  record's tallies are derived.
+- **Bookkeeping.** `test262_ratchet` checks that the selection listing equals
+  the record's keys, with no missing or stale entries. It prints the record's
+  tallies without executing the corpus (FIG-4761).
 - **Across commits.** `scripts/check_test262_ratchet.py --base <base>` (CI)
   holds the record to its base: a test that passed keeps passing, and a
   failure is new only where the base could not run the test (refused or
@@ -114,8 +115,9 @@ To re-record after a deliberate change, run:
 
 ```sh
 . ./env.sh
-kiln test //crates/lash-typescript:test262_ratchet__test \
-  --test_arg=--exact --test_arg=full_selection_matches_the_ratchet \
+kiln test //crates/lash-typescript:test262_full__test \
+  --test_arg=--ignored --test_arg=--exact --test_arg=bless_full_selection \
+  --test_sharding_strategy=disabled \
   --local-test-execution --nocache_test_results \
   --test_env=BUILD_WORKSPACE_DIRECTORY="$PWD" \
   --test_env=TEST262_BLESS=1 \

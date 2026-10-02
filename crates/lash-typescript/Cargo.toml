@@ -99,8 +99,8 @@ path = "tests/test262_sample.rs"
 name = "test262_full"
 path = "tests/test262_full.rs"
 
-# The whole-selection ratchet in one case, so the `TEST262_BLESS` re-record
-# recipe sees the selection whole (FIG-4733).
+# The ratchet's selection/record bookkeeping, without corpus execution
+# (FIG-4761). Per-case verdicts are checked in test262_full's shards.
 [[test]]
 name = "test262_ratchet"
 path = "tests/test262_ratchet.rs"

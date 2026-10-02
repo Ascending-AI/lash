@@ -68,6 +68,7 @@ jobs:
           set -euo pipefail
           scripts/ci/buck2-test.sh test262-full \
             --no-test-cache --test_arg=--nocapture \
+            //crates/lash-typescript:test262_full__test \
             //crates/lash-typescript:test262_ratchet__test
 
       - name: Report the figures

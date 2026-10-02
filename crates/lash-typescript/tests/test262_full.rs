@@ -1,8 +1,8 @@
 //! Test262 conformance, full selection (FIG-3646): every vendored test keeps
 //! its recorded outcome. The corpus runs as [`runner::CORPUS_PARTITIONS`]
 //! disjoint cases, so the Buck2 shards spread them across lanes (FIG-4733).
-//! The whole-selection ratchet and the `TEST262_BLESS` recipe live in
-//! `test262_ratchet.rs`.
+//! `test262_ratchet.rs` checks the record's keys without executing tests.
+//! The explicit `TEST262_BLESS` recipe uses the ignored case below.
 #![expect(
     clippy::expect_used,
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the helpers around them in this target are test code too"
@@ -46,12 +46,12 @@ fn focused_rows() {
 /// the knob is set): the partition's tests run and compare against the
 /// record. The partitions are disjoint and their union is the selection, so
 /// the target checks every vendored test while the Buck2 shards spread the
-/// cases. Re-recording stays with the `test262_ratchet` target: a bless must
-/// see the whole selection in one run.
+/// cases. Re-recording uses `bless_full_selection`: a bless must see the
+/// whole selection in one run.
 fn run_corpus_partition(index: usize) {
     assert!(
         std::env::var_os("TEST262_BLESS").is_none(),
-        "TEST262_BLESS rewrites the whole record; run the test262_ratchet target (see README.md)"
+        "TEST262_BLESS rewrites the whole record; run only bless_full_selection (see README.md)"
     );
     let recorded = runner::recorded_outcomes();
     let vendored = runner::vendored_tests().into_iter().collect::<Vec<_>>();
@@ -81,6 +81,25 @@ fn run_corpus_partition(index: usize) {
         mismatches.len(),
         mismatches.join("\n")
     );
+}
+
+/// Explicit maintenance recipe, excluded from ordinary corpus execution.
+#[test]
+#[ignore = "rewrites the record; requires the documented TEST262_BLESS recipe"]
+fn bless_full_selection() {
+    assert!(
+        std::env::var_os("TEST262_BLESS").is_some(),
+        "bless_full_selection requires TEST262_BLESS (see README.md)"
+    );
+    let paths = runner::vendored_tests().into_iter().collect::<Vec<_>>();
+    assert!(
+        runner::quick_selection(&paths).is_none(),
+        "unset LASH_QUICK so the whole selection is recorded"
+    );
+    let recorded = runner::recorded_outcomes();
+    let observed = runner::run_all(&paths);
+    assert!(runner::bless(&paths, &observed, &recorded));
+    eprintln!("blessed the outcomes shards from the run");
 }
 
 /// The partitions are disjoint, nonempty and their union is the whole
