@@ -378,6 +378,7 @@ pub async fn concurrent_seals_serialize(handles: SessionIngressHandles) {
                     &AdmissionId::new(admission),
                     observed,
                     &root_start(),
+                    None,
                 )
                 .await
                 .expect("seal a drive epoch")
@@ -392,7 +393,9 @@ pub async fn concurrent_seals_serialize(handles: SessionIngressHandles) {
         .iter()
         .filter_map(|outcome| match outcome {
             DriveEpochSeal::Sealed(fence) => Some(fence.clone()),
-            DriveEpochSeal::Superseded { .. } | DriveEpochSeal::ExecutionLost => None,
+            DriveEpochSeal::Superseded { .. }
+            | DriveEpochSeal::ExecutionLost
+            | DriveEpochSeal::HeldByAnotherExecutor { .. } => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(winners.len(), 1, "exactly one seal wins: {outcomes:?}");
@@ -433,6 +436,7 @@ pub async fn the_drive_epoch_seal_is_idempotent_per_admission(handles: SessionIn
                     &AdmissionId::new(admission),
                     observed,
                     &root_start(),
+                    None,
                 )
                 .await
                 .expect("seal a drive epoch")
@@ -462,6 +466,7 @@ pub async fn the_drive_epoch_seal_is_idempotent_per_admission(handles: SessionIn
                 &AdmissionId::new("seal-a"),
                 observed,
                 &lash_core::store::RootStartNonce::new("another execution"),
+                None,
             )
             .await
             .expect("seal a drive epoch"),

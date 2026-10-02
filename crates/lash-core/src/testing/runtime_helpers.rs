@@ -251,6 +251,7 @@ pub async fn submit_host_command(
             &admission,
             observed.epoch,
             &crate::store::RootStartNonce::new(uuid::Uuid::new_v4().to_string()),
+            None,
         )
         .await
         .map_err(|error| {

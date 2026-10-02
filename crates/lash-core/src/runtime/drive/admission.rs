@@ -69,30 +69,10 @@ pub(in crate::runtime) struct AdmitDriveRunner {
     /// The drain this admission hands over for, when its drive named one
     /// (FIG-4639).
     pub(in crate::runtime) drain: Option<DrainRead>,
-    /// Who runs the roots this drive admits: an unfinished root recorded
-    /// under an executor that excludes it is left to that executor
-    /// (FIG-4765).
-    pub(in crate::runtime) admitter: Admitter,
-}
-
-/// Who runs the roots a drive admits (FIG-4765).
-#[derive(Clone, Debug)]
-pub(crate) struct Admitter {
-    /// The execution that runs them, as their admission records it.
-    pub(crate) executor: crate::store::RootExecutor,
-    /// The drive is an acceptor's: a child session's turn driven inline in
-    /// its parent's execution, which an engine holds whatever its scope.
-    pub(crate) acceptor: bool,
-}
-
-impl Admitter {
-    /// An engine's drive, which runs each root as the root's own run.
-    pub(crate) fn engine() -> Self {
-        Self {
-            executor: crate::store::RootExecutor::Root,
-            acceptor: false,
-        }
-    }
+    /// The execution that runs the roots this drive admits: an unfinished
+    /// root recorded under an executor that excludes it is left to that
+    /// executor (FIG-4765).
+    pub(in crate::runtime) executor: crate::store::RootExecutor,
 }
 
 /// The drain mark an admission reads before it admits (ADR 0106 §1): the
@@ -277,38 +257,26 @@ impl AdmitDriveRunner {
     ///
     /// The root's recorded executor decides who runs it. When an engine
     /// holds that executor's run, the engine redrives it and answers for it
-    /// if it is lost, so another engine-held run, and an acceptor driving
-    /// its child session's turn inline under any scope, seals nothing over
-    /// its fence and admits nothing beside it, whatever ingress claim lapsed
-    /// in between. A session drive or queue drain no engine holds resumes
-    /// the root as before, under the drive fence. The refusal is the
-    /// attempt's, never a recorded verdict: the engine's retry re-decides
-    /// admission once that execution has ended the root.
+    /// if it is lost, so another engine-held run, an acceptor driving its
+    /// child session's turn inline included, admits nothing beside it,
+    /// whatever ingress claim lapsed in between. A session drive or queue
+    /// drain no engine holds resumes the root as before, under the drive
+    /// fence. The refusal is the attempt's, never a recorded verdict: the
+    /// engine's retry re-decides admission once that execution has ended
+    /// the root. The seal makes the same decision in its own transaction
+    /// ([`held_by_another_executor`]), for a root sealed since this read.
     fn leave_to_recorded_executor(
         &self,
         unfinished: Option<&crate::store::UnfinishedRoot>,
     ) -> Result<(), RuntimeEffectControllerError> {
-        let Some(held) = unfinished else {
-            return Ok(());
-        };
-        let Admitter { executor, acceptor } = &self.admitter;
-        let excluded = held.executor.excludes(executor)
-            || (*acceptor && held.executor.is_engine_held() && held.executor != *executor);
-        if !excluded {
-            return Ok(());
+        match unfinished {
+            Some(held) if held.executor.excludes(&self.executor) => Err(held_by_another_executor(
+                &self.request.session,
+                &held.root,
+                &held.executor,
+            )),
+            _ => Ok(()),
         }
-        Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::SessionRootPending,
-            format!(
-                "session `{session_id}` admits nothing to {admitting:?} while root `{root}` \
-                 is run by {recorded:?}; that execution ends the root",
-                session_id = self.request.session,
-                admitting = executor,
-                root = held.root,
-                recorded = held.executor,
-            ),
-        )
-        .retryable_uncommitted_derivation())
     }
 
     /// The work this admission drives next, and the root it runs under.
@@ -419,6 +387,24 @@ impl AdmitDriveRunner {
     }
 }
 
+/// The refusal of an admission or seal whose root `recorded` runs: the
+/// attempt's, retried until that executor has ended the root (FIG-4765,
+/// FIG-4814).
+fn held_by_another_executor(
+    session_id: &crate::SessionId,
+    root: &TurnId,
+    recorded: &crate::store::RootExecutor,
+) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        RuntimeErrorCode::SessionRootPending,
+        format!(
+            "session `{session_id}` admits nothing beside root `{root}`, which is run by \
+             {recorded:?}; that execution ends the root"
+        ),
+    )
+    .retryable_uncommitted_derivation()
+}
+
 /// The root a queued-work head is admitted under: named by its admission, so
 /// no two admissions share a root and a redrive of one names the same root.
 fn queued_root(admission: &AdmissionId) -> TurnId {
@@ -434,7 +420,10 @@ fn commands_root(admission: &AdmissionId) -> TurnId {
 /// compare-and-set, keyed by the admission nonce, so a retried body answers
 /// the fence it already raised (ADR 0105 L-S3, L-S4). It stores the start
 /// marker the root's execution drew, so another execution of the same
-/// admission is answered `SubstrateLost` (L-S8).
+/// admission is answered `SubstrateLost` (L-S8), and in the same transaction
+/// the executor that runs the root (FIG-4814). A root another engine-held
+/// executor holds is left to it: the step raises nothing and fails
+/// retryably, recording no verdict, until that executor has ended the root.
 pub(in crate::runtime) struct SealDriveRunner {
     /// The session's history store, or `None` when the engine could not open
     /// it at all — the session's close or tombstone already committed — in
@@ -443,6 +432,8 @@ pub(in crate::runtime) struct SealDriveRunner {
     pub(in crate::runtime) store: Option<crate::store::SessionStore>,
     pub(in crate::runtime) admitted: Admitted,
     pub(in crate::runtime) root_start: crate::engine::RootStartNonce,
+    /// The execution that runs the admitted root.
+    pub(in crate::runtime) executor: crate::store::RootExecutor,
 }
 
 #[async_trait::async_trait]
@@ -474,6 +465,10 @@ impl RuntimeEffectLocalRunner for SealDriveRunner {
                 self.admitted.admission(),
                 self.admitted.observed_epoch(),
                 &self.root_start,
+                Some(&crate::store::RootHold {
+                    root: self.admitted.root().clone(),
+                    executor: self.executor.clone(),
+                }),
             )
             .await
             .map_err(|error| store_fault("drive epoch seal", error))?;
@@ -483,6 +478,13 @@ impl RuntimeEffectLocalRunner for SealDriveRunner {
                 SealVerdict::Refused(SealRefusal::Superseded { epoch })
             }
             DriveEpochSeal::ExecutionLost => SealVerdict::Refused(SealRefusal::ExecutionLost),
+            DriveEpochSeal::HeldByAnotherExecutor { root, recorded } => {
+                return Err(held_by_another_executor(
+                    self.admitted.session(),
+                    &root,
+                    &recorded,
+                ));
+            }
         };
         Ok(RuntimeEffectOutcome::SealDriveAdmission {
             verdict: Box::new(verdict),

@@ -73,6 +73,7 @@ async fn seal_perf_drive(
             &admission,
             stored.epoch,
             &RootStartNonce::new(admission.as_str()),
+            None,
         )
         .await?;
     let DriveEpochSeal::Sealed(fence) = seal else {

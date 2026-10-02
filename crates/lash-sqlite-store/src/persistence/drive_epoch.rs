@@ -8,8 +8,9 @@
 
 use super::*;
 use lash_core_execution::store::{
-    AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
-    RootStartNonce, StoredDriveEpoch, decide_drive_epoch_seal, require_current_drive_fence,
+    AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence, RootHold,
+    RootStartNonce, StoredDriveEpoch, decide_drive_epoch_seal, decide_root_hold,
+    require_current_drive_fence,
 };
 use lash_core_execution::store_backend_support::sealed_drive_fence;
 
@@ -106,10 +107,12 @@ impl DriveEpochStore for SqliteStore {
         admission: &AdmissionId,
         observed_epoch: u64,
         root_start: &RootStartNonce,
+        hold: Option<&RootHold>,
     ) -> Result<DriveEpochSeal, StoreError> {
         let session_id = session_id.clone();
         let admission = admission.clone();
         let root_start = root_start.clone();
+        let hold = hold.cloned();
         self.conn
             .write_flow(move |tx| {
                 commit((|| {
@@ -124,6 +127,24 @@ impl DriveEpochStore for SqliteStore {
                     ) {
                         DriveEpochSealDecision::Answer(seal) => Ok(seal),
                         DriveEpochSealDecision::Raise { next } => {
+                            // The recorded executor of the root keeps its
+                            // fence (FIG-4814).
+                            if let Some(hold) = &hold
+                                && let Some(refused) = decide_root_hold(
+                                    hold,
+                                    stored.epoch,
+                                    crate::session_roots::held_root_conn(
+                                        tx,
+                                        &session_id,
+                                        &hold.root,
+                                    )?
+                                    .as_ref(),
+                                    crate::session_roots::unfinished_root_conn(tx, &session_id)?
+                                        .as_ref(),
+                                )
+                            {
+                                return Ok(refused);
+                            }
                             let changed = tx
                                 .execute(
                                     session_sql().meta.seal_drive_epoch.sql(),
@@ -140,6 +161,9 @@ impl DriveEpochStore for SqliteStore {
                                 return Ok(DriveEpochSeal::Superseded {
                                     epoch: drive_epoch_conn(tx, &session_id)?.epoch,
                                 });
+                            }
+                            if let Some(hold) = &hold {
+                                crate::session_roots::record_root_hold_conn(tx, &session_id, hold)?;
                             }
                             Ok(DriveEpochSeal::Sealed(sealed_drive_fence(
                                 session_id.clone(),

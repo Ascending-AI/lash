@@ -125,7 +125,7 @@ macro_rules! runtime_store_operations {
                 [session] fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError>;
             }
             DriveEpochStore {
-                [session] fn seal_drive_epoch(&self, session_id: &SessionId, admission: &AdmissionId, observed_epoch: u64, root_start: &RootStartNonce) -> Result<DriveEpochSeal, StoreError>;
+                [session] fn seal_drive_epoch(&self, session_id: &SessionId, admission: &AdmissionId, observed_epoch: u64, root_start: &RootStartNonce, hold: Option<&RootHold>) -> Result<DriveEpochSeal, StoreError>;
                 [session] fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError>;
             }
             RootStore {

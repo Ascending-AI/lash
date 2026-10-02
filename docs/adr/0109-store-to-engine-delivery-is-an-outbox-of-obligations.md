@@ -242,8 +242,8 @@ The engine accepting the ask holds the claim; root admission settles it
 regardless of the relay state. A child-session acceptance takes its row's
 claim in the acceptance transaction, because its acceptor's inline drive is
 the ask ([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md) §6). That claim only delays the relay's ask: once a root's
-admission is recorded, its executor decides who runs it, whoever holds the
-claim. A waiter follows later claimed attempts if
+admission is sealed, its recorded executor decides who runs it, whoever holds
+the claim. A waiter follows later claimed attempts if
 the earlier drive ends without admitting the item. An ingress retry uses a
 minted token and cannot send another ask while a prior claim remains held.
 
@@ -301,16 +301,16 @@ Evidence: `crates/lash-core/src/runtime/drive/relays.rs:148`,
 The same pass reads a root whose key Restate holds no run of on any
 generation lane. An admission delivers its input's ingress obligation in the
 same write, so no relay owns that input. The pass judges the root by the
-execution its recorded admission names (`RootExecutor`), which the store
-lists beside each open root. It never infers the executor from the root's
-name. The first admission records the executor, and every later admission of
-the root reads the record back unchanged.
+execution recorded for it (`RootExecutor`), which the store lists beside each
+open root. It never infers the executor from the root's name. The seal of the
+root's admission records the executor, the admission records it from then on,
+and every later admission of the root reads the record back unchanged.
 
 - **Its own run.** Retention purged the run, or its journal store was lost.
   The root has started, its effects may have run, and a fresh execution
   would run them again under an empty journal. It ends `SubstrateLost` in
   the same transaction as a failed run's root.
-- **A process's run.** A `SessionTurn` process's drive runs inline, in the
+- **An acceptor's run.** A `SessionTurn` process's drive runs inline, in the
   process's own run, every root it admits: its child turn's root, and any
   root admitted ahead of that turn in a reused session. No lane ever holds a
   run of those keys. While the process's record is not terminal, the pass
@@ -320,7 +320,13 @@ the root reads the record back unchanged.
 - **Another execution's drive.** An in-process drive holds no engine run
   the pass can read, so absence proves nothing and the pass leaves the root.
 - **No recorded admission.** The root has started nothing. Its ingress
-  obligation still owes its input and drives it, so the pass leaves it.
+  obligation still owes its input and drives it, so the pass never ends it.
+  When the executor its seal recorded holds no run any more (its own run is
+  gone, or its acceptor process is terminal), the pass releases that record,
+  so the drive the obligation asks for seals the root as its own.
+
+An acceptor under a parent turn's scope records no run the pass can read, so
+the pass leaves its root, admitted or only sealed.
 
 An admin read that fails proves nothing about any run and ends nothing.
 

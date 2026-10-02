@@ -638,8 +638,8 @@ pub mod persistence {
     /// of [`RuntimeStore`], implemented by every store a runtime drives,
     /// and the fence it yields, the one authority every drive write presents.
     pub use lash_core::store::{
-        AdmissionId, DriveEpochSeal, DriveEpochStore, DriveFence, DriveRaise, RootStartNonce,
-        StoredDriveEpoch,
+        AdmissionId, DriveEpochSeal, DriveEpochStore, DriveFence, DriveRaise, RootHold,
+        RootStartNonce, StoredDriveEpoch,
     };
     /// A root's recorded admission of the turn-lane run it drives and the
     /// execution that runs it, what its checkpoints admit, how a commit

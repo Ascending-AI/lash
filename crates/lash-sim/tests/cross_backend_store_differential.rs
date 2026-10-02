@@ -1460,6 +1460,7 @@ impl BackendRunner {
                         &admission,
                         stored.epoch,
                         &RootStartNonce::new(admission.as_str()),
+                        None,
                     )
                     .await?;
                 let fence = match seal {

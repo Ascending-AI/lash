@@ -49,6 +49,7 @@ impl lash_core::store::RuntimeStoreDecorator for CommitRetryStore {
         admission: &lash_core::store::AdmissionId,
         observed_epoch: u64,
         root_start: &lash_core::store::RootStartNonce,
+        hold: Option<&lash_core::store::RootHold>,
     ) -> Result<lash_core::store::DriveEpochSeal, lash_core::StoreError> {
         self.drive_seal_count.fetch_add(1, Ordering::SeqCst);
         lash_core::store::DriveEpochStore::seal_drive_epoch(
@@ -57,6 +58,7 @@ impl lash_core::store::RuntimeStoreDecorator for CommitRetryStore {
             admission,
             observed_epoch,
             root_start,
+            hold,
         )
         .await
     }

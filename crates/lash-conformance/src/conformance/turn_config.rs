@@ -371,7 +371,7 @@ impl CommittedRootUnderALlmProfileChange {
         };
         let seal = parts
             .store
-            .seal_drive_epoch(&parts.session_id, admission, sealed.epoch, root_start)
+            .seal_drive_epoch(&parts.session_id, admission, sealed.epoch, root_start, None)
             .await
             .expect("read root A's fence back");
         let crate::store::DriveEpochSeal::Sealed(fence) = seal else {

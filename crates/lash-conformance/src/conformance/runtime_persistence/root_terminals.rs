@@ -219,6 +219,7 @@ pub async fn a_commit_sealed_under_a_superseded_admission_is_refused(store: Arc<
                     &AdmissionId::new(admission),
                     observed,
                     &RootStartNonce::new(admission),
+                    None,
                 )
                 .await
                 .expect("seal the admission")

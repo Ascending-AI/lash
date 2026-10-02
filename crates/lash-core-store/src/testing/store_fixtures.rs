@@ -190,6 +190,7 @@ pub async fn seal_drive_fence_for_test(
             &admission,
             stored.epoch,
             &crate::store::RootStartNonce::new(admission.as_str()),
+            None,
         )
         .await
         .expect("seal drive-fence test drive")
@@ -243,6 +244,7 @@ pub trait RuntimeStoreTestDriveExt: crate::RuntimeStore {
                 &admission,
                 stored.epoch,
                 &crate::store::RootStartNonce::new(admission.as_str()),
+                None,
             )
             .await?;
         Ok(match seal {
@@ -253,6 +255,11 @@ pub trait RuntimeStoreTestDriveExt: crate::RuntimeStore {
                 }
             }
             crate::store::DriveEpochSeal::ExecutionLost => DriveSealTestOutcome::ExecutionLost,
+            held @ crate::store::DriveEpochSeal::HeldByAnotherExecutor { .. } => {
+                return Err(StoreError::Backend(format!(
+                    "a test seal that names no root was refused {held:?}"
+                )));
+            }
         })
     }
 
@@ -267,6 +274,7 @@ pub trait RuntimeStoreTestDriveExt: crate::RuntimeStore {
                 &admission,
                 fence.epoch(),
                 &crate::store::RootStartNonce::new(admission.as_str()),
+                None,
             )
             .await?;
         match result {
@@ -281,6 +289,9 @@ pub trait RuntimeStoreTestDriveExt: crate::RuntimeStore {
             crate::store::DriveEpochSeal::ExecutionLost => Err(StoreError::Backend(
                 "test drive successor lost execution".to_string(),
             )),
+            held @ crate::store::DriveEpochSeal::HeldByAnotherExecutor { .. } => Err(
+                StoreError::Backend(format!("test drive successor was refused {held:?}")),
+            ),
         }
     }
 }

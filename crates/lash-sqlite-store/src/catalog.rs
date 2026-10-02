@@ -462,6 +462,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                             root: lash_sansio::TurnId::from(row.get::<_, String>(1)?),
                         },
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                     ))
                 })?;
                 rows.collect::<Result<Vec<_>, _>>()
@@ -469,13 +470,13 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
             .await
             .map_err(sqlite_error)?;
         rows.into_iter()
-            .map(|(target, admission)| {
+            .map(|(target, admission, sealed)| {
                 Ok(lash_core_execution::engine::OpenRoot {
                     target,
-                    executor: admission
-                        .as_deref()
-                        .map(lash_core_execution::store::RootExecutor::from_stored_admission)
-                        .transpose()?,
+                    executor: lash_core_execution::store::RootExecutor::from_stored(
+                        admission.as_deref(),
+                        sealed.as_deref(),
+                    )?,
                 })
             })
             .collect()

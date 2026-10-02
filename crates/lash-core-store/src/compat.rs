@@ -471,8 +471,9 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// that admitted it (`admitted_generation`, indexed for the drain's in-flight
 /// count per generation, FIG-3795 S9), with at most one unfinished root per
 /// session; the queued-run ledger is gone and a queued-work head is admitted
-/// as an ordinary root (FIG-3927). A database written before these changes
-/// has the old shape; recreate it.
+/// as an ordinary root (FIG-3927). `session_roots` also records the executor
+/// the seal of a root's admission named (`executor_json`, FIG-4814). A
+/// database written before these changes has the old shape; recreate it.
 /// Version 99 also lets tool-intent submissions record process-definition
 /// and trigger registration (FIG-4057, changed in place under the version
 /// freeze): a catalog whose kind CHECK predates them rejects both kinds, so

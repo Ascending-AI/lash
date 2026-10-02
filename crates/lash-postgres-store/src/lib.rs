@@ -615,8 +615,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // it — plus the drain's in-flight count index over it (FIG-3795 S9) and at
 // most one unfinished root per session; the queued-run ledger is gone and a
 // queued-work head is admitted as an ordinary root (FIG-3927, changed in
-// place under the version freeze). A catalog provisioned before the change
-// fails the open-time shape check and is recreated.
+// place under the version freeze); and `lash_session_roots` gains
+// `executor_json`, the executor the seal of a root's admission recorded
+// (FIG-4814, changed in place likewise). A catalog provisioned before the
+// change fails the open-time shape check and is recreated.
 //
 // Version 141 also lets a turn park record the engine's handles on stopped
 // work its root waits on (FIG-4630, changed in place under the version

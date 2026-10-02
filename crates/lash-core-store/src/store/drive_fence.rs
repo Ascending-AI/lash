@@ -145,6 +145,73 @@ pub enum DriveEpochSeal {
     /// drew another start marker: this execution cannot read what that one
     /// did, so it must not run the root (L-S8).
     ExecutionLost,
+    /// `root` is held by `recorded`, another executor an engine holds a run
+    /// for, and has not ended (FIG-4814): the epoch stays where that
+    /// executor's seal raised it, and the sealer waits for the root's end.
+    HeldByAnotherExecutor {
+        root: crate::TurnId,
+        recorded: Box<super::RootExecutor>,
+    },
+}
+
+/// The root a seal's admission runs and the execution that runs it
+/// ([`DriveEpochStore::seal_drive_epoch`], FIG-4814).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootHold {
+    pub root: crate::TurnId,
+    pub executor: super::RootExecutor,
+}
+
+/// What the store holds for the root a seal names, read in the seal's
+/// transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeldRoot {
+    /// The executor recorded for the root: its admission's, else the one
+    /// the last seal recorded for it.
+    pub executor: super::RootExecutor,
+    /// The root has terminal evidence.
+    pub ended: bool,
+}
+
+/// Decide whether a seal that would raise the epoch at `stored_epoch` may,
+/// given who holds the roots it would run beside (FIG-4814). `None` lets it
+/// raise.
+///
+/// A root's executor is recorded by the seal that first raises the epoch
+/// for it, and by its admission from then on. Another executor an engine
+/// holds a run for ([`RootExecutor::excludes`](super::RootExecutor::excludes))
+/// never seals over it: not while the session's unfinished root is that
+/// executor's, and not for a root that executor sealed and has yet to
+/// admit. The refused sealer raises nothing, so the recorded executor's
+/// fence stands until its root ends. A root that already ended under
+/// another executor is not this admission's to run: the seal answers
+/// superseded.
+#[must_use]
+pub fn decide_root_hold(
+    hold: &RootHold,
+    stored_epoch: u64,
+    held: Option<&HeldRoot>,
+    unfinished: Option<&super::UnfinishedRoot>,
+) -> Option<DriveEpochSeal> {
+    if let Some(unfinished) = unfinished
+        && unfinished.executor.excludes(&hold.executor)
+    {
+        return Some(DriveEpochSeal::HeldByAnotherExecutor {
+            root: unfinished.root.clone(),
+            recorded: Box::new(unfinished.executor.clone()),
+        });
+    }
+    let held = held.filter(|held| held.executor.excludes(&hold.executor))?;
+    Some(if held.ended {
+        DriveEpochSeal::Superseded {
+            epoch: stored_epoch,
+        }
+    } else {
+        DriveEpochSeal::HeldByAnotherExecutor {
+            root: hold.root.clone(),
+            recorded: Box::new(held.executor.clone()),
+        }
+    })
 }
 
 /// What last raised a session's drive epoch.
@@ -346,12 +413,23 @@ pub trait DriveEpochStore: Send + Sync {
     /// Compare-and-set the session's drive epoch from `observed_epoch` to the
     /// next value under `admission`, storing `root_start` with it; idempotent
     /// per admission and start marker ([`decide_drive_epoch_seal`]).
+    ///
+    /// `hold` names the root the admission runs and the execution that runs
+    /// it (FIG-4814). The same transaction that raises the epoch records
+    /// that executor on the root, unless the root's admission already
+    /// records one, and a seal that would raise the epoch over a root
+    /// another engine-held executor holds raises nothing and answers
+    /// [`DriveEpochSeal::HeldByAnotherExecutor`] ([`decide_root_hold`]). So
+    /// from its first seal to its end a root has one executor, and no other
+    /// supersedes that executor's fence. A seal with no `hold` runs no
+    /// root: it records nothing and is refused by none.
     async fn seal_drive_epoch(
         &self,
         session_id: &SessionId,
         admission: &AdmissionId,
         observed_epoch: u64,
         root_start: &RootStartNonce,
+        hold: Option<&RootHold>,
     ) -> Result<DriveEpochSeal, StoreError>;
 
     /// The session's stored drive epoch.
@@ -481,6 +559,75 @@ mod tests {
 
     fn nonce() -> RootStartNonce {
         RootStartNonce::new("n")
+    }
+
+    #[test]
+    fn a_root_another_engine_held_executor_holds_is_never_sealed_over() {
+        use super::super::{AdmittedHead, RootExecutor, UnfinishedRoot};
+        let acceptor = RootExecutor::Acceptor {
+            scope: crate::ExecutionScope::turn("s", "r"),
+        };
+        let drain = RootExecutor::Inline {
+            scope: crate::ExecutionScope::session_operation("s", "drain"),
+        };
+        let hold = |executor: &RootExecutor| RootHold {
+            root: crate::TurnId::from("r"),
+            executor: executor.clone(),
+        };
+        let held = |executor: &RootExecutor, ended| HeldRoot {
+            executor: executor.clone(),
+            ended,
+        };
+        let refused = Some(DriveEpochSeal::HeldByAnotherExecutor {
+            root: crate::TurnId::from("r"),
+            recorded: Box::new(acceptor.clone()),
+        });
+        // Sealed or admitted, the acceptor's root is closed to the root's
+        // own run until it ends, and open to itself and to a drive no
+        // engine holds.
+        assert_eq!(
+            decide_root_hold(
+                &hold(&RootExecutor::Root),
+                4,
+                Some(&held(&acceptor, false)),
+                None
+            ),
+            refused
+        );
+        let unfinished = UnfinishedRoot {
+            root: crate::TurnId::from("r"),
+            head: AdmittedHead::Input(crate::InputId::from("i")),
+            executor: acceptor.clone(),
+        };
+        assert_eq!(
+            decide_root_hold(&hold(&RootExecutor::Root), 4, None, Some(&unfinished)),
+            refused
+        );
+        for sealer in [&acceptor, &drain] {
+            assert_eq!(
+                decide_root_hold(
+                    &hold(sealer),
+                    4,
+                    Some(&held(&acceptor, false)),
+                    Some(&unfinished)
+                ),
+                None
+            );
+        }
+        assert_eq!(
+            decide_root_hold(&hold(&acceptor), 4, Some(&held(&drain, false)), None),
+            None
+        );
+        // A root that ended under the acceptor is not the run's to seal.
+        assert_eq!(
+            decide_root_hold(
+                &hold(&RootExecutor::Root),
+                4,
+                Some(&held(&acceptor, true)),
+                None
+            ),
+            Some(DriveEpochSeal::Superseded { epoch: 4 })
+        );
     }
 
     #[test]

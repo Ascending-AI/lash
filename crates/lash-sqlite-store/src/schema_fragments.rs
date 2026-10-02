@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS session_ingress_sequence (
 /// The logical-root family (FIG-3600 S7), carried by the durable core alone.
 ///
 /// `session_roots` holds one row per `(session, root)` a drive admitted work
-/// under, with the exact result of the root's admission (`admission_json`),
+/// under, with the executor the seal of its admission recorded
+/// (`executor_json`, written in the seal's transaction, FIG-4814), the exact
+/// result of the root's admission (`admission_json`),
 /// committed in the admission's own transaction (FIG-3840, FIG-3927), and the root's terminal evidence once
 /// it has one: all four `terminal_*` columns are set together, exactly once. `session_root_inputs`
 /// binds each accepted input to the root that drives it. `control_intents`
@@ -31,6 +33,7 @@ pub(crate) const SESSION_ROOTS_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS session_roots (
     session_id              TEXT NOT NULL,
     root                    TEXT NOT NULL,
+    executor_json           TEXT,
     admission_json          TEXT,
     admitted_generation     TEXT,
     terminal_kind           TEXT,

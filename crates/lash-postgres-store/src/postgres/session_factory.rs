@@ -308,10 +308,12 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
                                 .map_err(crate::store_sqlx_error)?,
                         ),
                     },
-                    executor: admission
-                        .as_deref()
-                        .map(lash_core_execution::store::RootExecutor::from_stored_admission)
-                        .transpose()?,
+                    executor: lash_core_execution::store::RootExecutor::from_stored(
+                        admission.as_deref(),
+                        row.try_get::<Option<String>, _>(3)
+                            .map_err(crate::store_sqlx_error)?
+                            .as_deref(),
+                    )?,
                 })
             })
             .collect()

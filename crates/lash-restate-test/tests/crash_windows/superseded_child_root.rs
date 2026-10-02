@@ -28,6 +28,7 @@ async fn superseded_child_root_law(storage: Storage) {
             &lash_core::store::AdmissionId::new("superseding-child-admission"),
             epoch.epoch,
             &lash_core::store::RootStartNonce::new("superseding-child-execution"),
+            None,
         )
         .await
         .expect("the successor seals over the child's fence");

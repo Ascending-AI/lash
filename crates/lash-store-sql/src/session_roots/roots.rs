@@ -1,6 +1,6 @@
-//! `session_roots`: one row per `(session, root)` a drive admitted work
-//! under, holding the root's terminal evidence once it has one. The row lives
-//! until its session is deleted.
+//! `session_roots`: one row per `(session, root)` a drive sealed an
+//! admission for or admitted work under, holding the root's terminal evidence
+//! once it has one. The row lives until its session is deleted.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_roots";
@@ -21,6 +21,29 @@ crate::statements! {
         write_admission = "UPDATE session_roots
              SET admission_json = ?3, admitted_generation = ?4
              WHERE session_id = ?1 AND root = ?2 AND admission_json IS NULL";
+
+        /// What root `?2` of session `?1` holds, as a seal reads it: the
+        /// executor a seal recorded for it, its admission, and whether it
+        /// has terminal evidence.
+        select_hold = "SELECT executor_json, admission_json, terminal_kind IS NOT NULL
+             FROM session_roots
+             WHERE session_id = ?1 AND root = ?2";
+
+        /// Record `?3` as the executor of root `?2`, in the transaction of
+        /// the seal that raises the drive epoch for it. A root's admission
+        /// records its executor from then on, so an admitted or ended root
+        /// keeps what it has.
+        write_hold = "UPDATE session_roots
+             SET executor_json = ?3
+             WHERE session_id = ?1 AND root = ?2
+               AND admission_json IS NULL AND terminal_kind IS NULL";
+
+        /// Release the executor a seal recorded for root `?2`, which never
+        /// recorded its admission: the engine holds no run of it.
+        release_hold = "UPDATE session_roots
+             SET executor_json = NULL
+             WHERE session_id = ?1 AND root = ?2
+               AND admission_json IS NULL AND terminal_kind IS NULL";
 
         /// The one admitted root of session `?1` without terminal evidence,
         /// with its recorded admission.
@@ -57,8 +80,10 @@ crate::statements! {
              ORDER BY root";
 
         /// Bounded recovery page after the `(session_id, root)` cursor, with
-        /// each root's recorded admission: recovery reads its executor.
-        select_open_page = "SELECT session_id, root, admission_json FROM session_roots
+        /// each root's recorded admission and the executor its seal
+        /// recorded: recovery reads its executor.
+        select_open_page = "SELECT session_id, root, admission_json, executor_json
+             FROM session_roots
              WHERE terminal_kind IS NULL
                AND (session_id > ?1 OR (session_id = ?1 AND root > ?2))
              ORDER BY session_id, root LIMIT ?3";

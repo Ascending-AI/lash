@@ -304,9 +304,11 @@ async fn release_root_rows_conn(
 /// Store half of recovery after the engine proves a root's execution is lost
 /// (`loss`). The terminal, ingress settlement and scope-close arm commit
 /// together under the session history lock. A root that already has
-/// terminal evidence, or no row, is left as it is, and so is a root the
-/// engine holds no run of that never recorded its admission: it started
-/// nothing, and its ingress obligation still owns its input.
+/// terminal evidence, or no row, is left as it is. A root the engine holds
+/// no run of that never recorded its admission started nothing, and its
+/// ingress obligation still owns its input: it is not ended, and the
+/// executor a seal recorded for it is released (FIG-4814), so the drive that
+/// obligation asks for runs it.
 pub(crate) async fn end_lost_root_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target: &lash_core_execution::engine::RootRef,
@@ -320,6 +322,14 @@ pub(crate) async fn end_lost_root_tx(
                     .await?
                     .is_none()
             {
+                // The executor a seal recorded for it is gone with its run,
+                // so the root is free for the drive its ingress asks for.
+                sqlx::query(session_roots_sql().roots.release_hold.sql())
+                    .bind(target.session.as_str())
+                    .bind(target.root.as_str())
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
                 return Ok(None);
             }
             write_unanswered_root_end_tx(tx, target, at_ms, |cancelled_by| {
@@ -554,6 +564,54 @@ pub(crate) fn decode_root_admission(json: &str) -> Result<RootAdmission, StoreEr
         record_kind: "RootAdmission",
         message: error.to_string(),
     })
+}
+
+/// What root `root` holds, as a seal reads it in its transaction
+/// (FIG-4814): the executor its admission recorded, else the one a seal
+/// recorded for it. `None` when no executor is recorded for it.
+pub(crate) async fn held_root_conn(
+    conn: &mut PgConnection,
+    session_id: &SessionId,
+    root: &TurnId,
+) -> Result<Option<lash_core_execution::store::HeldRoot>, StoreError> {
+    let row: Option<(Option<String>, Option<String>, bool)> =
+        sqlx::query_as(session_roots_sql().roots.select_hold.sql())
+            .bind(session_id.as_str())
+            .bind(root.as_str())
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(store_sqlx_error)?;
+    let Some((sealed, admission, ended)) = row else {
+        return Ok(None);
+    };
+    lash_core_execution::store::RootExecutor::from_stored(admission.as_deref(), sealed.as_deref())
+        .map(|executor| {
+            executor.map(|executor| lash_core_execution::store::HeldRoot { executor, ended })
+        })
+}
+
+/// Record `hold`'s executor on its root, opening the root's row if it has
+/// none, in the transaction of the seal that raised the epoch for it.
+pub(crate) async fn record_root_hold_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    hold: &lash_core_execution::store::RootHold,
+) -> Result<(), StoreError> {
+    let sql = session_roots_sql();
+    sqlx::query(sql.roots.insert_open.sql())
+        .bind(session_id.as_str())
+        .bind(hold.root.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    sqlx::query(sql.roots.write_hold.sql())
+        .bind(session_id.as_str())
+        .bind(hold.root.as_str())
+        .bind(hold.executor.to_stored()?)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(())
 }
 
 /// The session's unfinished root, with the head its admission recorded,

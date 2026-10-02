@@ -120,22 +120,29 @@ runs the same root beside its acceptor.
 
 The claim is a liveness hint, not the exclusion. An acceptor that is alive but
 slower than the claim loses it to a relay pass, and the session's drive then
-admits the row's root as an engine run of its own. From that admission on the
-root's recorded executor decides who runs it: two different executors an engine
-holds a run for (the root's own run, or the run of a process that drives the
-root inline) never share a root, and an acceptor's inline drive, under any
-scope, never takes a root such a run holds. The acceptor's drive admission finds
-the unfinished root recorded under the other executor, seals nothing over its
-fence, and fails retryably with `SessionRootPending`; `admit_root` itself
-refuses the same mismatch with `RootHeldByAnotherExecutor`, which the root
-records as the refusal `HeldByAnotherExecutor` and cedes. The acceptor's retry
-finds its input answered once that run ends the root. A lost acceptor recorded
-nothing, so the relay's ask drives its root once, as the session's own run; an
-acceptor that recorded its root before it was lost is redriven by its own
-engine, and the lost-root pass ends the root if that run is gone for good. A
-inline drive no engine holds (an in-process session drive or queue drain) is
-outside the rule: its root is resumed by the next drive, and it resumes an
-unfinished root, under the drive fence as before.
+seals the row's root as an engine run of its own. The seal records the executor
+that runs the root in the transaction that raises the drive epoch, and the
+root's admission records it from then on. That record decides who runs the
+root: two different executors an engine holds a run for (the root's own run, or
+an acceptor that drives the root inline, under a process or a parent turn)
+never share a root. The store refuses the other one's seal with
+`HeldByAnotherExecutor` and raises nothing, so the recorded executor keeps its
+fence from its seal to the root's end; the drive admission step makes the same
+check before it admits, and `admit_root` refuses the mismatch with
+`RootHeldByAnotherExecutor`. A refused admission or seal is the attempt's:
+it fails retryably with `SessionRootPending` and records no verdict.
+
+The refused acceptor adopts its root's outcome. Once the root has ended, the
+acceptor's retry finds its input answered and returns the outcome the recorded
+executor committed, read from the root's terminal evidence on the durable
+head; a refused root answers its refusal. Until then the acceptor waits,
+retryably. A lost acceptor recorded nothing, so the relay's ask drives its root
+once, as the session's own run; an acceptor that sealed or admitted its root
+before it was lost is redriven by its own engine, and when that run is gone for
+good the lost-root pass releases a root it only sealed and ends one it
+admitted. A inline drive no engine holds (an in-process session drive or queue
+drain) is outside the rule: its root is resumed by the next drive, and it
+resumes an unfinished root, under the drive fence as before.
 
 The root then issues journaled `AdmitRoot`, keyed by the root rather than by a
 particular drive attempt. Its stored admission includes the exact inputs and

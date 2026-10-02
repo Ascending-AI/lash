@@ -473,6 +473,7 @@ impl DriveEpochStore for Integrator {
         admission: &AdmissionId,
         observed_epoch: u64,
         root_start: &RootStartNonce,
+        hold: Option<&RootHold>,
     ) -> Result<DriveEpochSeal, StoreError> {
         unreachable!("external signature witness")
     }

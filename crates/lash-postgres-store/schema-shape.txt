@@ -474,6 +474,7 @@ table lash_session_root_inputs
 table lash_session_roots
   column admission_json text nullable
   column admitted_generation text nullable
+  column executor_json text nullable
   column obligation_attempts integer not-null default
   column obligation_claim_token text nullable
   column obligation_due_at_ms bigint nullable

@@ -250,6 +250,7 @@ async fn competing_drive_seals(
                     &admission,
                     observed.epoch,
                     &RootStartNonce::new(admission.as_str()),
+                    None,
                 )
                 .await
         }));
@@ -267,6 +268,11 @@ async fn competing_drive_seals(
             DriveEpochSeal::Superseded { .. } => superseded += 1,
             DriveEpochSeal::ExecutionLost => {
                 return Err("drive seal unexpectedly lost execution".to_string());
+            }
+            held @ DriveEpochSeal::HeldByAnotherExecutor { .. } => {
+                return Err(format!(
+                    "a drive seal that names no root was refused {held:?}"
+                ));
             }
         }
     }

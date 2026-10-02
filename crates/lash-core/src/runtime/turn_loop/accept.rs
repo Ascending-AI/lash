@@ -303,13 +303,20 @@ impl LashRuntime {
                     ),
                 )));
             }
-            return Err(aborted(RuntimeError::new(
-                RuntimeErrorCode::AcceptedTurnInputCeded,
-                format!(
-                    "accepted turn input `{accepted_id}` was no longer open when the drive \
-                     reached it: another driver settled it or the host cancelled it"
-                ),
-            )));
+            // Another execution drives the input, or drove it: the root
+            // that took it answers it (FIG-4814).
+            let superseded = matches!(
+                outcome.ran.last(),
+                Some(crate::engine::RootOutcome::Refused { .. })
+            );
+            let mut run = Box::pin(self.adopt_recorded_outcome(&store, &accepted_id, superseded))
+                .await
+                .map_err(aborted)?;
+            if let Some(adopted) = run.turns.first_mut() {
+                adopted.turn_input_acceptance = Some(acceptance.clone());
+            }
+            run.acceptance = Some(acceptance);
+            return Ok(run);
         };
         // Only the physical turn this acceptance admitted carries it. An
         // agent-frame run's follow-on turns were started by the frame switch,
@@ -320,6 +327,125 @@ impl LashRuntime {
         }
         run.acceptance = Some(acceptance);
         Ok(run)
+    }
+
+    /// The run of accepted input `accepted_id` as its root's recorded
+    /// executor left it, for an acceptor whose own drive did not run that
+    /// root (FIG-4814).
+    ///
+    /// A root's recorded executor decides who runs it, so an acceptor that
+    /// lost its ingress claim to a relay pass is refused the root and waits
+    /// for it. Once the root has ended, its terminal evidence is the answer
+    /// of every input it took: a committed root answers its committed
+    /// outcome on the durable head, honest and thin, as the facade's durable
+    /// report does, and a refused root its refusal. While the root has not
+    /// ended, or the admission that `superseded` this drive's seal has yet
+    /// to take the input, the acceptor fails retryably and its engine's
+    /// retry asks again. An input no root took and no admission is about to
+    /// take was cancelled, and the acceptor cedes it. Nothing here reads a
+    /// pending row: the root's evidence is the answer of record.
+    async fn adopt_recorded_outcome(
+        &mut self,
+        store: &crate::store::SessionStore,
+        accepted_id: &crate::InputId,
+        superseded: bool,
+    ) -> Result<AgentFrameRun, RuntimeError> {
+        let root = store
+            .root_of_input(accepted_id)
+            .await
+            .map_err(super::runtime_error_from_store_commit)?;
+        let Some(root) = root else {
+            // No root took the input. A drive whose seal another admission
+            // superseded left it to that admission's root; any other drive
+            // found it no longer open.
+            return Err(if superseded {
+                RuntimeError::new(
+                    RuntimeErrorCode::SessionRootPending,
+                    format!(
+                        "accepted turn input `{accepted_id}` waits for the admission that \
+                         superseded this drive's; the root that takes it answers it"
+                    ),
+                )
+            } else {
+                RuntimeError::new(
+                    RuntimeErrorCode::AcceptedTurnInputCeded,
+                    format!(
+                        "accepted turn input `{accepted_id}` was no longer open when the drive \
+                         reached it: the host cancelled it"
+                    ),
+                )
+            });
+        };
+        let terminal = store
+            .root_terminal(&root)
+            .await
+            .map_err(super::runtime_error_from_store_commit)?;
+        let outcome = match terminal.map(|terminal| terminal.cause) {
+            None => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::SessionRootPending,
+                    format!(
+                        "accepted turn input `{accepted_id}` is driven by root `{root}` under \
+                         its recorded executor; that root's end answers it"
+                    ),
+                ));
+            }
+            Some(crate::store::RootTerminalCause::Committed { outcome, .. }) => {
+                crate::TurnOutcome::from(outcome)
+            }
+            Some(crate::store::RootTerminalCause::Refused {
+                code,
+                message,
+                refusal_cause,
+            }) => {
+                let mut refusal = RuntimeError::new(code, message);
+                refusal.cause = refusal_cause;
+                return Err(refusal);
+            }
+            Some(cause) => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AcceptedTurnInputCeded,
+                    format!(
+                        "accepted turn input `{accepted_id}` was taken by root `{root}`, which \
+                         ended without an outcome: {cause:?}"
+                    ),
+                ));
+            }
+        };
+        // The root committed on another runtime: answer on the durable head.
+        self.refresh_resident_head().await?;
+        let text = match &outcome {
+            crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage { text }) => {
+                Some(text.clone())
+            }
+            _ => None,
+        };
+        Ok(AgentFrameRun {
+            turns: vec![AssembledTurn {
+                state: self.export_state(),
+                outcome,
+                assistant_output: crate::AssistantOutput {
+                    state: if text.is_some() {
+                        crate::OutputState::Usable
+                    } else {
+                        crate::OutputState::EmptyOutput
+                    },
+                    safe_text: text.clone().unwrap_or_default(),
+                    raw_text: text.unwrap_or_default(),
+                },
+                execution: Default::default(),
+                token_usage: Default::default(),
+                llm_calls: Vec::new(),
+                tool_calls: Vec::new(),
+                omitted: None,
+                retained_outputs: Vec::new(),
+                failure_evidence: Vec::new(),
+                errors: Vec::new(),
+                turn_input_acceptance: None,
+                turn_cancel_input_outcome: Default::default(),
+            }],
+            acceptance: None,
+        })
     }
 
     /// How many accepted rows wait ahead of `accepted_id` when a follow-on

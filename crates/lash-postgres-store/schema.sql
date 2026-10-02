@@ -603,7 +603,8 @@ CREATE TABLE IF NOT EXISTS lash_session_ingress_sequence (
 );
 
 -- The logical-root family (FIG-3600 S7). `lash_session_roots` holds one row
--- per (session, root) a drive admitted work under, with the exact result of
+-- per (session, root) a drive admitted work under, with the executor the seal
+-- of its admission recorded (`executor_json`), the exact result of
 -- an input root's claim, committed in the claim's own transaction, and the
 -- root's terminal evidence once it has one: the `terminal_*` columns are set
 -- together, exactly once. `lash_session_root_inputs` binds each accepted input to the
@@ -613,6 +614,7 @@ CREATE TABLE IF NOT EXISTS lash_session_ingress_sequence (
 CREATE TABLE IF NOT EXISTS lash_session_roots (
     session_id TEXT NOT NULL,
     root TEXT NOT NULL,
+    executor_json TEXT,
     admission_json TEXT,
     admitted_generation TEXT,
     terminal_kind TEXT,

@@ -118,8 +118,9 @@ pub use control_intent::{
 };
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence, DriveRaise,
-    InMemoryDriveEpochs, RootStartNonce, SessionHeadRef, StoredDriveEpoch, close_admission,
-    current_drive_fence, decide_drive_epoch_seal, require_current_drive_fence,
+    HeldRoot, InMemoryDriveEpochs, RootHold, RootStartNonce, SessionHeadRef, StoredDriveEpoch,
+    close_admission, current_drive_fence, decide_drive_epoch_seal, decide_root_hold,
+    require_current_drive_fence,
 };
 pub use error::{AnchorUnavailable, StoreError, StoreFault, StoreRefusal, WindowAnchorViolation};
 pub use fencing::{

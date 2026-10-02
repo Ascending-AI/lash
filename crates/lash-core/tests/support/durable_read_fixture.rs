@@ -715,6 +715,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             &queue_admission,
             queue_epoch.epoch,
             &lash_core::store::RootStartNonce::new(queue_admission.as_str()),
+            None,
         )
         .await
         .expect("seal fixture queue drive")
@@ -752,6 +753,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                 &retained_admission,
                 retained_epoch.epoch,
                 &lash_core::store::RootStartNonce::new(retained_admission.as_str()),
+                None,
             )
             .await
             .expect("seal retained fixture drive"),

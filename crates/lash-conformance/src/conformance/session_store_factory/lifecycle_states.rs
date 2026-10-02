@@ -130,6 +130,7 @@ pub async fn a_control_raise_answers_no_seal_as_sealed(
                 &raised_by,
                 observed,
                 &crate::store::RootStartNonce::new("a-fresh-execution"),
+                None,
             )
             .await
             .expect("decide the seal");

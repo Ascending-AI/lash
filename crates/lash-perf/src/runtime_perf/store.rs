@@ -283,10 +283,11 @@ impl RuntimeStoreDecorator for RuntimePerfStore {
         admission: &lash_core::store::AdmissionId,
         observed_epoch: u64,
         root_start: &lash_core::store::RootStartNonce,
+        hold: Option<&lash_core::store::RootHold>,
     ) -> Result<lash_core::store::DriveEpochSeal, StoreError> {
         let _observation = self.metrics.observe_call("seal_drive_epoch");
         self.inner
-            .seal_drive_epoch(session_id, admission, observed_epoch, root_start)
+            .seal_drive_epoch(session_id, admission, observed_epoch, root_start, hold)
             .await
     }
 }

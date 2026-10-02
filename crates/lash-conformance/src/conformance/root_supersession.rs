@@ -183,6 +183,7 @@ pub async fn an_obsolete_executor_never_ends_its_successors_root(
                         &lash_core::store::RootStartNonce::new(format!(
                             "{session_id}-successor-start"
                         )),
+                        None,
                     )
                     .await
                     .expect("the successor seals");

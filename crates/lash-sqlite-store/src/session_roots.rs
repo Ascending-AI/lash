@@ -310,10 +310,11 @@ fn release_root_rows_conn(
 /// The engine proved the root's execution is lost (`loss`). This
 /// transaction makes its inputs and root terminal together, so the existing
 /// scope-close obligation takes over before recovery acknowledges the loss.
-/// A root that already has terminal evidence, or no row, is left as it is,
-/// and so is a root the engine holds no run of that never recorded its
-/// admission: it started nothing, and its ingress obligation still owns its
-/// input.
+/// A root that already has terminal evidence, or no row, is left as it is.
+/// A root the engine holds no run of that never recorded its admission
+/// started nothing, and its ingress obligation still owns its input: it is
+/// not ended, and the executor a seal recorded for it is released
+/// (FIG-4814), so the drive that obligation asks for runs it.
 pub(crate) fn end_lost_root_conn(
     tx: &Connection,
     target: &lash_core_execution::engine::RootRef,
@@ -325,6 +326,14 @@ pub(crate) fn end_lost_root_conn(
             if loss == lash_core_execution::engine::RootRunLoss::NoRun
                 && root_admission_conn(tx, &target.session, &target.root)?.is_none()
             {
+                // The executor a seal recorded for it is gone with its run,
+                // so the root is free for the drive its ingress asks for.
+                crate::conn::cached_execute(
+                    tx,
+                    session_roots_sql().roots.release_hold.sql(),
+                    params![target.session.as_str(), target.root.as_str()],
+                )
+                .map_err(sqlite_error)?;
                 return Ok(None);
             }
             write_unanswered_root_end_conn(tx, target, at_ms, |cancelled_by| {
@@ -508,6 +517,58 @@ fn write_unanswered_root_end_conn(
 /// Decode a root's recorded admission (`session_roots.admission_json`).
 pub(crate) fn decode_root_admission(json: &str) -> Result<RootAdmission, StoreError> {
     serde_json::from_str(json).map_err(|error| stored_data_corrupt("RootAdmission", error))
+}
+
+/// What root `root` holds, as a seal reads it in its transaction
+/// (FIG-4814): the executor its admission recorded, else the one a seal
+/// recorded for it. `None` when no executor is recorded for it.
+pub(crate) fn held_root_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    root: &TurnId,
+) -> Result<Option<lash_core_execution::store::HeldRoot>, StoreError> {
+    let row: Option<(Option<String>, Option<String>, bool)> = conn
+        .query_row(
+            session_roots_sql().roots.select_hold.sql(),
+            params![session_id.as_str(), root.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let Some((sealed, admission, ended)) = row else {
+        return Ok(None);
+    };
+    lash_core_execution::store::RootExecutor::from_stored(admission.as_deref(), sealed.as_deref())
+        .map(|executor| {
+            executor.map(|executor| lash_core_execution::store::HeldRoot { executor, ended })
+        })
+}
+
+/// Record `hold`'s executor on its root, opening the root's row if it has
+/// none, in the transaction of the seal that raised the epoch for it.
+pub(crate) fn record_root_hold_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    hold: &lash_core_execution::store::RootHold,
+) -> Result<(), StoreError> {
+    let sql = session_roots_sql();
+    crate::conn::cached_execute(
+        tx,
+        sql.roots.insert_open.sql(),
+        params![session_id.as_str(), hold.root.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    crate::conn::cached_execute(
+        tx,
+        sql.roots.write_hold.sql(),
+        params![
+            session_id.as_str(),
+            hold.root.as_str(),
+            hold.executor.to_stored()?
+        ],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
 }
 
 /// The session's unfinished root, with the head its admission recorded,

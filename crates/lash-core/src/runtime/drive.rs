@@ -277,8 +277,8 @@ pub(crate) struct DriveLimits {
     pub(crate) follow_on: FollowOnRecovery,
     pub(crate) max_roots: Option<usize>,
     /// The loop is an acceptor's drive of its child session's turn, inline
-    /// in its parent's execution: an unfinished root an engine holds another
-    /// run for is left to that run (FIG-4765).
+    /// in its parent's execution, which an engine holds: the roots it admits
+    /// record it as their acceptor (FIG-4765, FIG-4814).
     pub(crate) acceptor: bool,
 }
 
@@ -362,7 +362,7 @@ pub async fn admit_drive(
         request,
         ordinal,
         draining,
-        admission::Admitter::engine(),
+        crate::store::RootExecutor::Root,
     ))
     .await
 }
@@ -391,7 +391,7 @@ pub async fn admit_drive_on_store(
         request,
         AdmissionAuthority {
             generation: admitting_generation,
-            admitter: admission::Admitter::engine(),
+            executor: crate::store::RootExecutor::Root,
         },
         ordinal,
         draining,
@@ -401,7 +401,7 @@ pub async fn admit_drive_on_store(
 
 struct AdmissionAuthority<'a> {
     generation: &'a crate::engine::BuildGeneration,
-    admitter: admission::Admitter,
+    executor: crate::store::RootExecutor,
 }
 
 /// [`admit_drive_on_store`] for `authority`, the execution that runs the
@@ -486,7 +486,7 @@ async fn emit_admission_step(
                     request: admit_request,
                     ordinal,
                     drain,
-                    admitter: authority.admitter,
+                    executor: authority.executor,
                 }),
                 None,
             ),
@@ -518,7 +518,7 @@ pub async fn admit_drive_retired(
         request,
         AdmissionAuthority {
             generation: admitting_generation,
-            admitter: admission::Admitter::engine(),
+            executor: crate::store::RootExecutor::Root,
         },
         ordinal,
         None,
@@ -547,7 +547,15 @@ pub async fn run_admitted_root_retired(
     admitted: Admitted,
 ) -> Result<RootOutcome, DriveAbort> {
     let scope = controller.admitted_scope().clone();
-    let verdict = Box::pin(mark_and_seal_root(controller, &scope, &admitted, None)).await?;
+    // No store is open, so the seal names no executor to one.
+    let verdict = Box::pin(mark_and_seal_root(
+        controller,
+        &scope,
+        &admitted,
+        None,
+        crate::store::RootExecutor::Root,
+    ))
+    .await?;
     if let crate::engine::SealVerdict::Refused(refusal) = verdict {
         return Ok(RootOutcome::Refused {
             root: admitted.root().clone(),
@@ -846,8 +854,13 @@ impl LashRuntime {
         let mut budget_exhausted = false;
         // Every root this loop admits runs inline, in the execution of the
         // drive's controller: no engine run of the root holds it (FIG-4403).
-        let executor = crate::store::RootExecutor::Inline {
-            scope: controller.execution_scope().clone(),
+        // An acceptor's execution is itself a run an engine holds; a session
+        // drive's or queue drain's is not (FIG-4814).
+        let scope = controller.execution_scope().clone();
+        let executor = if limits.acceptor {
+            crate::store::RootExecutor::Acceptor { scope }
+        } else {
+            crate::store::RootExecutor::Inline { scope }
         };
         let stop = loop {
             // This loop's drive is pinned to no build an engine drains: its
@@ -857,10 +870,7 @@ impl LashRuntime {
                 request,
                 ordinal,
                 None,
-                admission::Admitter {
-                    executor: executor.clone(),
-                    acceptor: limits.acceptor,
-                },
+                executor.clone(),
             ))
             .await?
             {
@@ -942,7 +952,7 @@ impl LashRuntime {
         request: &DriveRequest,
         ordinal: u32,
         draining: Option<&crate::engine::BuildGeneration>,
-        admitter: admission::Admitter,
+        executor: crate::store::RootExecutor,
     ) -> Result<AdmitVerdict, DriveAbort> {
         if request.session != self.state.session_id {
             return Err(DriveAbort::Refused(RuntimeError::new(
@@ -971,7 +981,7 @@ impl LashRuntime {
             request,
             AdmissionAuthority {
                 generation: &admitting_generation,
-                admitter,
+                executor,
             },
             ordinal,
             draining,
@@ -1166,6 +1176,7 @@ impl LashRuntime {
             &scope,
             &admitted,
             Some(store),
+            executor.clone(),
         ))
         .await;
         let fence = match marked? {
@@ -1366,12 +1377,15 @@ async fn emit_close_step(
 /// the admission with it (ADR 0105 §2, L-S8). `store` is the session's
 /// history store, or `None` when the engine could not open the session at
 /// all — its close or tombstone already committed — in which case the seal's
-/// recorded body is the retirement itself (FIG-3881).
+/// recorded body is the retirement itself (FIG-3881). `executor` is the
+/// execution that runs the root, which the seal records in its own
+/// transaction (FIG-4814).
 async fn mark_and_seal_root(
     root_controller: &ScopedEffectController<'_>,
     scope: &crate::AdmittedScope,
     admitted: &Admitted,
     store: Option<crate::store::SessionStore>,
+    executor: crate::store::RootExecutor,
 ) -> Result<crate::engine::SealVerdict, DriveAbort> {
     let root = admitted.root().clone();
     // The execution's start marker, drawn in the root's own journal before
@@ -1416,6 +1430,7 @@ async fn mark_and_seal_root(
                     store,
                     admitted: admitted.clone(),
                     root_start,
+                    executor,
                 }),
                 None,
             ),

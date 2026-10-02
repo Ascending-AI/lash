@@ -641,6 +641,7 @@ pub async fn accounting_writes_never_touch_head_fence_or_receipts(f: &UsageLedge
             &AdmissionId::new("sealed"),
             0,
             &RootStartNonce::new("root-start"),
+            None,
         )
         .await
         .unwrap();

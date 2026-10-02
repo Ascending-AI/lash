@@ -532,6 +532,7 @@ pub async fn a_root_commit_racing_a_close_is_refused_stale_fence(
             &AdmissionId::new("root#0"),
             0,
             &RootStartNonce::new("root"),
+            None,
         )
         .await
         .expect("seal root")

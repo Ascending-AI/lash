@@ -275,7 +275,8 @@ impl Schedule<'_> {
     /// Actor `name` repeats its calls until another actor's write lets it
     /// finish, as work an engine retries does: on its own it never ends.
     /// After `steps` steps taken ahead of a waiting actor, it waits for the
-    /// others, which bounds the orders.
+    /// others, which bounds the orders. When every waiting actor is past its
+    /// bound, the one that took the fewest such steps goes next.
     pub(crate) fn yields_after(&mut self, name: &str, steps: usize) {
         match self.seats.iter_mut().find(|seat| seat.name == name) {
             Some(seat) => seat.yields_after = Some(steps),
@@ -399,8 +400,15 @@ impl Schedule<'_> {
                 seat.yields_after.is_none_or(|bound| seat.raced < bound)
             })
             .collect();
+        // Once every waiting actor is past its bound, the one that raced
+        // least goes, so two retried actors take turns.
         let offered = if within_bound.is_empty() {
-            vec![waiting[0]]
+            let least = waiting
+                .iter()
+                .copied()
+                .min_by_key(|actor| self.seats[*actor].raced)
+                .unwrap_or(waiting[0]);
+            vec![least]
         } else {
             within_bound
         };

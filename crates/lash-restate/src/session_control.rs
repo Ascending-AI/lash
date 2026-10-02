@@ -151,12 +151,14 @@ pub(crate) async fn end_lost_root_runs(
         let loss = if key_runs.is_empty() {
             let lost = match executor {
                 Some(RootExecutor::Root) => Ok(true),
-                Some(RootExecutor::Inline {
+                Some(RootExecutor::Acceptor {
                     scope: lash_core::ExecutionScope::Process { process_id },
                 }) => recovery_request(deadline, process_ended(processes, process_id))
                     .await
                     .map_err(|error| error.to_string()),
-                Some(RootExecutor::Inline { .. }) | None => Ok(false),
+                Some(RootExecutor::Acceptor { .. } | RootExecutor::Inline { .. }) | None => {
+                    Ok(false)
+                }
             };
             match lost {
                 Ok(true) => RootRunLoss::NoRun,

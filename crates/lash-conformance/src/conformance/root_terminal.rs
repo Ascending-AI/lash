@@ -278,6 +278,7 @@ pub async fn a_root_whose_admission_a_successor_sealed_commits_nothing(
                                 &AdmissionId::new("successor#0"),
                                 1,
                                 &RootStartNonce::new("successor"),
+                                None,
                             )
                             .await
                             .expect("the successor seals");

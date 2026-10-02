@@ -650,28 +650,28 @@ pub enum RootExecutor {
     /// The engine's own run of the root, keyed by the root's session and id
     /// (Restate's `LashTurn/{session}:{root}`).
     Root,
+    /// An acceptor: the execution `scope` accepted a child session's turn
+    /// and drives it inline, with every root admitted ahead of it, and holds
+    /// no engine run of the root (FIG-4814). An engine holds the acceptor's
+    /// own run, a process's
+    /// ([`ExecutionScope::Process`](crate::ExecutionScope::Process)) or its
+    /// parent turn's, and redrives it.
+    Acceptor { scope: crate::ExecutionScope },
     /// The drive of the execution `scope`, which runs the root inline and
-    /// holds no engine run of it: a process's run
-    /// ([`ExecutionScope::Process`](crate::ExecutionScope::Process)) drives
-    /// its child session's turn and every root admitted ahead of it that
-    /// way, and so does an in-process session drive or queue drain under
-    /// its own scope.
+    /// which no engine holds: an in-process session drive or queue drain
+    /// under its own scope.
     Inline { scope: crate::ExecutionScope },
 }
 
 impl RootExecutor {
     /// Whether an engine holds a run for this executor: the root's own run,
-    /// or the run of the process that drives the root inline. The engine
-    /// redrives such a run itself, and its lost-root recovery ends the root
-    /// when the run is gone for good. Any other inline drive is a session
+    /// or the run of the acceptor that drives the root inline. The engine
+    /// redrives such a run itself. Any other inline drive is a session
     /// drive or queue drain under its own scope, which no engine holds.
     #[must_use]
     pub fn is_engine_held(&self) -> bool {
         match self {
-            Self::Root
-            | Self::Inline {
-                scope: crate::ExecutionScope::Process { .. },
-            } => true,
+            Self::Root | Self::Acceptor { .. } => true,
             Self::Inline { .. } => false,
         }
     }
@@ -688,19 +688,39 @@ impl RootExecutor {
         self != admitting && self.is_engine_held() && admitting.is_engine_held()
     }
 
-    /// The executor a stored admission (`session_roots.admission_json`)
-    /// records, read without decoding the rows it admitted.
-    pub fn from_stored_admission(admission_json: &str) -> Result<Self, StoreError> {
+    /// The executor the store records for a root (`session_roots`): the one
+    /// its admission recorded (`admission_json`), read without decoding the
+    /// rows it admitted, else the one the seal of its admission recorded
+    /// (`executor_json`, FIG-4814). `None` when neither is stored.
+    pub fn from_stored(
+        admission_json: Option<&str>,
+        executor_json: Option<&str>,
+    ) -> Result<Option<Self>, StoreError> {
         #[derive(Deserialize)]
         struct Recorded {
             executor: RootExecutor,
         }
-        serde_json::from_str::<Recorded>(admission_json)
-            .map(|recorded| recorded.executor)
-            .map_err(|error| StoreError::StoredDataCorrupt {
-                record_kind: "RootAdmission",
-                message: format!("root admission executor: {error}"),
-            })
+        let corrupt = |error: serde_json::Error| StoreError::StoredDataCorrupt {
+            record_kind: "RootAdmission",
+            message: format!("root executor: {error}"),
+        };
+        if let Some(admission) = admission_json {
+            return serde_json::from_str::<Recorded>(admission)
+                .map(|recorded| Some(recorded.executor))
+                .map_err(corrupt);
+        }
+        executor_json
+            .map(|executor| serde_json::from_str(executor).map_err(corrupt))
+            .transpose()
+    }
+
+    /// The column a seal stores for this executor
+    /// (`session_roots.executor_json`).
+    pub fn to_stored(&self) -> Result<String, StoreError> {
+        serde_json::to_string(self).map_err(|error| StoreError::RecordEncodingFailed {
+            record_kind: "RootExecutor".to_string(),
+            message: error.to_string(),
+        })
     }
 }
 

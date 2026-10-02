@@ -2375,7 +2375,7 @@ async fn process_root(server: HarnessServer, which: ProcessRoot) {
         &target.root,
         AdmittedHead::Input(input.clone()),
     );
-    admission.executor = lash_core::store::RootExecutor::Inline {
+    admission.executor = lash_core::store::RootExecutor::Acceptor {
         scope: lash_core::ExecutionScope::process(process_id.clone()),
     };
     store

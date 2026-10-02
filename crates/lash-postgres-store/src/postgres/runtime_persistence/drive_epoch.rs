@@ -8,8 +8,9 @@
 
 use super::*;
 use lash_core_execution::store::{
-    AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
-    RootStartNonce, StoredDriveEpoch, decide_drive_epoch_seal, require_current_drive_fence,
+    AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence, RootHold,
+    RootStartNonce, StoredDriveEpoch, decide_drive_epoch_seal, decide_root_hold,
+    require_current_drive_fence,
 };
 use lash_core_execution::store_backend_support::sealed_drive_fence;
 
@@ -153,19 +154,37 @@ impl DriveEpochStore for PostgresStore {
         admission: &AdmissionId,
         observed_epoch: u64,
         root_start: &RootStartNonce,
+        hold: Option<&RootHold>,
     ) -> Result<DriveEpochSeal, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = self.begin_seal_tx(&mut connection, session_id).await?;
-        let stored = drive_epoch_tx(&mut tx, session_id).await?;
-        let seal = match decide_drive_epoch_seal(
-            session_id,
-            &stored,
-            admission,
-            observed_epoch,
-            root_start,
-        ) {
-            DriveEpochSealDecision::Answer(seal) => seal,
-            DriveEpochSealDecision::Raise { next } => {
+        // A seal that names its root reads who holds it: the row lock
+        // orders the read against another seal and against a root admission,
+        // whose fence check takes the same lock (FIG-4814).
+        let stored = match hold {
+            Some(_) => drive_epoch_locked_tx(&mut tx, session_id).await?,
+            None => drive_epoch_tx(&mut tx, session_id).await?,
+        };
+        let refused = match hold {
+            Some(hold) => decide_root_hold(
+                hold,
+                stored.epoch,
+                crate::session_roots::held_root_conn(&mut tx, session_id, &hold.root)
+                    .await?
+                    .as_ref(),
+                crate::session_roots::unfinished_root_conn(&mut tx, session_id)
+                    .await?
+                    .as_ref(),
+            ),
+            None => None,
+        };
+        let decision =
+            decide_drive_epoch_seal(session_id, &stored, admission, observed_epoch, root_start);
+        let seal = match (decision, refused) {
+            (DriveEpochSealDecision::Answer(seal), _) => seal,
+            // The recorded executor of the root keeps its fence.
+            (DriveEpochSealDecision::Raise { .. }, Some(refused)) => refused,
+            (DriveEpochSealDecision::Raise { next }, None) => {
                 let changed = sqlx::query(session_sql().meta.seal_drive_epoch.sql())
                     .bind(session_id.as_str())
                     .bind(sql_counter_value("drive_epoch", observed_epoch)?)
@@ -177,6 +196,10 @@ impl DriveEpochStore for PostgresStore {
                     .map_err(store_sqlx_error)?
                     .rows_affected();
                 if changed == 1 {
+                    if let Some(hold) = hold {
+                        crate::session_roots::record_root_hold_tx(&mut tx, session_id, hold)
+                            .await?;
+                    }
                     DriveEpochSeal::Sealed(sealed_drive_fence(
                         session_id.clone(),
                         next,

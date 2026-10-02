@@ -2101,6 +2101,9 @@ mod root_control {
     (a_root_recorded_under_one_executor_is_never_admitted_by_another, "drive-root-one-executor"),
     (a_lost_acceptors_root_is_driven_once_by_the_sessions_drive, "drive-root-lost-acceptor"),
     (admit_root_refuses_another_engine_held_executor, "root-admission-executor"),
+    (a_refused_acceptor_adopts_the_outcome_its_roots_executor_recorded, "drive-root-acceptor-adopts"),
+    (no_order_of_a_roots_owner_and_another_admitter_supersedes_the_owners_fence, "drive-root-owner-fence"),
+    (a_parent_turn_acceptors_root_is_closed_to_a_later_drive, "drive-root-acceptor-recorded"),
     ]);
 
     lash_conformance::queued_input_roots_tests!({

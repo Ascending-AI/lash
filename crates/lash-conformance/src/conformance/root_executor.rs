@@ -5,9 +5,11 @@
 //! relay's claim TTL (FIG-4728). The claim is a lease: an acceptor that is
 //! alive but slower than it loses the claim to a relay pass, whose ask has
 //! the session's drive run the row's root as an engine run of its own. The
-//! root's admission records that run as its executor, and from then on the
-//! record, not the lease, excludes every other execution: the acceptor seals
-//! nothing over the run's fence and admits nothing beside it.
+//! seal of the root's admission records that run as its executor, and from
+//! then on the record, not the lease, excludes every other execution an
+//! engine holds: the acceptor seals nothing over the run's fence and admits
+//! nothing beside it, and once the root has ended it answers the outcome
+//! that run committed (FIG-4814).
 //!
 //! The laws drive both executions through the tier's turn runner: the
 //! acceptor as a child session's turn under its turn scope, and the relay's
@@ -22,7 +24,7 @@ use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::{SessionId, TurnId};
 use pretty_assertions::assert_eq;
 
-use super::drive_admission::{DriveParts, on_tier};
+use super::drive_admission::{DriveParts, driver_scope, on_tier};
 use crate::admit;
 
 /// How long a law waits for a step the tier owes it.
@@ -147,8 +149,9 @@ struct Fixture {
     calls: Arc<AtomicUsize>,
 }
 
-/// How the acceptor's turn answered.
-type Accepted = Result<(), crate::RuntimeError>;
+/// How the acceptor's turn answered: the outcome of the root that drove its
+/// input.
+type Accepted = Result<crate::TurnOutcome, crate::RuntimeError>;
 
 impl Fixture {
     async fn new(
@@ -183,7 +186,7 @@ impl Fixture {
                         }
                         Ok(crate::LlmResponse {
                             parts: vec![crate::LlmOutputPart::Text {
-                                text: "answered by the root's one executor".to_string(),
+                                text: ANSWER.to_string(),
                                 response_meta: None,
                             }],
                             ..crate::LlmResponse::default()
@@ -250,8 +253,18 @@ impl Fixture {
         &self,
         answers: tokio::sync::mpsc::UnboundedSender<Accepted>,
     ) -> crate::ConformanceTurnAttempt {
-        let parts = self.parts.clone();
-        let turn_id = self.turn_id.clone();
+        Self::acceptor_of(&self.parts, &self.turn_id, answers)
+    }
+
+    /// [`Self::acceptor`] over `parts`, the acceptor's own view of the
+    /// session.
+    fn acceptor_of(
+        parts: &DriveParts,
+        turn_id: &TurnId,
+        answers: tokio::sync::mpsc::UnboundedSender<Accepted>,
+    ) -> crate::ConformanceTurnAttempt {
+        let parts = parts.clone();
+        let turn_id = turn_id.clone();
         Arc::new(move |scope| {
             let parts = parts.clone();
             let turn_id = turn_id.clone();
@@ -267,7 +280,7 @@ impl Fixture {
                     )
                     .await;
                 let end = crate::ConformanceTurnEnd::of(&turn);
-                let _ = answers.send(turn.map(|_| ()));
+                let _ = answers.send(turn.map(|turn| turn.outcome));
                 end
             })
         })
@@ -410,7 +423,7 @@ impl Fixture {
 /// seals nothing and admits nothing: its admission is refused retryably,
 /// naming the wait, and the recorded executor drives the root to its end
 /// under the one fence that was ever sealed. The acceptor's retry then finds
-/// its input answered and runs nothing.
+/// its input answered, runs nothing, and answers the root's outcome.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -511,11 +524,10 @@ pub async fn a_root_recorded_under_one_executor_is_never_admitted_by_another(
     let retried = within("the acceptor's retry answers", answered.recv())
         .await
         .expect("the acceptor's retry reports");
-    let ceded = retried.expect_err("the acceptor's input was answered by its root's executor");
-    assert_eq!(
-        ceded.code,
-        crate::RuntimeErrorCode::AcceptedTurnInputCeded,
-        "{ceded:?}"
+    let adopted = retried.expect("the acceptor answers what its root's executor committed");
+    assert!(
+        matches!(&adopted, crate::TurnOutcome::Finished(_)),
+        "{adopted:?}"
     );
     f.assert_driven_once_to_its_end().await;
     assert_eq!(
@@ -532,7 +544,7 @@ pub async fn a_root_recorded_under_one_executor_is_never_admitted_by_another(
 /// recorded nothing, so no executor owns the root yet. The relay retakes its
 /// lapsed claim and the session's drive runs the root as the engine's own
 /// run, to its end. The acceptor's execution, recovered afterwards, finds
-/// its input answered and drives nothing.
+/// its input answered, drives nothing, and answers the root's outcome.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -598,11 +610,10 @@ pub async fn a_lost_acceptors_root_is_driven_once_by_the_sessions_drive(
     let recovered = within("the acceptor's recovery answers", answered.recv())
         .await
         .expect("the acceptor's recovery reports");
-    let ceded = recovered.expect_err("the acceptor's input was answered by the session's drive");
-    assert_eq!(
-        ceded.code,
-        crate::RuntimeErrorCode::AcceptedTurnInputCeded,
-        "{ceded:?}"
+    let adopted = recovered.expect("the acceptor answers what the session's drive committed");
+    assert!(
+        matches!(&adopted, crate::TurnOutcome::Finished(_)),
+        "{adopted:?}"
     );
     f.assert_driven_once_to_its_end().await;
     assert_eq!(f.epoch().await, sealed, "the recovery seals nothing");
@@ -624,7 +635,7 @@ pub async fn admit_root_refuses_another_engine_held_executor(
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     use crate::testing::store_fixtures::{admit_root_request_for_test, seal_drive_fence_for_test};
-    let process = |label: &str| RootExecutor::Inline {
+    let process = |label: &str| RootExecutor::Acceptor {
         scope: crate::ExecutionScope::process(crate::ProcessId::fixture(label)),
     };
     let session_drive = RootExecutor::Inline {
@@ -705,4 +716,420 @@ pub async fn admit_root_refuses_another_engine_held_executor(
             "{law}"
         );
     }
+}
+
+/// The text the fixture's model answers a root's one call with.
+const ANSWER: &str = "answered by the root's one executor";
+
+/// A refused acceptor adopts its root's recorded outcome (FIG-4814).
+///
+/// The acceptor accepts its input and stalls before its admission. Its claim
+/// lapses, a relay pass retakes it, and the session's drive runs the root to
+/// its end as the engine's own run. The acceptor then wakes: its input is
+/// answered, so it drives nothing and seals nothing, and its turn answers
+/// what the root's recorded executor committed. The process whose child turn
+/// the relay took completes with that outcome.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_refused_acceptor_adopts_the_outcome_its_roots_executor_recorded(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let f = Fixture::new(prefix, "acceptor-adopts", &host, &stores, false).await;
+    let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
+    let accepting = tokio::spawn({
+        let runner = Arc::clone(&runner);
+        let scope = f.acceptor_scope();
+        let attempt = f.acceptor(answers);
+        async move { runner.run_turn(scope, attempt).await }
+    });
+    within("the acceptor reaches its admission", f.gate.held.notified()).await;
+    let input = f.accepted_input().await;
+    f.relay_retakes_the_lapsed_claim(&input).await;
+
+    let outcome = within(
+        "the session's drive runs the root",
+        f.spawn_session_drive(&runner),
+    )
+    .await
+    .expect("the session's drive ran")
+    .expect("the session's drive commits the relay-taken root");
+    let RootOutcome::Committed {
+        outcome: committed, ..
+    } = outcome
+    else {
+        panic!("the root's executor committed it: {outcome:?}");
+    };
+    let sealed = f.epoch().await;
+
+    // The acceptor wakes: its root ended under its recorded executor.
+    f.gate.resume();
+    f.gate.settle();
+    within("the acceptor's attempt ends", accepting)
+        .await
+        .expect("the acceptor ran");
+    let adopted = within("the acceptor answers", answered.recv())
+        .await
+        .expect("the acceptor reports")
+        .expect("the acceptor answers its root's recorded outcome");
+    assert_eq!(adopted, committed, "the acceptor adopts the root's outcome");
+    assert_eq!(
+        adopted,
+        crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {
+            text: ANSWER.to_string()
+        })
+    );
+    f.assert_driven_once_to_its_end().await;
+    assert_eq!(f.epoch().await, sealed, "the acceptor seals nothing");
+}
+
+/// What one executor did to the session's drive, in the order the store
+/// answered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Drove {
+    /// `by`'s seal raised the drive epoch to `epoch`.
+    Sealed { by: &'static str, epoch: u64 },
+    /// `by`'s admission recorded the root, or read its record back.
+    Admitted { by: &'static str },
+}
+
+/// Records what one actor's seals and root admissions answered.
+struct DriveLog {
+    inner: Arc<dyn crate::RuntimeStore>,
+    by: &'static str,
+    log: Arc<std::sync::Mutex<Vec<Drove>>>,
+}
+
+impl DriveLog {
+    fn record(&self, drove: Drove) {
+        self.log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(drove);
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::store::RuntimeStoreDecorator for DriveLog {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
+    }
+
+    async fn seal_drive_epoch(
+        &self,
+        session_id: &SessionId,
+        admission: &crate::store::AdmissionId,
+        observed_epoch: u64,
+        root_start: &crate::store::RootStartNonce,
+        hold: Option<&crate::store::RootHold>,
+    ) -> Result<crate::store::DriveEpochSeal, crate::StoreError> {
+        let before = self.inner.drive_epoch(session_id).await?.epoch;
+        let seal = self
+            .inner
+            .seal_drive_epoch(session_id, admission, observed_epoch, root_start, hold)
+            .await?;
+        if let crate::store::DriveEpochSeal::Sealed(fence) = &seal
+            && fence.epoch() > before
+        {
+            self.record(Drove::Sealed {
+                by: self.by,
+                epoch: fence.epoch(),
+            });
+        }
+        Ok(seal)
+    }
+
+    async fn admit_root(
+        &self,
+        request: &crate::store::AdmitRootRequest,
+    ) -> Result<Option<crate::store::RootAdmission>, crate::StoreError> {
+        let admission = self.inner.admit_root(request).await?;
+        if admission.is_some() {
+            self.record(Drove::Admitted { by: self.by });
+        }
+        Ok(admission)
+    }
+}
+
+/// No order of a root's owner and another admitter supersedes the owner's
+/// fence (FIG-4814).
+///
+/// Two executions an engine holds race for one accepted row: its acceptor,
+/// and the session's drive a relay pass asked for it. Each is held before it
+/// reads the drive epoch its admission observes, before its seal, before
+/// its root admission, and before the acceptor reads the root that took its
+/// input, and the explorer runs every order of those calls. An engine
+/// retries a refused admission and a waiting acceptor, so each is bounded
+/// to two steps ahead of the other. Whatever the order, once a root's admission is recorded no
+/// seal raises the drive epoch again: the executor the record names keeps
+/// its fence to the root's end, the root is driven once, and it ends
+/// answered.
+#[expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn no_order_of_a_roots_owner_and_another_admitter_supersedes_the_owners_fence(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    use crate::StoreOp;
+    let mut explorer = crate::interleave::Explorer::new("owner-versus-admitter").holding(&[
+        StoreOp::drive_epoch.into(),
+        StoreOp::seal_drive_epoch.into(),
+        StoreOp::admit_root.into(),
+        StoreOp::root_of_input.into(),
+    ]);
+    let mut raced = 0;
+    while let Some(mut schedule) = explorer.next_schedule() {
+        let law = format!("explore-owner-{}", schedule.index());
+        let f = Fixture::new(prefix, &law, &host, &stores, false).await;
+        // The explorer holds the actors; the fixture's own gate holds none.
+        f.gate.resume();
+        f.gate.settle();
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut actor = |by: &'static str| {
+            let logged: Arc<dyn crate::RuntimeStore> = Arc::new(DriveLog {
+                inner: Arc::clone(&f.parts.store),
+                by,
+                log: Arc::clone(&log),
+            });
+            let mut parts = f.parts.clone();
+            parts.store = schedule.actor(by, logged);
+            parts
+        };
+        let (owner, acceptor) = (actor("session"), actor("acceptor"));
+        schedule.yields_after("session", 2);
+        schedule.yields_after("acceptor", 2);
+
+        // The relay's ask: the session's drive, retried while its admission
+        // is refused.
+        let session_drive = async {
+            let (reports, mut reported) = tokio::sync::mpsc::unbounded_channel();
+            let parts = owner.clone();
+            let request = owner.request("relay-ask");
+            let attempt: crate::ConformanceTurnAttempt = Arc::new(move |scope| {
+                let parts = parts.clone();
+                let request = request.clone();
+                let reports = reports.clone();
+                Box::pin(async move {
+                    let mut runtime = parts.runtime().await;
+                    let drove = match lash_core::drive::admit_drive(
+                        &mut runtime,
+                        &scope,
+                        &request,
+                        0,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(AdmitVerdict::Admit(admitted)) => {
+                            lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted)
+                                .await
+                                .map(Some)
+                        }
+                        Ok(_) => Ok(None),
+                        Err(abort) => Err(abort),
+                    }
+                    .map_err(lash_core::engine::DriveAbort::into_error);
+                    let end = crate::ConformanceTurnEnd::of(&drove);
+                    let _ = reports.send(drove);
+                    end
+                })
+            });
+            loop {
+                runner
+                    .run_turn(driver_scope(&owner), Arc::clone(&attempt))
+                    .await;
+                match reported.recv().await.expect("the session's drive reports") {
+                    Err(refusal) if refusal.code == crate::RuntimeErrorCode::SessionRootPending => {
+                    }
+                    drove => break drove.map(|_| ()),
+                }
+            }
+        };
+        // The acceptor's turn, retried while its root's executor runs it.
+        let accepting = async {
+            let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
+            let attempt = Fixture::acceptor_of(&acceptor, &f.turn_id, answers);
+            loop {
+                runner
+                    .run_turn(f.acceptor_scope(), Arc::clone(&attempt))
+                    .await;
+                match answered.recv().await.expect("the acceptor reports") {
+                    Err(refusal) if refusal.code == crate::RuntimeErrorCode::SessionRootPending => {
+                    }
+                    answer => break answer.map(|_| ()),
+                }
+            }
+        };
+        schedule
+            .run(vec![
+                ("session", Box::pin(session_drive)),
+                ("acceptor", Box::pin(accepting)),
+            ])
+            .await;
+
+        let drove = log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let rendered = schedule.rendered();
+        let recorded = drove
+            .iter()
+            .position(|drove| matches!(drove, Drove::Admitted { .. }))
+            .unwrap_or_else(|| panic!("no executor recorded the root: {drove:?} in `{rendered}`"));
+        let Drove::Admitted { by: owner } = drove[recorded] else {
+            unreachable!("the position names an admission")
+        };
+        let superseding: Vec<&Drove> = drove[recorded..]
+            .iter()
+            .filter(|drove| matches!(drove, Drove::Sealed { .. }))
+            .collect();
+        assert!(
+            superseding.is_empty(),
+            "a seal superseded the fence of `{owner}`, the root's recorded executor: {drove:?} \
+             in `{rendered}`"
+        );
+        assert!(
+            drove[recorded..]
+                .iter()
+                .all(|drove| *drove == Drove::Admitted { by: owner }),
+            "only `{owner}` admits the root it recorded: {drove:?} in `{rendered}`"
+        );
+        if drove[..recorded]
+            .iter()
+            .filter(|drove| matches!(drove, Drove::Sealed { .. }))
+            .count()
+            > 1
+            || schedule
+                .trace()
+                .iter()
+                .filter(|call| {
+                    call.op == StoreOp::seal_drive_epoch.into()
+                        && call.phase == lash_core::testing::Phase::Before
+                })
+                .count()
+                > 1
+        {
+            raced += 1;
+        }
+        f.assert_driven_once_to_its_end().await;
+    }
+    assert!(raced > 0, "no schedule had both executors seal");
+}
+
+/// A parent-turn acceptor's root is recorded as an acceptor's, and the store
+/// closes it to a later drive (FIG-4814).
+///
+/// The acceptor drives its child session's turn under a turn scope. Its
+/// root's admission records it as an acceptor, an execution an engine holds,
+/// never as a drive no engine holds. While the root runs, the session's own
+/// run of it is refused by the store: its seal raises nothing, its root
+/// admission is refused typed under the session's current fence, and
+/// nothing changes. The acceptor drives the root to its end.
+#[expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_parent_turn_acceptors_root_is_closed_to_a_later_drive(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let f = Fixture::new(prefix, "acceptor-recorded", &host, &stores, true).await;
+    f.gate.resume();
+    f.gate.settle();
+    let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
+    let accepting = tokio::spawn({
+        let runner = Arc::clone(&runner);
+        let scope = f.acceptor_scope();
+        let attempt = f.acceptor(answers);
+        async move { runner.run_turn(scope, attempt).await }
+    });
+    within("the acceptor's root asks its model", f.asked.notified()).await;
+    let acceptor = RootExecutor::Acceptor {
+        scope: crate::ExecutionScope::turn(&f.parts.session_id, f.turn_id.clone()),
+    };
+    let unfinished = f.unfinished().await.expect("the acceptor's root runs");
+    assert_eq!(
+        (&unfinished.root, &unfinished.executor),
+        (&f.turn_id, &acceptor),
+        "the root is recorded under its acceptor"
+    );
+
+    // A later drive: the session's own run of the root.
+    let sealed = f.epoch().await;
+    let fence = lash_core::store::current_drive_fence(f.gate.inner.as_ref(), &f.parts.session_id)
+        .await
+        .expect("read the session's fence")
+        .expect("the acceptor sealed its admission");
+    let seal = f
+        .gate
+        .inner
+        .seal_drive_epoch(
+            &f.parts.session_id,
+            &lash_core::store::AdmissionId::new("a-later-drive#0"),
+            sealed.epoch,
+            &lash_core::store::RootStartNonce::new("a-later-drive"),
+            Some(&lash_core::store::RootHold {
+                root: f.turn_id.clone(),
+                executor: RootExecutor::Root,
+            }),
+        )
+        .await
+        .expect("the store answers the later drive's seal");
+    assert_eq!(
+        seal,
+        lash_core::store::DriveEpochSeal::HeldByAnotherExecutor {
+            root: f.turn_id.clone(),
+            recorded: Box::new(acceptor.clone()),
+        },
+        "the store refuses the later drive's seal"
+    );
+    let request = crate::testing::store_fixtures::admit_root_request_for_test(
+        &fence,
+        &f.turn_id,
+        unfinished.head.clone(),
+    );
+    assert_eq!(request.executor, RootExecutor::Root);
+    match f.gate.inner.admit_root(&request).await {
+        Err(crate::StoreError::RootHeldByAnotherExecutor {
+            recorded,
+            admitting,
+            ..
+        }) => {
+            assert_eq!(*recorded, acceptor);
+            assert_eq!(*admitting, RootExecutor::Root);
+        }
+        answer => panic!("the store refuses the later drive's admission: {answer:?}"),
+    }
+    assert_eq!(f.epoch().await, sealed, "the refused drive changed nothing");
+    assert_eq!(f.unfinished().await, Some(unfinished));
+
+    // The acceptor drives its root to its end.
+    f.answer.notify_one();
+    within("the acceptor's turn ends", accepting)
+        .await
+        .expect("the acceptor ran");
+    let outcome = within("the acceptor answers", answered.recv())
+        .await
+        .expect("the acceptor reports")
+        .expect("the acceptor commits its root");
+    assert!(
+        matches!(&outcome, crate::TurnOutcome::Finished(_)),
+        "{outcome:?}"
+    );
+    f.assert_driven_once_to_its_end().await;
+    assert_eq!(f.epoch().await, sealed, "one seal ran the root");
 }

@@ -930,7 +930,8 @@ pub async fn cancel_of_a_parked_root_writes_cancelled_settles_its_input_and_drai
                 &f.parts.session_id,
                 &AdmissionId::new("premature"),
                 epoch + 1,
-                &RootStartNonce::new("premature")
+                &RootStartNonce::new("premature"),
+                None
             )
             .await
             .expect("fenced seal"),
@@ -1350,6 +1351,7 @@ pub async fn a_stale_redrive_is_fenced_by_a_later_cancel(
             &AdmissionId::new("parked-root#0"),
             f.parts.epoch().await.epoch,
             &RootStartNonce::new("parked-execution"),
+            None,
         )
         .await
         .expect("seal")
