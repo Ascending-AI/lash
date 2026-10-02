@@ -24,7 +24,9 @@ use std::result::Result;
 use std::sync::{Arc, Weak};
 use std::time::Instant;
 
-struct Integrator;
+struct Integrator {
+    registry: Arc<dyn ProcessRegistry>,
+}
 mod storage;
 
 #[lash::async_trait]
@@ -1292,7 +1294,9 @@ impl ProcessRetention for Integrator {
         process_id: &ProcessId,
         through: u64,
     ) -> Result<ProcessEventRelease, PluginError> {
-        unreachable!("external signature witness")
+        self.registry
+            .release_process_events(process_id, through)
+            .await
     }
     async fn list_trigger_delivery_pins(&self) -> Result<Vec<PinnedTriggerDelivery>, PluginError> {
         unreachable!("external signature witness")
