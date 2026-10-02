@@ -38,6 +38,7 @@ pub trait TurnProtocol: Send + Sync + 'static {
 pub struct UnitTurnProtocol;
 
 mod turn_protocol;
+use turn_protocol::AnsweredWork;
 pub use turn_protocol::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExecutionEnvironmentSync,

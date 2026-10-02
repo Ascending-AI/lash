@@ -201,27 +201,39 @@ impl<M: TurnProtocol> MachineState<M> {
         }
     }
 
-    /// Take the work `response` answers, leaving the machine `Finished`
-    /// until the response's handler moves it on. A response whose id or kind
-    /// does not match the outstanding effect is stale: the machine keeps
-    /// waiting, its delivery bookkeeping untouched.
+    /// Take the work `response` answers, paired with it, leaving the machine
+    /// `Finished` until the response's handler moves it on. A response whose
+    /// id or kind does not match the outstanding effect is stale: the machine
+    /// keeps waiting, its delivery bookkeeping untouched.
     pub(super) fn take_waiting(
         &mut self,
-        response: &Response<M::IntentOutcome>,
-    ) -> Option<PendingWork<M>> {
+        response: Response<M::IntentOutcome>,
+    ) -> Option<AnsweredWork<M>> {
+        let Self::Waiting { effect_id, .. } = self else {
+            return None;
+        };
+        if *effect_id != response.effect_id() {
+            return None;
+        }
         let Self::Waiting {
-            effect_id, work, ..
-        } = self
+            effect_id,
+            work,
+            delivery,
+        } = std::mem::replace(self, Self::Finished)
         else {
             return None;
         };
-        if *effect_id != response.effect_id() || !work.answered_by(response) {
-            return None;
+        match work.answer(response) {
+            Ok(answered) => Some(answered),
+            Err(work) => {
+                *self = Self::Waiting {
+                    effect_id,
+                    work,
+                    delivery,
+                };
+                None
+            }
         }
-        let Self::Waiting { work, .. } = std::mem::replace(self, Self::Finished) else {
-            return None;
-        };
-        Some(work)
     }
 }
 

@@ -1173,7 +1173,11 @@ impl EffectGroupState for EffectGroupStateImpl {
             EffectGroupLifecycle::Retired {
                 cleanup: EffectGroupCleanup::Complete { .. },
             } => EffectGroupFinishRetirementResponse::AlreadyFinished,
-            _ => EffectGroupFinishRetirementResponse::NotRetired,
+            EffectGroupLifecycle::Preparing { .. }
+            | EffectGroupLifecycle::Ready { .. }
+            | EffectGroupLifecycle::Closed { .. } => {
+                EffectGroupFinishRetirementResponse::NotRetired
+            }
         };
         Ok(Reply::at(wire, response))
     }
@@ -1205,7 +1209,9 @@ impl EffectGroupState for EffectGroupStateImpl {
                         EffectGroupRetirementCancelResponse::Tombstone,
                     ));
                 }
-                _ => {
+                EffectGroupLifecycle::Preparing { .. }
+                | EffectGroupLifecycle::Ready { .. }
+                | EffectGroupLifecycle::Closed { .. } => {
                     return Ok(Reply::at(
                         wire,
                         EffectGroupRetirementCancelResponse::NotRetired,

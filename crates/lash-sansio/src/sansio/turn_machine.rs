@@ -488,39 +488,32 @@ impl<M: TurnProtocol> TurnMachine<M> {
         &mut self,
         response: Response<M::IntentOutcome>,
     ) -> Result<(), TokenUsageOverflow> {
-        let Some(work) = self.state.take_waiting(&response) else {
+        let Some(answered) = self.state.take_waiting(response) else {
             return Ok(());
         };
-        match (work, response) {
-            (
-                PendingWork::SyncExecutionEnvironment,
-                Response::ExecutionEnvironmentSynced { result, .. },
-            ) => self.handle_execution_environment_synced(result),
-            (
-                PendingWork::Llm {
-                    request,
-                    driver_state,
-                },
-                Response::LlmComplete {
-                    id,
-                    result,
-                    text_streamed,
-                },
-            ) => self.handle_llm_complete(id, request, driver_state, result, text_streamed)?,
-            (PendingWork::Tools { expansion, .. }, Response::ToolResults { results, .. }) => {
+        match answered {
+            AnsweredWork::ExecutionEnvironmentSynced { result } => {
+                self.handle_execution_environment_synced(result)
+            }
+            AnsweredWork::Llm {
+                id,
+                request,
+                driver_state,
+                result,
+                text_streamed,
+            } => self.handle_llm_complete(id, request, driver_state, result, text_streamed)?,
+            AnsweredWork::Tools { expansion, results } => {
                 self.handle_tool_results(&expansion, results);
             }
-            (PendingWork::Exec { driver_state, .. }, Response::ExecResult { result, .. }) => {
-                self.handle_exec_result(driver_state, result);
-            }
-            (
-                PendingWork::Checkpoint {
-                    checkpoint,
-                    on_empty,
-                },
-                Response::Checkpoint { delivery, .. },
-            ) => self.handle_checkpoint(checkpoint, on_empty, delivery),
-            _ => unreachable!("take_waiting yields only the work the response answers"),
+            AnsweredWork::Exec {
+                driver_state,
+                result,
+            } => self.handle_exec_result(driver_state, result),
+            AnsweredWork::Checkpoint {
+                checkpoint,
+                on_empty,
+                delivery,
+            } => self.handle_checkpoint(checkpoint, on_empty, delivery),
         }
         Ok(())
     }

@@ -601,18 +601,106 @@ impl<M: TurnProtocol> PendingWork<M> {
         }
     }
 
-    /// Whether `response` is the kind of answer this work waits for.
-    pub(super) fn answered_by(&self, response: &Response<M::IntentOutcome>) -> bool {
+    /// Pair this work with `response` when it is the kind of answer the work
+    /// waits for, or hand the work back unchanged when it is not. Exhaustive
+    /// over the work on purpose: a new kind of work must say which response
+    /// answers it before the machine compiles.
+    pub(super) fn answer(
+        self,
+        response: Response<M::IntentOutcome>,
+    ) -> Result<AnsweredWork<M>, Self> {
         match self {
-            Self::SyncExecutionEnvironment => {
-                matches!(response, Response::ExecutionEnvironmentSynced { .. })
-            }
-            Self::Llm { .. } => matches!(response, Response::LlmComplete { .. }),
-            Self::Tools { .. } => matches!(response, Response::ToolResults { .. }),
-            Self::Exec { .. } => matches!(response, Response::ExecResult { .. }),
-            Self::Checkpoint { .. } => matches!(response, Response::Checkpoint { .. }),
+            Self::SyncExecutionEnvironment => match response {
+                Response::ExecutionEnvironmentSynced { result, .. } => {
+                    Ok(AnsweredWork::ExecutionEnvironmentSynced { result })
+                }
+                _ => Err(Self::SyncExecutionEnvironment),
+            },
+            Self::Llm {
+                request,
+                driver_state,
+            } => match response {
+                Response::LlmComplete {
+                    id,
+                    result,
+                    text_streamed,
+                } => Ok(AnsweredWork::Llm {
+                    id,
+                    request,
+                    driver_state,
+                    result,
+                    text_streamed,
+                }),
+                _ => Err(Self::Llm {
+                    request,
+                    driver_state,
+                }),
+            },
+            Self::Tools { calls, expansion } => match response {
+                Response::ToolResults { results, .. } => {
+                    Ok(AnsweredWork::Tools { expansion, results })
+                }
+                _ => Err(Self::Tools { calls, expansion }),
+            },
+            Self::Exec {
+                language,
+                code,
+                driver_state,
+            } => match response {
+                Response::ExecResult { result, .. } => Ok(AnsweredWork::Exec {
+                    driver_state,
+                    result,
+                }),
+                _ => Err(Self::Exec {
+                    language,
+                    code,
+                    driver_state,
+                }),
+            },
+            Self::Checkpoint {
+                checkpoint,
+                on_empty,
+            } => match response {
+                Response::Checkpoint { delivery, .. } => Ok(AnsweredWork::Checkpoint {
+                    checkpoint,
+                    on_empty,
+                    delivery,
+                }),
+                _ => Err(Self::Checkpoint {
+                    checkpoint,
+                    on_empty,
+                }),
+            },
         }
     }
+}
+
+/// Outstanding work joined with the response that answers it: what
+/// [`PendingWork::answer`] yields, one variant per kind of work.
+pub(super) enum AnsweredWork<M: TurnProtocol = UnitTurnProtocol> {
+    ExecutionEnvironmentSynced {
+        result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
+    },
+    Llm {
+        id: EffectId,
+        request: Arc<LlmRequest>,
+        driver_state: Option<M::DriverState>,
+        result: Result<LlmResponse, LlmCallError>,
+        text_streamed: bool,
+    },
+    Tools {
+        expansion: ToolExpansionPlan,
+        results: Vec<CompletedToolCall<M::IntentOutcome>>,
+    },
+    Exec {
+        driver_state: M::DriverState,
+        result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+    },
+    Checkpoint {
+        checkpoint: CheckpointKind,
+        on_empty: CheckpointResumeAction,
+        delivery: CheckpointDelivery,
+    },
 }
 
 // justification: driver actions are single-step machine values and boxing generic driver state would add allocation to every iteration.
