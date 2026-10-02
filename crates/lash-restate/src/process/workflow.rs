@@ -236,7 +236,7 @@ pub(crate) struct LashProcessWorkflowImpl<R> {
     /// completes it on the stable root, and a generation lane admits only
     /// its own generation's inputs.
     route: ServiceRoute,
-    tracing: Option<lash_core::trace::TraceRuntime>,
+    tracing: Option<lash_core::facade_support::TraceRuntime>,
 }
 
 /// The parent-end delivery of a test workflow with no ingress: the registry
@@ -398,7 +398,7 @@ impl<R> LashProcessWorkflowImpl<R> {
     /// Attach the host's trace handle to every process-segment controller
     /// created by this workflow.
     #[cfg(test)]
-    pub(crate) fn with_tracing(mut self, tracing: lash_core::trace::TraceRuntime) -> Self {
+    pub(crate) fn with_tracing(mut self, tracing: lash_core::facade_support::TraceRuntime) -> Self {
         self.tracing = Some(tracing);
         self
     }

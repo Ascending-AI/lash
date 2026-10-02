@@ -127,6 +127,11 @@ pub mod facade_support {
         UnrecordedSessionSources, opener_for_execution_scope, scope_status,
     };
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION};
+    /// The drive-tracing seam a durable substrate implements against (the trace runtime,
+    /// a step's issue and its standing), public in every feature variant.
+    pub use lash_core_execution::trace::{
+        JournalFrontier, LiveStep, StepIssue, TraceRuntime, TraceStanding, effect_trace_scope,
+    };
     pub use lash_core_ids::operational_metrics::StoreObserver;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second

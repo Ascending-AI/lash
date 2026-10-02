@@ -48,7 +48,7 @@ async fn run_golden_turn(always_replay: bool) -> Observed {
     .await;
     let sink = Arc::new(RecordingTraceSink::default());
     let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
-    let tracing = lash_core::trace::TraceRuntime::default().with_trace_sink(sink_dyn);
+    let tracing = lash_core::facade_support::TraceRuntime::default().with_trace_sink(sink_dyn);
     let session_id = SessionId::fixture(format!("golden-tree-{}", harness.run_nonce()));
     let turn_id = TurnId::from("golden-tree-turn");
     let handler_runs = Arc::new(AtomicUsize::new(0));

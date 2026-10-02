@@ -1429,7 +1429,7 @@ pub mod tracing {
     pub use lash_core::facade_support::StoreObserver;
     /// Where engine code stands when it observes, and the journaled-step
     /// boundary that grants the right to.
-    pub use lash_core::trace::{JournalFrontier, LiveStep, StepIssue, TraceStanding};
+    pub use lash_core::facade_support::{JournalFrontier, LiveStep, StepIssue, TraceStanding};
     pub use lash_sansio::{AttachmentMaterializationReason, AttachmentMaterializationSource};
     /// The scope, cause, permit and identity vocabulary the trace runtime's
     /// signatures name.
