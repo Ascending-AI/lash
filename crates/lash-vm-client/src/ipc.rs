@@ -1,3 +1,6 @@
+#[cfg(not(target_os = "linux"))]
+compile_error!("Lash VM workers require Linux");
+
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
@@ -446,12 +449,8 @@ fn read_until(
 
 /// Writes without waiting, for as much as the socket takes at once.
 fn write_ready(pipe: &UnixStream, bytes: &[u8]) -> std::io::Result<usize> {
-    // SIGPIPE stays suppressed as on the standard library's own writes; Apple
-    // sockets carry that as an option the library set when it made them.
-    #[cfg(not(target_vendor = "apple"))]
+    // Linux send flags keep the write nonblocking and suppress SIGPIPE.
     let flags = libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL;
-    #[cfg(target_vendor = "apple")]
-    let flags = libc::MSG_DONTWAIT;
     count_socket_call();
     // SAFETY: the pointer and length describe `bytes`, which outlives the
     // call, and the descriptor is this open stream's.

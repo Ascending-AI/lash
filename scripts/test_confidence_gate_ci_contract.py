@@ -2579,6 +2579,9 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             "kiln build --config=optimized --materializations=final",
             worker_artifacts,
         )
+        self.assertEqual("ubuntu-24.04", yaml.safe_load(worker_artifacts)["worker-artifacts"]["runs-on"])
+        self.assertNotIn("strategy:", worker_artifacts)
+        self.assertIn("name: sdk-worker-linux", worker_artifacts)
         self.assertIn("python3 scripts/package_vm_worker.py", worker_artifacts)
         self.assertIn("pattern: sdk-worker-*", publish)
         release_assets = yaml.safe_load(workflow)["jobs"]["publish"]["steps"][-1]["with"]

@@ -45,57 +45,8 @@ pub(crate) unsafe fn inherited_pipe(fd: i32) -> Result<UnixStream, PoolError> {
             return Err(PoolError::io(std::io::Error::last_os_error()));
         }
     }
-    #[cfg(target_os = "macos")]
-    {
-        // PROC_PIDLISTFDS enumerates actual open handles, including descriptors
-        // above a lowered RLIMIT_NOFILE. The early entry has no host threads.
-        let pid = unsafe { libc::getpid() };
-        let size =
-            unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDLISTFDS, 0, std::ptr::null_mut(), 0) };
-        if size <= 0 {
-            return Err(PoolError::io(std::io::Error::last_os_error()));
-        }
-        let width = std::mem::size_of::<libc::proc_fdinfo>();
-        let mut slots = (size as usize / width).saturating_add(16);
-        loop {
-            let mut handles: Vec<libc::proc_fdinfo> = Vec::with_capacity(slots);
-            let bytes = slots
-                .checked_mul(width)
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or(PoolError::InvalidConfiguration)?;
-            let read = unsafe {
-                libc::proc_pidinfo(
-                    pid,
-                    libc::PROC_PIDLISTFDS,
-                    0,
-                    handles.as_mut_ptr().cast(),
-                    bytes,
-                )
-            };
-            if read <= 0 || read as usize % width != 0 {
-                return Err(PoolError::breach(BootstrapFault::DescriptorEnumeration));
-            }
-            if read == bytes {
-                slots = slots
-                    .checked_mul(2)
-                    .ok_or(PoolError::InvalidConfiguration)?;
-                continue;
-            }
-            unsafe {
-                handles.set_len(read as usize / width);
-            }
-            for handle in handles {
-                if handle.proc_fd != fd {
-                    unsafe {
-                        libc::close(handle.proc_fd);
-                    }
-                }
-            }
-            break;
-        }
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(not(target_os = "linux"))]
     return Err(PoolError::UnsupportedPlatform);
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     Ok(unsafe { UnixStream::from_raw_fd(fd) })
 }

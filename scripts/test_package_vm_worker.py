@@ -60,7 +60,13 @@ class WorkerBundle(unittest.TestCase):
         archive = PACKAGER.package(self.root, self.worker, self.root / "out", "0.0.0-dev")
         self.assertTrue(archive.name.endswith("linux-x86_64.tar.gz"))
         with self.assertRaisesRegex(ValueError, "differs from compiled target"):
-            PACKAGER.package(self.root, self.worker, self.root / "out", "0.0.0-dev", "macos-aarch64")
+            PACKAGER.package(self.root, self.worker, self.root / "out", "0.0.0-dev", "linux-aarch64")
+
+    def test_archive_rejects_non_linux_workers(self):
+        self.write_worker(os="freebsd")
+        with self.assertRaisesRegex(ValueError, "worker must target Linux"):
+            PACKAGER.package(self.root, self.worker, self.root / "out", "0.0.0-dev")
+        self.assertFalse((self.root / "out").exists())
 
     def test_crate_version_is_diagnostic_only(self):
         self.write_worker(crate_version="9.8.7")

@@ -23,6 +23,8 @@ def package(source: Path, worker: Path, output: Path, version: str, target: str 
     info = json.loads(subprocess.check_output([str(worker), "--version"], text=True))
     if info["debug"] or info["testing"]:
         raise ValueError("worker must be an optimized SDK build without testing")
+    if info["os"] != "linux":
+        raise ValueError("worker must target Linux")
     compiled_target = f"{info['os']}-{info['arch']}"
     if target is not None and target != compiled_target:
         raise ValueError(f"target {target} differs from compiled target {compiled_target}")

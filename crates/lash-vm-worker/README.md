@@ -9,7 +9,8 @@ constructing providers.
 
 The launcher clears the environment. Immediately after exec, the entry closes
 all inherited descriptors except its socket. Linux uses `close_range` and
-requires kernel 5.9 or newer. Unsupported descriptor adapters fail admission.
+requires kernel 5.9 or newer. Lash VM workers support Linux only. Non-Linux
+targets fail compilation.
 The language limits guest authority and the process contains native crashes.
 This does not provide OS confinement against a native escape.
 
@@ -83,9 +84,8 @@ Effect values use explicit variants and IEEE number bits, preserving undefined,
 non-finite numbers, negative zero, tuples and record order. Projection identities use parent-owned namespaces and keys; they carry no
 backing host handles. Frames include their eight-byte envelope in
 the configured cap, and encoding stops before crossing that allocation bound.
-Linux native-process laws run in this lane. macOS has an actual-descriptor
-adapter; execution evidence on a macOS runner remains pending. Persistence,
-journal replay and live Restate kill points belong to the broker/adapter lanes.
+Linux native-process laws run in this lane. Persistence, journal replay and live
+Restate kill points belong to the broker/adapter lanes.
 
 `lash-vm-protocol` defines `WORKER_PROTOCOL_VERSION` and
 `MIN_SUPPORTED_WORKER_PROTOCOL_VERSION` once for both sides. Pool admission
@@ -104,7 +104,7 @@ The SDK's `Service::default()` uses the documented `lash-vm-worker` executable
 beside the host executable. It does not search PATH or a checkout. Tests receive
 an explicit helper path through the runner's `LASH_VM_WORKER` environment.
 
-SDK releases attach `lash-sdk-worker-VERSION-OS-ARCH.tar.gz` plus its SHA256.
+SDK releases attach `lash-sdk-worker-VERSION-linux-ARCH.tar.gz` plus its SHA256.
 The archive contains `bin/lash-vm-worker`, optional reference sources under
 `sdk/`, and `manifest.json` with protocol and crate diagnostics, the explicit
 worker binary path, and file checksums. SDK hosts can build from registry
