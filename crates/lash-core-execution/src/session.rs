@@ -1,6 +1,6 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_TOOL_CATALOG_AUTHORITY_DOMAIN_VERSION, tool_catalog_authority_fingerprint))
-const LASH_TOOL_CATALOG_AUTHORITY_DOMAIN_VERSION: &str = "lash-tool-catalog-authority/v2";
+const LASH_TOOL_CATALOG_AUTHORITY_DOMAIN_VERSION: &str = "lash-tool-catalog-authority/v1";
 
 use crate::SessionId;
 #[cfg(test)]

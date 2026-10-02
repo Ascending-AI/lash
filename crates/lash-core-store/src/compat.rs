@@ -97,7 +97,7 @@ pub struct CompatDescriptor {
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
+pub const POSTGRES_SCHEMA_VERSION: u32 = 1;
 
 /// The SQLite durable-core database's version: its `lash_compat` row and its
 /// entry in the release stamp.
@@ -508,7 +508,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 99;
+pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 1;
 
 /// The SQLite process-registry database's version: its `lash_compat` row and
 /// its entry in the release stamp.
@@ -660,7 +660,7 @@ pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 99;
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const SQLITE_REGISTRY_SCHEMA_VERSION: u32 = 44;
+pub const SQLITE_REGISTRY_SCHEMA_VERSION: u32 = 1;
 
 /// The SQLite trigger database's version: its `lash_compat` row and its entry
 /// in the release stamp.
@@ -720,7 +720,7 @@ pub const SQLITE_REGISTRY_SCHEMA_VERSION: u32 = 44;
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const SQLITE_TRIGGERS_SCHEMA_VERSION: u32 = 12;
+pub const SQLITE_TRIGGERS_SCHEMA_VERSION: u32 = 1;
 
 /// What this build declares about a store component whose provisioning DDL
 /// is at `version`: it reads and writes exactly that version.

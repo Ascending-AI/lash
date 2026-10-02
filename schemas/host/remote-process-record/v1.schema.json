@@ -2780,7 +2780,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/remote-process-record/v100",
+  "$id": "https://lash.dev/schemas/remote-process-record/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "ancestry": {
@@ -2899,6 +2899,6 @@
   ],
   "title": "RemoteProcessRecord",
   "type": "object",
-  "x-lash-schema-version": 100,
+  "x-lash-schema-version": 1,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

@@ -1,6 +1,6 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_ATTACHMENT_DOMAIN_VERSION, content_id))
-const LASH_ATTACHMENT_DOMAIN_VERSION: &str = "lash-attachment/v2";
+const LASH_ATTACHMENT_DOMAIN_VERSION: &str = "lash-attachment/v1";
 
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;

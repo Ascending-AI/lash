@@ -6,7 +6,7 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_SESSION_APPEND_DRAFT_FALLBACK_DOMAIN_VERSION, session_append_node_drafts))
 const LASH_SESSION_APPEND_DRAFT_FALLBACK_DOMAIN_VERSION: &str =
-    "lash-session-append-draft-fallback/v2";
+    "lash-session-append-draft-fallback/v1";
 
 use crate::SessionId;
 use crate::TurnId;

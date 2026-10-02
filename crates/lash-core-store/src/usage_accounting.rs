@@ -1,7 +1,7 @@
 //! Owner-scoped, effect-keyed usage facts and dispatch liabilities.
 /// version_surface = "coexist"
 /// version_guard(items(LASH_USAGE_FACT_PAYLOAD_DOMAIN_VERSION, usage_correction_payload_hash, usage_fact_payload_hash))
-const LASH_USAGE_FACT_PAYLOAD_DOMAIN_VERSION: &str = "lash-usage-fact-payload/v4";
+const LASH_USAGE_FACT_PAYLOAD_DOMAIN_VERSION: &str = "lash-usage-fact-payload/v1";
 
 use crate::usage::{SessionUsageReport, UsageAttributionKey, UsageTotals};
 use crate::{LlmProfileKey, RuntimeOwner, StoreError};
@@ -596,7 +596,7 @@ pub struct UsageRunPage {
 ///     ),
 /// )
 /// version_surface = "coexist"
-pub const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
+pub const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 1;
 /// BLAKE3 hex under domain `lash-usage-fact-payload/v4` of the framed
 /// projection: kind, disposition tag, source, model key, requested model,
 /// optional served model, the five counters (big-endian i64), llm_call_id,

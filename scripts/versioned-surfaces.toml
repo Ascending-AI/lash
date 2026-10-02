@@ -183,3 +183,123 @@ reason = "FIG-3607: a process id is minted by the registrar, never derived"
 [[retired_hash_domain]]
 name = "lash-protocol-materialization/v1"
 reason = "FIG-4379: session config is owner-namespaced and the protocol materialization format is deleted"
+
+[[retired_hash_domain]]
+name = "lash-append-request/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-attachment/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-blob/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-composition-tool/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-derived-trigger-subscription/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-draft-node/v3"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-frame-node/v3"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-google-upload-credential-scope/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-history-node/v3"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-intent/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-lashlang-content/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-lashlang-program/v3"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-lifted-process-name/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-model-facing-composition/v3"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-openai-responses-request/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-process-env/v6"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-queued-work-batch/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-rlm-execution-state-leaf/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-rlm-stall-reply/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-runtime-effect-envelope/v3"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-session-append-draft-fallback/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-stable-identity/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-tool-catalog-authority/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-tool-intent-payload/v3"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-turn-input/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-usage-fact-payload/v4"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-workflow-edge/v2"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-workflow-node/v3"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash-workflow-source/v4"
+reason = "superseded by the 1.0 baseline reset"
+
+[[retired_hash_domain]]
+name = "lash.agent-frame-key/v2"
+reason = "superseded by the 1.0 baseline reset"

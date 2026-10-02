@@ -27,7 +27,7 @@ use super::entry_points::Entry;
 /// change retires what the previous ids were recorded against.
 /// version_surface = "coexist"
 /// version_guard(items(WORKFLOW_NODE_DOMAIN, of))
-const WORKFLOW_NODE_DOMAIN: &str = "lash-workflow-node/v3";
+const WORKFLOW_NODE_DOMAIN: &str = "lash-workflow-node/v1";
 
 /// The executable identity of one compiled entry point.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

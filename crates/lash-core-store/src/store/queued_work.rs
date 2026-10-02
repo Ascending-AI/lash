@@ -10,7 +10,7 @@
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_QUEUED_WORK_BATCH_DOMAIN_VERSION, derive_batch_id))
-const LASH_QUEUED_WORK_BATCH_DOMAIN_VERSION: &str = "lash-queued-work-batch/v2";
+const LASH_QUEUED_WORK_BATCH_DOMAIN_VERSION: &str = "lash-queued-work-batch/v1";
 
 use crate::{
     AdmissionBoundary, DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkKind,

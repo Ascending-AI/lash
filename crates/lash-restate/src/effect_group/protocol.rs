@@ -27,7 +27,7 @@ use super::*;
 /// )
 /// version_surface = "drain"
 /// format_manifest = "engine:restate.effect_group_dispatch_journal"
-pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 5;
+pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 1;
 
 /// The stored format the group index's retained record stamps into its
 /// object-state envelope, and the family format of every `EffectGroupIndex`

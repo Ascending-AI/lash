@@ -423,7 +423,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/workflow-type-facets/v4",
+  "$id": "https://lash.dev/schemas/workflow-type-facets/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "available_variables": {
@@ -447,6 +447,6 @@
   },
   "title": "WorkflowNodeTypeFacets",
   "type": "object",
-  "x-lash-schema-version": 4,
+  "x-lash-schema-version": 1,
   "x-lash-version-constant": "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
 }

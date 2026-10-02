@@ -2,15 +2,15 @@
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_STABLE_IDENTITY_DOMAIN_VERSION, derive))
-const LASH_STABLE_IDENTITY_DOMAIN_VERSION: &str = "lash-stable-identity/v2";
+const LASH_STABLE_IDENTITY_DOMAIN_VERSION: &str = "lash-stable-identity/v1";
 
 /// version_surface = "coexist"
 /// version_guard(items(PROCESS_ENV_PREFIX_VERSION, process_execution_env_ref_for_bytes))
-const PROCESS_ENV_PREFIX_VERSION: &str = "process-env:v6:blake3:";
+const PROCESS_ENV_PREFIX_VERSION: &str = "process-env:v1:blake3:";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_PROCESS_ENV_DOMAIN_VERSION, process_execution_env_ref_for_bytes))
-const LASH_PROCESS_ENV_DOMAIN_VERSION: &str = "lash-process-env/v6";
+const LASH_PROCESS_ENV_DOMAIN_VERSION: &str = "lash-process-env/v1";
 
 use crate::{ProcessId, SessionId};
 use serde::{Deserialize, Serialize};
@@ -763,14 +763,14 @@ impl WakeDeliveryState {
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "ProcessWakeDelivery"
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 4;
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 4's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "ProcessWakeDelivery"
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 5;
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 2;
 
 /// version_guard(
 ///     items(process_wake_identity_preimage),

@@ -26,7 +26,6 @@ fn production_catalogs_start_at_the_release_baseline() {
 /// step, and the synthetic-next build's steps carry the baseline to 2 and
 /// wait for no epoch and raise no floor past it.
 #[test]
-#[ignore = "release cut: FIG-4493"]
 fn catalogs_hold_no_pre_release_transition() {
     assert_eq!(
         SCHEMA_VERSION, 1,

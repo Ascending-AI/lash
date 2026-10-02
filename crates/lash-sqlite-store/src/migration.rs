@@ -134,7 +134,6 @@ mod release_catalog_tests {
     /// Every database starts at the release baseline 1, and the synthetic-next
     /// build's steps carry it to 2.
     #[test]
-    #[ignore = "release cut: FIG-4493"]
     fn catalog_holds_no_pre_release_transition() {
         for database in SqliteDatabase::ALL {
             let descriptor = compat::descriptor(database.component()).expect("descriptor");

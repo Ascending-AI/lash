@@ -20,7 +20,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/remote-config-transaction-request/v100",
+  "$id": "https://lash.dev/schemas/remote-config-transaction-request/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "A config transaction a remote caller submits to one session.",
@@ -55,6 +55,6 @@
   ],
   "title": "RemoteConfigTransactionRequest",
   "type": "object",
-  "x-lash-schema-version": 100,
+  "x-lash-schema-version": 1,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

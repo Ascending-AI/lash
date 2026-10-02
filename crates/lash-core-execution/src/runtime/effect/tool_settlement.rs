@@ -156,7 +156,7 @@ use crate::{PluginMessage, ProcessId};
 /// )
 /// version_surface = "drain"
 /// format_manifest = "ToolSettlement"
-pub const TOOL_SETTLEMENT_VERSION: u16 = 8;
+pub const TOOL_SETTLEMENT_VERSION: u16 = 1;
 
 /// The durable format version of one atomic attempt's captured facts.
 ///
@@ -185,7 +185,7 @@ pub const TOOL_SETTLEMENT_VERSION: u16 = 8;
 /// )
 /// version_surface = "drain"
 /// format_manifest = "ToolAttemptCapture"
-pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 6;
+pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 1;
 
 /// The semantic facts one atomic `ToolAttempt` produced, journaled with it.
 ///

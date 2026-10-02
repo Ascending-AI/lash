@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashDurableWaitIndex",
   "service": "LashDurableWaitIndex",
-  "generation": "1654dff52a0a",
+  "generation": "de8e7224200b",
   "handlers": {
     "group_child_membership": [
       [
@@ -35,7 +35,7 @@
         "InputCommand",
         "GetLazyStateCommand",
         "GetLazyStateCommand",
-        "SetStateCommand wait-index/v2/group-child/replay-corpus-turn:group:replay-corpus-session:replay-corpus-turn:1:0:tool_batch:3:child:0",
+        "SetStateCommand wait-index/v1/group-child/replay-corpus-turn:group:replay-corpus-session:replay-corpus-turn:1:0:tool_batch:3:child:0",
         "OutputCommand"
       ]
     ],
@@ -45,7 +45,7 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "GetLazyStateCommand",
-        "SetStateCommand wait-index/v2/wait/#",
+        "SetStateCommand wait-index/v1/wait/#",
         "OutputCommand"
       ]
     ],
@@ -56,7 +56,7 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "CallCommand LashDurableWaitWorkflow/peek",
-        "SetStateCommand wait-index/v2/metadata",
+        "SetStateCommand wait-index/v1/metadata",
         "OutputCommand"
       ]
     ],
@@ -67,7 +67,7 @@
         "GetLazyStateKeysCommand",
         "SetStateCommand _compat",
         "GetLazyStateCommand",
-        "SetStateCommand wait-index/v2/metadata",
+        "SetStateCommand wait-index/v1/metadata",
         "OutputCommand"
       ]
     ],
@@ -78,7 +78,7 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "CallCommand LashDurableWaitWorkflow/resolve",
-        "SetStateCommand wait-index/v2/metadata",
+        "SetStateCommand wait-index/v1/metadata",
         "OutputCommand"
       ],
       [
@@ -87,9 +87,9 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "CallCommand LashDurableWaitWorkflow/resolve",
-        "SetStateCommand wait-index/v2/wait/#",
+        "SetStateCommand wait-index/v1/wait/#",
         "CompleteAwakeableCommand",
-        "SetStateCommand wait-index/v2/metadata",
+        "SetStateCommand wait-index/v1/metadata",
         "OutputCommand"
       ],
       [
@@ -98,8 +98,8 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "CallCommand LashDurableWaitWorkflow/resolve",
-        "SetStateCommand wait-index/v2/wait/#",
-        "SetStateCommand wait-index/v2/metadata",
+        "SetStateCommand wait-index/v1/wait/#",
+        "SetStateCommand wait-index/v1/metadata",
         "OutputCommand"
       ]
     ],
@@ -110,7 +110,7 @@
         "GetLazyStateCommand",
         "GetLazyStateKeysCommand",
         "GetLazyStateCommand",
-        "ClearStateCommand wait-index/v2/wait/#",
+        "ClearStateCommand wait-index/v1/wait/#",
         "OutputCommand"
       ]
     ],
@@ -119,7 +119,7 @@
         "InputCommand",
         "GetLazyStateCommand",
         "GetLazyStateCommand",
-        "SetStateCommand wait-index/v2/wait/#",
+        "SetStateCommand wait-index/v1/wait/#",
         "OutputCommand"
       ]
     ],
@@ -128,7 +128,7 @@
         "InputCommand",
         "GetLazyStateCommand",
         "GetLazyStateCommand",
-        "SetStateCommand wait-index/v2/metadata",
+        "SetStateCommand wait-index/v1/metadata",
         "OutputCommand"
       ]
     ]

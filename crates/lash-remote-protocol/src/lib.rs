@@ -321,7 +321,7 @@ pub use usage_activity::*;
 /// )
 /// version_surface = "coexist"
 /// format_outside_manifest = "wire protocol: gates a live remote peer, not bytes a store parks"
-pub const REMOTE_PROTOCOL_VERSION: u32 = 100;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 1;
 
 /// One versioned remote-protocol message.
 ///

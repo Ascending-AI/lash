@@ -82,7 +82,7 @@ pub use canonical_messagepack::{
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "LashlangSnapshot"
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 14;
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the snapshot one version on
 /// with version 14's shape. Its registered `Lift::Decoder` row admits N's
@@ -91,7 +91,7 @@ pub const LASHLANG_SNAPSHOT_VERSION: u32 = 14;
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "LashlangSnapshot"
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 15;
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 2;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 /// The longest summary [`State::opaque_bindings`] renders, in characters.
 pub const BINDING_SUMMARY_MAX_CHARS: usize = super::heap::SUMMARY_MAX_CHARS;

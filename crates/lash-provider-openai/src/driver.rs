@@ -1,6 +1,6 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION, request_fingerprint))
-const LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION: &str = "lash-openai-responses-request/v2";
+const LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION: &str = "lash-openai-responses-request/v1";
 
 use crate::request_work::{body_excerpt, needs_blocking, run, serialize_body};
 use crate::support::*;

@@ -10,15 +10,15 @@
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_APPEND_REQUEST_DOMAIN_VERSION, append_request_identity_hash))
-const LASH_APPEND_REQUEST_DOMAIN_VERSION: &str = "lash-append-request/v2";
+const LASH_APPEND_REQUEST_DOMAIN_VERSION: &str = "lash-append-request/v1";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_INTENT_DOMAIN_VERSION, turn_commit_hash))
-const LASH_INTENT_DOMAIN_VERSION: &str = "lash-intent/v2";
+const LASH_INTENT_DOMAIN_VERSION: &str = "lash-intent/v1";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_HISTORY_NODE_DOMAIN_VERSION, derive_history_node_id))
-const LASH_HISTORY_NODE_DOMAIN_VERSION: &str = "lash-history-node/v3";
+const LASH_HISTORY_NODE_DOMAIN_VERSION: &str = "lash-history-node/v1";
 
 use super::*;
 use crate::SessionId;
@@ -50,7 +50,7 @@ pub struct OperationId {
 /// )
 /// version_surface = "coexist"
 /// format_manifest = "AppendRequestIdentity"
-pub const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 7;
+pub const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 
 /// Frozen durable-identity family domains minted by this module (ADR 0097).
 /// These are `FAMILY_DOMAINS`-registered names whose preimages carry no

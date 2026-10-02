@@ -35,14 +35,14 @@ pub enum ScopeId {
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "ScopeStoragePayload"
-pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 2;
+pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 2's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "ScopeStoragePayload"
-pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 3;
+pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 2;
 
 /// The versioned typed scope persisted beside the index projection.
 #[derive(Serialize, Deserialize)]

@@ -1,18 +1,18 @@
 /// version_surface = "coexist"
 /// version_guard(items(DRAFT_NODE_PREFIX_VERSION, draft_node_id))
-const DRAFT_NODE_PREFIX_VERSION: &str = "draft-node/v3/";
+const DRAFT_NODE_PREFIX_VERSION: &str = "draft-node/v1/";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_DRAFT_NODE_DOMAIN_VERSION, draft_node_id))
-const LASH_DRAFT_NODE_DOMAIN_VERSION: &str = "lash-draft-node/v3";
+const LASH_DRAFT_NODE_DOMAIN_VERSION: &str = "lash-draft-node/v1";
 
 /// version_surface = "coexist"
 /// version_guard(items(FRAME_NODE_PREFIX_VERSION, frame_node_id))
-const FRAME_NODE_PREFIX_VERSION: &str = "frame-node/v3/";
+const FRAME_NODE_PREFIX_VERSION: &str = "frame-node/v1/";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_FRAME_NODE_DOMAIN_VERSION, frame_node_id))
-const LASH_FRAME_NODE_DOMAIN_VERSION: &str = "lash-frame-node/v3";
+const LASH_FRAME_NODE_DOMAIN_VERSION: &str = "lash-frame-node/v1";
 
 use crate::{NodeId, SessionId};
 use std::collections::{HashMap, HashSet};
@@ -351,7 +351,7 @@ pub struct SessionNodeRecord {
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionNodeBody"
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 22;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the node body to 23. Its body
 /// keeps 22's shape, and [`upcast_synthetic_node_body`] is the permanent
@@ -359,7 +359,7 @@ pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 22;
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "SessionNodeBody"
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 23;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 2;
 
 /// The synthetic N+1's history upcaster: a generation-22 node body is a
 /// generation-23 body under the older stamp.

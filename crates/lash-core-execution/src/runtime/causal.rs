@@ -581,7 +581,7 @@ pub fn direct_effect_invocation(
 ///     ),
 /// )
 /// version_surface = "coexist"
-const DIRECT_EFFECT_FAMILY_VERSION: u8 = 3;
+const DIRECT_EFFECT_FAMILY_VERSION: u8 = 1;
 
 fn direct_effect_replay_preimage(
     owner: &crate::RuntimeOwner,

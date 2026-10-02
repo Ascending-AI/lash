@@ -4,7 +4,7 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_GOOGLE_UPLOAD_CREDENTIAL_SCOPE_DOMAIN_VERSION, upload_cache_key))
 const LASH_GOOGLE_UPLOAD_CREDENTIAL_SCOPE_DOMAIN_VERSION: &str =
-    "lash-google-upload-credential-scope/v2";
+    "lash-google-upload-credential-scope/v1";
 
 use crate::config::{UploadedAttachmentCacheKey, UploadedAttachmentRef};
 use crate::support::*;

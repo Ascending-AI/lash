@@ -206,7 +206,7 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// )
 /// version_surface = "coexist"
 /// format_manifest = "Bytecode"
-pub const BYTECODE_FORMAT_VERSION: u32 = 30;
+pub const BYTECODE_FORMAT_VERSION: u32 = 1;
 
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{

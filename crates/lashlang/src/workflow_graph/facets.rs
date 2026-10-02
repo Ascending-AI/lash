@@ -20,7 +20,7 @@ use crate::linker::{LinkError, WorkflowLinkAnalysis};
 /// version_surface = "migrate"
 /// format_manifest = "WorkflowTypeFacet"
 /// version_unguarded = "a derived projection facet: a reader strips it and regenerates it from its module rather than decoding it, so it has no range to read"
-pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 4;
+pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowNodeTypeFacets {

@@ -2324,7 +2324,7 @@ fn language_execution_records() -> Vec<TraceRecord> {
 #[test]
 fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-record/v36.schema.json"
+        "../../../schemas/host/trace-record/v1.schema.json"
     ))
     .expect("published trace schema");
     let context = TraceContext {
@@ -2355,7 +2355,7 @@ fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
 #[test]
 fn published_trace_record_schema_tolerates_additive_fields_and_refuses_unknown_variants() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-record/v36.schema.json"
+        "../../../schemas/host/trace-record/v1.schema.json"
     ))
     .expect("published trace schema");
     let record = TraceRecord::new(
@@ -2386,7 +2386,7 @@ fn published_trace_record_schema_tolerates_additive_fields_and_refuses_unknown_v
 #[test]
 fn published_graph_schema_accepts_a_folded_snapshot_and_enforces_its_row() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-lashlang-graph/v36.schema.json"
+        "../../../schemas/host/trace-lashlang-graph/v1.schema.json"
     ))
     .expect("published trace schema");
     let graph = lash_trace::TraceLashlangGraphStore::fold(None, &language_execution_records())

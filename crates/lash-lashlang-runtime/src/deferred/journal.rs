@@ -6,7 +6,7 @@
 
 /// version_surface = "coexist"
 /// version_guard(items(DEFERRED_TOOL_RESOLUTION_PREFIX_VERSION, journal_deferred_outcomes))
-const DEFERRED_TOOL_RESOLUTION_PREFIX_VERSION: &str = "deferred_tool_resolution:v2:";
+const DEFERRED_TOOL_RESOLUTION_PREFIX_VERSION: &str = "deferred_tool_resolution:v1:";
 
 use std::collections::{BTreeMap, BTreeSet};
 

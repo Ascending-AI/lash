@@ -174,7 +174,7 @@ use super::executor::RuntimeEffectControllerError;
 /// )
 /// version_surface = "drain"
 /// format_manifest = "ToolChildRequest"
-pub const TOOL_CHILD_REQUEST_VERSION: u16 = 10;
+pub const TOOL_CHILD_REQUEST_VERSION: u16 = 1;
 
 mod session_facts;
 pub use session_facts::{

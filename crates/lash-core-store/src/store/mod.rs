@@ -1,7 +1,7 @@
 //! The runtime's settled-session persistence contract and shared store types.
 /// version_surface = "coexist"
 /// version_guard(items(LASH_BLOB_DOMAIN_VERSION, for_content))
-const LASH_BLOB_DOMAIN_VERSION: &str = "lash-blob/v2";
+const LASH_BLOB_DOMAIN_VERSION: &str = "lash-blob/v1";
 
 use crate::SessionId;
 use crate::TurnId;
@@ -246,14 +246,14 @@ fn default_root_session_id() -> SessionId {
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionHeadMeta"
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 11;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 11's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "SessionHeadMeta"
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 12;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 2;
 
 #[cfg(test)]
 #[cfg(test)]

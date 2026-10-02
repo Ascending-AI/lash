@@ -829,7 +829,7 @@
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/remote-persist-process-env-request/v100",
+  "$id": "https://lash.dev/schemas/remote-persist-process-env-request/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "env_spec": {
@@ -841,6 +841,6 @@
   ],
   "title": "RemotePersistProcessEnvRequest",
   "type": "object",
-  "x-lash-schema-version": 100,
+  "x-lash-schema-version": 1,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

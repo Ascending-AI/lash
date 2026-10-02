@@ -12,7 +12,7 @@
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_WORKFLOW_NODE_DOMAIN_VERSION, workflow_node_id))
-const LASH_WORKFLOW_NODE_DOMAIN_VERSION: &str = "lash-workflow-node/v3";
+const LASH_WORKFLOW_NODE_DOMAIN_VERSION: &str = "lash-workflow-node/v1";
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -92,7 +92,7 @@ pub use projection::{
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "WorkflowGraphSchema"
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 21;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the document with version
 /// 21's shape. A derived projection registers no lift: while `F` is N's epoch
@@ -101,7 +101,7 @@ pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 21;
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "WorkflowGraphSchema"
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 22;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 2;
 
 /// A deterministic node identifier minted from structural owner and AST path.
 #[derive(

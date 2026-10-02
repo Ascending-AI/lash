@@ -6,7 +6,7 @@
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION, lifted_process_identity))
-const LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION: &str = "lash-lifted-process-name/v2";
+const LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION: &str = "lash-lifted-process-name/v1";
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

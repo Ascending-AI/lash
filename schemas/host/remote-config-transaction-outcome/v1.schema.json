@@ -231,7 +231,7 @@
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/remote-config-transaction-outcome/v100",
+  "$id": "https://lash.dev/schemas/remote-config-transaction-outcome/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "What a config transaction settled as.",
   "oneOf": [
@@ -312,6 +312,6 @@
     }
   ],
   "title": "RemoteConfigTransactionOutcome",
-  "x-lash-schema-version": 100,
+  "x-lash-schema-version": 1,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

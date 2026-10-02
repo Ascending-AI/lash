@@ -87,7 +87,7 @@ use std::sync::Arc;
 /// )
 /// version_surface = "drain"
 /// format_manifest = "engine:restate.process_journal"
-pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
+pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 1;
 
 /// The manual epoch of the journal-bearing handlers' logic, hashed into the
 /// build's drain generation beside the drain-format versions (FIG-3795).

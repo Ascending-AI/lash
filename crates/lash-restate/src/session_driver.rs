@@ -182,7 +182,7 @@ use continuation::{continuation_generation, drain_answered, session_drive_contin
 /// )
 /// version_surface = "drain"
 /// format_manifest = "engine:restate.session_drive"
-pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
+pub const LASH_SESSION_DRIVE_VERSION: u32 = 1;
 
 /// The drive handler's name on `LashSession`.
 const DRIVE_HANDLER: &str = "drive";

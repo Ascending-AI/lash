@@ -8,7 +8,7 @@
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_RLM_STALL_REPLY_DOMAIN_VERSION, reply_fingerprint))
-const LASH_RLM_STALL_REPLY_DOMAIN_VERSION: &str = "lash-rlm-stall-reply/v2";
+const LASH_RLM_STALL_REPLY_DOMAIN_VERSION: &str = "lash-rlm-stall-reply/v1";
 
 use lash_core::llm::types::ProviderReasoningReplay;
 use lash_core::session_model::SessionHistoryRecord;
