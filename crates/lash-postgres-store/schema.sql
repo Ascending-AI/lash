@@ -1068,15 +1068,20 @@ CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
     ON lash_tool_intent_submissions(owner, execution_scope_id, intent_index);
 
 CREATE TABLE IF NOT EXISTS lash_trigger_subscription_change_clock (
-    singleton BOOLEAN PRIMARY KEY CHECK (singleton),
-    current_seq BIGINT NOT NULL CHECK (current_seq >= 0),
-    pruned_through BIGINT NOT NULL CHECK (pruned_through >= 0 AND pruned_through <= current_seq)
+    singleton BOOLEAN PRIMARY KEY
+        CONSTRAINT ck_trigger_subscription_change_clock_singleton CHECK (singleton),
+    current_seq BIGINT NOT NULL
+        CONSTRAINT ck_trigger_subscription_change_clock_current_seq CHECK (current_seq >= 0),
+    pruned_through BIGINT NOT NULL
+        CONSTRAINT ck_trigger_subscription_change_clock_pruned_through
+        CHECK (pruned_through >= 0 AND pruned_through <= current_seq)
 );
 INSERT INTO lash_trigger_subscription_change_clock (singleton, current_seq, pruned_through)
     VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO NOTHING;
 CREATE TABLE IF NOT EXISTS lash_trigger_subscription_changes (
     subscription_id TEXT PRIMARY KEY,
-    change_seq BIGINT NOT NULL UNIQUE CHECK (change_seq > 0),
+    change_seq BIGINT NOT NULL UNIQUE
+        CONSTRAINT ck_trigger_subscription_changes_change_seq CHECK (change_seq > 0),
     deleted_at_ms BIGINT CONSTRAINT ck_trigger_subscription_changes_reclaimable CHECK ((deleted_at_ms IS NULL OR record_json::jsonb -> 'lifecycle' ->> 'lifecycle' = 'tombstoned') IS TRUE),
     record_json TEXT NOT NULL
 );
