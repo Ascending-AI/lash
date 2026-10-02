@@ -319,6 +319,20 @@ async fn run_workload() -> (RestateTestBackend, lash_core::engine::BuildGenerati
         .await
         .expect("open the session");
 
+    // Every session-bearing scope shares this index. Initialize it through
+    // one real handler before the turn's wait registration and group-child
+    // membership race to use it; otherwise either journal owns the bootstrap.
+    backend
+        .ingress()
+        .call_object_json::<_, crate::Reply<()>>(
+            "LashDurableWaitIndex",
+            SESSION,
+            "reinstate",
+            &crate::Call::new(()),
+        )
+        .await
+        .expect("initialize the session's wait index");
+
     // The turn: a model call that asks for the tool, the tool as an
     // effect-group child, and a second call that answers. The tool answers
     // only once the turn is parked on its group and the child's cancel watch

@@ -40,6 +40,7 @@
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:checkpoint:4",
         "CallCommand LashDurableWaitIndex/peek_turn_gate",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:sync_execution_environment:5",
+        "RunCommand lash:drain-mark:replay-corpus-turn:1",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:before_llm_call:6",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:llm_call:6",
         "OneWayCallCommand LashUsageAccounting/settle",

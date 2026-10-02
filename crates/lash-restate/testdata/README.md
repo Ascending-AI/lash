@@ -11,6 +11,11 @@ journals. Do not edit fixture contents by hand.
   each distinct ordered command sequence its invocations wrote, with minted
   ids elided as `#`.
 
+The workload initializes the session's durable-wait index through `reinstate`
+before starting the turn. Otherwise `register` and `record_group_child` race to
+initialize it, moving the bootstrap commands between their handler journals.
+The initialization remains part of the recorded corpus.
+
 The service list is derived:
 `every_restate_service_in_the_source_has_a_recorded_scenario` fails when a
 `#[restate_sdk::object]` or `#[restate_sdk::workflow]` in `src` has no

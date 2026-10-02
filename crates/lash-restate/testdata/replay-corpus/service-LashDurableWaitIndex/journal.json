@@ -18,14 +18,6 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "OutputCommand"
-      ],
-      [
-        "InputCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateKeysCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateKeysCommand",
-        "OutputCommand"
       ]
     ],
     "peek_turn_gate": [
@@ -36,23 +28,13 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "OutputCommand"
-      ],
-      [
-        "InputCommand",
-        "GetLazyStateKeysCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateCommand",
-        "OutputCommand"
       ]
     ],
     "record_group_child": [
       [
         "InputCommand",
         "GetLazyStateCommand",
-        "GetLazyStateKeysCommand",
-        "SetStateCommand _compat",
         "GetLazyStateCommand",
-        "SetStateCommand wait-index/v2/metadata",
         "SetStateCommand wait-index/v2/group-child/replay-corpus-turn:group:replay-corpus-session:replay-corpus-turn:1:0:tool_batch:3:child:0",
         "OutputCommand"
       ]
@@ -74,6 +56,17 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "CallCommand LashDurableWaitWorkflow/peek",
+        "SetStateCommand wait-index/v2/metadata",
+        "OutputCommand"
+      ]
+    ],
+    "reinstate": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateKeysCommand",
+        "SetStateCommand _compat",
+        "GetLazyStateCommand",
         "SetStateCommand wait-index/v2/metadata",
         "OutputCommand"
       ]
