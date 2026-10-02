@@ -14,7 +14,8 @@
 //! * an integration can be turned on and off while the bot is serving, which is
 //!   what [`McpPluginFactory::attach_server`] and
 //!   [`McpPluginFactory::detach_server`] exist for. Sessions opened after the
-//!   change see the new catalog; the bot opens one per delivered event;
+//!   change see the new catalog. A typed config command records the matching
+//!   prompt on every live channel and thread session at its next boundary;
 //! * an operator page needs both halves of "is this integration healthy" — the
 //!   connection status from [`McpPluginFactory::server_statuses`] and the tools
 //!   it actually advertises, which come from the pool
@@ -30,14 +31,12 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lash_plugin_mcp::{
-    McpConnectionPool, McpError, McpPluginFactory, McpServerHealth, McpServerStatus,
-};
+use lash::mcp::{McpConnectionPool, McpError, McpPluginFactory, McpServerHealth, McpServerStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::mcp_client::DemoRootsProvider;
-use super::runtime::{BotRuntime, http_mcp_server_config};
+use super::runtime::{BotRuntime, bot_prompt, http_mcp_server_config};
 use crate::secrets::constant_time_eq;
 
 /// Collection route for attached MCP servers.
@@ -49,6 +48,8 @@ pub const ROOTS_PATH: &str = "/admin/mcp/roots";
 /// Operator handle over the bot's MCP plugin factory and published roots.
 #[derive(Clone)]
 pub struct McpAdmin {
+    core: lash::LashCore,
+    session_spec: Arc<tokio::sync::RwLock<lash::SessionSpec>>,
     factory: Arc<McpPluginFactory>,
     roots: Arc<DemoRootsProvider>,
     token: Arc<String>,
@@ -58,6 +59,8 @@ impl McpAdmin {
     /// Build the operator handle from a built runtime and the bot's shared secret.
     pub fn new(runtime: &BotRuntime, token: impl Into<String>) -> Self {
         Self {
+            core: runtime.core.clone(),
+            session_spec: Arc::clone(&runtime.session_spec),
             factory: Arc::clone(&runtime.mcp),
             roots: Arc::clone(&runtime.roots),
             token: Arc::new(token.into()),
@@ -146,6 +149,9 @@ async fn attach_server(
     State(admin): State<McpAdmin>,
     Json(request): Json<AttachRequest>,
 ) -> Response {
+    // The same lock guards channel and thread creation: the catalog sweep
+    // cannot miss a channel created with the preceding prompt.
+    let mut spec = admin.session_spec.write().await;
     let config = http_mcp_server_config(&request.url, &request.token);
     if let Err(error) = admin
         .factory
@@ -154,7 +160,10 @@ async fn attach_server(
     {
         return mcp_error_response(&error);
     }
-    // Attach returns as soon as the eager connect attempt settles, and a server
+    if let Err(error) = record_mcp_prompt(&admin, &mut spec).await {
+        return prompt_error_response(&error);
+    }
+    // The factory registers a server once the eager connect attempt settles. A server
     // that refused the credential is *registered but disconnected* rather than
     // an error — the pool keeps retrying it. Returning the status row is what
     // tells the operator which of those two outcomes they got.
@@ -172,10 +181,83 @@ async fn attach_server(
 }
 
 async fn detach_server(State(admin): State<McpAdmin>, Path(name): Path<String>) -> Response {
+    let mut spec = admin.session_spec.write().await;
     match admin.factory.detach_server(&name).await {
-        Ok(()) => (StatusCode::OK, Json(json!({ "detached": name }))).into_response(),
+        Ok(()) => match record_mcp_prompt(&admin, &mut spec).await {
+            Ok(()) => (StatusCode::OK, Json(json!({ "detached": name }))).into_response(),
+            Err(error) => prompt_error_response(&error),
+        },
         Err(error) => mcp_error_response(&error),
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum PromptUpdateError {
+    #[error(transparent)]
+    Lash(#[from] lash::EmbedError),
+    #[error(transparent)]
+    Encoding(#[from] serde_json::Error),
+    #[error("the standard protocol refused the MCP prompt: {0:?}")]
+    Refused(lash::config::ConfigRefusal),
+}
+
+async fn record_mcp_prompt(
+    admin: &McpAdmin,
+    spec: &mut lash::SessionSpec,
+) -> Result<(), PromptUpdateError> {
+    let include_demo = admin
+        .factory
+        .server_statuses()
+        .iter()
+        .any(|status| status.server_name == crate::mcp_server::SERVER_NAME);
+    let prompt = bot_prompt(include_demo);
+    *spec = spec.clone().plugin(
+        lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+        lash::standard::StandardTurnOptions {
+            prompt: Some(prompt.clone()),
+            render: None,
+        },
+    )?;
+    for view in admin.core.sessions().await? {
+        let id = view.session_id.as_str();
+        if !matches!(view.entry, lash::SessionEntry::Live { .. })
+            || !(id.starts_with("channel:") || id.starts_with("thread:"))
+        {
+            continue;
+        }
+        let session = admin.core.session(view.session_id).open().await?;
+        let config = session.admin().config();
+        loop {
+            let revision = config.revision().await?;
+            let outcome = config
+                .apply(
+                    lash::config::ConfigWrite::new(
+                        format!("mcp-prompt:{}", uuid::Uuid::new_v4()),
+                        revision,
+                    ),
+                    lash::config::ConfigTransaction::of(lash::standard::SetStandardPrompt {
+                        prompt: prompt.clone(),
+                    }),
+                )
+                .await?;
+            match outcome {
+                lash::config::ConfigTransactionOutcome::Applied { .. } => break,
+                lash::config::ConfigTransactionOutcome::Stale { .. } => continue,
+                lash::config::ConfigTransactionOutcome::Refused { refusal } => {
+                    return Err(PromptUpdateError::Refused(refusal));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn prompt_error_response(error: &PromptUpdateError) -> Response {
+    let status = match error {
+        PromptUpdateError::Lash(error) if error.is_retryable() => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, Json(json!({ "error": error.to_string() }))).into_response()
 }
 
 async fn publish_root(

@@ -290,9 +290,11 @@ refused: a wrong token comes back `connected: false` with the 401 in
 example's proof that `.with_headers(...)` does something — the server's auth layer
 is the oracle. `GET` merges `McpPluginFactory::server_statuses()` with
 `McpConnectionPool::advertised_tools()`, since "is this integration healthy" needs
-both halves. `DELETE` calls `detach_server`, and the next session the bot opens
-no longer sees the tools. `POST /admin/mcp/roots` publishes a workspace root and
-then calls `notify_roots_changed`, so connected servers re-read `roots/list`.
+both halves. `DELETE` calls `detach_server`; the next catalog refresh removes
+its tools. Both changes record the matching bot prompt through `SetStandardPrompt`
+config commands on live channel and thread sessions. Commands apply at run
+boundaries, and new channels use the updated creation spec.
+`POST /admin/mcp/roots` publishes a workspace root and then calls `notify_roots_changed`, so connected servers re-read `roots/list`.
 
 The five tools exist to make host-side policy observable rather than to be
 useful:

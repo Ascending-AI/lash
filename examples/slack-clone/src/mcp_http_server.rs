@@ -4,7 +4,7 @@
 //! MCP client spawns. This one covers the other transport lash supports: a
 //! server the host reaches over HTTP, authenticated by a static header the host
 //! configures with
-//! [`McpServerConfig::with_headers`](lash_plugin_mcp::McpServerConfig::with_headers).
+//! [`McpServerConfig::with_headers`](lash::mcp::McpServerConfig::with_headers).
 //! It binds loopback only and every tool is a pure function of its own state, so
 //! the example never depends on a third-party server or on network egress.
 //!
@@ -15,7 +15,7 @@
 //! * `roots_change_report` counts the `notifications/roots/list_changed`
 //!   notifications this server received and re-lists the host's roots on each
 //!   one, which is what makes
-//!   [`notify_roots_changed`](lash_plugin_mcp::McpPluginFactory::notify_roots_changed)
+//!   [`notify_roots_changed`](lash::mcp::McpPluginFactory::notify_roots_changed)
 //!   observable from the server's side rather than only from the host's.
 //! * `elicit_unknown_prompt` asks a question the host has no standing answer
 //!   for, using a field name the host *does* answer elsewhere;
@@ -23,7 +23,7 @@
 //!   satisfy, so the host declines instead of sending content that fails the
 //!   server's schema.
 //! * `stall` never answers, so a host can prove its call timeout fires and that
-//!   its configured [`TimeoutDisconnectPolicy`](lash_plugin_mcp::TimeoutDisconnectPolicy)
+//!   its configured [`TimeoutDisconnectPolicy`](lash::mcp::TimeoutDisconnectPolicy)
 //!   decides whether a timeout also drops the connection.
 
 use std::sync::Arc;
@@ -62,7 +62,7 @@ pub const SERVER_NAME: &str = "workspace_http";
 
 // Resolve against the complete native catalog so collision groups agree with import.
 static TOOL_NAMES: LazyLock<std::collections::BTreeMap<String, String>> = LazyLock::new(|| {
-    lash_plugin_mcp::mcp_tool_names(
+    lash::mcp::mcp_tool_names(
         SERVER_NAME,
         &[
             "workspace_badge",
@@ -299,7 +299,7 @@ fn base64_standard(bytes: &[u8]) -> String {
 }
 
 /// The auth layer is the reason this example can prove
-/// [`McpServerConfig::with_headers`](lash_plugin_mcp::McpServerConfig::with_headers)
+/// [`McpServerConfig::with_headers`](lash::mcp::McpServerConfig::with_headers)
 /// does something: a host that omits or misspells the header never completes the
 /// MCP handshake, and its pool reports the server as disconnected with the
 /// rejection as `last_error`.

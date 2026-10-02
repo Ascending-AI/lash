@@ -13,15 +13,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
+use lash::mcp::{
+    McpPluginFactory, McpServerConfig, McpStdioTransport, McpStreamableHttpTransport, McpTransport,
+};
+use lash::openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash::persistence::LeaseOwnerIdentity;
 use lash::provider::ProviderHandle;
 use lash::standard::{StandardPrompt, StandardTurnOptions};
 use lash::tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink};
 use lash::{LashCore, LlmProfileMetadata, SessionId, SessionSpec};
-use lash_plugin_mcp::{
-    McpPluginFactory, McpServerConfig, McpStdioTransport, McpStreamableHttpTransport, McpTransport,
-};
-use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 
 use super::mcp_client::{DemoElicitationHandler, DemoRootsProvider, DemoSamplingHandler};
 use super::slack_api::SlackApi;
@@ -208,9 +208,9 @@ pub struct BotRuntime {
     /// The standard-mode core every channel session is opened from.
     pub core: LashCore,
     /// The spec every channel session is created from: the bot's own default.
-    /// A core keeps none, so the bot keeps this value and passes it to each
-    /// creation; a session it already created keeps what it recorded.
-    pub session_spec: SessionSpec,
+    /// Creation holds a read lock. MCP operator updates hold the write lock
+    /// while updating these defaults and recording the prompt on live sessions.
+    pub session_spec: Arc<tokio::sync::RwLock<SessionSpec>>,
     /// The MCP plugin factory shared by every session built from `core`.
     pub mcp: Arc<McpPluginFactory>,
     /// The roots this host publishes to connected MCP servers.
@@ -237,12 +237,12 @@ pub(crate) const SESSIONS_ROOT: &str = "lash-sessions";
 /// The store set is storage only: the committed transcript, queued turn input
 /// and attachments survive a restart here, while the engine that runs turns
 /// over it is the local restate-server's (ADR 0104).
-pub async fn open_stores(data_dir: &Path) -> Result<lash_sqlite_store::SqliteStoreSet> {
+pub async fn open_stores(data_dir: &Path) -> Result<lash::sqlite::SqliteStoreSet> {
     std::fs::create_dir_all(data_dir)
         .with_context(|| format!("create bot data dir {}", data_dir.display()))?;
-    lash_sqlite_store::SqliteStoreSet::open(data_dir.join(SESSIONS_ROOT))
+    lash::sqlite::SqliteStoreSet::open(data_dir.join(SESSIONS_ROOT))
         .await
-        .map_err(|error| anyhow::anyhow!("open the bot's SQLite store set: {error}"))
+        .context("open the bot's SQLite store set")
 }
 
 /// Durability choices, all of them deliberate for an example:
@@ -277,7 +277,7 @@ pub async fn build_core(
                 model.clone(),
             )))
             .elicitation_handler(Arc::new(DemoElicitationHandler))
-            .roots_provider(Arc::clone(&roots) as Arc<dyn lash_plugin_mcp::McpRootsProvider>)
+            .roots_provider(Arc::clone(&roots) as Arc<dyn lash::mcp::McpRootsProvider>)
             .build()
             .await
             .context("connect slack-clone MCP servers")?,
@@ -332,7 +332,7 @@ pub async fn build_core(
         .context("build slack-clone bot Lash core")?;
     Ok(BotRuntime {
         core,
-        session_spec,
+        session_spec: Arc::new(tokio::sync::RwLock::new(session_spec)),
         mcp,
         roots,
     })
@@ -384,7 +384,7 @@ fn resolve_stdio_command(command: &str, cwd: Option<&Path>) -> Option<PathBuf> {
 /// The bot's system prompt: the standard protocol's recorded prompt config.
 /// Its intro replaces the protocol's built-in one, so a channel session's
 /// prompt opens with one identity statement.
-fn bot_prompt(include_demo_mcp: bool) -> StandardPrompt {
+pub(crate) fn bot_prompt(include_demo_mcp: bool) -> StandardPrompt {
     let mut instructions = vec![
         "Answer in one or two short paragraphs of plain text. There is no rich \
          formatting in this client, so avoid headings, tables and long bullet lists. \
@@ -480,7 +480,7 @@ pub fn thread_session_id(channel_id: &str, thread_ts: &str) -> SessionId {
 
 /// Trace/store root under a data directory, used by the dev script and tests.
 pub fn store_root(data_dir: &Path) -> PathBuf {
-    data_dir.join("lash-sessions")
+    data_dir.join(SESSIONS_ROOT)
 }
 
 fn fresh_incarnation() -> String {

@@ -112,7 +112,7 @@ enum RootRoute {
 /// already include messages and turns posted after the thread root.
 pub async fn open_thread_session(
     core: &LashCore,
-    session_spec: &lash::SessionSpec,
+    session_spec: &tokio::sync::RwLock<lash::SessionSpec>,
     ledger: &EventLedger,
     record: &EventRecord,
     #[cfg(test)] root_wait: &RootWaitObserver,
@@ -138,7 +138,7 @@ pub async fn open_thread_session(
         let (fork_revision, channel) = loop {
             let channel = match open_channel_session(core, session_spec, &record.channel_id).await {
                 Ok(session) => session,
-                Err(error) if anyhow_session_admission_contended(&error) => {
+                Err(error) if error.is_retryable() => {
                     #[cfg(test)]
                     root_wait.observe_missing_root();
                     let elapsed = started.elapsed();
@@ -153,7 +153,7 @@ pub async fn open_thread_session(
                     backoff = backoff.saturating_mul(2).min(ROOT_ADMISSION_MAX_BACKOFF);
                     continue;
                 }
-                Err(error) => return Err(error),
+                Err(error) => return Err(error).context("open the channel session"),
             };
             let route = root_route(core, session_spec, ledger, record, thread_ts).await?;
             if let RootRoute::Ready(fork_revision) = route {
@@ -184,9 +184,9 @@ pub async fn open_thread_session(
         };
         let parent_id = lash::SessionId::fixture(session_id(&record.channel_id));
         let observed_processes = core
-            .process_registry()
+            .processes()
             .list_observed_by(
-                &parent_id,
+                &lash::process::SessionScope::new(parent_id.clone()),
                 &lash::process::ProcessListFilter {
                     status: lash::process::ProcessStatusFilter::Any,
                     ..Default::default()
@@ -194,11 +194,12 @@ pub async fn open_thread_session(
             )
             .await?
             .into_iter()
-            .map(|record| record.id)
+            .map(|record| record.process_id)
             .collect();
         // The recorded revision was pinned when it was recorded. The lineage
         // names no node: lash records the forked revision's leaf, and a
         // channel that has never run a turn has none.
+        let creation = session_spec.read().await;
         match core
             .fork_at(
                 &parent_id,
@@ -224,14 +225,15 @@ pub async fn open_thread_session(
             }
             Err(error) => return Err(error).context("fork thread session"),
         }
+        drop(creation);
         channel
     } else {
         match open_channel_session(core, session_spec, &record.channel_id).await {
             Ok(session) => session,
-            Err(error) if anyhow_session_admission_contended(&error) => {
+            Err(error) if error.is_retryable() => {
                 return Ok(ThreadSessionOpen::AdmissionContended);
             }
-            Err(error) => return Err(error),
+            Err(error) => return Err(error).context("open the channel session"),
         }
     };
 
@@ -241,7 +243,7 @@ pub async fn open_thread_session(
         .await
     {
         Ok(session) => session,
-        Err(error) if session_admission_contended(&error) => {
+        Err(error) if error.is_retryable() => {
             return Ok(ThreadSessionOpen::AdmissionContended);
         }
         Err(lash::EmbedError::Store(StoreError::SessionDeleted { .. })) => {
@@ -257,28 +259,10 @@ pub async fn open_thread_session(
     })
 }
 
-pub(crate) fn session_admission_contended(error: &lash::EmbedError) -> bool {
-    matches!(
-        error,
-        lash::EmbedError::Session(lash::SessionError::Store {
-            source: StoreError::Contended,
-            ..
-        }) | lash::EmbedError::Store(StoreError::Contended)
-    )
-}
-
-pub(crate) fn anyhow_session_admission_contended(error: &anyhow::Error) -> bool {
-    error.chain().any(|cause| {
-        cause
-            .downcast_ref::<lash::EmbedError>()
-            .is_some_and(session_admission_contended)
-    })
-}
-
 /// Resolve only durable evidence tied to the root itself.
 async fn root_route(
     core: &LashCore,
-    session_spec: &lash::SessionSpec,
+    session_spec: &tokio::sync::RwLock<lash::SessionSpec>,
     ledger: &EventLedger,
     record: &EventRecord,
     thread_ts: &str,
@@ -299,7 +283,7 @@ async fn root_route(
         // committed while this thread reply was waiting.
         let repair_view = match open_channel_session(core, session_spec, &record.channel_id).await {
             Ok(session) => session,
-            Err(error) if anyhow_session_admission_contended(&error) => {
+            Err(error) if error.is_retryable() => {
                 return Ok(RootRoute::Pending);
             }
             Err(error) => {
@@ -449,23 +433,19 @@ async fn retain_boundary(
 /// apply: the session keeps what it recorded.
 pub(crate) async fn open_channel_session(
     core: &LashCore,
-    session_spec: &lash::SessionSpec,
+    session_spec: &tokio::sync::RwLock<lash::SessionSpec>,
     channel_id: &str,
-) -> Result<DurableSession> {
+) -> std::result::Result<DurableSession, lash::EmbedError> {
+    let session_spec = session_spec.read().await;
     match core
         .session(session_id(channel_id))
         .create(lash::SessionCreation::root(session_spec.clone()))
         .await
     {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
-        Err(error) => {
-            return Err(error).with_context(|| format!("create session for channel {channel_id}"));
-        }
+        Err(error) => return Err(error),
     }
-    core.session(session_id(channel_id))
-        .durable()
-        .await
-        .with_context(|| format!("open session for channel {channel_id}"))
+    core.session(session_id(channel_id)).durable().await
 }
 
 /// Pin and record the channel head revision preceding a folded admission. A

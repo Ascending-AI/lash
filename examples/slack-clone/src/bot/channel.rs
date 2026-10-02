@@ -167,7 +167,7 @@ pub struct RecoveryReport {
 pub struct ChannelBot {
     core: LashCore,
     /// The spec a channel's session is created from on its first event.
-    session_spec: lash::SessionSpec,
+    session_spec: Arc<tokio::sync::RwLock<lash::SessionSpec>>,
     api: Arc<SlackApi>,
     ledger: EventLedger,
     identity: BotIdentity,
@@ -188,7 +188,7 @@ impl ChannelBot {
     /// Assemble a bot over an already-built core.
     pub fn new(
         core: LashCore,
-        session_spec: lash::SessionSpec,
+        session_spec: Arc<tokio::sync::RwLock<lash::SessionSpec>>,
         api: Arc<SlackApi>,
         ledger: EventLedger,
         identity: BotIdentity,
@@ -227,8 +227,8 @@ impl ChannelBot {
 
     /// The spec the bot creates each channel session from.
     #[cfg(test)]
-    pub fn session_spec(&self) -> &lash::SessionSpec {
-        &self.session_spec
+    pub async fn session_spec(&self) -> lash::SessionSpec {
+        self.session_spec.read().await.clone()
     }
 
     #[cfg(test)]
@@ -650,7 +650,7 @@ impl ChannelBot {
         } else {
             match self.open_session(&record.channel_id).await {
                 Ok(session) => (session, None),
-                Err(error) if threads::anyhow_session_admission_contended(&error) => {
+                Err(error) if error.is_retryable() => {
                     Self::log_turn_deferral(record, "the session lane is held elsewhere");
                     return Ok(DeliveryOutcome::Deferred {
                         event_id: record.event_id.clone(),
@@ -658,7 +658,7 @@ impl ChannelBot {
                         reason: "session_admission_contended",
                     });
                 }
-                Err(error) => return Err(error),
+                Err(error) => return Err(error).context("open the channel session"),
             }
         };
         if !is_mention {
@@ -1104,7 +1104,10 @@ impl ChannelBot {
     }
 
     /// Acquire the channel's durable handle, creating it on first use.
-    async fn open_session(&self, channel: &str) -> Result<DurableSession> {
+    async fn open_session(
+        &self,
+        channel: &str,
+    ) -> std::result::Result<DurableSession, lash::EmbedError> {
         threads::open_channel_session(&self.core, &self.session_spec, channel).await
     }
 

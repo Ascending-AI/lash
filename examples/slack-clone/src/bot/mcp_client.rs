@@ -10,14 +10,14 @@ use lash::direct::{
     DirectLlmClient, DirectMessage, DirectPart, DirectRequest, DirectRole, LlmTerminalReason,
     NonNegativeFiniteF64,
 };
-use lash::provider::{LlmResponse, ProviderHandle};
-use lash_plugin_mcp::{
+use lash::mcp::{
     CreateElicitationOutcome, CreateElicitationRequestParams, CreateMessageOutcome,
     ElicitationAction, ElicitationCapability, FormElicitationCapability, McpElicitationHandler,
     McpElicitationRequest, McpProtocolError, McpRootsProvider, McpRootsRequest, McpSamplingHandler,
     McpSamplingRequest, McpUrlElicitationComplete, Root, SamplingMessage, SamplingMessageContent,
     UrlElicitationCapability,
 };
+use lash::provider::{LlmResponse, ProviderHandle};
 use rmcp::model::Role;
 use serde_json::{Map, Value};
 use tokio::sync::RwLock;
@@ -243,7 +243,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
 /// The list is mutable because roots are a live host fact, not a boot-time
 /// constant: an operator can publish another root while the bot runs, and the
 /// host then tells connected servers to re-read the list with
-/// [`McpPluginFactory::notify_roots_changed`](lash_plugin_mcp::McpPluginFactory::notify_roots_changed).
+/// [`McpPluginFactory::notify_roots_changed`](lash::mcp::McpPluginFactory::notify_roots_changed).
 /// The provider is the single source both the notification and the servers'
 /// subsequent `roots/list` calls read.
 pub struct DemoRootsProvider {

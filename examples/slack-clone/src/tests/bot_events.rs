@@ -318,7 +318,7 @@ async fn ambient_traffic_folds_into_the_session_without_a_turn_or_a_reply() {
         .expect("read unfolded context");
     assert_eq!(unfolded.len(), 2, "both ambient lines wait: {unfolded:?}");
     let session =
-        crate::tests::created_session(bot.core(), bot.session_spec(), session_id(&channel))
+        crate::tests::created_session(bot.core(), &bot.session_spec().await, session_id(&channel))
             .await
             .open()
             .await
@@ -480,7 +480,7 @@ async fn each_channel_gets_its_own_session_and_neither_sees_the_others_context()
         "the other channel's queued context is untouched"
     );
     let public_session =
-        crate::tests::created_session(bot.core(), bot.session_spec(), session_id(&public))
+        crate::tests::created_session(bot.core(), &bot.session_spec().await, session_id(&public))
             .await
             .open()
             .await
@@ -515,7 +515,7 @@ async fn a_thread_forks_on_its_first_reply_and_inherits_uncommitted_root_context
     }
 
     let channel_session =
-        crate::tests::created_session(bot.core(), bot.session_spec(), session_id(&channel))
+        crate::tests::created_session(bot.core(), &bot.session_spec().await, session_id(&channel))
             .await
             .open()
             .await
@@ -1426,7 +1426,7 @@ async fn an_ambient_thread_reply_creates_the_fork_and_waits_for_a_mention() {
     assert_eq!(script.calls(), 0, "ambient thread traffic spends no token");
     let thread = crate::tests::created_session(
         bot.core(),
-        bot.session_spec(),
+        &bot.session_spec().await,
         thread_session_id(&channel, &root.to_string()),
     )
     .await
@@ -1470,7 +1470,7 @@ async fn an_ambient_thread_reply_creates_the_fork_and_waits_for_a_mention() {
 
 async fn channel_session_text(bot: &crate::bot::channel::ChannelBot, channel: &str) -> String {
     let session =
-        crate::tests::created_session(bot.core(), bot.session_spec(), session_id(channel))
+        crate::tests::created_session(bot.core(), &bot.session_spec().await, session_id(channel))
             .await
             .open()
             .await

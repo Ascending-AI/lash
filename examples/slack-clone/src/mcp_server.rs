@@ -24,7 +24,7 @@ pub const API_BASE_URL_ENV: &str = "SLACK_CLONE_MCP_API_BASE_URL";
 pub const BOT_TOKEN_ENV: &str = "SLACK_CLONE_MCP_BOT_TOKEN";
 // Resolve against the complete native catalog so collision groups agree with import.
 static TOOL_NAMES: LazyLock<std::collections::BTreeMap<String, String>> = LazyLock::new(|| {
-    lash_plugin_mcp::mcp_tool_names(
+    lash::mcp::mcp_tool_names(
         SERVER_NAME,
         &[
             "list_channels_summary",

@@ -100,7 +100,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
     assert_eq!(platform.bot_messages(&channel).await.len(), 1);
     // The redelivery must not have queued a second copy of the mention either.
     let session =
-        crate::tests::created_session(bot.core(), bot.session_spec(), session_id(&channel))
+        crate::tests::created_session(bot.core(), &bot.session_spec().await, session_id(&channel))
             .await
             .open()
             .await

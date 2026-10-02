@@ -4,6 +4,9 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
 use lash::direct::GenerationOptions;
+use lash::openai::{
+    OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider, ProviderRoutingPrefs,
+};
 use lash::provider::{
     CacheControlDialect, LlmProfileCapability, ProviderHandle, ProviderOptions,
     ProviderReliability, ReasoningCapability, ReasoningEncoding, ReasoningSelection,
@@ -15,9 +18,6 @@ use lash::tools::{
 };
 use lash::tracing::{JsonlTraceSink, TraceLevel};
 use lash::{LashCore, LlmProfileMetadata};
-use lash_provider_openai::{
-    OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider, ProviderRoutingPrefs,
-};
 use uuid::Uuid;
 
 use super::{
@@ -185,7 +185,7 @@ struct LiveEngine {
 async fn live_engine(label: &str) -> Result<LiveEngine> {
     let server = crate::local_restate::LocalRestateServer::shared("slack-live").await?;
     let restate = server.core(label)?;
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+    let stores = lash::sqlite::SqliteStoreSet::memory()
         .await
         .map_err(|error| anyhow::anyhow!("open a SQLite memory store set: {error}"))?;
     let engine = restate.engine(Arc::new(stores));

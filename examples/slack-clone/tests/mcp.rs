@@ -10,13 +10,13 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
 use lash::direct::LlmOutputPart;
+use lash::mcp::{McpServerConfig, McpStdioTransport, McpTransport, TimeoutDisconnectPolicy};
 use lash::provider::{LlmResponse, ProviderHandle};
 use lash::tools::{
     ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
     ToolProvider,
 };
 use lash::{LlmProfileMetadata, TurnInput};
-use lash_plugin_mcp::{McpServerConfig, McpStdioTransport, McpTransport, TimeoutDisconnectPolicy};
 use serde_json::{Value, json};
 use slack_clone::bot::mcp_admin;
 use slack_clone::bot::runtime::{self, BotRuntime, RuntimeConfig};
@@ -30,8 +30,7 @@ use tokio::sync::Notify;
 
 const TEST_TOKEN: &str = "mcp-integration-test-token";
 static WORKSPACE_INLINE_BADGE_TOOL: LazyLock<String> = LazyLock::new(|| {
-    lash_plugin_mcp::mcp_tool_names("workspace_inline", &["workspace_badge"])["workspace_badge"]
-        .clone()
+    lash::mcp::mcp_tool_names("workspace_inline", &["workspace_badge"])["workspace_badge"].clone()
 });
 
 #[derive(Clone)]
@@ -320,7 +319,7 @@ async fn bundled_server_exercises_sampling_both_elicitation_modes_and_roots_thro
 fn direct_server_config(api_base_url: &str) -> McpServerConfig {
     McpServerConfig {
         startup_timeout_ms: 5_000,
-        call_policy: lash_plugin_mcp::McpCallPolicy {
+        call_policy: lash::mcp::McpCallPolicy {
             call_timeout_ms: 5_000,
             ..Default::default()
         },
@@ -340,7 +339,7 @@ fn direct_server_config(api_base_url: &str) -> McpServerConfig {
 fn wrapped_server_config(api_base_url: &str, pid_file: &std::path::Path) -> McpServerConfig {
     McpServerConfig {
         startup_timeout_ms: 5_000,
-        call_policy: lash_plugin_mcp::McpCallPolicy {
+        call_policy: lash::mcp::McpCallPolicy {
             call_timeout_ms: 5_000,
             ..Default::default()
         },
@@ -385,7 +384,7 @@ impl std::ops::Deref for TestRuntime {
 struct TestCore {
     core: lash::LashCore,
     /// The spec the bot creates its sessions from.
-    session_spec: lash::SessionSpec,
+    session_spec: Arc<tokio::sync::RwLock<lash::SessionSpec>>,
     _double: lash_restate_test::RestateTestBackend,
 }
 
@@ -864,7 +863,7 @@ async fn catalog_names(runtime: &BotRuntime, session_id: &SessionId) -> Vec<Stri
         .collect()
 }
 
-fn status_of(runtime: &BotRuntime, server_name: &str) -> lash_plugin_mcp::McpServerStatus {
+fn status_of(runtime: &BotRuntime, server_name: &str) -> lash::mcp::McpServerStatus {
     runtime
         .mcp
         .server_statuses()
@@ -1427,6 +1426,160 @@ async fn publishing_a_root_notifies_the_connected_server_which_re_reads_the_list
 
 const ADMIN_TOKEN: &str = "slack-clone-admin-test-token";
 
+#[tokio::test]
+async fn operator_mcp_changes_record_the_prompt_for_existing_and_future_channels() {
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+    };
+
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let api = SlackApi::new(&api_base_url, TEST_TOKEN).expect("demo API client");
+    let service = StreamableHttpService::new(
+        move || Ok(mcp_server::WorkspaceMcpServer::new(api.clone())),
+        Arc::new(LocalSessionManager::default()),
+        StreamableHttpServerConfig::default(),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind demo MCP server");
+    let url = format!(
+        "http://{}/mcp",
+        listener.local_addr().expect("demo address")
+    );
+    let server = tokio::spawn(async move {
+        axum::serve(listener, Router::new().nest_service("/mcp", service))
+            .await
+            .expect("serve demo MCP");
+    });
+    let script = Script::new([]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+    let channel_ids = [
+        runtime::session_id("CONE"),
+        runtime::thread_session_id("CONE", "1"),
+    ];
+    for id in &channel_ids {
+        created_session(&runtime.core, &runtime.session_spec, id)
+            .await
+            .durable()
+            .await
+            .expect("durable channel")
+            .send(TurnInput::text("before attach"))
+            .await
+            .expect("send before attach")
+            .outcome()
+            .await
+            .expect("answer before attach");
+    }
+    let unrelated = created_session(&runtime.core, &runtime.session_spec, "unrelated")
+        .await
+        .open()
+        .await
+        .expect("open unrelated session");
+    assert!(script.requests().iter().all(|request| {
+        let request: Value = serde_json::from_str(request).expect("recorded request");
+        !request["instructions"]
+            .as_str()
+            .expect("system prompt before attach")
+            .contains("The bundled MCP server")
+    }));
+
+    let admin_url = serve_admin(&runtime).await;
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("{admin_url}{}", mcp_admin::SERVERS_PATH))
+        .bearer_auth(ADMIN_TOKEN)
+        .json(&json!({ "name": mcp_server::SERVER_NAME, "url": url, "token": "demo" }))
+        .send()
+        .await
+        .expect("attach demo through operator API");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let attached: Value = response.json().await.expect("attached server");
+    assert_eq!(attached["connected"], true);
+
+    let mut ids = channel_ids.to_vec();
+    ids.push(runtime::session_id("CTWO"));
+    for id in &ids {
+        let session = created_session(&runtime.core, &runtime.session_spec, id)
+            .await
+            .open()
+            .await
+            .expect("open channel after attach");
+        let revision = session
+            .admin()
+            .config()
+            .revision()
+            .await
+            .expect("config revision");
+        assert_eq!(
+            revision,
+            u64::from(channel_ids.contains(id)),
+            "recorded update for {id}"
+        );
+        session
+            .send(TurnInput::text("after attach"))
+            .await
+            .expect("send after attach")
+            .outcome()
+            .await
+            .expect("answer after attach");
+        let request: Value = serde_json::from_str(script.requests().last().expect("model request"))
+            .expect("recorded request");
+        let prompt = request["instructions"].as_str().expect("system prompt");
+        assert!(prompt.contains("The bundled MCP server"), "{id}: {prompt}");
+        assert!(
+            prompt.contains(SAMPLE_SUMMARY_TOOL.as_str()),
+            "{id}: {prompt}"
+        );
+    }
+    assert_eq!(
+        unrelated
+            .admin()
+            .config()
+            .revision()
+            .await
+            .expect("unrelated revision"),
+        0
+    );
+
+    let response = client
+        .delete(format!(
+            "{admin_url}/admin/mcp/servers/{}",
+            mcp_server::SERVER_NAME
+        ))
+        .bearer_auth(ADMIN_TOKEN)
+        .send()
+        .await
+        .expect("detach demo through operator API");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    for id in &ids {
+        runtime
+            .core
+            .session(id.clone())
+            .durable()
+            .await
+            .expect("durable channel")
+            .send(TurnInput::text("after detach"))
+            .await
+            .expect("send after detach")
+            .outcome()
+            .await
+            .expect("answer after detach");
+        let request: Value = serde_json::from_str(script.requests().last().expect("model request"))
+            .expect("recorded request");
+        let prompt = request["instructions"].as_str().expect("system prompt");
+        assert!(!prompt.contains("The bundled MCP server"), "{id}: {prompt}");
+        assert!(
+            !prompt.contains(SAMPLE_SUMMARY_TOOL.as_str()),
+            "{id}: {prompt}"
+        );
+    }
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot");
+    server.abort();
+}
+
 /// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
 #[expect(
     clippy::expect_used,
@@ -1685,9 +1838,10 @@ async fn publishing_a_root_through_the_operator_api_reaches_the_connected_server
 /// that verb to report.
 async fn created_session(
     core: &lash::LashCore,
-    spec: &lash::SessionSpec,
+    spec: &tokio::sync::RwLock<lash::SessionSpec>,
     session_id: impl Into<lash::SessionId>,
 ) -> lash::SessionBuilder {
+    let spec = spec.read().await;
     let session_id = session_id.into();
     match core
         .session(session_id.clone())

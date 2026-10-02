@@ -106,7 +106,7 @@ fn the_driver_expects_the_mcp_names_published_by_the_bot_servers() {
         ),
         ("workspace_http", &["workspace_badge"][..]),
     ] {
-        for name in lash_plugin_mcp::mcp_tool_names(server, tools).values() {
+        for name in lash::mcp::mcp_tool_names(server, tools).values() {
             assert!(
                 DRIVER.contains(&format!("\"{name}\"")),
                 "the full-host driver does not expect the published MCP tool name `{name}`"
