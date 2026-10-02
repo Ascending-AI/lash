@@ -163,7 +163,7 @@ pub use park::{
 };
 pub use pending_follow_on::{
     DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnAdmission, FollowOnBlocked, FollowOnRecovery,
-    FollowOnRecoveryAnswer, PendingFollowOn, follow_on_blocks_admission,
+    FollowOnRecoveryAnswer, PendingFollowOn, RunContinuation, follow_on_blocks_admission,
     validate_follow_on_head_write,
 };
 pub use preflight::{

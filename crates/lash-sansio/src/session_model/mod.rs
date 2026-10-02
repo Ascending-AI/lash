@@ -732,6 +732,30 @@ pub enum TurnOutcome {
         initial_nodes: Vec<SessionAppendNode>,
     },
     Stopped(TurnStop),
+    /// The turn ended at a segment boundary (FIG-4739): its logical run is
+    /// not over, and the session head owes the run's next physical turn, a
+    /// continuation that a new invocation runs. A boundary is an outcome of
+    /// one physical turn only: no run ends on it, and it never carries the
+    /// run's answer.
+    SegmentBoundary {
+        reason: BoundaryReason,
+    },
+}
+
+/// Why a run crossed a segment boundary into a new invocation.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundaryReason {
+    /// The invocation's journal reached its budget.
+    JournalBudget,
+    /// The build the invocation runs on is draining, and the run handed its
+    /// work to a successor on the newest build: a process segment its open
+    /// signal wait (FIG-3799), a Run its next protocol step or the wait its
+    /// code cell is parked on (FIG-4739). The successor waits again on the
+    /// same wait.
+    HandOver,
 }
 
 impl TurnOutcome {

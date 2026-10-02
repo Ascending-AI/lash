@@ -195,6 +195,15 @@ fn outcome_entry(actor: Actor, outcome: &TurnOutcome) -> Entry {
         } => Entry::new(Kind::Outcome, actor, "turn.frame_switch")
             .attr(Attr::id("frame_key", IdKind::Node, frame_key.as_str()))
             .attr(Attr::int("nodes", initial_nodes.len() as u64)),
+        TurnOutcome::SegmentBoundary { reason } => {
+            Entry::new(Kind::Outcome, actor, "turn.segment_boundary").attr(Attr::token(
+                "reason",
+                match reason {
+                    lash_sansio::BoundaryReason::JournalBudget => "journal_budget",
+                    lash_sansio::BoundaryReason::HandOver => "hand_over",
+                },
+            ))
+        }
         TurnOutcome::Stopped(stop) => {
             let mut entry = Entry::new(Kind::Outcome, actor, "turn.stopped")
                 .attr(Attr::token("reason", stop_reason(stop)));

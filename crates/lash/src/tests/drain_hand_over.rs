@@ -1050,3 +1050,5 @@ drain_hand_over_laws! {
     #[ignore = "requires a Restate server and PostgreSQL; run by the drain-hand-over-postgres suite"]
     postgres_live_restate_replay_hands_over: on_live_restate, Storage::Postgres, true;
 }
+
+mod run_segment;

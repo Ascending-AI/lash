@@ -245,6 +245,10 @@ where
         self.inner.owns_commit_backpressure()
     }
 
+    fn hands_over_turns(&self) -> bool {
+        self.inner.hands_over_turns()
+    }
+
     fn wants_segment_boundary(
         &self,
         progress: &lash_core::SegmentProgress,

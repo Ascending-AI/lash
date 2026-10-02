@@ -64,6 +64,13 @@ fn trace_outcome(outcome: &TurnOutcome) -> Option<lash_trace::TraceTurnOutcome> 
                 frame_key: frame_key.as_str().to_string(),
             },
         },
+        TurnOutcome::SegmentBoundary { reason } => Outcome::SegmentBoundary {
+            done_reason: match reason {
+                crate::BoundaryReason::JournalBudget => "journal_budget",
+                crate::BoundaryReason::HandOver => "hand_over",
+            }
+            .to_string(),
+        },
         TurnOutcome::Stopped(stop) => {
             use lash_trace::TraceTurnFailureReason as Failure;
             match stop {

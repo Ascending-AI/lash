@@ -393,6 +393,17 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         false
     }
 
+    /// Whether this engine pins a foreground turn's invocation to the build
+    /// that started it (FIG-4739), so a turn on a draining build must end at
+    /// its next quiet point for its run to go on in a new invocation on the
+    /// newest build. A turn records a read of its build's drain mark at each
+    /// quiet point only on an engine that answers `true`; on every other
+    /// engine the next attempt of the turn already runs on whichever build
+    /// is serving, and nothing is read.
+    fn hands_over_turns(&self) -> bool {
+        false
+    }
+
     /// Advises an engine to end the current in-process execution segment at a
     /// quiescent point. Engines may decline when live state is not capturable,
     /// but must make progress before returning another decline. In particular,

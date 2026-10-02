@@ -354,6 +354,7 @@ fn render_outcome_for_output(outcome: &TurnOutcome) -> Option<String> {
             Some(render_final_value_for_output(value))
         }
         TurnOutcome::AgentFrameSwitch { .. }
+        | TurnOutcome::SegmentBoundary { .. }
         | TurnOutcome::Stopped(
             TurnStop::Cancelled { .. }
             | TurnStop::Incomplete

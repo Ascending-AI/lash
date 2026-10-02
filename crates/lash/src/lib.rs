@@ -665,7 +665,7 @@ pub mod persistence {
         HydratedCheckpointComponent, HydratedSessionCheckpoint, InterruptedTurnClosure,
         OperationId, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
         ParkId, ParkReason, ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, ProcessPark,
-        ProcessParkKey, ProcessParkQuery, RuntimeCommit, RuntimeCommitReceipt,
+        ProcessParkKey, ProcessParkQuery, RunContinuation, RuntimeCommit, RuntimeCommitReceipt,
         RuntimeStoreDecorator, RuntimeTurnCommitStamp, SemanticBoundaryOperation,
         SessionCheckpoint, SessionHeadMeta, SessionHeadPayload, TurnCommitFailureCause,
         TurnCommitOutcome, TurnPark, TurnParkOrigin, TurnParkQuery, TurnParkTarget, TurnParkWrite,
@@ -1144,12 +1144,13 @@ pub mod remote {
     /// issues, and causal references.
     pub mod turn_result {
         pub use lash_remote_protocol::turn_result::{
-            RemoteAssistantOutput, RemoteAssistantOutputState, RemoteCausalRef, RemoteParkedTurn,
-            RemoteSendOutcome, RemoteStalledDelivery, RemoteToolCallOutcome, RemoteToolCallOutput,
-            RemoteToolCallRecord, RemoteToolCancellation, RemoteToolControlProjection,
-            RemoteToolFailure, RemoteTurnExecutionMetrics, RemoteTurnFinish, RemoteTurnIssue,
-            RemoteTurnIssueSeverity, RemoteTurnOutcome, RemoteTurnParkReason, RemoteTurnReport,
-            RemoteTurnStatus, RemoteTurnStop, RemoteTurnUsageReport,
+            RemoteAssistantOutput, RemoteAssistantOutputState, RemoteBoundaryReason,
+            RemoteCausalRef, RemoteParkedTurn, RemoteSendOutcome, RemoteStalledDelivery,
+            RemoteToolCallOutcome, RemoteToolCallOutput, RemoteToolCallRecord,
+            RemoteToolCancellation, RemoteToolControlProjection, RemoteToolFailure,
+            RemoteTurnExecutionMetrics, RemoteTurnFinish, RemoteTurnIssue, RemoteTurnIssueSeverity,
+            RemoteTurnOutcome, RemoteTurnParkReason, RemoteTurnReport, RemoteTurnStatus,
+            RemoteTurnStop, RemoteTurnUsageReport,
         };
     }
 

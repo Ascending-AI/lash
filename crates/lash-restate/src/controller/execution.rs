@@ -222,6 +222,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::SealDriveAdmission { .. }
         | RuntimeEffectCommand::AdmitRoot { .. }
         | RuntimeEffectCommand::InspectAdmittedHead { .. }
+        | RuntimeEffectCommand::ObserveDrainMark { .. }
         | RuntimeEffectCommand::RecoverFollowOn { .. }
         | RuntimeEffectCommand::ReadSessionCommandRun { .. }
         | RuntimeEffectCommand::IngestTriggerOccurrence { .. }

@@ -183,26 +183,54 @@ pub(super) struct LogicalTurnCommitEffects {
 /// continuing the depth the turn itself was owed with, and it carries the
 /// record the running root resolved, the logical run's recovery bound
 /// included: a follow-on re-records its parent's record verbatim, so the
-/// whole chain carries the one its root resolved. Every other outcome
-/// leaves nothing: a turn commits only while the head owes nothing or owes
-/// this very turn, and this commit is that follow-on's terminal record.
+/// whole chain carries the one its root resolved. A segment boundary
+/// (FIG-4739) owes the run's continuation the same way, in the frame the
+/// turn ran in — `frame`, the current frame of the state the turn assembled —
+/// and at the turn's own chain depth, since a boundary switches no frame;
+/// `segment_boundary` is the protocol iterations the run has spent through
+/// the turn. Every other outcome leaves nothing: a turn commits only
+/// while the head owes nothing or owes this very turn, and this commit is
+/// that follow-on's terminal record.
 pub(super) fn follow_on_after_turn(
     state: &RuntimeSessionState,
     outcome: &TurnOutcome,
     turn_id: &TurnId,
     root: &TurnId,
+    frame: Option<&crate::FrameNodeId>,
+    segment_boundary: Option<u64>,
 ) -> Result<Option<crate::store::PendingFollowOn>, RuntimeError> {
-    let TurnOutcome::AgentFrameSwitch {
-        frame_key, task, ..
-    } = outcome
-    else {
-        return Ok(None);
-    };
     let owed = state
         .pending_follow_on
         .as_ref()
         .filter(|owed| owed.is_turn(turn_id));
-    let chain_depth = owed.map_or(0, |owed| owed.chain_depth).saturating_add(1);
+    let (frame_id, task, continuation, chain_depth) = match outcome {
+        TurnOutcome::AgentFrameSwitch {
+            frame_key, task, ..
+        } => (
+            crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str()),
+            task.clone(),
+            None,
+            owed.map_or(0, |owed| owed.chain_depth).saturating_add(1),
+        ),
+        TurnOutcome::SegmentBoundary { reason } => {
+            let frame_id = frame.cloned().ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RecordedTerminationUnavailable,
+                    format!("the continuation of `{turn_id}` requires the frame the turn ran in"),
+                )
+            })?;
+            (
+                frame_id,
+                String::new(),
+                Some(crate::store::RunContinuation {
+                    reason: *reason,
+                    protocol_iterations: segment_boundary.unwrap_or_default(),
+                }),
+                owed.map_or(0, |owed| owed.chain_depth),
+            )
+        }
+        TurnOutcome::Finished(_) | TurnOutcome::Stopped(_) => return Ok(None),
+    };
     let resolved = state.authority.root_view().ok_or_else(|| {
         RuntimeError::new(
             RuntimeErrorCode::RecordedTerminationUnavailable,
@@ -216,14 +244,24 @@ pub(super) fn follow_on_after_turn(
                 format!("physical turn `{turn_id}` does not belong to root `{root}`"),
             )
         })?;
-    crate::store::PendingFollowOn::after_switch(
-        root,
-        physical_ordinal,
-        crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str()),
-        task.clone(),
-        chain_depth,
-        resolved.run.clone(),
-    )
+    match continuation {
+        Some(continuation) => crate::store::PendingFollowOn::after_boundary(
+            root,
+            physical_ordinal,
+            frame_id,
+            continuation,
+            chain_depth,
+            resolved.run.clone(),
+        ),
+        None => crate::store::PendingFollowOn::after_switch(
+            root,
+            physical_ordinal,
+            frame_id,
+            task,
+            chain_depth,
+            resolved.run.clone(),
+        ),
+    }
     .map(Some)
     .map_err(super::runtime_error_from_store_commit)
 }
@@ -585,7 +623,7 @@ impl LashRuntime {
                          commits failed instead of running",
                         owed.follow_on_turn_id, owed.attempts
                     ),
-                    owed.task.clone(),
+                    owed.continuation.is_none().then(|| owed.task.clone()),
                 )),
                 _ => self
                     .state
@@ -601,7 +639,7 @@ impl LashRuntime {
                             format!(
                                 "logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"
                             ),
-                            owed.task.clone(),
+                            owed.continuation.is_none().then(|| owed.task.clone()),
                         )
                     }),
             };
@@ -612,7 +650,7 @@ impl LashRuntime {
                     code,
                     message,
                     trace_turn_id: turn_trace_turn_id,
-                    delivered_task: Some(task),
+                    delivered_task: task,
                     sinks: TurnSinks { observer },
                     scoped_effect_controller: turn_effect_controller,
                     admissions: admissions.with_follow_on_allowed(false),
@@ -747,6 +785,16 @@ impl LashRuntime {
             // one path for every session: durable or store-less, the fact is
             // on the resident head.
             if let Some(owed) = self.state.pending_follow_on.as_deref().cloned() {
+                // A segment boundary ends this invocation's part of the run
+                // (FIG-4739): the continuation it owes stays on the head for
+                // the next drive to admit, in an invocation of its own. A
+                // turn that takes a boundary carries no withheld work.
+                if owed.continuation.is_some() {
+                    return Ok(AgentFrameRun {
+                        turns,
+                        acceptance: None,
+                    });
+                }
                 turn_trace_turn_id = owed.follow_on_turn_id.clone();
                 physical_ordinal = owed.physical_index();
                 self.pin_committed_follow_on_index(turns.last(), &owed.follow_on_turn_id)
@@ -828,13 +876,18 @@ impl LashRuntime {
     }
 }
 
-/// The input of the follow-on `owed`: its task (ADR 0101 §3). It runs under
-/// the recorded run its root resolved, which the fact carries.
+/// The input of the follow-on `owed`: its task (ADR 0101 §3), or nothing for
+/// a run's continuation, which goes on from the history its boundary
+/// committed (FIG-4739). It runs under the recorded run its root resolved,
+/// which the fact carries.
 pub(super) fn follow_on_input(
     owed: &crate::store::PendingFollowOn,
     turn_context: crate::TurnContext,
 ) -> TurnInput {
-    let mut input = TurnInput::text(owed.task.clone());
+    let mut input = match owed.continuation {
+        Some(_) => TurnInput::items(Vec::new()),
+        None => TurnInput::text(owed.task.clone()),
+    };
     input.turn_context = turn_context;
     input.trace_turn_id = Some(owed.follow_on_turn_id.clone());
     input

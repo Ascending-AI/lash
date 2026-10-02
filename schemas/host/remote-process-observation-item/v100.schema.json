@@ -5147,6 +5147,23 @@
           "type": "object"
         },
         {
+          "description": "The turn ended at a segment boundary of its run, which goes on in a\nnew invocation. `done_reason` is why: `journal_budget` or `hand_over`.",
+          "properties": {
+            "done_reason": {
+              "type": "string"
+            },
+            "status": {
+              "const": "segment_boundary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "done_reason"
+          ],
+          "type": "object"
+        },
+        {
           "description": "The turn was cancelled. Not a failure.",
           "properties": {
             "evidence": {

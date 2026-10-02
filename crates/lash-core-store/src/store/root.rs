@@ -105,8 +105,8 @@ impl RootTerminalKind {
 }
 
 /// The outcome a root's final physical turn committed with: it finished, or
-/// it stopped. A frame switch never ends a root (its root goes on in the
-/// next physical turn), so it has no spelling here. Encoded as the matching
+/// it stopped. A frame switch or a segment boundary never ends a root (its
+/// root goes on in the next physical turn), so neither has a spelling here. Encoded as the matching
 /// [`TurnOutcome`] variant.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -117,13 +117,13 @@ pub enum RootCommittedOutcome {
 
 impl RootCommittedOutcome {
     /// The committed outcome `outcome` ends a root with; `None` for a frame
-    /// switch, which ends none.
+    /// switch or a segment boundary, which end none.
     #[must_use]
     pub fn of_turn_outcome(outcome: &TurnOutcome) -> Option<Self> {
         match outcome {
             TurnOutcome::Finished(finish) => Some(Self::Finished(finish.clone())),
             TurnOutcome::Stopped(stop) => Some(Self::Stopped(stop.clone())),
-            TurnOutcome::AgentFrameSwitch { .. } => None,
+            TurnOutcome::AgentFrameSwitch { .. } | TurnOutcome::SegmentBoundary { .. } => None,
         }
     }
 

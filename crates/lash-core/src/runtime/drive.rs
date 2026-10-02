@@ -1253,6 +1253,9 @@ impl LashRuntime {
         if let Ok(run) = &result
             && let RootOutcome::Committed { root, .. } = &run.outcome
             && let Some(turn) = run.run.as_ref().and_then(AgentFrameRun::final_turn)
+            // A turn that ended at a segment boundary settled nothing: its
+            // run goes on in the continuation its commit owes (FIG-4739).
+            && !matches!(turn.outcome, crate::TurnOutcome::SegmentBoundary { .. })
         {
             sinks
                 .settled

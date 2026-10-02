@@ -589,6 +589,7 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
     // The switch commit writes the follow-on it owes onto the head, in the
     // same transaction that settles the root's admitted rows (ADR 0101 §3).
     let follow_on = crate::store::PendingFollowOn {
+        continuation: None,
         follow_on_turn_id: crate::TurnId::from("turn-atomic:agent-frame:1"),
         frame_id: state
             .current_frame_node_id

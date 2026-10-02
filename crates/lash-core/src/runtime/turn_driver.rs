@@ -10,6 +10,8 @@ mod lease;
 mod local_effects;
 mod machine;
 mod opener_groups;
+mod segment;
+pub(in crate::runtime) use segment::TurnSegment;
 mod streaming;
 mod tool_catalog;
 mod tools;
@@ -67,6 +69,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) drive_fence: Option<DriveFence>,
     /// The logical root the turn's checkpoint admissions bind rows to.
     pub(super) drive_root: Option<crate::TurnId>,
+    /// The build generation the turn's root invocation runs on: the one its
+    /// admission stamped (FIG-4742), whose drain mark the turn reads at a
+    /// quiet point (FIG-4739).
+    pub(super) drive_generation: Option<crate::engine::BuildGeneration>,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     pub(super) turn_control: Arc<ActiveTurnControl>,
     /// Names the reply the protocol driver materialized, for the boundary's
@@ -105,6 +111,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// effect body's emissions key under that effect's invocation replay key
     /// instead.
     pub(super) turn_observations: crate::engine::ObservationCursor,
+    /// The turn's part in its run's segment boundaries (FIG-4739).
+    pub(super) segment: TurnSegment,
 }
 
 impl RuntimeTurnDriver<'_> {

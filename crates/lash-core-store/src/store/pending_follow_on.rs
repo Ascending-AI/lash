@@ -1,8 +1,11 @@
-//! The pending follow-on: a frame handoff recorded on the session head
-//! (ADR 0101 §3, FIG-3542).
+//! The pending follow-on: the next physical turn a committed turn owes its
+//! logical run, recorded on the session head (ADR 0101 §3, FIG-3542).
 //!
 //! A turn that switches agent frame commits the switch and the obligation to
-//! run the switched frame's task in one head write. The obligation is this
+//! run the switched frame's task in one head write. A turn that ends at a
+//! segment boundary of its run (FIG-4739) commits the same way: what it
+//! owes is the run's continuation, in the frame it ran in, which a new
+//! invocation runs. The obligation is this
 //! fact, in its own head column (`pending_follow_on_json`), never an ingress
 //! row: nothing can admit it, reorder it, cancel it or render it into another
 //! frame. It is consumed exactly once, by the terminal commit of the turn it
@@ -34,8 +37,16 @@ pub struct PendingFollowOn {
     pub follow_on_turn_id: TurnId,
     /// The frame the follow-on runs in. Every head write keeps it current.
     pub frame_id: FrameNodeId,
-    /// The task the switching turn handed to the frame; the follow-on's input.
+    /// The task the switching turn handed to the frame; the follow-on's
+    /// input. Empty for a [`continuation`](Self::continuation), which has no
+    /// input of its own.
     pub task: String,
+    /// Set when the follow-on continues a run that crossed a segment
+    /// boundary (FIG-4739) rather than running a switched frame's task: the
+    /// owing turn ended at a quiet point of the run, and the follow-on goes
+    /// on from the history that turn committed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<RunContinuation>,
     /// The shape the logical run's root resolved under, recorded at the
     /// switch so a recovered follow-on runs under it — its protocol turn
     /// options included — rather than resolving the session's current
@@ -50,7 +61,48 @@ pub struct PendingFollowOn {
     pub attempts: u32,
 }
 
+/// The continuation a segment boundary owes its run (FIG-4739).
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunContinuation {
+    /// Why the run crossed the boundary.
+    pub reason: lash_sansio::BoundaryReason,
+    /// The protocol iterations the run has spent so far, over every physical
+    /// turn up to the boundary: the continuation's turn budget counts on
+    /// from them, so a run's budget is one budget however many segments it
+    /// takes.
+    pub protocol_iterations: u64,
+}
+
 impl PendingFollowOn {
+    /// The continuation the turn of `physical_ordinal` of `root` owes its run
+    /// after ending at a segment boundary in `frame_id`, the frame it ran in
+    /// (FIG-4739). A boundary is no frame switch: `chain_depth` is the depth
+    /// the owing turn itself ran at. `resolved` is the shape the run's root
+    /// resolved under, as for a switch.
+    pub fn after_boundary(
+        root: &TurnId,
+        physical_ordinal: u64,
+        frame_id: FrameNodeId,
+        continuation: RunContinuation,
+        chain_depth: u32,
+        resolved: crate::run_spec::ResolvedRun,
+    ) -> Result<Self, StoreError> {
+        let next =
+            StoreError::checked_monotonic_increment("follow_on_physical_index", physical_ordinal)?;
+        Ok(Self {
+            follow_on_turn_id: PhysicalTurn::derive_turn_id(root, next),
+            frame_id,
+            task: String::new(),
+            continuation: Some(continuation),
+            resolved_run: Box::new(resolved),
+            chain_depth,
+            attempts: 0,
+        })
+    }
+
     /// The follow-on of physical turn `physical_ordinal` of `root` switching to
     /// `frame_id` with `task`. `chain_depth` counts this switch; `resolved`
     /// is the shape the logical run's root resolved under, recorded so a
@@ -70,6 +122,7 @@ impl PendingFollowOn {
             follow_on_turn_id: PhysicalTurn::derive_turn_id(root, next),
             frame_id,
             task: task.into(),
+            continuation: None,
             resolved_run: Box::new(resolved),
             chain_depth,
             attempts: 0,
@@ -349,6 +402,7 @@ mod tests {
 
     fn fact(turn: &str, frame: &str) -> PendingFollowOn {
         PendingFollowOn {
+            continuation: None,
             follow_on_turn_id: TurnId::from(turn),
             frame_id: FrameNodeId::new(frame).expect("frame"),
             task: "task".into(),

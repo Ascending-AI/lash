@@ -316,6 +316,7 @@ async fn commit_switch_owing(
     };
     state.ensure_agent_frame_initialized();
     let owed = crate::store::PendingFollowOn {
+        continuation: None,
         follow_on_turn_id: crate::store::PhysicalTurn::derive_turn_id(
             &TurnId::from(switching_turn),
             1,

@@ -62,6 +62,7 @@ impl<'run> ScopedEffectController<'run> {
                 keyless_starts: self.keyless_starts,
                 compactions: self.compactions,
                 command_runs: self.command_runs,
+                effects: self.effects,
             }),
         }
     }

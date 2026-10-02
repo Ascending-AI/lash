@@ -639,6 +639,13 @@ pub(crate) fn validate_runtime_perf_turn(
                 frame_key.as_str()
             );
         }
+        TurnOutcome::SegmentBoundary { reason } => {
+            anyhow::bail!(
+                "runtime perf scenario {} turn {} unexpectedly ended at a segment boundary ({reason:?})",
+                scenario.name(),
+                turn_index + 1,
+            );
+        }
         TurnOutcome::Stopped(stop) => {
             anyhow::bail!(
                 "runtime perf scenario {} turn {} stopped with {:?}; assistant_output={:?}",

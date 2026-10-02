@@ -880,6 +880,7 @@ fn assert_terminal_derivation(fault: &crate::runtime_error::RuntimeEffectControl
         Kind::SealDriveAdmission,
         Kind::AdmitRoot,
         Kind::InspectAdmittedHead,
+        Kind::ObserveDrainMark,
         Kind::RecoverFollowOn,
         Kind::ResolveTurnConfig,
         Kind::ResolveConfigTransaction,

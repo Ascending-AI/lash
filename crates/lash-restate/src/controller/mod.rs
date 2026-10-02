@@ -1060,6 +1060,12 @@ where
         recorded.map_err(RuntimeEffectControllerError::from)
     }
 
+    /// An invocation is pinned to the deployment that started it, so a turn
+    /// on a draining build ends at its next quiet point (FIG-4739).
+    fn hands_over_turns(&self) -> bool {
+        true
+    }
+
     fn wants_segment_boundary(
         &self,
         progress: &lash_core::SegmentProgress,

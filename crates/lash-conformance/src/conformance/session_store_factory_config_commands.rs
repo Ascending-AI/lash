@@ -29,6 +29,7 @@ pub async fn ingress_follow_on_fork_and_command_run_matrix(
     };
     state.ensure_agent_frame_initialized();
     let owed = crate::store::PendingFollowOn {
+        continuation: None,
         follow_on_turn_id: TurnId::from("matrix-switch:agent-frame:1"),
         frame_id: state
             .current_frame_node_id

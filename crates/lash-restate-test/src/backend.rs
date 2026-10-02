@@ -233,9 +233,25 @@ pub async fn backend_with_store_set<StoreFuture>(
 where
     StoreFuture: Future<Output = Result<Arc<dyn StoreSet>, BackendError>>,
 {
+    backend_with_store_set_and_segment_budget(seed, config, None, hooks, make_stores).await
+}
+
+/// [`backend_with_store_set`], whose endpoint cuts every process segment
+/// and every root's invocation after `segment_effect_budget` effects, as
+/// [`backend_with_segment_budget`] does.
+pub async fn backend_with_store_set_and_segment_budget<StoreFuture>(
+    seed: u64,
+    config: ServerConfig,
+    segment_effect_budget: Option<u64>,
+    hooks: DeploymentHooks,
+    make_stores: impl FnOnce(Arc<dyn lash_core::Clock>) -> StoreFuture,
+) -> Result<RestateTestBackend<dyn StoreSet>, BackendError>
+where
+    StoreFuture: Future<Output = Result<Arc<dyn StoreSet>, BackendError>>,
+{
     RestateTestBackend::build(
         config.with_seed(seed),
-        None,
+        segment_effect_budget,
         "",
         hooks,
         |clock| async {
@@ -1174,12 +1190,16 @@ impl Process {
     ) -> Result<(Self, restate_sdk::endpoint::Endpoint), BackendError> {
         let connection =
             RestateConnection::with_transport(server.ingress_url(), server.transport());
-        let restate = Arc::new(RestateEngine::new(
-            Arc::clone(engine_stores),
-            RestateConfig::new(connection.clone(), connection.clone(), authority.clone())
-                .stamped(server.config().build_generation.clone())
-                .with_namespace(namespace.clone()),
-        ));
+        let restate = Arc::new(RestateEngine::new(Arc::clone(engine_stores), {
+            let config =
+                RestateConfig::new(connection.clone(), connection.clone(), authority.clone())
+                    .stamped(server.config().build_generation.clone())
+                    .with_namespace(namespace.clone());
+            match segment_effect_budget {
+                Some(budget) => config.with_root_effect_budget(budget),
+                None => config,
+            }
+        }));
         // The endpoint exists before any core over this backend does, so it
         // serves processes on whatever worker the fixture installs later.
         let processes = RestateProcessWorkerSlot::new();

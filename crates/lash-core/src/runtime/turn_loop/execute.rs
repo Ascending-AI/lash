@@ -21,6 +21,9 @@ pub(super) struct TurnDriverRemainder {
     pub(super) withheld_terminal_work: crate::runtime::logical_turn::WithheldTerminalWork,
     /// The cancellation the turn recorded honouring, if any.
     pub(super) turn_cancel: Option<crate::TurnCancellationEvidence>,
+    /// The protocol iterations the run has spent through this turn, when the
+    /// turn ended at a segment boundary (FIG-4739).
+    pub(super) segment_boundary: Option<u64>,
 }
 
 /// Everything the execute phase needs to drive an already-prepared turn.
@@ -97,6 +100,7 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
             pending_turn_inputs,
             withheld_terminal_work,
             turn_cancel,
+            segment,
             ..
         } = *self.driver.take().expect("turn driver loan is present");
         *self.session = Some(session);
@@ -109,6 +113,7 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
             pending_turn_inputs,
             withheld_terminal_work,
             turn_cancel,
+            segment_boundary: segment.taken,
         }
     }
 }
@@ -284,6 +289,7 @@ impl LashRuntime {
                 new_messages: prepared.messages,
                 turn_index,
                 trace_turn_id,
+                segment_boundary: None,
             },
             admissions,
             scoped_effect_controller,
@@ -453,6 +459,25 @@ impl LashRuntime {
         // follow-on: this turn's commit carries it on with its own, or hands
         // it to a cancellation (FIG-4044).
         let carried_withheld = initial_admissions.withheld_terminal_work.take();
+        // The turn's part in its run's segment boundaries (FIG-4739). A
+        // continuation counts on from the iterations its run already spent;
+        // a turn outside a drive, or one carrying withheld work to the run's
+        // follow-on, takes no boundary.
+        let segment = crate::runtime::turn_driver::TurnSegment::new(
+            drive_fence.is_some()
+                && self.drive_root.is_some()
+                && carried_withheld.is_none()
+                && matches!(
+                    scoped_effect_controller.execution_scope(),
+                    crate::ExecutionScope::Turn { .. }
+                ),
+            self.state
+                .pending_follow_on
+                .as_deref()
+                .filter(|owed| owed.is_turn(&trace_turn_id))
+                .and_then(|owed| owed.continuation.as_ref())
+                .map_or(0, |continuation| continuation.protocol_iterations),
+        );
         let session = self
             .session
             .take()
@@ -481,6 +506,10 @@ impl LashRuntime {
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             drive_fence: drive_fence.cloned(),
             drive_root: self.drive_root.as_ref().map(|root| root.root().clone()),
+            drive_generation: self
+                .drive_root
+                .as_ref()
+                .map(|root| root.journal_generation().clone()),
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_control: Arc::clone(&turn_control),
             protocol_reply: Default::default(),
@@ -493,6 +522,7 @@ impl LashRuntime {
                 &trace_turn_id,
                 "drive",
             ),
+            segment,
         });
         let protocol_run_offset = 0;
         self.mark_phase_begin(RuntimeTurnPhase::EffectLoop);
@@ -581,6 +611,7 @@ impl LashRuntime {
             pending_turn_inputs,
             mut withheld_terminal_work,
             turn_cancel,
+            segment_boundary,
         } = driver;
         withheld_terminal_work.carry_earlier(carried_withheld);
         let mut pending_admissions =
@@ -597,6 +628,7 @@ impl LashRuntime {
                     new_messages,
                     turn_index,
                     trace_turn_id,
+                    segment_boundary,
                 },
                 admissions: &pending_admissions,
                 scoped_effect_controller: &finish_scoped_effect_controller,

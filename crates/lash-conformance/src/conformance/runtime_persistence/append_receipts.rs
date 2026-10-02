@@ -957,6 +957,7 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
     // pending follow-on (ADR 0101 §3): the store refuses the whole commit.
     let mut failing = clean.clone();
     failing.pending_follow_on = Some(crate::store::PendingFollowOn {
+        continuation: None,
         follow_on_turn_id: crate::TurnId::from("atomic-append:agent-frame:1"),
         frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "atomic-frame"),
         task: "must roll back".to_string(),

@@ -441,9 +441,31 @@ pub struct RemoteTurnParkReason {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteTurnOutcome {
-    Finished { finish: RemoteTurnFinish },
-    AgentFrameSwitch { frame_key: String, task: String },
-    Stopped { stop: RemoteTurnStop },
+    Finished {
+        finish: RemoteTurnFinish,
+    },
+    AgentFrameSwitch {
+        frame_key: String,
+        task: String,
+    },
+    /// The physical turn ended at a segment boundary of its run, which goes
+    /// on in a new invocation. Never a run's final outcome.
+    SegmentBoundary {
+        reason: RemoteBoundaryReason,
+    },
+    Stopped {
+        stop: RemoteTurnStop,
+    },
+}
+
+/// Why a physical turn ended at a segment boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteBoundaryReason {
+    /// The turn's invocation reached its journal budget.
+    JournalBudget,
+    /// The build the turn's invocation ran on is draining.
+    HandOver,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -487,9 +509,9 @@ pub enum RemoteTurnStop {
 impl From<&RemoteTurnOutcome> for RemoteTurnStatus {
     fn from(value: &RemoteTurnOutcome) -> Self {
         match value {
-            RemoteTurnOutcome::Finished { .. } | RemoteTurnOutcome::AgentFrameSwitch { .. } => {
-                Self::Answered
-            }
+            RemoteTurnOutcome::Finished { .. }
+            | RemoteTurnOutcome::AgentFrameSwitch { .. }
+            | RemoteTurnOutcome::SegmentBoundary { .. } => Self::Answered,
             RemoteTurnOutcome::Stopped {
                 stop: RemoteTurnStop::Cancelled { .. },
             } => Self::Cancelled,

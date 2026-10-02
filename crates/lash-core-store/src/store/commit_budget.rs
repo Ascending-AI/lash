@@ -623,6 +623,7 @@ mod tests {
             .expect("the commit without a pending follow-on must fit");
 
         commit.pending_follow_on = Some(crate::store::PendingFollowOn {
+            continuation: None,
             follow_on_turn_id: crate::TurnId::from("budget:agent-frame:1"),
             frame_id: crate::session_graph::frame_node_id(&state.session_id, "budget-frame"),
             task: "q".repeat(BYTE_LIMIT * 2),
@@ -697,6 +698,7 @@ mod tests {
             crate::AttachmentId::parse("all-families-attachment").expect("valid attachment id"),
         ];
         commit.pending_follow_on = Some(crate::store::PendingFollowOn {
+            continuation: None,
             follow_on_turn_id: crate::TurnId::from("budget:agent-frame:1"),
             frame_id: crate::session_graph::frame_node_id(&state.session_id, "budget-frame"),
             task: "follow-up".to_string(),

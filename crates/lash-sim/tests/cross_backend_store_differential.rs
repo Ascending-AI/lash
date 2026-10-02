@@ -1351,6 +1351,7 @@ impl BackendRunner {
                     ));
                 commit.pending_follow_on =
                     owed_turn_id.map(|owed_turn_id| lash_core::store::PendingFollowOn {
+                        continuation: None,
                         follow_on_turn_id: lash_core::TurnId::from(owed_turn_id),
                         frame_id: frame
                             .clone()

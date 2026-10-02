@@ -156,6 +156,12 @@ impl RuntimeTurnDriver<'_> {
                     return Ok((messages, protocol_iteration));
                 }
                 Effect::LlmCall { id, request } => {
+                    if self
+                        .end_at_segment_boundary(&mut machine, run_offset)
+                        .await?
+                    {
+                        continue;
+                    }
                     self.protocol_reply
                         .mark_model_call(machine.messages().iter());
                     self.handle_llm_call_effect(&mut machine, id, request, &event_tx)

@@ -51,6 +51,7 @@ fn commit_as(
 
 fn follow_on(frame_id: crate::FrameNodeId) -> crate::store::PendingFollowOn {
     crate::store::PendingFollowOn {
+        continuation: None,
         follow_on_turn_id: TurnId::from(FOLLOW_ON_TURN),
         frame_id,
         task: "run in the switched frame".to_string(),

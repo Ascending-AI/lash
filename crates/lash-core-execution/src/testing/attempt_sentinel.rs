@@ -248,6 +248,10 @@ impl AwaitEventResolver for AttemptAtomicitySentinel<'_> {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
+    fn hands_over_turns(&self) -> bool {
+        self.inner.hands_over_turns()
+    }
+
     fn wants_segment_boundary(&self, progress: &SegmentProgress) -> Option<BoundaryReason> {
         self.inner.wants_segment_boundary(progress)
     }

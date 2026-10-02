@@ -478,6 +478,12 @@ pub enum RuntimeEffectCommand {
         root: crate::TurnId,
         head: crate::store::AdmittedHead,
     },
+    /// Read, at a quiet point of a turn, whether `generation` — the build
+    /// the turn's invocation runs on — is draining (FIG-4739). The body
+    /// reads the store's drain marks once; replay uses its recorded answer.
+    ObserveDrainMark {
+        generation: crate::engine::BuildGeneration,
+    },
     /// Decide a follow-on recovery root before its turn (FIG-4361): whether
     /// the head still owes `follow_on`, and, from the recovery count
     /// `attempts` its drive admission recorded, whether it runs under a
@@ -666,6 +672,7 @@ impl RuntimeEffectCommand {
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::AdmitRoot { .. } => RuntimeEffectKind::AdmitRoot,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
+            Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
@@ -1339,6 +1346,10 @@ pub enum RuntimeEffectOutcome {
     InspectAdmittedHead {
         verdict: AdmittedHeadVerdict,
     },
+    /// Whether the build was draining when the turn read its mark.
+    ObserveDrainMark {
+        draining: bool,
+    },
     /// A follow-on recovery root's recorded decision (FIG-4361), with the
     /// head its turn runs on (FIG-4380).
     RecoverFollowOn {
@@ -1803,6 +1814,7 @@ impl RuntimeEffectOutcome {
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::AdmitRoot { .. } => RuntimeEffectKind::AdmitRoot,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
+            Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,

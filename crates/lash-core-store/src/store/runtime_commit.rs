@@ -381,6 +381,9 @@ impl RuntimeCommit {
 pub enum TurnCommitOutcome {
     Completed,
     FrameSwitch,
+    /// The turn ended at a segment boundary of its run (FIG-4739): the run
+    /// goes on in the continuation the head owes.
+    SegmentBoundary,
     Cancelled,
     Failed(TurnCommitFailureCause),
 }
@@ -410,6 +413,7 @@ impl TurnCommitOutcome {
         match outcome {
             TurnOutcome::Finished(_) => Self::Completed,
             TurnOutcome::AgentFrameSwitch { .. } => Self::FrameSwitch,
+            TurnOutcome::SegmentBoundary { .. } => Self::SegmentBoundary,
             TurnOutcome::Stopped(stop) => match stop {
                 TurnStop::Cancelled { .. } => Self::Cancelled,
                 TurnStop::Incomplete => Self::Failed(TurnCommitFailureCause::Incomplete),
@@ -433,6 +437,7 @@ impl TurnCommitOutcome {
         match self {
             Self::Completed => "completed",
             Self::FrameSwitch => "frame_switch",
+            Self::SegmentBoundary => "segment_boundary",
             Self::Cancelled => "cancelled",
             Self::Failed(TurnCommitFailureCause::Incomplete) => "failed_incomplete",
             Self::Failed(TurnCommitFailureCause::InvalidInput) => "failed_invalid_input",

@@ -354,6 +354,10 @@ pub(crate) fn parse_turn_workflow_key(key: &str) -> Option<(SessionId, lash_core
 #[derive(Clone, Default)]
 pub struct RestateSessionDriverSlot {
     installation: Arc<Mutex<Option<Weak<InstalledSessionDriver>>>>,
+    /// The effect budget of a root's invocation, when the engine's
+    /// configuration set one
+    /// ([`RestateConfig::with_root_effect_budget`](crate::RestateConfig::with_root_effect_budget)).
+    root_effect_budget: Option<u64>,
 }
 
 /// A driver as a [`RestateSessionDriverSlot`] installed it: what its core
@@ -420,6 +424,21 @@ impl RestateSessionDriverSlot {
     /// An empty slot.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// This slot, whose roots' invocations run under `budget` effects.
+    pub(crate) fn with_root_effect_budget(mut self, budget: Option<u64>) -> Self {
+        self.root_effect_budget = budget;
+        self
+    }
+
+    /// The options a root's controller journals under.
+    fn root_options(&self) -> crate::RestateEffectControllerOptions {
+        let options = crate::RestateEffectControllerOptions::default();
+        match self.root_effect_budget {
+            Some(budget) => options.segment_effect_budget(budget),
+            None => options,
+        }
     }
 
     /// Install `driver` unless a live installation is held already; returns
@@ -1336,10 +1355,14 @@ async fn run_root_journal(
     // marker (FIG-3980): a journal of another build parks before it replays
     // past it.
     let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));
-    let controller =
-        RestateRuntimeEffectController::new(ctx, authority_id.clone(), generation.clone())
-            .in_namespace(route.namespace().clone())
-            .with_folded_sentinel(Arc::clone(&sentinel));
+    let controller = RestateRuntimeEffectController::with_options(
+        ctx,
+        authority_id.clone(),
+        generation.clone(),
+        slot.root_options(),
+    )
+    .in_namespace(route.namespace().clone())
+    .with_folded_sentinel(Arc::clone(&sentinel));
     let scoped = controller
         .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
         .map_err(refused_scope)?;

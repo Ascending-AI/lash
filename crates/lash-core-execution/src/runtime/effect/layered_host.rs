@@ -54,6 +54,12 @@ pub trait EffectLayer: Send + Sync + 'static {
         inner.owns_commit_backpressure()
     }
 
+    /// Whether the layered controller hands foreground turns over
+    /// ([`RuntimeEffectController::hands_over_turns`]).
+    fn hands_over_turns(&self, inner: &dyn RuntimeEffectController) -> bool {
+        inner.hands_over_turns()
+    }
+
     async fn revoke_await_events_for_session(
         &self,
         inner: &dyn AwaitEventResolver,
@@ -671,6 +677,10 @@ impl AwaitEventResolver for LayeredController<'_> {
 impl RuntimeEffectController for LayeredController<'_> {
     fn owns_commit_backpressure(&self) -> bool {
         self.layer.owns_commit_backpressure(self.inner.as_ref())
+    }
+
+    fn hands_over_turns(&self) -> bool {
+        self.layer.hands_over_turns(self.inner.as_ref())
     }
 
     fn wants_segment_boundary(&self, progress: &SegmentProgress) -> Option<BoundaryReason> {

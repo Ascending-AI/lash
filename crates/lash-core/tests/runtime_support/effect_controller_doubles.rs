@@ -641,6 +641,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::AcceptTurnInput { .. }
             | RuntimeEffectCommand::AdmitRoot { .. }
             | RuntimeEffectCommand::InspectAdmittedHead { .. }
+            | RuntimeEffectCommand::ObserveDrainMark { .. }
             | RuntimeEffectCommand::RecoverFollowOn { .. }
             | RuntimeEffectCommand::AdmitDrive { .. }
             | RuntimeEffectCommand::DrawRootStart { .. }

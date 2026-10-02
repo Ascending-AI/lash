@@ -42,7 +42,7 @@ pub mod server;
 pub use backend::{
     BackendError, HandlerAttempt, RestateTestBackend, SESSION_DRIVER_SERVICE, SeparateBuild,
     TURN_DRIVER_SERVICE, backend, backend_with, backend_with_build, backend_with_segment_budget,
-    backend_with_store_set,
+    backend_with_store_set, backend_with_store_set_and_segment_budget,
 };
 pub use open_handler::OpenHandler;
 pub use protocol::ProtocolVersion;

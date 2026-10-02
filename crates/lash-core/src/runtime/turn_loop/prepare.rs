@@ -152,6 +152,7 @@ impl LashRuntime {
                 turn_pipeline.apply_prepared_messages(&messages);
                 return Box::pin(self.finish_turn(TurnCommitContext {
                     finish: TurnFinishInput {
+                        segment_boundary: None,
                         turn_pipeline,
                         recorded_assembly,
                         new_messages: messages,

@@ -233,6 +233,7 @@ pub(super) fn turn_effect_executor(
         Arc::clone(&driver.host.core.clock),
     );
     let owned_driver = RuntimeTurnDriver {
+        segment: Default::default(),
         session: driver.session.clone_for_effect(),
         policy: driver.policy.clone(),
         // A step body commits nothing: whatever it would record is dropped
@@ -266,6 +267,7 @@ pub(super) fn turn_effect_executor(
         checkpoint_messages: driver.checkpoint_messages.clone(),
         drive_fence: driver.drive_fence.clone(),
         drive_root: driver.drive_root.clone(),
+        drive_generation: driver.drive_generation.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
         turn_control: Arc::clone(&driver.turn_control),
         protocol_reply: Default::default(),

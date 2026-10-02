@@ -30,6 +30,7 @@ pub struct RestateConfig {
     process_event_sink: Option<Arc<dyn ProcessEventSink>>,
     admin_connection: RestateConnection,
     namespace: RestateNamespace,
+    root_effect_budget: Option<u64>,
 }
 
 impl RestateConfig {
@@ -60,7 +61,17 @@ impl RestateConfig {
             process_event_sink: None,
             admin_connection: admin_connection.into(),
             namespace: RestateNamespace::default(),
+            root_effect_budget: None,
         }
+    }
+
+    /// End a root's `LashTurn` invocation at the run's next quiet point once
+    /// it has executed `effects` effects, instead of the default 10,000
+    /// (FIG-4739): the run goes on in a new invocation with a journal of its
+    /// own. A replay observes the same count and ends at the same point.
+    pub fn with_root_effect_budget(mut self, effects: u64) -> Self {
+        self.root_effect_budget = Some(effects.max(1));
+        self
     }
 
     /// Stamp `build_generation` on the engine instead of the generation its
@@ -130,6 +141,7 @@ impl RestateEngine {
             process_event_sink,
             admin_connection,
             namespace,
+            root_effect_budget,
         } = config.clone();
         let effect_host = Arc::new(RestateEffectHost::on_generation(
             connection.clone(),
@@ -154,7 +166,7 @@ impl RestateEngine {
         effect_host.bind_usage_accounting(stores.usage_accounting());
         let session_work = Arc::new(RestateSessionWork::new(
             RestateIngressClient::new(connection.clone()),
-            crate::RestateSessionDriverSlot::new(),
+            crate::RestateSessionDriverSlot::new().with_root_effect_budget(root_effect_budget),
             generation.clone(),
             namespace.clone(),
             Arc::new(crate::session_control::RestateSessionControl {

@@ -68,7 +68,7 @@ impl RuntimeTurnDriver<'_> {
             turn_causes: self.turn_causes.clone(),
             protocol_run_offset: run_offset,
             turn_driver_preamble,
-            turn_budget: session_policy.turn_budget,
+            turn_budget: self.segment.remaining_budget(session_policy.turn_budget),
             no_progress_budget: session_policy.no_progress_budget,
             model_variant: session_policy.llm_profile_config().reasoning.clone(),
             llm_profile_capability: session_policy

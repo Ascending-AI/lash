@@ -3774,6 +3774,21 @@
       ],
       "type": "string"
     },
+    "RemoteBoundaryReason": {
+      "description": "Why a physical turn ended at a segment boundary.",
+      "oneOf": [
+        {
+          "const": "journal_budget",
+          "description": "The turn's invocation reached its journal budget.",
+          "type": "string"
+        },
+        {
+          "const": "hand_over",
+          "description": "The build the turn's invocation ran on is draining.",
+          "type": "string"
+        }
+      ]
+    },
     "RemoteCausalRef": {
       "oneOf": [
         {
@@ -8954,6 +8969,23 @@
             "type",
             "frame_key",
             "task"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The physical turn ended at a segment boundary of its run, which goes\non in a new invocation. Never a run's final outcome.",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/RemoteBoundaryReason"
+            },
+            "type": {
+              "const": "segment_boundary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reason"
           ],
           "type": "object"
         },

@@ -1077,6 +1077,12 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                         done_reason.wire_tag(),
                     ));
                 }
+                crate::TraceTurnOutcome::SegmentBoundary { done_reason } => {
+                    attrs.push(KeyValue::new(
+                        attr::LASH_TURN_DONE_REASON,
+                        done_reason.clone(),
+                    ));
+                }
                 crate::TraceTurnOutcome::AgentFrameSwitch { frame_switch } => {
                     attrs.push(KeyValue::new(
                         attr::LASH_TURN_AGENT_FRAME_SWITCH_FRAME_KEY,

@@ -1693,6 +1693,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::SealDriveAdmission
                 | RuntimeEffectKind::AdmitRoot
                 | RuntimeEffectKind::InspectAdmittedHead
+                | RuntimeEffectKind::ObserveDrainMark
                 | RuntimeEffectKind::RecoverFollowOn
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::ResolveConfigTransaction

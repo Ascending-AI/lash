@@ -69,6 +69,10 @@ pub(super) struct TurnFinishInput {
     pub(super) new_messages: crate::MessageSequence,
     pub(super) turn_index: usize,
     pub(super) trace_turn_id: TurnId,
+    /// The protocol iterations the run has spent through this turn, when the
+    /// turn ended at a segment boundary (FIG-4739): what the continuation its
+    /// commit owes records.
+    pub(super) segment_boundary: Option<u64>,
 }
 
 struct PreparedTurn {
@@ -291,6 +295,7 @@ impl LashRuntime {
         );
         self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
+                segment_boundary: None,
                 turn_pipeline: pipeline,
                 recorded_assembly: RecordedTurnAssembly::new(),
                 new_messages: crate::MessageSequence::default(),
@@ -365,6 +370,7 @@ impl LashRuntime {
             new_messages,
             turn_index,
             trace_turn_id,
+            segment_boundary,
         } = finish;
         turn_pipeline.state_mut().policy = self.state.effective_policy().clone();
         turn_pipeline.state_mut().turn_index = turn_index;
@@ -539,6 +545,8 @@ impl LashRuntime {
                 self.drive_root
                     .as_ref()
                     .map_or(&trace_turn_id, |run| run.root()),
+                assembled.state.current_frame_node_id.as_ref(),
+                segment_boundary,
             )?;
             self.state.adopt_snapshot(assembled.state.clone());
             self.state.pending_follow_on = pending_follow_on.map(Box::new);
@@ -614,6 +622,8 @@ impl LashRuntime {
             self.drive_root
                 .as_ref()
                 .map_or(&trace_turn_id, |run| run.root()),
+            prepared.turn.state.current_frame_node_id.as_ref(),
+            segment_boundary,
         ) {
             Ok(pending_follow_on) => pending_follow_on,
             Err(err) => {
@@ -851,6 +861,7 @@ impl LashRuntime {
             .with_undelivered(withheld_terminal_work);
         Box::pin(self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
+                segment_boundary: None,
                 turn_pipeline,
                 recorded_assembly,
                 new_messages: cancellation_messages,
@@ -971,6 +982,7 @@ impl LashRuntime {
         turn_pipeline.apply_prepared_messages(&messages);
         Box::pin(self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
+                segment_boundary: None,
                 turn_pipeline,
                 recorded_assembly,
                 new_messages: messages,

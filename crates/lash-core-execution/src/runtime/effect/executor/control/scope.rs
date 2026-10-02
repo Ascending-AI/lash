@@ -5,7 +5,7 @@
 //! the production file-size budget; no item, signature or path changed.
 
 use super::*;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 /// A controller built for one scope that can build itself for another: what
 /// an engine-side controller that must know the scope of every effect it runs
@@ -66,6 +66,12 @@ pub struct ScopedEffectController<'run> {
     /// replays under the same key on every replay
     /// ([`Self::next_command_run_ordinal`]).
     pub(in crate::runtime::effect::executor) command_runs: Arc<AtomicU32>,
+    /// How many effects this controller has executed, shared by its clones:
+    /// what a turn weighs against its invocation's journal budget at a quiet
+    /// point (FIG-4739). A handler re-runs from the top on every replay and
+    /// issues the same effects, so the count at one quiet point is the same
+    /// on every replay ([`Self::effects_executed`]).
+    pub(in crate::runtime::effect::executor) effects: Arc<AtomicU64>,
 }
 
 /// A replayed language command's say over the journal writes made under it
@@ -392,6 +398,7 @@ impl<'run> ScopedEffectController<'run> {
             keyless_starts: Arc::default(),
             compactions: Arc::default(),
             command_runs: Arc::default(),
+            effects: Arc::default(),
         })
     }
 
@@ -410,6 +417,7 @@ impl<'run> ScopedEffectController<'run> {
             keyless_starts: Arc::default(),
             compactions: Arc::default(),
             command_runs: Arc::default(),
+            effects: Arc::default(),
         })
     }
 
@@ -429,6 +437,7 @@ impl<'run> ScopedEffectController<'run> {
             keyless_starts: Arc::default(),
             compactions: Arc::default(),
             command_runs: Arc::default(),
+            effects: Arc::default(),
         })
     }
 
@@ -459,9 +468,15 @@ impl<'run> ScopedEffectController<'run> {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.validate_envelope_scope(&envelope)?;
         let local_executor = self.guard_local_executor(&envelope, local_executor)?;
+        self.effects.fetch_add(1, Ordering::SeqCst);
         self.controller()
             .execute_effect(envelope, local_executor)
             .await
+    }
+
+    /// How many effects this controller and its clones have executed.
+    pub fn effects_executed(&self) -> u64 {
+        self.effects.load(Ordering::SeqCst)
     }
 
     /// Asks this controller's command guard to admit `envelope`, and marks
@@ -548,6 +563,7 @@ impl<'run> ScopedEffectController<'run> {
             keyless_starts: Arc::clone(&self.keyless_starts),
             compactions: Arc::clone(&self.compactions),
             command_runs: Arc::clone(&self.command_runs),
+            effects: Arc::clone(&self.effects),
         })
     }
 
