@@ -719,6 +719,10 @@ impl lash_core::facade_support::PluginFactory for SurfacePluginFactory {
         "surface_test"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -735,6 +739,10 @@ struct SurfacePlugin;
 impl lash_core::facade_support::SessionPlugin for SurfacePlugin {
     fn id(&self) -> &'static str {
         "surface_test"
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
     }
 
     fn register(
