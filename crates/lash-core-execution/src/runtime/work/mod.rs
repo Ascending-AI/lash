@@ -267,9 +267,8 @@ pub trait ProcessWorkSubstrate: Send + Sync {
     /// A process whose next execution the newest build refused, parked for
     /// `generation`, has no live execution to wake: an engine that routes by
     /// generation sends that execution to a build of `generation` instead
-    /// (FIG-4750), and leaves an execution already running there to finish.
-    /// When no build of `generation` is left the call is refused typed and
-    /// the park stands.
+    /// ([`Self::resend_refused_successor`]), and leaves an execution already
+    /// running there to finish.
     ///
     /// An engine that routes no work by build generation has nothing to hand
     /// over to and refuses.
@@ -283,6 +282,31 @@ pub trait ProcessWorkSubstrate: Send + Sync {
              process `{process_id}` over from generation {}",
             generation.as_str()
         )))
+    }
+
+    /// Send `process_id`'s next execution, which the newest build refused, to
+    /// a build of the generation that sent it (FIG-4750): the generation its
+    /// park names. `true` when it was sent.
+    ///
+    /// The refusal is the whole reason to send: the newest build cannot run
+    /// the execution, and a build of the sender's generation can, whether or
+    /// not that generation is draining and whichever build holds the
+    /// recovery lease (FIG-4739). `false` when the process is not such a
+    /// refusal: it is not parked for another generation, its park names an
+    /// execution the engine still holds — one that stopped on its own
+    /// journal and is its engine's to resume, never a second send's — or its
+    /// next execution already started. Idempotent: a repeated send names the
+    /// first. When no build of the generation is left the call is refused
+    /// typed and the park stands.
+    ///
+    /// An engine that routes no work by build generation refuses nothing and
+    /// has nothing to send.
+    async fn resend_refused_successor(
+        &self,
+        process_id: &crate::ProcessId,
+    ) -> Result<bool, PluginError> {
+        let _ = process_id;
+        Ok(false)
     }
 
     /// Publish `process`'s stored terminal `output` to the engine's waiters

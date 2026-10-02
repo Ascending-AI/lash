@@ -1072,7 +1072,7 @@ where
         let recorded = crate::sentinel::record_generation!(&ctx, &self.build_generation)?;
         if recorded != self.build_generation {
             return Err(self
-                .park_retired_journal(payload.process_id(), &recorded)
+                .park_retired_journal(payload.process_id(), &recorded, ctx.invocation_id())
                 .await);
         }
         // The input check (S6) follows it, before any other command: a
@@ -1413,12 +1413,10 @@ where
         let registry = &self.registry;
         let continuations = &self.continuations;
         let pid = &process_id;
-        // The route is data (FIG-3795 S3/S5): the successor is sent under the
-        // stable lane — the next segment runs on the newest build — and that
-        // route is recorded with the handover, so the external reference, a
-        // forwarded cancel and a redrive all address the recorded route
-        // rather than recomputing one.
-        let successor_route = self.route.namespace().stable(LashService::ProcessWorkflow);
+        // The route is data (FIG-3795 S3/S5): it is recorded with the
+        // handover, so the external reference, a forwarded cancel and a
+        // redrive all address the recorded route rather than recomputing one.
+        let successor_route = self.successor_route();
         let route = successor_route.name().into_owned();
         let written_generation = self.build_generation.clone();
         let reference_id = format!("{route}/{successor_key}");

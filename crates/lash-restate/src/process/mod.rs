@@ -758,9 +758,14 @@ impl RestateProcessIngressRunner {
     /// The process's record when `handover`'s successor is one the newest
     /// build refused and parked for `generation` (FIG-4750): the handover was
     /// written by `generation`, the process is parked `RetiredGeneration`
-    /// naming it, and the successor has no start marker. A segment whose own
-    /// journal parked it has started, and is its paused invocation's to
-    /// resume, not the drain's to send.
+    /// naming it, the park names no execution the engine still holds, and the
+    /// successor has no start marker. A segment whose own journal parked it
+    /// has started, and is its paused invocation's to resume, not the
+    /// drain's to send. So is a successor the generation sentinel parked
+    /// before its admission: its park names its invocation
+    /// ([`park_retired_journal`](workflow::LashProcessWorkflowImpl)), which
+    /// still holds the segment's workflow key on its own lane, and a second
+    /// send to another lane would run the segment twice (FIG-4739).
     async fn refused_successor(
         &self,
         process_id: &ProcessId,
@@ -779,6 +784,7 @@ impl RestateProcessIngressRunner {
                     park.reason,
                     lash_core::store::ParkReason::RetiredGeneration { .. }
                 ) && park.build_generation.as_ref() == Some(generation)
+                    && park.engine.is_none()
             });
         if !parked_for_generation {
             return Ok(None);
@@ -805,7 +811,7 @@ impl RestateProcessIngressRunner {
     /// When no deployment serves the lane the generation is gone: the
     /// refusal is typed [`RuntimeErrorCode::EngineServiceUnregistered`], and
     /// the process keeps its park and its handover for an operator.
-    async fn resend_refused_successor(
+    async fn send_refused_successor(
         &self,
         record: &ProcessRecord,
         segment_ordinal: u64,
@@ -976,11 +982,41 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
         .await
     }
 
+    /// The re-send of a refused successor, whatever its generation's drain
+    /// state (FIG-4739): the generation is the one the park names.
+    async fn resend_refused_successor(&self, process_id: &ProcessId) -> Result<bool, PluginError> {
+        let Some(generation) = self
+            .registry
+            .get_process(process_id)
+            .await?
+            .and_then(|record| record.park().and_then(|park| park.build_generation.clone()))
+        else {
+            return Ok(false);
+        };
+        let latest = self
+            .continuations
+            .latest_segment_handover(process_id)
+            .await?
+            .filter(|handover| handover.segment_ordinal > 0);
+        let Some(handover) = latest else {
+            return Ok(false);
+        };
+        let Some(record) = self
+            .refused_successor(process_id, &handover, &generation)
+            .await?
+        else {
+            return Ok(false);
+        };
+        self.send_refused_successor(&record, handover.segment_ordinal, &generation)
+            .await?;
+        Ok(true)
+    }
+
     /// What the drain of `generation` does to one of its live processes.
     ///
     /// - A successor the newest build refused, parked for `generation`
     ///   (FIG-4750), is re-sent to the generation's lane
-    ///   ([`resend_refused_successor`](Self::resend_refused_successor)).
+    ///   ([`send_refused_successor`](Self::send_refused_successor)).
     /// - A segment that runs on a generation lane is one the newest build
     ///   already refused: it is left to finish there, since a hand-over
     ///   would only be refused again.
@@ -1014,7 +1050,7 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
             .await?
         {
             return self
-                .resend_refused_successor(&record, handover.segment_ordinal, generation)
+                .send_refused_successor(&record, handover.segment_ordinal, generation)
                 .await;
         }
         let on_generation_lane = self

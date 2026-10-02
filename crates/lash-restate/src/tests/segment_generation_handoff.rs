@@ -94,6 +94,9 @@ struct BuildRunner {
     resumptions: Mutex<Vec<(u64, Option<lash_core::SegmentHandover>)>>,
     hooks: Mutex<HashMap<u64, BoxFuture>>,
     plugins: Mutex<Option<Arc<BuildPlugins>>>,
+    /// How many segments the process runs on this build: every one before
+    /// the last crosses a boundary.
+    segments: std::sync::atomic::AtomicU64,
 }
 
 impl BuildRunner {
@@ -106,6 +109,7 @@ impl BuildRunner {
             resumptions: Mutex::default(),
             hooks: Mutex::default(),
             plugins: Mutex::default(),
+            segments: std::sync::atomic::AtomicU64::new(SEGMENTS),
         }
     }
 
@@ -113,6 +117,11 @@ impl BuildRunner {
     /// on.
     fn install_plugins(&self, plugins: BuildPlugins) {
         *self.plugins.lock_recover() = Some(Arc::new(plugins));
+    }
+
+    /// Run `segments` segments on this build instead of [`SEGMENTS`].
+    fn runs_segments(&self, segments: u64) {
+        self.segments.store(segments, Ordering::SeqCst);
     }
 
     fn on_segment(&self, ordinal: u64, hook: BoxFuture) {
@@ -169,7 +178,7 @@ impl RestateProcessRunner for BuildRunner {
         if let Some(hook) = hook {
             hook.await;
         }
-        if ordinal + 1 < SEGMENTS {
+        if ordinal + 1 < self.segments.load(Ordering::SeqCst) {
             return Ok(lash_core::ProcessRunOutcome::SegmentBoundary(
                 lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,

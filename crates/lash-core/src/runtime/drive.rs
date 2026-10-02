@@ -62,7 +62,8 @@ pub use lanes::{LanesTick, RelayLanes};
 pub use parent_end_relay::ParentEndRelay;
 pub use park::{StoreParkRecovery, root_park_recorded};
 pub use reconcile::{
-    DrainHandOverPass, ReconcileParts, ReconcileProcesses, drain_hand_over_slot, reconcile_once,
+    DrainHandOverCursor, DrainHandOverPass, ReconcileParts, ReconcileProcesses,
+    drain_hand_over_slot, reconcile_once,
 };
 pub use relays::{
     ObligationRelayUnavailable, RelayNeed, RelayParts, RelaySupply, obligation_relays,

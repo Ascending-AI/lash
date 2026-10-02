@@ -25,6 +25,10 @@ pub struct ReconcileCursor {
     /// hand-over slot woke (FIG-3799), with that generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drain: Option<(super::BuildGeneration, crate::ProcessId)>,
+    /// The last parked process the previous tick's re-send scan read
+    /// (FIG-4739), by its park's instant and its id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resend: Option<(u64, crate::ProcessId)>,
 }
 
 /// The arm of a tick a failure came from.

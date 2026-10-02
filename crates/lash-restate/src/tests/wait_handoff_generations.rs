@@ -1332,9 +1332,16 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
     let mut passes = Vec::new();
     // Bounded: a cursor that does not advance would page forever.
     for _ in 0..8 {
-        let pass = lash_core::drive::drain_hand_over_slot(&processes, cursor.as_ref(), page)
-            .await
-            .expect("a slot pass");
+        let pass = lash_core::drive::drain_hand_over_slot(
+            &processes,
+            lash_core::drive::DrainHandOverCursor {
+                wake: cursor.as_ref(),
+                resend: None,
+            },
+            page,
+        )
+        .await
+        .expect("a slot pass");
         passes.push(pass.pass.handled);
         cursor = pass.next;
         if cursor.is_none() {
@@ -1361,23 +1368,35 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
         .push(failing.clone());
     port.wakes.lock().expect("the wake log").clear();
     let whole = NonZeroUsize::new(64).unwrap_or(NonZeroUsize::MIN);
-    let pass = lash_core::drive::drain_hand_over_slot(&processes, None, whole)
-        .await
-        .expect("a slot pass");
+    let pass = lash_core::drive::drain_hand_over_slot(
+        &processes,
+        lash_core::drive::DrainHandOverCursor::default(),
+        whole,
+    )
+    .await
+    .expect("a slot pass");
     assert_eq!((pass.pass.handled, pass.pass.deferred), (5, 1));
     assert_eq!(pass.next, None, "the pass read every generation");
     port.failing.lock().expect("the failing set").clear();
-    let pass = lash_core::drive::drain_hand_over_slot(&processes, None, whole)
-        .await
-        .expect("a slot pass");
+    let pass = lash_core::drive::drain_hand_over_slot(
+        &processes,
+        lash_core::drive::DrainHandOverCursor::default(),
+        whole,
+    )
+    .await
+    .expect("a slot pass");
     assert_eq!((pass.pass.handled, pass.pass.deferred), (6, 0));
 
     // A cleared mark is no longer swept.
     drain.clear_draining(&marked[0]).await.expect("clear");
     port.wakes.lock().expect("the wake log").clear();
-    let pass = lash_core::drive::drain_hand_over_slot(&processes, None, whole)
-        .await
-        .expect("a slot pass");
+    let pass = lash_core::drive::drain_hand_over_slot(
+        &processes,
+        lash_core::drive::DrainHandOverCursor::default(),
+        whole,
+    )
+    .await
+    .expect("a slot pass");
     assert_eq!(pass.pass.handled, 3);
     assert!(
         port.wakes

@@ -922,4 +922,11 @@ impl lash_core::ProcessWorkSubstrate for CrashProcessPort {
     ) -> Result<(), lash_core::PluginError> {
         self.inner.deliver_hand_over(process_id, generation).await
     }
+
+    async fn resend_refused_successor(
+        &self,
+        process_id: &lash_core::ProcessId,
+    ) -> Result<bool, lash_core::PluginError> {
+        self.inner.resend_refused_successor(process_id).await
+    }
 }

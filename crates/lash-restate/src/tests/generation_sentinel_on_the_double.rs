@@ -256,3 +256,220 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
     );
     assert!(record.park().is_none(), "the completion closes the park");
 }
+
+/// Hands segment 0 over and ends the process in segment 1.
+#[derive(Default)]
+struct HandingRunner {
+    entries: Mutex<Vec<u64>>,
+}
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for HandingRunner {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
+        None
+    }
+
+    async fn run_process_segment(
+        &self,
+        started: &crate::SegmentStarted,
+        _process_id: ProcessId,
+        _registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        _scoped_effect_controller: ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        let ordinal = started.segment_ordinal();
+        self.entries.lock_recover().push(ordinal);
+        if ordinal == 0 {
+            return Ok(lash_core::ProcessRunOutcome::SegmentBoundary(
+                lash_core::SegmentHandover {
+                    reason: lash_core::BoundaryReason::JournalBudget,
+                    program_hash: "blake3:sentinel-successor".to_string(),
+                    engine_state: vec![0],
+                },
+            ));
+        }
+        Ok(process_success(serde_json::json!("ended in its successor")).into())
+    }
+}
+
+/// FIG-4750 residual 3 (FIG-4739): a successor the generation sentinel
+/// parked before its admission is never re-sent.
+///
+/// Segment 0 hands over under `G_a`. Its successor journals the sentinel and
+/// dies before its admission; the code behind the deployment is swapped for
+/// a build of `G_b`, so the replay parks the process `RetiredGeneration` for
+/// `G_a` with no start marker: every fact a successor the newest build
+/// refused leaves, too. The park names the invocation that still holds the
+/// segment's journal, so the re-send answers that there is nothing to send
+/// and the drain's wake sends no second `run`. Back on a build of `G_a` the
+/// kept invocation resumes and the successor runs once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_successor_the_sentinel_parked_before_its_admission_is_never_re_sent() {
+    let server = RestateTestServer::new(ServerConfig::default().with_seed(0x4739_d003))
+        .expect("start the server double");
+    let connection = RestateConnection::with_transport(server.ingress_url(), server.transport());
+    let ingress = RestateIngressClient::new(connection.clone());
+    let stores = memory_process_stores().await;
+    let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
+    let runner = Arc::new(HandingRunner::default());
+    let build = |generation: &'static str| {
+        Arc::new(
+            LashProcessWorkflowImpl::new(
+                Arc::clone(&runner),
+                Arc::clone(&registry),
+                Arc::clone(&stores.continuations),
+                ingress.clone(),
+                Arc::new(lash_core::attachments::NoopAttachmentReferrers),
+                test_restate_authority_id(),
+                lash_core::engine::BuildGeneration::for_test(generation),
+                &crate::services::DEFAULT_NAMESPACE,
+            )
+            .with_retry_max_attempts(MAX_ATTEMPTS)
+            .serve(),
+        )
+    };
+    let (recorded, swapped) = (build("G_a"), build("G_b"));
+    let current = Arc::new(Mutex::new(Arc::clone(&recorded)));
+    server
+        .register(
+            Endpoint::builder()
+                .bind(swappable(Arc::clone(&current)))
+                .build(),
+        )
+        .await
+        .expect("register the deployment");
+
+    let process_id = registry
+        .register_process(executed_registration())
+        .await
+        .expect("register the process")
+        .id;
+    // The successor dies once, before the command after its sentinel, and
+    // the deployment's code is swapped as it dies.
+    let successor_key = crate::process::process_segment_workflow_key(&process_id, 1);
+    server.crash_on(
+        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeCommand {
+            index: 2,
+        })
+        .service("LashProcessWorkflow")
+        .handler("run")
+        .key(successor_key.clone()),
+    );
+    let crashes = lash_restate_test::CrashCount::new();
+    assert!(
+        server.on_crash(crashes.listener_with({
+            let current = Arc::clone(&current);
+            let swapped = Arc::clone(&swapped);
+            move |_| *current.lock_recover() = Arc::clone(&swapped)
+        })),
+        "the law's crash listener is the server's only one"
+    );
+    let generation = lash_core::engine::BuildGeneration::for_test("G_a");
+    ingress
+        .send_lash_workflow(
+            "LashProcessWorkflow",
+            &crate::process::process_segment_workflow_key(&process_id, 0),
+            "run",
+            &RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
+                process_id: process_id.clone(),
+                registration: executed_registration(),
+                execution_context: ProcessExecutionContext::default(),
+                segment_ordinal: 0,
+                sender_generation: generation.clone(),
+            }),
+        )
+        .await
+        .expect("send segment 0");
+    let target = format!("LashProcessWorkflow/{successor_key}/run");
+    wait_for(&server, &target, |status| status == "paused").await;
+    assert_eq!(crashes.get(), 1, "the successor died once");
+    assert_eq!(
+        *runner.entries.lock_recover(),
+        [0],
+        "the successor never reached its runner"
+    );
+    let invocation = server
+        .invocations()
+        .into_iter()
+        .find(|view| view.target == target)
+        .expect("the successor's invocation");
+    let record = registry
+        .get_process(&process_id)
+        .await
+        .expect("read the process")
+        .expect("the process");
+    let park = record.park().expect("the refused replay parks the process");
+    assert!(
+        matches!(
+            park.reason,
+            lash_core::store::ParkReason::RetiredGeneration { .. }
+        ) && park.build_generation.as_ref() == Some(&generation),
+        "the park is the shape a refused successor's is: {park:?}"
+    );
+    assert_eq!(
+        stores
+            .continuations
+            .segment_start(&lash_core::ProcessSegmentKey::new(process_id.clone(), 1))
+            .await
+            .expect("read the successor's start"),
+        None,
+        "the successor has no start marker"
+    );
+    assert_eq!(
+        park.engine,
+        Some(lash_core::store::EnginePark::new(invocation.id.clone())),
+        "the park names the invocation that holds the successor's journal"
+    );
+
+    // Neither the re-send nor the drain's wake sends the segment again.
+    let port = crate::process::RestateProcessIngressRunner::new(
+        connection,
+        Arc::clone(&registry),
+        Arc::clone(&stores.continuations),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+    );
+    assert!(
+        !lash_core::ProcessWorkSubstrate::resend_refused_successor(&port, &process_id)
+            .await
+            .expect("the re-send reads the stores"),
+        "a successor its own invocation still holds is not the re-send's"
+    );
+    lash_core::ProcessWorkSubstrate::deliver_hand_over(&port, &process_id, &generation)
+        .await
+        .expect("the drain's wake is delivered");
+    let runs: Vec<_> = server
+        .invocations()
+        .into_iter()
+        .filter(|view| view.target.ends_with(&format!("/{successor_key}/run")))
+        .collect();
+    assert_eq!(
+        runs.len(),
+        1,
+        "the successor has the one invocation its sender sent: {runs:#?}"
+    );
+
+    // Back on a build of the recorded generation, the kept invocation
+    // resumes and the successor runs once.
+    *current.lock_recover() = recorded;
+    assert_eq!(server.resume(&invocation.id), Some(true), "resume");
+    wait_for(&server, &target, |status| status == "completed").await;
+    assert_eq!(
+        *runner.entries.lock_recover(),
+        [0, 1],
+        "the successor ran once"
+    );
+    let record = registry
+        .get_process(&process_id)
+        .await
+        .expect("read the process")
+        .expect("the process");
+    assert_eq!(
+        record.outcome(),
+        Some(process_success(serde_json::json!("ended in its successor"))),
+    );
+}

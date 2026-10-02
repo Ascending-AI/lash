@@ -160,7 +160,14 @@ pub async fn reconcile_once(
                 bounded_arm(
                     parts.clock,
                     deadline,
-                    drain_hand_over_slot(&processes, cursor.drain.as_ref(), page),
+                    drain_hand_over_slot(
+                        &processes,
+                        DrainHandOverCursor {
+                            wake: cursor.drain.as_ref(),
+                            resend: cursor.resend.as_ref(),
+                        },
+                        page,
+                    ),
                 )
                 .await,
             ),
@@ -198,9 +205,11 @@ pub async fn reconcile_once(
             Ok(hand_over) => {
                 report.drain_hand_over = hand_over.pass;
                 report.next.drain = hand_over.next;
+                report.next.resend = hand_over.next_resend;
             }
             Err(error) => {
                 report.next.drain = cursor.drain.clone();
+                report.next.resend = cursor.resend.clone();
                 report.failures.push(ReconcileFailure {
                     arm: ReconcileArm::DrainHandOver,
                     error,
@@ -288,13 +297,25 @@ async fn bounded_arm<T, E: std::fmt::Display>(
 /// What one pass of the drain hand-over slot did, and where the next resumes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DrainHandOverPass {
-    /// Wakes delivered (`handled`) and wakes that failed and wait for the
-    /// next pass (`deferred`).
+    /// Wakes and re-sends delivered (`handled`) and ones that failed and
+    /// wait for the next pass (`deferred`).
     pub pass: SlotPass,
     /// The last process this pass woke when it stopped at its page bound, with
     /// its generation; `None` when it read every draining generation to the
     /// end, so the next pass starts over.
     pub next: Option<(crate::engine::BuildGeneration, crate::ProcessId)>,
+    /// The last parked process the re-send scan read when it stopped at its
+    /// page bound; `None` when it read every park, so the next pass starts
+    /// over.
+    pub next_resend: Option<(u64, crate::ProcessId)>,
+}
+
+/// Where a pass of the drain hand-over slot resumes: the last process the
+/// previous pass woke, and the last park its re-send scan read.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrainHandOverCursor<'a> {
+    pub wake: Option<&'a (crate::engine::BuildGeneration, crate::ProcessId)>,
+    pub resend: Option<&'a (u64, crate::ProcessId)>,
 }
 
 /// **FIG-3799 slot.** Wake the live processes of every draining generation
@@ -315,28 +336,37 @@ pub struct DrainHandOverPass {
 /// restamps it with the newest generation, or once it ends. One failed wake
 /// or re-send is logged and counted deferred, never failing the page; the
 /// next pass that reaches it tries again.
+///
+/// The pass then re-sends every other refused successor
+/// ([`resend_refused_successors`]): a refusal needs no drain mark to be
+/// moved, and the leader's own generation's refusals are moved too.
 pub async fn drain_hand_over_slot(
     processes: &ReconcileProcesses<'_>,
-    after: Option<&(crate::engine::BuildGeneration, crate::ProcessId)>,
+    after: DrainHandOverCursor<'_>,
     page: NonZeroUsize,
 ) -> Result<DrainHandOverPass, StoreError> {
     let draining = processes.drain.draining_generations().await?;
     let mut report = DrainHandOverPass::default();
     let mut remaining = page.get();
+    // The generations whose refused successors the wake loop re-sends.
+    let mut woken = Vec::new();
+    let mut wakes_ended = true;
     for marked in draining {
         let generation = marked.generation;
         if &generation == processes.generation {
             continue;
         }
+        woken.push(generation.clone());
         // Generations are visited in order; the cursor's generation resumes
         // after its process, an earlier one was finished last pass.
-        let resume = match after {
+        let resume = match after.wake {
             Some((cursor, _)) if generation < *cursor => continue,
             Some((cursor, process)) if generation == *cursor => Some(process),
             _ => None,
         };
         let Some(limit) = NonZeroUsize::new(remaining) else {
-            break;
+            wakes_ended = false;
+            continue;
         };
         let live = processes
             .drain
@@ -363,11 +393,89 @@ pub async fn drain_hand_over_slot(
             report.next = Some((generation.clone(), process_id));
         }
         if remaining == 0 {
-            return Ok(report);
+            wakes_ended = false;
         }
     }
-    // Every draining generation was read to its end: the next pass starts
-    // over.
-    report.next = None;
+    if wakes_ended {
+        // Every draining generation was read to its end: the next pass
+        // starts over.
+        report.next = None;
+    }
+    let resent =
+        resend_refused_successors(processes, &woken, after.resend, remaining.max(1)).await?;
+    report.pass.handled += resent.pass.handled;
+    report.pass.deferred += resent.pass.deferred;
+    report.next_resend = resent.next_resend;
+    Ok(report)
+}
+
+/// Re-send the refused successors the wake loop does not reach (FIG-4750
+/// residuals 2 and 4, FIG-4739): the processes parked `RetiredGeneration`
+/// for a generation that is not marked draining, or that is this
+/// deployment's own. At most `page` parks are read, in park order from
+/// `after`.
+///
+/// A successor the newest build refused can only run on a build of the
+/// generation that sent it, so nothing is gained by leaving it parked until
+/// an operator marks that generation draining, and the build that holds the
+/// recovery lease moves its own generation's refusals like any other's. The
+/// engine decides which parks are refusals
+/// ([`ProcessWorkSubstrate::resend_refused_successor`]): a park that names an
+/// execution the engine still holds, or whose successor already started, is
+/// left as it is. A generation in `woken` was served by the wake loop this
+/// pass, which re-sends through the same engine call.
+async fn resend_refused_successors(
+    processes: &ReconcileProcesses<'_>,
+    woken: &[crate::engine::BuildGeneration],
+    after: Option<&(u64, crate::ProcessId)>,
+    page: usize,
+) -> Result<DrainHandOverPass, StoreError> {
+    let mut report = DrainHandOverPass::default();
+    let Some(limit) = NonZeroUsize::new(page) else {
+        return Ok(report);
+    };
+    let parked = processes
+        .registry
+        .list_parked_processes(&crate::store::ProcessParkQuery {
+            reasons: Some(std::collections::BTreeSet::from([
+                crate::store::ParkReasonCode::RetiredGeneration,
+            ])),
+            parked_at_or_before_ms: None,
+            after: after.cloned(),
+            limit,
+        })
+        .await
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let read = parked.len();
+    for record in parked {
+        let Some(park) = record.park() else {
+            continue;
+        };
+        report.next_resend = Some((park.since_ms, record.id.clone()));
+        let refused_for = park
+            .build_generation
+            .as_ref()
+            .filter(|generation| park.engine.is_none() && !woken.contains(generation));
+        let Some(generation) = refused_for else {
+            continue;
+        };
+        match processes.port.resend_refused_successor(&record.id).await {
+            Ok(true) => report.pass.handled += 1,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(
+                    process_id = record.id.as_str(),
+                    generation = generation.as_str(),
+                    error = %error,
+                    "the re-send of a refused successor failed; a later pass sends it again"
+                );
+                report.pass.deferred += 1;
+            }
+        }
+    }
+    if read < page {
+        // Every park was read: the next pass starts over.
+        report.next_resend = None;
+    }
     Ok(report)
 }

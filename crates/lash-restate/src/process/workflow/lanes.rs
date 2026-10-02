@@ -17,7 +17,7 @@ use super::super::{
 };
 use super::{LashProcessWorkflowImpl, step_fault};
 use crate::controller::RestateControllerContext as _;
-use crate::services::{Lane, ServiceRoute};
+use crate::services::{Lane, LashService, ServiceRoute};
 
 /// The journal name of the step that decides whether this build takes a
 /// segment another build sent to the stable lane (FIG-3795 S6).
@@ -42,6 +42,19 @@ impl<R> LashProcessWorkflowImpl<R>
 where
     R: RestateProcessRunner,
 {
+    /// The route this segment sends its successor under. On the stable lane
+    /// that is the stable lane: the next segment runs on the newest build. A
+    /// segment on a generation lane is one the newest build refused
+    /// (FIG-4750), so its successor goes to the same lane: the stable lane
+    /// would only refuse it again and leave it parked until the next re-send
+    /// (FIG-4739).
+    pub(super) fn successor_route(&self) -> ServiceRoute {
+        match self.route.lane() {
+            Lane::Generation(_) => self.route.clone(),
+            Lane::Stable => self.route.namespace().stable(LashService::ProcessWorkflow),
+        }
+    }
+
     /// Refuse a journal the generation sentinel read back from another build
     /// (FIG-3795 §4.4): the code behind this invocation's pinned deployment
     /// was swapped. Nothing past the sentinel is replayed. The process parks
@@ -54,6 +67,7 @@ where
         &self,
         process_id: Option<&ProcessId>,
         recorded: &lash_core::engine::BuildGeneration,
+        invocation_id: &str,
     ) -> HandlerError {
         let message = crate::sentinel::retired_generation_message(
             &self.route.name(),
@@ -66,7 +80,11 @@ where
                     generation: None,
                     message: message.clone(),
                 },
-                engine: None,
+                // The invocation keeps its journal and its workflow key: the
+                // park names it, so nothing takes the park for a successor
+                // the newest build refused and sends the segment a second
+                // time (FIG-4739).
+                engine: Some(lash_core::store::EnginePark::new(invocation_id)),
                 build_generation: Some(recorded.clone()),
             };
             if let Err(error) = park_for_generation(&self.registry, process_id, write).await {

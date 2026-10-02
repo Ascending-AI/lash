@@ -423,6 +423,15 @@ impl World {
     /// port over the deployment's ingress and stores, as a leader that just
     /// took the lease builds it.
     async fn drain_pass(&self) -> lash_core::drive::DrainHandOverPass {
+        self.drain_pass_led_by(generation("N+1")).await
+    }
+
+    /// [`Self::drain_pass`], with the recovery lease held by a build of
+    /// `own`.
+    async fn drain_pass_led_by(
+        &self,
+        own: lash_core::engine::BuildGeneration,
+    ) -> lash_core::drive::DrainHandOverPass {
         let port = crate::process::RestateProcessIngressRunner::new(
             self.connection.clone(),
             Arc::clone(&self.registry),
@@ -430,7 +439,6 @@ impl World {
             lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         );
         let drain = self.stores.generation_drain();
-        let own = generation("N+1");
         lash_core::drive::drain_hand_over_slot(
             &lash_core::drive::ReconcileProcesses {
                 registry: self.registry.as_ref(),
@@ -438,7 +446,7 @@ impl World {
                 drain: drain.as_ref(),
                 generation: &own,
             },
-            None,
+            lash_core::drive::DrainHandOverCursor::default(),
             std::num::NonZeroUsize::new(16).expect("non-zero"),
         )
         .await
@@ -886,6 +894,109 @@ async fn a_refused_successor_of_a_gone_generation_keeps_its_work(world: World) {
     world.finish().await;
 }
 
+/// FIG-4750 residuals 2 and 4 (FIG-4739): a refused successor is re-sent
+/// with no drain mark, by a leader of its own generation.
+///
+/// The refusal is the whole reason to move the successor: only a build of
+/// its sender's generation can run it. Nothing here marks N draining, and
+/// the recovery lease is held by build N itself. The pass still re-sends
+/// segment 2 to N's lane, and the process ends there, having run once.
+async fn a_refused_successor_is_re_sent_with_no_drain_mark_by_its_own_generation(world: World) {
+    let (process_id, awaiter) = world.start_process().await;
+    world.refused(&process_id).await;
+
+    let pass = world.drain_pass_led_by(generation("N")).await;
+    assert_eq!(
+        (pass.pass.handled, pass.pass.deferred),
+        (1, 0),
+        "the pass re-sent the refused successor: {pass:?}"
+    );
+    assert_eq!(
+        ended(awaiter).await,
+        process_success(serde_json::json!({ "build": "N" })),
+        "the process ended on build N"
+    );
+    assert_eq!(
+        world.runs_of(SUCCESSOR),
+        vec![SegmentRun {
+            build: "N",
+            ordinal: SUCCESSOR,
+            admitted_by: Some(generation("N")),
+        }],
+        "the re-sent successor ran once, on build N"
+    );
+    let lane = world.lane();
+    let runs = world.successor_runs(&process_id).await;
+    assert_eq!(
+        runs.iter()
+            .filter(|run| run.target_service_name == lane)
+            .count(),
+        1,
+        "one re-sent invocation: {runs:?}"
+    );
+    let pass = world.drain_pass_led_by(generation("N")).await;
+    assert_eq!(
+        (pass.pass.handled, pass.pass.deferred),
+        (0, 0),
+        "an ended process leaves the pass nothing: {pass:?}"
+    );
+    world.finish().await;
+}
+
+/// FIG-4750 residual 1 (FIG-4739): a segment on a generation lane sends its
+/// successor to the same lane.
+///
+/// The process runs one segment more on build N. Its re-sent segment 2
+/// crosses a boundary on N's lane, and segment 3 is sent straight to that
+/// lane: the newest build never sees it, so it is never refused, the process
+/// never parks again, and no further drain pass is needed for it to end.
+async fn a_segment_on_a_generation_lane_sends_its_successor_to_its_own_lane(world: World) {
+    world.runner_n.runs_segments(SEGMENTS + 1);
+    let (process_id, awaiter) = world.start_process().await;
+    world.refused(&process_id).await;
+    world.mark_draining().await;
+    let pass = world.drain_pass().await;
+    assert_eq!((pass.pass.handled, pass.pass.deferred), (1, 0), "{pass:?}");
+
+    // No second pass runs: the process ends on N by itself.
+    assert_eq!(
+        ended(awaiter).await,
+        process_success(serde_json::json!({ "build": "N" })),
+        "the process ended on build N"
+    );
+    let last = SUCCESSOR + 1;
+    assert_eq!(
+        world.runs_of(last),
+        vec![SegmentRun {
+            build: "N",
+            ordinal: last,
+            admitted_by: Some(generation("N")),
+        }],
+        "the lane segment's successor ran once, on build N"
+    );
+    let lane = world.lane();
+    let runs = world
+        .admin
+        .segment_runs(
+            &crate::services::DEFAULT_NAMESPACE,
+            &[process_segment_workflow_key(&process_id, last)],
+        )
+        .await
+        .expect("read the last segment's runs");
+    assert_eq!(runs.len(), 1, "the successor was sent once: {runs:?}");
+    assert_eq!(
+        runs[0].target_service_name, lane,
+        "the successor went straight to its generation's lane: {runs:?}"
+    );
+    let record = world.record(&process_id).await;
+    assert_eq!(
+        record.park().map(|park| park.attempts),
+        None,
+        "nothing refused the lane segment's successor: {record:?}"
+    );
+    world.finish().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_refused_successor_completes_on_its_lane_and_the_generation_drains_sqlite() {
     let world = World::start(Fixture::sqlite().await, false, false).await;
@@ -940,4 +1051,38 @@ async fn live_restate_a_refused_successor_completes_recovers_and_the_generation_
     a_refused_successor_completes_on_its_lane_and_the_generation_drains(world).await;
     let world = World::start(Fixture::sqlite().await, true, false).await;
     a_crash_between_the_refusal_and_the_re_send_recovers(world).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_successor_is_re_sent_with_no_drain_mark_by_its_own_generation_sqlite() {
+    a_refused_successor_is_re_sent_with_no_drain_mark_by_its_own_generation(
+        World::start(Fixture::sqlite().await, false, false).await,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+async fn a_refused_successor_is_re_sent_with_no_drain_mark_by_its_own_generation_postgres() {
+    a_refused_successor_is_re_sent_with_no_drain_mark_by_its_own_generation(
+        World::start(Fixture::postgres().await, false, false).await,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_segment_on_a_generation_lane_sends_its_successor_to_its_own_lane_sqlite() {
+    a_segment_on_a_generation_lane_sends_its_successor_to_its_own_lane(
+        World::start(Fixture::sqlite().await, false, false).await,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+async fn a_segment_on_a_generation_lane_sends_its_successor_to_its_own_lane_postgres() {
+    a_segment_on_a_generation_lane_sends_its_successor_to_its_own_lane(
+        World::start(Fixture::postgres().await, false, false).await,
+    )
+    .await;
 }
