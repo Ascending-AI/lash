@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT / "scripts/ci"))
 import ci_plan  # noqa: E402
 import repository_gate_commands  # noqa: E402
 LIVE_STORES = (
-    "LASH_POSTGRES_DATABASE_URL", "LASH_REQUIRE_POSTGRES", "LASH_S3_ENDPOINT",
+    "LASH_POSTGRES_DATABASE_URL", "LASH_S3_ENDPOINT",
     "LASH_REQUIRE_S3",
 )
 # `LASH_QUICK`: the opt-in iteration knob for the heavy lanes.

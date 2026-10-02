@@ -146,7 +146,6 @@ service_test_env() {
     pg*)
       TEST_ENV=(
         "LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:${port}/lash"
-        "LASH_REQUIRE_POSTGRES=1"
         "LASH_POSTGRES_SLOT_COUNT=${POSTGRES_SLOT_COUNT}"
       )
       ;;

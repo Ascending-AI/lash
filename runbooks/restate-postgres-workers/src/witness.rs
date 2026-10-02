@@ -231,11 +231,12 @@ mod connection_budget_tests {
     use sqlx::Connection;
 
     #[tokio::test]
+    #[ignore = "requires PostgreSQL witness database and WITNESS_CONNECTIONS_PER_PROCESS=2"]
     async fn configured_witness_pool_counts_connections_under_load() {
-        let Ok(url) = std::env::var(WITNESS_DATABASE_URL_ENV) else {
-            assert_ne!(std::env::var("LASH_REQUIRE_POSTGRES").as_deref(), Ok("1"));
-            return;
-        };
+        let url = std::env::var(WITNESS_DATABASE_URL_ENV)
+            .ok()
+            .filter(|url| !url.trim().is_empty())
+            .expect("PostgreSQL witness test requires a non-empty WITNESS_DATABASE_URL");
         assert_eq!(
             std::env::var("WITNESS_CONNECTIONS_PER_PROCESS").as_deref(),
             Ok("2")
@@ -276,5 +277,31 @@ mod connection_budget_tests {
         assert!(pool.size() <= 2);
         println!("witness connections=2 concurrent requests=32 configured cap=2");
         pool.close().await;
+    }
+    #[test]
+    fn postgres_variants_never_pass_without_a_database_url() {
+        let executable = std::env::current_exe().expect("test executable");
+        let law = "witness::connection_budget_tests::configured_witness_pool_counts_connections_under_load";
+        for url in [None, Some(""), Some(" \t ")] {
+            let mut command = std::process::Command::new(&executable);
+            command
+                .args(["--exact", law, "--include-ignored", "--nocapture"])
+                .env_remove("WITNESS_DATABASE_URL");
+            if let Some(url) = url {
+                command.env("WITNESS_DATABASE_URL", url);
+            }
+            let output = command.output().expect("run PostgreSQL variant");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stdout.contains("running 1 test"), "{stdout}\n{stderr}");
+            assert!(
+                !output.status.success() && stdout.contains("0 passed; 1 failed"),
+                "{law} with URL {url:?} passed vacuously: {stdout}\n{stderr}"
+            );
+            assert!(
+                stderr.contains("WITNESS_DATABASE_URL"),
+                "{stdout}\n{stderr}"
+            );
+        }
     }
 }

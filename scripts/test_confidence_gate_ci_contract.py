@@ -220,7 +220,6 @@ entry = {
         name: os.environ.get(name)
         for name in (
             "LASH_POSTGRES_DATABASE_URL",
-            "LASH_REQUIRE_POSTGRES",
             "LASH_CROSS_BACKEND_CASES",
         )
     },
@@ -1157,8 +1156,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertIn("kiln test --test_timeout=1200 --test_output=all", body)
             self.assertIn(
                 "service=(--local-test-execution --no-test-cache "
-                "--test_env=LASH_POSTGRES_DATABASE_URL "
-                "--test_env=LASH_REQUIRE_POSTGRES=1)",
+                "--test_env=LASH_POSTGRES_DATABASE_URL)",
                 body,
             )
         for leaf, body in (
@@ -1199,7 +1197,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "kiln test --local-test-execution --no-test-cache", just_cross_backend
         )
         self.assertIn("--test_env=LASH_POSTGRES_DATABASE_URL", just_cross_backend)
-        self.assertIn("--test_env=LASH_REQUIRE_POSTGRES=1", just_cross_backend)
         self.assertIn("--test_output=all", just_cross_backend)
         self.assertIn("--test_timeout=1200", just_cross_backend)
 
@@ -1306,7 +1303,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             environment["PATH"] = str(temporary) + os.pathsep + environment["PATH"]
             environment["KILN_STUB_LOG"] = str(calls)
             environment.pop("LASH_POSTGRES_DATABASE_URL", None)
-            environment.pop("LASH_REQUIRE_POSTGRES", None)
             for name in (
                 "LASH_STORE_CONTRACT_PROPTEST_SEED",
                 "LASH_SESSION_GRAPH_PROPTEST_SEED",
@@ -1417,7 +1413,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                     "--local-test-execution",
                     "--no-test-cache",
                     "--test_env=LASH_POSTGRES_DATABASE_URL",
-                    "--test_env=LASH_REQUIRE_POSTGRES=1",
                     "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES=9",
                     "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED",
                 ):
@@ -1440,7 +1435,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 "--local-test-execution",
                 "--no-test-cache",
                 "--test_env=LASH_POSTGRES_DATABASE_URL",
-                "--test_env=LASH_REQUIRE_POSTGRES=1",
                 "--test_env=LASH_CROSS_BACKEND_CASES=5",
                 "--test_env=LASH_CROSS_BACKEND_SEED=17",
                 "--test_arg=--include-ignored",
@@ -1740,9 +1734,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         workspace = shell_function_body(push_gate, "run_workspace_tests")
 
         self.assertIn("--test cross_backend_store_differential", postgres)
-        self.assertIn("LASH_REQUIRE_POSTGRES=1", postgres)
+        self.assertIn("LASH_POSTGRES_DATABASE_URL", postgres)
         self.assertIn(
-            "env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES",
+            "env -u LASH_POSTGRES_DATABASE_URL",
             workspace,
         )
 
@@ -2651,8 +2645,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         for workflow_with_postgres in (perf, release):
             self.assertIn("LASH_POSTGRES_DATABASE_URL:", workflow_with_postgres)
 
-        # These two legs run no `cargo test`, so they carry no
-        # `LASH_REQUIRE_POSTGRES`: their Postgres service exists for one
+        # These two legs provision PostgreSQL for one
         # consumer, the store-hardening perf scenario, which refuses to run
         # without the URL instead of degrading to a SQLite-only measurement.
         # Pin both halves — a deleted scenario would leave the service
@@ -2993,7 +2986,7 @@ finalize_mutation_gate
             'LASH_POSTGRES_DATABASE_URL="$mutation_postgres_database_url"',
             postgres_mutation,
         )
-        self.assertIn("LASH_REQUIRE_POSTGRES=1", postgres_mutation)
+        self.assertIn("LASH_POSTGRES_DATABASE_URL", postgres_mutation)
         self.assertIn('"$@" --jobs "$mutation_jobs"', postgres_mutation)
 
         derive_jobs = shell_function_body(gate, "derive_mutation_jobs")
@@ -3085,30 +3078,12 @@ derive_mutation_jobs() {{
         push_gate = PUSH_GATE.read_text(encoding="utf-8")
         postgres_store_job = workflow_job_block(workflow, "postgres-store")
 
-        self.assertIn('LASH_REQUIRE_POSTGRES: "1"', workflow)
         self.assertIn('LASH_CROSS_BACKEND_CASES: "4"', postgres_store_job)
 
-        # Every live-Postgres suite needs both settings, on both dispatch paths.
-        # Without them the suites short-circuit on the absent URL, print a skip
-        # reason and report `ok` — the cross-backend differential reports
-        # "ok in 0.00s" with `compared_backends=[]`, so losing the URL from one
-        # suite silently returns the differential to comparing nothing.
-        #
-        # The require flag is supplied once, at job level, so no step can drop
-        # it. The connection URL cannot live there: `scripts/ci/with-service.sh`
-        # publishes the database on a free ephemeral port per step, so a
-        # job-level literal would name a port nothing listens on. Instead the
-        # wrapper that chooses the port exports the URL, and every suite in this
-        # job runs inside it — `scripts/test_with_service.py` refuses a store
-        # suite that is not wrapped, which is the same "no step can lose it"
-        # property enforced at its source rather than by inheritance. Either
-        # way a Buck2 test spawn inherits nothing from the client environment,
-        # so the shared `buck2_test` helper still forwards both by name — and
-        # that forwarding is what keeps the PG major an execution-only input,
-        # outside every compile action key.
+        # The service wrapper chooses a private database port and forwards the URL
+        # to each selected ignored variant. Its fixture fails if that URL is lost.
         postgres_job_env = yaml.safe_load(workflow)["jobs"]["postgres-store"]["env"]
         self.assertNotIn("LASH_POSTGRES_DATABASE_URL", postgres_job_env)
-        self.assertEqual("1", str(postgres_job_env["LASH_REQUIRE_POSTGRES"]))
         wrapper = (ROOT / "scripts" / "ci" / "with-service.sh").read_text(
             encoding="utf-8"
         )
@@ -3186,13 +3161,11 @@ derive_mutation_jobs() {{
             )
         ]
         self.assertGreater(len(conformance_calls), 0)
-        self.assertEqual(
-            len(conformance_calls),
-            sum(
-                "LASH_REQUIRE_POSTGRES=1" in command
-                for command in conformance_calls
-            ),
-        )
+        store_suites = STORE_TESTS.read_text(encoding="utf-8")
+        for suite in ("pg-artifact-referrers", "pg-attachment-referrers"):
+            selection = next(line for line in store_suites.splitlines() if f"[{suite}]=" in line)
+            self.assertIn("|::postgres|", selection)
+            self.assertIn("include-ignored", selection)
 
     def test_buck2_store_runtime_flags_and_reports_are_forwarded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -3201,7 +3174,6 @@ derive_mutation_jobs() {{
             runner_temp = temporary / "runner-temp"
             environment = {
                 "LASH_POSTGRES_DATABASE_URL": "postgres://fixture/db",
-                "LASH_REQUIRE_POSTGRES": "1",
                 "LASH_CROSS_BACKEND_CASES": "4",
             }
             first, = run_isolated_store_suite(
@@ -3233,7 +3205,6 @@ derive_mutation_jobs() {{
             forwarded,
             {
                 "LASH_POSTGRES_DATABASE_URL",
-                "LASH_REQUIRE_POSTGRES",
                 "LASH_CROSS_BACKEND_CASES",
             },
         )

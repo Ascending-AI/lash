@@ -27,109 +27,21 @@ def write_workflow(root: Path, name: str, body: str) -> Path:
     return path
 
 
-class RequireFlagRuleTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._temp = tempfile.TemporaryDirectory()
-        self.root = Path(self._temp.name)
-        self.addCleanup(self._temp.cleanup)
-
-    def test_job_env_without_require_flag_fails(self) -> None:
-        write_workflow(
-            self.root,
-            "release.yml",
-            """
-name: Release
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    env:
-      LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
-    steps:
-      - run: cargo test -p lash-internal-postgres-store
-""",
-        )
-        violations = checker.check_repository(self.root)
-        self.assertEqual(len(violations), 1, violations)
-        self.assertIn("LASH_REQUIRE_POSTGRES is unset", violations[0].detail)
-        self.assertIn("job `verify` env", violations[0].location)
-
-    def test_job_env_with_require_flag_passes(self) -> None:
-        write_workflow(
-            self.root,
-            "release.yml",
-            """
-name: Release
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    env:
-      LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
-      LASH_REQUIRE_POSTGRES: "1"
-    steps:
-      - run: cargo test -p lash-internal-postgres-store
-""",
-        )
-        self.assertEqual(checker.check_repository(self.root), [])
-
-    def test_require_flag_set_to_zero_fails(self) -> None:
-        write_workflow(
-            self.root,
-            "ci.yml",
-            """
+class PostgreSqlUrlContractTests(unittest.TestCase):
+    def test_postgres_url_needs_no_separate_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_workflow(root, "ci.yml", """
 name: CI
 jobs:
   verify:
-    runs-on: ubuntu-latest
     env:
       LASH_POSTGRES_DATABASE_URL: postgres://lash@localhost/lash
-      LASH_REQUIRE_POSTGRES: "0"
     steps:
-      - run: cargo test
-""",
-        )
-        violations = checker.check_repository(self.root)
-        self.assertEqual(len(violations), 1, violations)
-        self.assertIn("LASH_REQUIRE_POSTGRES is '0'", violations[0].detail)
+      - run: cargo test -p lash-internal-postgres-store
+""")
+            self.assertEqual(checker.check_repository(root), [])
 
-    def test_step_env_inherits_the_flag_from_the_job(self) -> None:
-        write_workflow(
-            self.root,
-            "ci.yml",
-            """
-name: CI
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    env:
-      LASH_REQUIRE_POSTGRES: "1"
-    steps:
-      - name: Test store
-        run: cargo test
-        env:
-          LASH_POSTGRES_DATABASE_URL: postgres://lash@localhost/lash
-""",
-        )
-        self.assertEqual(checker.check_repository(self.root), [])
-
-    def test_step_env_without_an_enclosing_flag_fails(self) -> None:
-        write_workflow(
-            self.root,
-            "ci.yml",
-            """
-name: CI
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Test store
-        run: cargo test
-        env:
-          LASH_POSTGRES_DATABASE_URL: postgres://lash@localhost/lash
-""",
-        )
-        violations = checker.check_repository(self.root)
-        self.assertEqual(len(violations), 1, violations)
-        self.assertIn("`Test store`", violations[0].location)
 
 class IgnoredSuiteRuleTests(unittest.TestCase):
     def setUp(self) -> None:

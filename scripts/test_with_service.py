@@ -249,13 +249,12 @@ class WithServiceBehaviour(unittest.TestCase):
                     binary = directory / "fake-suite-python"
                     binary.write_text(
                         '#!/usr/bin/env bash\n'
-                        'printf "%s\\n" "$*" "${LASH_POSTGRES_DATABASE_URL:-}" "${LASH_REQUIRE_POSTGRES:-}"\n'
+                        'printf "%s\\n" "$*" "${LASH_POSTGRES_DATABASE_URL:-}"\n'
                         f"exit {exit_code}\n", encoding="utf-8",
                     )
                     binary.chmod(0o755)
                     env = docker.env()
                     env.pop("LASH_POSTGRES_DATABASE_URL", None)
-                    env.pop("LASH_REQUIRE_POSTGRES", None)
                     results = []
 
                     def execute(command, **kwargs):
@@ -270,7 +269,7 @@ class WithServiceBehaviour(unittest.TestCase):
                     result = results[0]
                     self.assertEqual(1 if exit_code else 0, status, result.stderr)
                     self.assertIn(f"restate_suite.py suite {suite} --leg replay --keep-test-logs", result.stdout)
-                    self.assertRegex(result.stdout, r"postgres://lash:lash@127\.0\.0\.1:\d+/lash\n1\n")
+                    self.assertRegex(result.stdout, r"postgres://lash:lash@127\.0\.0\.1:\d+/lash\n")
                     self.assertTrue(any(call.startswith("rm --force") for call in docker.logged()))
 
     def test_effect_group_recipe_requires_postgres_before_both_legs(self) -> None:

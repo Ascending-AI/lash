@@ -61,7 +61,7 @@ buck2_test() {
   local test_env=()
   local name
   for name in \
-    LASH_POSTGRES_DATABASE_URL LASH_REQUIRE_POSTGRES \
+    LASH_POSTGRES_DATABASE_URL \
     LASH_REQUIRE_S3 LASH_S3_ENDPOINT LASH_S3_REGION LASH_S3_BUCKET \
     LASH_S3_ACCESS_KEY LASH_S3_SECRET_KEY LASH_CROSS_BACKEND_CASES; do
     if [[ -v "$name" ]]; then
@@ -176,8 +176,8 @@ declare -A uniform_store_suites=(
   [pg-facade-laws]="//crates/lash:lash__unit_test,//crates/lash:facade_host_wrappers__test,//crates/lash:integration__test,//crates/lash:replay_after_advance__test,//crates/lash:seam_proof_dialect__test|postgres|lash-runtime|--lib --bins --test facade_host_wrappers --test integration --test replay_after_advance --test seam_proof_dialect --features restate,rlm,sqlite,testing,typescript|cargo-test|ignored-only,nocapture,skip=postgres_live_restate,skip=live_postgres,skip=native_restate,skip=catalog_storm_native,skip=mcp_law_turn_failures_postgres_live"
   [pg-rlm-frame-open]="//crates/lash-protocol-rlm:frame_open_redrive__test|restate_double_postgres::|lash-internal-protocol-rlm|--test frame_open_redrive|cargo-test|include-ignored,nocapture"
   [pg-rlm-tool-call-limit]="//crates/lash-protocol-rlm:tool_batch_parallelism__test|restate_double_postgres::|lash-internal-protocol-rlm|--test tool_batch_parallelism|cargo-test|include-ignored,nocapture"
-  [pg-artifact-referrers]="//crates/lash:artifact_referrers_evidence__test||lash-runtime|--test artifact_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|nocapture"
-  [pg-attachment-referrers]="//crates/lash:attachment_referrers_evidence__test||lash-runtime|--test attachment_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|nocapture"
+  [pg-artifact-referrers]="//crates/lash:artifact_referrers_evidence__test|::postgres|lash-runtime|--test artifact_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|include-ignored,nocapture"
+  [pg-attachment-referrers]="//crates/lash:attachment_referrers_evidence__test|::postgres|lash-runtime|--test attachment_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|include-ignored,nocapture"
   [pg-model-keys]="//crates/lash:model_keys__test||lash-runtime|--test model_keys --features restate,sqlite,testing|cargo-test|include-ignored,nocapture"
   [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads|lash-perf||nextest|include-ignored"
   [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|include-ignored"

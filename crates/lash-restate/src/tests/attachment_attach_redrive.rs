@@ -142,6 +142,12 @@ enum Engine {
     Live(LiveRestateBackend<dyn StoreSet>),
 }
 
+#[derive(Clone, Copy)]
+enum Backend {
+    Sqlite,
+    Postgres,
+}
+
 struct World {
     engine: Engine,
     acquisitions: Arc<Acquisitions>,
@@ -149,15 +155,9 @@ struct World {
 }
 
 impl World {
-    async fn new(live: bool) -> Self {
-        let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-            .ok()
-            .filter(|url| !url.is_empty());
-        assert!(
-            url.is_some() || std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-            "PostgreSQL is required"
-        );
-        let postgres = if let Some(url) = url {
+    async fn new(live: bool, backend: Backend) -> Self {
+        let postgres = if matches!(backend, Backend::Postgres) {
+            let url = lash_postgres_store::testing::required_database_url();
             let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
             let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                 .await
@@ -579,12 +579,12 @@ async fn prepare_delivery(world: &World) -> Prepared {
     }
 }
 
-async fn receiver_prune_law(live: bool) {
+async fn receiver_prune_law(live: bool, backend: Backend) {
     println!(
         "host load {}",
         std::fs::read_to_string("/proc/loadavg").expect("host load")
     );
-    let world = World::new(live).await;
+    let world = World::new(live, backend).await;
     let backend = world.backend();
     let registry = backend.process_registry();
     let Prepared {
@@ -726,17 +726,17 @@ async fn receiver_prune_law(live: bool) {
 
 #[tokio::test]
 async fn attachment_attach_redrive_after_receiver_prune_terminates() {
-    receiver_prune_law(false).await;
+    receiver_prune_law(false, Backend::Sqlite).await;
 }
 
 #[tokio::test]
 #[ignore = "requires live Restate; the attachment-attach suite runs this law"]
 async fn live_restate_attachment_attach_redrive_after_receiver_prune_terminates() {
-    receiver_prune_law(true).await;
+    receiver_prune_law(true, Backend::Sqlite).await;
 }
 
-async fn store_fault_law(live: bool, fault: Fault) {
-    let world = World::new(live).await;
+async fn store_fault_law(live: bool, fault: Fault, backend: Backend) {
+    let world = World::new(live, backend).await;
     let Prepared {
         referrer,
         id,
@@ -832,7 +832,7 @@ async fn store_fault_law(live: bool, fault: Fault) {
 #[tokio::test]
 async fn attachment_attach_compatibility_refusals_are_recorded() {
     for fault in [Fault::Incompatible, Fault::WriterFenced] {
-        store_fault_law(false, fault).await;
+        store_fault_law(false, fault, Backend::Sqlite).await;
     }
 }
 
@@ -840,17 +840,84 @@ async fn attachment_attach_compatibility_refusals_are_recorded() {
 #[ignore = "requires live Restate; the attachment-attach suite runs this law"]
 async fn live_restate_attachment_attach_compatibility_refusals_are_recorded() {
     for fault in [Fault::Incompatible, Fault::WriterFenced] {
-        store_fault_law(true, fault).await;
+        store_fault_law(true, fault, Backend::Sqlite).await;
     }
 }
 
 #[tokio::test]
 async fn attachment_attach_retries_only_transient_acquisition_faults() {
-    store_fault_law(false, Fault::Transient).await;
+    store_fault_law(false, Fault::Transient, Backend::Sqlite).await;
 }
 
 #[tokio::test]
 #[ignore = "requires live Restate; the attachment-attach suite runs this law"]
 async fn live_restate_attachment_attach_retries_only_transient_acquisition_faults() {
-    store_fault_law(true, Fault::Transient).await;
+    store_fault_law(true, Fault::Transient, Backend::Sqlite).await;
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL; select inside the service gate"]
+async fn attachment_attach_redrive_after_receiver_prune_terminates_postgres() {
+    receiver_prune_law(false, Backend::Postgres).await;
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL and live Restate; select inside the service gate"]
+async fn live_restate_attachment_attach_redrive_after_receiver_prune_terminates_postgres() {
+    receiver_prune_law(true, Backend::Postgres).await;
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL; select inside the service gate"]
+async fn attachment_attach_compatibility_refusals_are_recorded_postgres() {
+    for fault in [Fault::Incompatible, Fault::WriterFenced] {
+        store_fault_law(false, fault, Backend::Postgres).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL and live Restate; select inside the service gate"]
+async fn live_restate_attachment_attach_compatibility_refusals_are_recorded_postgres() {
+    for fault in [Fault::Incompatible, Fault::WriterFenced] {
+        store_fault_law(true, fault, Backend::Postgres).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL; select inside the service gate"]
+async fn attachment_attach_retries_only_transient_acquisition_faults_postgres() {
+    store_fault_law(false, Fault::Transient, Backend::Postgres).await;
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL and live Restate; select inside the service gate"]
+async fn live_restate_attachment_attach_retries_only_transient_acquisition_faults_postgres() {
+    store_fault_law(true, Fault::Transient, Backend::Postgres).await;
+}
+
+#[test]
+fn postgres_variants_never_pass_without_a_database_url() {
+    let executable = std::env::current_exe().expect("test executable");
+    let law = "tests::attachment_attach_redrive::attachment_attach_redrive_after_receiver_prune_terminates_postgres";
+    for url in [None, Some(""), Some(" \t ")] {
+        let mut command = std::process::Command::new(&executable);
+        command
+            .args(["--exact", law, "--include-ignored", "--nocapture"])
+            .env_remove("LASH_POSTGRES_DATABASE_URL");
+        if let Some(url) = url {
+            command.env("LASH_POSTGRES_DATABASE_URL", url);
+        }
+        let output = command.output().expect("run PostgreSQL variant");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stdout.contains("running 1 test"), "{stdout}\n{stderr}");
+        assert!(
+            !output.status.success() && stdout.contains("0 passed; 1 failed"),
+            "{law} with URL {url:?} passed vacuously: {stdout}\n{stderr}"
+        );
+        assert!(
+            stderr.contains("LASH_POSTGRES_DATABASE_URL"),
+            "{stdout}\n{stderr}"
+        );
+    }
 }

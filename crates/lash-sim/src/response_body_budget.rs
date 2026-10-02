@@ -223,7 +223,7 @@ fn assert_refusal(error: RestateHttpError) {
 }
 
 #[tokio::test]
-async fn response_body_budget_current_turn_path_sqlite_memory_file_and_postgres() {
+async fn response_body_budget_current_turn_path_sqlite_memory_and_file() {
     let config = lash_restate_test::ServerConfig::default();
     let memory = lash_restate_test::backend(0x4291, config.clone())
         .await
@@ -246,33 +246,40 @@ async fn response_body_budget_current_turn_path_sqlite_memory_file_and_postgres(
     .await
     .unwrap();
     witness(file, "sqlite-file").await;
-    if let Some(database) = crate::postgres_test_isolation::isolated_database().await {
-        let storage = lash_postgres_store::PostgresStorage::connect(database.url())
-            .await
-            .unwrap();
-        let attachments = tempfile::tempdir().unwrap();
-        let postgres = lash_restate_test::backend_with_store_set(
-            0x4293,
-            config,
-            lash_restate_test::DeploymentHooks::default(),
-            |clock| async {
-                Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
-                    &storage,
-                    Arc::new(lash::persistence::FileAttachmentStore::new(
-                        attachments.path(),
-                    )),
-                    lash_core::WakeDeliveryConfig::default(),
-                    clock,
-                )) as Arc<dyn lash_core::StoreSet>)
-            },
-        )
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+async fn response_body_budget_current_turn_path_postgres() {
+    let config = lash_restate_test::ServerConfig::default();
+    let database = crate::postgres_test_isolation::isolated_database().await;
+    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
         .await
         .unwrap();
-        witness(postgres, "postgres").await;
-        eprintln!("response body budget witnesses ran on SQLite memory/file and PostgreSQL");
-    } else {
-        eprintln!(
-            "response body budget witnesses ran on SQLite memory/file; PostgreSQL needs the service gate"
-        );
-    }
+    let attachments = tempfile::tempdir().unwrap();
+    let postgres = lash_restate_test::backend_with_store_set(
+        0x4293,
+        config,
+        lash_restate_test::DeploymentHooks::default(),
+        |clock| async {
+            Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                &storage,
+                Arc::new(lash::persistence::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
+                lash_core::WakeDeliveryConfig::default(),
+                clock,
+            )) as Arc<dyn lash_core::StoreSet>)
+        },
+    )
+    .await
+    .unwrap();
+    witness(postgres, "postgres").await;
+}
+
+#[test]
+fn postgres_variants_never_pass_without_a_database_url() {
+    crate::postgres_test_isolation::assert_requires_database_url(
+        "response_body_budget::response_body_budget_current_turn_path_postgres",
+    );
 }

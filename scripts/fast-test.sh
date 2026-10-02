@@ -30,7 +30,7 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
 
 # Implementer loops do not talk to live stores. CI owns Postgres/S3/E2E.
-unset LASH_POSTGRES_DATABASE_URL LASH_REQUIRE_POSTGRES \
+unset LASH_POSTGRES_DATABASE_URL \
   LASH_S3_ENDPOINT LASH_REQUIRE_S3
 
 base_rev=""

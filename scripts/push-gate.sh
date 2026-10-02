@@ -300,12 +300,12 @@ run_workspace_tests() {
   step "Workspace tests"
   if cargo nextest --version >/dev/null 2>&1; then
     # shellcheck disable=SC2086
-    env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
+    env -u LASH_POSTGRES_DATABASE_URL \
       cargo nextest run --workspace --locked ${ci_features}
   else
     echo "cargo-nextest is not installed; falling back to cargo test for local push gate." >&2
     # shellcheck disable=SC2086
-    env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
+    env -u LASH_POSTGRES_DATABASE_URL \
       cargo test --workspace --locked ${ci_features}
   fi
 }
@@ -336,20 +336,17 @@ run_postgres_conformance() {
 
   local database_url="postgres://lash:lash@127.0.0.1:${port}/lash"
   LASH_POSTGRES_DATABASE_URL="$database_url" \
-    LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-internal-postgres-store --locked
 
   step "Cross-backend store differential"
   if cargo nextest --version >/dev/null 2>&1; then
     LASH_POSTGRES_DATABASE_URL="$database_url" \
-      LASH_REQUIRE_POSTGRES=1 \
       LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}" \
       cargo nextest run -p lash-sim \
         --test cross_backend_store_differential \
         --locked -j1 --no-capture --run-ignored all
   else
     LASH_POSTGRES_DATABASE_URL="$database_url" \
-      LASH_REQUIRE_POSTGRES=1 \
       LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}" \
       cargo test -p lash-sim \
         --test cross_backend_store_differential \

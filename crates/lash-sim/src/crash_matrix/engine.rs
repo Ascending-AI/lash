@@ -11,6 +11,9 @@
 //! crash-matrix-restate-e2e` sets all of it. A live run holds one world at a
 //! time on its server: the test binary runs with `--test-threads=1`.
 //!
+//! The double uses SQLite by default. An explicitly selected PostgreSQL variant
+//! sets `LASH_CRASH_MATRIX_STORE=postgres` and requires the database URL.
+//!
 //! # How each fault lands on a live server
 //!
 //! A deployment kill is real on both engines: the deployment's host tasks
@@ -155,8 +158,10 @@ impl DoubleBackend {
         seed: u64,
         config: lash_restate_test::ServerConfig,
         hooks: lash_restate_test::DeploymentHooks,
+        postgres: bool,
     ) -> Result<Self, String> {
-        if let Some(database) = crate::postgres_test_isolation::isolated_database().await {
+        if postgres {
+            let database = crate::postgres_test_isolation::isolated_database().await;
             let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                 .await
                 .map_err(|error| error.to_string())?;
@@ -231,7 +236,19 @@ impl Engine {
                 // every cut.
                 config.retry.initial_interval = Duration::from_millis(1);
                 config.retry.max_interval = Duration::from_millis(10);
-                DoubleBackend::start(seed, config, hooks)
+                let postgres = match std::env::var("LASH_CRASH_MATRIX_STORE")
+                    .unwrap_or_default()
+                    .as_str()
+                {
+                    "" | "sqlite" => false,
+                    "postgres" => true,
+                    other => {
+                        return Err(format!(
+                            "LASH_CRASH_MATRIX_STORE is `{other}`: expected `sqlite` or `postgres`"
+                        ));
+                    }
+                };
+                DoubleBackend::start(seed, config, hooks, postgres)
                     .await
                     .map(Self::Double)
                     .map_err(|error| format!("build the Restate test backend: {error}"))
@@ -624,5 +641,28 @@ impl Engine {
         if let Self::Live(live) = self {
             live.finish().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod postgres_tests {
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+    async fn postgres_double_requires_a_database_url() {
+        super::DoubleBackend::start(
+            0x4794,
+            lash_restate_test::ServerConfig::default(),
+            lash_restate_test::DeploymentHooks::default(),
+            true,
+        )
+        .await
+        .expect("PostgreSQL double");
+    }
+
+    #[test]
+    fn postgres_variants_never_pass_without_a_database_url() {
+        crate::postgres_test_isolation::assert_requires_database_url(
+            "crash_matrix::engine::postgres_tests::postgres_double_requires_a_database_url",
+        );
     }
 }

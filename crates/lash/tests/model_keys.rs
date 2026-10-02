@@ -2290,8 +2290,7 @@ fn postgres_variants_never_pass_without_a_database_url() {
             let mut command = std::process::Command::new(&executable);
             command
                 .args(["--exact", &law, "--include-ignored", "--nocapture"])
-                .env_remove("LASH_POSTGRES_DATABASE_URL")
-                .env_remove("LASH_REQUIRE_POSTGRES");
+                .env_remove("LASH_POSTGRES_DATABASE_URL");
             if let Some(url) = url {
                 command.env("LASH_POSTGRES_DATABASE_URL", url);
             }

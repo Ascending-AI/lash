@@ -11,15 +11,46 @@ use lash_postgres_store::testing::IsolatedDatabase;
 
 /// # Panics
 ///
-/// Panics when `LASH_REQUIRE_POSTGRES=1` and no database URL is configured, so
-/// a missing CI variable cannot silently skip the Postgres lane.
-pub(crate) async fn isolated_database() -> Option<IsolatedDatabase> {
-    let base_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(base_url) if !base_url.is_empty() => base_url,
-        _ if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") => {
-            panic!("LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1")
+/// Panics if an explicitly selected PostgreSQL leg has no database URL.
+pub(crate) async fn isolated_database() -> IsolatedDatabase {
+    IsolatedDatabase::create(&lash_postgres_store::testing::required_database_url()).await
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+async fn postgres_isolation_requires_a_database_url() {
+    let _database = isolated_database().await;
+}
+
+#[test]
+fn postgres_variants_never_pass_without_a_database_url() {
+    assert_requires_database_url(
+        "postgres_test_isolation::postgres_isolation_requires_a_database_url",
+    );
+}
+
+#[cfg(test)]
+pub(crate) fn assert_requires_database_url(law: &str) {
+    let executable = std::env::current_exe().expect("test executable");
+    for url in [None, Some(""), Some(" \t ")] {
+        let mut command = std::process::Command::new(&executable);
+        command
+            .args(["--exact", law, "--include-ignored", "--nocapture"])
+            .env_remove("LASH_POSTGRES_DATABASE_URL");
+        if let Some(url) = url {
+            command.env("LASH_POSTGRES_DATABASE_URL", url);
         }
-        _ => return None,
-    };
-    Some(IsolatedDatabase::create(&base_url).await)
+        let output = command.output().expect("run PostgreSQL variant");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stdout.contains("running 1 test"), "{stdout}\n{stderr}");
+        assert!(
+            !output.status.success() && stdout.contains("0 passed; 1 failed"),
+            "{law} with URL {url:?} passed vacuously: {stdout}\n{stderr}"
+        );
+        assert!(
+            stderr.contains("LASH_POSTGRES_DATABASE_URL"),
+            "{stdout}\n{stderr}"
+        );
+    }
 }

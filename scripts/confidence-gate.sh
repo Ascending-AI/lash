@@ -940,7 +940,6 @@ run_postgres_mutants_recorded() {
   shift 2
   start_mutation_postgres "$artifact"
   LASH_POSTGRES_DATABASE_URL="$mutation_postgres_database_url" \
-    LASH_REQUIRE_POSTGRES=1 \
     run_mutants_recorded "$name" "$artifact" "$@" --jobs "$mutation_jobs"
   cleanup_mutation_postgres
 }
@@ -1729,7 +1728,6 @@ run_cross_backend_store_soak() {
   local cases="${LASH_CROSS_BACKEND_SOAK_CASES:-64}"
   step "Cross-backend durable-store differential soak (${cases} cases)"
   LASH_POSTGRES_DATABASE_URL="$database_url" \
-    LASH_REQUIRE_POSTGRES=1 \
     LASH_CROSS_BACKEND_CASES="$cases" \
     cargo test -p lash-sim --test cross_backend_store_differential --locked \
       generated_cross_backend_surface_differential_agrees -- --nocapture --include-ignored
@@ -1744,17 +1742,15 @@ run_postgres_schema_gate() {
   # `schema.sql` and `schema-shape.txt` still describe the same schema.
   step "Postgres schema artifact drift and structural check"
   LASH_POSTGRES_DATABASE_URL="$database_url" \
-    LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-internal-postgres-store --locked --lib schema_shape
   LASH_POSTGRES_DATABASE_URL="$database_url" \
-    LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-internal-postgres-store --locked --test schema_drift
 }
 
 run_postgres_conformance() {
   step "Postgres backend conformance"
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-    LASH_REQUIRE_POSTGRES=1 cargo test -p lash-internal-postgres-store --locked --test conformance
+    cargo test -p lash-internal-postgres-store --locked --test conformance
     run_postgres_schema_gate "$LASH_POSTGRES_DATABASE_URL"
     run_cross_backend_store_soak "$LASH_POSTGRES_DATABASE_URL"
     if area_selected sim; then
@@ -1800,7 +1796,6 @@ EOF
   provision_gate_postgres "$container"
 
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
-    LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-internal-postgres-store --locked --test conformance
   run_postgres_schema_gate "postgres://lash:lash@127.0.0.1:${port}/lash"
   run_cross_backend_store_soak "postgres://lash:lash@127.0.0.1:${port}/lash"
@@ -1892,7 +1887,7 @@ run_broad_postgres_evidence() {
   fi
   step "Broad Postgres conformance evidence"
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-    LASH_REQUIRE_POSTGRES=1 cargo test -p lash-internal-postgres-store --locked --test conformance
+    cargo test -p lash-internal-postgres-store --locked --test conformance
     if area_selected sim; then
       run_model_replay_suite
     fi
@@ -1947,7 +1942,6 @@ EOF
   provision_gate_postgres "$container"
 
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
-    LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-internal-postgres-store --locked --test conformance
   if area_selected sim; then
     run_model_replay_suite

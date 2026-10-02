@@ -63,7 +63,6 @@ def main(argv=None) -> int:
                 f"--runs_per_test={args.runs_per_test}", "--test_sharding_strategy=disabled",
                 f"--test_env=LASH_RELEASE_FIXTURES_DIR={args.corpus.resolve()}",
                 f"--test_env=LASH_POSTGRES_DATABASE_URL={os.environ['LASH_POSTGRES_DATABASE_URL']}",
-                "--test_env=LASH_REQUIRE_POSTGRES=1",
             ], cwd=ROOT, check=True)
     except (ReadBackError, subprocess.CalledProcessError) as error:
         print(f"read-release-fixtures error: {error}", file=sys.stderr)

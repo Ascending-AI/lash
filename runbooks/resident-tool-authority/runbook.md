@@ -140,7 +140,7 @@ kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
   cargo nextest run -p lash-internal-sqlite-store \
     -E "test(session_tool_access_durable_recovery)"
 
-  LASH_REQUIRE_POSTGRES=1 scripts/ci/with-service.sh pg16 -- \
+  scripts/ci/with-service.sh pg16 -- \
     cargo nextest run -p lash-internal-postgres-store \
       -E "test(session_tool_access_durable_recovery)"
 ' | tee "$LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR/tool-access-durable-readback.log"

@@ -209,7 +209,7 @@ def regenerate_schema_shape(repo: Path):
     before = path.read_bytes()
     argv = ["kiln", "test", SHAPE_TARGET, "--local-test-execution", "--no-test-cache",
             "--test_arg=--exact", f"--test_arg={SHAPE_LAW}",
-            *[f"--test_env={key}" for key in ("LASH_POSTGRES_DATABASE_URL", "LASH_REQUIRE_POSTGRES")
+            *[f"--test_env={key}" for key in ("LASH_POSTGRES_DATABASE_URL",)
               if key in os.environ]]
     result = subprocess.run([*argv, "--test_env=LASH_UPDATE_SCHEMA_SHAPE=1"],
                             cwd=repo, capture_output=True, text=True)
@@ -242,7 +242,7 @@ def regenerate(repo: Path):
         run(repo, ["kiln", "test", target, "--local-test-execution", "--no-test-cache",
                    "--test_arg=--ignored", "--test_arg=--exact", f"--test_arg={law}",
                    *[f"--test_env={key}={value}" for key, value in environment.items()],
-                   *[f"--test_env={key}" for key in ("LASH_POSTGRES_DATABASE_URL", "LASH_REQUIRE_POSTGRES")
+                   *[f"--test_env={key}" for key in ("LASH_POSTGRES_DATABASE_URL",)
                      if key in os.environ]])
     run(repo, ["kiln", "sync"])
 

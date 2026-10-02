@@ -264,8 +264,7 @@ struct PostgresFaultLane {
 }
 
 impl BackendFaultLane {
-    /// `LASH_REQUIRE_POSTGRES=1` turns a missing database URL into a panic, so
-    /// a missing CI variable cannot silently skip the Postgres lane.
+    /// An explicitly selected PostgreSQL lane requires a non-empty database URL.
     pub async fn open(kind: BackendFaultKind) -> Result<Option<Self>, String> {
         match kind {
             BackendFaultKind::Sqlite => Ok(Some(Self {

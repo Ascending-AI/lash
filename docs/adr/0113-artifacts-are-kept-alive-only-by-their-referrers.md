@@ -542,10 +542,9 @@ registrations determine which laws run in each tier. Artifact-referrer
 store laws are registered in
 `crates/lash-sqlite-store/tests/conformance/suite.rs:540` and
 `crates/lash-postgres-store/tests/conformance.rs:694`. The RLM evidence
-fixture selects SQLite memory or PostgreSQL from
-`LASH_POSTGRES_DATABASE_URL`, and requires the URL when
-`LASH_REQUIRE_POSTGRES=1`
-(`crates/lash/tests/artifact_referrers_evidence/fixture.rs:25-102`).
+fixture has explicit SQLite memory and ignored PostgreSQL variants. A selected
+PostgreSQL variant requires a non-empty `LASH_POSTGRES_DATABASE_URL`
+(`crates/lash/tests/artifact_referrers_evidence/fixture.rs`).
 
 Definition store laws cover retention while any reader holds a descriptor,
 reclamation after the last referrer, byte verification on an existing id,

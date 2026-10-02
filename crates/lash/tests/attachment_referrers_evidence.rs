@@ -1,5 +1,5 @@
 //! Attachment referrer laws for ADR 0124. The Restate double runs the real
-//! engine over SQLite, and over PostgreSQL when a database is configured.
+//! engine over explicit SQLite and ignored PostgreSQL variants.
 
 #![cfg(all(
     feature = "rlm",
@@ -25,7 +25,7 @@ use lash_sansio::sync::MutexExt;
 
 #[path = "attachment_referrers_evidence/fixture.rs"]
 mod fixture;
-use fixture::Fixture;
+use fixture::{Backend, Fixture};
 
 const PUT_BLOB: &str = "put_blob";
 const HOLD: &str = "hold";
@@ -600,9 +600,8 @@ fn started_process_id(output: &lash::TurnOutput) -> lash_core::ProcessId {
 /// Law 2 (ADR 0124 §6): an Engine process runs under a runtime keyed by its
 /// minted id. It admits no session, and what it puts is held by its record
 /// alone.
-#[tokio::test]
-async fn engine_and_session_turn_create_only_real_sessions() {
-    let fixture = Fixture::new(0x4215_0002).await;
+async fn engine_and_session_turn_create_only_real_sessions(backend: Backend) {
+    let fixture = Fixture::new(0x4215_0002, backend).await;
     let witness = Witness::new();
     let text = "law-2-engine-put";
     let core = law_core(
@@ -665,8 +664,14 @@ finish(handle.process_id);"
 /// after the delivery is recorded. While it holds, the law prunes every
 /// terminal process and sweeps: `R` survives on the receiver's edge. Then the
 /// cell finishes with `R`, and the commit holds it on the session.
-async fn delivered_attachment_survives_prune(seed: u64, text: &str, cell: String, crash: bool) {
-    let fixture = Fixture::new(seed).await;
+async fn delivered_attachment_survives_prune(
+    seed: u64,
+    text: &str,
+    cell: String,
+    crash: bool,
+    backend: Backend,
+) {
+    let fixture = Fixture::new(seed, backend).await;
     let witness = Witness::new();
     let session_id = format!("law-3-{seed:x}");
     let core = law_core(&fixture.double, &witness, vec![response(&cell)]);
@@ -760,32 +765,46 @@ finish(value);"
 
 /// Law 3, `direct_await` (ADR 0124 §4): an RLM cell awaits its child's
 /// handle directly.
-#[tokio::test]
-async fn delivered_attachment_survives_prune_and_replay_direct_await() {
+async fn delivered_attachment_survives_prune_and_replay_direct_await(backend: Backend) {
     let text = "law-3-direct-await";
-    delivered_attachment_survives_prune(0x4215_0031, text, direct_await_cell(text), false).await;
+    delivered_attachment_survives_prune(0x4215_0031, text, direct_await_cell(text), false, backend)
+        .await;
 }
 
-#[tokio::test]
-async fn delivered_attachment_survives_prune_and_replay_direct_await_crash_after_record() {
+async fn delivered_attachment_survives_prune_and_replay_direct_await_crash_after_record(
+    backend: Backend,
+) {
     let text = "law-3-direct-await-crash";
-    delivered_attachment_survives_prune(0x4215_0032, text, direct_await_cell(text), true).await;
+    delivered_attachment_survives_prune(0x4215_0032, text, direct_await_cell(text), true, backend)
+        .await;
 }
 
 /// Law 3, `process_to_process` (ADR 0124 §4): an Engine parent awaits the
 /// child and returns `R`, and the cell awaits the parent.
-#[tokio::test]
-async fn delivered_attachment_survives_prune_and_replay_process_to_process() {
+async fn delivered_attachment_survives_prune_and_replay_process_to_process(backend: Backend) {
     let text = "law-3-process-to-process";
-    delivered_attachment_survives_prune(0x4215_0033, text, process_to_process_cell(text), false)
-        .await;
+    delivered_attachment_survives_prune(
+        0x4215_0033,
+        text,
+        process_to_process_cell(text),
+        false,
+        backend,
+    )
+    .await;
 }
 
-#[tokio::test]
-async fn delivered_attachment_survives_prune_and_replay_process_to_process_crash_after_record() {
+async fn delivered_attachment_survives_prune_and_replay_process_to_process_crash_after_record(
+    backend: Backend,
+) {
     let text = "law-3-process-to-process-crash";
-    delivered_attachment_survives_prune(0x4215_0034, text, process_to_process_cell(text), true)
-        .await;
+    delivered_attachment_survives_prune(
+        0x4215_0034,
+        text,
+        process_to_process_cell(text),
+        true,
+        backend,
+    )
+    .await;
 }
 
 /// The externally owned child a `declare_external` call declared, once it
@@ -831,8 +850,8 @@ async fn declared_external_child<T: std::fmt::Debug>(
 /// `R` from its own upload. The parked resolver acquires `T1`'s execution
 /// before it resolves, so neither the upload's expiry nor `C`'s prune nor a
 /// sweep reaches `R`, and `T1`'s commit holds it on the session.
-async fn parked_declared_start_survives(seed: u64, text: &str, crash: bool) {
-    let fixture = Fixture::new(seed).await;
+async fn parked_declared_start_survives(seed: u64, text: &str, crash: bool, backend: Backend) {
+    let fixture = Fixture::new(seed, backend).await;
     let witness = Witness::new();
     let session_id = format!("law-3-parked-{seed:x}");
     let core = law_core(
@@ -916,14 +935,14 @@ finish(value);",
     );
 }
 
-#[tokio::test]
-async fn delivered_attachment_survives_prune_and_replay_parked_declared_start() {
-    parked_declared_start_survives(0x4215_0035, "law-3-parked", false).await;
+async fn delivered_attachment_survives_prune_and_replay_parked_declared_start(backend: Backend) {
+    parked_declared_start_survives(0x4215_0035, "law-3-parked", false, backend).await;
 }
 
-#[tokio::test]
-async fn delivered_attachment_survives_prune_and_replay_parked_declared_start_crash_after_record() {
-    parked_declared_start_survives(0x4215_0036, "law-3-parked-crash", true).await;
+async fn delivered_attachment_survives_prune_and_replay_parked_declared_start_crash_after_record(
+    backend: Backend,
+) {
+    parked_declared_start_survives(0x4215_0036, "law-3-parked-crash", true, backend).await;
 }
 
 /// Wait for the SessionTurn child to reach its hold, or report the records
@@ -962,8 +981,8 @@ async fn child_reached_its_hold(core: &LashCore, witness: &Witness) {
 /// that names `R`. `K`'s registration acquires its record, so `R`
 /// outlives `T1`'s execution and a sweep, and `K`'s commit holds it on
 /// `K`'s own session.
-async fn start_input_survives(seed: u64, text: &str, crash: bool) {
-    let fixture = Fixture::new(seed).await;
+async fn start_input_survives(seed: u64, text: &str, crash: bool, backend: Backend) {
+    let fixture = Fixture::new(seed, backend).await;
     let witness = Witness::new();
     let session_id = format!("law-3-start-input-{seed:x}");
     let core = law_core(
@@ -1051,22 +1070,21 @@ finish(\"child done\");",
     );
 }
 
-#[tokio::test]
-async fn delivered_attachment_survives_prune_and_replay_start_input() {
-    start_input_survives(0x4215_0037, "law-3-start-input", false).await;
+async fn delivered_attachment_survives_prune_and_replay_start_input(backend: Backend) {
+    start_input_survives(0x4215_0037, "law-3-start-input", false, backend).await;
 }
 
-#[tokio::test]
-async fn delivered_attachment_survives_prune_and_replay_start_input_crash_after_record() {
-    start_input_survives(0x4215_0038, "law-3-start-input-crash", true).await;
+async fn delivered_attachment_survives_prune_and_replay_start_input_crash_after_record(
+    backend: Backend,
+) {
+    start_input_survives(0x4215_0038, "law-3-start-input-crash", true, backend).await;
 }
 
 /// Law 4 (ADR 0124 §1, ADR 0113 §3.2): pruning an Engine process ends its
 /// record's attachment edges through the cleanup executor, fences the
 /// record, and leaves its puts to the sweep. No session is involved.
-#[tokio::test]
-async fn process_referrer_cleanup_is_complete_without_sessions() {
-    let fixture = Fixture::new(0x4215_0004).await;
+async fn process_referrer_cleanup_is_complete_without_sessions(backend: Backend) {
+    let fixture = Fixture::new(0x4215_0004, backend).await;
     let witness = Witness::new();
     let (first, second) = ("law-4-first", "law-4-second");
     let core = law_core(
@@ -1187,9 +1205,8 @@ fn upload_of(found: &[ArtifactReferrer]) -> Option<lash_core::UploadReferrerId> 
 /// Law 5 (ADR 0124 §1, §5): each unbound put is held by its own upload, which
 /// ends at its expiry and fences nothing else. A committed reference outlives
 /// it on the session's edge.
-#[tokio::test]
-async fn upload_expiry_is_local() {
-    let fixture = Fixture::new(0x4215_0005).await;
+async fn upload_expiry_is_local(backend: Backend) {
+    let fixture = Fixture::new(0x4215_0005, backend).await;
     let witness = Witness::new();
     let session_id = "law-5-session";
     let core = law_core(&fixture.double, &witness, vec![text_response("noted")]);
@@ -1244,9 +1261,8 @@ async fn upload_expiry_is_local() {
 /// Ruling 7 (ADR 0124 §4, queued inputs): an input that waits in the queue
 /// longer than its put's upload expiry still resolves its bytes when its turn
 /// commits, because the enqueue acquired the session's edge.
-#[tokio::test]
-async fn queued_input_outlives_its_upload_expiry() {
-    let fixture = Fixture::new(0x4215_0006).await;
+async fn queued_input_outlives_its_upload_expiry(backend: Backend) {
+    let fixture = Fixture::new(0x4215_0006, backend).await;
     let witness = Witness::new();
     let session_id = "law-queued-session";
     let core = law_core(&fixture.double, &witness, vec![text_response("noted")]);
@@ -1300,9 +1316,8 @@ async fn queued_input_outlives_its_upload_expiry() {
 /// P1 (ADR 0124 §1): an Engine process whose segment dies after its tool's
 /// result is journaled replays that result on the redrive: no second put, no
 /// second pending write, and the record holds `R`.
-#[tokio::test]
-async fn redrive_replays_recorded_attachment_result() {
-    let fixture = Fixture::new(0x4215_0101).await;
+async fn redrive_replays_recorded_attachment_result(backend: Backend) {
+    let fixture = Fixture::new(0x4215_0101, backend).await;
     let witness = Witness::new();
     let text = "p1-recorded-put";
     let core = law_core(
@@ -1345,18 +1360,16 @@ finish(handle.process_id);"
 
 /// Cancellation (ADR 0113 case 11, with an attachment): a child cancelled
 /// while it runs keeps its record's edges until it is terminal and pruned.
-#[tokio::test]
-async fn a_cancelled_child_keeps_its_puts_until_pruned() {
-    cancelled_child_keeps_its_puts_until_pruned(false).await;
+async fn a_cancelled_child_keeps_its_puts_until_pruned(backend: Backend) {
+    cancelled_child_keeps_its_puts_until_pruned(false, backend).await;
 }
 
-#[tokio::test]
-async fn a_cancelled_child_keeps_its_puts_until_pruned_with_cancel_contention() {
-    cancelled_child_keeps_its_puts_until_pruned(true).await;
+async fn a_cancelled_child_keeps_its_puts_until_pruned_with_cancel_contention(backend: Backend) {
+    cancelled_child_keeps_its_puts_until_pruned(true, backend).await;
 }
 
-async fn cancelled_child_keeps_its_puts_until_pruned(delay_cancellation: bool) {
-    let fixture = Fixture::new(0x4215_0102).await;
+async fn cancelled_child_keeps_its_puts_until_pruned(delay_cancellation: bool, backend: Backend) {
+    let fixture = Fixture::new(0x4215_0102, backend).await;
     let witness = Witness::new();
     let text = "cancelled-child-put";
     let queue = responses(vec![response(&format!(
@@ -1446,4 +1459,66 @@ finish(cancelled.status);",
     );
     prune_processes(&core).await;
     wait_referrers(&fixture, &id, "no edge after prune", <[_]>::is_empty).await;
+}
+
+macro_rules! tiered {
+    ($($law:ident),* $(,)?) => {$(
+        mod $law {
+            #[tokio::test]
+            async fn sqlite() {
+                super::$law(super::Backend::Sqlite).await;
+            }
+
+            #[tokio::test]
+            #[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+            async fn postgres() {
+                super::$law(super::Backend::Postgres).await;
+            }
+        }
+    )*};
+}
+
+tiered!(
+    engine_and_session_turn_create_only_real_sessions,
+    delivered_attachment_survives_prune_and_replay_direct_await,
+    delivered_attachment_survives_prune_and_replay_direct_await_crash_after_record,
+    delivered_attachment_survives_prune_and_replay_process_to_process,
+    delivered_attachment_survives_prune_and_replay_process_to_process_crash_after_record,
+    delivered_attachment_survives_prune_and_replay_parked_declared_start,
+    delivered_attachment_survives_prune_and_replay_parked_declared_start_crash_after_record,
+    delivered_attachment_survives_prune_and_replay_start_input,
+    delivered_attachment_survives_prune_and_replay_start_input_crash_after_record,
+    process_referrer_cleanup_is_complete_without_sessions,
+    upload_expiry_is_local,
+    queued_input_outlives_its_upload_expiry,
+    redrive_replays_recorded_attachment_result,
+    a_cancelled_child_keeps_its_puts_until_pruned,
+    a_cancelled_child_keeps_its_puts_until_pruned_with_cancel_contention
+);
+
+#[test]
+fn postgres_variants_never_pass_without_a_database_url() {
+    let executable = std::env::current_exe().expect("test executable");
+    let law = "engine_and_session_turn_create_only_real_sessions::postgres";
+    for url in [None, Some(""), Some(" \t ")] {
+        let mut command = std::process::Command::new(&executable);
+        command
+            .args(["--exact", law, "--include-ignored", "--nocapture"])
+            .env_remove("LASH_POSTGRES_DATABASE_URL");
+        if let Some(url) = url {
+            command.env("LASH_POSTGRES_DATABASE_URL", url);
+        }
+        let output = command.output().expect("run PostgreSQL variant");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stdout.contains("running 1 test"), "{stdout}\n{stderr}");
+        assert!(
+            !output.status.success() && stdout.contains("0 passed; 1 failed"),
+            "{law} with URL {url:?} passed vacuously: {stdout}\n{stderr}"
+        );
+        assert!(
+            stderr.contains("LASH_POSTGRES_DATABASE_URL"),
+            "{stdout}\n{stderr}"
+        );
+    }
 }

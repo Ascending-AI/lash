@@ -241,16 +241,13 @@ enum PostgresTarget {
     NotNeeded,
     /// The scenario uses PostgreSQL and a URL is configured.
     Configured(String),
-    /// The scenario uses PostgreSQL, none is configured, and it is not
-    /// required: the run reports itself skipped rather than failing.
-    Skipped,
 }
 
 impl PostgresTarget {
     fn url(&self) -> Option<&str> {
         match self {
             Self::Configured(url) => Some(url.as_str()),
-            Self::NotNeeded | Self::Skipped => None,
+            Self::NotNeeded => None,
         }
     }
 }
@@ -268,17 +265,10 @@ fn resolve_postgres_target(scenario: RuntimePerfScenario) -> anyhow::Result<Post
     if let Some(url) = configured_postgres_database_url() {
         return Ok(PostgresTarget::Configured(url));
     }
-    if postgres_is_required() {
-        anyhow::bail!(
-            "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
-            scenario.name()
-        );
-    }
-    eprintln!(
-        "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
+    anyhow::bail!(
+        "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL",
         scenario.name()
-    );
-    Ok(PostgresTarget::Skipped)
+    )
 }
 
 async fn run_once_inner(
@@ -289,9 +279,6 @@ async fn run_once_inner(
     high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let postgres = resolve_postgres_target(scenario)?;
-    if matches!(postgres, PostgresTarget::Skipped) {
-        return Ok(skipped_runtime_perf_result(scenario, chat_turns));
-    }
 
     // One dispatch. The three groups below used to be selected by predicate
     // early-returns above this match, so their membership was stated twice --
@@ -951,10 +938,7 @@ pub(super) fn configured_postgres_database_url() -> Option<String> {
         })
 }
 
-pub(super) fn postgres_is_required() -> bool {
-    std::env::var_os("LASH_REQUIRE_POSTGRES").is_some()
-}
-
+#[cfg(test)]
 pub(crate) fn skipped_runtime_perf_result(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
@@ -995,5 +979,43 @@ pub(crate) fn skipped_runtime_perf_result(
         phase_profile: BTreeMap::new(),
         turns: vec![turn],
         cumulative_usage: SessionUsageReport::default(),
+    }
+}
+
+#[cfg(test)]
+mod postgres_tests {
+    #[test]
+    #[ignore = "requires PostgreSQL database configuration"]
+    fn selected_postgres_scenario_requires_a_database_url() {
+        super::resolve_postgres_target(super::RuntimePerfScenario::DurableCheckpointCurvePostgres)
+            .expect("PostgreSQL scenario requires a database URL");
+    }
+
+    #[test]
+    fn postgres_variants_never_pass_without_a_database_url() {
+        let executable = std::env::current_exe().expect("test executable");
+        let law = "runtime_perf::measurement::phase_probe::postgres_tests::selected_postgres_scenario_requires_a_database_url";
+        for url in [None, Some(""), Some(" \t ")] {
+            let mut command = std::process::Command::new(&executable);
+            command
+                .args(["--exact", law, "--include-ignored", "--nocapture"])
+                .env_remove("LASH_POSTGRES_DATABASE_URL")
+                .env_remove("DATABASE_URL");
+            if let Some(url) = url {
+                command.env("LASH_POSTGRES_DATABASE_URL", url);
+            }
+            let output = command.output().expect("run PostgreSQL variant");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stdout.contains("running 1 test"), "{stdout}\n{stderr}");
+            assert!(
+                !output.status.success() && stdout.contains("0 passed; 1 failed"),
+                "{law} with URL {url:?} passed vacuously: {stdout}\n{stderr}"
+            );
+            assert!(
+                stderr.contains("LASH_POSTGRES_DATABASE_URL"),
+                "{stdout}\n{stderr}"
+            );
+        }
     }
 }

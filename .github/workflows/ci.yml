@@ -1451,12 +1451,10 @@ jobs:
     # path and one copy of these facts rather than a workflow `services:` block
     # and a second local runner.
     environment: build-cache
-    # The require flag stays at job level so no step can lose it on its own; the
-    # connection URL cannot, because the port is chosen per step by
-    # `with-service.sh` and a job-level literal would be a lie.
+    # The service wrapper exports the required database URL for each selected
+    # PostgreSQL variant after choosing its private port.
     env:
       BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
-      LASH_REQUIRE_POSTGRES: "1"
       POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}
     # PRs run PG16 for store crates, lash-sim and migrations. The broader
     # dependency closure still selects merge-group and full-profile work.
@@ -1533,9 +1531,8 @@ jobs:
             pg-cross-backend \
             pg-catalog-compatibility
 
-      # `with-service.sh` exports LASH_REQUIRE_POSTGRES=1 alongside the URL, so
-      # a database this step could not reach fails the lane instead of silently
-      # skipping it.
+      # Selected PostgreSQL variants require the URL exported by with-service.sh
+      # and fail if it is missing or unreachable.
       #
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
@@ -1670,7 +1667,6 @@ jobs:
     environment: build-cache
     env:
       BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
-      LASH_REQUIRE_POSTGRES: "1"
       POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}
     if: >-
       (github.event_name == 'pull_request' && needs.plan.outputs.pr_pg_store == 'true')

@@ -7,6 +7,11 @@
     feature = "testing"
 ))]
 #![allow(clippy::disallowed_methods)]
+#![expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "backend-parametrized acceptance laws assert each step's result"
+)]
 
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -18,10 +23,9 @@ use lash_sansio::sync::MutexExt;
 
 #[path = "artifact_referrers_evidence/fixture.rs"]
 mod fixture;
-use fixture::Fixture;
+use fixture::{Backend, Fixture};
 
-#[tokio::test]
-async fn stored_module_refusals_preserve_causes_and_terminal_semantics() {
+async fn stored_module_refusals_preserve_causes_and_terminal_semantics(backend: Backend) {
     use lash_core::ProcessEngine as _;
     use lash_lashlang_runtime::{LashlangProcessEngine, LashlangProcessInput, LashlangSurface};
     use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
@@ -58,7 +62,7 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics() {
     .into_iter()
     .enumerate()
     {
-        let fixture = Fixture::new(0x4654_0000 + index as u64).await;
+        let fixture = Fixture::new(0x4654_0000 + index as u64, backend).await;
         let backend = fixture.double.lash_backend();
         let store = lashlang::LashlangArtifacts::new(backend.module_artifacts());
         let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
@@ -274,11 +278,10 @@ async fn wait_definition_reclaimed(
 /// Move past the former deadline after a real store read. Manual polling
 /// checks the pending wait without letting a paused clock auto-advance
 /// PostgreSQL's connection timeouts.
-#[tokio::test]
-async fn wait_edges_waits_for_condition_past_former_deadline() {
+async fn wait_edges_waits_for_condition_past_former_deadline(backend: Backend) {
     use futures_util::FutureExt as _;
 
-    let fixture = Fixture::new(0x4232_0001).await;
+    let fixture = Fixture::new(0x4232_0001, backend).await;
     let ready = std::sync::atomic::AtomicBool::new(false);
     let observed = tokio::sync::Notify::new();
     let waiting = wait_edges(&fixture, |edges| {
@@ -419,9 +422,8 @@ fn serve_processes(
     double.install_process_worker(worker);
 }
 
-#[tokio::test]
-async fn cold_reopen_globals_across_turns() {
-    let fixture = Fixture::new(0x4031_0001).await;
+async fn cold_reopen_globals_across_turns(backend: Backend) {
+    let fixture = Fixture::new(0x4031_0001, backend).await;
     let double = &fixture.double;
     // A reopened core may use either provider handle for the same route.
     // Both handles therefore draw from the two-turn script in call order.
@@ -495,9 +497,8 @@ async fn cold_reopen_globals_across_turns() {
     );
 }
 
-#[tokio::test]
-async fn overwrite_retains_old_module_until_frame_end() {
-    let fixture = Fixture::new(0x4031_0002).await;
+async fn overwrite_retains_old_module_until_frame_end(backend: Backend) {
+    let fixture = Fixture::new(0x4031_0002, backend).await;
     let double = &fixture.double;
     let core = rlm_core(
         double,
@@ -560,9 +561,8 @@ async fn overwrite_retains_old_module_until_frame_end() {
     );
 }
 
-#[tokio::test]
-async fn continue_as_carries_only_seeded_definition() {
-    let fixture = Fixture::new(0x4031_0003).await;
+async fn continue_as_carries_only_seeded_definition(backend: Backend) {
+    let fixture = Fixture::new(0x4031_0003, backend).await;
     let double = &fixture.double;
     let core = rlm_core(
         double,
@@ -681,9 +681,8 @@ impl lash_core::plugin::ContextPressureHook for SeedingPressureHook {
 /// (ADR 0113 §3.1). The hook seeds a definition the first frame bound; once
 /// the old frame's cleanup settles, the new frame alone holds the module's
 /// edge, and after a cold reopen the seeded definition still starts.
-#[tokio::test]
-async fn a_pressure_seed_carries_its_module_into_the_new_frame() {
-    let fixture = Fixture::new(0x4134_0001).await;
+async fn a_pressure_seed_carries_its_module_into_the_new_frame(backend: Backend) {
+    let fixture = Fixture::new(0x4134_0001, backend).await;
     let double = &fixture.double;
     let session_id = "artifact-referrers-pressure-seed";
     let run_carried =
@@ -766,9 +765,8 @@ async fn a_pressure_seed_carries_its_module_into_the_new_frame() {
     assert_eq!(last_cell_finish(&result), Some(serde_json::json!(13)));
 }
 
-#[tokio::test]
-async fn first_turn_continue_as_fences_its_initial_frame() {
-    let fixture = Fixture::new(0x4031_0004).await;
+async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
+    let fixture = Fixture::new(0x4031_0004, backend).await;
     let double = &fixture.double;
     let core = rlm_core(
         double,
@@ -829,9 +827,8 @@ async fn first_turn_continue_as_fences_its_initial_frame() {
     );
 }
 
-#[tokio::test]
-async fn carried_definition_id_retains_the_closure_across_frame_switch() {
-    let fixture = Fixture::new(0x4177_0012).await;
+async fn carried_definition_id_retains_the_closure_across_frame_switch(backend: Backend) {
+    let fixture = Fixture::new(0x4177_0012, backend).await;
     let core = rlm_core(
         &fixture.double,
         vec![
@@ -919,9 +916,8 @@ async fn carried_definition_id_retains_the_closure_across_frame_switch() {
     );
 }
 
-#[tokio::test]
-async fn uncarried_frame_switch_loses_an_uncarried_definition() {
-    let fixture = Fixture::new(0x4177_0013).await;
+async fn uncarried_frame_switch_loses_an_uncarried_definition(backend: Backend) {
+    let fixture = Fixture::new(0x4177_0013, backend).await;
     let core = rlm_core(
         &fixture.double,
         vec![
@@ -979,9 +975,8 @@ async fn uncarried_frame_switch_loses_an_uncarried_definition() {
     );
 }
 
-#[tokio::test]
-async fn host_pin_keeps_a_definition_across_an_uncarried_switch() {
-    let fixture = Fixture::new(0x4177_0014).await;
+async fn host_pin_keeps_a_definition_across_an_uncarried_switch(backend: Backend) {
+    let fixture = Fixture::new(0x4177_0014, backend).await;
     let core = rlm_core(
         &fixture.double,
         vec![
@@ -1091,9 +1086,8 @@ fn create_definition_cell(binding: &str) -> String {
 /// any other (ADR 0113 §6). The call's realization publishes its module under
 /// the realizing execution, the cell's global holds it in the frame, and a
 /// later turn in the same frame starts it by value after a cold reopen.
-#[tokio::test]
-async fn created_definition_survives_cold_reopen_and_starts_by_value() {
-    let fixture = Fixture::new(0x3116_0001).await;
+async fn created_definition_survives_cold_reopen_and_starts_by_value(backend: Backend) {
+    let fixture = Fixture::new(0x3116_0001, backend).await;
     let double = &fixture.double;
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![
         response(&create_definition_cell("made")),
@@ -1156,9 +1150,8 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value() {
 /// FIG-3116: deleting the session that created a definition ends the frame
 /// that held it, and the relay reclaims the module (ADR 0113 §3.1): nothing
 /// else keeps a created definition alive.
-#[tokio::test]
-async fn created_definition_is_reclaimed_after_session_deletion() {
-    let fixture = Fixture::new(0x3116_0002).await;
+async fn created_definition_is_reclaimed_after_session_deletion(backend: Backend) {
+    let fixture = Fixture::new(0x3116_0002, backend).await;
     let double = &fixture.double;
     let core = rlm_core(double, vec![response(&create_definition_cell("made"))]);
     let session_id = "processes-create-deletion";
@@ -1340,4 +1333,63 @@ async fn created_session(
         Err(error) => panic!("create session `{session_id}`: {error:?}"),
     }
     core.session(session_id)
+}
+
+macro_rules! tiered {
+    ($($law:ident),* $(,)?) => {$(
+        mod $law {
+            #[tokio::test]
+            async fn sqlite() {
+                super::$law(super::Backend::Sqlite).await;
+            }
+
+            #[tokio::test]
+            #[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+            async fn postgres() {
+                super::$law(super::Backend::Postgres).await;
+            }
+        }
+    )*};
+}
+
+tiered!(
+    stored_module_refusals_preserve_causes_and_terminal_semantics,
+    wait_edges_waits_for_condition_past_former_deadline,
+    cold_reopen_globals_across_turns,
+    overwrite_retains_old_module_until_frame_end,
+    continue_as_carries_only_seeded_definition,
+    a_pressure_seed_carries_its_module_into_the_new_frame,
+    first_turn_continue_as_fences_its_initial_frame,
+    carried_definition_id_retains_the_closure_across_frame_switch,
+    uncarried_frame_switch_loses_an_uncarried_definition,
+    host_pin_keeps_a_definition_across_an_uncarried_switch,
+    created_definition_survives_cold_reopen_and_starts_by_value,
+    created_definition_is_reclaimed_after_session_deletion
+);
+
+#[test]
+fn postgres_variants_never_pass_without_a_database_url() {
+    let executable = std::env::current_exe().expect("test executable");
+    let law = "stored_module_refusals_preserve_causes_and_terminal_semantics::postgres";
+    for url in [None, Some(""), Some(" \t ")] {
+        let mut command = std::process::Command::new(&executable);
+        command
+            .args(["--exact", law, "--include-ignored", "--nocapture"])
+            .env_remove("LASH_POSTGRES_DATABASE_URL");
+        if let Some(url) = url {
+            command.env("LASH_POSTGRES_DATABASE_URL", url);
+        }
+        let output = command.output().expect("run PostgreSQL variant");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stdout.contains("running 1 test"), "{stdout}\n{stderr}");
+        assert!(
+            !output.status.success() && stdout.contains("0 passed; 1 failed"),
+            "{law} with URL {url:?} passed vacuously: {stdout}\n{stderr}"
+        );
+        assert!(
+            stderr.contains("LASH_POSTGRES_DATABASE_URL"),
+            "{stdout}\n{stderr}"
+        );
+    }
 }

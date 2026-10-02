@@ -721,7 +721,7 @@ store-contract-soak cases='256':
   set -euo pipefail
   service=()
   if [[ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]]; then
-    service=(--local-test-execution --no-test-cache --test_env=LASH_POSTGRES_DATABASE_URL --test_env=LASH_REQUIRE_POSTGRES=1)
+    service=(--local-test-execution --no-test-cache --test_env=LASH_POSTGRES_DATABASE_URL)
   fi
   run_property_soak() {
     local setting="$1" label="$2" selector="$3" seed_setting="$4"
@@ -747,7 +747,7 @@ runtime-persistence-soak cases='256':
   set -euo pipefail
   service=()
   if [[ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]]; then
-    service=(--local-test-execution --no-test-cache --test_env=LASH_POSTGRES_DATABASE_URL --test_env=LASH_REQUIRE_POSTGRES=1)
+    service=(--local-test-execution --no-test-cache --test_env=LASH_POSTGRES_DATABASE_URL)
   fi
   replay=()
   if [[ -n "${LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED:-}" ]]; then
@@ -798,7 +798,7 @@ cross-backend-store-soak cases='64' seed='852':
   : "${LASH_POSTGRES_DATABASE_URL:?cross-backend-store-soak requires an explicit LASH_POSTGRES_DATABASE_URL}"
   kiln test --local-test-execution --no-test-cache \
     --test_timeout=1200 --test_output=all \
-    --test_env=LASH_POSTGRES_DATABASE_URL --test_env=LASH_REQUIRE_POSTGRES=1 \
+    --test_env=LASH_POSTGRES_DATABASE_URL \
     '--test_env=LASH_CROSS_BACKEND_CASES={{cases}}' \
     '--test_env=LASH_CROSS_BACKEND_SEED={{seed}}' \
     --test_arg=generated_cross_backend_surface_differential_agrees \

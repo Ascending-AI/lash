@@ -19,9 +19,9 @@ kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- \
 ```
 
 `with-service.sh` owns the disposable instance: `postgres:16-alpine` on an ephemeral
-loopback port, removed on exit, with `LASH_POSTGRES_DATABASE_URL` and
-`LASH_REQUIRE_POSTGRES=1` exported. Without the wrapper the test skips itself; with
-`LASH_REQUIRE_POSTGRES=1` and no URL it fails rather than silently passing.
+loopback port, removed on exit, with `LASH_POSTGRES_DATABASE_URL` exported.
+PostgreSQL tests are ignored without service selection; an explicitly selected
+test fails if its database URL is missing or blank.
 
 **Released API and revision to adopt.** The surface shipped by
 [FIG-888](https://linear.app/ascending-ai/issue/FIG-888) (PR #225, commit `d7a49fefd`),

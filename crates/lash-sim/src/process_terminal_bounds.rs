@@ -1,5 +1,5 @@
 //! The `ProcessTerminal` obligation's detection bounds (ADR 0109 §1.8), on
-//! SQLite and, when a database is configured, PostgreSQL.
+//! explicit SQLite and PostgreSQL variants.
 //!
 //! The terminal transaction arms the process row's obligation; the execution
 //! that stored the terminal publishes it itself (the Restate double's laws own
@@ -177,20 +177,10 @@ impl Lane {
         }
     }
 
-    async fn lanes(seed: u64) -> Vec<Self> {
+    async fn new(seed: u64, postgres: bool) -> Self {
         let clock = Arc::new(TestClock::new(EPOCH_MS));
-        let sqlite = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
-            .await
-            .expect("open the SQLite store set");
-        let mut lanes = vec![Self::over(
-            "sqlite",
-            Arc::new(sqlite),
-            clock,
-            seed,
-            Box::new(()),
-        )];
-        if let Some(database) = crate::postgres_test_isolation::isolated_database().await {
-            let clock = Arc::new(TestClock::new(EPOCH_MS));
+        if postgres {
+            let database = crate::postgres_test_isolation::isolated_database().await;
             let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                 .await
                 .expect("connect the isolated PostgreSQL database");
@@ -198,20 +188,24 @@ impl Lane {
             let stores = lash_postgres_store::PostgresStoreSet::with_clock(
                 &storage,
                 Arc::new(lash::persistence::FileAttachmentStore::new(
-                    attachments.path().join("attachments"),
+                    attachments.path(),
                 )),
                 lash_core::WakeDeliveryConfig::default(),
                 clock.clone(),
             );
-            lanes.push(Self::over(
+            Self::over(
                 "postgres",
                 Arc::new(stores),
                 clock,
                 seed,
                 Box::new((database, attachments)),
-            ));
+            )
+        } else {
+            let sqlite = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
+                .await
+                .expect("open the SQLite store set");
+            Self::over("sqlite", Arc::new(sqlite), clock, seed, Box::new(()))
         }
-        lanes
     }
 
     fn now(&self) -> u64 {
@@ -295,9 +289,9 @@ impl Lane {
 }
 
 /// A lost immediate attempt is claimed and delivered by `due_at + T`.
-#[tokio::test]
-async fn a_lost_immediate_publication_is_delivered_within_one_tick() {
-    for mut lane in Lane::lanes(3856).await {
+async fn a_lost_immediate_publication_is_delivered_within_one_tick(postgres: bool) {
+    {
+        let mut lane = Lane::new(3856, postgres).await;
         let due_at = lane.now();
         let process_id = lane.terminal().await;
         assert_eq!(lane.state(&process_id).await, Some(ObligationState::Due));
@@ -319,10 +313,10 @@ async fn a_lost_immediate_publication_is_delivered_within_one_tick() {
 }
 
 /// A claim whose relay died is retaken by `claimed_at + claim_ttl + T`.
-#[tokio::test]
-async fn a_lapsed_claim_is_retaken_within_its_ttl_and_one_tick() {
+async fn a_lapsed_claim_is_retaken_within_its_ttl_and_one_tick(postgres: bool) {
     let policy = RelayPolicy::default();
-    for mut lane in Lane::lanes(3857).await {
+    {
+        let mut lane = Lane::new(3857, postgres).await;
         let process_id = lane.terminal().await;
         // A relay claims the row and dies before it delivers or settles.
         let claimed_at = lane.now();
@@ -360,11 +354,11 @@ async fn a_lapsed_claim_is_retaken_within_its_ttl_and_one_tick() {
 /// Retryable failures back off `min(2^(n−1) s, 15 min)` plus at most `T`,
 /// and the row stalls at the attempt ceiling — never later, never retried
 /// again.
-#[tokio::test]
-async fn retryable_failures_back_off_and_stall_at_the_ceiling() {
+async fn retryable_failures_back_off_and_stall_at_the_ceiling(postgres: bool) {
     let policy = RelayPolicy::default();
     let ceiling = policy.attempt_ceiling.get();
-    for mut lane in Lane::lanes(3858).await {
+    {
+        let mut lane = Lane::new(3858, postgres).await;
         let process_id = lane.terminal().await;
         lane.engine.answer(&process_id, Answer::Unreachable);
         let armed_at = lane.now();
@@ -430,9 +424,9 @@ async fn retryable_failures_back_off_and_stall_at_the_ceiling() {
 
 /// A refused row stalls in the pass that claims it, and the rows behind it in
 /// the same page are still delivered.
-#[tokio::test]
-async fn a_refused_publication_stalls_in_its_pass_without_blocking_the_page() {
-    for mut lane in Lane::lanes(3859).await {
+async fn a_refused_publication_stalls_in_its_pass_without_blocking_the_page(postgres: bool) {
+    {
+        let mut lane = Lane::new(3859, postgres).await;
         let refused = lane.terminal().await;
         lane.engine.answer(&refused, Answer::Refuse);
         let mut behind = Vec::new();
@@ -466,4 +460,30 @@ async fn a_refused_publication_stalls_in_its_pass_without_blocking_the_page() {
         }
         assert_eq!(lane.engine.attempts(&refused).len(), 1);
     }
+}
+
+macro_rules! tiered {
+    ($($law:ident),* $(,)?) => {$(
+        mod $law {
+            #[tokio::test]
+            async fn sqlite() { super::$law(false).await; }
+            #[tokio::test]
+            #[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+            async fn postgres() { super::$law(true).await; }
+        }
+    )*};
+}
+
+tiered!(
+    a_lost_immediate_publication_is_delivered_within_one_tick,
+    a_lapsed_claim_is_retaken_within_its_ttl_and_one_tick,
+    retryable_failures_back_off_and_stall_at_the_ceiling,
+    a_refused_publication_stalls_in_its_pass_without_blocking_the_page
+);
+
+#[test]
+fn postgres_variants_never_pass_without_a_database_url() {
+    crate::postgres_test_isolation::assert_requires_database_url(
+        "process_terminal_bounds::a_lost_immediate_publication_is_delivered_within_one_tick::postgres",
+    );
 }

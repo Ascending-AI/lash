@@ -7,6 +7,12 @@ use lash_sqlite_store::{SqliteDatabase, SqliteStoreSet, SqliteStoreSetOptions};
 
 use super::Edge;
 
+#[derive(Clone, Copy)]
+pub enum Backend {
+    Sqlite,
+    Postgres,
+}
+
 pub struct Fixture {
     pub double: RestateTestBackend<dyn StoreSet>,
     database: Database,
@@ -48,17 +54,10 @@ impl Fixture {
         clippy::expect_used,
         reason = "acceptance fixture validates its store setup"
     )]
-    pub async fn new(seed: u64) -> Self {
+    pub async fn new(seed: u64, backend: Backend) -> Self {
         let config = ServerConfig::default();
-        let configured_url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-            .ok()
-            .filter(|url| !url.trim().is_empty());
-        assert!(
-            configured_url.is_some()
-                || std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-            "LASH_POSTGRES_DATABASE_URL must be set and non-empty when LASH_REQUIRE_POSTGRES=1"
-        );
-        if let Some(url) = configured_url {
+        if matches!(backend, Backend::Postgres) {
+            let url = lash_postgres_store::testing::required_database_url();
             let database = IsolatedDatabase::create(&url).await;
             let storage = PostgresStorage::connect(database.url())
                 .await

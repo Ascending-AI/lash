@@ -414,16 +414,9 @@ mod tests {
     #[tokio::test]
     async fn backend_contention_report_runs_sqlite_and_records_artifact() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        // The Postgres lane runs against a database created for this test
-        // alone: the shared database is truncated out from under it by the
-        // conformance suites running in sibling processes.
-        let database = crate::postgres_test_isolation::isolated_database().await;
-        let report = super::run_backend_contention_report_against(
-            tmp.path(),
-            database.as_ref().map(|database| database.url().to_string()),
-        )
-        .await
-        .expect("backend contention report");
+        let report = super::run_backend_contention_report_against(tmp.path(), None)
+            .await
+            .expect("backend contention report");
         assert_eq!(report.status, "passed");
         assert!(report.summary.passed >= 1);
         assert!(
@@ -439,5 +432,34 @@ mod tests {
         assert!(body.contains("runtime-persistence.competing-drive-seals"));
         assert!(body.contains("runtime-persistence.stale-head-transaction-rejected"));
         assert!(body.contains("runtime-persistence.idempotent-retry-and-stale-write-conflict"));
+    }
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+    async fn backend_contention_report_runs_postgres_and_records_artifact() {
+        let database = crate::postgres_test_isolation::isolated_database().await;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let report = super::run_backend_contention_report_against(
+            tmp.path(),
+            Some(database.url().to_string()),
+        )
+        .await
+        .expect("backend contention report");
+        assert_eq!(report.status, "passed");
+        assert!(
+            report
+                .scenarios
+                .iter()
+                .any(|scenario| scenario.backend == "postgres"
+                    && scenario.status == "passed"
+                    && scenario.operations.len() >= 3)
+        );
+        assert!(report.report_path.exists());
+    }
+
+    #[test]
+    fn postgres_variants_never_pass_without_a_database_url() {
+        crate::postgres_test_isolation::assert_requires_database_url(
+            "backend_contention::tests::backend_contention_report_runs_postgres_and_records_artifact",
+        );
     }
 }

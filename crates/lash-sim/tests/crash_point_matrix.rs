@@ -31,6 +31,16 @@ macro_rules! crash_matrix {
             }
         )*
 
+        mod postgres {
+            $(
+                #[test]
+                #[ignore = "requires PostgreSQL; select inside a pg16 gate"]
+                fn $name() {
+                    super::run_postgres_variant(stringify!($name));
+                }
+            )*
+        }
+
         /// Every generated test: its name, its cell and its ignore reason.
         const GENERATED: &[(&str, Seam, CrashPoint, Option<&str>)] = &[
             $((
@@ -206,4 +216,23 @@ async fn live_short_settle_budget_is_bounded() {
         elapsed <= budget + Duration::from_millis(1),
         "settle exceeded its {budget:?} budget plus one timer tick: {elapsed:?}"
     );
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "a service variant must execute its matrix law in a child process"
+)]
+fn run_postgres_variant(law: &str) {
+    let url = lash_postgres_store::testing::required_database_url();
+    let output = std::process::Command::new(std::env::current_exe().expect("matrix executable"))
+        .args(["--exact", law, "--include-ignored", "--nocapture"])
+        .env("LASH_POSTGRES_DATABASE_URL", url)
+        .env("LASH_CRASH_MATRIX_STORE", "postgres")
+        .env("LASH_CRASH_MATRIX_ENGINE", "double")
+        .output()
+        .expect("run the PostgreSQL matrix variant");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("running 1 test"), "{stdout}\n{stderr}");
+    assert!(output.status.success(), "{stdout}\n{stderr}");
 }
