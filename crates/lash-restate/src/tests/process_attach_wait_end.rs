@@ -146,7 +146,7 @@ impl World {
             .expect("read the awaited process")
             .expect("the awaited process is retained");
         assert!(
-            awaited.outcome.is_none() && awaited.cancel_request.is_none(),
+            awaited.outcome().is_none() && awaited.cancel_request.is_none(),
             "ending the wait neither ends nor cancels the process: {awaited:#?}"
         );
         assert_eq!(self.watches(), 0, "no watch outlives its wait");
