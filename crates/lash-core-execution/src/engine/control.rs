@@ -137,7 +137,7 @@ pub enum EngineAck {
 
 /// Whether the identical ask may succeed when it is made again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum RefusalDisposition {
+pub enum RefusalClass {
     /// A fault of this attempt: the obligation is retried after a backoff.
     Retryable,
     /// The engine's answer to the ask: making it again is refused the same
@@ -153,7 +153,7 @@ pub enum RefusalDisposition {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{code}: {message}")]
 pub struct EngineRefusal {
-    pub disposition: RefusalDisposition,
+    pub disposition: RefusalClass,
     pub code: crate::RuntimeErrorCode,
     pub message: String,
 }
@@ -163,7 +163,7 @@ impl EngineRefusal {
     #[must_use]
     pub fn retryable(code: crate::RuntimeErrorCode, message: impl Into<String>) -> Self {
         Self {
-            disposition: RefusalDisposition::Retryable,
+            disposition: RefusalClass::Retryable,
             code,
             message: message.into(),
         }
@@ -173,7 +173,7 @@ impl EngineRefusal {
     #[must_use]
     pub fn permanent(code: crate::RuntimeErrorCode, message: impl Into<String>) -> Self {
         Self {
-            disposition: RefusalDisposition::Permanent,
+            disposition: RefusalClass::Permanent,
             code,
             message: message.into(),
         }
@@ -182,7 +182,7 @@ impl EngineRefusal {
     /// Whether the ask is worth another attempt.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
-        self.disposition == RefusalDisposition::Retryable
+        self.disposition == RefusalClass::Retryable
     }
 
     /// The cause as an obligation row and a refused intent retain it.
@@ -197,9 +197,9 @@ impl EngineRefusal {
 impl From<StoreError> for EngineRefusal {
     fn from(error: StoreError) -> Self {
         let disposition = if error.is_transient() {
-            RefusalDisposition::Retryable
+            RefusalClass::Retryable
         } else {
-            RefusalDisposition::Permanent
+            RefusalClass::Permanent
         };
         let crate::store::DeliveryError { code, message } = error.into();
         Self {
@@ -215,9 +215,9 @@ impl From<StoreError> for EngineRefusal {
 impl From<crate::PluginError> for EngineRefusal {
     fn from(error: crate::PluginError) -> Self {
         let disposition = if error.is_terminal() {
-            RefusalDisposition::Permanent
+            RefusalClass::Permanent
         } else {
-            RefusalDisposition::Retryable
+            RefusalClass::Retryable
         };
         let message = error.to_string();
         Self {

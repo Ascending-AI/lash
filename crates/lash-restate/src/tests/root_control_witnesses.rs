@@ -1406,7 +1406,7 @@ async fn mismatched_handle(server: HarnessServer) {
         assert_eq!(
             (refusal.disposition, &refusal.code),
             (
-                RefusalDisposition::Permanent,
+                RefusalClass::Permanent,
                 &lash_core::RuntimeErrorCode::EngineHandleMismatch
             ),
             "{refusal:?}"

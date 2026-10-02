@@ -220,6 +220,8 @@ const TURN_OUTCOME_STATE: &str = "outcome";
 ///
 /// version_guard(
 ///     roots(path = "crates/lash-core-execution/src/engine/drive.rs", RootOutcome),
+///     roots(path = "crates/lash-core-execution/src/engine/admission.rs", SealVerdict),
+///     roots(path = "crates/lash-core-store/src/store/drive_fence.rs", AdmissionId, DriveFence),
 ///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", ErrorEnvelope),
 ///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
 ///     items(TURN_OUTCOME_STATE, TURN_OUTCOME_FORMATS),

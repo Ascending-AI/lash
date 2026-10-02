@@ -32,9 +32,9 @@ pub use contracts::{
 };
 pub use control::{
     EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, NoEngineControl,
-    NoScopeClose, OpenRoot, ParkReconcileReport, ParkRecoveryWriter, ParkTarget,
-    RefusalDisposition, RootRef, RootRunLoss, ScopeCloseSink, SessionControlEngine,
-    StalledExecution, begin_session_close_replay_key,
+    NoScopeClose, OpenRoot, ParkReconcileReport, ParkRecoveryWriter, ParkTarget, RefusalClass,
+    RootRef, RootRunLoss, ScopeCloseSink, SessionControlEngine, StalledExecution,
+    begin_session_close_replay_key,
 };
 pub use drive::{
     DRIVE_CONTINUATION_PREFIX, DriveAbort, DriveHold, DriveLoop, DriveOutcome, DriveStop,

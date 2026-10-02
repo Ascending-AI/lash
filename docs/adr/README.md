@@ -67,7 +67,7 @@ The generated region below is checked against the live filenames and headings.
 | 0026 | [Model capability is host-supplied data and providers are executors](0026-model-capability-is-host-supplied-data.md) |
 | 0027 | [Process completion carries explicit authority](0027-unleased-completion-carries-explicit-authority.md) |
 | 0028 | [Attachments have blob storage, reference tracking and host lifecycle policy](0028-attachments-are-three-layers-blob-reference-lifecycle.md) |
-| 0030 | [The session model is recorded at creation](0030-the-session-model-is-resolved-once-at-open.md) |
+| 0030 | [The session model is recorded at creation](0030-the-session-profile-is-resolved-once-at-open.md) |
 | 0031 | [Execution evidence is provider-reported fact](0031-execution-evidence-is-provider-reported-fact.md) |
 | 0032 | [Attempt history rides inside the result](0032-attempt-history-rides-inside-the-result.md) |
 | 0033 | [Final-output attribution is host policy](0033-final-output-attribution-is-host-policy.md) |

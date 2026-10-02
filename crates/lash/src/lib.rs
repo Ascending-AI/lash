@@ -1330,8 +1330,8 @@ pub mod runtime {
     pub use lash_core::engine::{
         AdmitRequest, AdmitVerdict, DriveAbort, EngineAck, EngineCursor, EnginePage,
         EngineParkRecorded, EngineRefusal, ParkReconcileReport, ParkRecoveryWriter, ParkRef,
-        ParkTarget, RefusalDisposition, ScopeCloseSink, SealRefusal, SealVerdict,
-        SessionControlEngine, StalledExecution,
+        ParkTarget, RefusalClass, ScopeCloseSink, SealRefusal, SealVerdict, SessionControlEngine,
+        StalledExecution,
     };
     pub use lash_core::facade_support::CommittedGroupChildFinal;
     pub use lash_core::facade_support::{
