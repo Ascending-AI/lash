@@ -254,7 +254,7 @@ pub use lash_core_store::testing::queued_work_admission_policy;
 pub use crate::runtime::DeploymentOp;
 pub use lash_core_store::store::StoreOp;
 pub use lash_core_store::testing::{
-    Call, FaultKind, GATE_DEADLINE, Gate, Op, Outcome, Phase, Script, Scripted,
+    Call, FaultKind, GATE_DEADLINE, Gate, Op, Outcome, Phase, Script, Scripted, ScriptedError,
 };
 
 /// Fresh test executor host identity used by runtime construction.

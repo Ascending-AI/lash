@@ -96,5 +96,10 @@ pub use lash_core::testing::checkpoint_observer;
 /// completion-deferral authorization seam.
 pub use lash_core::testing::store_fixtures;
 
+/// The error side of a scripted store fault: each listed operation's error
+/// type lifts an injected `StoreError`, so a fault reaches the caller as that
+/// operation's own error (ADR 0044 §Simulation).
+pub use lash_core::testing::ScriptedError;
+
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core::triggers::{TriggerDeliveryRecoveryError, TriggerRouter};

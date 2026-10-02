@@ -19,7 +19,7 @@
 // serves its own store-backed tests and is not re-exported here.
 pub use lash_core_execution::testing::{
     Call, DeploymentOp, FaultKind, GATE_DEADLINE, Gate, Op, Outcome, Phase, Script, Scripted,
-    StoreOp,
+    ScriptedError, StoreOp,
 };
 pub use lash_core_execution::testing::{
     EffectLayer, EmptyToolProvider, FIXTURE_ECHO_TOOL, FixtureProcessEngine, FixtureTools,
