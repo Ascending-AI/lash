@@ -1192,24 +1192,6 @@ pub async fn fence_is_not_in_the_envelope_hash(
     }
 }
 
-/// Where the root admission faults once.
-#[derive(Clone, Copy, Debug)]
-enum AdmissionFault {
-    /// The admission itself does not answer.
-    AtAdmission,
-    /// The admission bound its rows, then its answer does not reach the
-    /// root: the rows are this attempt's uncommitted-to-journal admission.
-    AfterAdmission,
-}
-
-/// A session store whose root admission faults once, at [`AdmissionFault`], with a
-/// transient contention the next attempt does not meet.
-struct AdmissionFaultsOnce {
-    inner: Arc<dyn crate::RuntimeStore>,
-    fault: AdmissionFault,
-    fired: AtomicUsize,
-}
-
 /// A session store whose worker dies once right after the root admission
 /// committed, before the effect journal records the admission's outcome
 /// (FIG-3840). It keeps every admission it returned, with the drive
@@ -1475,36 +1457,6 @@ pub async fn a_committed_root_replays_its_recorded_repair(
     assert_eq!(parts.calls(), 1, "the model call replays too");
 }
 
-impl AdmissionFaultsOnce {
-    fn fire(&self, at: AdmissionFault) -> Result<(), crate::StoreError> {
-        if std::mem::discriminant(&at) == std::mem::discriminant(&self.fault)
-            && self.fired.fetch_add(1, Ordering::SeqCst) == 0
-        {
-            return Err(crate::StoreError::Contended);
-        }
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::store::RuntimeStoreDecorator for AdmissionFaultsOnce {
-    type Inner = dyn crate::RuntimeStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn admit_root(
-        &self,
-        request: &crate::store::AdmitRootRequest,
-    ) -> Result<Option<crate::store::RootAdmission>, crate::StoreError> {
-        self.fire(AdmissionFault::AtAdmission)?;
-        let drive = self.inner.admit_root(request).await?;
-        self.fire(AdmissionFault::AfterAdmission)?;
-        Ok(drive)
-    }
-}
-
 /// A store that does not answer at a root's admission is that attempt's
 /// fault, never the admission's recorded outcome (FIG-3600 review HIGH-3).
 /// The root is re-admitted first by every later drive, so a recorded fault
@@ -1522,20 +1474,19 @@ pub async fn a_store_fault_at_the_root_admission_is_retried_not_recorded(
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    for (fault, law) in [
-        (AdmissionFault::AtAdmission, "admission-fault-at-admission"),
-        (
-            AdmissionFault::AfterAdmission,
-            "admission-fault-after-admission",
-        ),
+    for (after, law) in [
+        (false, "admission-fault-at-admission"),
+        (true, "admission-fault-after-admission"),
     ] {
         let mut parts = DriveParts::new(prefix, law, &effect_host, &stores, 8).await;
-        let faults = Arc::new(AdmissionFaultsOnce {
-            inner: Arc::clone(&parts.store),
-            fault,
-            fired: AtomicUsize::new(0),
-        });
-        parts.store = Arc::clone(&faults) as Arc<dyn crate::RuntimeStore>;
+        let script = lash_core::testing::Script::new();
+        let op = lash_core::testing::StoreOp::admit_root;
+        if after {
+            script.on(op).after().lose_reply();
+        } else {
+            script.on(op).before().fail(|| crate::StoreError::Contended);
+        }
+        parts.store = script.wrap(law, Arc::clone(&parts.store));
         let input = parts
             .enqueue("ask once", Some("admission-fault-root"))
             .await;
@@ -1585,33 +1536,28 @@ pub async fn a_store_fault_at_the_root_admission_is_retried_not_recorded(
         while let Ok(outcome) = rx.try_recv() {
             outcomes.push(outcome);
         }
-        assert_eq!(
-            faults.fired.load(Ordering::SeqCst) >= 1,
-            true,
-            "{fault:?}: the store fault fired"
-        );
         let committed: Vec<_> = outcomes
             .iter()
             .filter_map(|outcome| outcome.as_ref().ok())
             .collect();
         assert!(
             matches!(committed.as_slice(), [RootOutcome::Committed { .. }]),
-            "{fault:?}: the retry commits the root exactly once: {outcomes:?}"
+            "{law}: the retry commits the root exactly once: {outcomes:?}"
         );
         assert_eq!(
             parts.calls.load(Ordering::SeqCst),
             1,
-            "{fault:?}: one model call"
+            "{law}: one model call"
         );
         assert_eq!(
             parts.epoch().await.epoch,
             1,
-            "{fault:?}: one drive-epoch transition"
+            "{law}: one drive-epoch transition"
         );
         assert_eq!(
             parts.applications().await,
             vec![(input, TurnId::from("admission-fault-root"))],
-            "{fault:?}: the input is applied once"
+            "{law}: the input is applied once"
         );
     }
 }

@@ -1214,12 +1214,12 @@ mod response_phase_replay;
 #[cfg(feature = "rlm")]
 mod rlm_restore_idempotence;
 mod send_handle;
-mod send_open_failures;
 mod session_control;
 mod session_drive;
 #[cfg(feature = "rlm")]
 mod stack_budget;
 mod standard_compaction_persistence;
+mod store_faults;
 mod tool_intent_ingress;
 mod tool_restore_report;
 mod turn_streaming;

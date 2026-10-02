@@ -183,6 +183,7 @@ impl Action {
 #[derive(Clone, Copy)]
 enum Hits {
     Nth(usize),
+    Range { first: usize, count: usize },
     From(usize),
 }
 
@@ -237,6 +238,7 @@ impl Target {
         };
         match self.hits {
             Hits::Nth(wanted) => nth == wanted,
+            Hits::Range { first, count } => nth >= first && nth - first < count,
             Hits::From(first) => nth >= first,
         }
     }
@@ -249,6 +251,9 @@ impl std::fmt::Display for Target {
         }
         match self.hits {
             Hits::Nth(nth) => write!(f, "{}#{nth}", self.ops)?,
+            Hits::Range { first, count } => {
+                write!(f, "{}#{first}..{}", self.ops, first + (count - 1))?
+            }
             Hits::From(first) => write!(f, "{}#{first}..", self.ops)?,
         }
         write!(f, " {}", self.phase)
@@ -480,6 +485,21 @@ impl<'a> On<'a> {
     pub fn nth(mut self, nth: usize) -> Self {
         assert!(nth > 0, "calls are counted from 1");
         self.target.hits = Hits::Nth(nth);
+        self
+    }
+
+    /// Act on `count` consecutive calls starting at the selected `nth` call.
+    /// The one rule must fire, but a background caller need not hit it twice.
+    pub fn times(mut self, count: usize) -> Self {
+        assert!(count > 0, "a rule must cover at least one call");
+        let first = match self.target.hits {
+            Hits::Nth(first) | Hits::From(first) | Hits::Range { first, .. } => first,
+        };
+        assert!(
+            first.checked_add(count - 1).is_some(),
+            "call range overflows"
+        );
+        self.target.hits = Hits::Range { first, count };
         self
     }
 
@@ -715,6 +735,25 @@ mod tests {
                 "a:admit_root#1 after fail(transient)",
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn a_finite_fault_rule_recovers_after_two_failed_calls() {
+        let script = Script::new();
+        let store = script.wrap("a", Arc::new(Counter::default()));
+        script
+            .on(StoreOp::lookup_session)
+            .nth(2)
+            .times(2)
+            .before()
+            .fail(transient);
+        let call = || store.call(StoreOp::lookup_session, store.inner().work());
+        assert_eq!(call().await.expect("first call passes"), 1);
+        for _ in 0..2 {
+            assert!(matches!(call().await, Err(StoreError::Contended)));
+        }
+        assert_eq!(call().await.expect("store recovers"), 2);
+        assert_eq!(script.calls(StoreOp::lookup_session), 4);
     }
 
     #[tokio::test]
