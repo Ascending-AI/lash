@@ -298,3 +298,103 @@ async fn a_terminal_resolves_a_live_wait_and_drops_the_watch() {
         "the wait holds the process's terminal: {outcome:?}"
     );
 }
+
+/// A segment retires a read by invocation id, while its successor retains
+/// the same logical event key and the original absolute deadline.
+#[tokio::test]
+async fn retiring_a_physical_read_preserves_the_event_for_its_successor() {
+    for timed in [false, true] {
+        let world = World::new(0x4862_1000 + u64::from(timed)).await;
+        let key = world.key(custom("shared-event-retirement")).await;
+        let address = RestateDurableWaitAddress::for_key(&key);
+        let request = RestateDurableWaitAwaitRequest {
+            key: key.clone(),
+            deadline: timed.then(|| crate::RestateDurableWaitDeadline {
+                version: crate::DURABLE_WAIT_REQUEST_VERSION,
+                unix_epoch_ms: crate::system_clock().timestamp_ms() + 3_600_000,
+            }),
+        };
+        let target = format!(
+            "LashDurableWaitWorkflow/{}/await_resolution",
+            address.workflow_key
+        );
+        let ingress = world.engine.ingress().clone();
+        let predecessor_request = request.clone();
+        let workflow_key = address.workflow_key.clone();
+        let predecessor = tokio::spawn(async move {
+            ingress
+                .call_workflow_json::<_, crate::Reply<Resolution>>(
+                    "LashDurableWaitWorkflow",
+                    &workflow_key,
+                    "await_resolution",
+                    &crate::Call::new(predecessor_request),
+                )
+                .await
+                .map(crate::Reply::into_body)
+        });
+        world
+            .until(&target, |statuses| {
+                statuses.iter().all(|s| *s != "completed")
+            })
+            .await;
+        world.engine.server().settle().await;
+        let subscription = world
+            .engine
+            .server()
+            .invocations()
+            .into_iter()
+            .find(|view| view.target == target)
+            .expect("the physical read");
+        assert_eq!(world.engine.server().cancel(&subscription.id), Some(true));
+        assert_eq!(
+            predecessor
+                .await
+                .expect("the read task")
+                .expect("the retired read"),
+            Resolution::Cancelled
+        );
+        let terminal: Option<Resolution> = world
+            .engine
+            .ingress()
+            .call_workflow_json::<_, crate::Reply<Option<Resolution>>>(
+                "LashDurableWaitWorkflow",
+                &address.workflow_key,
+                "peek",
+                &crate::Call::new(()),
+            )
+            .await
+            .expect("read the shared promise")
+            .into_body();
+        assert_eq!(terminal, None, "retirement writes no logical terminal");
+        let ingress = world.engine.ingress().clone();
+        let workflow_key = address.workflow_key;
+        let successor = tokio::spawn(async move {
+            ingress
+                .call_workflow_json::<_, crate::Reply<Resolution>>(
+                    "LashDurableWaitWorkflow",
+                    &workflow_key,
+                    "await_resolution",
+                    &crate::Call::new(request),
+                )
+                .await
+                .map(crate::Reply::into_body)
+        });
+        world
+            .until(&target, |statuses| {
+                statuses.len() == 2
+                    && statuses.contains(&"completed")
+                    && statuses.iter().any(|s| *s != "completed")
+            })
+            .await;
+        world
+            .resolve(&key, Resolution::Ok(serde_json::json!("delivered")))
+            .await;
+        assert_eq!(
+            successor
+                .await
+                .expect("the successor task")
+                .expect("the successor's answer"),
+            Resolution::Ok(serde_json::json!("delivered"))
+        );
+    }
+}

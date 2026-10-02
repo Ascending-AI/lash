@@ -104,9 +104,8 @@ fn first_completed(
 /// promise's, then the hand-over promise's. A cancel promise holding the
 /// segment's own `SegmentFinished` retirement is not a cancel, and a
 /// hand-over naming another generation is not this segment's: each drops
-/// out and the rest race on. The event is never released on a hand-over —
-/// the wait stays open for the successor, and the orphaned call completes
-/// harmlessly when the signal resolves it.
+/// out and the rest race on. The logical event stays open on a hand-over;
+/// the caller retires its physical read before publishing the boundary.
 pub(super) async fn race_signal_wait<'run>(
     event: GateWait<'run, crate::compat::Reply<Resolution>>,
     cancel: GateWait<'run, String>,
@@ -259,7 +258,7 @@ macro_rules! process_hand_over_promise {
 /// The wait hands over only to a wake naming `generation`, the generation
 /// that admitted the segment. A cancel releases the losing event wait, as
 /// the cancel race always has: nobody is left to resolve it. A hand-over
-/// leaves it open for the successor.
+/// leaves the logical event open and retires the predecessor's read.
 macro_rules! process_signal_wait_method {
     ($promises:ident, $context:ident, $ctx_lifetime:lifetime) => {
         fn await_signal_or_segment_end<'run>(
@@ -291,7 +290,9 @@ macro_rules! process_signal_wait_body {
                 .durable_wait_workflow(context, event_address.workflow_key.clone())
                 .await_resolution($request.clone().into())
                 .header(LASH_REPLAY_KEY_HEADER.to_string(), $replay_key.clone());
-            let event = erase_gate_wait(event.call());
+            let event = event.call();
+            let subscription = event.invocation_handle().await?;
+            let event = erase_gate_wait(event);
             let (Some(cancel), Some(hand_over)) = (
                 process_cancel_promise!($promises, $context, $run, context),
                 process_hand_over_promise!($promises, $context, $run, context),
@@ -301,6 +302,12 @@ macro_rules! process_signal_wait_body {
                 ));
             };
             let outcome = race_signal_wait(event, cancel, hand_over, &$generation).await?;
+            if matches!(
+                outcome,
+                RestateTurnCancelRaceOutcome::Completed(SignalWaitOutcome::HandedOver)
+            ) {
+                retire_wait_subscription(subscription).await?;
+            }
             if matches!(outcome, RestateTurnCancelRaceOutcome::ProcessCancelled) {
                 let resolve = $namespace
                     .durable_wait_registry(context, durable_wait_index_object_key(&event_address))

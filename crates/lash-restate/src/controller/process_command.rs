@@ -974,7 +974,11 @@ where
                 authority_id,
                 invocation.execution_scope(),
                 lash_core::AwaitEventWaitIdentity::Custom {
-                    key: process_await_wait_key(&process_id, invocation.effect_id()),
+                    key: process_await_wait_key(
+                        &process_id,
+                        invocation.effect_id(),
+                        context.invocation_id(),
+                    ),
                 },
             )?;
             context
@@ -1041,10 +1045,22 @@ where
                     process_await_output_from_resolution(resolution)?
                 }
                 RestateTurnCancelRaceOutcome::Completed(context::TurnWaitOutcome::HandedOver) => {
-                    // The wait has no outcome here. It stays armed on its
-                    // key for whoever resolves the process's terminal, and
-                    // the successor segment's turn waits on the process
-                    // under a key of its own.
+                    // Retire this physical subscription before the boundary.
+                    // Its attach watches the key and cancels its terminal read.
+                    // The process terminal and logical opener remain live;
+                    // the successor observes the terminal or arms its own key.
+                    context
+                        .resolve_event(
+                            namespace,
+                            crate::durable_wait::RestateDurableWaitResolveRequest {
+                                key: await_key,
+                                resolution: lash_core::Resolution::Cancelled,
+                            },
+                        )
+                        .await
+                        .map_err(|error| {
+                            crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineProcessAwait)
+                        })?;
                     tracing::info!(
                         target: "lash::restate",
                         event = "restate.turn_wait_handed_over",
@@ -1148,6 +1164,7 @@ where
                             key: process_await_after_turn_cancel_wait_key(
                                 &process_id,
                                 invocation.effect_id(),
+                                context.invocation_id(),
                             ),
                         },
                     )?;
@@ -1217,10 +1234,15 @@ where
 }
 
 /// The wait a direct process await parks on: its own, named by the awaited
-/// process and the awaiting command, so two awaits of one process in one
-/// scope never share a wait (ADR 0124).
-fn process_await_wait_key(process_id: &lash_core::ProcessId, effect_id: &str) -> String {
-    format!("process-await:{process_id}:{effect_id}")
+/// process, the logical command and the physical engine invocation. A
+/// successor reissues the logical command under a fresh subscription, so
+/// retiring a predecessor cannot settle the successor's wait (ADR 0124).
+fn process_await_wait_key(
+    process_id: &lash_core::ProcessId,
+    effect_id: &str,
+    invocation_id: &str,
+) -> String {
+    format!("process-await:{process_id}:{effect_id}:invocation:{invocation_id}")
 }
 
 /// The wait a direct process await reads its terminal from after a turn
@@ -1228,8 +1250,12 @@ fn process_await_wait_key(process_id: &lash_core::ProcessId, effect_id: &str) ->
 fn process_await_after_turn_cancel_wait_key(
     process_id: &lash_core::ProcessId,
     effect_id: &str,
+    invocation_id: &str,
 ) -> String {
-    format!("process-await:{process_id}:{effect_id}:after-turn-cancel")
+    format!(
+        "{}:after-turn-cancel",
+        process_await_wait_key(process_id, effect_id, invocation_id)
+    )
 }
 
 /// The terminal a resolved process-await wait carries. The attach workflow

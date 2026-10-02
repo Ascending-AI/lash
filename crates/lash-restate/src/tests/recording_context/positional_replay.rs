@@ -36,6 +36,10 @@ impl PositionalReplayContext {
 impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx> for Arc<PositionalReplayContext> {}
 
 impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
+    fn invocation_id(&self) -> &str {
+        "PositionalReplayContext"
+    }
+
     fn send_usage_settlement<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,

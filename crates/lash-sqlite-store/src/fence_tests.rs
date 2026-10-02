@@ -587,6 +587,13 @@ struct Deployments(std::sync::Mutex<Vec<RetainedDeployment>>);
 
 #[async_trait::async_trait]
 impl DeploymentRegistry for Deployments {
+    async fn unfinished_invocations(
+        &self,
+        _generation: &BuildGeneration,
+    ) -> Result<u64, DeploymentRegistryError> {
+        Ok(0)
+    }
+
     async fn deployments_serving(
         &self,
         _generation: &BuildGeneration,

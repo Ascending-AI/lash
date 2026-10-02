@@ -494,6 +494,10 @@ impl RecordingContext {
 impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx> for Arc<RecordingContext> {}
 
 impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
+    fn invocation_id(&self) -> &str {
+        "RecordingContext"
+    }
+
     fn send_usage_settlement<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
@@ -1853,6 +1857,10 @@ impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx>
 }
 
 impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
+    fn invocation_id(&self) -> &str {
+        "ReplayableRecordingContext"
+    }
+
     fn send_usage_settlement<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,

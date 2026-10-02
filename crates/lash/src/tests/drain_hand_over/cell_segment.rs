@@ -44,11 +44,10 @@ finish({{ answer, before }});"#
 }
 
 fn cell_provider(
-    signal: &str,
+    cell: String,
     requests: &Arc<std::sync::Mutex<Vec<LlmRequest>>>,
 ) -> ProviderHandle {
     let requests = Arc::clone(requests);
-    let cell = cell(signal);
     crate::testing::TestProvider::builder()
         .kind("cell-segment")
         .complete(move |request| {
@@ -74,7 +73,7 @@ fn cell_provider(
 fn cell_core(
     backend: lash_core::Backend,
     work: Arc<dyn lash_core::SessionWorkEngine>,
-    signal: &str,
+    cell: String,
     requests: &Arc<std::sync::Mutex<Vec<LlmRequest>>>,
 ) -> LashCore {
     let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
@@ -85,7 +84,7 @@ fn cell_core(
         .queued_work_batching(
             crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
         )
-        .serve_test_llm_profile(cell_provider(signal, requests), mock_llm_profile_spec())
+        .serve_test_llm_profile(cell_provider(cell, requests), mock_llm_profile_spec())
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::session_or_starter,
@@ -135,7 +134,7 @@ impl CellRoll {
             lash_core::testing::runtime_helpers::LayeredBackend::over(engine.old_backend())
                 .map_session_store_factory(move |inner| scripted.wrap("cell-run", inner))
                 .into_backend();
-        let core = cell_core(backend, engine.old_work(), &signal, &requests);
+        let core = cell_core(backend, engine.old_work(), cell(&signal), &requests);
         double.install_process_worker(
             lash_core_worker::DurableProcessWorker::new(core.durable_process_worker_config()?)
                 .expect("the core's process worker"),
@@ -177,6 +176,76 @@ impl CellRoll {
             _keep,
             script,
         })
+    }
+
+    async fn start_external(storage: Storage, label: &str) -> Result<Self> {
+        let World { engine, _keep, .. } = double_world(storage).await;
+        let session = lash_core::SessionId::fixture(label);
+        let process = engine
+            .old_backend()
+            .process_registry()
+            .register_process_with_observers(
+                lash_core::ProcessRegistration::new(
+                    lash_core::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    lash_core::ProcessProvenance::host(),
+                    lash_core::Lifetime::Detached,
+                ),
+                std::slice::from_ref(&session),
+            )
+            .await?
+            .id;
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let source = typescript_block(
+            r#"let before = 20;
+const handles = await processes.list({});
+const answer = await handles[0];
+before = before + 22;
+finish({ answer, before });"#,
+        );
+        let old = engine
+            .old_backend()
+            .build_generation()
+            .expect("a bound build")
+            .clone();
+        let core = cell_core(engine.old_backend(), engine.old_work(), source, &requests);
+        let handle = core
+            .session(session.clone())
+            .created()
+            .await
+            .open()
+            .await?
+            .send(TurnInput::text("await the external job"))
+            .id("run-run")
+            .await?;
+        let next = BuildGeneration::for_test("cell-external-next");
+        // Register N+1 after the caller has armed its subscription on N.
+        let roll = Self {
+            engine,
+            core,
+            requests,
+            session,
+            handle: Some(handle),
+            process,
+            signal: String::new(),
+            old,
+            next,
+            _keep,
+            script: Arc::new(lash_core::testing::Script::new()),
+        };
+        roll.parked_run("run-run", 1).await;
+        roll.engine
+            .roll(roll.next.clone(), &Arc::new(Model::holding(0)))
+            .await;
+        assert!(
+            roll.engine
+                .old_backend()
+                .generation_drain()
+                .mark_draining(&roll.old, 1)
+                .await?
+        );
+        Ok(roll)
     }
 
     fn server(&self) -> &lash_restate_test::RestateTestServer {
@@ -682,7 +751,7 @@ async fn cancellation_discards_the_cell(
     let reopened = cell_core(
         fresh_build.lash_backend(),
         fresh_build.explicit_reconcile_session_work(),
-        &roll.signal,
+        cell(&roll.signal),
         &roll.requests,
     );
     fresh_build.processes().install(
@@ -847,4 +916,424 @@ cell_segment_laws! {
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     cell_cancel_capture_postgres:
         cancellation_discards_the_cell, Storage::Postgres, (CancelAt::Captured, None);
+}
+
+fn predecessor_subscriptions(roll: &CellRoll) -> (String, Vec<lash_restate_test::InvocationView>) {
+    let views = roll.server().invocations();
+    let attach = views
+        .iter()
+        .find(|view| view.target.starts_with("LashProcessAttach/"))
+        .expect("the predecessor's attach");
+    let key = attach
+        .target
+        .split('/')
+        .nth(1)
+        .expect("the attach's wait key")
+        .to_owned();
+    let wait = format!("LashDurableWaitWorkflow/{key}/await_resolution");
+    let read = format!("LashProcessWorkflow/{}/await_terminal", roll.process);
+    let subscriptions: Vec<_> = views
+        .iter()
+        .filter(|view| view.target == attach.target || view.target == wait || view.target == read)
+        .cloned()
+        .collect();
+    assert_eq!(
+        subscriptions.len(),
+        3,
+        "the wait, attach and terminal read are armed on N"
+    );
+    assert!(subscriptions.iter().all(|view| view.status != "completed"));
+    (key, subscriptions)
+}
+
+async fn complete_external(roll: &CellRoll) -> Result<()> {
+    let output = lash_core::ProcessAwaitOutput::from_tool_output(
+        lash_core::ToolCallOutput::success(serde_json::json!("done")),
+    );
+    roll.engine
+        .old_backend()
+        .process_registry()
+        .complete_process(
+            &roll.process,
+            output.clone(),
+            lash_core::ProcessCompletionAuthority::ExternalOwner,
+        )
+        .await?;
+    let Engine::Double(double) = &roll.engine else {
+        unreachable!("the law's double")
+    };
+    lash_restate::RestateIngressClient::new(double.connection())
+        .call_workflow_json::<_, lash_restate::Reply<()>>(
+            "LashProcessWorkflow",
+            roll.process.as_str(),
+            "complete_terminal",
+            &lash_restate::Call::new(lash_restate::RestateProcessCompleteRequest {
+                process_id: roll.process.clone(),
+                output,
+            }),
+        )
+        .await
+        .expect("publish the external process's terminal");
+    Ok(())
+}
+
+async fn assert_subscription_retired(
+    roll: &CellRoll,
+    subscriptions: &[lash_restate_test::InvocationView],
+) {
+    let deadline = tokio::time::Instant::now() + WEDGE;
+    loop {
+        let views = roll.server().invocations();
+        if subscriptions.iter().all(|old| {
+            views
+                .iter()
+                .any(|view| view.id == old.id && view.status == "completed")
+        }) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "predecessor subscription remains pinned: {views:#?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+async fn assert_external_answer(roll: &mut CellRoll) -> Result<()> {
+    let output = tokio::time::timeout(WEDGE, roll.sent().output())
+        .await
+        .expect("the resumed run answers")?;
+    assert_eq!(
+        output.result.outcome,
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue {
+            value: serde_json::json!({"answer": "done", "before": 42}),
+        })
+    );
+    assert_eq!(
+        roll.requests.lock_recover().len(),
+        1,
+        "the captured cell resumes without another model call"
+    );
+    roll.assert_ended().await
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RetirementCrash {
+    BeforePromise,
+    AfterPromise,
+    BeforeIndex,
+    AfterIndex,
+}
+
+async fn retires_subscription(crash: Option<RetirementCrash>, hold_attach: bool) -> Result<()> {
+    use lash_restate_test::{CrashPoint, CrashRule, protocol::MessageType};
+    let mut roll = CellRoll::start_external(
+        Storage::SqliteMemory,
+        &format!("wait-retirement-{crash:?}-{hold_attach}"),
+    )
+    .await?;
+    let predecessor = roll.parked_run("run-run", 1).await;
+    let old_deployment = roll
+        .server()
+        .pinned_deployment(&predecessor.id)
+        .expect("N is pinned");
+    let (key, subscriptions) = predecessor_subscriptions(&roll);
+    let crashes = lash_restate_test::CrashCount::new();
+    if let Some(crash) = crash {
+        assert!(roll.server().on_crash(crashes.listener()));
+        let (service, key, ty) = match crash {
+            RetirementCrash::BeforePromise => (
+                "LashDurableWaitWorkflow",
+                key.clone(),
+                MessageType::CompletePromiseCommand,
+            ),
+            RetirementCrash::AfterPromise => (
+                "LashDurableWaitWorkflow",
+                key.clone(),
+                MessageType::OutputCommand,
+            ),
+            RetirementCrash::BeforeIndex => (
+                "LashDurableWaitIndex",
+                roll.session.to_string(),
+                MessageType::SetStateCommand,
+            ),
+            RetirementCrash::AfterIndex => (
+                "LashDurableWaitIndex",
+                roll.session.to_string(),
+                MessageType::OutputCommand,
+            ),
+        };
+        roll.server().crash_on(
+            CrashRule::new(CrashPoint::BeforeFrame { ty })
+                .service(service)
+                .key(key)
+                .handler("resolve"),
+        );
+    }
+    let held = if hold_attach {
+        Some(roll.server().hold("LashProcessAttach", &key).await)
+    } else {
+        None
+    };
+    roll.hand_over().await?;
+    roll.parked_run(CONTINUATION, 1).await;
+    if let Some(held) = held {
+        let status = roll.core.generation_drain_status(&roll.old).await?;
+        assert_eq!(status.in_flight_turns, 0, "the run already belongs to N+1");
+        assert!(
+            status.unfinished_invocations >= 2,
+            "the held attach and read still need N: {status:?}"
+        );
+        assert!(
+            !status.drained(),
+            "engine work holds the drain after SQL work transfers"
+        );
+        assert!(
+            roll.server()
+                .remove_deployment(&old_deployment, false)
+                .is_err()
+        );
+        held.release();
+    }
+    assert_subscription_retired(&roll, &subscriptions).await;
+    roll.server().settle().await;
+    let successor: Vec<_> = roll
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|view| {
+            view.pinned_deployment_id != predecessor.pinned_deployment_id
+                && view.status != "completed"
+                && (view.target.starts_with("LashProcessAttach/")
+                    || view.target.ends_with("/await_terminal")
+                    || view.target.starts_with("LashDurableWaitWorkflow/")
+                        && view.target.ends_with("/await_resolution"))
+        })
+        .collect();
+    assert_eq!(
+        successor.len(),
+        3,
+        "N+1 owns its own wait, attach and read: {successor:?}"
+    );
+    let process = roll
+        .engine
+        .old_backend()
+        .process_registry()
+        .get_process(&roll.process)
+        .await?
+        .expect("the awaited process");
+    assert!(
+        process.terminal().is_none() && process.cancel_request.is_none(),
+        "retiring the subscription leaves the process live"
+    );
+    let status = roll.core.generation_drain_status(&roll.old).await?;
+    assert!(status.drained(), "N has no remaining holds: {status:?}");
+    roll.server()
+        .remove_deployment(&old_deployment, false)
+        .expect("remove N before completing the process");
+    complete_external(&roll).await?;
+    if crash.is_some() {
+        assert_eq!(crashes.get(), 1, "the chosen record boundary crashed once");
+    }
+    assert_external_answer(&mut roll).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn handover_retires_predecessor_subscription_before_process_completion() -> Result<()> {
+    retires_subscription(None, false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_signal_handover_retires_only_the_predecessors_read() -> Result<()> {
+    let mut roll = CellRoll::start(Storage::SqliteMemory, "signal-read-retirement").await?;
+    let key = roll
+        .engine
+        .old_backend()
+        .effect_host()
+        .await_event_key(
+            &lash_core::ExecutionScope::process(roll.process.clone()),
+            lash_core::AwaitEventWaitIdentity::process_signal(
+                roll.process.clone(),
+                &roll.signal,
+                1,
+            ),
+        )
+        .await
+        .expect("the process's signal key");
+    let address = lash_restate::RestateDurableWaitAddress::for_key(&key);
+    let target = format!(
+        "LashDurableWaitWorkflow/{}/await_resolution",
+        address.workflow_key
+    );
+    let predecessor = roll
+        .server()
+        .invocations()
+        .into_iter()
+        .find(|view| view.target == target)
+        .expect("the predecessor's signal read");
+    roll.engine
+        .old_backend()
+        .process_work()
+        .port()
+        .deliver_hand_over(&roll.process, &roll.old)
+        .await?;
+    assert_subscription_retired(&roll, std::slice::from_ref(&predecessor)).await;
+    let deadline = tokio::time::Instant::now() + WEDGE;
+    while !roll.server().invocations().iter().any(|view| {
+        view.target == target
+            && view.pinned_deployment_id != predecessor.pinned_deployment_id
+            && view.status != "completed"
+    }) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the successor never awaited the same signal key"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let record = roll
+        .engine
+        .old_backend()
+        .process_registry()
+        .get_process(&roll.process)
+        .await?
+        .expect("the process");
+    assert!(record.terminal().is_none() && record.cancel_request.is_none());
+    roll.hand_over().await?;
+    roll.parked_run(CONTINUATION, 1).await;
+    roll.release_process().await?;
+    assert_external_answer(&mut roll).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn handover_retirement_crash_before_promise() -> Result<()> {
+    retires_subscription(Some(RetirementCrash::BeforePromise), false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn handover_retirement_crash_after_promise() -> Result<()> {
+    retires_subscription(Some(RetirementCrash::AfterPromise), false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn handover_retirement_crash_before_index() -> Result<()> {
+    retires_subscription(Some(RetirementCrash::BeforeIndex), false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn handover_retirement_crash_after_index() -> Result<()> {
+    retires_subscription(Some(RetirementCrash::AfterIndex), false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn handover_drain_counts_an_attach_until_it_returns() -> Result<()> {
+    retires_subscription(None, true).await
+}
+
+async fn terminal_or_cancel_during_retirement(cancel: bool) -> Result<()> {
+    let mut roll = CellRoll::start_external(
+        Storage::SqliteMemory,
+        &format!("wait-retirement-race-{cancel}"),
+    )
+    .await?;
+    let predecessor = roll.parked_run("run-run", 1).await;
+    let old_deployment = roll
+        .server()
+        .pinned_deployment(&predecessor.id)
+        .expect("N is pinned");
+    let (key, subscriptions) = predecessor_subscriptions(&roll);
+    let held = roll.server().hold("LashDurableWaitWorkflow", &key).await;
+    let driver = Arc::clone(&roll.core._session_shifts);
+    let reconcile = tokio::spawn(async move {
+        driver
+            .reconcile(
+                &lash_core::engine::ReconcileCursor::default(),
+                std::num::NonZeroUsize::new(16).expect("page"),
+            )
+            .await
+    });
+    let deadline = tokio::time::Instant::now() + WEDGE;
+    while !roll
+        .server()
+        .journal(&predecessor.id)
+        .expect("the predecessor's journal")
+        .iter()
+        .any(|entry| entry.ty == lash_restate_test::protocol::MessageType::AttachInvocationCommand)
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "retirement never awaited its physical read"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    if cancel {
+        // The store accepts cancellation while retirement cannot complete.
+        // Its engine delivery queues behind the exclusive retirement call.
+        let request = roll
+            .handle
+            .as_ref()
+            .expect("the sent input")
+            .cancel()
+            .origin("retirement-race")
+            .into_future();
+        tokio::pin!(request);
+        tokio::select! {
+            result = &mut request => {
+                result?;
+                held.release();
+            },
+            result = async {
+                loop {
+                    let store = lash_core::runtime::live_session_view(&roll.core.store_factory, &roll.session).await?.expect("the session");
+                    if store.turn_cancel_request(&lash_core::facade_support::TurnAddress::new(roll.session.clone(), lash_core::TurnId::fixture("run-run"))).await?.is_some() { break; }
+                    assert!(tokio::time::Instant::now() < deadline, "the cancel was never recorded");
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Ok::<(), crate::EmbedError>(())
+            } => {
+                result?;
+                held.release();
+                request.await?;
+            }
+        }
+    } else {
+        complete_external(&roll).await?;
+        held.release();
+    }
+    reconcile.await.expect("the recovery task finishes")?;
+    assert_subscription_retired(&roll, &subscriptions).await;
+    if cancel {
+        let outcome = tokio::time::timeout(WEDGE, roll.sent().outcome())
+            .await
+            .expect("the cancelled run answers")?;
+        assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
+        assert!(
+            roll.engine
+                .old_backend()
+                .process_registry()
+                .get_process(&roll.process)
+                .await?
+                .expect("the process")
+                .terminal()
+                .is_none(),
+            "a detached externally owned process remains live after its waiting Run cancels"
+        );
+        assert_eq!(roll.requests.lock_recover().len(), 1);
+    } else {
+        assert_external_answer(&mut roll).await?;
+    }
+    roll.server().settle().await;
+    roll.server()
+        .remove_deployment(&old_deployment, false)
+        .expect("the retirement race releases N");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn handover_observes_completion_during_subscription_retirement() -> Result<()> {
+    terminal_or_cancel_during_retirement(false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn handover_honours_cancel_during_subscription_retirement() -> Result<()> {
+    terminal_or_cancel_during_retirement(true).await
 }

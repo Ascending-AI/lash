@@ -22,8 +22,8 @@ use lash_core::{
 };
 use restate_sdk::context::macro_support::SealedDurableFuture;
 use restate_sdk::context::{
-    Context as RestateContext, ContextAwakeables, ContextClient, ObjectContext, RunRetryPolicy,
-    SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+    CallFuture as _, Context as RestateContext, ContextAwakeables, ContextClient, ObjectContext,
+    RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, TerminalError};
 use restate_sdk::serde::Json;
@@ -132,6 +132,20 @@ fn erase_gate_wait<'run, T>(
     Box::pin(wait)
 }
 
+/// Retire the exact shared-handler read, preserving its workflow's logical
+/// event. The cancellation and output attachment are both journaled, so the
+/// caller cannot commit a handover before this subscription has returned.
+async fn retire_wait_subscription(
+    subscription: restate_sdk::context::InvocationHandle,
+) -> Result<(), TerminalError> {
+    subscription.cancel();
+    match subscription.attach::<Reply<Resolution>>().await {
+        Ok(_) => Ok(()),
+        Err(error) if is_engine_cancellation(&error) => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 /// This is the SDK's `select!` without its consuming semantics: the macro
 /// awaits the winner and drops the loser, but a deferred wake must keep the
 /// guarded wait alive and await it afterwards. The VM's first-completed await
@@ -197,6 +211,10 @@ where
 }
 
 pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sync + 'ctx {
+    /// The physical journal's engine identity, stable on replay and distinct
+    /// for each successor segment. Logical effect identities survive a segment.
+    fn invocation_id(&self) -> &str;
+
     fn sleep_send<'run>(&'run self, duration: Duration) -> crate::JournaledFuture<'run, ()>
     where
         'ctx: 'run;
@@ -300,7 +318,8 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     /// (FIG-4739): the event raced against the turn's cancellation gate,
     /// with the gate entry registered for the drain of `generation`, the
     /// build generation the turn runs on. A drain wake answers
-    /// [`TurnWaitOutcome::HandedOver`] and leaves the event wait open; a
+    /// [`TurnWaitOutcome::HandedOver`] and retires only this physical read,
+    /// leaving the event key open for the successor; a
     /// cancel releases it, as [`Self::await_event_or_turn_cancel`] does.
     ///
     /// A context whose waits take no drain wake races the gate alone.
@@ -760,6 +779,10 @@ macro_rules! impl_restate_controller_context {
     ($($context:ident : $promises:ident),+ $(,)?) => {
         $(
             impl<'ctx> RestateControllerContext<'ctx> for $context<'ctx> {
+                fn invocation_id(&self) -> &str {
+                    $context::invocation_id(self)
+                }
+
                 fn sleep_send<'run>(
                     &'run self,
                     duration: Duration,
@@ -1144,7 +1167,9 @@ macro_rules! impl_restate_controller_context {
                             )
                             .await_resolution(request.into())
                             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
-                        let event = erase_gate_wait(event.call());
+                        let event = event.call();
+                        let subscription = event.invocation_handle().await?;
+                        let event = erase_gate_wait(event);
                         let outcome = match race_turn_gate(
                             self,
                             namespace,
@@ -1156,11 +1181,8 @@ macro_rules! impl_restate_controller_context {
                         )
                         .await?
                         {
-                            // The event wait stays open: the successor
-                            // segment's turn waits on the same process, and
-                            // this orphaned call completes harmlessly when
-                            // the process ends.
                             TurnGateRace::HandedOver => {
+                                retire_wait_subscription(subscription).await?;
                                 return Ok(RestateTurnCancelRaceOutcome::Completed(
                                     TurnWaitOutcome::HandedOver,
                                 ));

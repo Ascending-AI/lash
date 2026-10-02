@@ -150,6 +150,10 @@ pub struct GenerationDrainStatus {
     /// engine's count ([`DeploymentRegistry::undrained_group_children`]),
     /// since a group's record lives in the engine, not the store.
     pub undrained_group_children: u64,
+    /// Unfinished engine invocations pinned to a deployment serving this
+    /// generation, including the predecessor's wait, attach, terminal read
+    /// and session shift until they return. Independent of the SQL counts.
+    pub unfinished_invocations: u64,
     /// Stalled store→engine delivery obligations per kind (ADR 0109 §1.5),
     /// every kind present, zero included. Not per generation, and they do
     /// not hold the drain: see [`drained`](Self::drained).
@@ -186,6 +190,14 @@ impl GenerationDrainStatus {
                 backend: "engine deployment registry",
                 message: error.to_string(),
             })?;
+        let unfinished_invocations =
+            registry
+                .unfinished_invocations(generation)
+                .await
+                .map_err(|error| StoreError::StorageFailure {
+                    backend: "engine deployment registry",
+                    message: error.to_string(),
+                })?;
         let mut stalled_obligations = BTreeMap::new();
         for kind in ObligationKind::ALL {
             let count = obligation_ledger(kind).count_stalled().await?;
@@ -200,6 +212,7 @@ impl GenerationDrainStatus {
             in_flight_turns: work.in_flight_turns,
             closing_sessions,
             undrained_group_children,
+            unfinished_invocations,
             stalled_obligations,
             checked_at: now_ms,
         })
@@ -207,8 +220,8 @@ impl GenerationDrainStatus {
 
     /// True only when the generation is marked draining, it holds no live
     /// process, no parked process or turn and no in-flight turn, no session
-    /// is closing, and no committed group child on its lane owes its seat:
-    /// nothing is left that needs the generation's own deployment.
+    /// is closing, no committed group child on its lane owes its seat, and
+    /// no unfinished engine invocation is pinned to a deployment serving it.
     ///
     /// Stalled obligations do not hold it (ADR 0115 §3.5, FIG-4076). They
     /// are not pinned to any generation and none of them moves until an
@@ -223,6 +236,7 @@ impl GenerationDrainStatus {
             && self.in_flight_turns == 0
             && self.closing_sessions == 0
             && self.undrained_group_children == 0
+            && self.unfinished_invocations == 0
     }
 }
 
@@ -240,6 +254,7 @@ impl serde::Serialize for GenerationDrainStatus {
             in_flight_turns: u64,
             closing_sessions: u64,
             undrained_group_children: u64,
+            unfinished_invocations: u64,
             stalled_obligations: &'a BTreeMap<ObligationKind, u64>,
             checked_at: u64,
             drained: bool,
@@ -253,6 +268,7 @@ impl serde::Serialize for GenerationDrainStatus {
             in_flight_turns: self.in_flight_turns,
             closing_sessions: self.closing_sessions,
             undrained_group_children: self.undrained_group_children,
+            unfinished_invocations: self.unfinished_invocations,
             stalled_obligations: &self.stalled_obligations,
             checked_at: self.checked_at,
             drained: self.drained(),
@@ -275,6 +291,7 @@ mod tests {
             in_flight_turns: 0,
             closing_sessions: 0,
             undrained_group_children: 0,
+            unfinished_invocations: 0,
             stalled_obligations: ObligationKind::ALL
                 .into_iter()
                 .map(|kind| (kind, 0))
@@ -298,7 +315,7 @@ mod tests {
 
     #[test]
     fn work_pinned_to_the_generation_holds_the_drain() {
-        let holds: [fn(&mut GenerationDrainStatus); 7] = [
+        let holds: [fn(&mut GenerationDrainStatus); 8] = [
             |status| status.draining_since_ms = None,
             |status| status.live_processes = 1,
             |status| status.parked_processes = 1,
@@ -306,6 +323,7 @@ mod tests {
             |status| status.in_flight_turns = 1,
             |status| status.closing_sessions = 1,
             |status| status.undrained_group_children = 1,
+            |status| status.unfinished_invocations = 1,
         ];
         for hold in holds {
             let mut status = marked_and_empty();

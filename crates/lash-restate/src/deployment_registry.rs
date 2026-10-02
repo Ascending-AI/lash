@@ -29,6 +29,32 @@ impl RestateDeploymentRegistry {
 
 #[async_trait::async_trait]
 impl DeploymentRegistry for RestateDeploymentRegistry {
+    async fn unfinished_invocations(
+        &self,
+        generation: &BuildGeneration,
+    ) -> Result<u64, DeploymentRegistryError> {
+        let deployments = self.deployments_serving(generation).await?;
+        if deployments.is_empty() {
+            return Ok(0);
+        }
+        let counts = self
+            .admin
+            .open_invocations_by_deployment()
+            .await
+            .map_err(|error| DeploymentRegistryError {
+                detail: format!("read pinned engine invocations: {error}"),
+            })?;
+        Ok(counts
+            .into_iter()
+            .filter(|row| {
+                row.pinned_deployment_id
+                    .as_ref()
+                    .is_some_and(|id| deployments.iter().any(|deployment| &deployment.id == id))
+            })
+            .map(|row| row.open_count)
+            .sum())
+    }
+
     /// Every deployment whose services include a generation lane of
     /// `generation` in any namespace ([`generation_lane_of`]).
     ///

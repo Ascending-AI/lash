@@ -143,9 +143,12 @@ state while investigating either refusal.
    Repeat `drain-status` until its `drained` field is true and exit code is 0.
    Drained means nothing left needs N's deployment: the generation is marked,
    and it holds no live or parked process, no parked or in-flight turn, no
-   session is closing, and no effect-group child on its lane whose final
-   committed is still owed its seat. `drain-status` reads that last count,
-   `undrained_group_children`, from Restate's admin API, so it requires
+   session is closing, no effect-group child on its lane is still owed its
+   seat, and no unfinished engine invocation is pinned to a deployment
+   serving N. `unfinished_invocations` includes waits, attaches, terminal
+   reads, session shifts and paused invocations until they return.
+   `drain-status` reads this count and `undrained_group_children` from
+   Restate's admin API, so it requires
    `--restate-admin-url`; an unreachable or unreadable admin API fails the
    command rather than reporting drained. A code 5 means some of that remains;
    inspect those counts. Keep N's deployment registered while any invocation or recorded

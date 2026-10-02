@@ -687,14 +687,19 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
                         Resolution::Timeout
                     },
                     on_cancel => {
-                        let payload = serde_json::to_string(&Resolution::Cancelled)
-                            .map_err(TerminalError::from_error)?;
-                        ctx.resolve_promise(DURABLE_WAIT_PROMISE_KEY, payload);
-                        Resolution::Cancelled
+                        // Cancellation retires this physical read. The logical
+                        // event belongs to its resolver and may still be awaited
+                        // by a successor on the same workflow key.
+                        return Ok(Reply::at(wire, Resolution::Cancelled));
                     }
                 }
             } else {
-                let payload = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY).await?;
+                let payload = restate_sdk::select! {
+                    payload = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY) => payload?,
+                    on_cancel => {
+                        return Ok(Reply::at(wire, Resolution::Cancelled));
+                    }
+                };
                 serde_json::from_str(&payload).map_err(TerminalError::from_error)?
             };
 

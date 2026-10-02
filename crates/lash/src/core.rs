@@ -327,6 +327,7 @@ impl LashCore {
             ("parked_turns", status.parked_turns),
             ("in_flight_turns", status.in_flight_turns),
             ("undrained_group_children", status.undrained_group_children),
+            ("unfinished_invocations", status.unfinished_invocations),
         ] {
             lash_core::operational_metrics::record_generation_drain_work(
                 metrics,

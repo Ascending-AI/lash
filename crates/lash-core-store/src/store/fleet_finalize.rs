@@ -79,6 +79,14 @@ pub trait DeploymentRegistry: Send + Sync {
         generation: &BuildGeneration,
     ) -> Result<Vec<RetainedDeployment>, DeploymentRegistryError>;
 
+    /// Unfinished engine invocations pinned to deployments serving this
+    /// generation, including stable waits, reads and session shifts. Paused
+    /// invocations still hold their deployment. A failed read proves nothing.
+    async fn unfinished_invocations(
+        &self,
+        generation: &BuildGeneration,
+    ) -> Result<u64, DeploymentRegistryError>;
+
     /// The committed effect-group children whose group dispatches on a lane
     /// of `generation`, in any namespace, and whose seat is still owed
     /// (FIG-4454): each one's drain runs, or is recovered, on that lane, so
@@ -98,6 +106,13 @@ pub struct NoDeployments;
 
 #[async_trait::async_trait]
 impl DeploymentRegistry for NoDeployments {
+    async fn unfinished_invocations(
+        &self,
+        _generation: &BuildGeneration,
+    ) -> Result<u64, DeploymentRegistryError> {
+        Ok(0)
+    }
+
     async fn deployments_serving(
         &self,
         _generation: &BuildGeneration,
@@ -121,7 +136,8 @@ pub enum FinalizeRefusal {
     /// it was never marked draining.
     #[error(
         "generation {} has not drained: marked draining {}, {} live and {} parked processes, \
-         {} parked and {} in-flight turns, {} closing sessions, {} undrained group children; \
+         {} parked and {} in-flight turns, {} closing sessions, {} undrained group children, \
+         {} unfinished engine invocations; \
          run `lashctl drain {}` and wait for `lashctl drain-status {}` to read drained",
         status.generation.as_str(),
         status.draining_since_ms.is_some(),
@@ -131,10 +147,11 @@ pub enum FinalizeRefusal {
         status.in_flight_turns,
         status.closing_sessions,
         status.undrained_group_children,
+        status.unfinished_invocations,
         status.generation.as_str(),
         status.generation.as_str()
     )]
-    GenerationNotDrained { status: GenerationDrainStatus },
+    GenerationNotDrained { status: Box<GenerationDrainStatus> },
     /// The engine still holds a deployment that serves the retired
     /// generation's lanes.
     #[error(
@@ -232,7 +249,7 @@ pub async fn require_retired(
 ) -> Result<(), FinalizeError> {
     if !drain.drained() {
         return Err(FinalizeRefusal::GenerationNotDrained {
-            status: drain.clone(),
+            status: Box::new(drain.clone()),
         }
         .into());
     }
@@ -257,6 +274,13 @@ mod tests {
 
     #[async_trait::async_trait]
     impl DeploymentRegistry for Registry {
+        async fn unfinished_invocations(
+            &self,
+            _generation: &BuildGeneration,
+        ) -> Result<u64, DeploymentRegistryError> {
+            Ok(0)
+        }
+
         async fn deployments_serving(
             &self,
             _generation: &BuildGeneration,
@@ -282,6 +306,7 @@ mod tests {
             in_flight_turns: 0,
             closing_sessions: 0,
             undrained_group_children: 0,
+            unfinished_invocations: 0,
             stalled_obligations: BTreeMap::new(),
             checked_at: 9,
         }
@@ -328,12 +353,12 @@ mod tests {
         );
         assert!(held.to_string().contains("lashctl finalize-hold clear"));
         let undrained = FinalizeRefusal::GenerationNotDrained {
-            status: status(false, 0),
+            status: Box::new(status(false, 0)),
         };
-        assert_eq!(
-            serde_json::to_value(&undrained).expect("serialize")["refusal"],
-            "generation_not_drained"
-        );
+        let wire = serde_json::to_value(&undrained).expect("serialize");
+        assert_eq!(wire["refusal"], "generation_not_drained");
+        assert_eq!(wire["status"]["unfinished_invocations"], 0);
+        assert_eq!(wire["status"]["drained"], false);
         assert!(undrained.to_string().contains("lashctl drain"));
     }
 }
