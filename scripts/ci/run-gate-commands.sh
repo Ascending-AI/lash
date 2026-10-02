@@ -6,6 +6,10 @@
 # Usage: run-gate-commands.sh [--jobs N] < commands
 set -uo pipefail
 
+# Self-tests must not write bytecode into the checkout: a sibling command
+# copying the scripts tree would race the writer's temporary .pyc.
+export PYTHONDONTWRITEBYTECODE=1
+
 jobs_limit=""
 while (($#)); do
   case "$1" in

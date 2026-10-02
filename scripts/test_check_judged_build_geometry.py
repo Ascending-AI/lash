@@ -44,7 +44,9 @@ class JudgedBuildGeometryTests(unittest.TestCase):
             shutil.copytree(
                 ROOT / relative,
                 self.root / relative,
-                ignore=shutil.ignore_patterns("target", "node_modules", "frontend"),
+                ignore=shutil.ignore_patterns(
+                    "target", "node_modules", "frontend", "__pycache__", "*.pyc"
+                ),
             )
         GATE.ROOT = self.root
 
