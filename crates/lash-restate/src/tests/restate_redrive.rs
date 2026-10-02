@@ -705,7 +705,7 @@ pub(super) async fn fig779_pending_durable_timer_suspends_through_guard() {
 
 /// FIG-2499: a process handler records its process-scope effect in the
 /// scope's index before journaling it, so the deployed first attempt parks
-/// on the `begin_effect` call; once the index admits the effect the attempt
+/// on the `register_process_journal` call; once the index admits the segment the attempt
 /// journals its timer and parks on that. Returns both legs' output, whose
 /// commands are the deployed journal: the call, then the timer.
 pub(super) async fn park_process_on_its_timer(
@@ -731,8 +731,8 @@ pub(super) async fn park_process_on_its_timer(
             .iter()
             .map(|call| (call.service.as_str(), call.handler.as_str()))
             .collect::<Vec<_>>(),
-        vec![("LashDurableWaitIndex", "begin_effect")],
-        "the effect is recorded in the scope's index before its timer is journaled"
+        vec![("LashDurableWaitIndex", "register_process_journal")],
+        "the segment pins its scope's index before its timer is journaled"
     );
     assert_eq!(
         restate_message_types(&recording).expect("decode recording frames"),
@@ -1293,7 +1293,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
     }));
 
     // The timer won its recorded race with the cancel promise: the woken
-    // effect goes straight on to clearing itself from the scope's index
+    // segment goes straight on to releasing its journal pin from the scope's index
     // (FIG-3673; the FIG-3149 wake peek is subsumed by the race).
     let completed_effect = encode_recorded_commands_replay(
         process_id.as_str(),
@@ -1312,8 +1312,8 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
             .iter()
             .map(|call| (call.service.as_str(), call.handler.as_str()))
             .collect::<Vec<_>>(),
-        vec![("LashDurableWaitIndex", "end_effect")],
-        "the completed effect is cleared from the scope's index before terminal delivery"
+        vec![("LashDurableWaitIndex", "release_process_journal")],
+        "the completed segment releases its scope's pin before terminal delivery"
     );
     assert_eq!(
         restate_message_types(&effect_cleared).expect("decode effect-clearing frames"),

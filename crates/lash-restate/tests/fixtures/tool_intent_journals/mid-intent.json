@@ -1,7 +1,7 @@
 {
   "generation": {
     "effect_journal_version": 15,
-    "build_generation": "1654dff52a0a"
+    "build_generation": "4fe4c9d94749"
   },
   "crash_point": "after_signal_command_commit_before_reply",
   "captured_from_endpoint_interruption": true,
@@ -430,7 +430,7 @@
     0,
     0,
     2,
-    196,
+    205,
     10,
     20,
     76,
@@ -463,7 +463,7 @@
     118,
     101,
     26,
-    237,
+    246,
     3,
     123,
     34,
@@ -490,6 +490,15 @@
     58,
     49,
     125,
+    44,
+    34,
+    108,
+    105,
+    110,
+    101,
+    34,
+    58,
+    49,
     44,
     34,
     98,

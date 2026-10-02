@@ -51,6 +51,18 @@ leaves the index unfenced. Pending turn-closure participants also prevent
 revocation. A returning operation receipt alone does not prove quiescence.
 Retention and lifecycle cleanup use the host's explicit levers.
 
+Restate process-scope quiescence is conservative per segment (FIG-4849).
+The segment registers one journal pin before its runner can issue effects
+and releases it only after the runner ends. Both retirement modes refuse
+while that journal can issue another effect; each effect needs only its own
+journaled step. Cancel still ends the segment through its existing process
+signal. A killed invocation's completed engine status proves an abandoned
+pin can be cleared; an absent or active status proves nothing. Unsettled
+process-scoped group children also prevent retirement after the segment
+ends. The process's generation remains counted as live work until its
+terminal transaction. Runtime-operation effect recording and retirement
+retain their existing semantics.
+
 Process ids are minted and single-use (ADR 0107), and runtime-operation ids
 are used once. `reinstate_effect_scope` is a process-scope lever only; session
 revocation cannot be lifted by it. The process registry binds its registration

@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashDurableWaitIndex",
   "service": "LashDurableWaitIndex",
-  "generation": "b14bcd97a3f0",
+  "generation": "4fe4c9d94749",
   "handlers": {
     "group_child_membership": [
       [
@@ -60,6 +60,18 @@
         "OutputCommand"
       ]
     ],
+    "register_process_journal": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateKeysCommand",
+        "SetStateCommand _compat",
+        "GetLazyStateCommand",
+        "SetStateCommand wait-index/v2/metadata",
+        "SetStateCommand wait-index/v2/process-journal/inv_#",
+        "OutputCommand"
+      ]
+    ],
     "reinstate": [
       [
         "InputCommand",
@@ -68,6 +80,14 @@
         "SetStateCommand _compat",
         "GetLazyStateCommand",
         "SetStateCommand wait-index/v2/metadata",
+        "OutputCommand"
+      ]
+    ],
+    "release_process_journal": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "ClearStateCommand wait-index/v2/process-journal/inv_#",
         "OutputCommand"
       ]
     ],

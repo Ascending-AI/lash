@@ -1,8 +1,8 @@
 //! One scope's view of the in-handler controller.
 //!
 //! Forwards every call to the handler controller and records executing
-//! effects and opened groups of a non-session scope in the scope's
-//! `LashDurableWaitRegistry` object, so the scope's quiescence proof counts them.
+//! effects of runtime operations and opened groups in the scope's index.
+//! Process effects are protected by their segment's journal pin instead.
 
 use lash_sansio::SessionId;
 use std::sync::Arc;
@@ -19,8 +19,8 @@ use super::{RestateControllerContext, RestateRuntimeEffectController};
 use crate::durable_wait::durable_wait_index_key_for_scope;
 
 /// One scope's view of the in-handler controller: forwards everything, and
-/// records executing effects and opened groups of a non-session scope in the
-/// scope's `LashDurableWaitRegistry` object so its quiescence proof counts them.
+/// records runtime-operation effects and opened groups in the scope's index.
+/// A process segment pins its index once until it can issue no more effects.
 pub(super) struct ScopeRecordingController<'run, 'ctx, C> {
     pub(super) inner: HandlerController<'run, 'ctx, C>,
     /// The admitted scope this controller serves: the claim address its
@@ -344,6 +344,9 @@ where
                     ));
                 }
             }
+        }
+        if matches!(self.admitted.scope(), ExecutionScope::Process { .. }) {
+            return self.inner.execute_effect(envelope, local_executor).await;
         }
         let Some(index_key) = self.index_key() else {
             return self.inner.execute_effect(envelope, local_executor).await;

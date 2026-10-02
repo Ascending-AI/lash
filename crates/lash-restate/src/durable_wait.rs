@@ -40,6 +40,9 @@ use sha2::{Digest, Sha256};
 
 mod observer;
 mod run_retirement;
+mod scope_retirement;
+
+use self::scope_retirement::revoke_index;
 
 pub(crate) use self::observer::{WaitObserver, observe_durable_wait};
 
@@ -157,10 +160,12 @@ pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 ///
 /// version_guard(
 ///     roots(RestateDurableWaitIndexMetadata, IndexedWait),
+///     roots(path = "crates/lash-restate/src/ingress.rs", RestateInvocationId),
 ///     items(
 ///         DURABLE_WAIT_REGISTRY_FORMATS, DURABLE_WAIT_INDEX_METADATA_KEY,
 ///         DURABLE_WAIT_INDEX_WAIT_PREFIX,
 ///         DURABLE_WAIT_INDEX_EFFECT_PREFIX, DURABLE_WAIT_INDEX_GROUP_PREFIX,
+///         DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX,
 ///         DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX, DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX,
 ///     ),
 ///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
@@ -189,7 +194,7 @@ pub(crate) const DURABLE_WAIT_REGISTRY_FAMILY: ObjectFamily = ObjectFamily {
     formats: &DURABLE_WAIT_REGISTRY_FORMATS,
 };
 /// version_surface = "coexist"
-/// version_guard(items(DURABLE_WAIT_INDEX_METADATA_KEY, fence_cancel_decided, load_durable_wait_index_metadata, peek_turn_gate, read_durable_wait_index_metadata, register_awakeable, reinstate, resolve, revoke_index, unregister_awakeable))
+/// version_guard(items(DURABLE_WAIT_INDEX_METADATA_KEY, fence_cancel_decided, load_durable_wait_index_metadata, peek_turn_gate, read_durable_wait_index_metadata, register_awakeable, reinstate, resolve, unregister_awakeable), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", revoke_index))
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_WAIT_PREFIX, durable_wait_address_from_state_key, durable_wait_index_state_key, load_indexed_waits))
@@ -203,12 +208,17 @@ pub(crate) struct IndexedWait {
 /// An effect executing under the scope inside a handler, keyed by replay
 /// key: recorded at start, cleared at completion (FIG-2499 quiescence).
 /// version_surface = "coexist"
-/// version_guard(items(DURABLE_WAIT_INDEX_EFFECT_PREFIX, durable_wait_index_effect_key, scope_effects_and_groups_are_quiescent))
+/// version_guard(items(DURABLE_WAIT_INDEX_EFFECT_PREFIX, durable_wait_index_effect_key), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", scope_effects_and_groups_are_quiescent))
 const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
+/// A process segment can issue effects until its journal closes. Its single
+/// pin replaces the two index calls around each effect (FIG-4849).
+/// version_surface = "coexist"
+/// version_guard(items(DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", process_journal_key, process_journals_are_quiescent))
+const DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX: &str = "wait-index/v2/process-journal/";
 /// An effect group opened under the scope, keyed by group key; cleared once
 /// the group's index reports no unsettled child.
 /// version_surface = "coexist"
-/// version_guard(items(DURABLE_WAIT_INDEX_GROUP_PREFIX, durable_wait_index_group_key, scope_effects_and_groups_are_quiescent))
+/// version_guard(items(DURABLE_WAIT_INDEX_GROUP_PREFIX, durable_wait_index_group_key), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", scope_effects_and_groups_are_quiescent))
 const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v2/group/";
 /// A group child's replay-key-to-group binding, keyed by replay key: the
 /// membership a §4 boundary commit resolves its group from (FIG-3409).
@@ -216,7 +226,7 @@ const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v2/group/";
 /// version_guard(items(DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX, durable_wait_index_group_child_key))
 const DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX: &str = "wait-index/v2/group-child/";
 /// version_surface = "coexist"
-/// version_guard(items(DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX, durable_wait_index_closure_participant_key, revoke_index))
+/// version_guard(items(DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX, durable_wait_index_closure_participant_key), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", revoke_index))
 const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v2/closure-participant/";
 
 #[cfg(test)]
@@ -811,6 +821,12 @@ pub trait LashDurableWaitRegistry {
     async fn begin_effect(
         call: Call<RestateDurableWaitEffectRequest>,
     ) -> HandlerResult<Reply<bool>>;
+    async fn register_process_journal(
+        call: Call<RestateDurableWaitProcessJournalRequest>,
+    ) -> HandlerResult<Reply<bool>>;
+    async fn release_process_journal(
+        call: Call<RestateDurableWaitProcessJournalRequest>,
+    ) -> HandlerResult<Reply<()>>;
     async fn end_effect(call: Call<RestateDurableWaitEffectRequest>) -> HandlerResult<Reply<()>>;
     /// Record an effect group opened under this scope, answering whether the
     /// scope admits it (`false` once revoked). The scope is not quiescent
@@ -846,11 +862,20 @@ pub(crate) struct LashDurableWaitRegistryImpl {
     namespace: crate::RestateNamespace,
     /// Where the handlers read the fleet epoch their writes are stamped at.
     fleet: FleetView,
+    admin: Option<crate::RestateAdminClient>,
 }
 
 impl LashDurableWaitRegistryImpl {
-    pub(crate) fn new(namespace: crate::RestateNamespace, fleet: FleetView) -> Self {
-        Self { namespace, fleet }
+    pub(crate) fn new(
+        namespace: crate::RestateNamespace,
+        fleet: FleetView,
+        admin: crate::RestateAdminClient,
+    ) -> Self {
+        Self {
+            namespace,
+            fleet,
+            admin: Some(admin),
+        }
     }
 
     /// The registry's `_compat` gate for a handler that may write.
@@ -1098,87 +1123,6 @@ fn store_indexed_wait(
             terminal,
         },
     );
-}
-
-/// Revoke the index: fence it, revoke its awakeables, and cancel its waits.
-/// With `only_if_quiescent`, an unresolved wait or a live awakeable leaves
-/// the index untouched and answers `false`.
-async fn revoke_index(
-    ctx: &ObjectContext<'_>,
-    object: object_state::AdmittedObject,
-    namespace: &crate::RestateNamespace,
-    only_if_quiescent: bool,
-) -> HandlerResult<bool> {
-    let mut metadata = load_durable_wait_index_metadata(ctx, object.writer).await?;
-    let waits: Vec<_> = load_indexed_waits(ctx)
-        .await?
-        .into_iter()
-        .filter(|wait| wait.terminal.is_none())
-        .map(|wait| wait.key)
-        .collect();
-    let keys = ctx.get_keys().await?;
-    if keys
-        .iter()
-        .any(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX))
-        || (only_if_quiescent
-            && (!waits.is_empty()
-                || !metadata.awakeables.is_empty()
-                || !scope_effects_and_groups_are_quiescent(ctx, namespace).await?))
-    {
-        return Ok(false);
-    }
-    let awakeables = std::mem::take(&mut metadata.awakeables);
-    metadata.revoked = true;
-    // A revoked index keeps its `_compat` record: it fences a stale handler
-    // from recreating the state the revocation cleared.
-    object.clear_all(ctx);
-    object_state::set_stamped(
-        ctx,
-        DURABLE_WAIT_INDEX_METADATA_KEY,
-        object.writer,
-        metadata,
-    );
-    for entry in awakeables {
-        revoke_durable_wait_awakeable(ctx, &entry);
-    }
-    resolve_indexed_waits(ctx, object.writer, namespace, waits, false).await?;
-    Ok(true)
-}
-
-/// Whether nothing recorded by `begin_effect` or `record_group` is still
-/// live: no executing effect, and every recorded group's index reports no
-/// unsettled child. A group found settled is forgotten here, so a caller
-/// that never closed it does not fence its scope forever.
-async fn scope_effects_and_groups_are_quiescent(
-    ctx: &ObjectContext<'_>,
-    namespace: &crate::RestateNamespace,
-) -> Result<bool, TerminalError> {
-    let keys = ctx.get_keys().await?;
-    if keys
-        .iter()
-        .any(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_EFFECT_PREFIX))
-    {
-        return Ok(false);
-    }
-    let mut live = false;
-    for (state_key, group_key) in keys.iter().filter_map(|state_key| {
-        state_key
-            .strip_prefix(DURABLE_WAIT_INDEX_GROUP_PREFIX)
-            .map(|group_key| (state_key, group_key))
-    }) {
-        let unsettled = namespace
-            .effect_group_state(ctx, group_key.to_string())
-            .unsettled_children()
-            .call()
-            .await?
-            .into_body();
-        if unsettled > 0 {
-            live = true;
-        } else {
-            ctx.clear(state_key);
-        }
-    }
-    Ok(!live)
 }
 
 fn durable_wait_index_effect_key(replay_key: &str) -> String {
@@ -1636,7 +1580,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
     async fn revoke_all(&self, ctx: ObjectContext<'_>, call: Call<()>) -> HandlerResult<Reply<()>> {
         let (wire, ()) = call.open()?;
         let object = self.admit(&ctx).await?;
-        revoke_index(&ctx, object, &self.namespace, false).await?;
+        revoke_index(&ctx, object, &self.namespace, self.admin.as_ref(), false).await?;
         Ok(Reply::at(wire, ()))
     }
 
@@ -1647,7 +1591,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
     ) -> HandlerResult<Reply<bool>> {
         let (wire, ()) = call.open()?;
         let object = self.admit(&ctx).await?;
-        revoke_index(&ctx, object, &self.namespace, true)
+        revoke_index(&ctx, object, &self.namespace, self.admin.as_ref(), true)
             .await
             .map(|revoked| Reply::at(wire, revoked))
     }
@@ -1659,7 +1603,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
     ) -> HandlerResult<Reply<bool>> {
         let (wire, ()) = call.open()?;
         let object = self.admit(&ctx).await?;
-        revoke_index(&ctx, object, &self.namespace, false)
+        revoke_index(&ctx, object, &self.namespace, self.admin.as_ref(), false)
             .await
             .map(|revoked| Reply::at(wire, revoked))
     }
@@ -1712,6 +1656,22 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         Ok(Reply::at(wire, ()))
     }
 
+    async fn register_process_journal(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<RestateDurableWaitProcessJournalRequest>,
+    ) -> HandlerResult<Reply<bool>> {
+        scope_retirement::register_process_journal(self, ctx, call).await
+    }
+
+    async fn release_process_journal(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<RestateDurableWaitProcessJournalRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        scope_retirement::release_process_journal(self, ctx, call).await
+    }
+
     async fn record_group(
         &self,
         ctx: ObjectContext<'_>,
@@ -1742,6 +1702,22 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if metadata.revoked {
             return Ok(Reply::at(wire, false));
+        }
+        // A process-scoped child can outlive the segment that opened its
+        // group. Its group's unsettled count pins retirement after that
+        // segment releases its journal pin.
+        if ctx
+            .key()
+            .strip_prefix("scope:")
+            .and_then(ExecutionScope::from_journal_key)
+            .is_some_and(|scope| matches!(scope, ExecutionScope::Process { .. }))
+        {
+            object_state::set_stamped(
+                &ctx,
+                &durable_wait_index_group_key(&request.group_key),
+                object.writer,
+                true,
+            );
         }
         object_state::set_stamped(
             &ctx,

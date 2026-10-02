@@ -50,6 +50,7 @@ use crate::process_stop::ProcessStopDelivery;
 use crate::services::{Lane, LashService, ServiceRoute, routed_workflow};
 
 mod lanes;
+mod scope_journal;
 
 /// The journal name of the terminal completion step.
 const COMPLETE_STEP: &str = "lash.process.complete";
@@ -1272,6 +1273,9 @@ where
         };
         // The segment's signal waits race the drain's hand-over of this
         // build's generation (FIG-3799) beside its cancel promise.
+        let journal_pin =
+            scope_journal::ProcessJournalPin::register(&ctx, self.route.namespace(), &process_id)
+                .await?;
         let options = RestateEffectControllerOptions::default()
             .segment_effect_budget(policy.effect_budget)
             .process_segment_drive()
@@ -1355,6 +1359,7 @@ where
             break end;
         };
         let context = controller.context();
+        journal_pin.release(context, self.route.namespace()).await?;
         let handover = match end {
             SegmentRunEnd::Terminal(proposal) => {
                 let output = self

@@ -1,7 +1,7 @@
 {
   "generation": {
     "effect_journal_version": 15,
-    "build_generation": "1654dff52a0a"
+    "build_generation": "4fe4c9d94749"
   },
   "crash_point": "after_tool_attempt_before_signal_command",
   "captured_from_endpoint_interruption": true,

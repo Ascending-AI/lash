@@ -562,6 +562,10 @@ lash_clients! {
         revoke_all() -> ();
         begin_effect(crate::durable_wait::RestateDurableWaitEffectRequest) -> bool;
         end_effect(crate::durable_wait::RestateDurableWaitEffectRequest) -> ();
+        register_process_journal(crate::durable_wait::RestateDurableWaitProcessJournalRequest)
+            -> bool;
+        release_process_journal(crate::durable_wait::RestateDurableWaitProcessJournalRequest)
+            -> ();
         record_group(crate::durable_wait::RestateDurableWaitGroupRequest) -> bool;
         record_group_child(crate::durable_wait::RestateDurableWaitGroupChildRequest)
             -> bool;
@@ -914,7 +918,12 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
                 ),
                 LashService::DurableWaitRegistry => bind_as(
                     builder,
-                    LashDurableWaitRegistryImpl::new(namespace.clone(), fleet.clone()).serve(),
+                    LashDurableWaitRegistryImpl::new(
+                        namespace.clone(),
+                        fleet.clone(),
+                        admin.clone(),
+                    )
+                    .serve(),
                     &name,
                     claimed().enable_lazy_state(true),
                     &wire,

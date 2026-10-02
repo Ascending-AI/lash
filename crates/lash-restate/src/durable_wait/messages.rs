@@ -160,6 +160,13 @@ pub struct RestateDurableWaitEffectRequest {
     pub replay_key: String,
 }
 
+/// A process segment's invocation, pinned before its runner can issue effects.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateDurableWaitProcessJournalRequest {
+    pub process_id: lash_core::ProcessId,
+    pub invocation_id: crate::RestateInvocationId,
+}
+
 /// One effect group opened under a scope's index (FIG-2499).
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateDurableWaitGroupRequest {

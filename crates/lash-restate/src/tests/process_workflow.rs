@@ -1,7 +1,421 @@
 use super::*;
-use lash_core::ProcessEventLogTestSupport as _;
+use lash_core::{ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessRegistrar as _};
 
 use lashlang::testing::ast_builders as b;
+
+struct ProcessHopRunner {
+    executions: AtomicUsize,
+    held: bool,
+    entered: tokio::sync::Semaphore,
+    release: tokio::sync::Semaphore,
+}
+
+impl ProcessHopRunner {
+    fn new(held: bool) -> Self {
+        Self {
+            executions: AtomicUsize::new(0),
+            held,
+            entered: tokio::sync::Semaphore::new(0),
+            release: tokio::sync::Semaphore::new(0),
+        }
+    }
+
+    async fn wait_for_effect(&self) {
+        tokio::time::timeout(Duration::from_secs(30), self.entered.acquire())
+            .await
+            .expect("runner reaches held effect")
+            .expect("open semaphore")
+            .forget();
+    }
+}
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for ProcessHopRunner {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
+        None
+    }
+
+    async fn run_process_segment(
+        &self,
+        _started: &SegmentStarted,
+        process_id: ProcessId,
+        _registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        scoped: ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        for ordinal in 0..3 {
+            scoped
+                .execute_effect(
+                    RuntimeEffectEnvelope::new(
+                        RuntimeEffectInvocation::new(
+                            EffectAddress::new(
+                                ExecutionScope::process(&process_id),
+                                format!("process-hop-{ordinal}"),
+                            )
+                            .expect("valid process effect address"),
+                            RuntimeAttribution::none(),
+                            format!("process-hop-{ordinal}"),
+                        ),
+                        RuntimeEffectCommand::LanguageRuntimeValue {
+                            operation: "process-hop".to_string(),
+                        },
+                    ),
+                    RuntimeEffectLocalExecutor::testing(|_| async {
+                        self.executions.fetch_add(1, Ordering::SeqCst);
+                        if self.held && ordinal == 1 {
+                            self.entered.add_permits(1);
+                            tokio::select! {
+                                permit = self.release.acquire() => permit.expect("release effect").forget(),
+                                () = cancellation.cancelled() => {}
+                            }
+                        }
+                        Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
+                            value: serde_json::json!(ordinal),
+                        })
+                    }),
+                )
+                .await?;
+            if cancellation.is_cancelled() {
+                return Ok(process_cancellation("process cancelled", None).into());
+            }
+        }
+        Ok(process_success(serde_json::json!("done")).into())
+    }
+}
+
+struct ProcessJournalWorld {
+    server: lash_restate_test::RestateTestServer,
+    ingress: RestateIngressClient,
+    runner: Arc<ProcessHopRunner>,
+    stores: lash_sqlite_store::SqliteStoreSet,
+    process_id: ProcessId,
+    registration: ProcessRegistration,
+    index_key: String,
+}
+
+impl ProcessJournalWorld {
+    async fn new(held: bool) -> Self {
+        let server =
+            lash_restate_test::RestateTestServer::new(Default::default()).expect("start double");
+        let stores = lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("SQLite memory");
+        let registry = stores.process_registry();
+        let connection =
+            RestateConnection::with_transport(server.ingress_url(), server.transport());
+        let ingress = RestateIngressClient::new(connection.clone());
+        let runner = Arc::new(ProcessHopRunner::new(held));
+        server
+            .register(
+                Endpoint::builder()
+                    .bind(
+                        LashProcessWorkflowImpl::new(
+                            Arc::clone(&runner),
+                            registry.clone(),
+                            registry.clone(),
+                            ingress.clone(),
+                            Arc::new(lash_core::attachments::NoopAttachmentReferrers),
+                            test_restate_authority_id(),
+                            crate::tests::test_build_generation(),
+                            &crate::services::DEFAULT_NAMESPACE,
+                        )
+                        .serve(),
+                    )
+                    .bind(
+                        crate::durable_wait::LashDurableWaitRegistryImpl::new(
+                            Default::default(),
+                            Default::default(),
+                            crate::RestateAdminClient::new(connection),
+                        )
+                        .serve(),
+                    )
+                    .build(),
+            )
+            .await
+            .expect("register handlers");
+        let registration = executed_registration();
+        let process_id = registry
+            .register_process(registration.clone())
+            .await
+            .expect("register process")
+            .id;
+        let index_key = crate::durable_wait::durable_wait_index_key_for_scope(
+            &ExecutionScope::process(&process_id),
+        );
+        Self {
+            server,
+            ingress,
+            runner,
+            stores,
+            process_id,
+            registration,
+            index_key,
+        }
+    }
+
+    fn start(
+        &self,
+    ) -> tokio::task::JoinHandle<Result<RestateProcessWorkflowOutput, crate::RestateHttpError>>
+    {
+        let ingress = self.ingress.clone();
+        let input = RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
+            process_id: self.process_id.clone(),
+            registration: self.registration.clone(),
+            execution_context: ProcessExecutionContext::default(),
+            segment_ordinal: 0,
+            sender_generation: crate::tests::test_build_generation(),
+        });
+        let key = self.process_id.to_string();
+        tokio::spawn(async move {
+            tokio::time::timeout(
+                Duration::from_secs(60),
+                ingress.call_lash_workflow("LashProcessWorkflow", &key, "run", &input),
+            )
+            .await
+            .expect("process completes")
+        })
+    }
+
+    async fn index(&self, handler: &str) -> bool {
+        self.ingress
+            .call_lash_object("LashDurableWaitIndex", &self.index_key, handler, &())
+            .await
+            .expect("index answers")
+    }
+
+    async fn assert_pinned(&self) {
+        assert!(!self.index("revoke_all_if_quiescent").await);
+        assert!(!self.index("retire_scope").await);
+        assert!(
+            !self.index("is_revoked").await,
+            "refusal leaves the scope unfenced"
+        );
+        assert_eq!(
+            lash_core::StoreSet::generation_drain(&self.stores)
+                .generation_work(&crate::tests::test_build_generation())
+                .await
+                .expect("drain work")
+                .live_processes,
+            1
+        );
+    }
+
+    async fn assert_released(&self) {
+        assert!(
+            self.index("revoke_all_if_quiescent").await,
+            "retirement completes after segment end"
+        );
+        assert!(self.index("is_revoked").await);
+        assert!(
+            self.server
+                .object_state("LashDurableWaitIndex", &self.index_key)
+                .keys()
+                .all(|key| !key.starts_with("wait-index/v2/process-journal/"))
+        );
+        assert_eq!(
+            lash_core::StoreSet::generation_drain(&self.stores)
+                .generation_work(&crate::tests::test_build_generation())
+                .await
+                .expect("drain work")
+                .live_processes,
+            0
+        );
+    }
+
+    fn run_id(&self) -> String {
+        self.server
+            .invocations()
+            .into_iter()
+            .find(|row| row.target.ends_with("/run"))
+            .expect("process run")
+            .id
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_effects_make_no_index_hops() {
+    use lash_restate_test::protocol::MessageType;
+    let world = ProcessJournalWorld::new(false).await;
+    world.start().await.expect("run task").expect("run process");
+    let invocations = world.server.invocations();
+    let index_hops: Vec<_> = invocations
+        .iter()
+        .filter(|invocation| {
+            invocation.target.ends_with("/begin_effect")
+                || invocation.target.ends_with("/end_effect")
+        })
+        .collect();
+    let segment_hops = invocations
+        .iter()
+        .filter(|invocation| {
+            invocation.target.ends_with("/register_process_journal")
+                || invocation.target.ends_with("/release_process_journal")
+        })
+        .count();
+    let effect_steps = world
+        .server
+        .journal(&world.run_id())
+        .expect("process journal")
+        .iter()
+        .filter(|entry| {
+            entry.ty == MessageType::RunCommand
+                && entry
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| name.starts_with("lash:process-hop-"))
+        })
+        .count();
+    println!(
+        "PROCESS_EFFECT_HOPS effects=3 index_hops={} segment_hops={segment_hops} effect_steps={effect_steps}",
+        index_hops.len()
+    );
+    assert_eq!(world.runner.executions.load(Ordering::SeqCst), 3);
+    assert!(
+        index_hops.is_empty(),
+        "per-effect index calls: {index_hops:#?}"
+    );
+    assert_eq!(segment_hops, 2);
+    assert_eq!(effect_steps, 3);
+    world.assert_released().await;
+}
+
+async fn crash_at_process_pin(point: lash_restate_test::CrashPoint) {
+    use lash_restate_test::{CrashCount, CrashRule};
+    let world = ProcessJournalWorld::new(false).await;
+    // Initialize the object so the handler's first SetState is the pin itself.
+    world
+        .ingress
+        .call_lash_object::<_, ()>("LashDurableWaitIndex", &world.index_key, "reinstate", &())
+        .await
+        .expect("initialize index");
+    let crashes = CrashCount::new();
+    assert!(world.server.on_crash(crashes.listener()));
+    world.server.crash_on(
+        CrashRule::new(point)
+            .service("LashDurableWaitIndex")
+            .handler("register_process_journal")
+            .within_attempts(1),
+    );
+    world
+        .start()
+        .await
+        .expect("run task")
+        .expect("run process after crash");
+    assert_eq!(crashes.get(), 1, "crash reached the new state write");
+    assert_eq!(world.runner.executions.load(Ordering::SeqCst), 3);
+    world.assert_released().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_journal_crash_before_pin_write() {
+    crash_at_process_pin(lash_restate_test::CrashPoint::BeforeFrame {
+        ty: lash_restate_test::protocol::MessageType::SetStateCommand,
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_journal_crash_after_pin_write() {
+    crash_at_process_pin(lash_restate_test::CrashPoint::BeforeFrame {
+        ty: lash_restate_test::protocol::MessageType::OutputCommand,
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_journal_crash_mid_segment_retains_pin_until_end() {
+    use lash_restate_test::{CrashCount, CrashPoint, CrashRule};
+    let world = ProcessJournalWorld::new(true).await;
+    let crashes = CrashCount::new();
+    assert!(world.server.on_crash(crashes.listener()));
+    world.server.crash_on(
+        CrashRule::new(CrashPoint::BeforeRunResult {
+            name: Some("lash:process-hop-1".to_string()),
+        })
+        .service("LashProcessWorkflow")
+        .handler("run")
+        .within_attempts(1),
+    );
+    let run = world.start();
+    world.runner.wait_for_effect().await;
+    world.assert_pinned().await;
+    world.runner.release.add_permits(1);
+    world.runner.wait_for_effect().await;
+    assert_eq!(crashes.get(), 1);
+    world.assert_pinned().await;
+    world.runner.release.add_permits(1);
+    run.await.expect("run task").expect("redrive completes");
+    // Only the unrecorded run repeats; the first recorded effect stays recorded.
+    assert_eq!(world.runner.executions.load(Ordering::SeqCst), 4);
+    world.assert_released().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_cancel_releases_journal_pin_and_drain_work() {
+    let world = ProcessJournalWorld::new(true).await;
+    let run = world.start();
+    world.runner.wait_for_effect().await;
+    world.assert_pinned().await;
+    world
+        .ingress
+        .call_lash_workflow::<_, ()>(
+            "LashProcessWorkflow",
+            world.process_id.as_str(),
+            "cancel",
+            &RestateProcessCancelRequest {
+                journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
+                process_id: world.process_id.clone(),
+                request: lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:process-pin-law",
+                    11,
+                ),
+            },
+        )
+        .await
+        .expect("cancel process");
+    run.await.expect("run task").expect("cancel ends segment");
+    let record = world
+        .stores
+        .process_registry()
+        .get_process(&world.process_id)
+        .await
+        .expect("process record")
+        .expect("registered process");
+    assert!(record.status().is_terminal());
+    assert_eq!(world.runner.executions.load(Ordering::SeqCst), 2);
+    world.assert_released().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_kill_releases_abandoned_journal_pin() {
+    let world = ProcessJournalWorld::new(true).await;
+    let run = world.start();
+    world.runner.wait_for_effect().await;
+    world.assert_pinned().await;
+    assert_eq!(
+        world.server.kill_and_await(&world.run_id()).await,
+        Some(true)
+    );
+    assert!(run.await.expect("run task").is_err());
+    assert!(
+        world.index("retire_scope").await,
+        "a completed invocation can issue no more effects"
+    );
+    assert!(world.index("is_revoked").await);
+    assert!(
+        world
+            .server
+            .object_state("LashDurableWaitIndex", &world.index_key)
+            .keys()
+            .all(|key| !key.starts_with("wait-index/v2/process-journal/"))
+    );
+}
 
 #[tokio::test]
 pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {

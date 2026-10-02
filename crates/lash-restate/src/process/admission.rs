@@ -73,6 +73,8 @@ use std::sync::Arc;
 /// ancestry and session capability where it carried a parent policy
 /// (FIG-3607), and the input carries its sender's drain generation in place
 /// of this version, behind the generation sentinel (FIG-3795).
+/// Generation 5 (FIG-4849) pins one process segment's effect journal instead
+/// of recording every effect's begin and end at the scope index.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -83,11 +85,16 @@ use std::sync::Arc;
 ///     ),
 ///     roots(path = "crates/lash-restate/src/process_attach.rs", RestateProcessAttachRequest),
 ///     items(ADMIT_STEP, START_STEP, stamped_journal_version, decode_stamped_request),
+///     items(path = "crates/lash-restate/src/controller/scope_recording.rs", execute_effect),
+///     roots(path = "crates/lash-restate/src/durable_wait/messages.rs", RestateDurableWaitProcessJournalRequest),
+///     items(path = "crates/lash-restate/src/process/workflow.rs", run),
+///     items(path = "crates/lash-restate/src/process/workflow/scope_journal.rs", register, release),
+///     items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", register_process_journal, release_process_journal),
 ///     file(path = "crates/lash-restate/src/process/stamped_requests.rs"),
 /// )
 /// version_surface = "drain"
 /// format_manifest = "engine:restate.process_journal"
-pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
+pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 
 /// The manual epoch of the journal-bearing handlers' logic, hashed into the
 /// build's drain generation beside the drain-format versions (FIG-3795).

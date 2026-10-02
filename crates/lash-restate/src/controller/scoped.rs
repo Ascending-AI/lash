@@ -18,7 +18,7 @@ where
     C: RestateControllerContext<'ctx>,
 {
     /// The controller bound to `scope`. A non-session scope gets a view that
-    /// records every effect it executes and every group it opens in the
+    /// records runtime-operation effects and every group it opens in the
     /// scope's durable-wait index, so a `WhenQuiescent` retirement of the
     /// scope refuses while they are live (FIG-2499); a session scope's
     /// effects complete under Restate's own journal and need no record.
@@ -59,6 +59,9 @@ where
     /// committed, that this execution may run the segment. No other route
     /// yields a controller bound to a process scope, so a segment cannot
     /// dispatch an effect before its marker.
+    /// The workflow also registers a journal pin before lending this view;
+    /// process quiescence stays conservative until that segment stops issuing
+    /// effects, without index calls around each effect (FIG-4849).
     pub fn process_segment_controller<'run>(
         &'run self,
         started: &crate::SegmentStarted,

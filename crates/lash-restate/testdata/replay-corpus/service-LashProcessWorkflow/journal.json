@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashProcessWorkflow",
   "service": "LashProcessWorkflow",
-  "generation": "b14bcd97a3f0",
+  "generation": "4fe4c9d94749",
   "handlers": {
     "await_cancel": [
       [
@@ -23,6 +23,8 @@
         "RunCommand lash.build.generation",
         "RunCommand lash.segment.admit",
         "RunCommand lash.segment.start",
+        "CallCommand LashDurableWaitIndex/register_process_journal",
+        "CallCommand LashDurableWaitIndex/release_process_journal",
         "RunCommand lash.process.complete",
         "RunCommand lash.process.parent-end",
         "CompletePromiseCommand",

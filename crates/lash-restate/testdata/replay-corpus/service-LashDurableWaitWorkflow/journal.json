@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashDurableWaitWorkflow",
   "service": "LashDurableWaitWorkflow",
-  "generation": "b14bcd97a3f0",
+  "generation": "4fe4c9d94749",
   "handlers": {
     "await_resolution": [
       [
