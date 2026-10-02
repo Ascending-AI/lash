@@ -237,3 +237,113 @@ fn validate_canonical_binary(
     *cursor = end;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn validate(bytes: &[u8], depth: usize) -> Result<(), SnapshotDecodeError> {
+        validate_canonical_messagepack_structure(
+            bytes,
+            "root",
+            depth,
+            |_| CanonicalMapOrder::Sorted,
+            |_| false,
+        )
+    }
+
+    #[test]
+    fn canonical_structure_checks_depth_map_order_and_field_paths() {
+        assert_eq!(validate(&[0x91, 0xc0], 2), Ok(()));
+        assert!(matches!(
+            validate(&[0x91, 0x91, 0xc0], 2),
+            Err(SnapshotDecodeError::DepthLimitExceeded { limit: 2 })
+        ));
+        let ordered = [0x82, 0xa1, b'a', 0xc0, 0xa1, b'b', 0xc0];
+        assert_eq!(validate(&ordered, 2), Ok(()));
+        let reversed = [0x82, 0xa1, b'b', 0xc0, 0xa1, b'a', 0xc0];
+        assert!(matches!(
+            validate(&reversed, 2),
+            Err(SnapshotDecodeError::NonCanonicalEncoding { .. })
+        ));
+        assert_eq!(
+            CanonicalPathSegment::Key("field".into()).key(),
+            Some("field")
+        );
+        assert_eq!(CanonicalPathSegment::Index(1).key(), None);
+        assert!(
+            validate_canonical_messagepack_structure(
+                &[0x91, 0xc0],
+                "root",
+                2,
+                |_| CanonicalMapOrder::Unordered,
+                |path| path.is_empty()
+            )
+            .is_err()
+        );
+        let map = [0x81, 0xa1, b'a', 0x91, 0xc0];
+        assert!(matches!(
+            validate(&map, 2),
+            Err(SnapshotDecodeError::DepthLimitExceeded { limit: 2 })
+        ));
+        let seen = std::cell::RefCell::new(Vec::new());
+        assert_eq!(
+            validate_canonical_messagepack_structure(
+                &map,
+                "root",
+                3,
+                |path| {
+                    seen.borrow_mut().push(path.to_vec());
+                    CanonicalMapOrder::Fields(&["a"])
+                },
+                |_| false
+            ),
+            Ok(())
+        );
+        assert_eq!(*seen.borrow(), vec![Vec::<CanonicalPathSegment>::new()]);
+        assert!(matches!(
+            validate(&[0xca, 0, 0, 0, 0], 1),
+            Err(SnapshotDecodeError::NonCanonicalEncoding { .. })
+        ));
+    }
+
+    #[test]
+    fn canonical_binary_widths_accept_complete_bodies_and_refuse_truncation() {
+        assert_eq!(
+            validate(&[0x92, 0xc4, 1, 0, 0xc4, 1, 1], 2),
+            Ok(()),
+            "binary bodies can end before the enclosing array ends"
+        );
+        for length in [0usize, 1, 255, 256, 65_535, 65_536] {
+            let mut bytes = if length <= 255 {
+                vec![0xc4, length as u8]
+            } else if length <= 65_535 {
+                let mut bytes = vec![0xc5];
+                bytes.extend_from_slice(&(length as u16).to_be_bytes());
+                bytes
+            } else {
+                let mut bytes = vec![0xc6];
+                bytes.extend_from_slice(&(length as u32).to_be_bytes());
+                bytes
+            };
+            bytes.resize(bytes.len() + length, 0);
+            assert_eq!(validate(&bytes, 1), Ok(()), "length {length}");
+            if length > 0 {
+                bytes.pop();
+                assert!(
+                    matches!(
+                        validate(&bytes, 1),
+                        Err(SnapshotDecodeError::InvalidEncoding(_))
+                    ),
+                    "length {length}"
+                );
+            }
+        }
+        for bytes in [vec![0xc5, 0, 1, 0], vec![0xc6, 0, 0, 0, 1, 0]] {
+            assert!(matches!(
+                validate(&bytes, 1),
+                Err(SnapshotDecodeError::NonCanonicalEncoding { .. })
+            ));
+        }
+    }
+}

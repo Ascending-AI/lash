@@ -473,3 +473,32 @@ mod tests {
         assert!(heap.validate_persisted_graph(&roots).is_err());
     }
 }
+
+#[cfg(test)]
+mod mutation_tests {
+    use super::*;
+
+    #[test]
+    fn search_params_accept_zero_or_one_url_owner_and_refuse_two() {
+        let mut heap = Heap::default();
+        let Value::Ref(id) = heap
+            .allocate(HeapObject::UrlSearchParams(
+                super::super::UrlSearchParamsObject {
+                    entries: Vec::new(),
+                },
+            ))
+            .expect("params")
+        else {
+            panic!("heap reference")
+        };
+        for owners in 0..=2 {
+            let result = validate_exotic_invariants(&heap, id, heap.get(id).expect("params"));
+            assert_eq!(result.is_ok(), owners <= 1, "{owners} owners");
+            heap.allocate(HeapObject::Url(super::super::UrlObject {
+                href: "https://example.com/".to_string(),
+                search_params: Value::Ref(id),
+            }))
+            .expect("URL");
+        }
+    }
+}

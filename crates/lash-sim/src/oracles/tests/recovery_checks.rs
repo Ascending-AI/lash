@@ -164,44 +164,14 @@ fn scheduler_owned_runtime_completion_oracle_rejects_missing_pending_evidence() 
 
 #[test]
 fn scheduler_owned_runtime_completion_oracle_rejects_incomplete_pending_evidence() {
-    for (name, completion) in [
-        (
-            "empty family",
-            json!({
-                "completion_family": "",
-                "completion_units": [{"unit": "runtime:unit", "at": 0}],
-                "ready_at": 0,
-                "registered_after": "session-001:ingress"
-            }),
-        ),
-        (
-            "empty units",
-            json!({
-                "completion_family": "provider_turn_completion",
-                "completion_units": [],
-                "ready_at": 0,
-                "registered_after": "session-001:ingress"
-            }),
-        ),
-        (
-            "wrong ready_at",
-            json!({
-                "completion_family": "provider_turn_completion",
-                "completion_units": [{"unit": "runtime:unit", "at": 0}],
-                "ready_at": 99,
-                "registered_after": "session-001:ingress"
-            }),
-        ),
-        (
-            "empty registered_after",
-            json!({
-                "completion_family": "provider_turn_completion",
-                "completion_units": [{"unit": "runtime:unit", "at": 0}],
-                "ready_at": 0,
-                "registered_after": ""
-            }),
-        ),
+    for (name, field, value) in [
+        ("empty family", "completion_family", json!("")),
+        ("empty units", "completion_units", json!([])),
+        ("wrong ready_at", "ready_at", json!(99)),
+        ("empty registered_after", "registered_after", json!("")),
     ] {
+        let mut completion = runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 0);
+        completion[field] = value;
         let verdict = scheduler_owned_runtime_completions(
             &[delivered_with_payload(
                 0,

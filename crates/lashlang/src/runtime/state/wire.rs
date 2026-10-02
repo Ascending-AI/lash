@@ -587,3 +587,37 @@ pub(super) fn bindings_into_record(
     }
     Ok(record)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_paths_quote_names_that_are_not_identifiers() {
+        for (name, path) in [
+            ("valid_1", "root.valid_1"),
+            ("1valid", "root[\"1valid\"]"),
+            ("has-dash", "root[\"has-dash\"]"),
+            ("", "root[\"\"]"),
+        ] {
+            assert_eq!(child_location("root", name), path);
+        }
+    }
+
+    #[test]
+    fn record_values_enforce_the_snapshot_depth_limit() {
+        let mut value = Value::Null;
+        for _ in 0..=MAX_SNAPSHOT_VALUE_DEPTH {
+            value = Value::Record(Arc::new(
+                [("nested".to_string(), value)].into_iter().collect(),
+            ));
+        }
+        assert!(matches!(
+            CanonicalValue::from_runtime(&value, "root", 0),
+            Err(ContinuationError::UnserializableValue {
+                variant: "value beyond the snapshot depth limit",
+                ..
+            })
+        ));
+    }
+}

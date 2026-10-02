@@ -503,6 +503,88 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Waker};
 
+    #[test]
+    fn projected_names_and_execution_captures_preserve_session_state() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = Arc::new(RlmRuntimeState::new_for_tests().expect("state"));
+                let session = crate::plugin::protocol_session::RlmProtocolSession::new(
+                    crate::plugin::RlmProtocolPluginConfig::builder()
+                        .channel(crate::plugin::RlmChannel::Cell)
+                        .instruction_limit(crate::plugin::InstructionBound::unbounded())
+                        .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
+                        .build(),
+                    state.clone(),
+                );
+                let session_id = lash_core::SessionId::from("mutation-session");
+                let ctx = || {
+                    lash_core::plugin::ProtocolSessionContext::new(
+                        &session_id,
+                        lash_core::FleetFormat::current(),
+                    )
+                };
+                lash_core::plugin::ProtocolSessionPlugin::append_session_nodes(
+                    &session,
+                    ctx(),
+                    &projected_seed_nodes("kept"),
+                )
+                .await
+                .expect("seed");
+                assert_eq!(
+                    state.protected_projected_binding_names().await,
+                    BTreeSet::from(["projected_kept".to_string()])
+                );
+                {
+                    let _running = state.execution.lock().await;
+                    assert!(state.execution_state_dirty(), "a running cell is dirty");
+                }
+                state
+                    .snapshot_execution_state(lash_core::FleetFormat::current())
+                    .await
+                    .expect("capture idle state");
+                state.acknowledge_execution_state_capture().await;
+                assert!(
+                    !state.execution_state_dirty(),
+                    "an acknowledged idle session is clean"
+                );
+                let response =
+                    execute_cell(&state, cell("let persisted = 4815; finish(persisted);"))
+                        .await
+                        .expect("cell");
+                assert_eq!(response.terminal_finish, Some(serde_json::json!(4815)));
+                state
+                    .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
+                    .await
+                    .expect("settle");
+                assert!(
+                    state.execution_state_dirty(),
+                    "an accepted cell has uncaptured changes"
+                );
+                let capture = state
+                    .snapshot_execution_state(lash_core::FleetFormat::current())
+                    .await
+                    .expect("capture");
+                assert!(
+                    capture.root().is_some_and(|root| !root.is_empty()),
+                    "the capture carries the execution state"
+                );
+                lash_core::plugin::ProtocolSessionPlugin::restore_session(
+                    &session,
+                    ctx(),
+                    seed_restore_view("restored", &["restored"]),
+                )
+                .await
+                .expect("restore through the protocol hook");
+                assert_eq!(
+                    state.protected_projected_binding_names().await,
+                    BTreeSet::from(["projected_restored".to_string()])
+                );
+            });
+    }
+
     const SEED: u64 = 0x5_2c08;
 
     /// Runs `request` on `state` as one cell, in a handler of its own on a
