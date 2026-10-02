@@ -54,6 +54,10 @@ pub enum Step {
         root: String,
         child: bool,
     },
+    /// Send a root whose every run fails live until the engine stops
+    /// retrying it, wait for its park, and redrive the park on a deployment
+    /// that runs the root again.
+    ParkAndRedrive { session: SessionRef, root: String },
     /// Delete a session (its close intent, then its physical delete).
     Delete { session: SessionRef },
     /// Start a Lashlang process that sleeps and finishes, and arm an engine
@@ -90,6 +94,7 @@ impl Step {
             Self::Command { .. } => "command",
             Self::CancelHeld { .. } => "cancel_held",
             Self::DeleteHeld { .. } => "delete_held",
+            Self::ParkAndRedrive { .. } => "park_redrive",
             Self::Delete { .. } => "delete",
             Self::StartProcess { .. } => "start_process",
             Self::Tick { .. } => "tick",
@@ -106,11 +111,12 @@ impl Step {
 
 /// The step kinds a triage run may leave out: every kind but the ones that
 /// open sessions, send, or move time, which later steps build on.
-pub const OPTIONAL_KINDS: [&str; 12] = [
+pub const OPTIONAL_KINDS: [&str; 13] = [
     "send_batch",
     "command",
     "cancel_held",
     "delete_held",
+    "park_redrive",
     "delete",
     "start_process",
     "kill",
@@ -196,6 +202,10 @@ pub fn plan(seed: u64, steps: usize, without: &[String]) -> Vec<Step> {
         })
         .collect();
     let mut plan = opening();
+    // Park roots count on their own, and a park step takes no draw of its
+    // own, so every other step of a seed's plan stands as it did before the
+    // kind existed.
+    let mut next_park = 0_u64;
     let mut next_input = 0_u64;
     let mut root = |prefix: &str| {
         next_input += 1;
@@ -272,6 +282,13 @@ pub fn plan(seed: u64, steps: usize, without: &[String]) -> Vec<Step> {
             60..=71 => Step::Tick {
                 count: rng.u32(1..4),
             },
+            78..=79 if !plain.is_empty() => {
+                next_park += 1;
+                Step::ParkAndRedrive {
+                    session: plain[draw as usize % plain.len()],
+                    root: format!("park-{next_park}"),
+                }
+            }
             72..=79 => Step::Quiesce,
             80..=84 => Step::Kill,
             85..=89 => {
@@ -328,6 +345,6 @@ mod tests {
     fn every_step_kind_is_drawn() {
         let steps = plan(7, 2_000, &[]);
         let kinds: std::collections::BTreeSet<&str> = steps.iter().map(Step::kind).collect();
-        assert_eq!(kinds.len(), 16, "{kinds:?}");
+        assert_eq!(kinds.len(), 17, "{kinds:?}");
     }
 }

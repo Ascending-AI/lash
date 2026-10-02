@@ -137,6 +137,9 @@ pub enum HostSite {
     DeliverCancelBefore,
     /// `ProcessWorkSubstrate::deliver_cancel`, after the engine answered.
     DeliverCancelAfter,
+    /// `SessionDriver::run_root`, before the deployment runs the root: the
+    /// attempt fails live, and the engine retries it until it stops.
+    RunRootBefore,
 }
 
 /// What an armed site does when a call reaches it.
@@ -246,6 +249,49 @@ impl HostFaults {
         self.arms.lock_recover().clear();
     }
 
+    /// Disarm the arms of `site` that match exactly `matching`, leaving every
+    /// other arm as it stands.
+    pub fn disarm_matching(&self, site: HostSite, matching: &str) {
+        self.arms
+            .lock_recover()
+            .retain(|arm| arm.site != site || arm.matching.as_deref() != Some(matching));
+    }
+
+    /// Record that the store holds `intent` acknowledged: `applied` when its
+    /// engine half ran, not when the store settled a redrive its root ran
+    /// past.
+    fn record_acknowledged(&self, intent: &lash_core::store::ControlIntent, applied: bool) {
+        if !matches!(
+            intent.state,
+            lash_core::store::ControlIntentState::Acknowledged { .. }
+        ) {
+            return;
+        }
+        let (root, park) = match &intent.kind {
+            lash_core::store::ControlIntentKind::Redrive { root, park }
+            | lash_core::store::ControlIntentKind::Cancel { root, park }
+            | lash_core::store::ControlIntentKind::Fork { root, park, .. } => {
+                (Some(root.to_string()), Some(park.feed_sequence()))
+            }
+            lash_core::store::ControlIntentKind::CloseSession { .. } => (None, None),
+        };
+        self.record(crate::invariants::Fact::IntentAck {
+            intent: intent.id.to_string(),
+            session: intent.session_id.to_string(),
+            verb: intent.kind.code().to_owned(),
+            root,
+            park,
+            applied,
+        });
+    }
+
+    /// Record what a decorated call answered, when a history observes.
+    fn record(&self, fact: crate::invariants::Fact) {
+        if let Some(recorder) = self.recorder.lock_recover().as_ref() {
+            recorder.record(fact);
+        }
+    }
+
     /// The crash sites armed but never reached: a cell whose armed crash
     /// nothing took never reached its crash point, whatever the trip says.
     #[must_use]
@@ -314,6 +360,8 @@ async fn die<T>() -> T {
 pub struct DriverProxy {
     current: Mutex<Option<Arc<dyn SessionDriver>>>,
     up: watch::Sender<u64>,
+    /// The world's armed sites: a root's run crosses [`HostSite::RunRootBefore`].
+    faults: Option<Arc<HostFaults>>,
 }
 
 impl std::fmt::Debug for DriverProxy {
@@ -330,11 +378,21 @@ impl Default for DriverProxy {
         Self {
             current: Mutex::new(None),
             up: watch::channel(0).0,
+            faults: None,
         }
     }
 }
 
 impl DriverProxy {
+    /// A slot whose root runs cross `faults`.
+    #[must_use]
+    pub fn with_faults(faults: Arc<HostFaults>) -> Self {
+        Self {
+            faults: Some(faults),
+            ..Self::default()
+        }
+    }
+
     /// Serve `driver` from now on.
     pub fn serve(&self, driver: Arc<dyn SessionDriver>) {
         *self.current.lock_recover() = Some(driver);
@@ -393,7 +451,25 @@ impl SessionDriver for DriverProxy {
         controller: lash_core::ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
     ) -> lash_core::engine::RootRunEnd {
-        self.live().await.run_root(controller, admitted).await
+        let driver = self.live().await;
+        let detail = format!("{}/{}", admitted.session(), admitted.root());
+        match self
+            .faults
+            .as_ref()
+            .and_then(|faults| faults.take(HostSite::RunRootBefore, &detail))
+        {
+            Some(ArmEffect::Crash) => return die().await,
+            Some(effect) => {
+                return lash_core::engine::RootRunEnd::owing_nothing(Err(
+                    lash_core::engine::DriveAbort::Retry(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::PluginSessionManager,
+                        format!("crash matrix: {effect:?} at the run of `{detail}`"),
+                    )),
+                ));
+            }
+            None => {}
+        }
+        driver.run_root(controller, admitted).await
     }
 
     async fn close_root(
@@ -569,7 +645,13 @@ impl lash_core::engine::SessionControlEngine for CrashControl {
         target: &lash_core::engine::RootRef,
         engine: Option<&lash_core::store::EnginePark>,
     ) -> Result<lash_core::engine::EngineAck, lash_core::engine::EngineRefusal> {
-        self.inner.resume_root(target, engine).await
+        let ack = self.inner.resume_root(target, engine).await?;
+        self.faults.record(crate::invariants::Fact::Resume {
+            session: target.session.to_string(),
+            root: target.root.to_string(),
+            held: matches!(ack, lash_core::engine::EngineAck::Resumed),
+        });
+        Ok(ack)
     }
 
     async fn resume_process(
@@ -693,8 +775,32 @@ impl lash_core::store::RuntimeStoreDecorator for CrashSessionFactory {
             Some(effect) => Err(lash_core::StoreError::Backend(format!(
                 "crash matrix: {effect:?} at the intent acknowledgement"
             ))),
-            None => self.inner.acknowledge_intent(id, claim, at_ms).await,
+            None => {
+                let settle = self.inner.acknowledge_intent(id, claim, at_ms).await?;
+                // Only a write under a held claim acknowledges the intent.
+                if let lash_core::store::IntentSettle::Held(intent) = &settle {
+                    self.faults.record_acknowledged(intent, true);
+                }
+                Ok(settle)
+            }
         }
+    }
+
+    /// A redrive its root ran past is settled acknowledged here, without
+    /// its engine half: the claim's own transaction writes it.
+    async fn claim_intent_application(
+        &self,
+        id: lash_core::store::ControlIntentId,
+        at_ms: u64,
+    ) -> StoreResult<lash_core::store::IntentApplication> {
+        let before = self.inner.load_intent(id).await?;
+        let application = self.inner.claim_intent_application(id, at_ms).await?;
+        if let lash_core::store::IntentApplication::Done(intent) = &application
+            && before.is_some_and(|before| before.state != intent.state)
+        {
+            self.faults.record_acknowledged(intent, false);
+        }
+        Ok(application)
     }
 
     async fn delete_session(

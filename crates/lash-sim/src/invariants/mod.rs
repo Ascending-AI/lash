@@ -25,6 +25,7 @@
 //! | [`frame_lineage`] | `graph_nodes` and `session_head` |
 //! | [`host_admission`] | typed host send outcomes, raw input rows and committed input/answer markers |
 //! | [`transcript_order`] | sequential Known host sends and their committed user-message positions |
+//! | [`redrive_resumes`] | the host's redrives, the intent acknowledgements and root resumes the deployment's store and engine answered ([`Fact::IntentAck`], [`Fact::Resume`]), and the turn park feed ([`ParkEventRow`]) |
 //!
 //! Store rows are read raw, through the SQLite store's test-only
 //! `read_rows_for_testing` (`lash-sqlite-store`, `testing` feature), the
@@ -63,6 +64,7 @@ checkers! {
     frame_lineage => FrameLineage,
     host_admission => HostAdmission,
     transcript_order => TranscriptOrder,
+    redrive_resumes => RedriveResumes,
 }
 pub mod quarantine;
 mod snapshot;
@@ -76,6 +78,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::sync::MutexExt as _;
 use serde::Serialize;
 
+pub use redrive_resumes::ParkEventRow;
 pub use snapshot::{
     ArtifactRow, CleanupRow, GraphNodeRow, InputRow, ObligationRow, RootRow, StoreSnapshot,
     TranscriptCall, TranscriptSession, TranscriptToolOutput,
@@ -106,6 +109,10 @@ pub struct History {
     pub relay_ran: bool,
     /// The store clock's epoch milliseconds when the stores were read.
     pub now_ms: Option<u64>,
+    /// The deployment's turn park feed, in commit order, as the run's end
+    /// read it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub park_events: Vec<ParkEventRow>,
 }
 
 impl History {
@@ -118,6 +125,7 @@ impl History {
             stores: Vec::new(),
             relay_ran: false,
             now_ms: None,
+            park_events: Vec::new(),
         }
     }
 
@@ -234,6 +242,20 @@ pub enum HostOutcome {
 pub enum HostRefusalCode {
     Runtime(lash_core::RuntimeErrorCode),
     UnknownSession,
+    /// The store refused a redrive of a parked root.
+    Redrive(RedriveRefusal),
+}
+
+/// Why the store refused a redrive, as `lash::ParkVerbRefused` names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RedriveRefusal {
+    NotParked,
+    ParkSuperseded,
+    Redriving,
+    IntentOpen,
+    SessionDeleted,
+    SessionClosing,
 }
 
 /// A fault or deployment transition at a harness seam.
@@ -261,6 +283,27 @@ pub enum Fact {
     Fault {
         kind: FaultKind,
         detail: String,
+    },
+    /// The store acknowledged a control intent: its verb, and the root and
+    /// park a root verb names. `applied` when its engine half ran and was
+    /// acknowledged under a held claim; not when the store settled a redrive
+    /// its root had already run past.
+    IntentAck {
+        intent: String,
+        session: String,
+        verb: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        root: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        park: Option<u64>,
+        applied: bool,
+    },
+    /// The engine answered a root's resume; `held` when it resumed an
+    /// execution it held.
+    Resume {
+        session: String,
+        root: String,
+        held: bool,
     },
     /// A scheduler boundary the run delivered.
     Boundary {
@@ -322,9 +365,10 @@ impl Fact {
             Self::ToolExecuted { call, .. } | Self::CompletionRegistered { call, .. } => {
                 Some(&call.session)
             }
-            Self::CompletionResolved { session, .. } | Self::HostOp { session, .. } => {
-                Some(session)
-            }
+            Self::CompletionResolved { session, .. }
+            | Self::HostOp { session, .. }
+            | Self::IntentAck { session, .. }
+            | Self::Resume { session, .. } => Some(session),
             Self::EffectRan { .. } | Self::ProcessStartAnswered { .. } | Self::Fault { .. } => None,
         }
     }
@@ -671,36 +715,37 @@ pub fn render(history: &History, violation: &Violation) -> String {
         .into_iter()
         .filter_map(|at| history.records.get(at))
         .collect::<Vec<_>>();
-    let excerpt: Vec<&Record> =
-        if matches!(violation.invariant, "host-admission" | "transcript-order")
-            && let Some(session) = &violation.session
-        {
-            history
-                .records
-                .iter()
-                .filter(|record| {
-                    record.fact.session() == Some(session.as_str())
-                        || matches!(record.fact, Fact::Fault { .. })
-                })
-                .collect()
-        } else if named.is_empty() {
-            match &violation.session {
-                Some(session) => {
-                    let mut tail = history
-                        .records
-                        .iter()
-                        .rev()
-                        .filter(|record| record.fact.session() == Some(session.as_str()))
-                        .take(EXCERPT_RECORDS)
-                        .collect::<Vec<_>>();
-                    tail.reverse();
-                    tail
-                }
-                None => Vec::new(),
+    let excerpt: Vec<&Record> = if matches!(
+        violation.invariant,
+        "host-admission" | "transcript-order" | "redrive-resumes"
+    ) && let Some(session) = &violation.session
+    {
+        history
+            .records
+            .iter()
+            .filter(|record| {
+                record.fact.session() == Some(session.as_str())
+                    || matches!(record.fact, Fact::Fault { .. })
+            })
+            .collect()
+    } else if named.is_empty() {
+        match &violation.session {
+            Some(session) => {
+                let mut tail = history
+                    .records
+                    .iter()
+                    .rev()
+                    .filter(|record| record.fact.session() == Some(session.as_str()))
+                    .take(EXCERPT_RECORDS)
+                    .collect::<Vec<_>>();
+                tail.reverse();
+                tail
             }
-        } else {
-            named
-        };
+            None => Vec::new(),
+        }
+    } else {
+        named
+    };
     if !excerpt.is_empty() {
         out.push_str("  trace excerpt:\n");
         for record in excerpt {
@@ -857,6 +902,7 @@ async fn capture_crash_world(
     history.extend_from(world.history());
     history.relay_ran = relayed;
     history.now_ms = Some(world.now_ms());
+    history.park_events = redrive_resumes::read_park_feed(world).await?;
     history
         .capture_store_with_transcripts("engine", stores)
         .await

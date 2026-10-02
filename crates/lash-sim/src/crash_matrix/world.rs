@@ -214,7 +214,7 @@ impl CrashWorld {
         let clock: Arc<dyn lash_core::Clock> = engine.clock();
         let trip = Arc::new(Trip::new(clock));
         let faults = Arc::new(HostFaults::new(Arc::clone(&trip)));
-        let proxy = Arc::new(DriverProxy::default());
+        let proxy = Arc::new(DriverProxy::with_faults(Arc::clone(&faults)));
         let drives = Arc::new(DriveLog::default());
         let work = Arc::new(CrashSessionWork::new(
             engine.explicit_reconcile_session_work(),

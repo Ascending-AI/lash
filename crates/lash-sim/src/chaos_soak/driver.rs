@@ -54,6 +54,7 @@ const DELETE_UNANSWERED_RETRIES: u32 = 2;
 
 pub use crate::invariants::HostOutcome as Admission;
 use crate::invariants::{Fact, FaultKind, HostOp, HostRefusalCode};
+
 /// An input the host sent, and whether it saw the acceptance.
 #[derive(Clone, Debug)]
 pub struct SentInput {
@@ -672,6 +673,22 @@ impl Driver {
                 let admission = self.send_held(&id, root, *child).await?;
                 let deleted = self.delete(*session).await?;
                 Ok(format!("{admission:?}; delete: {deleted}"))
+            }
+            Step::ParkAndRedrive { session, root } => {
+                let id = self.slot(*session)?.id.clone();
+                let redriven = self.park_and_redrive(&id, root).await?;
+                self.ledger.inputs.push(SentInput {
+                    session: id,
+                    root: root.clone(),
+                    admission: redriven.admission.clone(),
+                });
+                Ok(match redriven.park {
+                    Some((parked, redrive)) => format!(
+                        "{:?}; parked `{parked}`; redrive: {redrive:?}",
+                        redriven.admission
+                    ),
+                    None => format!("{:?}; nothing parked", redriven.admission),
+                })
             }
             Step::Delete { session } => self.delete(*session).await,
             Step::StartProcess { sleep_ms } => self.start_process(*sleep_ms).await,
@@ -1514,6 +1531,9 @@ fn invocation_input(
         })
         .unwrap_or_default()
 }
+
+mod park;
+pub use park::Redriven;
 
 #[cfg(test)]
 mod tests;

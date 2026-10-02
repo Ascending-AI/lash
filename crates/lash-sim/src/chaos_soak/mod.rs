@@ -10,8 +10,9 @@
 //! - **Workload.** Sends and batched sends on plain sessions, session
 //!   commands, held roots that are cancelled or whose session is deleted
 //!   (some with a child process that lives until the root ends), session
-//!   deletes, child sessions, and Lashlang processes that sleep and finish
-//!   with an engine waiter on their terminal.
+//!   deletes, child sessions, roots whose runs fail until the engine stops
+//!   retrying them, which park and are redriven, and Lashlang processes
+//!   that sleep and finish with an engine waiter on their terminal.
 //! - **Faults.** The deployment killed where it stands, a first attempt of a
 //!   lash invocation cut at a seeded journal command, the host killed at one
 //!   of the crash matrix's seam boundaries, typed one-shot admission refusals,
@@ -31,7 +32,8 @@
 //! took effect at most once, every engine waiter was answered, every root's
 //! scope close delivered, and every retired generation holds nothing. A live
 //! session must then still drive a fresh input.
-//! Each epoch also completes one real deferred tool through `ToolProvider`.
+//! Each epoch also completes one real deferred tool through `ToolProvider`,
+//! and parks and redrives one root of a session of its own.
 //! The smoke law requires evidence for every registered global checker;
 //! host outcomes and fault facts remain in its diagnostic history.
 //!
@@ -493,6 +495,9 @@ async fn finish_with_progress(
     if held {
         if let Err(error) = driver.witness().await {
             report.violations.push(format!("checker witness: {error}"));
+        }
+        if let Err(error) = driver.park_witness().await {
+            report.violations.push(format!("park witness: {error}"));
         }
         progress.record("live-session probes and global invariants");
         report

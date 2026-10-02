@@ -193,9 +193,11 @@ fn the_clean_history_keeps_every_invariant_and_gives_each_facts() {
             || *invariant == "an-existing-start-is-answered-only-to-its-originator"
             || *invariant == "host-admission"
             || *invariant == "transcript-order"
+            || *invariant == "redrive-resumes"
         {
-            // The pending-tool turn stores no artifact and makes no host
-            // start or sequential host sends; each red fixture adds its own.
+            // The pending-tool turn stores no artifact, parks nothing and
+            // makes no host start or sequential host sends; each red fixture
+            // adds its own.
             continue;
         }
         assert!(
@@ -734,4 +736,116 @@ fn host_history() -> History {
         ..Default::default()
     });
     history
+}
+
+/// One parked root, redriven: the feed's three events and the facts the
+/// store and the engine answered, after the final recovery pass.
+fn redrive_history() -> History {
+    let event = |seq: u64, kind: &str| ParkEventRow {
+        seq,
+        at_ms: 1_000 + seq,
+        session: "s".to_owned(),
+        root: "root".to_owned(),
+        park: 1,
+        kind: kind.to_owned(),
+        intent: (kind == "redrive_requested").then(|| "7".to_owned()),
+        cause: (kind == "unparked").then(|| "turn_committed".to_owned()),
+    };
+    let mut history = History::new("chaos-soak", SEED).after_relay();
+    history.park_events = vec![
+        event(1, "parked"),
+        event(2, "redrive_requested"),
+        event(3, "unparked"),
+    ];
+    history.push(Fact::Fault {
+        kind: FaultKind::Refusal,
+        detail: "fixture run failure".to_owned(),
+    });
+    history.push(Fact::Resume {
+        session: "s".to_owned(),
+        root: "root".to_owned(),
+        held: true,
+    });
+    history.push(Fact::IntentAck {
+        intent: "7".to_owned(),
+        session: "s".to_owned(),
+        verb: "redrive".to_owned(),
+        root: Some("root".to_owned()),
+        park: Some(1),
+        applied: true,
+    });
+    history.push(Fact::HostOp {
+        op: HostOp::Redrive,
+        session: "s".to_owned(),
+        roots: vec!["root".to_owned()],
+        outcome: HostOutcome::Known,
+    });
+    history
+}
+
+#[test]
+fn soak_history_redrive_resumes_catches_a_redrive_that_never_resumed() {
+    let clean = redrive_history();
+    let report = check_with(&clean, &[checker("redrive-resumes")]);
+    assert!(report.passed(), "{}", report.failure());
+    assert_eq!(report.observed, [("redrive-resumes", 1)]);
+
+    // The redriven root never resumed, its intent was never acknowledged,
+    // or its park never ended.
+    for fact in ["resume", "intent_ack"] {
+        let mut history = clean.clone();
+        history.records.retain(|record| {
+            serde_json::to_value(&record.fact).expect("a fact encodes")["fact"] != fact
+        });
+        let report = assert_caught(&history, "redrive-resumes");
+        let failure = report.failure();
+        assert!(failure.contains("redrive_requested"), "{failure}");
+        assert!(failure.contains("fixture run failure"), "{failure}");
+    }
+    let mut history = clean.clone();
+    history.park_events.pop();
+    assert_caught(&history, "redrive-resumes");
+    // Before the final recovery pass the same history still owes the resume.
+    history.relay_ran = false;
+    assert!(check_with(&history, &[checker("redrive-resumes")]).passed());
+
+    // A park a cancel, fork or deletion ended owes no resume.
+    let mut history = clean.clone();
+    history
+        .records
+        .retain(|record| matches!(record.fact, Fact::Fault { .. }));
+    history.park_events[2].kind = "cancelled".to_owned();
+    history.park_events[2].cause = Some("session_deleted".to_owned());
+    assert!(check_with(&history, &[checker("redrive-resumes")]).passed());
+}
+
+#[test]
+fn soak_history_redrive_resumes_catches_a_redrive_no_park_names() {
+    let clean = redrive_history();
+    // The request names a park no `parked` event opened for its root.
+    let mut history = clean.clone();
+    history.park_events.remove(0);
+    assert_caught(&history, "redrive-resumes");
+    let mut history = clean.clone();
+    history.park_events[0].root = "another".to_owned();
+    assert_caught(&history, "redrive-resumes");
+    // An acknowledgement, an accepted host redrive or a resume with no
+    // request behind it: each alone is a spontaneous redrive.
+    for fact in ["intent_ack", "host_op", "resume"] {
+        let mut history = clean.clone();
+        history.park_events.clear();
+        history.records.retain(|record| {
+            serde_json::to_value(&record.fact).expect("a fact encodes")["fact"] == fact
+        });
+        assert_eq!(history.records.len(), 1, "{fact}");
+        assert_caught(&history, "redrive-resumes");
+    }
+    // The acknowledgement names another intent than the feed's request.
+    let mut history = clean;
+    for record in &mut history.records {
+        if let Fact::IntentAck { intent, .. } = &mut record.fact {
+            *intent = "8".to_owned();
+        }
+    }
+    assert_caught(&history, "redrive-resumes");
 }

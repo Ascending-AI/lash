@@ -5,7 +5,8 @@
 //! draws and checks, and how a failed epoch replays from its seed.
 //!
 //! `chaos_soak_smoke` is the short mode: two epochs, about two minutes, over
-//! every step kind no open finding exposes. `chaos_soak_release` is the
+//! every step kind no open finding exposes. Each epoch parks and redrives one
+//! root whatever its plan draws, so the redrive checker always judges one. `chaos_soak_release` is the
 //! release gate's 90-minute soak over every step kind (`just chaos-soak`),
 //! ignored in every ordinary run. Each finding has a regression test here
 //! that replays it: ignored while it is open
@@ -45,6 +46,9 @@ fn assert_green(report: &chaos_soak::SoakReport) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn chaos_soak_smoke() {
     let mut config = SoakConfig::from_env(SMOKE_SEED, SMOKE_CAP, Some(SMOKE_EPOCHS));
+    // Open findings' kinds are left out. Today that is `park_redrive`, for
+    // FIG-4718 S6 (fix: FIG-4780): until it is fixed the smoke's redrives
+    // come from each epoch's park witness alone.
     for kind in findings::smoke_without() {
         if !config.without.contains(&kind) {
             config.without.push(kind);
@@ -111,6 +115,8 @@ regressions! {
     s3_delete_with_an_orphaned_root_stays_due => "FIG-3873 S3";
     s4_interrupted_delete_leaks_the_cancel_gate_wait => "FIG-3873 S4";
     s5_cancelled_root_scope_close_stays_claimed_after_a_kill => "FIG-3873 S5";
+    #[ignore = "FIG-4718 S6 (fix: FIG-4780): a redriven command root's park never ends"]
+    s6_a_redriven_command_roots_park_never_ends => "FIG-4718 S6";
 }
 
 /// The regression tests and the findings agree: one test per finding,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::crash_matrix::deployment::HostSite;
 
 /// A rolling deploy's drain charges its ticks to time, never to work
 /// (FIG-4624). One drive of the first build is calling a backlog of roots
@@ -399,5 +400,184 @@ async fn soak_history_a_refused_send_is_a_typed_host_fact() {
                     .is_some_and(|detail| detail.starts_with("taken"))
         }),
         "the armed refusal fired"
+    );
+}
+
+/// Open plain session 0 of a fresh world.
+async fn park_world(seed: u64) -> (Driver, SessionId) {
+    let mut driver = Driver::new(seed).await.expect("world");
+    driver
+        .step(
+            seed,
+            &Step::Open {
+                session: 0,
+                lane: Lane::Plain,
+                parent: None,
+            },
+        )
+        .await
+        .expect("open the session");
+    let id = driver.ledger.sessions[0].id.clone();
+    (driver, id)
+}
+
+/// Tick recovery until `root` has its terminal, then judge the world's
+/// history as the soak's end does.
+async fn redriven_history(
+    driver: &mut Driver,
+    session: &SessionId,
+    root: &lash_core::TurnId,
+) -> crate::invariants::Report {
+    let store = driver.world.backend().session_store_factory();
+    for _ in 0..8 {
+        driver.world.quiesce().await;
+        if store
+            .root_terminal(session, root)
+            .await
+            .expect("read the root's terminal")
+            .is_some()
+        {
+            break;
+        }
+        driver.tick().await.expect("a recovery tick");
+    }
+    assert!(
+        store
+            .root_terminal(session, root)
+            .await
+            .expect("read the root's terminal")
+            .is_some(),
+        "the redriven root `{root}` ran to its terminal"
+    );
+    let report = crate::invariants::report_crash_world(&driver.world, "chaos-soak")
+        .await
+        .expect("capture the history")
+        .expect("a SQLite world");
+    driver.world.finish().await;
+    report
+}
+
+fn facts_of(report_facts: &[Fact], fact: &str) -> Vec<serde_json::Value> {
+    report_facts
+        .iter()
+        .map(|recorded| serde_json::to_value(recorded).expect("a fact encodes"))
+        .filter(|recorded| recorded["fact"] == fact)
+        .collect()
+}
+
+fn redrives_observed(report: &crate::invariants::Report) -> usize {
+    report
+        .observed
+        .iter()
+        .find(|(invariant, _)| *invariant == "redrive-resumes")
+        .expect("the redrive checker is registered")
+        .1
+}
+
+/// FIG-4718: a root whose runs fail until the turn handler stops retrying
+/// them is parked by the recovery pass, and the host's redrive of that park
+/// resumes the execution the engine held: the store acknowledges the
+/// redrive's intent, the root commits, and its commit ends the park. The
+/// redrive checker judges that one redrive from the park feed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_parked_root_is_redriven_and_resumes() {
+    let seed = 0x4718;
+    let (mut driver, id) = park_world(seed).await;
+    let redriven = driver
+        .park_and_redrive(&id, "park-1")
+        .await
+        .expect("the park step");
+    let Redriven {
+        admission: Admission::Known,
+        park: Some((root, Admission::Known)),
+    } = redriven.clone()
+    else {
+        panic!("the root parked and its redrive was accepted: {redriven:?}");
+    };
+    let facts = driver.world.history().facts();
+    let report = redriven_history(&mut driver, &id, &root).await;
+    assert!(
+        report.passed(),
+        "{}\n{}",
+        report.summary(),
+        report.failure()
+    );
+    assert_eq!(redrives_observed(&report), 1, "{}", report.summary());
+    let resumes = facts_of(&facts, "resume");
+    assert_eq!(resumes.len(), 1, "{resumes:?}");
+    assert_eq!(
+        (&resumes[0]["root"], &resumes[0]["held"]),
+        (
+            &serde_json::json!(root.to_string()),
+            &serde_json::json!(true)
+        ),
+        "the engine resumed the execution it had stopped retrying"
+    );
+    let acknowledged = facts_of(&facts, "intent_ack");
+    assert_eq!(acknowledged.len(), 1, "{acknowledged:?}");
+    assert_eq!(
+        (&acknowledged[0]["verb"], &acknowledged[0]["applied"]),
+        (&serde_json::json!("redrive"), &serde_json::json!(true)),
+        "the redrive's engine half ran and was acknowledged"
+    );
+    assert!(
+        facts_of(&facts, "fault").iter().any(|fault| {
+            fault["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("RunRootBefore"))
+        }),
+        "the park came from the run-root seam"
+    );
+}
+
+/// FIG-4718: a host that dies after the engine resumed the root and before
+/// the store acknowledged the redrive's intent never hears the redrive
+/// accepted. The resumed root commits, which ends its park. The intent is
+/// durable, so the recovery pass of the next deployment claims it again,
+/// finds the root ran past it and settles it acknowledged without resuming
+/// the root a second time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_redrive_whose_host_dies_before_its_acknowledgement_is_delivered_again() {
+    let seed = 0x4718_0002;
+    let (mut driver, id) = park_world(seed).await;
+    driver
+        .world
+        .faults()
+        .crash_once(HostSite::AcknowledgeIntentBefore);
+    let redriven = driver
+        .park_and_redrive(&id, "park-1")
+        .await
+        .expect("the park step");
+    let Redriven {
+        admission: Admission::Known,
+        park: Some((root, Admission::Maybe)),
+    } = redriven.clone()
+    else {
+        panic!("the host never heard its redrive accepted: {redriven:?}");
+    };
+    assert_eq!(driver.counts.crashes, 1, "the host died inside the redrive");
+    let report = redriven_history(&mut driver, &id, &root).await;
+    let facts = driver.world.history().facts();
+    assert!(
+        report.passed(),
+        "{}\n{}",
+        report.summary(),
+        report.failure()
+    );
+    assert_eq!(redrives_observed(&report), 1, "{}", report.summary());
+    assert!(
+        !facts_of(&facts, "resume").is_empty(),
+        "the engine was asked to resume the root"
+    );
+    let acknowledged = facts_of(&facts, "intent_ack");
+    assert_eq!(
+        acknowledged.len(),
+        1,
+        "the next deployment acknowledged the intent once: {acknowledged:?}"
+    );
+    assert_eq!(
+        (&acknowledged[0]["verb"], &acknowledged[0]["applied"]),
+        (&serde_json::json!("redrive"), &serde_json::json!(false)),
+        "the root ran past the redrive, so the store settled it without resuming again"
     );
 }
