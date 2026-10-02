@@ -205,12 +205,15 @@ impl SessionCommitStore for SqliteStore {
         &self,
         fence: &lash_core_execution::store::DriveFence,
         follow_on_turn_id: &lash_core_execution::TurnId,
+        recovering: &lash_core_execution::engine::BuildGeneration,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
         let fence = fence.clone();
         let follow_on_turn_id = follow_on_turn_id.clone();
+        let recovering = recovering.clone();
         self.conn
             .write_flow(move |tx| {
-                let outcome = raise_pending_follow_on_conn(tx, &fence, &follow_on_turn_id);
+                let outcome =
+                    raise_pending_follow_on_conn(tx, &fence, &follow_on_turn_id, &recovering);
                 Ok(match outcome {
                     Ok(raised) => TxOutcome::Commit(Ok(raised)),
                     Err(error) => TxOutcome::Rollback(Err(error)),

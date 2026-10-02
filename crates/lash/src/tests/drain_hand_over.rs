@@ -16,10 +16,11 @@
 //!   first execution did: the decision is the journaled admission's.
 //!
 //! - **stamp** (FIG-4742): a root is stamped with the generation of the build
-//!   that admits it. While N's root is in flight N counts it; once N+1 has
-//!   admitted the next root from the hand-over, N counts none and its drain
-//!   is complete, and a park of that root names N+1. These run on the double
-//!   only.
+//!   that runs it, which is the build whose drive admitted it unless a newer
+//!   build registered in between and the stable name handed the root to it.
+//!   While N's root is in flight N counts it; once N+1 has admitted the next
+//!   root from the hand-over, N counts none and its drain is complete, and a
+//!   park of that root names N+1. These run on the double only.
 //!
 //! Both run on the Restate server double over SQLite memory, SQLite file
 //! and PostgreSQL, and on a live `restate-server` over SQLite memory and
@@ -1004,6 +1005,93 @@ async fn a_park_of_a_root_admitted_from_a_hand_over_names_the_admitting_generati
     Ok(())
 }
 
+/// FIG-4742 residual (FIG-4739): a root is held by the build that runs it.
+/// A drive on N that is not draining admits its next root and calls it on
+/// the stable name, which the newest build serves: the root's journal is
+/// N+1's, so N+1 counts it and N holds nothing, whichever build's drive
+/// admitted it.
+async fn a_root_started_on_a_newer_build_counts_in_the_build_that_runs_it(
+    storage: Storage,
+) -> Result<()> {
+    let World { engine, _keep, .. } = double_world(storage).await;
+    let model = Arc::new(Model::holding(2));
+    let old = engine
+        .old_backend()
+        .build_generation()
+        .expect("the engine's generation is bound")
+        .clone();
+    let core = core_over(engine.old_backend(), engine.old_work(), &model);
+    let session = lash_core::SessionId::from("drain-hand-over-runner-stamp");
+    core.session(session.as_str())
+        .created()
+        .await
+        .open()
+        .await?;
+    let store = lash_core::runtime::live_session_view(&core.store_factory, &session)
+        .await?
+        .expect("an opened session has a store");
+    for index in 0..2 {
+        store
+            .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+                session.clone(),
+                lash_core::TurnInputIngress::NextTurn,
+                TurnInput::text(format!("question {index}")),
+            ))
+            .await
+            .expect("enqueue the input");
+    }
+    let request = DriveRequestId::new("drain-hand-over");
+    let port = core.substrate_slot.ports().await.queued;
+    port.schedule_drive(&session, request.clone());
+    tokio::time::timeout(WEDGE, model.reached.notified())
+        .await
+        .expect("the drive's first root reaches its model call");
+
+    // N+1 registers beside N, and nothing is marked draining: N's drive goes
+    // on admitting.
+    let next = BuildGeneration::for_test("drain-hand-over-next");
+    engine.roll(next.clone(), &model).await;
+    model.release.notify_one();
+    tokio::time::timeout(WEDGE, model.reached.notified())
+        .await
+        .expect("the root N's drive admitted next reaches its model call");
+    let in_flight = |generation: BuildGeneration| {
+        let drain = engine.old_backend().generation_drain();
+        async move {
+            drain
+                .generation_work(&generation)
+                .await
+                .expect("read the generation's work")
+                .in_flight_turns
+        }
+    };
+    assert_eq!(
+        (in_flight(old.clone()).await, in_flight(next.clone()).await),
+        (0, 1),
+        "the root counts in the generation of the build running it"
+    );
+
+    model.release.notify_one();
+    let outcome = tokio::time::timeout(WEDGE, port.await_drive(&session, &request))
+        .await
+        .expect("the drive ends")
+        .expect("the drive is not refused");
+    assert_eq!(outcome.stop, DriveStop::Idle, "{outcome:?}");
+    assert_eq!(outcome.ran.len(), 2, "{outcome:?}");
+    assert_eq!(
+        (in_flight(old).await, in_flight(next).await),
+        (0, 0),
+        "every root ended"
+    );
+    drop(core);
+    engine.finish().await;
+    Ok(())
+}
+
+async fn stamp_runner(storage: Storage, (): ()) -> Result<()> {
+    a_root_started_on_a_newer_build_counts_in_the_build_that_runs_it(storage).await
+}
+
 async fn stamp_counts(storage: Storage, (): ()) -> Result<()> {
     a_root_admitted_from_a_hand_over_counts_in_the_admitting_generation(storage).await
 }
@@ -1037,6 +1125,10 @@ drain_hand_over_laws! {
     stamp_counts_sqlite_file: stamp_counts, Storage::SqliteFile, ();
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     stamp_counts_postgres: stamp_counts, Storage::Postgres, ();
+    stamp_runner_sqlite_memory: stamp_runner, Storage::SqliteMemory, ();
+    stamp_runner_sqlite_file: stamp_runner, Storage::SqliteFile, ();
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+    stamp_runner_postgres: stamp_runner, Storage::Postgres, ();
     stamp_park_sqlite_memory: stamp_park, Storage::SqliteMemory, ();
     stamp_park_sqlite_file: stamp_park, Storage::SqliteFile, ();
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]

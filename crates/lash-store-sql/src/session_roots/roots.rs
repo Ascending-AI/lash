@@ -45,6 +45,14 @@ crate::statements! {
              WHERE session_id = ?1 AND root = ?2
                AND admission_json IS NULL AND terminal_kind IS NULL";
 
+        /// Restamp unfinished root `?2` of session `?1` with generation `?3`:
+        /// the build whose follow-on recovery runs the rest of the root holds
+        /// it from here on (FIG-4739).
+        restamp_admitted_generation = "UPDATE session_roots
+             SET admitted_generation = ?3
+             WHERE session_id = ?1 AND root = ?2 AND admission_json IS NOT NULL
+               AND terminal_kind IS NULL";
+
         /// The one admitted root of session `?1` without terminal evidence,
         /// with its recorded admission.
         select_unfinished = "SELECT root, admission_json FROM session_roots

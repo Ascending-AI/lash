@@ -18,6 +18,9 @@
 //!   before it sends the drive on, and N+1's continuation before its first
 //!   step and after its final commit. The run ends the same: the tool ran
 //!   once and the model was asked twice.
+//! - **counts**: N holds the run while its first invocation runs there, and
+//!   N+1 holds it from the admission of its continuation: N's drain completes
+//!   at the hand-over, while the run is still running.
 //! - **cancel before**: a cancel that lands while the run is still on N ends
 //!   it there, and no continuation is owed.
 //! - **cancel after**: a cancel that lands after the hand-over reaches the
@@ -151,6 +154,7 @@ struct RunRoll {
     session: lash_core::SessionId,
     handle: Option<crate::SendHandle>,
     old: BuildGeneration,
+    next: BuildGeneration,
     _keep: Keep,
 }
 
@@ -187,11 +191,9 @@ impl RunRoll {
         tokio::time::timeout(WEDGE, model.reached.notified())
             .await
             .expect("the run reaches its first model call");
+        let next = BuildGeneration::for_test("run-segment-next");
         engine
-            .roll(
-                BuildGeneration::for_test("run-segment-next"),
-                &Arc::new(Model::holding(0)),
-            )
+            .roll(next.clone(), &Arc::new(Model::holding(0)))
             .await;
         assert!(
             engine
@@ -210,6 +212,7 @@ impl RunRoll {
             session,
             handle: Some(handle),
             old,
+            next,
             _keep,
         })
     }
@@ -227,6 +230,17 @@ impl RunRoll {
             .into_iter()
             .filter_map(|row| row.pinned_deployment_id)
             .collect()
+    }
+
+    /// The turns `generation` holds in flight.
+    async fn in_flight(&self, generation: &BuildGeneration) -> u64 {
+        self.engine
+            .old_backend()
+            .generation_drain()
+            .generation_work(generation)
+            .await
+            .expect("read the generation's work")
+            .in_flight_turns
     }
 
     /// The run left nothing behind: the head owes no continuation, and the
@@ -382,6 +396,58 @@ async fn a_run_on_a_draining_build_goes_on_in_a_new_invocation(
     if crash.is_some() {
         assert_eq!(crashes.get(), 1, "the invocation died once");
     }
+    roll.assert_ended().await
+}
+
+/// The old generation drains at the hand-over, not at the run's end: while
+/// the run's first invocation is on N, N holds the run; once N+1 has admitted
+/// its continuation, N+1 holds it and N's drain is complete, though the run
+/// is still running.
+async fn a_run_counts_in_the_generation_that_is_running_it(storage: Storage) -> Result<()> {
+    let mut roll = RunRoll::start(storage, "run-segment-counts", &[1, 2]).await?;
+    assert_eq!(
+        (
+            roll.in_flight(&roll.old).await,
+            roll.in_flight(&roll.next).await
+        ),
+        (1, 0),
+        "the run's first invocation counts on the draining build"
+    );
+    assert!(
+        !roll
+            .core
+            .generation_drain_status(&roll.old)
+            .await?
+            .drained(),
+        "the drain waits for the invocation running on its build"
+    );
+
+    roll.model.release.notify_one();
+    tokio::time::timeout(WEDGE, roll.model.reached.notified())
+        .await
+        .expect("the continuation reaches its model call on the newest build");
+    assert_eq!(
+        (
+            roll.in_flight(&roll.old).await,
+            roll.in_flight(&roll.next).await
+        ),
+        (0, 1),
+        "the run counts in the generation that admitted its continuation"
+    );
+    assert!(
+        roll.core
+            .generation_drain_status(&roll.old)
+            .await?
+            .drained(),
+        "N's drain is complete while the run goes on on N+1"
+    );
+
+    roll.model.release.notify_one();
+    let output = tokio::time::timeout(WEDGE, roll.sent().output())
+        .await
+        .expect("the run ends")?;
+    assert!(output.result.is_success(), "{:?}", output.result.outcome);
+    assert_eq!(roll.in_flight(&roll.next).await, 0, "the run ended");
     roll.assert_ended().await
 }
 
@@ -632,6 +698,10 @@ async fn journal_budget(storage: Storage, (): ()) -> Result<()> {
     a_run_past_its_journal_budget_goes_on_in_a_new_invocation(storage).await
 }
 
+async fn counts(storage: Storage, (): ()) -> Result<()> {
+    a_run_counts_in_the_generation_that_is_running_it(storage).await
+}
+
 async fn cancel_before(storage: Storage, (): ()) -> Result<()> {
     a_cancel_before_the_boundary_ends_the_run_on_the_draining_build(storage).await
 }
@@ -684,6 +754,10 @@ drain_hand_over_laws! {
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     run_crash_continuation_after_commit_postgres:
         hands_over, Storage::Postgres, Some(Crash::ContinuationAfterItsCommit);
+    run_counts_sqlite_memory: counts, Storage::SqliteMemory, ();
+    run_counts_sqlite_file: counts, Storage::SqliteFile, ();
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+    run_counts_postgres: counts, Storage::Postgres, ();
     run_cancel_before_sqlite_memory: cancel_before, Storage::SqliteMemory, ();
     run_cancel_before_sqlite_file: cancel_before, Storage::SqliteFile, ();
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]

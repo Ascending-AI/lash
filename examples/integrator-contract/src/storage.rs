@@ -214,6 +214,7 @@ impl SessionCommitStore for Integrator {
         &self,
         fence: &DriveFence,
         follow_on_turn_id: &TurnId,
+        recovering: &BuildGeneration,
     ) -> Result<PendingFollowOn, StoreError> {
         unreachable!("external signature witness")
     }

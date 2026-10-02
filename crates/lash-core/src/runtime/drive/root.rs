@@ -365,6 +365,7 @@ impl LashRuntime {
                     fence: fence.clone(),
                     follow_on: follow_on.turn.clone(),
                     attempts: follow_on.attempts,
+                    generation: admitted.admitted_generation().clone(),
                     base: crate::store::SessionHeadRef {
                         // Read by the decision body on its first execution.
                         generation: 0,
@@ -715,6 +716,9 @@ struct RecoverFollowOnRunner {
     fence: crate::store::DriveFence,
     follow_on: TurnId,
     attempts: u32,
+    /// The generation of the build this recovery runs on, which holds the
+    /// follow-on's root from the raise on (FIG-4739).
+    generation: crate::engine::BuildGeneration,
     /// The resident head the follow-on's turn runs on, as the drive
     /// refreshed it. Its generation is read in the body.
     base: crate::store::SessionHeadRef,
@@ -750,7 +754,11 @@ impl RecoverFollowOnRunner {
                     owed
                 } else {
                     self.store
-                        .raise_pending_follow_on_attempts(&self.fence, &owed.follow_on_turn_id)
+                        .raise_pending_follow_on_attempts(
+                            &self.fence,
+                            &owed.follow_on_turn_id,
+                            &self.generation,
+                        )
                         .await?
                 },
                 base,

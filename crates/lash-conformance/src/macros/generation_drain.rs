@@ -15,6 +15,10 @@ macro_rules! generation_drain_tests {
                 in_flight_turns_follow_their_admitting_generation,
                 "generation-drain-in-flight"
             ),
+            (
+                a_recovered_follow_on_moves_its_root_to_the_recovering_generation,
+                "generation-drain-recovered-follow-on"
+            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

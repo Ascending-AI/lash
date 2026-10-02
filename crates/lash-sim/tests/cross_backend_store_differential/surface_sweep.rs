@@ -1319,6 +1319,7 @@ impl BackendRunner {
                     .raise_pending_follow_on_attempts(
                         &lease_fence,
                         &lash_core::TurnId::from(turn_id),
+                        &lash_core::engine::BuildGeneration::for_test("surface-recovering"),
                     )
                     .await?;
                 format!("attempts={}", raised.attempts)

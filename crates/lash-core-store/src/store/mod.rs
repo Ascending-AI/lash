@@ -1099,10 +1099,17 @@ pub trait SessionCommitStore: Send + Sync {
     /// back with `attempts` raised by one. The head revision does not move:
     /// the raise changes no other head fact, and nothing ever lowers the count.
     /// Returns the raised fact.
+    ///
+    /// The same transaction restamps the unfinished root the follow-on
+    /// belongs to with `recovering`, the generation of the build whose
+    /// recovery runs the rest of the root (FIG-4739): from here on that build
+    /// holds the root, and the build that ran its earlier turns counts it no
+    /// longer.
     async fn raise_pending_follow_on_attempts(
         &self,
         fence: &DriveFence,
         follow_on_turn_id: &TurnId,
+        recovering: &crate::build_generation::BuildGeneration,
     ) -> Result<PendingFollowOn, StoreError>;
 
     /// Replace only the pending observer intents of an admitted session.

@@ -93,6 +93,7 @@ pub(super) fn raise_pending_follow_on_conn(
     conn: &Connection,
     fence: &lash_core_execution::store::DriveFence,
     follow_on_turn_id: &lash_core_execution::TurnId,
+    recovering: &lash_core_execution::engine::BuildGeneration,
 ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
     require_drive_fence_conn(conn, fence)?;
     let session_id = fence.session();
@@ -123,6 +124,21 @@ pub(super) fn raise_pending_follow_on_conn(
     if updated != 1 {
         return Err(not_pending());
     }
+    // The recovering build holds the root from here on. A follow-on whose
+    // root was never admitted through a drive has no stamp to move.
+    crate::conn::cached_execute(
+        conn,
+        crate::session_roots::session_roots_sql()
+            .roots
+            .restamp_admitted_generation
+            .sql(),
+        params![
+            session_id.as_str(),
+            raised.root_turn_id().as_str(),
+            recovering.as_str(),
+        ],
+    )
+    .map_err(sqlite_error)?;
     Ok(raised)
 }
 

@@ -1367,6 +1367,9 @@ async fn run_root_journal(
         .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
         .map_err(refused_scope)?;
     let root = admitted.root().clone();
+    // This build runs the root, whichever build's drive admitted it: the
+    // stable lane hands a new root to the newest build (FIG-4742).
+    let admitted = admitted.run_by(generation.clone());
     let RootRunEnd { result, owed_close } =
         sentinel.guard(driver.run_root(scoped, admitted)).await?;
     let (ended, result) = match result {

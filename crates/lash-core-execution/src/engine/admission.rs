@@ -146,6 +146,20 @@ impl Admitted {
         }
     }
 
+    /// This admission as the build of `generation` runs its root (FIG-4742).
+    ///
+    /// An engine that pins a root's execution to the build that started it
+    /// may start it on a newer build than the one whose drive admitted it.
+    /// The root's stamp names the build its journal belongs to, so the build
+    /// that runs the root restates the stamp before anything records it: the
+    /// root's admission, its parks and the drain's count then all name the
+    /// build that holds it.
+    #[must_use]
+    pub fn run_by(mut self, generation: super::contracts::BuildGeneration) -> Self {
+        self.admitted_generation = generation;
+        self
+    }
+
     pub fn session(&self) -> &SessionId {
         &self.session
     }
@@ -168,9 +182,10 @@ impl Admitted {
         self.observed_epoch
     }
 
-    /// The drain generation of the build that admitted the root: the
-    /// generation a queued run this root begins resumes through
-    /// (FIG-3795 S9).
+    /// The drain generation of the build that holds the root: the one whose
+    /// drive admitted it, or the one that runs it once that build restated
+    /// the stamp ([`Self::run_by`]). A queued run this root begins resumes
+    /// through it (FIG-3795 S9).
     pub fn admitted_generation(&self) -> &super::contracts::BuildGeneration {
         &self.admitted_generation
     }

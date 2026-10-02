@@ -129,6 +129,7 @@ mod tests {
             &self,
             fence: &super::super::DriveFence,
             follow_on_turn_id: &crate::TurnId,
+            _recovering: &crate::build_generation::BuildGeneration,
         ) -> Result<super::super::PendingFollowOn, StoreError> {
             Err(StoreError::FollowOnNotPending {
                 session_id: fence.session().clone(),

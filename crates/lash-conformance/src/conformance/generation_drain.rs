@@ -137,6 +137,53 @@ impl AdmittedRoot {
         }
     }
 
+    /// Commit the root's first physical turn owing a follow-on: the rows the
+    /// root was admitted with settle, and the root stays unfinished.
+    async fn owe_follow_on(&self) -> crate::store::PendingFollowOn {
+        let mut state = crate::RuntimeSessionState {
+            session_id: self.session_id.clone(),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ))
+        };
+        state.ensure_agent_frame_initialized();
+        let owed = crate::store::PendingFollowOn {
+            continuation: None,
+            follow_on_turn_id: lash_core::store::PhysicalTurn::derive_turn_id(&self.root, 1),
+            frame_id: state
+                .current_frame_node_id
+                .clone()
+                .expect("the initial frame is current"),
+            task: "run the rest of the root".to_owned(),
+            resolved_run: crate::conformance::helpers::default_resolved_run(),
+            chain_depth: 1,
+            attempts: 0,
+        };
+        // A follow-on is written only by a turn's terminal commit.
+        let operation =
+            crate::OperationId::turn(self.session_id.as_str(), self.root.as_str(), "final");
+        let mut graph = state.pending_graph_commit();
+        graph
+            .derive_node_ids(&state.session_id, &operation)
+            .expect("derive commit node ids");
+        let mut commit = crate::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+            &state, graph, operation,
+        )
+        .expect("build the commit");
+        commit.drive_fence = Some(Box::new(self.lease.clone()));
+        commit.pending_follow_on = Some(owed.clone());
+        commit.ingress = Some(super::completing_admission(
+            self.root.as_str(),
+            &self.admission,
+        ));
+        self.store
+            .commit_runtime_state(commit)
+            .await
+            .expect("the root's first turn commits owing its follow-on");
+        owed
+    }
+
     /// End the root with the commit of its first physical turn, which
     /// settles the rows it was admitted with and writes its terminal.
     async fn end(&self) {
@@ -253,5 +300,68 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
     assert!(
         emptied.drained(),
         "nothing of a's stands once ia and qa end: {emptied:?}"
+    );
+}
+
+/// FIG-4739: a root whose turn committed owing a follow-on stays its
+/// admitting generation's in-flight turn until a drive recovers the
+/// follow-on; the recovery's raise moves the root to the generation of the
+/// build that recovers it, which holds the root until it ends. A root that
+/// owes nothing is not moved by another root's recovery.
+#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
+pub async fn a_recovered_follow_on_moves_its_root_to_the_recovering_generation(
+    fixture: GenerationDrainLawFixture,
+) {
+    let drain = fixture.stores.generation_drain();
+    let (old, next) = (
+        generation(&fixture.prefix, "handed-over-old"),
+        generation(&fixture.prefix, "handed-over-next"),
+    );
+    let in_flight = |stamp: crate::engine::BuildGeneration| {
+        let drain = Arc::clone(&drain);
+        async move {
+            drain
+                .generation_work(&stamp)
+                .await
+                .expect("count the work")
+                .in_flight_turns
+        }
+    };
+
+    let handed = AdmittedRoot::admit(&fixture, "handed", Head::Input, &old).await;
+    let _staying = AdmittedRoot::admit(&fixture, "staying", Head::Input, &old).await;
+    let owed = handed.owe_follow_on().await;
+    assert_eq!(
+        (in_flight(old.clone()).await, in_flight(next.clone()).await),
+        (2, 0),
+        "a follow-on no drive has recovered is still its admitting generation's"
+    );
+
+    let recovering = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+        &handed.store,
+        &handed.session_id,
+        &format!("{}-handed-recovering", fixture.prefix),
+    )
+    .await;
+    let raised = handed
+        .store
+        .raise_pending_follow_on_attempts(&recovering, &owed.follow_on_turn_id, &next)
+        .await
+        .expect("the recovering drive raises the count");
+    assert_eq!(raised.attempts, 1);
+    assert_eq!(
+        (in_flight(old.clone()).await, in_flight(next.clone()).await),
+        (1, 1),
+        "the recovering generation holds the root it recovers, and no other"
+    );
+    assert_eq!(
+        handed
+            .store
+            .unfinished_root(&handed.session_id)
+            .await
+            .expect("read the unfinished root")
+            .map(|unfinished| unfinished.root),
+        Some(handed.root.clone()),
+        "the raise ends no root"
     );
 }
