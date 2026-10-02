@@ -76,7 +76,10 @@ mod tests {
     use crate::plugin::StaticPluginFactory;
 
     fn factory(id: &'static str) -> Arc<dyn PluginFactory> {
-        Arc::new(StaticPluginFactory::new(id, PluginSpec::new()))
+        Arc::new(StaticPluginFactory::new(
+            crate::plugin::PluginDeclaration::initial(id),
+            PluginSpec::new(),
+        ))
     }
 
     fn ids(stack: &PluginStack) -> Vec<&'static str> {

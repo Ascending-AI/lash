@@ -169,6 +169,12 @@ impl PluginHost {
         self.factories.as_ref().as_slice()
     }
 
+    /// This host's plugins in hook order ([`super::PluginComposition`]): the
+    /// builtin factories, then the embedder's, each as it declares itself.
+    pub fn composition(&self) -> Result<super::PluginComposition, super::PluginDeclarationError> {
+        super::PluginComposition::of(self.factories())
+    }
+
     /// Every config registration of this host's plugins, and the core
     /// owner's (FIG-4379): the one list config creation, command ingress,
     /// resolution and the command catalog are generated from. A factory's

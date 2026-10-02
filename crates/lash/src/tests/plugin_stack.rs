@@ -34,6 +34,10 @@ impl lash_core::facade_support::PluginFactory for ShutdownRecordingPluginFactory
         self.id
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     async fn shutdown(&self) -> std::result::Result<(), lash_core::PluginError> {
         self.calls.lock_recover().push(self.id);
         match self.failure {

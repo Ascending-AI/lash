@@ -129,6 +129,10 @@ impl PluginFactory for StateHook {
     fn id(&self) -> &'static str {
         "typed-state"
     }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(PluginFactory::id(self))
+    }
     fn build(
         &self,
         _: &PluginSessionContext,

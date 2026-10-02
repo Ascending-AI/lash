@@ -957,7 +957,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         lash_protocol_standard::StandardProtocolPluginFactory::new(),
     )];
     factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "standard-intent-tools",
+        lash_core::plugin::PluginDeclaration::initial("standard-intent-tools"),
         lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
     )));
     let policy = lash_core::SessionPolicy {

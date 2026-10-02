@@ -1028,7 +1028,7 @@ fn rendezvous_plugin(
         effect_host,
     });
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-tool-batch-parallelism",
+        lash_core::plugin::PluginDeclaration::initial("conformance-tool-batch-parallelism"),
         crate::facade_support::PluginSpec::new().with_tool_provider(leaves),
     ))
 }

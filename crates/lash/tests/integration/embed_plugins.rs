@@ -83,6 +83,10 @@ impl PluginFactory for TestPluginFactory {
         TEST_PLUGIN_ID
     }
 
+    fn declaration(&self) -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(self.id())
+    }
+
     fn register_config(
         &self,
         registrar: &mut lash::plugins::ConfigRegistrar,

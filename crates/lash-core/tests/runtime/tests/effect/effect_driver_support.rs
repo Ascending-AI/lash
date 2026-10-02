@@ -9,6 +9,10 @@ impl lash_core::facade_support::PluginFactory for EffectControllerTestProtocolFa
         "test_protocol"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -59,6 +63,10 @@ pub(super) const PROMPT_REFUSAL: &str = "the prompt template names no dialect";
 impl lash_core::facade_support::PluginFactory for PromptRefusingProtocolFactory {
     fn id(&self) -> &'static str {
         "test_protocol"
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
     }
 
     fn build(

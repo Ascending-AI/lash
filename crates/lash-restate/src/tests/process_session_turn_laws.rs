@@ -897,6 +897,10 @@ impl lash_core::facade_support::PluginFactory for DefaultsFactory {
         DEFAULTS
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn register_config(
         &self,
         registrar: &mut lash_core::ConfigRegistrar,
@@ -1463,7 +1467,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     let mut parent = parent_runtime(Arc::clone(&registry), Arc::clone(&factory)).await;
     let panic_once = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let panic_plugin = Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "child-panic-test",
+        lash_core::plugin::PluginDeclaration::initial("child-panic-test"),
         lash_core::plugin::PluginSpec::new().with_before_turn(Arc::new(move |_| {
             let panic_once = Arc::clone(&panic_once);
             Box::pin(async move {

@@ -214,7 +214,7 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() {
         .build();
     let abort_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(StaticPluginFactory::new(
-            "abort-first-chunk",
+            lash_core::plugin::PluginDeclaration::initial("abort-first-chunk"),
             lash_core::facade_support::PluginSpec::new().with_assistant_stream(Arc::new(
                 |context| {
                     Box::pin(async move {
@@ -362,7 +362,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
         .build();
     let abort_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(StaticPluginFactory::new(
-            "abort-before-provider-failure",
+            lash_core::plugin::PluginDeclaration::initial("abort-before-provider-failure"),
             lash_core::facade_support::PluginSpec::new().with_assistant_stream(Arc::new(
                 |context| {
                     Box::pin(async move {
@@ -450,7 +450,7 @@ async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_fai
         .build();
     let abort_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(StaticPluginFactory::new(
-            "abort-complete-cell",
+            lash_core::plugin::PluginDeclaration::initial("abort-complete-cell"),
             lash_core::facade_support::PluginSpec::new().with_assistant_stream(Arc::new(
                 |context| {
                     Box::pin(async move {

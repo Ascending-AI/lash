@@ -126,6 +126,10 @@ impl PluginFactory for CounterFactory {
         self.id
     }
 
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &crate::plugin::PluginSessionContext,
@@ -712,6 +716,10 @@ fn registrations_that_cannot_stand_are_refused() {
     impl PluginFactory for Reserved {
         fn id(&self) -> &'static str {
             CORE_CONFIG_OWNER
+        }
+
+        fn declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(self.id())
         }
         fn build(
             &self,

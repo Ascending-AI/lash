@@ -99,6 +99,10 @@ impl PluginFactory for TestProtocolFactory {
         self.id
     }
 
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(self.id())
+    }
+
     /// The code protocol records the create extras a creator states; the
     /// standard fake registers no config.
     fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {

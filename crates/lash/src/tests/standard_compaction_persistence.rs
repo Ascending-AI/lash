@@ -162,7 +162,7 @@ struct WindowProbe {
 impl WindowProbe {
     fn plugin(self: &Arc<Self>) -> Arc<dyn lash_core::facade_support::PluginFactory> {
         Arc::new(crate::plugins::StaticPluginFactory::new(
-            "standard-compaction-window-probe",
+            lash_core::plugin::PluginDeclaration::initial("standard-compaction-window-probe"),
             lash_core::facade_support::PluginSpec::new()
                 .with_turn_context_transform(0, Arc::clone(self) as _),
         ))
@@ -1311,7 +1311,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         })
     };
     let injection_plugin = crate::plugins::StaticPluginFactory::new(
-        "standard-compaction-injection-test",
+        lash_core::plugin::PluginDeclaration::initial("standard-compaction-injection-test"),
         lash_core::facade_support::PluginSpec::new().with_before_turn(injection_hook),
     );
     // Every turn after the first crosses the threshold, so its pressure
@@ -1495,7 +1495,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
             .stores(),
     );
     let plugin = crate::plugins::StaticPluginFactory::new(
-        "after-turn-injection",
+        lash_core::plugin::PluginDeclaration::initial("after-turn-injection"),
         lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(|_| {
             Box::pin(async {
                 Ok(vec![
@@ -1606,7 +1606,7 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
     let append_error = Arc::new(std::sync::Mutex::new(None::<String>));
     let hook_append_error = Arc::clone(&append_error);
     let plugin = crate::plugins::StaticPluginFactory::new(
-        "mid-turn-append",
+        lash_core::plugin::PluginDeclaration::initial("mid-turn-append"),
         lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new(move |ctx| {
             let appended = Arc::clone(&hook_appended);
             let completions = Arc::clone(&completions);
@@ -1744,7 +1744,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
     let visible_in_turn = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hook_visible_in_turn = Arc::clone(&visible_in_turn);
     let plugin = crate::plugins::StaticPluginFactory::new(
-        "same-turn-append",
+        lash_core::plugin::PluginDeclaration::initial("same-turn-append"),
         lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new(move |ctx| {
             let draft_node_ids = Arc::clone(&hook_draft_node_ids);
             let visible_in_turn = Arc::clone(&hook_visible_in_turn);
@@ -1902,7 +1902,7 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
             .stores(),
     );
     let plugin = crate::plugins::StaticPluginFactory::new(
-        "after-turn-injection",
+        lash_core::plugin::PluginDeclaration::initial("after-turn-injection"),
         lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(|_| {
             Box::pin(async {
                 Ok(vec![

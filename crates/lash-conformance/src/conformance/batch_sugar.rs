@@ -250,7 +250,7 @@ fn sugar_plugin(witness: Arc<Witness>) -> Arc<dyn crate::facade_support::PluginF
             })
         }));
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-batch-sugar",
+        lash_core::plugin::PluginDeclaration::initial("conformance-batch-sugar"),
         spec,
     ))
 }

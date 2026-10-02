@@ -358,6 +358,10 @@ impl PluginFactory for RlmProtocolPluginFactory {
         RLM_PROTOCOL_PLUGIN_ID
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     /// The session's RLM namespace and its one command (FIG-4379): the
     /// channel and dialect this host selected are recorded at creation.
     fn register_config(

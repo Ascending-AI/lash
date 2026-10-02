@@ -1947,7 +1947,7 @@ fn follow_on_core(
     .model("mock-model")
     .tools(Arc::new(SwitchFrameTool) as Arc<dyn lash_core::ToolProvider>)
     .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "host-send-wait-follow-on-failure",
+        lash_core::plugin::PluginDeclaration::initial("host-send-wait-follow-on-failure"),
         lash_core::facade_support::PluginSpec::new().with_before_turn(hook),
     )))
     .build(owner())

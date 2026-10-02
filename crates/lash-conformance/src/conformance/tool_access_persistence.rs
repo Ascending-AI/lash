@@ -36,7 +36,7 @@ impl crate::ToolProvider for ResidentProvider {
 fn assert_restricted_empty_catalog(access: crate::SessionToolAccess, session_id: &str) {
     let mut factories = lash_core::testing::test_standard_protocol_factories();
     factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "tool_access_recovery_resident",
+        lash_core::plugin::PluginDeclaration::initial("tool_access_recovery_resident"),
         lash_core::plugin::PluginSpec::new().with_tool_provider(Arc::new(ResidentProvider)),
     )));
     let session = lash_core::facade_support::PluginHost::new(factories)

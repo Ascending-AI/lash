@@ -793,6 +793,12 @@ pub mod plugins {
         ToolPresentationPresenter, ToolResultHookContext, ToolResultProjectionContext,
         TurnHookReport,
     };
+    /// What a plugin factory declares about itself: its behaviour revision
+    /// and the formats it reads and writes. The build generation is computed
+    /// from every registered factory's declaration, in hook order.
+    pub use lash_core::plugin::{
+        BehaviorRevision, FormatVersion, PluginDeclaration, PluginDeclarationError, PluginId,
+    };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
         CheckpointApplication, CodeExecutionOutcome, CodeExecutorPlugin,

@@ -229,7 +229,7 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
         .expect("read the session head")
         .map_or(0, |head| head.head_revision);
     let tool: Arc<dyn PluginFactory> = Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-frame-switch-probe",
+        lash_core::plugin::PluginDeclaration::initial("conformance-frame-switch-probe"),
         crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool {
             executed: Arc::clone(&executed),
         })),

@@ -146,7 +146,7 @@ async fn persisted_provider_response(
     let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
         Arc::new(StandardProtocolPluginFactory::new()),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "provider-part-persistence-tools",
+            lash_core::plugin::PluginDeclaration::initial("provider-part-persistence-tools"),
             lash_core::facade_support::PluginSpec::new()
                 .with_tool_provider(Arc::new(LookupRuntimeTool)),
         )),

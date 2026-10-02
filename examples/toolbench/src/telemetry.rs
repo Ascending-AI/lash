@@ -89,7 +89,7 @@ impl Telemetry {
     pub(crate) fn plugin(self: &Arc<Self>) -> Arc<lash::plugins::StaticPluginFactory> {
         let telemetry = Arc::clone(self);
         Arc::new(lash::plugins::StaticPluginFactory::new(
-            "toolbench_telemetry",
+            lash::plugins::PluginDeclaration::initial("toolbench_telemetry"),
             lash::plugins::PluginSpec::new().with_assistant_response(Arc::new(move |ctx| {
                 let telemetry = Arc::clone(&telemetry);
                 Box::pin(async move {

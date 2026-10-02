@@ -107,7 +107,7 @@ async fn build_runtime(parts: &Parts) -> crate::LashRuntime {
     let factories = crate::testing::test_standard_protocol_factories()
         .into_iter()
         .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-pass-refusal",
+            lash_core::plugin::PluginDeclaration::initial("conformance-pass-refusal"),
             crate::facade_support::PluginSpec::new().with_tool_provider(tools),
         )) as Arc<dyn crate::facade_support::PluginFactory>])
         .collect();

@@ -14,6 +14,10 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         fn id(&self) -> &'static str {
             self.id
         }
+
+        fn declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(crate::plugin::PluginFactory::id(self))
+        }
         fn build(
             &self,
             _: &crate::plugin::PluginSessionContext,

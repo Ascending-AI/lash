@@ -985,7 +985,7 @@ pub async fn one_config_resolution_per_root(
     )
     .await;
     parts.tools = vec![Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-turn-config-switch-probe",
+        lash_core::plugin::PluginDeclaration::initial("conformance-turn-config-switch-probe"),
         crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool)),
     ))];
     let root = TurnId::from(format!("{prefix}-turn-config-one-resolution-root"));
@@ -1515,7 +1515,7 @@ async fn looping_session(
     )
     .await;
     parts.tools = vec![Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-turn-config-lookup-probe",
+        lash_core::plugin::PluginDeclaration::initial("conformance-turn-config-lookup-probe"),
         crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(LookupTool)),
     ))];
     parts

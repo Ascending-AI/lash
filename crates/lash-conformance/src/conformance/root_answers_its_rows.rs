@@ -104,7 +104,7 @@ impl crate::ToolProvider for RootRowsTools {
 
 fn tools_plugin() -> Arc<dyn PluginFactory> {
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-root-answers-its-rows-tools",
+        lash_core::plugin::PluginDeclaration::initial("conformance-root-answers-its-rows-tools"),
         crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(RootRowsTools)),
     ))
 }

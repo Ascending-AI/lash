@@ -442,6 +442,10 @@ impl PluginFactory for FaultPlugin {
     fn id(&self) -> &'static str {
         "operator-fault"
     }
+
+    fn declaration(&self) -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(PluginFactory::id(self))
+    }
     fn build(
         &self,
         _: &PluginSessionContext,

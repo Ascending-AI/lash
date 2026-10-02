@@ -107,7 +107,7 @@ fn gated_factory(
             })
         });
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        "law-deferred-commit",
+        lash_core::plugin::PluginDeclaration::initial("law-deferred-commit"),
         crate::plugin::PluginSpec::new()
             .with_presentation_step(step)
             .with_after_tool_call(hook),

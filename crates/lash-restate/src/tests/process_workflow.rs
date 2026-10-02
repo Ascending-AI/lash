@@ -796,7 +796,7 @@ pub(super) fn snapshot_recovery_tool_config(snapshot_ref: &str) -> lash_core::Ad
 pub(super) fn snapshot_recovery_tool_factory() -> Arc<dyn lash_core::facade_support::PluginFactory>
 {
     Arc::new(lash_core::plugin::PluginSpecFactory::new(
-        "snapshot-recovery-tool",
+        lash_core::plugin::PluginDeclaration::initial("snapshot-recovery-tool"),
         Arc::new(|ctx| {
             let snapshot_available = ctx
                 .plugin_config
@@ -845,7 +845,7 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
             as Arc<dyn lash_core::facade_support::PluginFactory>,
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "recovery-tool",
+            lash_core::plugin::PluginDeclaration::initial("recovery-tool"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
         )),
     ];

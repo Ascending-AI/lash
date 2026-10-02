@@ -26,7 +26,7 @@ fn before_tool_factory(
     hook: crate::plugin::BeforeToolCallHook,
 ) -> Arc<dyn PluginFactory> {
     Arc::new(StaticPluginFactory::new(
-        id,
+        lash_core_execution::plugin::PluginDeclaration::initial(id),
         crate::PluginSpec::new().with_before_tool_call(hook),
     ))
 }
@@ -48,7 +48,7 @@ fn before_tool_plugin_stack(mut factories: Vec<Arc<dyn PluginFactory>>) -> Arc<P
     factories.insert(
         0,
         Arc::new(StaticPluginFactory::new(
-            "directive_test_tools",
+            lash_core_execution::plugin::PluginDeclaration::initial("directive_test_tools"),
             crate::PluginSpec::new().with_tool_provider(Arc::new(MockTools)),
         )),
     );
@@ -62,7 +62,7 @@ fn after_tool_factory(
     hook: crate::plugin::AfterToolCallHook,
 ) -> Arc<dyn PluginFactory> {
     Arc::new(StaticPluginFactory::new(
-        id,
+        lash_core_execution::plugin::PluginDeclaration::initial(id),
         crate::PluginSpec::new().with_after_tool_call(hook),
     ))
 }
@@ -84,7 +84,7 @@ fn after_tool_plugin_stack(mut factories: Vec<Arc<dyn PluginFactory>>) -> Arc<Pl
     factories.insert(
         0,
         Arc::new(StaticPluginFactory::new(
-            "directive_test_tools",
+            lash_core_execution::plugin::PluginDeclaration::initial("directive_test_tools"),
             crate::PluginSpec::new().with_tool_provider(Arc::new(MockTools)),
         )),
     );

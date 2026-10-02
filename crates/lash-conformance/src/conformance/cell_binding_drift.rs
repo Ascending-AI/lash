@@ -42,7 +42,7 @@ pub(super) fn probe_factory(
 ) -> Arc<dyn crate::facade_support::PluginFactory> {
     let tools: Arc<dyn crate::ToolProvider> = Arc::new(ProbeTool { probe, executions });
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-binding-probe",
+        lash_core::plugin::PluginDeclaration::initial("conformance-binding-probe"),
         crate::facade_support::PluginSpec::new().with_tool_provider(tools),
     ))
 }

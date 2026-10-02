@@ -82,7 +82,8 @@ pub use registrar::{
 };
 pub(crate) use registrar::{PluginContributions, RegisteredHook};
 pub use registry::{
-    PluginExtensionContribution, PluginExtensions, PluginFactory, PluginSessionContext,
+    BehaviorRevision, FormatVersion, PluginComposition, PluginDeclaration, PluginDeclarationError,
+    PluginExtensionContribution, PluginExtensions, PluginFactory, PluginId, PluginSessionContext,
     PluginSessionMaterialization, PluginSpec, PluginSpecBuilder, PluginSpecFactory,
     ProcessEngineContributionContext, SessionPlugin, SessionReadyContext, StaticPluginFactory,
 };
@@ -263,6 +264,10 @@ mod tests {
             "mock"
         }
 
+        fn declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(self.id())
+        }
+
         fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
             let session_id = ctx.owner.session_id().cloned().ok_or_else(|| {
                 PluginError::Session("the mock plugin serves sessions".to_string())
@@ -278,6 +283,10 @@ mod tests {
     impl PluginFactory for ExtensionPluginFactory {
         fn id(&self) -> &'static str {
             "extension_resource"
+        }
+
+        fn declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(self.id())
         }
 
         fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
@@ -376,6 +385,10 @@ mod tests {
                 "session_extension"
             }
 
+            fn declaration(&self) -> crate::plugin::PluginDeclaration {
+                crate::plugin::PluginDeclaration::initial(self.id())
+            }
+
             fn build(
                 &self,
                 _ctx: &PluginSessionContext,
@@ -425,6 +438,10 @@ mod tests {
         impl PluginFactory for TriggerEventOnlyFactory {
             fn id(&self) -> &'static str {
                 "trigger_only"
+            }
+
+            fn declaration(&self) -> crate::plugin::PluginDeclaration {
+                crate::plugin::PluginDeclaration::initial(self.id())
             }
 
             fn build(
@@ -581,6 +598,10 @@ mod tests {
                 "duplicate"
             }
 
+            fn declaration(&self) -> crate::plugin::PluginDeclaration {
+                crate::plugin::PluginDeclaration::initial(self.id())
+            }
+
             fn build(
                 &self,
                 _ctx: &PluginSessionContext,
@@ -711,6 +732,10 @@ mod tests {
         impl PluginFactory for CrossKindFactory {
             fn id(&self) -> &'static str {
                 "cross_kind"
+            }
+
+            fn declaration(&self) -> crate::plugin::PluginDeclaration {
+                crate::plugin::PluginDeclaration::initial(self.id())
             }
 
             fn build(
@@ -870,7 +895,7 @@ mod tests {
     #[test]
     fn runtime_services_are_backed_by_plugin_sessions() {
         let host = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
-            "mock_tool",
+            crate::plugin::PluginDeclaration::initial("mock_tool"),
             PluginSpec::new()
                 .with_tool_provider(Arc::new(MockToolProvider) as Arc<dyn ToolProvider>),
         ))]);
@@ -899,6 +924,10 @@ mod tests {
     impl PluginFactory for ProjectorPluginFactory {
         fn id(&self) -> &'static str {
             self.plugin_id
+        }
+
+        fn declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(self.id())
         }
 
         fn build(

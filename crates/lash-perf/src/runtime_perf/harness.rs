@@ -806,7 +806,7 @@ fn benchmark_plugin_factories(
         },
     );
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
-        "runtime_perf_tools",
+        lash_core::plugin::PluginDeclaration::initial("runtime_perf_tools"),
         PluginSpec::new().with_tool_provider(Arc::new(benchmark_tool)),
     ))];
     if wiring.llm_query_plugin {
@@ -825,20 +825,20 @@ fn benchmark_plugin_factories(
     }
     if wiring.oblique_tools_plugin {
         factories.push(Arc::new(StaticPluginFactory::new(
-            "runtime_perf_oblique_tools",
+            lash_core::plugin::PluginDeclaration::initial("runtime_perf_oblique_tools"),
             PluginSpec::new().with_tool_provider(Arc::new(BenchmarkObliqueTools)),
         )));
     }
     if wiring.large_tool_catalog_plugin {
         factories.push(Arc::new(StaticPluginFactory::new(
-            "runtime_perf_large_tool_catalog",
+            lash_core::plugin::PluginDeclaration::initial("runtime_perf_large_tool_catalog"),
             PluginSpec::new().with_tool_provider(Arc::new(BenchmarkLargeToolCatalog::default())),
         )));
     }
     if let Some(observer) = tool_catalog_observer {
         let composition_observer = Arc::clone(observer);
         factories.push(Arc::new(StaticPluginFactory::new(
-            "runtime_perf_tool_catalog_observer",
+            lash_core::plugin::PluginDeclaration::initial("runtime_perf_tool_catalog_observer"),
             PluginSpec::new().with_tool_catalog_contributor(Arc::new(move |context| {
                 if let Some(session_id) = context.owner.session_id() {
                     composition_observer.observe_session_catalog_composition(session_id)?;
@@ -1056,6 +1056,10 @@ struct BenchmarkWorkbenchTriggerPluginFactory;
 impl PluginFactory for BenchmarkWorkbenchTriggerPluginFactory {
     fn id(&self) -> &'static str {
         "runtime_perf_workbench_trigger"
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
     }
 
     #[expect(

@@ -2044,6 +2044,10 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
         "ingress-admission-engine-factory"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn process_engine_contributions(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,

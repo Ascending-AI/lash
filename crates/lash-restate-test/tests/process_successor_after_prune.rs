@@ -125,6 +125,10 @@ impl lash::plugins::PluginFactory for EnginePluginFactory {
         ENGINE_KIND
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn process_engine_contributions(
         &self,
         _context: &lash_core::ProcessEngineContributionContext<'_>,

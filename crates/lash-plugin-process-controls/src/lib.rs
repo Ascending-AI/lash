@@ -72,7 +72,10 @@ impl SessionProcessAdminPluginFactory {
         let spec =
             PluginSpec::new().with_tool_provider(Arc::new(provider) as Arc<dyn ToolProvider>);
         Self {
-            inner: StaticPluginFactory::new("processes", spec),
+            inner: StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("processes"),
+                spec,
+            ),
         }
     }
 }
@@ -80,6 +83,10 @@ impl SessionProcessAdminPluginFactory {
 impl PluginFactory for SessionProcessAdminPluginFactory {
     fn id(&self) -> &'static str {
         self.inner.id()
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        self.inner.declaration()
     }
 
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {

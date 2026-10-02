@@ -432,12 +432,105 @@ pub struct SessionReadyContext {
     pub host: PluginHost,
 }
 
+pub use lash_core_ids::{BehaviorRevision, FormatVersion, PluginId};
+
+/// What a plugin declares about itself before any session is built
+/// (FIG-4732): its id, the revision of what it does, the format it reads
+/// natively and the formats it can write. Lash trusts the declaration; it
+/// hashes no plugin content.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginDeclaration {
+    /// The id the plugin registers under.
+    pub id: PluginId,
+    /// Moves with any change in what the plugin does.
+    pub behavior_revision: BehaviorRevision,
+    /// The format of stored state and config the plugin reads natively.
+    pub format_version: FormatVersion,
+    /// Every format the plugin can write. It contains `format_version`.
+    pub writable_formats: Vec<FormatVersion>,
+}
+
+impl PluginDeclaration {
+    /// The declaration of a plugin at its first behaviour revision that
+    /// reads and writes only its first format.
+    pub fn initial(id: &'static str) -> Self {
+        Self {
+            id: PluginId::new(id),
+            behavior_revision: BehaviorRevision::ONE,
+            format_version: FormatVersion::ONE,
+            writable_formats: vec![FormatVersion::ONE],
+        }
+    }
+}
+
+/// Why a factory's [`PluginDeclaration`] is refused.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum PluginDeclarationError {
+    /// The declaration names another plugin than the factory that gave it.
+    #[error("plugin factory `{factory}` declares itself as `{declared}`")]
+    IdMismatch {
+        factory: PluginId,
+        declared: PluginId,
+    },
+    /// The plugin cannot write the format it reads natively.
+    #[error(
+        "plugin `{plugin}` reads format {format_version} natively and does not declare it writable"
+    )]
+    NativeFormatNotWritable {
+        plugin: PluginId,
+        format_version: FormatVersion,
+    },
+}
+
+/// The plugins of one core in hook order: the order their factories are
+/// registered in, which is the order their hooks run in. The build
+/// generation folds it in (FIG-4744), so two cores whose plugins differ in
+/// any behaviour revision, or only in order, never share a lane.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginComposition {
+    declarations: Vec<PluginDeclaration>,
+}
+
+impl PluginComposition {
+    /// The composition of `factories`, in their order.
+    ///
+    /// # Errors
+    /// [`PluginDeclarationError`] for a declaration that names another id
+    /// than its factory or that cannot write its native format.
+    pub fn of(factories: &[Arc<dyn PluginFactory>]) -> Result<Self, PluginDeclarationError> {
+        let mut declarations = Vec::with_capacity(factories.len());
+        for factory in factories {
+            let declaration = factory.declaration();
+            let factory_id = PluginId::new(factory.id());
+            if declaration.id != factory_id {
+                return Err(PluginDeclarationError::IdMismatch {
+                    factory: factory_id,
+                    declared: declaration.id,
+                });
+            }
+            if !declaration
+                .writable_formats
+                .contains(&declaration.format_version)
+            {
+                return Err(PluginDeclarationError::NativeFormatNotWritable {
+                    plugin: declaration.id,
+                    format_version: declaration.format_version,
+                });
+            }
+            declarations.push(declaration);
+        }
+        Ok(Self { declarations })
+    }
+
+    /// Every plugin's declaration, in hook order.
+    pub fn declarations(&self) -> &[PluginDeclaration] {
+        &self.declarations
+    }
+}
+
 pub trait SessionPlugin: Send + Sync {
     fn id(&self) -> &'static str;
-
-    fn version(&self) -> &'static str {
-        "1"
-    }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError>;
 
@@ -506,6 +599,15 @@ pub trait SessionPlugin: Send + Sync {
 #[async_trait::async_trait]
 pub trait PluginFactory: Send + Sync {
     fn id(&self) -> &'static str;
+
+    /// What this plugin declares about itself (FIG-4732): its behaviour
+    /// revision, the format it reads natively and the formats it can write,
+    /// under [`id`](Self::id). Required, with no default: the build
+    /// generation is computed from every registered factory's answer, so a
+    /// plugin that moved its behaviour and kept an inherited revision would
+    /// share a lane with the build it changed. Must be cheap and perform no
+    /// I/O; it is read before any session is built.
+    fn declaration(&self) -> PluginDeclaration;
 
     /// Release host-visible resources owned by this factory after intake stops.
     ///
@@ -642,24 +744,27 @@ pub type PluginSpecBuilder =
     Arc<dyn Fn(&PluginSessionContext) -> Result<PluginSpec, PluginError> + Send + Sync>;
 
 pub struct PluginSpecFactory {
-    id: &'static str,
+    declaration: PluginDeclaration,
     builder: PluginSpecBuilder,
 }
 
 impl PluginSpecFactory {
-    pub fn new(id: &'static str, builder: PluginSpecBuilder) -> Self {
-        Self { id, builder }
+    pub fn new(declaration: PluginDeclaration, builder: PluginSpecBuilder) -> Self {
+        Self {
+            declaration,
+            builder,
+        }
     }
 }
 
 pub struct StaticPluginFactory {
-    id: &'static str,
+    declaration: PluginDeclaration,
     spec: PluginSpec,
 }
 
 impl StaticPluginFactory {
-    pub fn new(id: &'static str, spec: PluginSpec) -> Self {
-        Self { id, spec }
+    pub fn new(declaration: PluginDeclaration, spec: PluginSpec) -> Self {
+        Self { declaration, spec }
     }
 }
 
@@ -670,12 +775,16 @@ struct SpecPlugin {
 
 impl PluginFactory for PluginSpecFactory {
     fn id(&self) -> &'static str {
-        self.id
+        self.declaration.id.as_str()
+    }
+
+    fn declaration(&self) -> PluginDeclaration {
+        self.declaration.clone()
     }
 
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(SpecPlugin {
-            id: self.id,
+            id: self.id(),
             spec: (self.builder)(ctx)?,
         }))
     }
@@ -683,12 +792,16 @@ impl PluginFactory for PluginSpecFactory {
 
 impl PluginFactory for StaticPluginFactory {
     fn id(&self) -> &'static str {
-        self.id
+        self.declaration.id.as_str()
+    }
+
+    fn declaration(&self) -> PluginDeclaration {
+        self.declaration.clone()
     }
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(SpecPlugin {
-            id: self.id,
+            id: self.id(),
             spec: self.spec.clone(),
         }))
     }

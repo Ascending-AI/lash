@@ -244,11 +244,13 @@ fn probe_context_with<'run>(
         Some(step) => spec.with_presentation_step(step),
         None => spec,
     };
-    let plugins = crate::support::plugin_host(vec![Arc::new(
-        crate::plugin::StaticPluginFactory::new("probe_tools", spec),
-    )])
-    .build_session(PluginSessionRequest::creation("root", Default::default()))
-    .expect("plugin session");
+    let plugins =
+        crate::support::plugin_host(vec![Arc::new(crate::plugin::StaticPluginFactory::new(
+            lash_core_execution::plugin::PluginDeclaration::initial("probe_tools"),
+            spec,
+        ))])
+        .build_session(PluginSessionRequest::creation("root", Default::default()))
+        .expect("plugin session");
     let tools = plugins.tools();
     let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     let attachment_store: Arc<crate::RuntimeAttachmentStore> =

@@ -111,7 +111,7 @@ async fn inherited_child_session_carries_parent_tool_state() {
     let backend = double.lash_backend();
     let plugin_host =
         lash_core::testing::test_plugin_host(vec![Arc::new(StaticPluginFactory::new(
-            "memory_probe",
+            lash_core::plugin::PluginDeclaration::initial("memory_probe"),
             lash_core::facade_support::PluginSpec::new()
                 .with_tool_provider(Arc::new(MemoryProbeTool)),
         ))]);
@@ -224,7 +224,7 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
     let backend = double.lash_backend();
     let plugin_host =
         lash_core::testing::test_plugin_host(vec![Arc::new(StaticPluginFactory::new(
-            "memory_probe",
+            lash_core::plugin::PluginDeclaration::initial("memory_probe"),
             lash_core::facade_support::PluginSpec::new()
                 .with_tool_provider(Arc::new(MemoryProbeTool)),
         ))]);
@@ -602,6 +602,10 @@ struct MemoryProbeFactory;
 impl lash_core::plugin::PluginFactory for MemoryProbeFactory {
     fn id(&self) -> &'static str {
         "root_only_memory_probe"
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
     }
 
     fn build(
@@ -1093,6 +1097,10 @@ struct InheritingCapOwner;
 impl lash_core::plugin::PluginFactory for InheritingCapOwner {
     fn id(&self) -> &'static str {
         CAP_OWNER
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
     }
 
     fn build(

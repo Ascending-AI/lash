@@ -205,6 +205,10 @@ impl crate::PluginFactory for FixtureProcessEngineFactory {
         "testing-fixture-process-engine"
     }
 
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn process_engine_contributions(
         &self,
         _context: &crate::ProcessEngineContributionContext<'_>,

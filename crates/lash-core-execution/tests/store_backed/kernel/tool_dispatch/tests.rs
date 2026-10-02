@@ -793,7 +793,7 @@ async fn strict_mcp_dispatch_context<'h>(
 
 fn test_plugins(provider: Arc<dyn ToolProvider>) -> Arc<PluginSession> {
     crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "test_tools",
+        lash_core_execution::plugin::PluginDeclaration::initial("test_tools"),
         crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
     ))])
     .build_session(PluginSessionRequest::creation("root", Default::default()))
@@ -857,7 +857,7 @@ async fn projection_policy_dispatch_context<'h>(
         })
     });
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "projection_policy_tools",
+        lash_core_execution::plugin::PluginDeclaration::initial("projection_policy_tools"),
         crate::PluginSpec::new()
             .with_tool_provider(Arc::clone(&provider))
             .with_before_tool_call(hook),
@@ -1087,7 +1087,7 @@ async fn authority_hidden_dispatch_context<'h>(
         .with_hidden_tools(["hidden"])
         .expect("valid hidden name");
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "test_tools",
+        lash_core_execution::plugin::PluginDeclaration::initial("test_tools"),
         crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
     ))])
     .build_session(PluginSessionRequest::creation(
@@ -1248,7 +1248,7 @@ async fn retry_dispatch_context_with_after_observations<'h>(
         })
     });
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "retry_probe_tools",
+        lash_core_execution::plugin::PluginDeclaration::initial("retry_probe_tools"),
         crate::PluginSpec::new()
             .with_tool_provider(provider)
             .with_after_tool_call(hook),
@@ -1286,7 +1286,7 @@ async fn pending_dispatch_context<'h>(
         spec = spec.with_after_tool_call(hook);
     }
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "pending_probe_tools",
+        lash_core_execution::plugin::PluginDeclaration::initial("pending_probe_tools"),
         spec,
     ))])
     .build_session(PluginSessionRequest::creation("root", Default::default()))

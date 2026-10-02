@@ -255,7 +255,7 @@ async fn before_tool_attachment_replacement_is_normalized_before_leaf_recording(
         sources: Vec::new(),
     });
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "before_hook_attachment_probe",
+        lash_core_execution::plugin::PluginDeclaration::initial("before_hook_attachment_probe"),
         crate::PluginSpec::new()
             .with_tool_provider(provider)
             .with_before_tool_call(before_attachment_hook(DENIED_BYTES)),
@@ -293,7 +293,7 @@ async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording()
         sources: Vec::new(),
     });
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "after_hook_leaf_attachment_probe",
+        lash_core_execution::plugin::PluginDeclaration::initial("after_hook_leaf_attachment_probe"),
         crate::PluginSpec::new()
             .with_tool_provider(provider)
             .with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
@@ -326,7 +326,9 @@ async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording()
 async fn deferred_completion_after_hook_attachment_is_normalized_before_recording() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "deferred_completion_attachment_probe",
+        lash_core_execution::plugin::PluginDeclaration::initial(
+            "deferred_completion_attachment_probe",
+        ),
         crate::PluginSpec::new().with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
     ))])
     .build_session(PluginSessionRequest::creation("root", Default::default()))

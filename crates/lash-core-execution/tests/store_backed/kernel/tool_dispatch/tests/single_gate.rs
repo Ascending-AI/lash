@@ -11,7 +11,7 @@ async fn authority_hidden_tool_executes_on_pinned_registry_but_is_absent_from_ca
         executed: Arc::clone(&executed),
     });
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "test_tools",
+        lash_core_execution::plugin::PluginDeclaration::initial("test_tools"),
         crate::PluginSpec::new().with_tool_provider(provider),
     ))])
     .build_session(PluginSessionRequest::creation("root", Default::default()))

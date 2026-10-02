@@ -51,7 +51,7 @@ fn session_surface_contribution() -> LashlangSurfaceContribution {
 
 fn session_surface_factory() -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(PluginSpecFactory::new(
-        SURFACE_PLUGIN_ID,
+        lash_core::plugin::PluginDeclaration::initial(SURFACE_PLUGIN_ID),
         Arc::new(|ctx: &PluginSessionContext| {
             let granted = ctx
                 .plugin_config

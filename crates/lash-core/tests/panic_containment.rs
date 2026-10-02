@@ -487,6 +487,10 @@ impl PluginFactory for MinimalProtocolFactory {
         "panic-containment-protocol"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(MinimalProtocolPlugin))
     }
@@ -752,7 +756,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
     );
     host.providers.models = lash_core::testing::models_serving(&policy(), provider);
     let plugin = Arc::new(StaticPluginFactory::new(
-        "panic-tool-test",
+        lash_core::plugin::PluginDeclaration::initial("panic-tool-test"),
         PluginSpec::new().with_tool_provider(Arc::new(PanicTool)),
     ));
     let mut runtime = Box::pin(

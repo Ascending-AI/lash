@@ -211,7 +211,7 @@ async fn drive_redrive_turn(
     let members: Arc<dyn crate::ToolProvider> = Arc::new(RedriveMembers { witness });
     let mut factories = producer.factories.clone();
     factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-batch-crash-redrive",
+        lash_core::plugin::PluginDeclaration::initial("conformance-batch-crash-redrive"),
         crate::facade_support::PluginSpec::new().with_tool_provider(members),
     )));
     let mut runtime = Box::pin(

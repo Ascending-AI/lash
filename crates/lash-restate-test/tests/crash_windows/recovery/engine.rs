@@ -8,6 +8,10 @@ impl lash_core::plugin::PluginFactory for ProcessEngines {
     fn id(&self) -> &'static str {
         "recovery-process-engine"
     }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
     fn bound_backend(&self) -> Option<&str> {
         self.0.bound_backend()
     }
@@ -21,8 +25,11 @@ impl lash_core::plugin::PluginFactory for ProcessEngines {
         &self,
         ctx: &lash_core::plugin::PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
-        lash_core::plugin::StaticPluginFactory::new(self.id(), lash_core::plugin::PluginSpec::new())
-            .build(ctx)
+        lash_core::plugin::StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial(self.id()),
+            lash_core::plugin::PluginSpec::new(),
+        )
+        .build(ctx)
     }
 }
 

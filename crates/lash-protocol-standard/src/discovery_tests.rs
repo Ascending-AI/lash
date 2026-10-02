@@ -345,7 +345,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
             },
         )),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "discovery-refusal-tools",
+            lash_core::plugin::PluginDeclaration::initial("discovery-refusal-tools"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
         )),
     ];

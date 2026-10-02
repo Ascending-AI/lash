@@ -762,7 +762,7 @@ impl World {
         let factories = protocol
             .into_iter()
             .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
-                "conformance-tool-call-identity",
+                lash_core::plugin::PluginDeclaration::initial("conformance-tool-call-identity"),
                 crate::facade_support::PluginSpec::new()
                     .with_tool_provider(probes)
                     .with_context_compactor(100, Arc::new(FixedCompactor)),

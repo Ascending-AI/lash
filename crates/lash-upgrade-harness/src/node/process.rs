@@ -303,6 +303,10 @@ impl lash_core::facade_support::PluginFactory for ProcessEnginePlugin {
         "lash-upgrade-harness-processes"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn process_engine_contributions(
         &self,
         _context: &lash_core::ProcessEngineContributionContext<'_>,

@@ -15,6 +15,10 @@ impl lash_core::facade_support::PluginFactory for QueuedWorkHydrationProbeFactor
         "queued-work-hydration-probe"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -52,6 +56,10 @@ struct TurnPersistedGraphAppendFactory {
 impl lash_core::facade_support::PluginFactory for TurnPersistedGraphAppendFactory {
     fn id(&self) -> &'static str {
         "turn-persisted-graph-append"
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
     }
 
     fn build(

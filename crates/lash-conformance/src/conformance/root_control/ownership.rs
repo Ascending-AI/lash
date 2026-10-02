@@ -92,7 +92,7 @@ impl OwnershipTools {
 
     fn factory(self: &Arc<Self>) -> Arc<dyn crate::plugin::PluginFactory> {
         Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-ownership-probe",
+            lash_core::plugin::PluginDeclaration::initial("conformance-ownership-probe"),
             crate::facade_support::PluginSpec::new()
                 .with_tool_provider(Arc::clone(self) as Arc<dyn crate::ToolProvider>),
         ))

@@ -67,7 +67,7 @@ fn plugin_host_with_tools(
     let mut factories = lash_core::testing::test_standard_protocol_factories();
     if let Some(tools) = tools {
         factories.push(Arc::new(StaticPluginFactory::new(
-            "fig3367_tools",
+            lash_core::plugin::PluginDeclaration::initial("fig3367_tools"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
         )));
     }

@@ -56,6 +56,10 @@ impl lash::plugins::PluginFactory for HostRlmFactory {
         self.inner.id()
     }
 
+    fn declaration(&self) -> lash::plugins::PluginDeclaration {
+        self.inner.declaration()
+    }
+
     async fn shutdown(&self) -> Result<(), lash::plugins::PluginError> {
         self.inner.shutdown().await
     }

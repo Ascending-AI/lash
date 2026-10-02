@@ -91,7 +91,7 @@ fn steps_factory(
         spec = spec.with_presentation_step(step);
     }
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        "law-presentation",
+        lash_core::plugin::PluginDeclaration::initial("law-presentation"),
         spec,
     ))
 }

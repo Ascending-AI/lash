@@ -292,7 +292,7 @@ pub async fn an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteratio
     let attempts = Arc::clone(&tool.attempts);
     let plugin: Arc<dyn crate::facade_support::PluginFactory> =
         Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-retry-once",
+            lash_core::plugin::PluginDeclaration::initial("conformance-retry-once"),
             crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(tool)),
         ));
     let (model, model_calls) = scripted_model(vec![
@@ -486,7 +486,7 @@ pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gat
     });
     let plugin: Arc<dyn crate::facade_support::PluginFactory> =
         Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-follow-on-pending",
+            lash_core::plugin::PluginDeclaration::initial("conformance-follow-on-pending"),
             crate::facade_support::PluginSpec::new().with_tool_provider(tools),
         ));
     let (model, model_calls) = scripted_model(vec![
@@ -646,7 +646,7 @@ pub async fn cancel_dispositions_survive_group_child_teardown_and_redrive(
         };
         let plugin: Arc<dyn crate::facade_support::PluginFactory> =
             Arc::new(crate::plugin::StaticPluginFactory::new(
-                "conformance-ignores-cancellation",
+                lash_core::plugin::PluginDeclaration::initial("conformance-ignores-cancellation"),
                 crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(tool)),
             ));
         // The native binding honours an immediate cancel found at the step

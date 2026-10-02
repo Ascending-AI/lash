@@ -32,3 +32,10 @@ where
         .create_or_use_restate(ctx, lash::SessionCreation::default())
         .await
 }
+
+/// This worker process's incarnation: one id per process, minted on first
+/// use.
+pub(crate) fn process_incarnation_id() -> &'static str {
+    static INCARNATION_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    INCARNATION_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
+}

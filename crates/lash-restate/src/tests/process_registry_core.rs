@@ -401,7 +401,7 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
     });
     let tool_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "restate-scalar-replay-tools",
+            lash_core::plugin::PluginDeclaration::initial("restate-scalar-replay-tools"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
         ));
     let corpus_clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);

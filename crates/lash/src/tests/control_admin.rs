@@ -189,7 +189,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(StaticPluginFactory::new(
-        "test-compactor",
+        lash_core::plugin::PluginDeclaration::initial("test-compactor"),
         lash_core::facade_support::PluginSpec::new()
             .with_context_compactor(100, Arc::new(FixedCompactor)),
     )))
@@ -379,7 +379,7 @@ async fn compact_context_system_prompt_is_the_protocols_compaction_render() -> R
     .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
     .plugin(Arc::new(StaticPluginFactory::new(
-        "test-prompt-compactor",
+        lash_core::plugin::PluginDeclaration::initial("test-prompt-compactor"),
         lash_core::facade_support::PluginSpec::new()
             .with_context_compactor(100, Arc::new(PromptAssertingCompactor)),
     )))
@@ -936,7 +936,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(StaticPluginFactory::new(
-        "button-triggers",
+        lash_core::plugin::PluginDeclaration::initial("button-triggers"),
         lash_core::facade_support::PluginSpec::new().with_trigger_event(trigger),
     )))
     .build(crate::testing::runtime_lease_owner())?;
@@ -1002,7 +1002,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
     )
     .tools(Arc::new(AppTools))
     .plugin(Arc::new(StaticPluginFactory::new(
-        "nonblocking-observation-query",
+        lash_core::plugin::PluginDeclaration::initial("nonblocking-observation-query"),
         lash_core::facade_support::PluginSpec::new()
             .with_plugin_query_typed::<NonblockingObservationQuery, _, _>(
                 |_ctx, _args| async move {

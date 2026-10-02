@@ -233,7 +233,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
     let factories = plugins
         .into_iter()
         .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-migrated-echo",
+            lash_core::plugin::PluginDeclaration::initial("conformance-migrated-echo"),
             crate::facade_support::PluginSpec::new().with_tool_provider(echo),
         )) as Arc<dyn crate::facade_support::PluginFactory>])
         .collect::<Vec<_>>();

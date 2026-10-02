@@ -88,7 +88,10 @@ fn plugin_types_are_nameable() -> PluginHost {
             .with_before_tool_call(Arc::clone(&before))
             .with_after_tool_call(Arc::clone(&after)))
     });
-    PluginHost::new(vec![Arc::new(PluginSpecFactory::new("facade", builder))])
+    PluginHost::new(vec![Arc::new(PluginSpecFactory::new(
+        lash::plugins::PluginDeclaration::initial("facade"),
+        builder,
+    ))])
 }
 
 struct FacadeCompactor;

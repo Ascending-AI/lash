@@ -11,6 +11,10 @@ impl PluginFactory for TriggerResourcePluginFactory {
         TRIGGER_RESOURCE_PLUGIN_ID
     }
 
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(TriggerResourcePlugin))
     }

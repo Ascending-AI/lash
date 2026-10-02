@@ -328,7 +328,7 @@ async fn ledger_dispatch_context<'h>(
         .with_tool_provider(provider)
         .with_after_tool_call(hook);
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
-        "ledger_tools",
+        lash_core_execution::plugin::PluginDeclaration::initial("ledger_tools"),
         spec,
     ))])
     .build_session(PluginSessionRequest::creation("root", Default::default()))
