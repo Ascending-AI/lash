@@ -5,9 +5,9 @@ mod catalog;
 mod contract;
 mod display;
 mod graph;
-mod mock_tools;
 mod operations;
 mod runtime;
+mod sample_tools;
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -40,7 +40,7 @@ pub use contract::{
     SaveWorkflowResponse, SourceProjectionErrorResponse, TypeDiagnostic, TypedVariable,
     ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument,
 };
-pub use runtime::RunTiming;
+pub use runtime::{bind_commands, core as workflow_core};
 
 /// Default deterministic workflow served as version 1.
 ///
@@ -83,7 +83,8 @@ const onboarding = async () => {
 #[derive(Clone)]
 pub struct AppState {
     store: Arc<Mutex<WorkflowStore>>,
-    timing: RunTiming,
+    core: lash::LashCore,
+    commands: runtime::CommandClient,
 }
 
 struct WorkflowStore {
@@ -98,20 +99,18 @@ struct SavedWorkflow {
     graph: WorkflowGraph,
     /// The version's admission, when its source admits: what a run executes
     /// and the view its overlay binds to.
-    admitted: Option<runtime::AdmittedWorkflow>,
+    admitted: Result<runtime::AdmittedWorkflow, Arc<runtime::RunError>>,
 }
 
 impl AppState {
-    pub fn new() -> Result<Self, WorkflowGraphBuildError> {
-        Self::with_run_timing(RunTiming::default())
-    }
-
     #[expect(
         clippy::expect_used,
-        reason = "the graph was just rendered by workflow_graph_to_source, the inverse of the \
-                  parser, so re-rendering it canonically cannot fail"
+        reason = "the built-in workflow is rendered by the graph printer"
     )]
-    pub fn with_run_timing(timing: RunTiming) -> Result<Self, WorkflowGraphBuildError> {
+    pub fn new(
+        core: lash::LashCore,
+        connection: lash::restate::RestateConnection,
+    ) -> Result<Self, WorkflowGraphBuildError> {
         let graph = workflow_graph_from_source(DEFAULT_WORKFLOW)?;
         let source = workflow_graph_to_source(&graph)
             .expect("the default workflow graph should render canonically");
@@ -119,12 +118,13 @@ impl AppState {
             store: Arc::new(Mutex::new(WorkflowStore {
                 versions: vec![SavedWorkflow {
                     version: 1,
-                    admitted: runtime::AdmittedWorkflow::admit(&source).ok(),
+                    admitted: runtime::AdmittedWorkflow::admit(&source).map_err(Arc::new),
                     source,
                     graph,
                 }],
             })),
-            timing,
+            core,
+            commands: runtime::CommandClient::new(connection),
         })
     }
 
@@ -146,22 +146,12 @@ impl AppState {
         let version = store.versions.last().map_or(1, |saved| saved.version + 1);
         let saved = SavedWorkflow {
             version,
-            admitted: runtime::AdmittedWorkflow::admit(&source).ok(),
+            admitted: runtime::AdmittedWorkflow::admit(&source).map_err(Arc::new),
             source,
             graph,
         };
         store.versions.push(saved.clone());
         saved
-    }
-}
-
-impl Default for AppState {
-    #[expect(
-        clippy::expect_used,
-        reason = "the built-in default workflow source is valid; see DEFAULT_WORKFLOW"
-    )]
-    fn default() -> Self {
-        Self::new().expect("default workflow should be valid")
     }
 }
 
@@ -174,6 +164,7 @@ pub fn app(state: AppState) -> Router {
         .route("/workflow", get(get_workflow).post(save_workflow))
         .route("/workflow/select", post(select_workflow))
         .route("/run", post(run_workflow))
+        .route("/runs/{process}/signals/{name}", post(signal_process))
         .route("/healthz", get(healthz))
         .route("/", get(static_index))
         .route("/{*path}", get(static_asset))
@@ -318,15 +309,34 @@ async fn run_workflow(
     let admitted = saved
         .admitted
         .as_ref()
-        .ok_or_else(|| RenderErrorResponse::run_preparation("saved workflow does not admit"))?;
+        .map_err(RenderErrorResponse::run_preparation)?;
     let prepared = runtime::PreparedRun::new(admitted.view(), admitted, saved.version)
         .map_err(RenderErrorResponse::run_preparation)?;
-    let (tx, rx) = mpsc::channel::<RunEvent>(64);
-    let timing = state.timing;
+    let (tx, rx) = mpsc::channel::<Result<RunEvent, runtime::RunError>>(64);
+    let key = uuid::Uuid::new_v4().to_string();
+    let (request, pin) = prepared
+        .publish(&state.core, &key)
+        .await
+        .map_err(RenderErrorResponse::run_preparation)?;
+    let started = state.commands.start(&key, request).await;
+    state
+        .core
+        .host_artifacts()
+        .release(pin)
+        .await
+        .map_err(RenderErrorResponse::run_preparation)?;
+    let started = started.map_err(RenderErrorResponse::run_preparation)?;
+    let core = state.core;
     tokio::spawn(async move {
-        prepared.execute(tx, timing).await;
+        if let Err(error) = prepared.observe(core, started.process_id, tx.clone()).await {
+            let _ = tx.send(Err(error)).await;
+        }
     });
     let stream = ReceiverStream::new(rx).map(|event| {
+        let event = match event {
+            Ok(event) => event,
+            Err(error) => return Ok(Event::default().event("run_error").data(error.to_string())),
+        };
         let sequence = event.sequence.to_string();
         let json = serde_json::to_string(&event).expect("run events serialize");
         Ok(Event::default().event("run_event").id(sequence).data(json))
@@ -336,6 +346,25 @@ async fn run_workflow(
             .interval(Duration::from_secs(10))
             .text("keep-alive"),
     ))
+}
+
+async fn signal_process(
+    State(state): State<AppState>,
+    AxumPath((process, name)): AxumPath<(String, String)>,
+    Json(payload): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, RenderErrorResponse> {
+    let process = process
+        .parse::<lash::ProcessId>()
+        .map_err(RenderErrorResponse::run_preparation)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let identity = lash::process::ProcessSignalIdentity::new(process, name, &id)
+        .map_err(RenderErrorResponse::run_preparation)?;
+    state
+        .commands
+        .signal(&id, lash::process::ProcessSignal::new(identity, payload))
+        .await
+        .map_err(RenderErrorResponse::run_preparation)?;
+    Ok(Json(serde_json::json!({"accepted": true})))
 }
 
 async fn healthz() -> Json<serde_json::Value> {
@@ -446,7 +475,11 @@ mod save_tests {
     /// parameter type survives as the annotation that lowers to it.
     #[tokio::test]
     async fn a_projected_workflow_with_a_lifted_process_saves_as_its_source() {
-        let state = AppState::new().expect("default workflow");
+        let double = lash_restate_test::backend(4698, Default::default())
+            .await
+            .expect("Restate double");
+        let core = workflow_core(double.lash_backend()).expect("workflow core");
+        let state = AppState::new(core, double.connection()).expect("default workflow");
         let Json(projected) = project_source(
             State(state.clone()),
             Json(ProjectWorkflowRequest {

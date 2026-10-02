@@ -66,7 +66,7 @@ const branching_approval = async () => {
   await display.show_message({ text: "Approval requested" });
   /** @label Wait for the decision */
   const decision = await waitSignal("continue");
-  if (decision.autoFired) {
+  if (decision.approved) {
     await display.set_status({ key: "approval", value: "approved" });
     if (true) {
       await display.set_light({ name: "approved", state: "green" });

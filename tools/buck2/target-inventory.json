@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 2,
   "cargo_package_count": 55,
-  "cargo_target_count": 221,
+  "cargo_target_count": 222,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_0f5f2ec4[static]",
     "//crates/lash-conformance:lash-conformance__fv_110ca6ce[static]",
@@ -49959,7 +49959,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_41763c4b"
     ]
   },
-  "generated_label_count": 287,
+  "generated_label_count": 288,
   "packages": [
     {
       "declared_features": [
@@ -54350,11 +54350,14 @@
       "dependencies": [
         "anyhow",
         "axum",
+        "lash-internal-restate-test",
         "lash-runtime",
         "reqwest",
+        "restate-sdk",
         "schemars",
         "serde",
         "serde_json",
+        "thiserror",
         "tokio",
         "tokio-stream",
         "uuid"
@@ -54426,6 +54429,19 @@
           "clippy_label": "//examples/workflow-graph-roundtrip:authoring__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//examples/workflow-graph-roundtrip:authoring__test",
+          "tags": [
+            "cargo-frontend-assets",
+            "manual"
+          ]
+        },
+        {
+          "build_label": "//examples/workflow-graph-roundtrip:durable_run__test",
+          "cargo": "durable_run",
+          "cargo_only": "uses the Cargo-owned generated frontend asset workflow",
+          "check_label": "//examples/workflow-graph-roundtrip:durable_run__test[check]",
+          "clippy_label": "//examples/workflow-graph-roundtrip:durable_run__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//examples/workflow-graph-roundtrip:durable_run__test",
           "tags": [
             "cargo-frontend-assets",
             "manual"
@@ -55378,6 +55394,7 @@
     "//examples/slack-clone:slack-clone__unit_test__fv_ea918b0f": 300,
     "//examples/toolbench:toolbench__unit_test": 300,
     "//examples/workflow-graph-roundtrip:authoring__test": 300,
+    "//examples/workflow-graph-roundtrip:durable_run__test": 300,
     "//examples/workflow-graph-roundtrip:roundtrip__test": 300,
     "//examples/workflow-graph-roundtrip:type_facets__test": 300,
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test": 300,
@@ -55662,6 +55679,7 @@
     "//examples/toolbench:toolbench",
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:authoring__test",
+    "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",
     "//examples/workflow-graph-roundtrip:type_facets__test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip[static]",
@@ -55950,6 +55968,7 @@
     "//examples/toolbench:toolbench[check]",
     "//examples/toolbench:toolbench__unit_test[check]",
     "//examples/workflow-graph-roundtrip:authoring__test[check]",
+    "//examples/workflow-graph-roundtrip:durable_run__test[check]",
     "//examples/workflow-graph-roundtrip:roundtrip__test[check]",
     "//examples/workflow-graph-roundtrip:type_facets__test[check]",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip[check]",
@@ -56238,6 +56257,7 @@
     "//examples/toolbench:toolbench__clippy[clippy.txt]",
     "//examples/toolbench:toolbench__unit_test__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:authoring__test__clippy[clippy.txt]",
+    "//examples/workflow-graph-roundtrip:durable_run__test__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:roundtrip__test__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:type_facets__test__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__clippy[clippy.txt]",
@@ -56526,6 +56546,7 @@
     "//examples/toolbench:toolbench",
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:authoring__test",
+    "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",
     "//examples/workflow-graph-roundtrip:type_facets__test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip",
@@ -56815,6 +56836,7 @@
     "//examples/toolbench:toolbench",
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:authoring__test",
+    "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",
     "//examples/workflow-graph-roundtrip:type_facets__test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip",
@@ -57846,6 +57868,7 @@
     "//examples/slack-clone:slack-clone__unit_test",
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:authoring__test",
+    "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",
     "//examples/workflow-graph-roundtrip:type_facets__test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",

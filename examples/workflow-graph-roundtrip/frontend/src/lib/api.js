@@ -145,7 +145,7 @@ export async function projectSource(/** @type {string} */ source) {
 }
 
 // Each call is a brand-new run/invocation.
-// `signal` aborts it (a new Play).
+// `signal` stops observation; the durable process continues.
 export async function* runWorkflow(/** @type {AbortSignal} */ signal) {
   const res = await fetch('/run', { method: 'POST', signal });
   if (!res.ok) {
@@ -178,6 +178,7 @@ export async function* runWorkflow(/** @type {AbortSignal} */ signal) {
 
 function parseFrame(/** @type {string} */ frame) {
   const lines = frame.split('\n');
+  if (frame.includes("event: run_error")) throw new Error(frame);
   let dataLine = null;
   let eventName = null;
   for (const line of lines) {
@@ -190,4 +191,11 @@ function parseFrame(/** @type {string} */ frame) {
   } catch {
     return null;
   }
+}
+
+export async function signalWorkflow(/** @type {string} */ processId, /** @type {string} */ signal, /** @type {unknown} */ payload) {
+  const response = await fetch(`/runs/${encodeURIComponent(processId)}/signals/${encodeURIComponent(signal)}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(await response.text());
 }

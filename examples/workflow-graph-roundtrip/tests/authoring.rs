@@ -1,19 +1,15 @@
+#[path = "support/runtime.rs"]
+mod runtime;
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Duration;
 
 use serde_json::Value;
 use workflow_graph_roundtrip::{
-    AppState, EditableValue, FlowNode, NodeName, RunEvent, RunStatus, RunTiming,
-    SaveWorkflowResponse, WorkflowDocument,
+    EditableValue, FlowNode, NodeName, RunEvent, RunStatus, SaveWorkflowResponse, WorkflowDocument,
 };
 
 #[tokio::test]
 async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -254,11 +250,7 @@ async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() 
 /// the client sends with it.
 #[tokio::test]
 async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -398,11 +390,7 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
 /// receiver operation, and the save the author just made is refused whole.
 #[tokio::test]
 async fn an_authored_action_saves_only_with_the_awaited_receiver_call_the_editor_emits() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -501,11 +489,7 @@ async fn an_authored_action_saves_only_with_the_awaited_receiver_call_the_editor
 /// into `[object Object]` on the way into the argument record.
 #[tokio::test]
 async fn a_non_display_action_saves_against_its_own_receiver_and_expression_defaults() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -611,24 +595,8 @@ async fn select_workflow(client: &reqwest::Client, base: &str, id: &str) -> Work
 }
 
 /// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
-#[expect(
-    clippy::expect_used,
-    reason = "POST /run and its SSE body exist for every served workflow, and each `data: ` \
-              line is a RunEvent the server serialized"
-)]
 async fn run_workflow(client: &reqwest::Client, base: &str) -> Vec<RunEvent> {
-    let response = client
-        .post(format!("{base}/run"))
-        .send()
-        .await
-        .expect("POST /run");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    let stream = response.text().await.expect("complete SSE stream");
-    stream
-        .lines()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .map(|data| serde_json::from_str::<RunEvent>(data).expect("run event JSON"))
-        .collect()
+    runtime::run_workflow(client, base).await
 }
 
 #[expect(
@@ -925,11 +893,7 @@ async fn start_server() -> (
     String,
     tokio::task::JoinHandle<std::io::Result<()>>,
 ) {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1149,10 +1113,8 @@ async fn literal_expression_members_survive_projection_json_and_save() {
         .await
         .expect("listener");
     let addr = listener.local_addr().expect("address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(
-        listener,
-        AppState::default(),
-    ));
+    let (state, _double) = runtime::state().await;
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
     for inputs in [

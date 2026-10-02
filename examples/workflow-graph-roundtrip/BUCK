@@ -62,7 +62,9 @@ lash_rust_binary(
     crate_root = "src/main.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_graph_roundtrip"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -84,6 +86,12 @@ lash_rust_unit_test(
     crate_root = "src/main.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_graph_roundtrip", "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test"),
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":workflow-graph-roundtrip",
     library_crate_name = "workflow_graph_roundtrip",
@@ -91,9 +99,6 @@ lash_rust_unit_test(
     package_name = "workflow-graph-roundtrip",
     tags = [],
     version = "0.0.0-dev",
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
 )
 
 lash_rust_binary(
@@ -103,7 +108,9 @@ lash_rust_binary(
     crate_root = "src/bin/workflow_contract_schema.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_contract_schema"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -125,6 +132,12 @@ lash_rust_unit_test(
     crate_root = "src/bin/workflow_contract_schema.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_contract_schema", "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test"),
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":workflow-graph-roundtrip",
     library_crate_name = "workflow_graph_roundtrip",
@@ -132,9 +145,6 @@ lash_rust_unit_test(
     package_name = "workflow-graph-roundtrip",
     tags = [],
     version = "0.0.0-dev",
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
 )
 
 lash_rust_integration_test(
@@ -144,7 +154,35 @@ lash_rust_integration_test(
     crate_root = "tests/authoring.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "authoring", "//examples/workflow-graph-roundtrip:authoring__test"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":workflow-graph-roundtrip",
+    library_crate_name = "workflow_graph_roundtrip",
+    manifest_dir = "examples/workflow-graph-roundtrip",
+    package_name = "workflow-graph-roundtrip",
+    rustc_env = {},
+    tags = [
+        "cargo-frontend-assets",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "durable_run__test",
+    crate_features = [],
+    crate_name = "durable_run",
+    crate_root = "tests/durable_run.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("workflow-graph-roundtrip", "durable_run", "//examples/workflow-graph-roundtrip:durable_run__test"),
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -168,7 +206,9 @@ lash_rust_integration_test(
     crate_root = "tests/roundtrip.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "roundtrip", "//examples/workflow-graph-roundtrip:roundtrip__test"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -192,7 +232,9 @@ lash_rust_integration_test(
     crate_root = "tests/type_facets.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "type_facets", "//examples/workflow-graph-roundtrip:type_facets__test"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -216,7 +258,9 @@ lash_rust_integration_test(
     crate_root = "tests/workflow_graph.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_graph", "//examples/workflow-graph-roundtrip:workflow_graph__test"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],

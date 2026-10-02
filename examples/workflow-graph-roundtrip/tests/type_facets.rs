@@ -1,6 +1,8 @@
+#[path = "support/runtime.rs"]
+mod runtime;
 use serde_json::Value;
 use workflow_graph_roundtrip::{
-    AppState, EditableValue, SaveWorkflowResponse, TypeDiagnostic, WorkflowDocument,
+    EditableValue, SaveWorkflowResponse, TypeDiagnostic, WorkflowDocument,
 };
 
 #[test]
@@ -32,10 +34,8 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
         .await
         .expect("bind test listener");
     let addr = listener.local_addr().expect("test listener address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(
-        listener,
-        AppState::default(),
-    ));
+    let (state, _double) = runtime::state().await;
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
     let response = client
@@ -161,10 +161,8 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
         .await
         .expect("bind test listener");
     let addr = listener.local_addr().expect("test listener address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(
-        listener,
-        AppState::default(),
-    ));
+    let (state, _double) = runtime::state().await;
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
 

@@ -251,14 +251,14 @@ Every SSE frame is named `run_event`; its SSE `id` equals `sequence`:
 ```text
 event: run_event
 id: 7
-data: {"runId":"uuid","workflowVersion":2,"definition":"<source identity>","sequence":7,"nodeId":"call:stable-id","status":"succeeded","displayDelta":{"messagesAppended":["Welcome"]},"display":{"messages":["Welcome"],"statuses":{},"lists":{},"lights":{},"progress":0.0}}
+data: {"runId":"<process id>","workflowVersion":2,"definition":"<source identity>","sequence":7,"nodeId":"call:stable-id","status":"succeeded","displayDelta":{"messagesAppended":["Welcome"]},"display":{"messages":["Welcome"],"statuses":{},"lists":{},"lights":{},"progress":0.0}}
 ```
 
 The data JSON shape is:
 
 ```json
 {
-  "runId": "fresh UUID per POST",
+  "runId": "canonical durable process ID for this POST",
   "workflowVersion": 2,
   "definition": "source identity of the admitted artifact",
   "sequence": 7,
@@ -316,3 +316,19 @@ The in-process `display` module has no network or external dependencies:
 | `display.set_light({ name, state })` | Set `display.lights[name]` |
 | `display.set_progress({ pct })` | Clamp and set progress to 0–100 |
 | `display.highlight({ target })` | Set the highlighted panel/node |
+
+## Durable runs
+
+`POST /run` publishes and starts the current saved version as a durable Lash
+process. Each SSE `run_event` retains the saved version and artifact identity;
+`runId` is the canonical process ID. Node statuses come from the process's
+recorded effect outcomes and live language observation, bounded to its execution
+map. Display snapshots fold committed `workflow.display` events in sequence. Their
+stable tool-call IDs correlate display deltas with observed graph nodes.
+A terminal process event closes the stream. A `run_error` SSE event reports a
+failed observation and does not end the durable process.
+
+A waiting event may include `waitingSignal`. The operator sends its value with
+`POST /runs/{runId}/signals/{waitingSignal}` and a JSON body. Signals use Lash's
+process signal admission. The example UI sends `{ "approved": true }`.
+Dropping a stream stops observation and leaves the process running.

@@ -1142,26 +1142,6 @@ pub struct DisplayDelta {
     pub highlighted: Option<String>,
 }
 
-impl DisplayDelta {
-    pub(crate) fn merge(&mut self, other: Self) {
-        self.messages_appended.extend(other.messages_appended);
-        self.statuses.extend(other.statuses);
-        for (list, items) in other.list_items_appended {
-            self.list_items_appended
-                .entry(list)
-                .or_default()
-                .extend(items);
-        }
-        self.lights.extend(other.lights);
-        if other.progress.is_some() {
-            self.progress = other.progress;
-        }
-        if other.highlighted.is_some() {
-            self.highlighted = other.highlighted;
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
@@ -1187,6 +1167,8 @@ pub struct RunEvent {
     pub display: DisplayState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_signal: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]

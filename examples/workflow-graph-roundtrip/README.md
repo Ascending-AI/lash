@@ -4,8 +4,14 @@ This example is the Rust half of a visual Lashlang workflow editor. It exposes
 the source → graph → edited graph → canonical source seam over HTTP, then runs
 the saved version and streams node-correlated display events over SSE.
 
-The backend owns in-memory versions and execution. Lashlang owns graph
-projection, graph validation/rendering, and execution-site correlation. Canvas
+The backend owns in-memory editor versions. Run publishes the saved artifact
+and process definition through `core.host_artifacts()`, then calls
+`core.processes().start()` inside the host command's Restate handler. Restate executes the durable process over SQLite.
+The overlay folds `core.processes().events()` and uses
+`lash::process::trace_lashlang_process_map` to validate node identities.
+Live process observation supplies transient node starts and waits. Display events
+carry the stable tool-call ID used to correlate their deltas with observed nodes. Lashlang owns
+graph projection, validation/rendering, and execution-site correlation. Canvas
 layout is deliberately frontend-owned and never appears in source or API graph
 documents.
 
@@ -33,6 +39,19 @@ See the suite's
 [workflow editor authoring runbook](../../runbooks/workflow-editor-authoring/runbook.md)
 for the judged browser journey. [RUNBOOK.md](RUNBOOK.md) remains as a stable
 compatibility link and records the deterministic integration command.
+
+SQLite process records live in `WORKFLOW_GRAPH_DATA_DIR`, default
+`.workflow-graph`. The backend starts a local Restate server and retains it while
+serving. Its journal lasts for that server's lifetime. Editor versions remain
+in memory and reset when the backend restarts.
+
+Display operations are leaf tools whose committed intents append
+`workflow.display` events. The sample email, web, and agent tools return fixed
+example data through the same engine dispatcher. They make no provider calls.
+Sleeps use their authored duration. A signal wait remains pending until the
+operator clicks **Send continue**, which calls
+`POST /runs/{process_id}/signals/{name}` with a JSON payload. Closing the SSE
+stream stops observation; it does not cancel the process.
 
 ## Coverage
 

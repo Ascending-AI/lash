@@ -195,3 +195,67 @@ fn scalar_text_arg(args: &Record, key: &str) -> Result<String, ExecutionHostErro
         ))),
     }
 }
+
+pub(crate) const EVENT_TYPE: &str = "workflow.display";
+
+#[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub(crate) struct DisplayEvent {
+    pub call_id: String,
+    pub operation: String,
+    pub args: serde_json::Value,
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "the declared display event schema admits"
+)]
+pub(crate) fn event_type() -> lash::process::ProcessEventType {
+    lash::process::ProcessEventType {
+        name: EVENT_TYPE.into(),
+        payload_schema: lash::schema::JsonSchema::admit(
+            serde_json::to_value(schemars::schema_for!(DisplayEvent))
+                .expect("display schema serializes"),
+        )
+        .expect("display event schema"),
+        semantics: Default::default(),
+    }
+}
+
+pub(crate) struct DisplayTools;
+
+#[lash::async_trait]
+impl lash::tools::StaticToolExecute for DisplayTools {
+    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+        use lash::tools::{
+            EmitProcessEventIntent, ToolIntent, ToolIntents, ToolOutcome, ToolOutcomeDone,
+        };
+        let Some(operation) = call.name().strip_prefix("display_") else {
+            return match crate::sample_tools::apply_tool(
+                call.name(),
+                &[lash::rlm::lang::from_json(call.args.clone())],
+            ) {
+                Ok(value) => ToolOutcome::ok(value).into(),
+                Err(error) => ToolOutcome::err_fmt(error).into(),
+            };
+        };
+        if let Err(error) = apply_tool(
+            &mut DisplayState::default(),
+            operation,
+            &[lash::rlm::lang::from_json(call.args.clone())],
+        ) {
+            return ToolOutcome::err_fmt(error).into();
+        }
+        let Some(process_id) = call.context.enclosing_process() else {
+            return ToolOutcome::err_fmt("display tools require a durable workflow process").into();
+        };
+        lash::tools::ToolAttemptOutcome::done(
+            ToolOutcomeDone::ok(serde_json::Value::Null),
+            ToolIntents::v3(vec![ToolIntent::EmitProcessEvent(EmitProcessEventIntent {
+                owner: call.context.owner().runtime_owner(),
+                process_id: process_id.clone(),
+                event_type: EVENT_TYPE.into(),
+                payload: serde_json::json!({"operation": operation, "args": call.args, "call_id": call.context.call_id().as_str()}),
+            })]),
+        )
+    }
+}

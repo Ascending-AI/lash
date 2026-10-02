@@ -1348,15 +1348,19 @@ PACKAGE_DEPS = {
     "workflow-graph-roundtrip": {
         "build": {},
         "dev": {
-            "reqwest": "//third-party/rust:p0296"
+            "lash": "//crates/lash:lash",
+            "lash_restate_test": "//crates/lash-restate-test:lash-restate-test"
         },
         "normal": {
             "anyhow": "//third-party/rust:p0011",
             "axum": "//third-party/rust:p0021",
             "lash": "//crates/lash:lash",
+            "reqwest": "//third-party/rust:p0296",
+            "restate_sdk": "//third-party/rust:p0297",
             "schemars": "//third-party/rust:p0322",
             "serde": "//third-party/rust:p0331",
             "serde_json": "//third-party/rust:p0338",
+            "thiserror": "//third-party/rust:p0392",
             "tokio": "//third-party/rust:p0399",
             "tokio_stream": "//third-party/rust:p0403",
             "uuid": "//third-party/rust:p0440"

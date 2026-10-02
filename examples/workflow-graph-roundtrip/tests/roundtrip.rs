@@ -1,14 +1,15 @@
 #[path = "support/catalog_span_oracles.rs"]
 mod catalog_span_oracles;
+#[path = "support/runtime.rs"]
+mod runtime;
 
 use std::collections::BTreeSet;
-use std::time::Duration;
 
 use catalog_span_oracles::{expected_catalog_node_slices, expected_catalog_process_slice};
 use serde_json::{Value, json};
 use workflow_graph_roundtrip::{
-    AppState, ChildGroup, EditableProcessField, EditableValue, FlowNode, NodeName, RunEvent,
-    RunStatus, RunTiming, SaveWorkflowResponse, WorkflowCatalogEntry, WorkflowDocument,
+    ChildGroup, EditableProcessField, EditableValue, FlowNode, NodeName, RunEvent, RunStatus,
+    SaveWorkflowResponse, WorkflowCatalogEntry, WorkflowDocument,
 };
 
 /// The names a `counter-loop` fragment may reach. The lens parses editable
@@ -36,10 +37,8 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
         .await
         .expect("bind test listener");
     let addr = listener.local_addr().expect("test listener address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(
-        listener,
-        AppState::default(),
-    ));
+    let (state, _double) = runtime::state().await;
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
 
@@ -198,10 +197,8 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
         .await
         .expect("bind test listener");
     let addr = listener.local_addr().expect("test listener address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(
-        listener,
-        AppState::default(),
-    ));
+    let (state, _double) = runtime::state().await;
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
     let entries: Vec<Value> = client
@@ -305,10 +302,8 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         .await
         .expect("bind test listener");
     let addr = listener.local_addr().expect("test listener address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(
-        listener,
-        AppState::default(),
-    ));
+    let (state, _double) = runtime::state().await;
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
 
@@ -445,10 +440,8 @@ async fn newly_catalogued_nodes_save_reproject_and_run_from_their_catalog_shapes
         .await
         .expect("bind test listener");
     let addr = listener.local_addr().expect("test listener address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(
-        listener,
-        AppState::default(),
-    ));
+    let (state, _double) = runtime::state().await;
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
     let entries: Vec<Value> = client
@@ -517,10 +510,8 @@ async fn source_projection_is_a_stateless_canonical_fixpoint_with_typed_errors()
         .await
         .expect("bind test listener");
     let addr = listener.local_addr().expect("test listener address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(
-        listener,
-        AppState::default(),
-    ));
+    let (state, _double) = runtime::state().await;
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
     let before: WorkflowDocument = client
@@ -605,10 +596,8 @@ async fn projected_available_vars_follow_ssa_and_nested_lexical_scope() {
         .await
         .expect("bind test listener");
     let addr = listener.local_addr().expect("test listener address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(
-        listener,
-        AppState::default(),
-    ));
+    let (state, _double) = runtime::state().await;
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
     let client = reqwest::Client::new();
     let response = client
         .post(format!("http://{addr}/project"))
@@ -698,10 +687,8 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
         .await
         .expect("bind test listener");
     let addr = listener.local_addr().expect("test listener address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(
-        listener,
-        AppState::default(),
-    ));
+    let (state, _double) = runtime::state().await;
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
     let mut document = select_workflow(&client, &base, "blank").await;
@@ -858,11 +845,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
 
 #[tokio::test]
 async fn lists_selects_projects_and_runs_built_in_workflows() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1134,11 +1117,7 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
 
 #[tokio::test]
 async fn project_mutate_save_and_run_streams_correlated_events() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1234,11 +1213,7 @@ async fn project_mutate_save_and_run_streams_correlated_events() {
 
 #[tokio::test]
 async fn edited_counter_loop_condition_saves_reprojects_and_runs() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1297,11 +1272,7 @@ async fn edited_counter_loop_condition_saves_reprojects_and_runs() {
 
 #[tokio::test]
 async fn bare_counter_loop_condition_rewraps_canonically_and_runs() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1341,11 +1312,7 @@ async fn bare_counter_loop_condition_rewraps_canonically_and_runs() {
 
 #[tokio::test]
 async fn expression_valued_call_fields_save_reproject_and_reject_malformed_edits() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1419,11 +1386,7 @@ async fn expression_valued_call_fields_save_reproject_and_reject_malformed_edits
 
 #[tokio::test]
 async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1575,11 +1538,7 @@ async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
 
 #[tokio::test]
 async fn delete_node_edit_round_trips_and_runs_the_saved_graph() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1661,11 +1620,7 @@ async fn delete_node_edit_round_trips_and_runs_the_saved_graph() {
 
 #[tokio::test]
 async fn new_call_node_saves_reprojects_and_runs_with_canonical_correlation() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1744,11 +1699,7 @@ async fn new_call_node_saves_reprojects_and_runs_with_canonical_correlation() {
 
 #[tokio::test]
 async fn new_if_while_and_for_containers_save_reproject_and_run() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1847,7 +1798,7 @@ async fn new_if_while_and_for_containers_save_reproject_and_run() {
 
 #[tokio::test]
 async fn new_statement_containers_allow_empty_bodies() {
-    let state = AppState::default();
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1891,11 +1842,7 @@ async fn new_statement_containers_allow_empty_bodies() {
 
 #[tokio::test]
 async fn blank_workflow_grows_by_two_nodes_then_saves_and_runs() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -1954,11 +1901,7 @@ async fn blank_workflow_grows_by_two_nodes_then_saves_and_runs() {
 
 #[tokio::test]
 async fn reordered_process_statements_save_reproject_and_run_in_node_id_order() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -2033,11 +1976,7 @@ async fn reordered_process_statements_save_reproject_and_run_in_node_id_order() 
 
 #[tokio::test]
 async fn moved_statement_between_scopes_saves_reprojects_and_runs_in_new_scope() {
-    let state = AppState::with_run_timing(RunTiming {
-        sleep_cap: Duration::from_millis(2),
-        signal_delay: Duration::from_millis(2),
-    })
-    .expect("default workflow");
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -2168,7 +2107,7 @@ async fn moved_statement_between_scopes_saves_reprojects_and_runs_in_new_scope()
 
 #[tokio::test]
 async fn new_call_without_receiver_expression_returns_typed_error() {
-    let state = AppState::default();
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -2204,7 +2143,7 @@ async fn new_call_without_receiver_expression_returns_typed_error() {
 
 #[tokio::test]
 async fn invalid_graph_post_returns_typed_unprocessable_entity() {
-    let state = AppState::default();
+    let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
@@ -2330,31 +2269,8 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
 }
 
 /// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
-#[expect(
-    clippy::expect_used,
-    reason = "POST /run and its SSE body exist for every served workflow, and each `data: ` \
-              line is a RunEvent the server serialized"
-)]
 async fn run_workflow(client: &reqwest::Client, base: &str) -> Vec<RunEvent> {
-    let response = client
-        .post(format!("{base}/run"))
-        .send()
-        .await
-        .expect("POST /run");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    assert_eq!(
-        response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-        Some("text/event-stream")
-    );
-    let stream = response.text().await.expect("complete SSE stream");
-    stream
-        .lines()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .map(|data| serde_json::from_str::<RunEvent>(data).expect("run event JSON"))
-        .collect()
+    runtime::run_workflow(client, base).await
 }
 
 /// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.

@@ -28,6 +28,7 @@ else
     //examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test \
     //examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test \
     //examples/workflow-graph-roundtrip:authoring__test \
+    //examples/workflow-graph-roundtrip:durable_run__test \
     //examples/workflow-graph-roundtrip:roundtrip__test \
     //examples/workflow-graph-roundtrip:type_facets__test \
     //examples/workflow-graph-roundtrip:workflow_graph__test

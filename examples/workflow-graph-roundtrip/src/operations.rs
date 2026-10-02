@@ -1,5 +1,5 @@
 use crate::display;
-use crate::mock_tools;
+use crate::sample_tools;
 use crate::{EditableValue, OperationCatalogEntry, OperationField};
 
 pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
@@ -25,7 +25,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
                 .collect(),
         })
         .collect::<Vec<_>>();
-    entries.extend(mock_tools::OPERATIONS.iter().map(|operation| {
+    entries.extend(sample_tools::OPERATIONS.iter().map(|operation| {
         OperationCatalogEntry {
             id: format!("{}.{}", operation.module, operation.operation),
             label: operation.label.to_string(),
@@ -220,6 +220,110 @@ fn field(name: &str, field_type: &str, default: &str) -> OperationField {
     }
 }
 
+use lash::rlm::lang::{
+    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
+    OperationContract,
+};
+
+#[expect(
+    clippy::expect_used,
+    reason = "the declared tool schemas and bindings are valid"
+)]
+pub(crate) fn host_environment() -> LashlangHostEnvironment {
+    use lash::tools::{ToolBindingResolutionExt, ToolManifestBindingExt, ToolOutputContract};
+    let mut catalog = LashlangHostCatalog::new();
+    for definition in tool_definitions() {
+        let binding = definition
+            .manifest()
+            .tool_binding()
+            .expect("tool binding decodes")
+            .expect("every example tool declares its binding")
+            .executable_for(definition.name())
+            .expect("valid binding");
+        let contract = definition.contract();
+        let operation = match contract.output_contract {
+            ToolOutputContract::Static => OperationContract::new(
+                contract.input_schema.canonical().clone(),
+                contract.output_schema.canonical().clone(),
+            ),
+            ToolOutputContract::FromInputSchema {
+                input_field,
+                default_schema,
+            } => OperationContract::from_input_field(
+                contract.input_schema.canonical().clone(),
+                input_field,
+                default_schema.map(|schema| schema.as_value().clone()),
+            ),
+        };
+        catalog
+            .add_module_operation_contract(
+                binding.module_path,
+                binding.authority_type,
+                binding.operation,
+                definition.id().as_str(),
+                &operation,
+            )
+            .expect("unique tool binding");
+    }
+    LashlangHostEnvironment::new(catalog, LashlangAbilities::all())
+        .with_language_features(LashlangLanguageFeatures::default().with_label_annotations())
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "the example declares valid schemas and bindings"
+)]
+pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
+    use lash::tools::{ToolBinding, ToolDefinition, ToolDefinitionBindingExt};
+    let mut definitions = Vec::new();
+    for operation in crate::display::OPERATIONS {
+        let properties = operation
+            .fields
+            .iter()
+            .map(|field| {
+                let schema = match (operation.operation, field.name, field.field_type) {
+                    ("add_item", "item", _) | ("set_light", "state", _) => {
+                        serde_json::json!({"type": ["string", "number", "boolean"]})
+                    }
+                    (_, _, "number") => serde_json::json!({"type": "number"}),
+                    _ => serde_json::json!({"type": "string"}),
+                };
+                (field.name.to_owned(), schema)
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let name = format!("display_{}", operation.operation);
+        definitions.push(ToolDefinition::raw(format!("tool:{name}"), name, operation.label,
+            serde_json::json!({"type":"object", "properties":properties, "required":operation.fields.iter().map(|field| field.name).collect::<Vec<_>>(), "additionalProperties":false}),
+            serde_json::json!({"type":"null"})).expect("display schema")
+            .with_tool_binding(ToolBinding::new(["display"], operation.operation).with_authority_type("ToyDisplay")));
+    }
+    for operation in crate::sample_tools::OPERATIONS {
+        let name = operation.host_operation.replace('.', "_");
+        let definition = ToolDefinition::raw(
+            format!("tool:{name}"),
+            name,
+            operation.label,
+            operation.input_schema(),
+            operation.output_schema(),
+        )
+        .expect("example schema")
+        .with_tool_binding(
+            ToolBinding::new([operation.module], operation.operation)
+                .with_authority_type(operation.resource_type),
+        );
+        definitions.push(match operation.output_from_input() {
+            Some((field, default)) => definition.with_output_from_input_schema(
+                field,
+                default.map(|schema| {
+                    lash::schema::JsonSchema::admit(schema).expect("valid output schema")
+                }),
+            ),
+            None => definition,
+        });
+    }
+    definitions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,7 +349,7 @@ mod tests {
     #[test]
     fn every_mocked_tool_has_exactly_one_catalog_entry() {
         let entries = entries();
-        for operation in mock_tools::OPERATIONS {
+        for operation in sample_tools::OPERATIONS {
             let id = format!("{}.{}", operation.module, operation.operation);
             let matching = entries
                 .iter()

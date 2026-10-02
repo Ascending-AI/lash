@@ -1,19 +1,19 @@
-use lash::rlm::lang::{ExecutionHostError, Record, Value, from_json};
+use lash::rlm::lang::{ExecutionHostError, Record, Value};
 use serde_json::{Value as JsonValue, json};
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct MockOperation {
-    kind: MockOperationKind,
+pub(crate) struct SampleOperation {
+    kind: SampleOperationKind,
     pub module: &'static str,
     pub resource_type: &'static str,
     pub operation: &'static str,
     pub host_operation: &'static str,
     pub label: &'static str,
-    pub fields: &'static [MockField],
+    pub fields: &'static [SampleField],
 }
 
 #[derive(Clone, Copy, Debug)]
-enum MockOperationKind {
+enum SampleOperationKind {
     GmailListRecent,
     LlmQuery,
     WebSearch,
@@ -23,20 +23,20 @@ enum MockOperationKind {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct MockField {
+pub(crate) struct SampleField {
     pub name: &'static str,
     pub field_type: &'static str,
-    pub default: MockDefault,
+    pub default: SampleDefault,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum MockDefault {
+pub(crate) enum SampleDefault {
     String(&'static str),
     Number(f64),
     Expression(&'static str),
 }
 
-impl MockDefault {
+impl SampleDefault {
     pub(crate) fn editable(self) -> crate::EditableValue {
         match self {
             Self::String(value) => crate::EditableValue::String(value.to_string()),
@@ -46,39 +46,39 @@ impl MockDefault {
     }
 }
 
-pub(crate) const OPERATIONS: &[MockOperation] = &[
-    MockOperation {
-        kind: MockOperationKind::GmailListRecent,
+pub(crate) const OPERATIONS: &[SampleOperation] = &[
+    SampleOperation {
+        kind: SampleOperationKind::GmailListRecent,
         module: "gmail",
         resource_type: "MockGmail",
         operation: "list_recent",
         host_operation: "gmail.list_recent",
         label: "List recent emails",
-        fields: &[MockField {
+        fields: &[SampleField {
             name: "count",
             field_type: "number",
-            default: MockDefault::Number(5.0),
+            default: SampleDefault::Number(5.0),
         }],
     },
-    MockOperation {
-        kind: MockOperationKind::LlmQuery,
+    SampleOperation {
+        kind: SampleOperationKind::LlmQuery,
         module: "llm",
         resource_type: "MockLlm",
         operation: "query",
         host_operation: "llm_query",
         label: "Query LLM",
         fields: &[
-            MockField {
+            SampleField {
                 name: "task",
                 field_type: "string",
-                default: MockDefault::String("Summarize the supplied input"),
+                default: SampleDefault::String("Summarize the supplied input"),
             },
-            MockField {
+            SampleField {
                 name: "inputs",
                 field_type: "expression",
-                default: MockDefault::Expression("{}"),
+                default: SampleDefault::Expression("{}"),
             },
-            MockField {
+            SampleField {
                 name: "output",
                 field_type: "expression",
                 // A catalog default is authored source the fragment validator
@@ -87,54 +87,54 @@ pub(crate) const OPERATIONS: &[MockOperation] = &[
                 // be saved. The empty record is the unconstrained output shape
                 // the workflows that call this operation already imply by
                 // leaving the argument off (FIG-3179).
-                default: MockDefault::Expression("{}"),
+                default: SampleDefault::Expression("{}"),
             },
         ],
     },
-    MockOperation {
-        kind: MockOperationKind::WebSearch,
+    SampleOperation {
+        kind: SampleOperationKind::WebSearch,
         module: "web",
         resource_type: "MockWeb",
         operation: "search",
         host_operation: "search_web",
         label: "Search the web",
         fields: &[
-            MockField {
+            SampleField {
                 name: "query",
                 field_type: "string",
-                default: MockDefault::String("NVIDIA stock outlook"),
+                default: SampleDefault::String("NVIDIA stock outlook"),
             },
-            MockField {
+            SampleField {
                 name: "limit",
                 field_type: "number",
-                default: MockDefault::Number(5.0),
+                default: SampleDefault::Number(5.0),
             },
         ],
     },
-    MockOperation {
-        kind: MockOperationKind::AgentsSpawn,
+    SampleOperation {
+        kind: SampleOperationKind::AgentsSpawn,
         module: "agents",
         resource_type: "MockAgents",
         operation: "spawn",
         host_operation: "spawn_agent",
         label: "Spawn subagent",
         fields: &[
-            MockField {
+            SampleField {
                 name: "capability",
                 field_type: "string",
-                default: MockDefault::String("explore"),
+                default: SampleDefault::String("explore"),
             },
-            MockField {
+            SampleField {
                 name: "task",
                 field_type: "string",
-                default: MockDefault::String("Research the supplied material"),
+                default: SampleDefault::String("Research the supplied material"),
             },
-            MockField {
+            SampleField {
                 name: "seed",
                 field_type: "expression",
-                default: MockDefault::Expression("{}"),
+                default: SampleDefault::Expression("{}"),
             },
-            MockField {
+            SampleField {
                 name: "output",
                 field_type: "expression",
                 // A catalog default is authored source the fragment validator
@@ -143,62 +143,62 @@ pub(crate) const OPERATIONS: &[MockOperation] = &[
                 // be saved. The empty record is the unconstrained output shape
                 // the workflows that call this operation already imply by
                 // leaving the argument off (FIG-3179).
-                default: MockDefault::Expression("{}"),
+                default: SampleDefault::Expression("{}"),
             },
         ],
     },
-    MockOperation {
-        kind: MockOperationKind::SlackRecent,
+    SampleOperation {
+        kind: SampleOperationKind::SlackRecent,
         module: "slack",
         resource_type: "MockSlack",
         operation: "recent",
         host_operation: "slack.recent",
         label: "Get recent Slack messages",
         fields: &[
-            MockField {
+            SampleField {
                 name: "channel",
                 field_type: "string",
-                default: MockDefault::String("team-platform"),
+                default: SampleDefault::String("team-platform"),
             },
-            MockField {
+            SampleField {
                 name: "since",
                 field_type: "string",
-                default: MockDefault::String("yesterday"),
+                default: SampleDefault::String("yesterday"),
             },
         ],
     },
-    MockOperation {
-        kind: MockOperationKind::GithubRecent,
+    SampleOperation {
+        kind: SampleOperationKind::GithubRecent,
         module: "github",
         resource_type: "MockGithub",
         operation: "recent",
         host_operation: "github.recent",
         label: "Get recent GitHub activity",
         fields: &[
-            MockField {
+            SampleField {
                 name: "repo",
                 field_type: "string",
-                default: MockDefault::String("acme/widgets"),
+                default: SampleDefault::String("acme/widgets"),
             },
-            MockField {
+            SampleField {
                 name: "since",
                 field_type: "string",
-                default: MockDefault::String("yesterday"),
+                default: SampleDefault::String("yesterday"),
             },
         ],
     },
 ];
 
-impl MockOperation {
+impl SampleOperation {
     pub(crate) fn input_schema(self) -> JsonValue {
         match self.kind {
-            MockOperationKind::GmailListRecent => object_schema(
+            SampleOperationKind::GmailListRecent => object_schema(
                 json!({
                     "count": { "type": "number" }
                 }),
                 &["count"],
             ),
-            MockOperationKind::LlmQuery => object_schema(
+            SampleOperationKind::LlmQuery => object_schema(
                 json!({
                     "task": { "type": "string" },
                     "inputs": {},
@@ -206,7 +206,7 @@ impl MockOperation {
                 }),
                 &["task"],
             ),
-            MockOperationKind::WebSearch => object_schema(
+            SampleOperationKind::WebSearch => object_schema(
                 json!({
                     "query": { "type": "string" },
                     "limit": {
@@ -218,7 +218,7 @@ impl MockOperation {
                 }),
                 &["query"],
             ),
-            MockOperationKind::AgentsSpawn => object_schema(
+            SampleOperationKind::AgentsSpawn => object_schema(
                 json!({
                     "task": { "type": "string" },
                     "capability": { "type": "string", "enum": ["explore", "peer"] },
@@ -233,14 +233,14 @@ impl MockOperation {
                 }),
                 &["task", "capability"],
             ),
-            MockOperationKind::SlackRecent => object_schema(
+            SampleOperationKind::SlackRecent => object_schema(
                 json!({
                     "channel": { "type": "string" },
                     "since": { "type": "string" }
                 }),
                 &["channel", "since"],
             ),
-            MockOperationKind::GithubRecent => object_schema(
+            SampleOperationKind::GithubRecent => object_schema(
                 json!({
                     "repo": { "type": "string" },
                     "since": { "type": "string" }
@@ -252,7 +252,7 @@ impl MockOperation {
 
     pub(crate) fn output_schema(self) -> JsonValue {
         match self.kind {
-            MockOperationKind::GmailListRecent => array_schema(
+            SampleOperationKind::GmailListRecent => array_schema(
                 json!({
                     "from": { "type": "string" },
                     "subject": { "type": "string" },
@@ -261,8 +261,8 @@ impl MockOperation {
                 }),
                 &["from", "subject", "snippet", "unread"],
             ),
-            MockOperationKind::LlmQuery | MockOperationKind::AgentsSpawn => json!({}),
-            MockOperationKind::WebSearch => object_schema(
+            SampleOperationKind::LlmQuery | SampleOperationKind::AgentsSpawn => json!({}),
+            SampleOperationKind::WebSearch => object_schema(
                 json!({
                     "results": {
                         "type": "array",
@@ -278,7 +278,7 @@ impl MockOperation {
                 }),
                 &["results"],
             ),
-            MockOperationKind::SlackRecent => array_schema(
+            SampleOperationKind::SlackRecent => array_schema(
                 json!({
                     "user": { "type": "string" },
                     "text": { "type": "string" },
@@ -286,7 +286,7 @@ impl MockOperation {
                 }),
                 &["user", "text", "ts"],
             ),
-            MockOperationKind::GithubRecent => array_schema(
+            SampleOperationKind::GithubRecent => array_schema(
                 json!({
                     "author": { "type": "string" },
                     "kind": { "type": "string" },
@@ -299,8 +299,8 @@ impl MockOperation {
 
     pub(crate) fn output_from_input(self) -> Option<(&'static str, Option<JsonValue>)> {
         match self.kind {
-            MockOperationKind::LlmQuery => Some(("output", Some(json!({ "type": "string" })))),
-            MockOperationKind::AgentsSpawn => Some(("output", None)),
+            SampleOperationKind::LlmQuery => Some(("output", Some(json!({ "type": "string" })))),
+            SampleOperationKind::AgentsSpawn => Some(("output", None)),
             _ => None,
         }
     }
@@ -322,45 +322,26 @@ fn array_schema(properties: JsonValue, required: &[&str]) -> JsonValue {
     })
 }
 
-pub(crate) fn is_operation(receiver: &Value, operation: &str) -> bool {
-    operation_for(receiver, operation).is_some()
-}
-
-pub(crate) fn apply_tool(
-    receiver: &Value,
-    operation: &str,
-    args: &[Value],
-) -> Result<Value, ExecutionHostError> {
-    let operation = operation_for(receiver, operation).ok_or_else(|| {
-        ExecutionHostError::new(format!("unknown mocked operation `{operation}`"))
-    })?;
-    let args = args.first().and_then(Value::as_record).ok_or_else(|| {
-        ExecutionHostError::new(format!(
-            "{} expects one record argument",
-            operation.operation
-        ))
-    })?;
-
+pub(crate) fn apply_tool(name: &str, args: &[Value]) -> Result<JsonValue, ExecutionHostError> {
+    let operation = OPERATIONS
+        .iter()
+        .find(|operation| operation.host_operation.replace('.', "_") == name)
+        .ok_or_else(|| ExecutionHostError::new(format!("unknown sample tool `{name}`")))?;
+    let args = args
+        .first()
+        .and_then(Value::as_record)
+        .ok_or_else(|| ExecutionHostError::new("a sample tool expects one record"))?;
     match operation.kind {
-        MockOperationKind::GmailListRecent => list_recent_emails(args),
-        MockOperationKind::LlmQuery => llm_query(args),
-        MockOperationKind::WebSearch => web_search(args),
-        MockOperationKind::AgentsSpawn => spawn_agent(args),
-        MockOperationKind::SlackRecent => recent_slack(args),
-        MockOperationKind::GithubRecent => recent_github(args),
+        SampleOperationKind::GmailListRecent => list_recent_emails(args),
+        SampleOperationKind::LlmQuery => llm_query(args),
+        SampleOperationKind::WebSearch => web_search(args),
+        SampleOperationKind::AgentsSpawn => spawn_agent(args),
+        SampleOperationKind::SlackRecent => recent_slack(args),
+        SampleOperationKind::GithubRecent => recent_github(args),
     }
 }
 
-fn operation_for(receiver: &Value, operation: &str) -> Option<&'static MockOperation> {
-    let Value::Resource(resource) = receiver else {
-        return None;
-    };
-    OPERATIONS.iter().find(|candidate| {
-        candidate.resource_type == resource.resource_type && candidate.operation == operation
-    })
-}
-
-fn list_recent_emails(args: &Record) -> Result<Value, ExecutionHostError> {
+fn list_recent_emails(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     let count = number_arg(args, "count")?;
     if !count.is_finite() || count < 0.0 {
         return Err(ExecutionHostError::new(
@@ -406,15 +387,15 @@ fn list_recent_emails(args: &Record) -> Result<Value, ExecutionHostError> {
         }),
     ];
     emails.truncate((count.floor() as usize).min(emails.len()));
-    Ok(from_json(JsonValue::Array(emails)))
+    Ok(JsonValue::Array(emails))
 }
 
-fn llm_query(args: &Record) -> Result<Value, ExecutionHostError> {
+fn llm_query(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     let task = string_arg(args, "task")?;
     if task.to_ascii_lowercase().contains("format") {
-        return Ok(from_json(json!(
+        return Ok(json!(
             "Top 5 emails\n\n1. Q3 launch moves to September 18; final owners are due Friday.\n2. Checkout design is approved once accessibility feedback is addressed.\n3. Submit July receipts by Thursday at 5 PM.\n4. Interviews praise saved views and flag sharing controls and export speed.\n5. The nightly build is green after the integration retry fix."
-        )));
+        ));
     }
     let inputs = record_arg(args, "inputs")?;
     let text = string_arg(inputs, "snippet")?;
@@ -431,10 +412,10 @@ fn llm_query(args: &Record) -> Result<Value, ExecutionHostError> {
     } else {
         "Team lunch is Friday at 12:30; dietary needs are due tomorrow."
     };
-    Ok(from_json(json!(summary)))
+    Ok(json!(summary))
 }
 
-fn web_search(args: &Record) -> Result<Value, ExecutionHostError> {
+fn web_search(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     let query = string_arg(args, "query")?;
     let limit = optional_number_arg(args, "limit")?.unwrap_or(5.0);
     if !(1.0..=20.0).contains(&limit) || limit.fract() != 0.0 {
@@ -460,10 +441,10 @@ fn web_search(args: &Record) -> Result<Value, ExecutionHostError> {
         }),
     ];
     results.truncate((limit as usize).min(results.len()));
-    Ok(from_json(json!({ "results": results })))
+    Ok(json!({ "results": results }))
 }
 
-fn spawn_agent(args: &Record) -> Result<Value, ExecutionHostError> {
+fn spawn_agent(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     let capability = string_arg(args, "capability")?;
     if capability != "explore" && capability != "peer" {
         return Err(ExecutionHostError::new(format!(
@@ -473,22 +454,22 @@ fn spawn_agent(args: &Record) -> Result<Value, ExecutionHostError> {
     let task = string_arg(args, "task")?;
     let _seed = record_arg(args, "seed")?;
     if task.to_ascii_lowercase().contains("nvidia") {
-        Ok(from_json(json!({
+        Ok(json!({
             "summary": "NVIDIA remains strongly positioned in accelerated computing as AI training and inference demand expands. Its software and networking ecosystem strengthens the moat beyond individual chips.",
             "risks": "High expectations in the valuation, supply constraints, customer concentration, export restrictions, and competition from custom silicon."
-        })))
+        }))
     } else {
-        Ok(from_json(json!({
+        Ok(json!({
             "digest": "Team standup digest\n\nSlack: the API rollout is unblocked, checkout accessibility notes remain, and staging metrics are stable.\n\nGitHub: two pull requests moved forward and the retry fix restored the nightly build. Today: land the accessibility follow-up and watch rollout health.",
             "blockers": ["Checkout accessibility notes still need to land."]
-        })))
+        }))
     }
 }
 
-fn recent_slack(args: &Record) -> Result<Value, ExecutionHostError> {
+fn recent_slack(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     let channel = string_arg(args, "channel")?;
     let _since = string_arg(args, "since")?;
-    Ok(from_json(json!([
+    Ok(json!([
         {
             "user": "Priya",
             "text": format!("#{channel}: API rollout is unblocked after the config fix."),
@@ -504,13 +485,13 @@ fn recent_slack(args: &Record) -> Result<Value, ExecutionHostError> {
             "text": "Staging latency and error-rate metrics stayed within target overnight.",
             "ts": "2026-07-18T09:27:00Z"
         }
-    ])))
+    ]))
 }
 
-fn recent_github(args: &Record) -> Result<Value, ExecutionHostError> {
+fn recent_github(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     let repo = string_arg(args, "repo")?;
     let _since = string_arg(args, "since")?;
-    Ok(from_json(json!([
+    Ok(json!([
         {
             "author": "alexm",
             "kind": "pull_request",
@@ -526,7 +507,7 @@ fn recent_github(args: &Record) -> Result<Value, ExecutionHostError> {
             "kind": "pull_request",
             "title": format!("{repo}#487: Expose rollout health metrics")
         }
-    ])))
+    ]))
 }
 
 fn string_arg(args: &Record, key: &str) -> Result<String, ExecutionHostError> {

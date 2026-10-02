@@ -1052,6 +1052,7 @@ TEST_RUN_REQUESTS = {
     "//examples/slack-clone:slack-clone__unit_test__fv_ea918b0f": {"cpu_count": 3, "memory_kb": 524288},
     "//examples/toolbench:toolbench__unit_test": {"cpu_count": 2, "memory_kb": 786432},
     "//examples/workflow-graph-roundtrip:authoring__test": {"cpu_count": 2, "memory_kb": 1048576},
+    "//examples/workflow-graph-roundtrip:durable_run__test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/workflow-graph-roundtrip:roundtrip__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//examples/workflow-graph-roundtrip:type_facets__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test": {"cpu_count": 1, "memory_kb": 262144},
