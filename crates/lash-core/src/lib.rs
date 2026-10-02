@@ -825,12 +825,12 @@ pub use store::{
     MaintenanceResult, MaintenanceStop, MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION,
     OperationId, QueuedWorkStore, RetentionBound, RetentionReport, RuntimeCommit, RuntimeStore,
     RuntimeStoreDecorator, RuntimeTurnCommitStamp, ScanCoverage, SemanticBoundaryOperation,
-    SessionAdmission, SessionBinding, SessionBlobReclaimReport, SessionCatalogStore,
-    SessionCommitStore, SessionHistoryStore, SessionLookup, SessionMeta, SessionReferrerState,
-    SessionStateAdmission, SessionStore, StoreBackend, StoreComponentVersion, StoreError,
-    StoreMaintenance, StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase,
-    StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission,
-    TurnInputStore, VacuumReport, WriterPin, compare_releases, release_stamp_advances,
+    SessionAdmission, SessionBlobReclaimReport, SessionCatalogStore, SessionCommitStore,
+    SessionHistoryStore, SessionLookup, SessionMeta, SessionReferrerState, SessionStateAdmission,
+    SessionStore, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
+    StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
+    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputStore,
+    VacuumReport, WriterPin, compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

@@ -488,11 +488,15 @@ async fn fetch_sessions(
     // the whole table.
     let sql = crate::session_sql::session_sql();
     let query = match scan.after.as_deref() {
-        None => sqlx::query_as::<_, (String, String)>(sql.head.scan_checkpoints_first_page.sql())
-            .bind(row_limit(scan)),
-        Some(after) => sqlx::query_as::<_, (String, String)>(sql.head.scan_checkpoints_after.sql())
-            .bind(after.to_string())
-            .bind(row_limit(scan)),
+        None => sqlx::query_as::<_, (String, String)>(
+            sql.head_postgres.scan_checkpoints_first_page.sql(),
+        )
+        .bind(row_limit(scan)),
+        Some(after) => {
+            sqlx::query_as::<_, (String, String)>(sql.head_postgres.scan_checkpoints_after.sql())
+                .bind(after.to_string())
+                .bind(row_limit(scan))
+        }
     };
     let rows = query.fetch_all(&mut **snapshot).await?;
     Ok(rows

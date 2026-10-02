@@ -266,39 +266,6 @@ impl SessionMeta {
     }
 }
 
-/// Complete durable identity metadata supplied at session admission.
-///
-/// Session ids are opaque, non-empty UTF-8 strings. Lash deliberately imposes
-/// no additional length or character-set policy; hosts that expose ids in URLs,
-/// filenames, or other constrained namespaces own those boundary rules.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SessionBinding {
-    pub session_id: SessionId,
-    pub relation: crate::SessionRelation,
-}
-
-impl SessionBinding {
-    pub fn root(session_id: impl Into<SessionId>) -> Self {
-        Self {
-            session_id: session_id.into(),
-            relation: crate::SessionRelation::Root,
-        }
-    }
-
-    /// Projects the durable binding fields store implementors need from a create request.
-    pub fn from_create_request(request: &crate::SessionStoreCreateRequest) -> Self {
-        Self {
-            session_id: request.session_id.clone(),
-            relation: request.relation.clone(),
-        }
-    }
-
-    /// Rejects an empty or NUL-containing session ID before store implementors admit the binding.
-    pub fn validate(&self) -> Result<(), StoreError> {
-        validate_session_id(&self.session_id)
-    }
-}
-
 /// Outcome of admitting a session binding to a persistence handle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionAdmission {
@@ -1123,21 +1090,16 @@ pub trait SessionCommitStore: Send + Sync {
         follow_on_turn_id: &TurnId,
     ) -> Result<PendingFollowOn, StoreError>;
 
-    /// Write `meta.session_id`'s metadata, creating the row when it is absent.
+    /// Replace only the pending observer intents of an admitted session.
     ///
-    /// The recorded lineage is write-once. `meta.relation` must declare the
-    /// same lineage the existing row records — the same parent, or the same
-    /// fork source and node — or the write is refused with
-    /// [`StoreError::SessionRelationMismatch`] and the row is left unchanged.
-    /// Admission reads [`SessionRelation::Root`](crate::SessionRelation::Root)
-    /// as "no claim" on a rebind because a resume declares no lineage; a write
-    /// cannot, because the row it would record replaces the recorded parent
-    /// with that root. Causal provenance and the pending observer intents are
-    /// not lineage and are replaced as given, which is what lets the observer
-    /// intent settlement round-trip the metadata it loaded. Use
-    /// [`store_backend_support::guard_session_meta_relation_rewrite`](crate::store_backend_support::guard_session_meta_relation_rewrite)
-    /// so all backends answer identically.
-    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
+    /// This update never writes lineage, creation provenance or the owning
+    /// process. A missing session is refused with [`StoreError::SessionNotFound`];
+    /// a deleted session remains fenced with [`StoreError::SessionDeleted`].
+    async fn settle_observer_intents(
+        &self,
+        session_id: &SessionId,
+        remaining: Vec<crate::SessionObserverIntent>,
+    ) -> Result<(), StoreError>;
 
     /// The session's metadata, if the catalog holds it.
     async fn load_session_meta(

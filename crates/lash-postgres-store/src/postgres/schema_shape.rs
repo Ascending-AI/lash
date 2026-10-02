@@ -165,12 +165,13 @@ pub(crate) async fn synthetic_next_findings(
 ) -> Result<Vec<String>, crate::StoreError> {
     let mut findings = expanded_findings(tx, report).await?;
     findings.retain(|finding| {
-        finding != "added CHECK constraint lash_sessions.ck_lash_sessions_synthetic_next_note"
+        finding
+            != "added CHECK constraint lash_session_head.ck_lash_session_head_synthetic_next_note"
     });
     let mut column_found = false;
     for finding in &report.findings {
         if let SchemaFinding::UnexpectedColumn { table, found } = finding {
-            if table == "lash_sessions"
+            if table == "lash_session_head"
                 && found.name == "synthetic_next_note"
                 && found.sql_type == "text"
                 && found.nullable
@@ -183,7 +184,7 @@ pub(crate) async fn synthetic_next_findings(
         }
     }
     if !column_found {
-        findings.push("missing nullable lash_sessions.synthetic_next_note".to_owned());
+        findings.push("missing nullable lash_session_head.synthetic_next_note".to_owned());
     }
     let Some(schema) = report.schema.as_deref() else {
         return Ok(findings);

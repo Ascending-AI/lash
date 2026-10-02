@@ -65,7 +65,7 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
     async fn edge_path(&self, session_id: &SessionId) -> Vec<GraphFactObservation> {
         let mut facts = self.all_graph_facts().await;
         let mut current = sqlx::query_scalar::<_, String>(
-            "SELECT leaf_node_id FROM lash_sessions
+            "SELECT leaf_node_id FROM lash_session_head
              WHERE session_id = $1 AND leaf_node_id IS NOT NULL",
         )
         .bind(session_id.as_str())
@@ -124,7 +124,7 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
     async fn inject_raw_value(&self, target: &FenceIntegrityTarget, value: i64) {
         let result = match target {
             FenceIntegrityTarget::SessionHeadRevision { session_id } => {
-                sqlx::query("UPDATE lash_sessions SET head_revision = $1 WHERE session_id = $2")
+                sqlx::query("UPDATE lash_session_head SET head_revision = $1 WHERE session_id = $2")
                     .bind(value)
                     .bind(session_id.as_str())
                     .execute(self.storage.pool())
@@ -165,7 +165,7 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                     Option<String>,
                 ) = sqlx::query_as(
                     "SELECT head_revision, head_json, leaf_node_id, checkpoint_ref
-                     FROM lash_sessions WHERE session_id = $1",
+                     FROM lash_session_head WHERE session_id = $1",
                 )
                 .bind(session_id.as_str())
                 .fetch_one(self.storage.pool())

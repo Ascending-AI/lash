@@ -136,9 +136,10 @@ mod tests {
             })
         }
 
-        async fn save_session_meta(
+        async fn settle_observer_intents(
             &self,
-            _meta: super::super::SessionMeta,
+            _session_id: &SessionId,
+            _remaining: Vec<crate::SessionObserverIntent>,
         ) -> Result<(), StoreError> {
             Ok(())
         }

@@ -286,12 +286,15 @@ impl lash_core::store::RuntimeStoreDecorator for CountingWrites {
         self.inner.commit_runtime_state(commit).await
     }
 
-    async fn save_session_meta(
+    async fn settle_observer_intents(
         &self,
-        meta: lash_core::SessionMeta,
+        session_id: &SessionId,
+        remaining: Vec<lash_core::facade_support::SessionObserverIntent>,
     ) -> std::result::Result<(), StoreError> {
         self.record("session_meta");
-        self.inner.save_session_meta(meta).await
+        self.inner
+            .settle_observer_intents(session_id, remaining)
+            .await
     }
 }
 

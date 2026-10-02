@@ -785,7 +785,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         ),
     );
     branch_store
-        .save_session_meta(recovery_meta)
+        .settle_observer_intents(recovery_meta.pending_observer_intents)
         .await
         .expect("simulate a crash before observer intent consumption");
     registry

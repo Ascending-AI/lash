@@ -155,7 +155,9 @@ async fn every_writer_is_fenced(stores: &dyn StoreSet, label: &str) -> Result<Ve
         .await;
     expect("session admission", store_outcome(admitted))?;
 
-    let committed = factory.save_session_meta(root_meta(&session)).await;
+    let committed = factory
+        .settle_observer_intents(&SessionId::from(session.as_str()), Vec::new())
+        .await;
     expect("session commit", store_outcome(committed))?;
 
     let input = factory
@@ -293,8 +295,15 @@ async fn postgres_leg(url: &str, scratch: &Path) -> Result<BackendEvidence> {
     // 1. The paused writer is ordered before finalize.
     let mut pause = seam.pause_next();
     let store = storage.store();
-    let writer =
-        tokio::spawn(async move { store.save_session_meta(root_meta("pg-straddles")).await });
+    let writer = tokio::spawn(async move {
+        store
+            .admit_session(
+                &lash_core::testing::store_fixtures::session_request_from_meta_for_test(root_meta(
+                    "pg-straddles",
+                )),
+            )
+            .await
+    });
     ensure!(
         pause.reached().await == N_EPOCH,
         "the paused writer read another epoch"
@@ -439,7 +448,11 @@ async fn sqlite_leg(scratch: &Path) -> Result<BackendEvidence> {
         let factory = Arc::clone(&factory);
         async move {
             factory
-                .save_session_meta(root_meta("sqlite-straddles"))
+                .admit_session(
+                    &lash_core::testing::store_fixtures::session_request_from_meta_for_test(
+                        root_meta("sqlite-straddles"),
+                    ),
+                )
                 .await
         }
     });

@@ -20,7 +20,7 @@ DROP TABLE IF EXISTS lash_fleet_format CASCADE;
 
 DROP TABLE IF EXISTS lash_blobs CASCADE;
 
-DROP TABLE IF EXISTS lash_sessions CASCADE;
+DROP TABLE IF EXISTS lash_session_head CASCADE;
 
 DROP TABLE IF EXISTS lash_node_anchors CASCADE;
 

@@ -59,7 +59,7 @@ async fn postgres_persisted_record_decode_classification_head_when_configured() 
 
     let (head_session_id, head_store) = persisted_record_decode_store(&storage, "head").await;
     assert_eq!(
-        sqlx::query("UPDATE lash_sessions SET head_json = '{' WHERE session_id = $1")
+        sqlx::query("UPDATE lash_session_head SET head_json = '{' WHERE session_id = $1")
             .bind(head_session_id.as_str())
             .execute(storage.pool())
             .await
@@ -97,7 +97,7 @@ async fn postgres_persisted_record_decode_classification_checkpoint_when_configu
     let (checkpoint_session_id, checkpoint_store) =
         persisted_record_decode_store(&storage, "checkpoint").await;
     let checkpoint_ref: String =
-        sqlx::query_scalar("SELECT checkpoint_ref FROM lash_sessions WHERE session_id = $1")
+        sqlx::query_scalar("SELECT checkpoint_ref FROM lash_session_head WHERE session_id = $1")
             .bind(checkpoint_session_id.as_str())
             .fetch_one(storage.pool())
             .await
@@ -1269,7 +1269,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
         {
             "session-admitted-check"
         }
-        q if q.starts_with("SELECT pending_follow_on_json FROM lash_sessions") => {
+        q if q.starts_with("SELECT pending_follow_on_json FROM lash_session_head") => {
             "pending-follow-on-read"
         }
         q if q.starts_with("SELECT head_json, head_revision") => "head-load",
@@ -1289,7 +1289,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
         }
         q if q.starts_with("INSERT INTO lash_runtime_turn_commits") => "turn-commit-insert",
         q if q.starts_with("INSERT INTO lash_session_meta") => "session-meta-insert",
-        q if q.starts_with("INSERT INTO lash_sessions") => "head-upsert",
+        q if q.starts_with("INSERT INTO lash_session_head") => "head-upsert",
         q if q.starts_with("SELECT EXISTS") && q.contains("FROM lash_referrer_fences") => {
             "attachment-referrer-fence-check"
         }
@@ -1313,7 +1313,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
         }
         q if q.starts_with("UPDATE lash_session_meta") => "session-meta-touch",
         q if q.starts_with("LOCK TABLE lash_blobs") => "blob-table-lock",
-        q if q.starts_with("SELECT checkpoint_ref FROM lash_sessions") => "checkpoint-roots",
+        q if q.starts_with("SELECT checkpoint_ref FROM lash_session_head") => "checkpoint-roots",
         q if q.starts_with("SELECT content FROM lash_blobs") => "blob-content-read",
         q if q.starts_with("DELETE FROM lash_checkpoint_blob_refs") => "checkpoint-edges-sweep",
         q if q.starts_with("DELETE FROM lash_blobs") => "blob-sweep",

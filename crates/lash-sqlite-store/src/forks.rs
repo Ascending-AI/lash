@@ -99,7 +99,7 @@ pub(super) async fn pin_in_catalog(
                 }
                 let retained = tx
                     .query_row(
-                        session_sql().head.select_retained_by_leaf.sql(),
+                        session_sql().head_sqlite.select_retained_by_leaf.sql(),
                         params![node_id],
                         |row| {
                             Ok((
@@ -192,7 +192,7 @@ pub(super) async fn fork_points_in_catalog(
                     crate::compat::read_recorded(&tx, lash_core_execution::FleetFormat::writable())
                         .map_err(sqlite_error)?;
                 let mut stmt = tx
-                    .prepare(session_sql().head.select_fork_points.sql())
+                    .prepare(session_sql().head_sqlite.select_fork_points.sql())
                     .map_err(sqlite_error)?;
                 let rows = stmt
                     .query_map([], |row| {
@@ -282,7 +282,7 @@ pub(super) async fn fork_at_in_catalog(
             }
             let retained = tx
                 .query_row(
-                    session_sql().head.select_retained_checkpoint.sql(),
+                    session_sql().head_sqlite.select_retained_checkpoint.sql(),
                     params![request.node_id.as_str()],
                     |row| Ok((SessionId::from(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
                 )
@@ -455,7 +455,7 @@ pub(super) async fn fork_at_in_catalog(
                 Some(request.node_id.clone()),
             )?;
             crate::conn::cached_execute(tx,
-                session_sql().head.insert_fork.sql(),
+                session_sql().head_sqlite.insert_fork.sql(),
                 params![
                     request.session_id.as_str(),
                     encode_json(&meta.payload())?,
@@ -493,7 +493,7 @@ pub(super) async fn fork_at_in_catalog(
             crate::session_meta::write_session_meta(
                 tx,
                 &session_meta,
-                crate::session_meta::SessionMetaWrite::Insert,
+
                 created_at_ms,
                 fleet_format,
             )?;

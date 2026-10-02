@@ -292,8 +292,12 @@ impl SessionCommitStore for SqliteStore {
         }
     }
 
-    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        SqliteStore::save_session_meta(self, meta).await
+    async fn settle_observer_intents(
+        &self,
+        session_id: &SessionId,
+        remaining: Vec<lash_core_execution::facade_support::SessionObserverIntent>,
+    ) -> Result<(), StoreError> {
+        SqliteStore::settle_observer_intents(self, session_id, remaining).await
     }
 
     async fn load_session_meta(
@@ -755,7 +759,7 @@ impl SqliteStore {
                         end_frames_tx(tx, &commit.session_id, &left, None, now)?;
                     }
                     crate::conn::cached_execute(tx,
-                        session_sql().head.upsert.sql(),
+                        session_sql().head_sqlite.upsert.sql(),
                         params![
                             meta.session_id.as_str(),
                             encode_json(&meta.payload())?,

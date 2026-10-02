@@ -622,7 +622,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         "stale session binding must be fenced as deleted, got: {ensure_error}"
     );
     let save_error = stale
-        .save_session_meta(stale_meta)
+        .settle_observer_intents(stale_meta.pending_observer_intents)
         .await
         .expect_err("a stale handle must not restore deleted session metadata");
     assert!(
@@ -1121,7 +1121,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
 
     for (label, relation) in relations {
         let session_id = SessionId::from(format!("session-meta-roundtrip-{label}"));
-        // The relation is created with the store: `save_session_meta` may not
+        // The relation is created with the store: `settle_observer_intents` may not
         // move a recorded lineage (FIG-3045), so the round trip declares it at
         // admission and then rewrites only the rest of the record.
         let request = session_store_request(
@@ -1147,7 +1147,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
             relation,
         };
         store
-            .save_session_meta(expected.clone())
+            .settle_observer_intents((expected.clone()).pending_observer_intents)
             .await
             .unwrap_or_else(|error| panic!("save {label} relation: {error}"));
         let loaded = store
@@ -1178,7 +1178,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::DeploymentStore>) {
-    // The relation is declared at creation: a later `save_session_meta` may
+    // The relation is declared at creation: a later `settle_observer_intents` may
     // not move a recorded lineage (FIG-3045).
     let initial = session_store_request(
         &SessionId::from("stable-session"),

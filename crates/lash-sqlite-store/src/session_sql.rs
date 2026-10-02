@@ -1,41 +1,13 @@
-//! The SQLite owner of the session-core family's statements.
-//!
-//! Every statement this store issues over `session_meta` and its two child
-//! tables, `session_head`, `graph_nodes`, `node_anchors`, `fork_lineage`,
-//! `runtime_turn_commits`, `deleted_sessions`,
-//! `release_stamp` and `checkpoint_blob_refs` is either one of
-//! `lash_store_sql::session`'s shared statements or one of the backend-only
-//! statements declared here. No other module in this crate spells one.
-//!
-//! **Why so much of this family forks.** Three reasons, and none of them is
-//! taste:
-//!
-//! * `graph_nodes.tombstoned`, `deleted_sessions`' catalog flag and the
-//!   fork-point listing's `pinned` are integers here and booleans on
-//!   PostgreSQL. ADR 0098 is explicit that a boolean literal is a fork, so
-//!   every read carrying the reachability predicate is two statements.
-//! * The durable head is spelled `session_head` here and `sessions` there, a
-//!   name both backends have frozen. That makes *every* head statement
-//!   backend-specific by construction.
-//! * SQLite binds a variable-length list through `json_each` where PostgreSQL
-//!   uses `unnest` or `= ANY(...)`, and writes through `INSERT OR IGNORE` /
-//!   `INSERT OR REPLACE` where PostgreSQL writes `ON CONFLICT`.
-//!
-//! **One dialect, not three.** Unlike the effect family, nothing reaches these
-//! tables through an `ATTACH`ed schema: the durable-core database is always
-//! the connection's own `main`, whether the caller is a bound store, the
-//! session-delete catalog connection, the fork catalog connection or the
-//! retention sweep (which attaches the *journal* beside it, not the catalog).
-//! So the set renders once, unqualified, exactly the way these statements have
-//! always addressed their tables.
+//! Session-core SQL with shared head statements and backend-specific locks and writes.
 
 use std::sync::LazyLock;
 
 use lash_store_sql::Dialect;
 use lash_store_sql::session::{
     fork_lineage::ForkLineageStatements, graph_nodes::GraphNodeStatements,
-    meta::SessionMetaStatements, meta_pending_observer_intents::ObserverIntentStatements,
-    node_anchors::NodeAnchorStatements, turn_commits::TurnCommitStatements,
+    head::SessionHeadStatements as SharedHeadStatements, meta::SessionMetaStatements,
+    meta_pending_observer_intents::ObserverIntentStatements, node_anchors::NodeAnchorStatements,
+    turn_commits::TurnCommitStatements,
 };
 
 lash_store_sql::statements! {
@@ -55,37 +27,6 @@ lash_store_sql::statements! {
               source_node_id, created_at_ms, last_commit_at_ms, owning_process_id)
              VALUES (?1, ?19, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
                      ?13, ?14, ?15, ?16, ?17, ?18, NULL, ?20)";
-
-        /// Forks with [`SessionMetaSqliteStatements::insert`], and again on
-        /// the conflict alias: SQLite's is `excluded`, PostgreSQL's is
-        /// `EXCLUDED`.
-        upsert = "INSERT INTO session_meta
-             (session_id, session_state_version, relation_kind, parent_session_id,
-              caused_by_kind, caused_by_session_id, caused_by_turn_id,
-              caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-              caused_by_process_event_sequence, caused_by_occurrence_id,
-              caused_by_subscription_id, caused_by_subscription_incarnation,
-              caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, created_at_ms, last_commit_at_ms, owning_process_id)
-             VALUES (?1, ?19, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     ?13, ?14, ?15, ?16, ?17, ?18, NULL, ?20)
-             ON CONFLICT(session_id) DO UPDATE SET
-               relation_kind = excluded.relation_kind,
-               parent_session_id = excluded.parent_session_id,
-               caused_by_kind = excluded.caused_by_kind,
-               caused_by_session_id = excluded.caused_by_session_id,
-               caused_by_turn_id = excluded.caused_by_turn_id,
-               caused_by_effect_id = excluded.caused_by_effect_id,
-               caused_by_call_id = excluded.caused_by_call_id,
-               caused_by_process_id = excluded.caused_by_process_id,
-               caused_by_process_event_sequence = excluded.caused_by_process_event_sequence,
-               caused_by_occurrence_id = excluded.caused_by_occurrence_id,
-               caused_by_subscription_id = excluded.caused_by_subscription_id,
-               caused_by_subscription_incarnation = excluded.caused_by_subscription_incarnation,
-               caused_by_subscription_revision = excluded.caused_by_subscription_revision,
-               caused_by_node_id = excluded.caused_by_node_id,
-               source_session_id = excluded.source_session_id,
-               source_node_id = excluded.source_node_id";
 
         /// The stored relation of `?1`.
         ///
@@ -109,8 +50,7 @@ lash_store_sql::statements! {
         /// holding a share lock it would rather not take twice.
         select_sole_session_id = "SELECT session_id FROM session_meta ORDER BY session_id ASC LIMIT 2";
 
-        /// Names the head table, so it forks on the name (ADR 0098);
-        /// PostgreSQL additionally wraps it in `EXISTS(...)`.
+        /// PostgreSQL wraps this existence query in `EXISTS(...)`.
         exists_materialized = "SELECT 1 FROM session_meta WHERE session_id = ?1
                      UNION ALL
                      SELECT 1 FROM session_head WHERE session_id = ?1
@@ -121,9 +61,8 @@ lash_store_sql::statements! {
         /// `closing_intent`, so a session whose close has begun never lists
         /// as live.
         ///
-        /// Forks three ways: the head table's name, the `deleted` flag's
-        /// integer spelling, and `json_group_array` where PostgreSQL has
-        /// `jsonb_agg`. It stays one statement because a listing assembled
+        /// The `deleted` flag is an integer, and `json_group_array` replaces
+        /// PostgreSQL's `jsonb_agg`. It stays one statement because a listing assembled
         /// from four reads would report a session as live in one row and
         /// deleted in another.
         select_catalog = "WITH catalog AS (
@@ -166,37 +105,19 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `session_head` statements. Every one of them is SQLite's alone: the
-    /// table is spelled `sessions` on PostgreSQL (ADR 0098), so the name is
-    /// the fork and there is nothing to share.
-    pub(crate) struct SessionHeadStatements @ "session_head" {
-        /// The published head of `?1`.
-        select_meta = "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref,
-                    pending_follow_on_json
-             FROM session_head WHERE session_id = ?1";
+    /// Head statements requiring SQLite semantics.
+    pub(crate) struct SessionHeadSqliteStatements @ "session_head" {
 
         /// The follow-on `?1`'s head owes (ADR 0101 §3), read by every admission
         /// inside its write transaction.
         select_pending_follow_on = "SELECT pending_follow_on_json FROM session_head WHERE session_id = ?1";
 
-        /// Raise `?1`'s pending follow-on to `?2`, only while the head still
-        /// owes the follow-on `?3` (the recovery bound's fenced write). The
-        /// head revision does not move.
-        clear_pending_follow_on = "UPDATE session_head SET pending_follow_on_json = NULL WHERE session_id = ?1";
-
         raise_pending_follow_on = "UPDATE session_head SET pending_follow_on_json = ?2
              WHERE session_id = ?1
                AND json_extract(pending_follow_on_json, '$.follow_on_turn_id') = ?3";
 
-        /// The published revision of `?1`, read inside the write transaction
-        /// so the commit's head verdict decides over what is actually stored.
-        select_revision = "SELECT head_revision FROM session_head WHERE session_id = ?1";
-
         /// The leaf node `?1`'s head points at.
         select_leaf_node_id = "SELECT leaf_node_id FROM session_head WHERE session_id = ?1";
-
-        /// What session deletion needs from `?1`'s head before removing it.
-        select_reclaim = "SELECT leaf_node_id, checkpoint_ref FROM session_head WHERE session_id = ?1";
 
         /// The session that retains node `?1` through its own head.
         select_retained_by_leaf = "SELECT session_id, checkpoint_ref FROM session_head
@@ -214,25 +135,9 @@ lash_store_sql::statements! {
                           pending_follow_on_json)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 
-        /// The config-only head a creating admission writes beside the
-        /// catalog row (FIG-4099): revision 0, no leaf, no checkpoint.
-        insert_created = "INSERT INTO session_head (session_id, head_json, head_revision)
-                 VALUES (?1, ?2, 0)";
-
         insert_fork = "INSERT INTO session_head
                  (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
                  VALUES (?1, ?2, 0, ?3, ?4)";
-
-        delete_by_session = "DELETE FROM session_head WHERE session_id = ?1";
-
-        /// Every live checkpoint root: heads that have published one, every
-        /// explicit anchor, and every retained admission base (FIG-3682).
-        select_checkpoint_roots = "SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL
-                 UNION
-                 SELECT checkpoint_ref FROM node_anchors
-                 UNION
-                 SELECT admission_base_checkpoint_ref FROM session_meta
-                 WHERE admission_base_checkpoint_ref IS NOT NULL";
 
         /// The retained checkpoint for node `?1`: an explicit anchor if there
         /// is one, otherwise the lowest-numbered session head that points at
@@ -299,12 +204,6 @@ lash_store_sql::statements! {
         /// The stored head document of `?1`, for a test that wants to read or
         /// rewrite it behind the store's back.
         select_head_json = "SELECT head_json FROM session_head WHERE session_id = ?1";
-
-        /// Replace `?1`'s stored head document with `?2`.
-        set_head_json = "UPDATE session_head SET head_json = ?2 WHERE session_id = ?1";
-
-        /// Replace `?1`'s stored head document with text no decoder accepts.
-        corrupt_head_json = "UPDATE session_head SET head_json = '{not-current-json' WHERE session_id = ?1";
     }
 }
 
@@ -670,8 +569,9 @@ pub(crate) struct SessionSql {
     pub(crate) meta_sqlite: SessionMetaSqliteStatements,
     /// `session_meta_pending_observer_intents` statements.
     pub(crate) observer_intents: ObserverIntentStatements,
-    /// `session_head` statements. SQLite's alone, by ADR 0098.
-    pub(crate) head: SessionHeadStatements,
+    /// Shared session-head statements.
+    pub(crate) head: SharedHeadStatements,
+    pub(crate) head_sqlite: SessionHeadSqliteStatements,
     /// `graph_nodes` statements both backends issue verbatim.
     pub(crate) graph: GraphNodeStatements,
     /// `graph_nodes` statements only SQLite issues.
@@ -698,7 +598,8 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         meta: SessionMetaStatements::render(dialect),
         meta_sqlite: SessionMetaSqliteStatements::render(dialect),
         observer_intents: ObserverIntentStatements::render(dialect),
-        head: SessionHeadStatements::render(dialect),
+        head: SharedHeadStatements::render(dialect),
+        head_sqlite: SessionHeadSqliteStatements::render(dialect),
         graph: GraphNodeStatements::render(dialect),
         graph_sqlite: GraphNodeSqliteStatements::render(dialect),
         anchors: NodeAnchorStatements::render(dialect),

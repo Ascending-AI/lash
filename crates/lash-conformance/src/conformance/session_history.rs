@@ -302,19 +302,12 @@ pub async fn history_pages_are_bounded_and_pinned(store: Arc<dyn ConformanceDepl
     assert_eq!(one.nodes.len(), 1);
     assert_eq!(one.nodes[0].record.node_id, exact.nodes[0].record.node_id);
 
-    // A catalog row with no head (FIG-4561): admission always writes the
-    // created head, so the corrupt state is written at store level with
-    // `save_session_meta`, which touches the metadata row alone.
     let headless = SessionId::from("history-pages-headless");
+    admit(store.as_ref(), &headless).await;
     store
-        .save_session_meta(crate::SessionMeta {
-            session_id: headless.clone(),
-            relation: crate::SessionRelation::Root,
-            pending_observer_intents: Vec::new(),
-            owning_process_id: None,
-        })
+        .delete_session_head_for_testing(&headless)
         .await
-        .expect("write the headless catalog row");
+        .expect("leave the catalog row without its head");
     let missing = store
         .load_ancestors(&headless, HistoryAnchor::Head, budget(1, 1024))
         .await

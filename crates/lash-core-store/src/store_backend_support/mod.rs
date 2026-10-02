@@ -8,6 +8,7 @@ mod process_lifecycle_sql;
 mod queued_work_admission;
 mod run_spec_admission;
 mod session_meta;
+pub mod turn_cancel;
 mod turn_input_batch;
 mod turn_input_lifecycle_sql;
 
@@ -29,8 +30,7 @@ pub use run_spec_admission::{
     steering_run_spec_target,
 };
 pub use session_meta::{
-    CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredObserverIntent, StoredRelation,
-    guard_rebind_lineage, guard_session_meta_relation_rewrite,
+    CausalColumns, SessionMetaCodec, StoredObserverIntent, StoredRelation, guard_rebind_lineage,
 };
 pub use turn_input_batch::{
     TurnInputDraftAdmission, decide_turn_input_draft_admission, turn_input_submission_digest,

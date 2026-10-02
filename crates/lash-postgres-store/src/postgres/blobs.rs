@@ -58,14 +58,13 @@ lash_store_sql::statements! {
 
         /// Reclaim the session-delete candidate `?1` if nothing still roots it.
         ///
-        /// Forks from SQLite's counterpart twice: this backend has no
+        /// Forks from SQLite's counterpart: this backend has no
         /// `artifact_refs` pointer table to rule out, because its artifact
-        /// bytes live inline in `lash_lashlang_artifacts`, and its head table
-        /// is `lash_sessions` where SQLite's is `session_head`.
+        /// bytes live inline in `lash_lashlang_artifacts`.
         reclaim_session_candidate = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
                AND NOT EXISTS (
-                   SELECT 1 FROM sessions AS head
+                   SELECT 1 FROM session_head AS head
                    WHERE head.checkpoint_ref = candidate.hash
                )
                AND NOT EXISTS (

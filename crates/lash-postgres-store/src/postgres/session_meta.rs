@@ -4,7 +4,6 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
-pub(crate) use lash_core_execution::store_backend_support::SessionMetaWrite;
 use lash_core_execution::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRelation};
 
 const SESSION_META_CODEC: SessionMetaCodec = SessionMetaCodec::new("PostgreSQL BIGINT");
@@ -101,15 +100,11 @@ pub(crate) async fn load_recorded_lineage_tx(
 pub(crate) async fn write_session_meta_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     meta: &SessionMeta,
-    mode: SessionMetaWrite,
     created_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<bool, StoreError> {
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
-    let sql = match mode {
-        SessionMetaWrite::Insert => session_sql().meta_postgres.insert.sql(),
-        SessionMetaWrite::Replace => session_sql().meta_postgres.upsert.sql(),
-    };
+    let sql = session_sql().meta_postgres.insert.sql();
     let result = sqlx::query(sql)
         .bind(stored.session_id.as_str())
         .bind(&stored.relation_kind)
@@ -142,14 +137,23 @@ pub(crate) async fn write_session_meta_tx(
         return Ok(false);
     }
 
+    settle_observer_intents_tx(tx, &meta.session_id, &meta.pending_observer_intents).await?;
+    Ok(true)
+}
+
+pub(crate) async fn settle_observer_intents_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    remaining: &[lash_core_execution::facade_support::SessionObserverIntent],
+) -> Result<(), StoreError> {
     sqlx::query(session_sql().observer_intents.delete_by_session.sql())
-        .bind(stored.session_id.as_str())
+        .bind(session_id.as_str())
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    for (process_index, intent) in stored.pending_observer_intents.iter().enumerate() {
+    for (process_index, intent) in remaining.iter().enumerate() {
         sqlx::query(session_sql().observer_intents.insert.sql())
-            .bind(stored.session_id.as_str())
+            .bind(session_id.as_str())
             .bind(SessionMetaCodec::write_index(
                 SESSION_META_CODEC,
                 process_index,
@@ -160,7 +164,7 @@ pub(crate) async fn write_session_meta_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
-    Ok(true)
+    Ok(())
 }
 
 pub(crate) async fn load_session_meta(

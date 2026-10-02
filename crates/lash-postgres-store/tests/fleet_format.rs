@@ -100,14 +100,16 @@ async fn postgres_session_meta_stamps_the_version_the_fleet_format_selects() {
         version: 7,
     }]);
     let store = storage.store().with_fleet_format_for_testing(fleet);
-    lash_core::SessionCommitStore::save_session_meta(
+    lash_core::SessionCatalogStore::admit_session(
         &store,
-        lash_core::SessionMeta {
-            owning_process_id: None,
-            session_id: session_id.clone(),
-            relation: lash_core::SessionRelation::Root,
-            pending_observer_intents: Vec::new(),
-        },
+        &lash_core::testing::store_fixtures::session_request_from_meta_for_test(
+            lash_core::SessionMeta {
+                owning_process_id: None,
+                session_id: session_id.clone(),
+                relation: lash_core::SessionRelation::Root,
+                pending_observer_intents: Vec::new(),
+            },
+        ),
     )
     .await
     .expect("save session meta");
@@ -209,14 +211,16 @@ async fn a_select_only_role_reads_the_fleet_format_and_is_refused_on_write() {
     // the writer needs is a privilege the role does not hold.
     let session_id = lash_core::SessionId::from("select-only-session");
     let store = storage.store();
-    let error = lash_core::SessionCommitStore::save_session_meta(
+    let error = lash_core::SessionCatalogStore::admit_session(
         &store,
-        lash_core::SessionMeta {
-            owning_process_id: None,
-            session_id,
-            relation: lash_core::SessionRelation::Root,
-            pending_observer_intents: Vec::new(),
-        },
+        &lash_core::testing::store_fixtures::session_request_from_meta_for_test(
+            lash_core::SessionMeta {
+                owning_process_id: None,
+                session_id,
+                relation: lash_core::SessionRelation::Root,
+                pending_observer_intents: Vec::new(),
+            },
+        ),
     )
     .await
     .expect_err("a select-only role must not write session rows");

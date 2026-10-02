@@ -542,7 +542,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // and provisions an empty database outright. Older catalogs are still
 // rejected and recreated.
 //
-// Version 135 (FIG-3542) adds `lash_sessions.pending_follow_on_json`, the
+// Version 135 (FIG-3542) adds `lash_session_head.pending_follow_on_json`, the
 // follow-on turn a committed agent-frame switch owes the session (ADR 0101
 // §3); a frame handoff is no longer a queued-work row, and runtime-commit
 // receipts carry schema 2. `lash migrate` carries a component-134 catalog
@@ -647,7 +647,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 ///         path = "crates/lash-postgres-store/schema.sql",
 ///         cover(
 ///             "CREATE TABLE IF NOT EXISTS lash_schema_versions",
-///             "CREATE TABLE IF NOT EXISTS lash_blobs", "CREATE TABLE IF NOT EXISTS lash_sessions",
+///             "CREATE TABLE IF NOT EXISTS lash_blobs", "CREATE TABLE IF NOT EXISTS lash_session_head",
 ///             "CREATE TABLE IF NOT EXISTS lash_graph_nodes",
 ///             "CREATE TABLE IF NOT EXISTS lash_session_meta",
 ///             "CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits",

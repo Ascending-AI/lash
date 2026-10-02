@@ -363,3 +363,14 @@ pub fn settling_commit_for_test(
     commit.ingress = Some(settlement);
     commit
 }
+
+/// Admit creation facts for store-level fixtures that commit their own first head.
+pub fn session_request_from_meta_for_test(
+    meta: crate::SessionMeta,
+) -> crate::SessionStoreCreateRequest {
+    let mut request = root_session_request(&meta.session_id);
+    request.relation = meta.relation;
+    request.owning_process_id = meta.owning_process_id;
+    request.pending_observer_intents = meta.pending_observer_intents;
+    request
+}

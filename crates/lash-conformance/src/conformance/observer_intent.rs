@@ -145,7 +145,7 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
         crate::SessionObserverIntent::host_requested(pruned),
     ]);
     store
-        .save_session_meta(meta)
+        .settle_observer_intents(meta.pending_observer_intents)
         .await
         .expect("retain full selector");
     registry.set_process_read_error_after(
@@ -271,9 +271,10 @@ impl crate::store::RuntimeStoreDecorator for CrashBeforeClear {
     fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
-    async fn save_session_meta(
+    async fn settle_observer_intents(
         &self,
-        _meta: crate::store::SessionMeta,
+        _session_id: &SessionId,
+        _remaining: Vec<crate::SessionObserverIntent>,
     ) -> Result<(), crate::StoreError> {
         Err(crate::StoreError::Backend(
             "crash before observer intent clear".to_string(),

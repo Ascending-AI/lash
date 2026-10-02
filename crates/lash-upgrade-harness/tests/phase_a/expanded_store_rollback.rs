@@ -59,7 +59,7 @@ async fn expanded_store_rollback() -> Result<()> {
         "SELECT EXISTS (
              SELECT 1 FROM information_schema.columns
              WHERE table_schema = current_schema()
-               AND table_name = 'lash_sessions'
+               AND table_name = 'lash_session_head'
                AND column_name = 'synthetic_next_note'
                AND is_nullable = 'YES'
          ), to_regclass('lash_synthetic_next') IS NOT NULL,
@@ -105,10 +105,11 @@ async fn expanded_store_rollback() -> Result<()> {
         read.session_present == Some(true),
         "N+1 did not read N's PostgreSQL row: {read:?}"
     );
-    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lash_sessions WHERE session_id = $1")
-        .bind(&session)
-        .fetch_one(&mut pg)
-        .await?;
+    let rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM lash_session_head WHERE session_id = $1")
+            .bind(&session)
+            .fetch_one(&mut pg)
+            .await?;
     ensure!(rows == 1, "N's PostgreSQL session row was not retained");
 
     let sqlite = Case::sqlite("expanded-sqlite", &services, scratch.path())?;
@@ -159,33 +160,33 @@ async fn expanded_store_rollback() -> Result<()> {
     let postgres_unsafe = [
         (
             "not null without default",
-            "ALTER TABLE lash_sessions ADD COLUMN synthetic_required TEXT NOT NULL DEFAULT 'seed'; ALTER TABLE lash_sessions ALTER COLUMN synthetic_required DROP DEFAULT",
-            "ALTER TABLE lash_sessions DROP COLUMN synthetic_required",
+            "ALTER TABLE lash_session_head ADD COLUMN synthetic_required TEXT NOT NULL DEFAULT 'seed'; ALTER TABLE lash_session_head ALTER COLUMN synthetic_required DROP DEFAULT",
+            "ALTER TABLE lash_session_head DROP COLUMN synthetic_required",
         ),
         (
             "CHECK NOT VALID",
-            "ALTER TABLE lash_sessions ADD CONSTRAINT synthetic_check CHECK (head_revision >= 0) NOT VALID",
-            "ALTER TABLE lash_sessions DROP CONSTRAINT synthetic_check",
+            "ALTER TABLE lash_session_head ADD CONSTRAINT synthetic_check CHECK (head_revision >= 0) NOT VALID",
+            "ALTER TABLE lash_session_head DROP CONSTRAINT synthetic_check",
         ),
         (
             "UNIQUE",
-            "ALTER TABLE lash_sessions ADD CONSTRAINT synthetic_unique UNIQUE (head_revision)",
-            "ALTER TABLE lash_sessions DROP CONSTRAINT synthetic_unique",
+            "ALTER TABLE lash_session_head ADD CONSTRAINT synthetic_unique UNIQUE (head_revision)",
+            "ALTER TABLE lash_session_head DROP CONSTRAINT synthetic_unique",
         ),
         (
             "FOREIGN KEY NOT VALID",
-            "ALTER TABLE lash_sessions ADD CONSTRAINT synthetic_fk FOREIGN KEY (leaf_node_id) REFERENCES lash_blobs(hash) NOT VALID",
-            "ALTER TABLE lash_sessions DROP CONSTRAINT synthetic_fk",
+            "ALTER TABLE lash_session_head ADD CONSTRAINT synthetic_fk FOREIGN KEY (leaf_node_id) REFERENCES lash_blobs(hash) NOT VALID",
+            "ALTER TABLE lash_session_head DROP CONSTRAINT synthetic_fk",
         ),
         (
             "EXCLUDE",
-            "ALTER TABLE lash_sessions ADD CONSTRAINT synthetic_exclude EXCLUDE USING gist (int8range(head_revision, head_revision + 1) WITH &&)",
-            "ALTER TABLE lash_sessions DROP CONSTRAINT synthetic_exclude",
+            "ALTER TABLE lash_session_head ADD CONSTRAINT synthetic_exclude EXCLUDE USING gist (int8range(head_revision, head_revision + 1) WITH &&)",
+            "ALTER TABLE lash_session_head DROP CONSTRAINT synthetic_exclude",
         ),
         (
             "trigger",
-            "CREATE FUNCTION synthetic_reject() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE TRIGGER synthetic_trigger BEFORE INSERT ON lash_sessions FOR EACH ROW EXECUTE FUNCTION synthetic_reject()",
-            "DROP TRIGGER synthetic_trigger ON lash_sessions; DROP FUNCTION synthetic_reject()",
+            "CREATE FUNCTION synthetic_reject() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE TRIGGER synthetic_trigger BEFORE INSERT ON lash_session_head FOR EACH ROW EXECUTE FUNCTION synthetic_reject()",
+            "DROP TRIGGER synthetic_trigger ON lash_session_head; DROP FUNCTION synthetic_reject()",
         ),
     ];
     for (name, addition, cleanup) in postgres_unsafe {

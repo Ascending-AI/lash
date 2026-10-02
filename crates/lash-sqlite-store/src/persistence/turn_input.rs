@@ -402,17 +402,15 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                         }
                         return Ok(existing);
                     }
-                    let record = lash_core_execution::TurnCancelRequestRecord {
-                        request,
-                        outcome: None,
-                    };
                     crate::conn::cached_execute(
                         tx,
                         crate::turn_ingress::turn_ingress_sql()
                             .cancel_requests_sqlite
                             .insert_first
                             .sql(),
-                        params![session_id.as_str(), turn_id.as_str(), encode_json(&record)?],
+                        params![session_id.as_str(), turn_id.as_str(), request.request_id, request.origin, request.reason,
+                            lash_core_execution::store_backend_support::turn_cancel::turn_cancel_undelivered_wire(request.undelivered),
+                            lash_core_execution::store_backend_support::turn_cancel::turn_cancel_mode_wire(request.mode)],
                     )
                     .map_err(sqlite_error)?;
                     load_turn_cancel_request_conn(tx, &session_id, &turn_id)?.ok_or_else(|| {

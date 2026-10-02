@@ -34,17 +34,13 @@ pub async fn session_meta_records_the_process_that_owns_it(
         .expect("the owned session has metadata");
     assert_eq!(meta.owning_process_id, Some(owner.clone()));
 
-    // A rewrite of the rest of the record keeps the owner it was created with.
+    // Settling the pending observers keeps the creation owner.
     store
-        .save_session_meta(crate::SessionMeta {
-            owning_process_id: None,
-            pending_observer_intents: vec![crate::SessionObserverIntent::host_requested(
-                crate::ProcessId::fixture("session-meta-observer"),
-            )],
-            ..meta
-        })
+        .settle_observer_intents(vec![crate::SessionObserverIntent::host_requested(
+            crate::ProcessId::fixture("session-meta-observer"),
+        )])
         .await
-        .expect("rewrite the owned session's observers");
+        .expect("settle the owned session's observers");
     let reopened = factory
         .live_view_for(&owned)
         .await

@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use lash_conformance::{FleetFormatDeployment, fleet_format_conformance};
 use lash_core_execution::{
-    FleetFormat, FleetFormatStore, StoreError, StorePreflight, StoreSchemaStatus, WriterPin,
+    FleetFormat, FleetFormatStore, SessionCatalogStore as _, StoreError, StorePreflight,
+    StoreSchemaStatus, WriterPin,
 };
 use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
 
@@ -83,12 +84,16 @@ async fn sqlite_session_meta_stamps_the_version_the_fleet_format_selects() {
         .with_fleet_format_for_testing(fleet);
     let session_id = lash_core::SessionId::from("fleet-stamped-session");
     store
-        .save_session_meta(lash_core::SessionMeta {
-            owning_process_id: None,
-            session_id: session_id.clone(),
-            relation: lash_core::SessionRelation::Root,
-            pending_observer_intents: Vec::new(),
-        })
+        .admit_session(
+            &lash_core::testing::store_fixtures::session_request_from_meta_for_test(
+                lash_core::SessionMeta {
+                    owning_process_id: None,
+                    session_id: session_id.clone(),
+                    relation: lash_core::SessionRelation::Root,
+                    pending_observer_intents: Vec::new(),
+                },
+            ),
+        )
         .await
         .expect("save session meta");
     drop(store);

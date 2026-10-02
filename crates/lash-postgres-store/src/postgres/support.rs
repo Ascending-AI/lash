@@ -70,14 +70,16 @@ pub(crate) async fn retained_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     node_id: &str,
 ) -> Result<Option<(SessionId, String)>, StoreError> {
-    sqlx::query_as::<_, (String, String)>(session_sql().head.select_retained_checkpoint.sql())
-        .bind(node_id)
-        .fetch_optional(&mut **tx)
-        .await
-        .map(|row| {
-            row.map(|(session_id, checkpoint_ref)| (SessionId::from(session_id), checkpoint_ref))
-        })
-        .map_err(store_sqlx_error)
+    sqlx::query_as::<_, (String, String)>(
+        session_sql().head_postgres.select_retained_checkpoint.sql(),
+    )
+    .bind(node_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map(|row| {
+        row.map(|(session_id, checkpoint_ref)| (SessionId::from(session_id), checkpoint_ref))
+    })
+    .map_err(store_sqlx_error)
 }
 
 pub(crate) async fn retention_source_holds_checkpoint_tx(
@@ -86,7 +88,7 @@ pub(crate) async fn retention_source_holds_checkpoint_tx(
     source_session_id: &SessionId,
     checkpoint_ref: &str,
 ) -> Result<bool, StoreError> {
-    sqlx::query_scalar(session_sql().head.exists_retention_source.sql())
+    sqlx::query_scalar(session_sql().head_postgres.exists_retention_source.sql())
         .bind(node_id)
         .bind(source_session_id.as_str())
         .bind(checkpoint_ref)
@@ -631,7 +633,7 @@ pub(crate) async fn load_session_head_meta_tx(
     fleet: lash_core_execution::FleetFormat,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let sql = if for_update {
-        session_sql().head.select_meta_for_update.sql()
+        session_sql().head_postgres.select_meta_for_update.sql()
     } else {
         session_sql().head.select_meta.sql()
     };

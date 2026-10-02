@@ -28,7 +28,7 @@ Domain predicates such as `{{live_process_status(status)}}` come from the
 backend's typed vocabulary. `lash-store-sql` has no `lash-core` dependency.
 A vocabulary token does not permit a dialect-specific clause to appear shared.
 
-Different locks, conflict clauses, boolean spellings, head tables, or database
+Different locks, conflict clauses, boolean spellings, or database
 operations remain named backend forks. Query shape changes have separate
 statements rather than per-call string construction. Rendering does not alter
 fencing, compare-and-set, or failure semantics.
@@ -69,7 +69,9 @@ Evidence: `crates/lash-store-sql/src/render.rs:175`, `:201`,
 - Templating dialect forks obscures their differing contracts. Every fork has
   its own literal, name, and owner.
 - Adding a conflict clause merely to share SQL changes observable failures.
-- Renaming durable head tables for sharing invalidates stored data.
+Under the pre-1.0 version freeze, both stores use `session_head` with the
+same column order. Shared head and cancellation statements have one owner;
+locks and conflict semantics remain backend-owned.
 
 Schema artifacts and migration SQL have their own ownership. Migrations can
 touch multiple table families. `schema_versions` stays schema-owned: its name

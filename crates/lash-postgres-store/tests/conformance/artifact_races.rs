@@ -74,7 +74,7 @@ type SessionHeadRow = (i64, String, Option<String>, Option<String>, Option<Strin
 /// refused commit must leave every one identical.
 #[derive(Debug, PartialEq)]
 struct AdmittedRows {
-    /// `lash_sessions`' head row beside the key.
+    /// `lash_session_head`' head row beside the key.
     head: Option<SessionHeadRow>,
     graph_nodes: i64,
     session_meta: i64,
@@ -85,7 +85,7 @@ struct AdmittedRows {
 async fn committed_rows(storage: &PostgresStorage, session_id: &SessionId) -> AdmittedRows {
     let head = sqlx::query_as(
         "SELECT head_revision, head_json, checkpoint_ref, leaf_node_id, pending_follow_on_json
-         FROM lash_sessions WHERE session_id = $1",
+         FROM lash_session_head WHERE session_id = $1",
     )
     .bind(session_id.as_str())
     .fetch_optional(storage.pool())

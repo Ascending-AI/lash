@@ -18,7 +18,8 @@ use lash_core_execution::store::fleet_finalize::{
     FleetEpochFlip, RetainedDeployment,
 };
 use lash_core_execution::{
-    SessionCommitStore as _, SessionId, SessionMeta, SessionRelation, StoreError,
+    SessionCatalogStore as _, SessionCommitStore as _, SessionId, SessionMeta, SessionRelation,
+    StoreError,
 };
 
 use crate::testing::IsolatedDatabase;
@@ -212,7 +213,11 @@ async fn finalize_refuses_while_an_old_generation_is_live() {
     }
     assert_eq!(recorded_epoch(&next).await, 1, "every refusal left F alone");
     n.store()
-        .save_session_meta(meta("n-while-refused"))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                meta("n-while-refused"),
+            ),
+        )
         .await
         .expect("N still writes: the rollback window is open");
 
@@ -319,11 +324,19 @@ async fn rollback_is_safe_until_finalize() {
     let registry = Registry::default();
 
     next.store()
-        .save_session_meta(meta("written-by-next"))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                meta("written-by-next"),
+            ),
+        )
         .await
         .expect("N+1 writes before finalize");
     n.store()
-        .save_session_meta(meta("written-by-n"))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                meta("written-by-n"),
+            ),
+        )
         .await
         .expect("N writes before finalize");
     assert!(
@@ -360,7 +373,11 @@ async fn rollback_is_safe_until_finalize() {
             other => panic!("a contract before finalize must refuse: {other:?}"),
         }
         assert_eq!(
-            count(&next, "lash_sessions WHERE synthetic_next_note IS NOT NULL").await,
+            count(
+                &next,
+                "lash_session_head WHERE synthetic_next_note IS NOT NULL"
+            )
+            .await,
             0,
             "no row is in the new release's shape before finalize"
         );
@@ -380,7 +397,11 @@ async fn rollback_is_safe_until_finalize() {
         .expect("N reopens the store before finalize");
     n_again
         .store()
-        .save_session_meta(meta("n-after-rollback"))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                meta("n-after-rollback"),
+            ),
+        )
         .await
         .expect("N writes after its restart");
 
@@ -391,7 +412,11 @@ async fn rollback_is_safe_until_finalize() {
     fenced(
         n_again
             .store()
-            .save_session_meta(meta("n-after-finalize"))
+            .admit_session(
+                &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                    meta("n-after-finalize"),
+                ),
+            )
             .await,
         "N after finalize",
     );
@@ -428,7 +453,11 @@ async fn a_stale_writer_is_fenced_after_finalize() {
     let marks = count(&n, "lash_draining_generations").await;
     fenced(
         n.store()
-            .save_session_meta(meta("stale-after-finalize"))
+            .admit_session(
+                &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                    meta("stale-after-finalize"),
+                ),
+            )
             .await,
         "N's session write",
     );
@@ -452,7 +481,11 @@ async fn a_stale_writer_is_fenced_after_finalize() {
     assert_eq!(next.finalize_hold().await.expect("read the hold"), None);
 
     next.store()
-        .save_session_meta(meta("next-after-finalize"))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                meta("next-after-finalize"),
+            ),
+        )
         .await
         .expect("N+1 writes under the epoch it finalized");
 }
@@ -462,7 +495,7 @@ async fn a_stale_writer_is_fenced_after_finalize() {
 #[cfg(feature = "synthetic-next")]
 async fn old_sessions(storage: &PostgresStorage, rows: usize) {
     for index in 0..rows {
-        sqlx::query("INSERT INTO lash_sessions (session_id, head_json) VALUES ($1, '{}')")
+        sqlx::query("INSERT INTO lash_session_head (session_id, head_json) VALUES ($1, '{}')")
             .bind(format!("old-{index:02}"))
             .execute(storage.pool())
             .await
@@ -501,7 +534,7 @@ async fn interrupted_backfill_resumes_idempotently() {
         .await
         .expect("finalize moves F");
     sqlx::query(
-        "INSERT INTO lash_sessions (session_id, head_json, synthetic_next_note)
+        "INSERT INTO lash_session_head (session_id, head_json, synthetic_next_note)
          VALUES ('old-03-next', '{}', 'written by N+1')",
     )
     .execute(next.pool())
@@ -538,7 +571,7 @@ async fn interrupted_backfill_resumes_idempotently() {
     assert_eq!(
         count(
             &next,
-            "lash_sessions WHERE synthetic_next_note LIKE 'backfilled:%'"
+            "lash_session_head WHERE synthetic_next_note LIKE 'backfilled:%'"
         )
         .await,
         3,
@@ -556,7 +589,7 @@ async fn interrupted_backfill_resumes_idempotently() {
     assert_eq!(state, "applied");
     assert_eq!(rows, 7, "every old row rewritten exactly once");
     let notes: Vec<(String, Option<String>)> =
-        sqlx::query_as("SELECT session_id, synthetic_next_note FROM lash_sessions ORDER BY 1")
+        sqlx::query_as("SELECT session_id, synthetic_next_note FROM lash_session_head ORDER BY 1")
             .fetch_all(next.pool())
             .await
             .expect("read the notes");
@@ -669,7 +702,7 @@ async fn contract_refuses_until_backfills_complete() {
         "SELECT versions.min_reader, constraint_row.convalidated
          FROM lash_schema_versions AS versions, pg_catalog.pg_constraint AS constraint_row
          WHERE versions.component = $1
-           AND constraint_row.conname = 'ck_lash_sessions_synthetic_next_note'",
+           AND constraint_row.conname = 'ck_lash_session_head_synthetic_next_note'",
     )
     .bind(crate::SCHEMA_COMPONENT)
     .fetch_one(next.pool())

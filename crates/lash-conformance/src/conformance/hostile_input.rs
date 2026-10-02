@@ -111,7 +111,7 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) 
         "victim",
         "../victim",
         "/victim",
-        "'; DROP TABLE lash_sessions; --",
+        "'; DROP TABLE lash_session_head; --",
     ] {
         let request = session_store_request(
             &SessionId::from(raw),
@@ -127,7 +127,7 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) 
         "victim",
         "../victim",
         "/victim",
-        "'; DROP TABLE lash_sessions; --",
+        "'; DROP TABLE lash_session_head; --",
     ] {
         let request = session_store_request(
             &SessionId::from(raw),

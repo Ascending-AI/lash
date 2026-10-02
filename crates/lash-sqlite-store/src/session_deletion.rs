@@ -118,7 +118,7 @@ pub(super) async fn delete_session_from_catalog(
                 .unwrap_or((None, None));
             let head_json: Option<String> = tx
                 .query_row(
-                    session_sql().head.select_head_json.sql(),
+                    session_sql().head_sqlite.select_head_json.sql(),
                     params![session_id.as_str()],
                     |row| row.get(0),
                 )

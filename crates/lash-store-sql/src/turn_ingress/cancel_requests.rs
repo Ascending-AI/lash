@@ -1,20 +1,8 @@
-//! `turn_cancel_requests`: the durable cancellation intent for one turn.
-//!
-//! The two backends store the same facts in different shapes and have since
-//! before this arc: SQLite keeps the request as one `record_json` document
-//! beside its revision, while PostgreSQL spreads it over typed columns and
-//! keeps the affected-input receipts in a second table. ADR 0098 freezes the
-//! durable encodings, so every statement over this table forks and this module
-//! owns the two column lists rather than a shared statement.
+//! `turn_cancel_requests`: the relational cancellation intent for one turn.
 
-/// The table's unprefixed name.
 pub const TABLE: &str = "turn_cancel_requests";
-
-/// The columns SQLite's insert writes: one document plus its revision.
-pub const INSERT_COLUMNS: &str = "session_id, turn_id, record_json, intent_revision";
-
-/// PostgreSQL's request fields, without the revision: what a record read
-/// rebuilds the request from before attaching its affected-input receipts.
+pub const INSERT_COLUMNS: &str =
+    "session_id, turn_id, request_id, origin, reason, disposition, mode, intent_revision";
 pub const REQUEST_COLUMNS: &str = "request_id, origin, reason, disposition, mode";
 
 crate::statements! {
@@ -31,5 +19,24 @@ crate::statements! {
         advance_intent_revision = "UPDATE turn_cancel_requests
              SET intent_revision = ?3
              WHERE session_id = ?1 AND turn_id = ?2";
+        select_request = "SELECT request_id, origin, reason, disposition, mode
+             FROM turn_cancel_requests
+             WHERE session_id = ?1 AND turn_id = ?2";
+        select_request_with_revision = "SELECT request_id, origin, reason, disposition, mode,
+                    intent_revision
+             FROM turn_cancel_requests
+             WHERE session_id = ?1 AND turn_id = ?2";
+        upsert_record = "INSERT INTO turn_cancel_requests (
+                 session_id, turn_id, request_id, origin, reason, disposition, mode,
+                 intent_revision
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT (session_id, turn_id) DO UPDATE SET
+                 request_id = excluded.request_id,
+                 origin = excluded.origin,
+                 reason = excluded.reason,
+                 disposition = excluded.disposition,
+                 mode = excluded.mode,
+                 intent_revision = excluded.intent_revision";
     }
 }

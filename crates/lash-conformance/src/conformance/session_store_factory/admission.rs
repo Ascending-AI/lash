@@ -221,18 +221,13 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         "a refused rebind must leave the durable relation unchanged"
     );
 
-    // A view cannot be pointed at another session: a request carrying a
-    // foreign session id is refused before it reaches the store (ADR 0112 §3).
-    let foreign_meta = crate::SessionMeta {
-        session_id: SessionId::from("admission-other"),
-        ..created_meta.clone()
-    };
+    // Settlement of an unadmitted id cannot create a second session.
     assert!(matches!(
         store
-            .save_session_meta(foreign_meta)
-            .await
-            .expect_err("a view must refuse another session's request"),
-        crate::StoreError::ForeignSessionRequest { .. }
+            .store()
+            .settle_observer_intents(&SessionId::from("admission-other"), Vec::new())
+            .await,
+        Err(crate::StoreError::SessionNotFound { .. })
     ));
     assert!(
         factory

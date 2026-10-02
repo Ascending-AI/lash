@@ -56,18 +56,10 @@ pub const CATALOG_COLUMNS_SQLITE: &str =
 /// from the head table. It is its own list because the deleted set records a
 /// session's final shape rather than its relation: no causal column survives
 /// deletion, and the head revision is not a `session_meta` column at all.
-pub const DELETED_EVIDENCE_COLUMNS_SQLITE: &str =
+pub const DELETED_EVIDENCE_COLUMNS: &str =
     "meta.session_id, meta.created_at_ms, meta.last_commit_at_ms,
                             COALESCE(head.head_revision, 0), meta.relation_kind,
                             meta.parent_session_id";
-
-/// The PostgreSQL spelling of [`DELETED_EVIDENCE_COLUMNS_SQLITE`], which
-/// differs only in the head table's alias, because the head table itself is
-/// spelled differently (ADR 0098).
-pub const DELETED_EVIDENCE_COLUMNS_POSTGRES: &str =
-    "meta.session_id, meta.created_at_ms, meta.last_commit_at_ms,
-                    COALESCE(session.head_revision, 0), meta.relation_kind,
-                    meta.parent_session_id";
 
 crate::statements! {
     /// `session_meta` statements both backends issue verbatim.

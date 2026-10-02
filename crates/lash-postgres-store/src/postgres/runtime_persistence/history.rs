@@ -95,7 +95,7 @@ const PAGE_HEADERS: &str = "WITH readable_sessions AS (
 
 /// The live head leaf of `$1`, where the head-path probe starts.
 const HEAD_LEAF_PATH_NODE: &str = "SELECT leaf.node_id, leaf.session_id, leaf.generation
-    FROM lash_sessions AS head
+    FROM lash_session_head AS head
     JOIN lash_graph_nodes AS leaf ON leaf.node_id = head.leaf_node_id
     WHERE head.session_id = $1 AND NOT leaf.tombstoned";
 
@@ -718,7 +718,7 @@ impl SessionHistoryStore for PostgresStore {
         let candidate = sqlx::query_as::<_, (String, String, i64, String, i64)>(
             "SELECT leaf.node_id, leaf.session_id, leaf.generation,
                     node.session_id, node.generation
-             FROM lash_sessions AS head
+             FROM lash_session_head AS head
              JOIN lash_graph_nodes AS leaf ON leaf.node_id = head.leaf_node_id
              JOIN lash_graph_nodes AS node ON node.node_id = $2
              WHERE head.session_id = $1 AND NOT leaf.tombstoned AND NOT node.tombstoned

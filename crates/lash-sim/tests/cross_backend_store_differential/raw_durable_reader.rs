@@ -168,7 +168,7 @@ impl RawDurableReader {
                     .expect("Postgres reader is attached to a store");
                 let head: Option<(i64, Option<String>, Option<String>)> = sqlx::query_as(
                     "SELECT head_revision, leaf_node_id, checkpoint_ref
-                     FROM lash_sessions
+                     FROM lash_session_head
                      WHERE session_id = $1",
                 )
                 .bind(session_id.as_str())

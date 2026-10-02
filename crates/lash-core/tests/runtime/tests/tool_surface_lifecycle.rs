@@ -250,14 +250,16 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
     let env = runtime_environment(&backend, plugin_host);
     let store = double_unbound_recording_store(&double).await;
-    lash_core::SessionCommitStore::save_session_meta(
+    lash_core::SessionCatalogStore::admit_session(
         store.as_ref(),
-        lash_core::SessionMeta {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("parked-session"),
-            relation: lash_core::SessionRelation::Root,
-        },
+        &lash_core::testing::store_fixtures::session_request_from_meta_for_test(
+            lash_core::SessionMeta {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: SessionId::from("parked-session"),
+                relation: lash_core::SessionRelation::Root,
+            },
+        ),
     )
     .await
     .expect("save session meta");

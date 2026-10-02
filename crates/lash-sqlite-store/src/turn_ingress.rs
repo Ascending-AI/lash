@@ -16,8 +16,8 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::turn_ingress::{
-    TurnIngressStatements, cancel_requests::CancelRequestStatements,
-    cancellation_bindings::CancellationBindingStatements,
+    TurnIngressStatements, cancel_affected_inputs::CancelAffectedInputStatements,
+    cancel_requests::CancelRequestStatements, cancellation_bindings::CancellationBindingStatements,
     closure_authorizations::ClosureAuthorizationStatements, pending_inputs::PendingInputStatements,
     queued_batches::QueuedBatchStatements, retired_scopes::RetiredScopeStatements,
     run_specs::RunSpecStatements, tool_intent_submissions::ToolIntentSubmissionStatements,
@@ -119,6 +119,7 @@ pub(crate) struct TurnIngressSql {
     pub(crate) cancel_requests: CancelRequestStatements,
     /// `turn_cancel_requests`, SQLite only.
     pub(crate) cancel_requests_sqlite: CancelRequestSqliteStatements,
+    pub(crate) cancel_affected_inputs: CancelAffectedInputStatements,
     /// `turn_cancellation_bindings`, shared.
     pub(crate) bindings: CancellationBindingStatements,
     /// `turn_cancellation_bindings`, SQLite only.
@@ -153,6 +154,7 @@ impl TurnIngressSql {
             queued_batches: QueuedBatchStatements::render(dialect),
             queued_batches_sqlite: QueuedBatchSqliteStatements::render(dialect),
             cancel_requests: CancelRequestStatements::render(dialect),
+            cancel_affected_inputs: CancelAffectedInputStatements::render(dialect),
             cancel_requests_sqlite: CancelRequestSqliteStatements::render(dialect),
             bindings: CancellationBindingStatements::render(dialect),
             bindings_sqlite: CancellationBindingSqliteStatements::render(dialect),

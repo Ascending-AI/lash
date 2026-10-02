@@ -8,8 +8,8 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::turn_ingress::{
-    TurnIngressStatements, cancel_requests::CancelRequestStatements,
-    cancellation_bindings::CancellationBindingStatements,
+    TurnIngressStatements, cancel_affected_inputs::CancelAffectedInputStatements,
+    cancel_requests::CancelRequestStatements, cancellation_bindings::CancellationBindingStatements,
     closure_authorizations::ClosureAuthorizationStatements, pending_inputs::PendingInputStatements,
     queued_batches::QueuedBatchStatements, retired_scopes::RetiredScopeStatements,
     run_specs::RunSpecStatements, tool_intent_submissions::ToolIntentSubmissionStatements,
@@ -34,9 +34,9 @@ pub(crate) use family::TurnIngressPostgresStatements;
 pub(crate) use pending_inputs::PendingInputPostgresStatements;
 pub(crate) use queued_work::QueuedBatchPostgresStatements;
 pub(crate) use turn_cancel::{
-    CancelAffectedInputPostgresStatements, CancelRequestPostgresStatements,
-    CancellationBindingPostgresStatements, ClosureAuthorizationPostgresStatements,
-    RetiredScopePostgresStatements, ToolIntentSubmissionPostgresStatements,
+    CancelRequestPostgresStatements, CancellationBindingPostgresStatements,
+    ClosureAuthorizationPostgresStatements, RetiredScopePostgresStatements,
+    ToolIntentSubmissionPostgresStatements,
 };
 pub(crate) use turn_parks::{TurnParkClockPostgresStatements, TurnParkPostgresStatements};
 
@@ -112,8 +112,8 @@ pub(crate) struct TurnIngressSql {
     pub(crate) cancel_requests: CancelRequestStatements,
     /// `turn_cancel_requests`, PostgreSQL only.
     pub(crate) cancel_requests_postgres: CancelRequestPostgresStatements,
-    /// `turn_cancel_affected_inputs` statements, all of them PostgreSQL-only.
-    pub(crate) cancel_affected_inputs_postgres: CancelAffectedInputPostgresStatements,
+    /// Shared cancellation receipt snapshots.
+    pub(crate) cancel_affected_inputs: CancelAffectedInputStatements,
     /// `turn_cancellation_bindings`, shared.
     pub(crate) bindings: CancellationBindingStatements,
     /// `turn_cancellation_bindings`, PostgreSQL only.
@@ -152,7 +152,7 @@ static TURN_INGRESS_SQL: LazyLock<TurnIngressSql> = LazyLock::new(|| {
         queued_batches_postgres: QueuedBatchPostgresStatements::render(dialect),
         cancel_requests: CancelRequestStatements::render(dialect),
         cancel_requests_postgres: CancelRequestPostgresStatements::render(dialect),
-        cancel_affected_inputs_postgres: CancelAffectedInputPostgresStatements::render(dialect),
+        cancel_affected_inputs: CancelAffectedInputStatements::render(dialect),
         bindings: CancellationBindingStatements::render(dialect),
         bindings_postgres: CancellationBindingPostgresStatements::render(dialect),
         closures: ClosureAuthorizationStatements::render(dialect),

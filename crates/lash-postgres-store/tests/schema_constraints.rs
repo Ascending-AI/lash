@@ -469,8 +469,8 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     // The cancellation receipt's affected-input evidence is structural: the
     // states the parallel-array shape made representable are all rejected.
     sqlx::query(
-        "INSERT INTO lash_turn_cancel_requests (session_id, turn_id, request_id, intent_revision)
-         VALUES ('session', 'turn', 'request', 1)",
+        "INSERT INTO lash_turn_cancel_requests (session_id, turn_id, request_id, disposition, mode, intent_revision)
+         VALUES ('session', 'turn', 'request', 'defer', 'immediate', 1)",
     )
     .execute(&mut connection)
     .await
@@ -732,4 +732,75 @@ async fn dropped_trigger_occurrences_cannot_be_reclaimed_or_have_deliveries() {
             .is_err(),
         "outcome vocabulary is closed"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn turn_cancellation_shape_is_guarded() {
+    let url = lash_postgres_store::testing::required_database_url();
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = PostgresStorage::connect(database.url())
+        .await
+        .expect("open cancellation fixture");
+    let mut conn = storage.pool().acquire().await.expect("acquire connection");
+    sqlx::query("BEGIN")
+        .execute(&mut *conn)
+        .await
+        .expect("begin");
+    sqlx::query("INSERT INTO lash_turn_cancel_requests (session_id, turn_id, request_id, disposition, mode, intent_revision) VALUES ('session', 'turn', 'request', 'defer', 'immediate', 1)").execute(&mut *conn).await.expect("record request");
+    for (column, value, constraint) in [
+        (
+            "disposition",
+            "discard",
+            "ck_turn_cancel_requests_disposition",
+        ),
+        ("mode", "later", "ck_turn_cancel_requests_mode"),
+        (
+            "intent_revision",
+            "0",
+            "ck_turn_cancel_requests_intent_revision",
+        ),
+    ] {
+        assert_check_rejects(
+            &mut conn,
+            &format!("UPDATE lash_turn_cancel_requests SET {column} = '{value}'"),
+            constraint,
+        )
+        .await;
+    }
+
+    for (ordinal, kind, batch, constraint) in [
+        (
+            -1,
+            "input",
+            "NULL",
+            "ck_turn_cancel_affected_inputs_ordinal",
+        ),
+        (
+            0,
+            "unknown",
+            "NULL",
+            "ck_turn_cancel_affected_inputs_item_kind",
+        ),
+        (
+            0,
+            "process_wake",
+            "NULL",
+            "ck_turn_cancel_affected_inputs_item_kind",
+        ),
+        (
+            0,
+            "input",
+            "'batch'",
+            "ck_turn_cancel_affected_inputs_item_kind",
+        ),
+    ] {
+        assert_check_rejects(&mut conn, &format!("INSERT INTO lash_turn_cancel_affected_inputs (session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind, batch_id) VALUES ('session', 'turn', {ordinal}, 'item', 'defer', '{{}}', '{kind}', {batch})"), constraint).await;
+    }
+    assert_integrity_rejects(&mut conn, "INSERT INTO lash_turn_cancel_affected_inputs (session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind, batch_id) VALUES ('session', 'turn', 0, 'item', 'defer', '{}', 'input', NULL), ('session', 'turn', 1, 'item', 'defer', '{}', 'input', NULL)", |error| error.kind() == sqlx::error::ErrorKind::UniqueViolation, "duplicate receipt").await;
+    assert_integrity_rejects(&mut conn, "INSERT INTO lash_turn_cancel_affected_inputs (session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind, batch_id) VALUES ('missing', 'turn', 0, 'item', 'defer', '{}', 'input', NULL)", |error| error.kind() == sqlx::error::ErrorKind::ForeignKeyViolation, "orphan receipt").await;
+    sqlx::query("ROLLBACK")
+        .execute(&mut *conn)
+        .await
+        .expect("rollback");
 }

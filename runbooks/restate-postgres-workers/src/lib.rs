@@ -288,7 +288,7 @@ pub async fn reset_e2e_rows(pool: &PgPool) -> Result<()> {
     }
     for session_id in [DEFAULT_SESSION_ID, FRAME_CRASH_SESSION_ID] {
         for statement in [
-            "DELETE FROM lash_sessions WHERE session_id = $1",
+            "DELETE FROM lash_session_head WHERE session_id = $1",
             "DELETE FROM lash_graph_nodes WHERE session_id = $1",
             "DELETE FROM lash_usage_facts WHERE owner_kind = 'session' AND owner_id = $1",
             "DELETE FROM lash_usage_runs WHERE owner_kind = 'session' AND owner_id = $1",

@@ -16,8 +16,8 @@ use lash_core_execution::store::fleet_finalize::{
     RetainedDeployment,
 };
 use lash_core_execution::{
-    FleetFormat, FleetFormatStore, SessionId, SessionMeta, SessionRelation, StoreError, StoreSet,
-    TriggerStore as _,
+    FleetFormat, FleetFormatStore, SessionCatalogStore as _, SessionId, SessionMeta,
+    SessionRelation, StoreError, StoreSet, TriggerStore as _,
 };
 use rusqlite::Connection;
 
@@ -135,9 +135,13 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
         )
         .expect("seed a receipt the trigger writer would prune");
     let core = set.process_env_store();
-    core.save_session_meta(session_meta("before-finalize"))
-        .await
-        .expect("a writer before finalize commits");
+    core.admit_session(
+        &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+            session_meta("before-finalize"),
+        ),
+    )
+    .await
+    .expect("a writer before finalize commits");
     let sessions_before = count(&location, SqliteDatabase::DurableCore, "session_meta");
     let mut writers = Vec::new();
     for database in SqliteDatabase::ALL {
@@ -154,7 +158,11 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
     .expect("finalize");
 
     let core_error = core
-        .save_session_meta(session_meta("after-finalize"))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                session_meta("after-finalize"),
+            ),
+        )
         .await
         .expect_err("the durable-core writer is fenced");
     assert!(is_fenced(&core_error, next), "{core_error}");
@@ -390,7 +398,14 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
     let pause = injector.pause(crate::testing::SqliteFaultPoint::AfterFence);
     let paused = tokio::spawn({
         let core = std::sync::Arc::clone(&core);
-        async move { core.save_session_meta(session_meta("straddles")).await }
+        async move {
+            core.admit_session(
+                &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                    session_meta("straddles"),
+                ),
+            )
+            .await
+        }
     });
     pause.wait_until_reached().await;
 
@@ -426,7 +441,11 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
         "the straddling writer's row is kept"
     );
     let error = core
-        .save_session_meta(session_meta("after"))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                session_meta("after"),
+            ),
+        )
         .await
         .expect_err("the next writer is fenced");
     assert!(is_fenced(&error, next), "{error}");
@@ -457,7 +476,11 @@ async fn sqlite_fence_observes_a_writable_move_of_f() {
         )
         .expect("another build finalizes");
     store
-        .save_session_meta(session_meta("under-next"))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                session_meta("under-next"),
+            ),
+        )
         .await
         .expect("a writable move of F is admitted");
     assert_eq!(
@@ -474,7 +497,11 @@ async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
     let factory = set.session_store_factory();
     let session = SessionId::from("fenced-delete");
     factory
-        .save_session_meta(session_meta(session.as_str()))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                session_meta(session.as_str()),
+            ),
+        )
         .await
         .expect("save session");
     let next = FleetFormat::writable().max() + 1;
@@ -902,9 +929,13 @@ async fn a_stale_writer_is_fenced_after_finalize() {
         assert_eq!(fleet(database), i64::from(writable.min()), "{database:?}");
     }
     let core = set.process_env_store();
-    core.save_session_meta(session_meta("before-finalize"))
-        .await
-        .expect("this build writes while finalize is refused");
+    core.admit_session(
+        &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+            session_meta("before-finalize"),
+        ),
+    )
+    .await
+    .expect("this build writes while finalize is refused");
     let mut writers = Vec::new();
     for database in SqliteDatabase::ALL {
         writers.push((database, writer(&location, database).await));
@@ -928,7 +959,11 @@ async fn a_stale_writer_is_fenced_after_finalize() {
 
     let sessions = count(&location, SqliteDatabase::DurableCore, "session_meta");
     let error = core
-        .save_session_meta(session_meta("after-finalize"))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                session_meta("after-finalize"),
+            ),
+        )
         .await
         .expect_err("the durable-core writer is fenced");
     assert!(is_fenced(&error, next), "{error}");

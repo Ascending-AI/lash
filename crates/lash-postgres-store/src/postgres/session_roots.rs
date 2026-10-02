@@ -249,17 +249,18 @@ async fn release_root_rows_conn(
         return Ok(());
     }
     // `select_request` yields request_id, origin, reason, disposition, mode.
-    let request: Option<crate::runtime_persistence::turn_cancel::TurnCancelRequestRow> =
-        sqlx::query_as(sql.cancel_requests_postgres.select_request.sql())
-            .bind(session_id.as_str())
-            .bind(root.as_str())
-            .fetch_optional(&mut *conn)
-            .await
-            .map_err(store_sqlx_error)?;
+    let request: Option<
+        lash_core_execution::store_backend_support::turn_cancel::TurnCancelRequestRow,
+    > = sqlx::query_as(sql.cancel_requests.select_request.sql())
+        .bind(session_id.as_str())
+        .bind(root.as_str())
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(store_sqlx_error)?;
     let disposition = request
         .as_ref()
         .map(|row| {
-            crate::runtime_persistence::turn_cancel::turn_cancel_undelivered_from_wire(&row.3)
+            lash_core_execution::store_backend_support::turn_cancel::turn_cancel_undelivered_from_wire(&row.3)
         })
         .transpose()?
         .unwrap_or(lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer);
@@ -448,18 +449,19 @@ async fn write_unanswered_root_end_tx(
     let session = &target.session;
     let root = &target.root;
     // `select_request` yields request_id, origin, reason, disposition, mode.
-    let request: Option<crate::runtime_persistence::turn_cancel::TurnCancelRequestRow> =
-        sqlx::query_as(
-            crate::turn_ingress::turn_ingress_sql()
-                .cancel_requests_postgres
-                .select_request
-                .sql(),
-        )
-        .bind(session.as_str())
-        .bind(root.as_str())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    let request: Option<
+        lash_core_execution::store_backend_support::turn_cancel::TurnCancelRequestRow,
+    > = sqlx::query_as(
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_requests
+            .select_request
+            .sql(),
+    )
+    .bind(session.as_str())
+    .bind(root.as_str())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     let cause = cause(request.map(|row| row.0));
     let terminal = RootTerminal {
         session_id: session.clone(),

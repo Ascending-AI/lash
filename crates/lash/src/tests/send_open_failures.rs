@@ -135,15 +135,13 @@ async fn a_send_to_a_catalog_row_with_no_head_is_answered_creation_unrecorded() 
     const ID: &str = "row-with-no-head";
     let double = restate_double(SEED).await;
     let core = builder(double.lash_backend()).build(crate::testing::runtime_lease_owner())?;
-    core.store_factory
-        .save_session_meta(lash_core::SessionMeta {
-            session_id: SessionId::from(ID),
-            relation: lash_core::SessionRelation::Root,
-            pending_observer_intents: Vec::new(),
-            owning_process_id: None,
-        })
-        .await
-        .map_err(EmbedError::Store)?;
+    crate::tests::create_catalog_session(&core, ID).await?;
+    lash_core::store::StoreTestSupport::delete_session_head_for_testing(
+        double.stores().session_store_factory().as_ref(),
+        &SessionId::from(ID),
+    )
+    .await
+    .map_err(EmbedError::Store)?;
     let error = drive_refusal(ID, refusal_of(&core, &double, ID).await);
     assert_eq!(
         error.code,

@@ -30,7 +30,7 @@ pub async fn session_metadata_round_trips(store: Arc<dyn RuntimeStore>) {
         relation: SessionRelation::Root,
     };
     store
-        .save_session_meta(meta.clone())
+        .settle_observer_intents(&meta.session_id, meta.pending_observer_intents.clone())
         .await
         .expect("save session meta");
     let loaded = store
@@ -41,97 +41,87 @@ pub async fn session_metadata_round_trips(store: Arc<dyn RuntimeStore>) {
     assert_eq!(loaded, meta);
 }
 
-/// The recorded lineage of a session is a durable fact (FIG-1559), so the
-/// metadata writer may not quietly replace it.
-///
-/// `admit_session` already refuses a rebind that declares a different
-/// lineage. `save_session_meta` replaces the same relation columns, and its one
-/// production caller round-trips the metadata it loaded, so a write that
-/// carries a different parent, a fork source, or a bare root over a recorded
-/// lineage is a rewrite and is refused with
-/// [`StoreError::SessionRelationMismatch`](crate::StoreError::SessionRelationMismatch)
-/// on every backend, leaving the row untouched. Admission may read
-/// [`SessionRelation::Root`] as "no claim"; a write may not, because the row it
-/// would record replaces the recorded lineage with that root.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimeStore>) {
-    // The fixture admitted this session as a root; claiming a parent for it is
-    // the conflict `admit_session` already refuses on a rebind.
-    let recorded = SessionMeta {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("root"),
-        relation: SessionRelation::Root,
+/// Settling observers preserves the relation, creation provenance and process owner.
+#[expect(clippy::expect_used, reason = "conformance fixture")]
+pub async fn observer_settlement_preserves_creation_facts(store: Arc<dyn RuntimeStore>) {
+    let session_id = SessionId::from("observer-creation-facts");
+    let relation = SessionRelation::Child {
+        parent_session_id: SessionId::from("root"),
+        caused_by: Some(crate::CausalRef::Turn {
+            session_id: SessionId::from("root"),
+            turn_id: TurnId::from("creation"),
+        }),
     };
-    assert_eq!(
-        store
-            .load_session_meta(&SessionId::from("root"))
-            .await
-            .expect("load the admitted session metadata")
-            .expect("the fixture admits this session before the law runs"),
-        recorded,
-        "this law needs the admitted root relation as its precondition"
+    let mut request = lash_core::testing::store_fixtures::session_store_request(
+        &session_id,
+        "conformance-model",
+        relation.clone(),
     );
-
-    // The round trip the production caller performs: the same relation, with
-    // its observer intents settled.
-    let settled = SessionMeta {
-        owning_process_id: None,
-        pending_observer_intents: vec![crate::SessionObserverIntent::host_requested(
-            crate::ProcessId::fixture("observer-a"),
-        )],
-        ..recorded.clone()
-    };
+    request.owning_process_id = Some(crate::ProcessId::fixture("owner"));
+    request.pending_observer_intents = vec![crate::SessionObserverIntent::host_requested(
+        crate::ProcessId::fixture("observer"),
+    )];
     store
-        .save_session_meta(settled.clone())
+        .admit_session(&request)
         .await
-        .expect("a save that keeps the recorded lineage still writes");
-
-    for (label, relation) in [
-        (
-            "a parent",
-            SessionRelation::Child {
-                parent_session_id: SessionId::from("other-parent"),
-                caused_by: None,
-            },
-        ),
-        (
-            "a fork source",
-            SessionRelation::Fork {
-                source_session_id: SessionId::from("other-source"),
-                source_node_id: crate::NodeId::from("other-node"),
-            },
-        ),
-    ] {
-        let error = store
-            .save_session_meta(SessionMeta {
-                owning_process_id: None,
-                relation,
-                ..settled.clone()
-            })
-            .await
-            .expect_err("a metadata write must not rewrite the recorded relation");
-        assert!(
-            matches!(
-                error,
-                crate::StoreError::SessionRelationMismatch { ref session_id, .. }
-                    if session_id.as_str() == "root"
-            ),
-            "rewriting the recorded relation to claim {label} must be refused as a relation mismatch, got: {error}"
-        );
-    }
-
+        .expect("admit creation facts");
+    let recorded = store
+        .load_session_meta(&session_id)
+        .await
+        .expect("load creation")
+        .expect("admitted row");
+    let remaining = vec![crate::SessionObserverIntent::host_requested(
+        crate::ProcessId::fixture("remaining-observer"),
+    )];
+    store
+        .settle_observer_intents(&session_id, remaining.clone())
+        .await
+        .expect("retain unresolved observer");
+    let mut expected_pending = recorded.clone();
+    expected_pending.pending_observer_intents = remaining.clone();
     assert_eq!(
         store
-            .load_session_meta(&SessionId::from("root"))
+            .load_session_meta(&session_id)
             .await
-            .expect("load session meta")
-            .expect("session meta present"),
-        settled,
-        "a refused rewrite must leave the recorded metadata untouched"
+            .expect("read pending")
+            .expect("row retained"),
+        expected_pending
+    );
+    store
+        .settle_observer_intents(&session_id, remaining)
+        .await
+        .expect("replay settlement");
+    store
+        .settle_observer_intents(&session_id, Vec::new())
+        .await
+        .expect("clear observers");
+    let mut expected = recorded;
+    expected.pending_observer_intents.clear();
+    assert_eq!(
+        store
+            .load_session_meta(&session_id)
+            .await
+            .expect("read settled")
+            .expect("row retained"),
+        expected
+    );
+}
+
+/// Observer settlement must never create metadata without session admission.
+#[expect(clippy::expect_used, reason = "conformance fixture")]
+pub async fn observer_settlement_requires_admission(store: Arc<dyn RuntimeStore>) {
+    let session_id = SessionId::from("unadmitted-observer-session");
+    let result = store.settle_observer_intents(&session_id, Vec::new()).await;
+    assert!(
+        matches!(result, Err(StoreError::SessionNotFound { session_id: ref missing }) if missing == session_id),
+        "observer settlement must refuse missing admission, got {result:?}"
+    );
+    assert!(
+        store
+            .load_session_meta(&session_id)
+            .await
+            .expect("read missing session")
+            .is_none()
     );
 }
 
@@ -319,7 +309,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
     };
     factory
         .open
-        .save_session_meta(meta.clone())
+        .settle_observer_intents(&meta.session_id, meta.pending_observer_intents.clone())
         .await
         .expect("save meta");
     let mut state = RuntimeSessionState {

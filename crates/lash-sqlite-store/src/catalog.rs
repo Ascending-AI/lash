@@ -23,13 +23,8 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                 let fleet_format = tx.fleet();
                 let outcome = (|| {
                     crate::persistence::ensure_session_not_deleted_conn(tx, &meta.session_id)?;
-                    let inserted = session_meta::write_session_meta(
-                        tx,
-                        &meta,
-                        session_meta::SessionMetaWrite::Insert,
-                        created_at_ms,
-                        fleet_format,
-                    )?;
+                    let inserted =
+                        session_meta::write_session_meta(tx, &meta, created_at_ms, fleet_format)?;
                     if inserted {
                         // The creator's config is baked in with the catalog
                         // row, in this transaction (FIG-4099).

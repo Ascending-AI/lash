@@ -199,7 +199,7 @@ pub fn head_publication_verdict(
 ///   why one does not exist there.
 /// * **PostgreSQL** — the commit takes `pg_advisory_xact_lock` on the session
 ///   id before any read, then `SELECT head_revision … FOR UPDATE`. The
-///   conditional upsert keeps its `WHERE lash_sessions.head_revision = :read`
+///   conditional upsert keeps its `WHERE lash_session_head.head_revision = :read`
 ///   predicate as the backstop for the concurrent *first* commit, where the
 ///   placeholder row is created inside the same transaction.
 ///

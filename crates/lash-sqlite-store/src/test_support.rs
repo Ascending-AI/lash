@@ -126,6 +126,30 @@ impl StoreTestSupport for SqliteStore {
             .map_err(sqlite_error)
     }
 
+    async fn delete_session_head_for_testing(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), StoreError> {
+        let session_id = session_id.clone();
+        self.conn
+            .write(move |tx| {
+                let changed = crate::conn::cached_execute(
+                    tx,
+                    crate::session_sql::session_sql()
+                        .head
+                        .delete_by_session
+                        .sql(),
+                    params![session_id.as_str()],
+                )?;
+                if changed != 1 {
+                    return Err(rusqlite::Error::QueryReturnedNoRows);
+                }
+                Ok(())
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
     async fn set_head_current_frame_for_testing(
         &self,
         session_id: &SessionId,
@@ -136,7 +160,7 @@ impl StoreTestSupport for SqliteStore {
             .write(move |tx| {
                 let head_json: String = tx.query_row(
                     crate::session_sql::session_sql()
-                        .head
+                        .head_sqlite
                         .select_head_json
                         .sql(),
                     params![session_id.as_str()],
@@ -170,7 +194,7 @@ impl StoreTestSupport for SqliteStore {
             .write(move |tx| {
                 let head_json: String = tx.query_row(
                     crate::session_sql::session_sql()
-                        .head
+                        .head_sqlite
                         .select_head_json
                         .sql(),
                     params![session_id.as_str()],

@@ -244,6 +244,8 @@ pub(crate) use session_identity::{
     OpenAgentFrameOutcome, OpenAgentFrameRequest, SessionStoreCreateRequest,
 };
 #[allow(unused_imports)]
+pub(crate) use store::SessionAdmission;
+#[allow(unused_imports)]
 pub(crate) use store::attachment_referrers::{
     AttachmentCondemnation, AttachmentDeleteArming, AttachmentReferrers, AttachmentWrite,
     AttachmentWriteFence, AttachmentWritePermit,
@@ -252,8 +254,6 @@ pub(crate) use store::attachment_referrers::{
 pub(crate) use store::commit_budget::{CommitBudget, CommitBudgetLimit};
 #[allow(unused_imports)]
 pub(crate) use store::runtime_commit::{RuntimeCommit, RuntimeTurnCommitStamp};
-#[allow(unused_imports)]
-pub(crate) use store::{SessionAdmission, SessionBinding};
 #[allow(unused_imports)]
 pub(crate) use turn_failure_evidence::ChargeSafetyRefusalEvidence;
 #[allow(unused_imports)]

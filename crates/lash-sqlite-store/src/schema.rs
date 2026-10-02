@@ -406,10 +406,34 @@ CREATE INDEX IF NOT EXISTS idx_runtime_turn_commits_failure_evidence
 
 CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     session_id TEXT NOT NULL,
-    turn_id    TEXT NOT NULL,
-    record_json TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    origin TEXT,
+    reason TEXT,
+    disposition TEXT NOT NULL CONSTRAINT ck_turn_cancel_requests_disposition CHECK (disposition IN ('defer', 'drop')),
+    mode TEXT NOT NULL CONSTRAINT ck_turn_cancel_requests_mode CHECK (mode IN ('immediate', 'after_step')),
     intent_revision INTEGER NOT NULL CONSTRAINT ck_turn_cancel_requests_intent_revision CHECK (intent_revision >= 1),
     PRIMARY KEY (session_id, turn_id)
+);
+
+-- Affected-input evidence for a cancellation receipt, one row per input.
+-- `input_json` deliberately snapshots the pending-input payload at
+-- disposition time: the pending row is vacuum-eligible once settled, and the
+-- receipt must stay readable afterwards. The (session_id, turn_id, item_kind, input_id)
+-- uniqueness makes duplicate evidence impossible rather than checked.
+CREATE TABLE IF NOT EXISTS turn_cancel_affected_inputs (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CONSTRAINT ck_turn_cancel_affected_inputs_ordinal CHECK (ordinal >= 0),
+    input_id TEXT NOT NULL,
+    disposition TEXT NOT NULL CONSTRAINT ck_turn_cancel_affected_inputs_disposition CHECK (disposition IN ('defer', 'drop')),
+    input_json TEXT NOT NULL,
+    item_kind TEXT NOT NULL,
+    batch_id TEXT,
+    CONSTRAINT ck_turn_cancel_affected_inputs_item_kind CHECK ((item_kind = 'input' AND batch_id IS NULL) OR (item_kind = 'process_wake' AND batch_id IS NOT NULL AND input_id = batch_id AND disposition = 'defer')),
+    PRIMARY KEY (session_id, turn_id, ordinal),
+    UNIQUE (session_id, turn_id, item_kind, input_id),
+    FOREIGN KEY (session_id, turn_id) REFERENCES turn_cancel_requests (session_id, turn_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS turn_cancellation_bindings (

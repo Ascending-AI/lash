@@ -155,7 +155,6 @@ pub const TABLES: &[&str] = &[
     session::meta_pending_observer_intents::TABLE,
     session::node_anchors::TABLE,
     session::release_stamp::TABLE,
-    session::sessions::TABLE,
     session::turn_commits::TABLE,
     session_roots::control_intents::TABLE,
     session_roots::root_inputs::TABLE,

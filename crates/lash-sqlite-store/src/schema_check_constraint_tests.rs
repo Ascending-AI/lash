@@ -320,3 +320,84 @@ fn sqlite_drive_authority_check_admits_only_real_drive_states() {
             .unwrap_or_else(|error| panic!("{case} is a real drive state: {error}"));
     }
 }
+
+#[test]
+fn turn_cancellation_shape_is_guarded() {
+    let conn = Connection::open_in_memory().expect("open cancellation fixture");
+    conn.execute_batch(SCHEMA).expect("create schema");
+    conn.execute_batch("PRAGMA foreign_keys = ON")
+        .expect("enable foreign keys");
+    conn.execute_batch("INSERT INTO turn_cancel_requests (session_id, turn_id, request_id, disposition, mode, intent_revision) VALUES ('session', 'turn', 'request', 'defer', 'immediate', 1)").expect("record relational request");
+    for (column, value, constraint) in [
+        (
+            "disposition",
+            "discard",
+            "ck_turn_cancel_requests_disposition",
+        ),
+        ("mode", "later", "ck_turn_cancel_requests_mode"),
+        (
+            "intent_revision",
+            "0",
+            "ck_turn_cancel_requests_intent_revision",
+        ),
+    ] {
+        assert_check_rejects(
+            &conn,
+            &format!("UPDATE turn_cancel_requests SET {column} = '{value}'"),
+            constraint,
+        );
+    }
+    for (ordinal, kind, batch, constraint) in [
+        (
+            -1,
+            "input",
+            "NULL",
+            "ck_turn_cancel_affected_inputs_ordinal",
+        ),
+        (
+            0,
+            "unknown",
+            "NULL",
+            "ck_turn_cancel_affected_inputs_item_kind",
+        ),
+        (
+            0,
+            "process_wake",
+            "NULL",
+            "ck_turn_cancel_affected_inputs_item_kind",
+        ),
+        (
+            0,
+            "input",
+            "'batch'",
+            "ck_turn_cancel_affected_inputs_item_kind",
+        ),
+    ] {
+        assert_check_rejects(
+            &conn,
+            &format!(
+                "INSERT INTO turn_cancel_affected_inputs (session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind, batch_id) VALUES ('session', 'turn', {ordinal}, 'item', 'defer', '{{}}', '{kind}', {batch})"
+            ),
+            constraint,
+        );
+    }
+    conn.execute_batch("INSERT INTO turn_cancel_affected_inputs (session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind, batch_id) VALUES ('session', 'turn', 0, 'item', 'defer', '{}', 'input', NULL)").expect("record snapshot");
+    let duplicate = conn.execute_batch("INSERT INTO turn_cancel_affected_inputs (session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind, batch_id) VALUES ('session', 'turn', 1, 'item', 'defer', '{}', 'input', NULL)").expect_err("duplicate receipt must be refused");
+    assert_eq!(
+        duplicate.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::ConstraintViolation)
+    );
+    let orphan = conn.execute_batch("INSERT INTO turn_cancel_affected_inputs (session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind, batch_id) VALUES ('missing', 'turn', 0, 'item', 'defer', '{}', 'input', NULL)").expect_err("orphan receipt must be refused");
+    assert!(orphan.to_string().contains("FOREIGN KEY"));
+    conn.execute_batch("DELETE FROM turn_cancel_requests")
+        .expect("delete owner");
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM turn_cancel_affected_inputs",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .expect("count snapshots"),
+        0
+    );
+}

@@ -73,7 +73,7 @@ macro_rules! runtime_store_operations {
                 [session] fn committed_turn_exists(&self, session_id: &SessionId, turn_id: &crate::TurnId) -> Result<bool, StoreError>;
                 [carried commit] fn commit_runtime_state(&self, commit: RuntimeCommit) -> Result<RuntimeCommitReceipt, StoreError>;
                 [carried fence] fn raise_pending_follow_on_attempts(&self, fence: &DriveFence, follow_on_turn_id: &crate::TurnId) -> Result<PendingFollowOn, StoreError>;
-                [carried meta] fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
+                [session] fn settle_observer_intents(&self, session_id: &SessionId, remaining: Vec<crate::SessionObserverIntent>) -> Result<(), StoreError>;
                 [session] fn load_session_meta(&self, session_id: &SessionId) -> Result<Option<SessionMeta>, StoreError>;
                 [session] fn load_session_meta_for_commit(&self, session_id: &SessionId) -> Result<Option<SessionMeta>, StoreError>;
                 [carried park] fn record_turn_park(&self, park: &TurnParkWrite) -> Result<TurnPark, StoreError>;

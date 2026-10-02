@@ -151,16 +151,16 @@ async fn a_retyped_column_is_rejected() {
 #[tokio::test]
 async fn a_widened_nullability_is_rejected() {
     assert_mutation_is_rejected(
-        "ALTER TABLE lash_sessions ALTER COLUMN head_json DROP NOT NULL",
+        "ALTER TABLE lash_session_head ALTER COLUMN head_json DROP NOT NULL",
         &[
             "COLUMN DRIFT",
-            "lash_sessions.head_json: expected text not-null, found text nullable",
+            "lash_session_head.head_json: expected text not-null, found text nullable",
         ],
         |finding| {
             matches!(
                 finding,
                 SchemaFinding::ColumnMismatch { table, expected, .. }
-                    if table == "lash_sessions" && expected.name == "head_json"
+                    if table == "lash_session_head" && expected.name == "head_json"
             )
         },
     )
@@ -229,20 +229,20 @@ async fn an_identity_always_column_lash_writes_explicitly_is_rejected() {
 #[tokio::test]
 async fn a_stored_generated_column_lash_writes_explicitly_is_rejected() {
     assert_mutation_is_rejected(
-        "ALTER TABLE lash_sessions DROP COLUMN head_revision;
-         ALTER TABLE lash_sessions
+        "ALTER TABLE lash_session_head DROP COLUMN head_revision;
+         ALTER TABLE lash_session_head
              ADD COLUMN head_revision BIGINT NOT NULL
              GENERATED ALWAYS AS (length(head_json)::bigint) STORED",
         &[
             "COLUMN DRIFT",
-            "lash_sessions.head_revision: expected bigint not-null default, found bigint \
+            "lash_session_head.head_revision: expected bigint not-null default, found bigint \
              not-null generated",
         ],
         |finding| {
             matches!(
                 finding,
                 SchemaFinding::ColumnMismatch { table, found, .. }
-                    if table == "lash_sessions"
+                    if table == "lash_session_head"
                         && found.value_source == ColumnValueSource::Generated
             )
         },
@@ -513,9 +513,9 @@ async fn an_alter_built_equivalent_schema_opens_clean() {
             // Different physical column order, plus an attnum gap from the drop.
             // Dropping the column takes its index with it; the host rebuilds it
             // under its own name.
-            "ALTER TABLE lash_sessions DROP COLUMN leaf_node_id;
-             ALTER TABLE lash_sessions ADD COLUMN leaf_node_id TEXT;
-             CREATE INDEX host_named_leaf_index ON lash_sessions(leaf_node_id);
+            "ALTER TABLE lash_session_head DROP COLUMN leaf_node_id;
+             ALTER TABLE lash_session_head ADD COLUMN leaf_node_id TEXT;
+             CREATE INDEX host_named_leaf_index ON lash_session_head(leaf_node_id);
 
              -- Host-chosen constraint names over the same columns.
              ALTER TABLE lash_trigger_subscriptions

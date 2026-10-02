@@ -4,7 +4,6 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
-pub(crate) use lash_core_execution::store_backend_support::SessionMetaWrite;
 use lash_core_execution::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRelation};
 
 const SESSION_META_CODEC: SessionMetaCodec = SessionMetaCodec::new("SQLite INTEGER");
@@ -63,15 +62,11 @@ pub(crate) fn decode_catalog_relation(
 pub(crate) fn write_session_meta(
     conn: &Connection,
     meta: &SessionMeta,
-    mode: SessionMetaWrite,
     created_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<bool, StoreError> {
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
-    let sql = match mode {
-        SessionMetaWrite::Insert => session_sql().meta_sqlite.insert.sql(),
-        SessionMetaWrite::Replace => session_sql().meta_sqlite.upsert.sql(),
-    };
+    let sql = session_sql().meta_sqlite.insert.sql();
     let changed = conn
         .execute(
             sql,
@@ -104,18 +99,28 @@ pub(crate) fn write_session_meta(
     if changed == 0 {
         return Ok(false);
     }
+    settle_observer_intents_conn(conn, &meta.session_id, &meta.pending_observer_intents)?;
+    Ok(true)
+}
+
+/// Replace the observer selector inside the caller's guarded transaction.
+pub(crate) fn settle_observer_intents_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    remaining: &[lash_core_execution::facade_support::SessionObserverIntent],
+) -> Result<(), StoreError> {
     crate::conn::cached_execute(
         conn,
         session_sql().observer_intents.delete_by_session.sql(),
-        params![stored.session_id.as_str()],
+        params![session_id.as_str()],
     )
     .map_err(sqlite_error)?;
-    for (process_index, intent) in stored.pending_observer_intents.iter().enumerate() {
+    for (process_index, intent) in remaining.iter().enumerate() {
         crate::conn::cached_execute(
             conn,
             session_sql().observer_intents.insert.sql(),
             params![
-                stored.session_id.as_str(),
+                session_id.as_str(),
                 SessionMetaCodec::write_index(
                     SESSION_META_CODEC,
                     process_index,
@@ -126,13 +131,10 @@ pub(crate) fn write_session_meta(
         )
         .map_err(sqlite_error)?;
     }
-    Ok(true)
+    Ok(())
 }
 
-/// Read the durable lineage recorded for `session_id`, if the row exists.
-///
-/// Admission uses this inside its own transaction, so it must not open a
-/// nested one: it selects the four lineage columns and nothing else.
+/// Read only the immutable lineage for admission's rebind guard.
 pub(crate) fn load_recorded_lineage(
     conn: &Connection,
     session_id: &SessionId,

@@ -91,10 +91,10 @@ async fn postgres_opens_an_expanded_catalog_under_its_floor() {
     let scratch = Scratch::new(&url).await;
     scratch
         .apply(
-            "ALTER TABLE lash_sessions ADD COLUMN next_release_note TEXT;
+            "ALTER TABLE lash_session_head ADD COLUMN next_release_note TEXT;
          CREATE TABLE next_release_table (id BIGINT PRIMARY KEY);
-         CREATE VIEW next_release_view AS SELECT session_id FROM lash_sessions;
-         CREATE INDEX next_release_lookup ON lash_sessions(next_release_note);",
+         CREATE VIEW next_release_view AS SELECT session_id FROM lash_session_head;
+         CREATE INDEX next_release_lookup ON lash_session_head(next_release_note);",
         )
         .await;
     // A release past this build's own expanded the catalog and kept this
@@ -153,27 +153,27 @@ async fn postgres_refuses_each_unsafe_addition() {
     for (kind, ddl) in [
         (
             "required column",
-            "ALTER TABLE lash_sessions ADD COLUMN unsafe_required INTEGER NOT NULL",
+            "ALTER TABLE lash_session_head ADD COLUMN unsafe_required INTEGER NOT NULL",
         ),
         (
             "CHECK",
-            "ALTER TABLE lash_sessions ADD CONSTRAINT unsafe_check CHECK (head_revision >= 0) NOT VALID",
+            "ALTER TABLE lash_session_head ADD CONSTRAINT unsafe_check CHECK (head_revision >= 0) NOT VALID",
         ),
         (
             "UNIQUE",
-            "ALTER TABLE lash_sessions ADD CONSTRAINT unsafe_unique UNIQUE (head_json)",
+            "ALTER TABLE lash_session_head ADD CONSTRAINT unsafe_unique UNIQUE (head_json)",
         ),
         (
             "FOREIGN KEY",
-            "ALTER TABLE lash_sessions ADD CONSTRAINT unsafe_fk FOREIGN KEY (session_id) REFERENCES lash_sessions(session_id) NOT VALID",
+            "ALTER TABLE lash_session_head ADD CONSTRAINT unsafe_fk FOREIGN KEY (session_id) REFERENCES lash_session_head(session_id) NOT VALID",
         ),
         (
             "EXCLUDE",
-            "ALTER TABLE lash_sessions ADD CONSTRAINT unsafe_exclude EXCLUDE USING gist (int8range(head_revision, head_revision + 1) WITH &&)",
+            "ALTER TABLE lash_session_head ADD CONSTRAINT unsafe_exclude EXCLUDE USING gist (int8range(head_revision, head_revision + 1) WITH &&)",
         ),
         (
             "trigger",
-            "CREATE FUNCTION unsafe_trigger_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE TRIGGER unsafe_trigger BEFORE INSERT ON lash_sessions FOR EACH ROW EXECUTE FUNCTION unsafe_trigger_fn()",
+            "CREATE FUNCTION unsafe_trigger_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE TRIGGER unsafe_trigger BEFORE INSERT ON lash_session_head FOR EACH ROW EXECUTE FUNCTION unsafe_trigger_fn()",
         ),
     ] {
         let scratch = Scratch::new(&url).await;

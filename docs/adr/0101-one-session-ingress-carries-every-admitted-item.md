@@ -60,7 +60,7 @@ Evidence: `crates/lash-core-execution/src/runtime/process/registry.rs:112`,
 ### 3. The pending follow-on lives on the session head
 
 A frame switch records `PendingFollowOn` atomically with its frame pointer in
-`pending_follow_on_json` on `session_head` or `lash_sessions`. It contains the
+`pending_follow_on_json` on `session_head`. It contains the
 follow-on turn id, frame id, task, options, resolved run, chain depth, recovery
 count, and the recovery bound of its logical run. It is not a queue item.
 

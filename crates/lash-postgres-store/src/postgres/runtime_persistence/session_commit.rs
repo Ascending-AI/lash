@@ -262,7 +262,7 @@ impl SessionCommitStore for PostgresStore {
             .filter(|pending| pending.is_turn(follow_on_turn_id))
             .ok_or_else(not_pending)?;
         let raised = pending.raised()?;
-        let updated = sqlx::query(session_sql().head.raise_pending_follow_on.sql())
+        let updated = sqlx::query(session_sql().head_postgres.raise_pending_follow_on.sql())
             .bind(session_id.as_str())
             .bind(
                 lash_core_execution::store::pending_follow_on::encode_pending_follow_on(Some(
@@ -319,31 +319,30 @@ impl SessionCommitStore for PostgresStore {
         }
     }
 
-    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        let created_at_ms = self.clock.timestamp_ms();
+    async fn settle_observer_intents(
+        &self,
+        session_id: &SessionId,
+        remaining: Vec<lash_core_execution::facade_support::SessionObserverIntent>,
+    ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
-        ensure_session_not_deleted_tx(&mut tx, &meta.session_id).await?;
-        // FIG-3045: the recorded lineage is write-once, so a metadata replace
-        // that moves it is refused here exactly as admission refuses a
-        // conflicting rebind.
-        if let Some(recorded) =
-            crate::session_meta::load_recorded_lineage_tx(&mut tx, &meta.session_id).await?
-        {
-            lash_core_execution::store_backend_support::guard_session_meta_relation_rewrite(
-                &meta.session_id,
-                &recorded,
-                &meta.relation,
-            )?;
-        }
-        crate::session_meta::write_session_meta_tx(
-            &mut tx,
-            &meta,
-            crate::session_meta::SessionMetaWrite::Replace,
-            created_at_ms,
-            self.fence.fleet(),
+        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
+        let present: Option<i32> = sqlx::query_scalar(
+            crate::session_sql::session_sql()
+                .meta_postgres
+                .select_state_version_for_update
+                .sql(),
         )
-        .await?;
+        .bind(session_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if present.is_none() {
+            return Err(StoreError::SessionNotFound {
+                session_id: session_id.clone(),
+            });
+        }
+        crate::session_meta::settle_observer_intents_tx(&mut tx, session_id, &remaining).await?;
         tx.commit().await.map_err(store_sqlx_error)
     }
 
@@ -690,25 +689,26 @@ impl PostgresStore {
                 None,
                 None,
             )?;
-            sqlx::query(session_sql().head.insert_placeholder.sql())
+            sqlx::query(session_sql().head_postgres.insert_placeholder.sql())
                 .bind(commit.session_id.as_str())
                 .bind(encode_json(&placeholder.payload())?)
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
         }
-        let locked_revision =
-            sqlx::query_scalar::<_, i64>(session_sql().head.select_revision_for_update.sql())
-                .bind(commit.session_id.as_str())
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?
-                .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
-                .transpose()?
-                .ok_or_else(|| StoreError::StoredDataCorrupt {
-                    record_kind: "SessionHeadMeta",
-                    message: "head row disappeared while commit authority was held".to_string(),
-                })?;
+        let locked_revision = sqlx::query_scalar::<_, i64>(
+            session_sql().head_postgres.select_revision_for_update.sql(),
+        )
+        .bind(commit.session_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
+        .transpose()?
+        .ok_or_else(|| StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message: "head row disappeared while commit authority was held".to_string(),
+        })?;
         let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
         let parent_leaf = match old_leaf_node_id.as_deref() {
             Some(leaf_node_id) => sqlx::query_as::<_, (i64, String, String)>(
@@ -900,7 +900,7 @@ impl PostgresStore {
         // Existing sessions already hold the row lock and the session-keyed
         // advisory lock, so for them it can no longer disagree with the
         // verdict.
-        let head_write = sqlx::query(session_sql().head.upsert_cas.sql())
+        let head_write = sqlx::query(session_sql().head_postgres.upsert_cas.sql())
             .bind(commit.session_id.as_str())
             .bind(sql_head_revision)
             .bind(encode_json(&meta.payload())?)

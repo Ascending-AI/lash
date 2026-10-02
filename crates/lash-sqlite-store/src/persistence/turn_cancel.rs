@@ -2,6 +2,7 @@
 //! each running inside the caller's write transaction.
 
 use super::*;
+use lash_core_execution::store_backend_support::turn_cancel::*;
 
 /// Withdraw one row for the host at `now` (FIG-3927): an open row is
 /// cancelled, its ingress obligation settled in the same write (FIG-4098); a
@@ -70,7 +71,7 @@ pub(super) fn pending_follow_on_conn(
     let json = conn
         .query_row(
             crate::session_sql::session_sql()
-                .head
+                .head_sqlite
                 .select_pending_follow_on
                 .sql(),
             params![session_id.as_str()],
@@ -107,7 +108,7 @@ pub(super) fn raise_pending_follow_on_conn(
         crate::conn::cached_execute(
             conn,
             crate::session_sql::session_sql()
-                .head
+                .head_sqlite
                 .raise_pending_follow_on
                 .sql(),
             params![
@@ -146,19 +147,50 @@ pub(crate) fn load_turn_cancel_request_conn(
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> Result<Option<lash_core_execution::TurnCancelRequestRecord>, StoreError> {
-    let json = conn
+    let row = conn
         .query_row(
             crate::turn_ingress::turn_ingress_sql()
-                .cancel_requests_sqlite
-                .select_record
+                .cancel_requests
+                .select_request
                 .sql(),
             params![session_id.as_str(), turn_id.as_str()],
-            |row| row.get::<_, String>(0),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .optional()
         .map_err(sqlite_error)?;
-    json.map(|json| decode_stored_json(&json, "turn cancel request"))
-        .transpose()
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let mut stmt = conn
+        .prepare(
+            crate::turn_ingress::turn_ingress_sql()
+                .cancel_affected_inputs
+                .select_by_turn
+                .sql(),
+        )
+        .map_err(sqlite_error)?;
+    let affected = stmt
+        .query_map(params![session_id.as_str(), turn_id.as_str()], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })
+        .map_err(sqlite_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sqlite_error)?;
+    turn_cancel_record_from_rows(session_id, turn_id, row, affected).map(Some)
 }
 
 pub(super) fn load_turn_cancel_intent_snapshot_conn(
@@ -169,30 +201,63 @@ pub(super) fn load_turn_cancel_intent_snapshot_conn(
     let row = conn
         .query_row(
             crate::turn_ingress::turn_ingress_sql()
-                .cancel_requests_sqlite
-                .select_record_with_revision
+                .cancel_requests
+                .select_request_with_revision
                 .sql(),
             params![session_id.as_str(), turn_id.as_str()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((json, revision)) = row else {
-        return Ok(lash_core_execution::TurnCancelIntentSnapshot::Absent);
-    };
-    let record: lash_core_execution::TurnCancelRequestRecord =
-        decode_stored_json(&json, "turn cancel request")?;
-    let revision = u64::try_from(revision)
-        .map_err(|_| StoreError::Backend("turn cancel intent revision is negative".to_string()))?;
-    if revision == 0 {
-        return Err(StoreError::Backend(
-            "turn cancel intent revision is zero".to_string(),
-        ));
+    turn_cancel_snapshot_from_row(session_id, turn_id, row)
+}
+
+struct CancelItem<'a> {
+    item_id: &'a str,
+    disposition: lash_core_execution::TurnCancelUndeliveredInputPolicy,
+    payload: String,
+    kind: &'static str,
+    batch_id: Option<&'a str>,
+}
+
+fn append_cancel_item(
+    conn: &Connection,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    item: CancelItem<'_>,
+) -> Result<(), StoreError> {
+    if load_turn_cancel_intent_snapshot_conn(conn, session_id, turn_id)?
+        == lash_core_execution::TurnCancelIntentSnapshot::Absent
+    {
+        return Ok(());
     }
-    Ok(lash_core_execution::TurnCancelIntentSnapshot::Present {
-        request: record.request,
-        revision,
-    })
+    crate::conn::cached_execute(
+        conn,
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_affected_inputs
+            .append_at_next_ordinal
+            .sql(),
+        params![
+            session_id.as_str(),
+            turn_id.as_str(),
+            item.item_id,
+            turn_cancel_undelivered_wire(item.disposition),
+            item.payload,
+            item.kind,
+            item.batch_id
+        ],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
 }
 
 pub(crate) fn append_turn_cancel_outcome_conn(
@@ -201,57 +266,38 @@ pub(crate) fn append_turn_cancel_outcome_conn(
     turn_id: &TurnId,
     affected: lash_core_execution::TurnCancelAffectedInput,
 ) -> Result<(), StoreError> {
-    let Some(mut record) = load_turn_cancel_request_conn(conn, session_id, turn_id)? else {
-        return Ok(());
-    };
-    // An input the interrupted turn's commit recorded is still addressed to
-    // that turn, its delivery unchanged, when the root's terminal write
-    // sweeps the turns it ends: it is recorded once.
-    let affected_inputs = &mut record.outcome.get_or_insert_default().affected_inputs;
-    if affected_inputs
-        .iter()
-        .any(|recorded| recorded.input_id == affected.input_id)
-    {
-        return Ok(());
-    }
-    affected_inputs.push(affected);
-    crate::conn::cached_execute(
+    append_cancel_item(
         conn,
-        crate::turn_ingress::turn_ingress_sql()
-            .cancel_requests_sqlite
-            .update_record
-            .sql(),
-        params![session_id.as_str(), turn_id.as_str(), encode_json(&record)?],
+        session_id,
+        turn_id,
+        CancelItem {
+            item_id: affected.input_id.as_str(),
+            disposition: affected.disposition,
+            payload: encode_json(&affected.payload)?,
+            kind: AFFECTED_INPUT_KIND,
+            batch_id: None,
+        },
     )
-    .map_err(sqlite_error)?;
-    Ok(())
 }
 
-/// Record one wake a turn cancel deferred on the cancellation (FIG-3543).
 pub(super) fn append_turn_cancel_wake_conn(
     conn: &Connection,
     session_id: &SessionId,
     turn_id: &TurnId,
     affected: lash_core_execution::TurnCancelAffectedWake,
 ) -> Result<(), StoreError> {
-    let Some(mut record) = load_turn_cancel_request_conn(conn, session_id, turn_id)? else {
-        return Ok(());
-    };
-    record
-        .outcome
-        .get_or_insert_default()
-        .affected_wakes
-        .push(affected);
-    crate::conn::cached_execute(
+    append_cancel_item(
         conn,
-        crate::turn_ingress::turn_ingress_sql()
-            .cancel_requests_sqlite
-            .update_record
-            .sql(),
-        params![session_id.as_str(), turn_id.as_str(), encode_json(&record)?],
+        session_id,
+        turn_id,
+        CancelItem {
+            item_id: affected.batch_id.as_str(),
+            disposition: affected.disposition,
+            payload: encode_json(&affected.wake)?,
+            kind: AFFECTED_WAKE_KIND,
+            batch_id: Some(affected.batch_id.as_str()),
+        },
     )
-    .map_err(sqlite_error)?;
-    Ok(())
 }
 
 pub(super) fn reconcile_turn_cancel_winner_conn(
@@ -265,19 +311,6 @@ pub(super) fn reconcile_turn_cancel_winner_conn(
     if actual != *observed {
         return Ok(false);
     }
-    let mut record = load_turn_cancel_request_conn(conn, session_id, turn_id)?.unwrap_or(
-        lash_core_execution::TurnCancelRequestRecord {
-            request: lash_core_execution::facade_support::TurnCancelRequest {
-                address: lash_core_execution::facade_support::TurnAddress::new(session_id, turn_id),
-                request_id: evidence.request_id.clone(),
-                origin: evidence.origin.clone(),
-                reason: evidence.reason.clone(),
-                undelivered: evidence.undelivered,
-                mode: evidence.mode,
-            },
-            outcome: None,
-        },
-    );
     let request = lash_core_execution::facade_support::TurnCancelRequest {
         address: lash_core_execution::facade_support::TurnAddress::new(session_id, turn_id),
         request_id: evidence.request_id.clone(),
@@ -296,20 +329,24 @@ pub(super) fn reconcile_turn_cancel_winner_conn(
             StoreError::checked_monotonic_increment("turn_cancel_intent_revision", revision)?
         }
     };
-    record.request = request;
-    let revision = i64::try_from(revision).map_err(|_| {
-        StoreError::Backend("turn cancel intent revision exceeds SQLite range".to_string())
+    let revision = i64::try_from(revision).map_err(|_| StoreError::RecordEncodingFailed {
+        record_kind: "TurnCancelRequest".into(),
+        message: "intent revision exceeds SQLite INTEGER".into(),
     })?;
     crate::conn::cached_execute(
         conn,
         crate::turn_ingress::turn_ingress_sql()
-            .cancel_requests_sqlite
+            .cancel_requests
             .upsert_record
             .sql(),
         params![
             session_id.as_str(),
             turn_id.as_str(),
-            encode_json(&record)?,
+            request.request_id,
+            request.origin,
+            request.reason,
+            turn_cancel_undelivered_wire(request.undelivered),
+            turn_cancel_mode_wire(request.mode),
             revision
         ],
     )
@@ -356,5 +393,84 @@ pub(super) fn append_identity_columns(
             None,
             Some(i64::from(*encoding_version)),
         ),
+    }
+}
+
+#[cfg(test)]
+mod receipt_tests {
+    use super::*;
+
+    #[test]
+    fn replayed_cancellation_wake_has_one_receipt() {
+        let root = tempfile::tempdir().expect("receipt fixture directory");
+        for conn in [
+            Connection::open_in_memory().expect("open memory receipt fixture"),
+            Connection::open(root.path().join("receipts.db")).expect("open file receipt fixture"),
+        ] {
+            assert_replayed_wake_has_one_receipt(conn);
+        }
+    }
+
+    fn assert_replayed_wake_has_one_receipt(conn: Connection) {
+        conn.execute_batch(crate::schema::SCHEMA)
+            .expect("create schema");
+        let session = SessionId::from("session");
+        let turn = TurnId::from("turn");
+        let request = lash_core_execution::facade_support::TurnCancelRequest::new(
+            lash_core_execution::facade_support::TurnAddress::new(&session, &turn),
+            "request",
+            None,
+        );
+        conn.execute(
+            crate::turn_ingress::turn_ingress_sql()
+                .cancel_requests_sqlite
+                .insert_first
+                .sql(),
+            params![
+                session.as_str(),
+                turn.as_str(),
+                request.request_id,
+                request.origin,
+                request.reason,
+                turn_cancel_undelivered_wire(request.undelivered),
+                turn_cancel_mode_wire(request.mode)
+            ],
+        )
+        .expect("seed request");
+        let process_id = lash_sansio::ProcessId::fixture("process");
+        let wake = lash_core_execution::ProcessWakeDelivery {
+            version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+            wake_id: "wake".into(),
+            target_session_id: session.clone(),
+            process_id: process_id.clone(),
+            sequence: 1,
+            event_type: "process.wake".into(),
+            event_invocation: lash_core_execution::RuntimeInvocation {
+                attribution: lash_core_execution::RuntimeAttribution::for_session(&session),
+                subject: lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
+                    process_id,
+                    sequence: 1,
+                    event_type: "process.wake".into(),
+                },
+                caused_by: None,
+                replay: None,
+            },
+            process_caused_by: None,
+            authority: Default::default(),
+            input: "wake payload".into(),
+            created_at_ms: 0,
+        };
+        let affected = lash_core_execution::TurnCancelAffectedWake::deferred("batch".into(), wake);
+        append_turn_cancel_wake_conn(&conn, &session, &turn, affected.clone())
+            .expect("append wake");
+        append_turn_cancel_wake_conn(&conn, &session, &turn, affected.clone())
+            .expect("replay wake");
+        let loaded = load_turn_cancel_request_conn(&conn, &session, &turn)
+            .expect("load receipt")
+            .expect("request exists");
+        assert_eq!(
+            loaded.outcome.expect("affected wake exists").affected_wakes,
+            vec![affected]
+        );
     }
 }

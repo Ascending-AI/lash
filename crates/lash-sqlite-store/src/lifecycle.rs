@@ -311,42 +311,41 @@ impl SqliteStore {
             .map_err(sqlite_error)
     }
 
-    pub async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        let created_at_ms = self.clock.timestamp_ms();
+    pub async fn settle_observer_intents(
+        &self,
+        session_id: &SessionId,
+        remaining: Vec<lash_core_execution::facade_support::SessionObserverIntent>,
+    ) -> Result<(), StoreError> {
+        let session_id = session_id.clone();
         self.conn
             .write_flow(move |tx| {
-                let fleet_format = tx.fleet();
-                let outcome: Result<(), StoreError> = (|| {
-                    crate::persistence::ensure_session_not_deleted_conn(tx, &meta.session_id)?;
-                    // FIG-3045: the recorded lineage is write-once, so a
-                    // metadata replace that moves it is refused here exactly
-                    // as admission refuses a conflicting rebind.
-                    if let Some(recorded) =
-                        crate::session_meta::load_recorded_lineage(tx, &meta.session_id)?
-                    {
-                        lash_core_execution::store_backend_support::guard_session_meta_relation_rewrite(
-                            &meta.session_id,
-                            &recorded,
-                            &meta.relation,
-                        )?;
+                let outcome = (|| {
+                    crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
+                    let present = tx
+                        .query_row(
+                            crate::session_sql::session_sql()
+                                .meta
+                                .select_state_version
+                                .sql(),
+                            params![session_id.as_str()],
+                            |_| Ok(()),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?;
+                    if present.is_none() {
+                        return Err(StoreError::SessionNotFound {
+                            session_id: session_id.clone(),
+                        });
                     }
-                    crate::session_meta::write_session_meta(
-                        tx,
-                        &meta,
-                        crate::session_meta::SessionMetaWrite::Replace,
-                        created_at_ms,
-                        fleet_format,
-                    )?;
-                    Ok(())
+                    crate::session_meta::settle_observer_intents_conn(tx, &session_id, &remaining)
                 })();
                 Ok(match outcome {
                     Ok(()) => TxOutcome::Commit(Ok(())),
-                    Err(err) => TxOutcome::Rollback(Err(err)),
+                    Err(error) => TxOutcome::Rollback(Err(error)),
                 })
             })
             .await
-            .map_err(sqlite_error)??;
-        Ok(())
+            .map_err(sqlite_error)?
     }
 
     pub async fn load_session_meta(

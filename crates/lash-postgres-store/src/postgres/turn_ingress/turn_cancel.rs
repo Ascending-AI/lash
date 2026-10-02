@@ -1,11 +1,4 @@
-//! The cancellation and tool-intent statements only PostgreSQL issues.
-//!
-//! `turn_cancel_requests` forks wholesale: PostgreSQL stores the request as
-//! typed columns with the affected-input receipts in
-//! `lash_turn_cancel_affected_inputs`, SQLite as one `record_json` document.
-//! ADR 0098 freezes both durable encodings, so every read and write of that
-//! table is two statements. The rest fork on the row lock PostgreSQL must take
-//! where SQLite holds the database write lock.
+//! Backend-specific cancellation locks and conflict handling.
 
 lash_store_sql::statements! {
     /// `turn_cancel_requests` statements only PostgreSQL issues.
@@ -22,26 +15,16 @@ lash_store_sql::statements! {
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)";
 
-        /// Turn `?2` of session `?1`'s request fields.
-        select_request = "SELECT request_id, origin, reason, disposition, mode
-             FROM turn_cancel_requests
-             WHERE session_id = ?1 AND turn_id = ?2";
 
-        /// [`select_request`](Self::select_request), locked for the caller's
+        /// The shared request projection, locked for the caller's
         /// transaction: a record read that precedes a write serializes on this
         /// row.
         select_request_for_update = "SELECT request_id, origin, reason, disposition, mode
              FROM turn_cancel_requests
              WHERE session_id = ?1 AND turn_id = ?2 FOR UPDATE";
 
-        /// Turn `?2` of session `?1`'s intent snapshot: the request fields and
-        /// the revision a closure compare-and-swap is taken against.
-        select_request_with_revision = "SELECT request_id, origin, reason, disposition, mode,
-                    intent_revision
-             FROM turn_cancel_requests
-             WHERE session_id = ?1 AND turn_id = ?2";
 
-        /// [`select_request_with_revision`](Self::select_request_with_revision),
+        /// The shared request and revision projection,
         /// locked for the caller's transaction.
         select_request_with_revision_for_update = "SELECT request_id, origin, reason, disposition,
                     mode, intent_revision
@@ -52,25 +35,10 @@ lash_store_sql::statements! {
         /// there at all.
         ///
         /// Concurrent appends to the affected-input receipts serialize on this
-        /// row so their ordinals cannot collide; SQLite rewrites the one
-        /// document under its write lock and needs no counterpart.
+        /// row so their ordinals cannot collide; SQLite holds its database write lock and needs no row lock.
         lock_request = "SELECT 1 FROM turn_cancel_requests
              WHERE session_id = ?1 AND turn_id = ?2 FOR UPDATE";
 
-        /// The caller has already proved the observed intent is still current,
-        /// so this is the winner's write, not a blind overwrite.
-        upsert_record = "INSERT INTO turn_cancel_requests (
-                 session_id, turn_id, request_id, origin, reason, disposition, mode,
-                 intent_revision
-             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT (session_id, turn_id) DO UPDATE SET
-                 request_id = excluded.request_id,
-                 origin = excluded.origin,
-                 reason = excluded.reason,
-                 disposition = excluded.disposition,
-                 mode = excluded.mode,
-                 intent_revision = excluded.intent_revision";
     }
 }
 
@@ -96,46 +64,6 @@ lash_store_sql::statements! {
         select_by_session_for_update = "SELECT binding_id, admitted_scope_json
              FROM turn_cancellation_bindings
              WHERE session_id = ?1 FOR UPDATE";
-    }
-}
-
-lash_store_sql::statements! {
-    /// `turn_cancel_affected_inputs` statements. The table has no SQLite half:
-    /// SQLite keeps the same dispositions as one `record_json` document on the
-    /// cancel-request row, so both statements here are PostgreSQL-only by
-    /// construction.
-    pub(crate) struct CancelAffectedInputPostgresStatements @ "turn_cancel_affected_input" {
-        /// Turn `?2` of session `?1`'s recorded dispositions, host inputs and
-        /// held wakes alike, in the order the turn observed them.
-        ///
-        /// `ordinal` is the order and it is a total one — it is the third
-        /// component of the primary key — so no tie needs breaking.
-        select_by_turn = "SELECT input_id, input_json, disposition, item_kind, batch_id
-             FROM turn_cancel_affected_inputs
-             WHERE session_id = ?1 AND turn_id = ?2
-             ORDER BY ordinal ASC";
-
-        /// The next ordinal is computed inside the insert rather than read
-        /// first: the caller already holds the cancel-request row's lock, and
-        /// deriving it in one statement is what keeps the ordinal allocation
-        /// and the append in a single round trip. An item already recorded
-        /// is not recorded again: an input the interrupted turn's commit
-        /// recorded is still addressed to that turn, its delivery unchanged,
-        /// when the root's terminal write sweeps the turns it ends.
-        append_at_next_ordinal = "INSERT INTO turn_cancel_affected_inputs (
-                 session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind,
-                 batch_id
-             )
-             SELECT
-                 ?1, ?2,
-                 (SELECT COALESCE(MAX(ordinal) + 1, 0)
-                    FROM turn_cancel_affected_inputs
-                   WHERE session_id = ?1 AND turn_id = ?2),
-                 ?3, ?4, ?5, ?6, ?7
-             WHERE NOT EXISTS (
-                 SELECT 1 FROM turn_cancel_affected_inputs
-                  WHERE session_id = ?1 AND turn_id = ?2 AND item_kind = ?6 AND input_id = ?3
-             )";
     }
 }
 

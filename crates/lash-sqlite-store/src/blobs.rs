@@ -57,7 +57,7 @@ lash_store_sql::statements! {
         ///
         /// Forks from PostgreSQL's counterpart on the artifact clause: only
         /// SQLite keeps an `artifact_refs` pointer table. The head table also
-        /// forks by name, `session_head` here and `lash_sessions` there.
+        /// forks by name, `session_head` here and `lash_session_head` there.
         reclaim_session_candidate = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
                AND NOT EXISTS (
@@ -88,7 +88,7 @@ lash_store_sql::statements! {
         /// whose manifest blob has gone missing simply disappear from the
         /// walk — the single most alarming finding a preflight can make,
         /// rendered as "no such session". PostgreSQL's walk reads its own
-        /// head table, `lash_sessions`, so the two texts fork on the table
+        /// head table, `lash_session_head`, so the two texts fork on the table
         /// name alone.
         select_session_checkpoint_page = "SELECT session_head.session_id, session_head.checkpoint_ref, blobs.content
              FROM session_head

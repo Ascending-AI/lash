@@ -57,6 +57,13 @@ pub trait StoreTestSupport: Send + Sync {
         corruption: GraphRowCorruption,
     ) -> Result<(), StoreError>;
 
+    /// Remove only the head of an admitted session, leaving its catalog row.
+    /// Tests use this corruption to prove reads and drives refuse missing creation state.
+    async fn delete_session_head_for_testing(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), StoreError>;
+
     /// Rewrite only the head's `current_frame_node_id` pointer of
     /// `session_id`, leaving its leaf as it is.
     async fn set_head_current_frame_for_testing(

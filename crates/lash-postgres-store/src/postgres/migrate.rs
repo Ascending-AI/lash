@@ -79,7 +79,7 @@ const FLEET_FORMAT_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_fleet_form
 /// made by N: the column is nullable, the table is new, and the index is not
 /// unique. The compatibility stamp moves to 2 in the same transaction.
 #[cfg(feature = "synthetic-next")]
-const SYNTHETIC_NEXT_EXPAND_DDL: &str = "ALTER TABLE lash_sessions
+const SYNTHETIC_NEXT_EXPAND_DDL: &str = "ALTER TABLE lash_session_head
     ADD COLUMN IF NOT EXISTS synthetic_next_note TEXT;
 CREATE TABLE IF NOT EXISTS lash_synthetic_next (
     id BIGSERIAL PRIMARY KEY,
@@ -93,8 +93,8 @@ CREATE INDEX IF NOT EXISTS idx_lash_synthetic_next_note
 /// VALID`, so every row written from then on obeys it, and the synthetic
 /// contract validates it once the backfill has filled every old row.
 #[cfg(feature = "synthetic-next")]
-const SYNTHETIC_NEXT_NOTE_CONSTRAINT_DDL: &str = "ALTER TABLE lash_sessions
-    ADD CONSTRAINT ck_lash_sessions_synthetic_next_note
+const SYNTHETIC_NEXT_NOTE_CONSTRAINT_DDL: &str = "ALTER TABLE lash_session_head
+    ADD CONSTRAINT ck_lash_session_head_synthetic_next_note
     CHECK (synthetic_next_note IS NULL OR synthetic_next_note <> '') NOT VALID";
 
 /// One batch of Phase A's synthetic backfill: the sessions after the cursor,
@@ -103,13 +103,13 @@ const SYNTHETIC_NEXT_NOTE_CONSTRAINT_DDL: &str = "ALTER TABLE lash_sessions
 /// twice rewrites nothing the second time.
 #[cfg(feature = "synthetic-next")]
 const SYNTHETIC_NEXT_NOTE_BATCH: &str = "WITH batch AS (
-    SELECT session_id FROM lash_sessions
+    SELECT session_id FROM lash_session_head
     WHERE $1::TEXT IS NULL OR session_id > $1::TEXT
     ORDER BY session_id
     LIMIT $2
     FOR UPDATE
 ), rewritten AS (
-    UPDATE lash_sessions AS sessions
+    UPDATE lash_session_head AS sessions
     SET synthetic_next_note = 'backfilled:' || sessions.session_id
     FROM batch
     WHERE sessions.session_id = batch.session_id
@@ -123,7 +123,7 @@ SELECT (SELECT max(session_id) FROM batch),
 /// Phase A's synthetic contract: validate the note's constraint.
 #[cfg(feature = "synthetic-next")]
 const SYNTHETIC_NEXT_CONTRACT_DDL: &str =
-    "ALTER TABLE lash_sessions VALIDATE CONSTRAINT ck_lash_sessions_synthetic_next_note";
+    "ALTER TABLE lash_session_head VALIDATE CONSTRAINT ck_lash_session_head_synthetic_next_note";
 
 /// The 139→140 expand step (FIG-3600 S7): the logical-root family. The
 /// session head gains its closing intent, a park its engine reference and
@@ -206,7 +206,7 @@ struct ExpandMigration {
 
 /// The expand catalog this build carries. Pre-1.0 the first step let
 /// component 133 gain the ledger itself and become 134 (FIG-3816); the second
-/// adds `lash_sessions.pending_follow_on_json`, the frame-handoff follow-on a
+/// adds `lash_session_head.pending_follow_on_json`, the frame-handoff follow-on a
 /// session head carries, and becomes 135 (FIG-3542); the third adds
 /// `lash_fleet_format`, the deployment's fleet-format row, and becomes 136
 /// (FIG-3796); the fourth restamps 136 to 137 on a vocabulary-only change
@@ -230,7 +230,7 @@ static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
         id: "0135-pending-follow-on",
         from_version: 134,
         to_version: 135,
-        statements: "ALTER TABLE lash_sessions ADD COLUMN IF NOT EXISTS pending_follow_on_json TEXT",
+        statements: "ALTER TABLE lash_session_head ADD COLUMN IF NOT EXISTS pending_follow_on_json TEXT",
     },
     ExpandMigration {
         id: "0136-fleet-format",

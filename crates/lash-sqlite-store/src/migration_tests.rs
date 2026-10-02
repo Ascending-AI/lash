@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core_execution::{SessionId, StoreError};
+use lash_core_execution::{SessionCatalogStore as _, SessionId, StoreError};
 use rusqlite::{Connection, OpenFlags};
 
 use super::{
@@ -192,12 +192,16 @@ async fn assert_migrated(root: &Path) {
         "the durable core serves its row after the migration"
     );
     store
-        .save_session_meta(lash_core_execution::SessionMeta {
-            owning_process_id: None,
-            session_id: SessionId::from("after-migration"),
-            relation: lash_core_execution::SessionRelation::Root,
-            pending_observer_intents: Vec::new(),
-        })
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                lash_core_execution::SessionMeta {
+                    owning_process_id: None,
+                    session_id: SessionId::from("after-migration"),
+                    relation: lash_core_execution::SessionRelation::Root,
+                    pending_observer_intents: Vec::new(),
+                },
+            ),
+        )
         .await
         .expect("the migrated store admits this build's writers");
 }

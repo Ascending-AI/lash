@@ -30,19 +30,19 @@ pub async fn reconcile_session_process_observer_intents(
     let (pending_observer_intents, persisted) = match source {
         SessionObserverIntentSource::Persisted(store) => {
             let mut meta = store.load_session_meta(session_id).await?.ok_or_else(|| {
-                StoreError::Backend(format!(
-                    "session `{session_id}` has no metadata for observer intent settlement"
-                ))
+                StoreError::SessionNotFound {
+                    session_id: session_id.clone(),
+                }
             })?;
             let pending = std::mem::take(&mut meta.pending_observer_intents);
-            (pending, Some((store, meta)))
+            (pending, Some(store))
         }
         SessionObserverIntentSource::PersistedIfPresent(store) => {
             let Some(mut meta) = store.load_session_meta(session_id).await? else {
                 return Ok(Vec::new());
             };
             let pending = std::mem::take(&mut meta.pending_observer_intents);
-            (pending, Some((store, meta)))
+            (pending, Some(store))
         }
         SessionObserverIntentSource::Unstored(intents) => (intents, None),
     };
@@ -53,14 +53,15 @@ pub async fn reconcile_session_process_observer_intents(
     let results =
         apply_process_observers(process_registry, session_id, &pending_observer_intents).await;
 
-    if let Some((store, mut meta)) = persisted {
+    if let Some(store) = persisted {
+        let mut remaining = Vec::new();
         if results.iter().any(|receipt| {
             matches!(
                 receipt.outcome,
                 SessionObservedProcessOutcome::Unavailable { .. }
             )
         }) {
-            meta.pending_observer_intents = pending_observer_intents
+            remaining = pending_observer_intents
                 .into_iter()
                 .zip(&results)
                 .filter_map(|(intent, receipt)| match receipt.outcome {
@@ -71,7 +72,7 @@ pub async fn reconcile_session_process_observer_intents(
                 })
                 .collect();
         }
-        store.save_session_meta(meta).await?;
+        store.settle_observer_intents(session_id, remaining).await?;
     }
 
     Ok(results)

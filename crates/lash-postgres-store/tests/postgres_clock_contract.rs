@@ -138,7 +138,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         (
             RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE,
             "async fn commit_runtime_state(",
-            "async fn save_session_meta(",
+            "async fn settle_observer_intents(",
         ),
         // The shared process-event append sequence stamps registry events
         // under the caller's store clock.

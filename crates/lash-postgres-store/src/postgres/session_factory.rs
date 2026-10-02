@@ -547,7 +547,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let rows = sqlx::query(session_sql().head.select_fork_points.sql())
+        let rows = sqlx::query(session_sql().head_postgres.select_fork_points.sql())
             .fetch_all(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -805,7 +805,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             Some(checkpoint_ref.clone().into()),
             Some(request.node_id.clone()),
         )?;
-        sqlx::query(session_sql().head.insert_fork.sql())
+        sqlx::query(session_sql().head_postgres.insert_fork.sql())
             .bind(request.session_id.as_str())
             .bind(encode_json(&head.payload())?)
             .bind(&checkpoint_ref)
@@ -837,7 +837,6 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         crate::session_meta::write_session_meta_tx(
             &mut tx,
             &meta,
-            crate::session_meta::SessionMetaWrite::Insert,
             created_at_ms,
             self.fence.fleet(),
         )

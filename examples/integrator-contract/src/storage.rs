@@ -200,7 +200,11 @@ impl SessionCommitStore for Integrator {
     ) -> Result<PendingFollowOn, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
+    async fn settle_observer_intents(
+        &self,
+        session_id: &SessionId,
+        remaining: Vec<SessionObserverIntent>,
+    ) -> Result<(), StoreError> {
         unreachable!("external signature witness")
     }
     async fn load_session_meta(

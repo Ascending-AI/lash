@@ -501,7 +501,7 @@ pub(super) async fn selected_observer_intents(
             lash_core::facade_support::SessionObserverIntent::host_requested(selected.clone()),
         ];
         store
-            .save_session_meta(meta)
+            .settle_observer_intents(&meta.session_id, meta.pending_observer_intents)
             .await
             .expect("persist selection before reuse");
         let terminal = registry

@@ -86,7 +86,7 @@ impl PostgresStore {
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         // Serialize against concurrent checkpoint-blob writers. Every commit
         // INSERTs its new manifest into `lash_blobs` (holding a ROW EXCLUSIVE
-        // lock) inside the same transaction that repoints `lash_sessions`, so an
+        // lock) inside the same transaction that repoints `lash_session_head`, so an
         // EXCLUSIVE table lock makes the root read and the sweep atomic with
         // respect to every committer: a commit racing GC either lands fully
         // before the root read or blocks until GC releases. This is the fenced

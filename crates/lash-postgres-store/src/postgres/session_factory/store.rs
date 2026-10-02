@@ -60,7 +60,6 @@ impl PostgresStore {
         let inserted = crate::session_meta::write_session_meta_tx(
             &mut tx,
             &meta,
-            crate::session_meta::SessionMetaWrite::Insert,
             created_at_ms,
             self.fence.fleet(),
         )

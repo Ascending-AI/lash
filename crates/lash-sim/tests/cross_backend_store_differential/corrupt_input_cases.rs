@@ -394,7 +394,7 @@ impl BackendRunner {
                 CorruptTarget::CheckpointManifestBlob => {
                     backup.bytes = sqlx::query_scalar(
                         "SELECT content FROM lash_blobs WHERE hash =
-                             (SELECT checkpoint_ref FROM lash_sessions WHERE session_id = $1)",
+                             (SELECT checkpoint_ref FROM lash_session_head WHERE session_id = $1)",
                     )
                     .bind(session_id.as_str())
                     .fetch_optional(pool)
@@ -402,7 +402,7 @@ impl BackendRunner {
                     .expect("read Postgres checkpoint manifest before corruption");
                     let result = sqlx::query(
                         "UPDATE lash_blobs SET content = $2 WHERE hash =
-                             (SELECT checkpoint_ref FROM lash_sessions WHERE session_id = $1)",
+                             (SELECT checkpoint_ref FROM lash_session_head WHERE session_id = $1)",
                     )
                     .bind(session_id.as_str())
                     .bind(CORRUPT_BYTES)
@@ -562,7 +562,7 @@ pub(super) async fn restore_corrupt_record_raw(
                 CorruptTarget::CheckpointManifestBlob => {
                     sqlx::query(
                         "UPDATE lash_blobs SET content = $2 WHERE hash =
-                             (SELECT checkpoint_ref FROM lash_sessions WHERE session_id = $1)",
+                             (SELECT checkpoint_ref FROM lash_session_head WHERE session_id = $1)",
                     )
                     .bind(session_id.as_str())
                     .bind(backup.bytes.expect("checkpoint backup is bytes"))

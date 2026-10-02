@@ -54,7 +54,7 @@ pub(super) fn stale_handle_after_delete_case() -> GeneratedCase {
             StoreOperation::AdmitOnHandle {
                 handle_alias: "handle-1",
             },
-            StoreOperation::SaveMetaOnHandle {
+            StoreOperation::SettleObserversOnHandle {
                 handle_alias: "handle-1",
             },
             StoreOperation::CommitOnHandle {

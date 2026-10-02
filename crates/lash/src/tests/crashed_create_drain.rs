@@ -55,36 +55,53 @@ pub(super) async fn double_over(
 ) -> Option<(
     lash_restate_test::RestateTestBackend,
     Box<dyn std::any::Any>,
+    Arc<dyn lash_core::store::StoreTestSupport>,
 )> {
     let config = lash_restate_test::ServerConfig::default;
     Some(match storage {
-        Storage::SqliteMemory => (
-            lash_restate_test::backend(SEED, config())
+        Storage::SqliteMemory => {
+            let double = lash_restate_test::backend(SEED, config())
                 .await
-                .expect("the Restate double over SQLite memory"),
-            Box::new(()),
-        ),
+                .expect("the Restate double over SQLite memory");
+            let seams = double.stores().session_store_factory();
+            (double, Box::new(()), seams)
+        }
         Storage::SqliteFile => {
             let files = tempfile::tempdir().expect("a SQLite store directory");
-            let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
-                lash_sqlite_store::SqliteStoreSet::open(files.path())
-                    .await
-                    .expect("open the SQLite file stores"),
-            );
+            let stores = lash_sqlite_store::SqliteStoreSet::open(files.path())
+                .await
+                .expect("open the SQLite file stores");
+            let seams = stores.session_store_factory();
+            let stores: Arc<dyn lash_core::StoreSet> = Arc::new(stores);
             (
                 lash_restate_test::backend_with(SEED, config(), move |_| stores)
                     .await
                     .expect("the Restate double over SQLite files"),
                 Box::new(files),
+                seams,
             )
         }
         Storage::Postgres => {
-            let (stores, held) = postgres_store_set().await?;
+            let url = lash_postgres_store::testing::required_database_url();
+            let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+            let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+                .await
+                .expect("connect to PostgreSQL");
+            let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
+            let stores = lash_postgres_store::PostgresStoreSet::new(
+                &storage,
+                Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
+            );
+            let seams = stores.session_store_factory();
+            let stores: Arc<dyn lash_core::StoreSet> = Arc::new(stores);
             (
                 lash_restate_test::backend_with(SEED, config(), move |_| stores)
                     .await
                     .expect("the Restate double over PostgreSQL"),
-                held,
+                Box::new((database, attachments, storage)),
+                seams,
             )
         }
     })
@@ -111,21 +128,16 @@ struct CrashedCreate {
     creation: lash_core::PersistedSessionConfig,
 }
 
-/// A catalog row with no head, written at store level (FIG-4561): the row a
-/// catalog write orphaned before any admission recorded a head.
-/// `save_session_meta` creates the metadata row without touching the head
-/// table, which is exactly the corrupt state the law exercises — every
-/// admission path now writes the created head in the row's transaction, so
-/// no public seam can produce it.
-async fn headless_row(core: &LashCore, session: &str) -> Result<lash_core::store::SessionStore> {
+/// An admitted catalog row whose head has been removed through a test seam.
+async fn headless_row(
+    core: &LashCore,
+    seams: &dyn lash_core::store::StoreTestSupport,
+    session: &str,
+) -> Result<lash_core::store::SessionStore> {
     let session_id = SessionId::from(session);
-    core.store_factory
-        .save_session_meta(lash_core::SessionMeta {
-            session_id: session_id.clone(),
-            relation: lash_core::SessionRelation::Root,
-            pending_observer_intents: Vec::new(),
-            owning_process_id: None,
-        })
+    crate::tests::create_catalog_session(core, session).await?;
+    seams
+        .delete_session_head_for_testing(&session_id)
         .await
         .map_err(EmbedError::Store)?;
     lash_core::runtime::live_session_view(&core.store_factory, &session_id)
@@ -358,7 +370,7 @@ async fn a_refused_append_drained_after_a_crashed_create_leaves_nothing_of_it(
     storage: Storage,
 ) -> Result<()> {
     const ID: &str = "crashed-create-refused-append";
-    let Some((double, _held)) = double_over(storage).await else {
+    let Some((double, _held, _seams)) = double_over(storage).await else {
         return Ok(());
     };
     let core = core_over(&double, NODE_BUDGET)?;
@@ -392,7 +404,7 @@ async fn an_append_drained_after_a_crashed_create_is_committed_once(
     storage: Storage,
 ) -> Result<()> {
     const ID: &str = "crashed-create-accepted-append";
-    let Some((double, _held)) = double_over(storage).await else {
+    let Some((double, _held, _seams)) = double_over(storage).await else {
         return Ok(());
     };
     let core = core_over(&double, NODE_BUDGET)?;
@@ -427,7 +439,7 @@ async fn a_session_drained_after_a_crashed_create_reopens_on_a_new_deployment(
     append: Append,
 ) -> Result<()> {
     let id = format!("crashed-create-reopen-{append:?}").to_lowercase();
-    let Some((double, _held)) = double_over(storage).await else {
+    let Some((double, _held, _seams)) = double_over(storage).await else {
         return Ok(());
     };
     {
@@ -470,11 +482,11 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
     storage: Storage,
 ) -> Result<()> {
     const ID: &str = "catalog-row-with-no-head";
-    let Some((double, _held)) = double_over(storage).await else {
+    let Some((double, _held, seams)) = double_over(storage).await else {
         return Ok(());
     };
     let core = core_over(&double, NODE_BUDGET)?;
-    let store = headless_row(&core, ID).await?;
+    let store = headless_row(&core, seams.as_ref(), ID).await?;
     assert!(head_of(&store).await?.is_none(), "the row has no head");
 
     let opened = core.session(ID).open().await;
@@ -534,11 +546,11 @@ async fn a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal(
     storage: Storage,
 ) -> Result<()> {
     const ID: &str = "send-to-a-catalog-row-with-no-head";
-    let Some((double, _held)) = double_over(storage).await else {
+    let Some((double, _held, seams)) = double_over(storage).await else {
         return Ok(());
     };
     let core = core_over(&double, NODE_BUDGET)?;
-    let store = headless_row(&core, ID).await?;
+    let store = headless_row(&core, seams.as_ref(), ID).await?;
 
     let sent = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         core.session(ID)

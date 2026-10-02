@@ -64,7 +64,7 @@ async fn a_delete_of_a_never_created_id_leaves_the_id_creatable_and_runnable(
     storage: Storage,
 ) -> Result<()> {
     const ID: &str = "absent-delete-then-create";
-    let Some((double, _held)) = double_over(storage).await else {
+    let Some((double, _held, _seams)) = double_over(storage).await else {
         return Ok(());
     };
     let core = core_over(&double)?;
@@ -150,7 +150,7 @@ async fn a_delete_racing_a_create_cleans_up_nothing_without_an_accepted_close(
     storage: Storage,
 ) -> Result<()> {
     const ID: &str = "absent-delete-races-create";
-    let Some((double, _held)) = double_over(storage).await else {
+    let Some((double, _held, _seams)) = double_over(storage).await else {
         return Ok(());
     };
     let (answered, closed) = tokio::sync::oneshot::channel();

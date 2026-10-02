@@ -707,12 +707,12 @@ pub mod persistence {
         MaintenanceResult, MaintenanceStop, MaintenanceSweep,
         OLDEST_SUPPORTED_SESSION_STATE_VERSION, PersistedSessionConfig, PersistedTurnState,
         ProtocolEvent, RetentionBound, RetentionReport, ScanCoverage, SessionAdmission,
-        SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionGraph,
-        SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionReadView,
-        SessionRelation, SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError,
-        StoreMaintenance, StorePreflight, StoreReleaseStamp, StoreReleaseState,
-        StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
-        TurnInputAdmission, VacuumReport, facade_support::SessionNodeProjection,
+        SessionBlobReclaimReport, SessionCommitStore, SessionGraph, SessionHistoryRecord,
+        SessionMeta, SessionNodePayload, SessionNodeRecord, SessionReadView, SessionRelation,
+        SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
+        StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase,
+        StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnInputAdmission,
+        VacuumReport, facade_support::SessionNodeProjection,
     };
     pub use lash_core::{
         facade_support::ChronologicalEntry, facade_support::ChronologicalPayload,

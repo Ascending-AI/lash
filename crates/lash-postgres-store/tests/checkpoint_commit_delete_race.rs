@@ -192,7 +192,7 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
     .await
     .expect("checkpoint publication never reached the reused blob row lock");
 
-    sqlx::query("DELETE FROM lash_sessions WHERE session_id = 'commit-delete-victim'")
+    sqlx::query("DELETE FROM lash_session_head WHERE session_id = 'commit-delete-victim'")
         .execute(&mut *deleting)
         .await
         .expect("sever victim head inside controlled delete");

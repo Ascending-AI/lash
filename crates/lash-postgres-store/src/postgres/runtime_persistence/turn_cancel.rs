@@ -2,6 +2,7 @@
 //! paths share, each running inside the caller's transaction.
 
 use super::*;
+use lash_core_execution::store_backend_support::turn_cancel::*;
 
 /// Load one cancellation record. Affected-input payloads are receipt
 /// snapshots on `lash_turn_cancel_affected_inputs`, so no cross-table
@@ -17,8 +18,6 @@ pub(super) async fn load_turn_cancel_request_pg(
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(record)
 }
-
-type TurnCancelIntentRow = (String, Option<String>, Option<String>, String, String, i64);
 
 pub(super) async fn load_turn_cancel_intent_snapshot_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -39,37 +38,6 @@ pub(super) async fn load_turn_cancel_intent_snapshot_tx(
     turn_cancel_snapshot_from_row(session_id, turn_id, row)
 }
 
-fn turn_cancel_snapshot_from_row(
-    session_id: &SessionId,
-    turn_id: &TurnId,
-    row: Option<TurnCancelIntentRow>,
-) -> Result<lash_core_execution::TurnCancelIntentSnapshot, StoreError> {
-    let Some((request_id, origin, reason, disposition, mode, revision)) = row else {
-        return Ok(lash_core_execution::TurnCancelIntentSnapshot::Absent);
-    };
-    let revision = u64::try_from(revision).map_err(|_| StoreError::StoredDataCorrupt {
-        record_kind: "TurnCancelRequest",
-        message: "intent revision is negative".to_string(),
-    })?;
-    if revision == 0 {
-        return Err(StoreError::StoredDataCorrupt {
-            record_kind: "TurnCancelRequest",
-            message: "intent revision is zero".to_string(),
-        });
-    }
-    Ok(lash_core_execution::TurnCancelIntentSnapshot::Present {
-        request: lash_core_execution::facade_support::TurnCancelRequest {
-            address: lash_core_execution::facade_support::TurnAddress::new(session_id, turn_id),
-            request_id,
-            origin,
-            reason,
-            undelivered: turn_cancel_undelivered_from_wire(&disposition)?,
-            mode: turn_cancel_mode_from_wire(&mode)?,
-        },
-        revision,
-    })
-}
-
 pub(super) async fn load_turn_cancel_intent_snapshot_pg(
     pool: &sqlx::PgPool,
     session_id: &SessionId,
@@ -78,7 +46,7 @@ pub(super) async fn load_turn_cancel_intent_snapshot_pg(
     let mut connection = acquire_runtime_connection(pool).await?;
     let row = sqlx::query_as(
         crate::turn_ingress::turn_ingress_sql()
-            .cancel_requests_postgres
+            .cancel_requests
             .select_request_with_revision
             .sql(),
     )
@@ -100,7 +68,10 @@ async fn load_turn_cancel_request_in_tx(
     let metadata_sql = if lock_request {
         statements.select_request_for_update.sql()
     } else {
-        statements.select_request.sql()
+        crate::turn_ingress::turn_ingress_sql()
+            .cancel_requests
+            .select_request
+            .sql()
     };
     let row: Option<TurnCancelRequestRow> = sqlx::query_as(metadata_sql)
         .bind(session_id.as_str())
@@ -113,7 +84,7 @@ async fn load_turn_cancel_request_in_tx(
     };
     let affected_rows: Vec<TurnCancelAffectedRow> = sqlx::query_as(
         crate::turn_ingress::turn_ingress_sql()
-            .cancel_affected_inputs_postgres
+            .cancel_affected_inputs
             .select_by_turn
             .sql(),
     )
@@ -133,111 +104,6 @@ pub(super) async fn load_turn_cancel_request_tx(
     load_turn_cancel_request_in_tx(tx, session_id, turn_id, true).await
 }
 
-/// One `lash_turn_cancel_requests` row: request id, origin, reason,
-/// disposition, mode.
-pub(crate) type TurnCancelRequestRow = (String, Option<String>, Option<String>, String, String);
-
-/// One `lash_turn_cancel_affected_inputs` row: ingress row id, payload, disposition,
-/// item kind and — for a held wake — its batch.
-pub(super) type TurnCancelAffectedRow = (String, String, String, String, Option<String>);
-
-const AFFECTED_INPUT_KIND: &str = "input";
-const AFFECTED_WAKE_KIND: &str = "process_wake";
-
-pub(super) fn turn_cancel_record_from_rows(
-    session_id: &SessionId,
-    turn_id: &TurnId,
-    row: TurnCancelRequestRow,
-    affected_rows: Vec<TurnCancelAffectedRow>,
-) -> Result<lash_core_execution::TurnCancelRequestRecord, StoreError> {
-    let (request_id, origin, reason, disposition, mode) = row;
-    let mut outcome = lash_core_execution::TurnCancelInputOutcome::default();
-    for (item_id, payload_json, applied_disposition, item_kind, batch_id) in affected_rows {
-        let applied_disposition = turn_cancel_undelivered_from_wire(&applied_disposition)?;
-        match (item_kind.as_str(), batch_id) {
-            (AFFECTED_INPUT_KIND, None) => {
-                outcome
-                    .affected_inputs
-                    .push(lash_core_execution::TurnCancelAffectedInput {
-                        input_id: item_id.into(),
-                        payload: store_decode_json(&payload_json, "turn input")?,
-                        disposition: applied_disposition,
-                    });
-            }
-            (AFFECTED_WAKE_KIND, Some(batch_id)) => {
-                outcome
-                    .affected_wakes
-                    .push(lash_core_execution::TurnCancelAffectedWake {
-                        batch_id: batch_id.into(),
-                        wake: store_decode_json(&payload_json, "process wake")?,
-                        disposition: applied_disposition,
-                    });
-            }
-            (other, _) => {
-                return Err(StoreError::StoredDataCorrupt {
-                    record_kind: "TurnCancelRequest",
-                    message: format!("malformed turn cancel affected item of kind `{other}`"),
-                });
-            }
-        }
-    }
-    Ok(lash_core_execution::TurnCancelRequestRecord {
-        request: lash_core_execution::facade_support::TurnCancelRequest {
-            address: lash_core_execution::facade_support::TurnAddress::new(session_id, turn_id),
-            request_id,
-            origin,
-            reason,
-            undelivered: turn_cancel_undelivered_from_wire(&disposition)?,
-            mode: turn_cancel_mode_from_wire(&mode)?,
-        },
-        outcome: (!outcome.is_empty()).then_some(outcome),
-    })
-}
-
-pub(super) fn turn_cancel_mode_wire(
-    mode: lash_core_execution::facade_support::TurnCancelMode,
-) -> &'static str {
-    match mode {
-        lash_core_execution::facade_support::TurnCancelMode::Immediate => "immediate",
-        lash_core_execution::facade_support::TurnCancelMode::AfterStep => "after_step",
-    }
-}
-
-pub(super) fn turn_cancel_mode_from_wire(
-    mode: &str,
-) -> Result<lash_core_execution::facade_support::TurnCancelMode, StoreError> {
-    match mode {
-        "immediate" => Ok(lash_core_execution::facade_support::TurnCancelMode::Immediate),
-        "after_step" => Ok(lash_core_execution::facade_support::TurnCancelMode::AfterStep),
-        other => Err(StoreError::StoredDataCorrupt {
-            record_kind: "TurnCancelRequest",
-            message: format!("unknown turn cancel mode `{other}`"),
-        }),
-    }
-}
-
-pub(crate) fn turn_cancel_undelivered_from_wire(
-    disposition: &str,
-) -> Result<lash_core_execution::TurnCancelUndeliveredInputPolicy, StoreError> {
-    match disposition {
-        "defer" => Ok(lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer),
-        "drop" => Ok(lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop),
-        other => Err(StoreError::StoredDataCorrupt {
-            record_kind: "TurnCancelRequest",
-            message: format!("unknown turn cancel disposition `{other}`"),
-        }),
-    }
-}
-
-pub(super) fn turn_cancel_undelivered_wire(
-    policy: lash_core_execution::TurnCancelUndeliveredInputPolicy,
-) -> &'static str {
-    match policy {
-        lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => "defer",
-        lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => "drop",
-    }
-}
-
 pub(crate) async fn append_turn_cancel_outcome_conn(
     conn: &mut sqlx::PgConnection,
     session_id: &SessionId,
@@ -249,7 +115,7 @@ pub(crate) async fn append_turn_cancel_outcome_conn(
     }
     sqlx::query(
         crate::turn_ingress::turn_ingress_sql()
-            .cancel_affected_inputs_postgres
+            .cancel_affected_inputs
             .append_at_next_ordinal
             .sql(),
     )
@@ -278,7 +144,7 @@ pub(super) async fn append_turn_cancel_wake_tx(
     }
     sqlx::query(
         crate::turn_ingress::turn_ingress_sql()
-            .cancel_affected_inputs_postgres
+            .cancel_affected_inputs
             .append_at_next_ordinal
             .sql(),
     )
@@ -350,7 +216,7 @@ pub(super) async fn reconcile_turn_cancel_winner_tx(
     })?;
     sqlx::query(
         crate::turn_ingress::turn_ingress_sql()
-            .cancel_requests_postgres
+            .cancel_requests
             .upsert_record
             .sql(),
     )
@@ -378,12 +244,12 @@ pub(super) async fn pending_follow_on_tx(
 ) -> Result<Option<lash_core_execution::store::PendingFollowOn>, StoreError> {
     let statement = if for_update {
         crate::session_sql::session_sql()
-            .head
+            .head_postgres
             .select_pending_follow_on_for_update
             .sql()
     } else {
         crate::session_sql::session_sql()
-            .head
+            .head_postgres
             .select_pending_follow_on_for_share
             .sql()
     };
@@ -464,6 +330,79 @@ pub(super) fn append_identity_columns(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
+    async fn replayed_cancellation_wake_has_one_receipt() {
+        let database =
+            crate::testing::IsolatedDatabase::create(&crate::testing::required_database_url())
+                .await;
+        let storage = crate::PostgresStorage::connect(database.url())
+            .await
+            .expect("open receipt fixture");
+        let session = SessionId::from("session");
+        let turn = TurnId::from("turn");
+        let mut tx = storage
+            .pool()
+            .begin()
+            .await
+            .expect("begin receipt transaction");
+        sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .cancel_requests_postgres
+                .insert_first
+                .sql(),
+        )
+        .bind(session.as_str())
+        .bind(turn.as_str())
+        .bind("request")
+        .bind(None::<&str>)
+        .bind(None::<&str>)
+        .bind("defer")
+        .bind("immediate")
+        .execute(&mut *tx)
+        .await
+        .expect("seed request");
+        let process_id = lash_sansio::ProcessId::fixture("process");
+        let wake = lash_core_execution::ProcessWakeDelivery {
+            version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+            wake_id: "wake".into(),
+            target_session_id: session.clone(),
+            process_id: process_id.clone(),
+            sequence: 1,
+            event_type: "process.wake".into(),
+            event_invocation: lash_core_execution::RuntimeInvocation {
+                attribution: lash_core_execution::RuntimeAttribution::for_session(&session),
+                subject: lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
+                    process_id,
+                    sequence: 1,
+                    event_type: "process.wake".into(),
+                },
+                caused_by: None,
+                replay: None,
+            },
+            process_caused_by: None,
+            authority: Default::default(),
+            input: "wake payload".into(),
+            created_at_ms: 0,
+        };
+        let affected = lash_core_execution::TurnCancelAffectedWake::deferred("batch".into(), wake);
+        append_turn_cancel_wake_tx(&mut tx, &session, &turn, &affected)
+            .await
+            .expect("append wake");
+        append_turn_cancel_wake_tx(&mut tx, &session, &turn, &affected)
+            .await
+            .expect("replay wake");
+        let loaded = load_turn_cancel_request_tx(&mut tx, &session, &turn)
+            .await
+            .expect("read receipt")
+            .expect("request exists");
+        assert_eq!(
+            loaded.outcome.expect("affected wake exists").affected_wakes,
+            vec![affected]
+        );
+        tx.rollback().await.expect("rollback fixture");
+    }
 
     #[test]
     fn append_identity_columns_refuse_encoding_versions_that_do_not_fit_postgres_integer() {

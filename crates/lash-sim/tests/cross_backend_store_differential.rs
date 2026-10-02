@@ -303,7 +303,7 @@ enum StoreOperation {
     RestoreCorruptRecord {
         target: CorruptTarget,
     },
-    SaveMetaOnHandle {
+    SettleObserversOnHandle {
         handle_alias: &'static str,
     },
     CommitOnHandle {
@@ -360,7 +360,7 @@ impl StoreOperation {
             Self::CreateHandle { .. } => "create_handle",
             Self::DeleteSessionThroughFactory => "delete_session_through_factory",
             Self::AdmitOnHandle { .. } => "admit_on_handle",
-            Self::SaveMetaOnHandle { .. } => "save_meta_on_handle",
+            Self::SettleObserversOnHandle { .. } => "settle_observers_on_handle",
             Self::CommitOnHandle { .. } => "commit_on_handle",
             Self::ObserveSessionAbsent { .. } => "observe_session_absent",
             Self::DriveSurface { method } => method.label(),
@@ -1807,17 +1807,20 @@ impl BackendRunner {
                 self.assert_session_deleted(&error, "stale-handle admission");
                 Err(error)
             }
-            StoreOperation::SaveMetaOnHandle { handle_alias } => {
+            StoreOperation::SettleObserversOnHandle { handle_alias } => {
                 let handle = self
                     .handles
                     .get(handle_alias)
-                    .expect("generated sequence creates handle before metadata save");
+                    .expect("generated sequence creates handle before observer settlement");
                 let error = handle
                     .store
-                    .save_session_meta(handle.meta.clone())
+                    .settle_observer_intents(
+                        &handle.meta.session_id,
+                        handle.meta.pending_observer_intents.clone(),
+                    )
                     .await
-                    .expect_err("stale handle metadata save must be fenced");
-                self.assert_session_deleted(&error, "stale-handle metadata save");
+                    .expect_err("stale handle observer settlement must be fenced");
+                self.assert_session_deleted(&error, "stale-handle observer settlement");
                 Err(error)
             }
             StoreOperation::CommitOnHandle { handle_alias } => {
@@ -2113,8 +2116,6 @@ async fn runners_for_case_with_clock(
 ) -> Vec<BackendRunner> {
     let session_id = SessionId::from(format!("fig-778-{run_nonce}-{}", case.as_str()));
     // The deterministic relation is declared at creation on every backend:
-    // `save_session_meta` may not move a recorded lineage (FIG-3045), so the
-    // metadata install below rewrites a row that already records it.
     let relation = SessionRelation::Child {
         parent_session_id: SessionId::from(format!("fig-778-{run_nonce}-parent")),
         caused_by: None,
@@ -2148,10 +2149,13 @@ async fn runners_for_case_with_clock(
     let sqlite_memory_store = admit_test_session(memory_factory.clone(), &create_request)
         .await
         .expect("create SQLite memory differential store");
-    sqlite_memory_store
-        .save_session_meta(expected_meta.clone())
-        .await
-        .expect("install deterministic SQLite memory session metadata");
+    assert_eq!(
+        sqlite_memory_store
+            .load_session_meta(&session_id)
+            .await
+            .expect("read admitted metadata"),
+        Some(expected_meta.clone())
+    );
     let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn DeploymentStore>;
     let memory_path = PathBuf::from(
         sqlite_memory_stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
@@ -2174,10 +2178,13 @@ async fn runners_for_case_with_clock(
     let sqlite_store = admit_test_session(sqlite_factory.clone(), &create_request)
         .await
         .expect("create SQLite differential store");
-    sqlite_store
-        .save_session_meta(expected_meta.clone())
-        .await
-        .expect("install deterministic SQLite session metadata");
+    assert_eq!(
+        sqlite_store
+            .load_session_meta(&session_id)
+            .await
+            .expect("read admitted metadata"),
+        Some(expected_meta.clone())
+    );
     let sqlite_factory_dyn = Arc::clone(&sqlite_factory) as Arc<dyn DeploymentStore>;
 
     let postgres_factory = Arc::new(
@@ -2188,10 +2195,13 @@ async fn runners_for_case_with_clock(
     let postgres_store = admit_test_session(postgres_factory.clone(), &create_request)
         .await
         .expect("create Postgres differential store");
-    postgres_store
-        .save_session_meta(expected_meta.clone())
-        .await
-        .expect("install deterministic Postgres session metadata");
+    assert_eq!(
+        postgres_store
+            .load_session_meta(&session_id)
+            .await
+            .expect("read admitted metadata"),
+        Some(expected_meta.clone())
+    );
     let postgres_factory_dyn = Arc::clone(&postgres_factory) as Arc<dyn DeploymentStore>;
 
     let memory_lifecycle: lash::Backend = held_work_lifecycle_backend(

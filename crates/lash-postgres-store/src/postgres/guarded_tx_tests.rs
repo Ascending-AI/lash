@@ -107,7 +107,9 @@ async fn pg_fence_orders_a_writer_before_finalize() {
     let writer = tokio::spawn({
         let store = storage.store();
         let meta = root_meta(&session_id);
-        async move { store.save_session_meta(meta).await }
+        async move {
+            store.admit_session(&lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(meta)).await
+        }
     });
     assert_eq!(
         pause.reached().await,
@@ -159,7 +161,11 @@ async fn pg_fence_refuses_a_writer_after_finalize_with_zero_writes() {
     let session_id = SessionId::from("fence-refuses-writer");
     let error = storage
         .store()
-        .save_session_meta(root_meta(&session_id))
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
+                root_meta(&session_id),
+            ),
+        )
         .await
         .expect_err("a writer after finalize is fenced");
     assert!(

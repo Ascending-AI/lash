@@ -108,7 +108,7 @@ async fn stamp_two_preflight_and_open_agree_on_synthetic_shape() {
     scratch
         .apply(
             "UPDATE lash_schema_versions SET version = 2, min_reader = 1;
-             ALTER TABLE lash_sessions ADD COLUMN synthetic_next_note TEXT;
+             ALTER TABLE lash_session_head ADD COLUMN synthetic_next_note TEXT;
              CREATE TABLE lash_synthetic_next (id BIGSERIAL PRIMARY KEY, note TEXT);
              CREATE INDEX idx_lash_synthetic_next_note ON lash_synthetic_next(note)",
         )
@@ -134,8 +134,8 @@ async fn stamp_two_preflight_and_open_agree_on_synthetic_shape() {
         .expect("the complete stamp-2 catalog opens");
     for (mutation, missing) in [
         (
-            "ALTER TABLE lash_sessions DROP COLUMN synthetic_next_note",
-            "missing nullable lash_sessions.synthetic_next_note",
+            "ALTER TABLE lash_session_head DROP COLUMN synthetic_next_note",
+            "missing nullable lash_session_head.synthetic_next_note",
         ),
         (
             "DROP INDEX idx_lash_synthetic_next_note",
@@ -370,7 +370,7 @@ async fn status_holds_the_schema_lock_through_optional_probes_and_migration() {
         .expect("begin migration");
     sqlx::raw_sql(
         "UPDATE lash_schema_versions SET version = 3, min_reader = 1;
-         ALTER TABLE lash_sessions ADD CONSTRAINT observation_restriction CHECK (TRUE);
+         ALTER TABLE lash_session_head ADD CONSTRAINT observation_restriction CHECK (TRUE);
          UPDATE lash_release_stamp SET release_version = 'after', written_at_epoch_ms = 2",
     )
     .execute(&mut *migration)
@@ -588,7 +588,7 @@ async fn status_takes_its_first_snapshot_after_a_waiting_migration_commits() {
     sqlx::raw_sql(
         "BEGIN;
          UPDATE lash_schema_versions SET version = 3, min_reader = 1;
-         ALTER TABLE lash_sessions ADD COLUMN observation_note TEXT;
+         ALTER TABLE lash_session_head ADD COLUMN observation_note TEXT;
          UPDATE lash_release_stamp SET release_version = 'after', written_at_epoch_ms = 2;
          COMMIT",
     )
@@ -622,7 +622,7 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
     scratch
         .apply(
             "UPDATE lash_schema_versions SET version = 3, min_reader = 1;
-             ALTER TABLE lash_sessions ADD COLUMN observation_note TEXT",
+             ALTER TABLE lash_session_head ADD COLUMN observation_note TEXT",
         )
         .await;
     let readonly = sqlx::postgres::PgPoolOptions::new()
@@ -658,8 +658,8 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
     scratch
         .apply(
             "UPDATE lash_schema_versions SET version = 2;
-             ALTER TABLE lash_sessions DROP COLUMN observation_note;
-             ALTER TABLE lash_sessions ADD COLUMN synthetic_next_note TEXT;
+             ALTER TABLE lash_session_head DROP COLUMN observation_note;
+             ALTER TABLE lash_session_head ADD COLUMN synthetic_next_note TEXT;
              CREATE TABLE lash_synthetic_next (id BIGSERIAL PRIMARY KEY, note TEXT);
              CREATE INDEX idx_lash_synthetic_next_note ON lash_synthetic_next(note)",
         )
@@ -678,7 +678,7 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
         );
     }
     scratch
-        .apply("ALTER TABLE lash_sessions DROP COLUMN synthetic_next_note")
+        .apply("ALTER TABLE lash_session_head DROP COLUMN synthetic_next_note")
         .await;
     let missing = preflight
         .schema_status()
@@ -689,7 +689,7 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
             &missing.databases[0].verdict,
             StoreSchemaVerdict::Refused {
                 refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused { findings, .. }
-            } if findings.iter().any(|finding| finding.contains("missing nullable lash_sessions.synthetic_next_note"))
+            } if findings.iter().any(|finding| finding.contains("missing nullable lash_session_head.synthetic_next_note"))
         ));
     } else {
         assert_eq!(

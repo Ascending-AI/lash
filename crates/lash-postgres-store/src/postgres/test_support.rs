@@ -128,6 +128,28 @@ impl StoreTestSupport for PostgresStore {
         Ok(())
     }
 
+    async fn delete_session_head_for_testing(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query(
+            crate::session_sql::session_sql()
+                .head
+                .delete_by_session
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        if result.rows_affected() != 1 {
+            return Err(StoreError::Backend(format!(
+                "test session head `{session_id}` is missing"
+            )));
+        }
+        Ok(())
+    }
+
     async fn set_head_current_frame_for_testing(
         &self,
         session_id: &SessionId,
@@ -136,7 +158,7 @@ impl StoreTestSupport for PostgresStore {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         let mut head: serde_json::Value = sqlx::query_scalar::<_, String>(
             crate::session_sql::session_sql()
-                .head
+                .head_postgres
                 .select_head_json_for_update
                 .sql(),
         )
@@ -170,7 +192,7 @@ impl StoreTestSupport for PostgresStore {
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let head_json: String = sqlx::query_scalar(
             crate::session_sql::session_sql()
-                .head
+                .head_postgres
                 .select_head_json_for_update
                 .sql(),
         )

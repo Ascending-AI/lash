@@ -387,6 +387,14 @@ table lash_schema_versions
   column min_reader integer not-null
   column version integer not-null
   primary-key (component)
+table lash_session_head
+  column checkpoint_ref text nullable
+  column head_json text not-null
+  column head_revision bigint not-null default
+  column leaf_node_id text nullable
+  column pending_follow_on_json text nullable
+  column session_id text not-null
+  primary-key (session_id)
 table lash_session_ingress_sequence
   column enqueue_seq bigint not-null
   column session_id text not-null
@@ -465,14 +473,6 @@ table lash_session_run_specs
   column spec_hash text not-null
   column spec_json text not-null
   primary-key (session_id, spec_hash)
-table lash_sessions
-  column checkpoint_ref text nullable
-  column head_json text not-null
-  column head_revision bigint not-null default
-  column leaf_node_id text nullable
-  column pending_follow_on_json text nullable
-  column session_id text not-null
-  primary-key (session_id)
 table lash_tool_intent_submissions
   column execution_scope_id text not-null
   column intent_index bigint not-null
@@ -552,7 +552,7 @@ table lash_turn_cancel_affected_inputs
   column ordinal bigint not-null
   column session_id text not-null
   column turn_id text not-null
-  unique (session_id, turn_id, input_id)
+  unique (session_id, turn_id, item_kind, input_id)
   primary-key (session_id, turn_id, ordinal)
   foreign-key (session_id, turn_id) references lash_turn_cancel_requests (session_id, turn_id) on delete cascade
 table lash_turn_cancel_closure_authorizations
@@ -561,9 +561,9 @@ table lash_turn_cancel_closure_authorizations
   column turn_id text not-null
   primary-key (session_id, turn_id)
 table lash_turn_cancel_requests
-  column disposition text not-null default
+  column disposition text not-null
   column intent_revision bigint not-null
-  column mode text not-null default
+  column mode text not-null
   column origin text nullable
   column reason text nullable
   column request_id text not-null
