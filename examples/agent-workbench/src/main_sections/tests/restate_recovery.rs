@@ -1751,41 +1751,32 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         "active-turn input must reach the next provider iteration exactly once"
     );
     // Settlement is keyed by the root and the turn (ADR 0101, FIG-3927
-    // amendment): the commit that settles the input names it in its
-    // `ingress.settled` record, under that turn and its root.
+    // amendment), and the durable record is what replay must preserve:
+    // `turn_input_applications` is read back out of the committed turn
+    // receipts, which carry one application per input per commit, so a
+    // second real completion leaves a second row where the per-attempt
+    // `ingress.settled` trace lines would only repeat the first.
     let in_flight_turn = injected.ingress.active_turn_id().map(TurnId::as_str);
-    let settlements = std::fs::read_to_string(&harness.trace_path)
-        .expect("read turn ingress trace")
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .filter(|record| {
-            record.get("name").and_then(Value::as_str) == Some("ingress.settled")
-                && record
-                    .pointer("/payload/input_ids")
-                    .and_then(Value::as_array)
-                    .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(&injected.input_id)))
-        })
-        .map(|record| {
-            (
-                record
-                    .pointer("/context/turn_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                record
-                    .pointer("/payload/root")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-            )
-        })
+    let applications = snapshot
+        .turn_input_applications
+        .iter()
+        .filter(|application| application.input_id == injected.input_id)
         .collect::<Vec<_>>();
     assert_eq!(
-        settlements,
-        vec![(
-            in_flight_turn.map(str::to_owned),
-            in_flight_turn.map(str::to_owned)
-        )],
-        "active-turn input must complete exactly once under the in-flight turn id; trace={} ",
-        trace_tail(&harness.trace_path)
+        applications.len(),
+        1,
+        "active-turn input must complete exactly once on the durable record: {:?}",
+        snapshot.turn_input_applications
+    );
+    assert_eq!(
+        Some(applications[0].turn_id.as_str()),
+        in_flight_turn,
+        "the input's committed application must name the in-flight turn"
+    );
+    assert!(
+        applications[0].checkpoint.is_some(),
+        "an active-turn input applies at the in-flight turn's checkpoint: {:?}",
+        applications[0]
     );
     assert_eq!(
         captured[2].matches("active injection marker").count(),
@@ -1879,6 +1870,13 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
     // Declared before every child/store owner so unwinding kills and reaps those
     // resources before this guard stops libtest from entering another fixture.
     let mut failure_scope = AbortRestateFixtureOnPanic::armed("ingress-owner-restart");
+    // Every wait below polls committed state (an admitted invocation, a
+    // provider owner, a trace row, a committed terminal, a drained
+    // deployment); the bound is only a hang detector, never part of what the
+    // law asserts, so one value serves both legs — on the replay leg every
+    // await suspends and replays, and each engine-paced step is uniformly
+    // slower.
+    let hang = Duration::from_secs(120);
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -1937,10 +1935,10 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
     let invocation_id = lash_turn_invocation_at(
         &admin_url,
         &lash::TurnAddress::new(&session_id, &turn_id),
-        Duration::from_secs(20),
+        hang,
     )
     .await;
-    wait_for_provider_owner(&data_dir, first_pid, Duration::from_secs(20)).await;
+    wait_for_provider_owner(&data_dir, first_pid, hang).await;
     let admitted = restate_invocation_status_with_deployment(&admin_url, &invocation_id)
         .await
         .expect("admitted recovery invocation status");
@@ -1949,13 +1947,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
         Some(deployment_id.as_str()),
         "recovery invocation must stay pinned to the original immutable deployment"
     );
-    wait_for_trace_event_count(
-        &data_dir.join("trace.jsonl"),
-        "llm_call_completed",
-        1,
-        Duration::from_secs(20),
-    )
-    .await;
+    wait_for_trace_event_count(&data_dir.join("trace.jsonl"), "llm_call_completed", 1, hang).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     let first_generation = session_drive_epoch(&data_dir, backend, &session_id).await;
 
@@ -2016,7 +2008,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
         ),
         "recovered turn cancellation did not reach the durable gate: {receipt:#?}"
     );
-    let terminal = tokio::time::timeout(Duration::from_secs(20), driver.await_terminal(&address))
+    let terminal = tokio::time::timeout(hang, driver.await_terminal(&address))
         .await
         .expect("recovered turn must commit a cancellation terminal")
         .expect("attach recovered turn terminal");
@@ -2040,7 +2032,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
         Some("deterministic ingress-owner restart gate")
     );
     let product_event_path = data_dir.join("product-events.json");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let deadline = tokio::time::Instant::now() + hang;
     loop {
         let product_events = SessionEventRegistry::persistent(product_event_path.clone(), 4)
             .expect("reopen product events after ingress-owner replacement")
@@ -2071,12 +2063,8 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
         done_count, 1,
         "owner replacement and Restate redelivery must settle the product projection once"
     );
-    wait_for_restate_deployment_and_unpinned_invocations_drained(
-        &admin_url,
-        &deployment_id,
-        Duration::from_secs(30),
-    )
-    .await;
+    wait_for_restate_deployment_and_unpinned_invocations_drained(&admin_url, &deployment_id, hang)
+        .await;
     replacement.stop_and_reap();
     assert!(
         tokio::net::TcpStream::connect(endpoint_bind).await.is_err(),

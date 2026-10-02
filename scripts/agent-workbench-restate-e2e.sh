@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The agent-workbench live Restate suite.
+# The agent-workbench Restate suite, on the live leg and the replay leg.
 #
 # `scripts/ci/restate_suite.py` builds the workbench test binary on the shared
 # pool and runs its `live_restate_` laws beside pinned `restate-server`s, one
@@ -114,7 +114,6 @@ if [ -n "${AGENT_WORKBENCH_E2E_ARTIFACT_DIR:-}" ]; then
 else
   artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/lash-agent-workbench-restate-e2e-${LASH_GATE_WORKTREE_SLUG}.XXXXXX")"
 fi
-test_output="$artifact_dir/test.log"
 cleanup_log="$artifact_dir/cleanup.log"
 data_manifest="$artifact_dir/fixture-data.manifest"
 child_manifest="$artifact_dir/fixture-children.manifest"
@@ -148,20 +147,32 @@ trap cleanup_trap EXIT
 companion_executable="$(python3 "$repo/scripts/ci/restate_suite.py" build \
   //crates/lash-sqlite-store:conformance_memory__test)"
 
-set +e
-# shellcheck disable=SC2016 # expanded by the inner shell, after with-service exports the URL
-bash "$repo/scripts/ci/with-service.sh" pg16 -- bash -c '
-  set -euo pipefail
-  export AGENT_WORKBENCH_E2E_POSTGRES_BASE_URL="${LASH_POSTGRES_DATABASE_URL%/*}"
-  exec python3 scripts/ci/restate_suite.py suite agent-workbench \
-    --leg "${LASH_RESTATE_SUITE_LEG:-${AGENT_WORKBENCH_E2E_LEG:-live}}" \
-    --artifacts "$AGENT_WORKBENCH_E2E_SUITE_ARTIFACTS"
-' 2>&1 | tee "$test_output"
-test_status="${PIPESTATUS[0]}"
-set -e
-if ((test_status != 0)); then
-  exit "$test_status"
+# The suite runs both legs, live then replay, each beside a fresh Postgres:
+# the replay leg's invoker suspends at every await and replays each journal
+# from the start, so a per-attempt observation repeats there while the
+# committed facts must not. The registry-derived matrix sets
+# LASH_RESTATE_SUITE_LEG for its one-leg rows; AGENT_WORKBENCH_E2E_LEG names
+# one leg to run alone.
+legs=(live replay)
+if [ -n "${LASH_RESTATE_SUITE_LEG:-${AGENT_WORKBENCH_E2E_LEG:-}}" ]; then
+  legs=("${LASH_RESTATE_SUITE_LEG:-${AGENT_WORKBENCH_E2E_LEG}}")
 fi
+for leg in "${legs[@]}"; do
+  set +e
+  # shellcheck disable=SC2016 # expanded by the inner shell, after with-service exports the URL
+  bash "$repo/scripts/ci/with-service.sh" pg16 -- bash -c '
+    set -euo pipefail
+    export AGENT_WORKBENCH_E2E_POSTGRES_BASE_URL="${LASH_POSTGRES_DATABASE_URL%/*}"
+    exec python3 scripts/ci/restate_suite.py suite agent-workbench \
+      --leg "$1" \
+      --artifacts "$AGENT_WORKBENCH_E2E_SUITE_ARTIFACTS"
+  ' _ "$leg" 2>&1 | tee "$artifact_dir/test-$leg.log"
+  test_status="${PIPESTATUS[0]}"
+  set -e
+  if ((test_status != 0)); then
+    exit "$test_status"
+  fi
+done
 
 companion_output="$artifact_dir/companion.log"
 (cd crates/lash-sqlite-store && "$companion_executable" \
