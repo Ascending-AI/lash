@@ -467,7 +467,7 @@ finish("done via Restate E2E");
             .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
             .expect("register worked effect-group resolver");
         let lash_backend = lash::Backend::new(backend.clone());
-        let factory = crate::rlm_factory(&backend);
+        let factory = crate::rlm_factory(&lash_backend);
         let core = LashCore::rlm_builder(
             lash_backend,
             factory,

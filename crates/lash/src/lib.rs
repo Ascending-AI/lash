@@ -1659,7 +1659,12 @@ pub mod mcp {
 /// policy, for example [`lifetime::session_or_starter`](crate::process::lifetime::session_or_starter),
 /// decides the lifetime of every process a model's `start_process` declares.
 pub mod process_controls {
-    pub use lash_plugin_process_controls::SessionProcessAdminPluginFactory;
+    pub use lash_plugin_process_controls::{
+        SessionProcessAdminPluginFactory, process_await_tool_definition,
+        process_cancel_tool_definition, process_emit_tool_definition, process_get_tool_definition,
+        process_list_tool_definition, process_signal_tool_definition,
+        process_start_tool_definition,
+    };
 }
 
 /// Subagent spawning plugin.
@@ -1682,6 +1687,10 @@ pub mod http_transport {
 
 /// Model-provider configuration and request types.
 pub mod provider {
+    #[cfg(any(feature = "anthropic", feature = "google", feature = "openai"))]
+    pub use lash_llm_transport::ExtraHeaders;
+    #[cfg(any(feature = "google", feature = "openai"))]
+    pub use lash_provider_auth::{OAuthError, OAuthTokenErrorCode, OAuthTokens};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::llm::transport::HttpFailureContext;
     pub use lash_sansio::llm::types::{

@@ -11,47 +11,11 @@ from typing import Any, Iterator
 
 REPO = Path(__file__).resolve().parents[1]
 
-# The workers harness mixes host code with independent storage/journal evidence.
-# Ticket C1 of the runbooks sweep owns its facade cutover. Exempt exact existing
-# files only; new harness sources and every other runbook host fail closed.
-RUNBOOK_INTERNAL_SOURCES = frozenset(
-    Path(path)
-    for path in (
-        'runbooks/restate-postgres-workers/src/batch_journal.rs',
-        'runbooks/restate-postgres-workers/src/bin/await_event_helper.rs',
-        'runbooks/restate-postgres-workers/src/bin/context_overflow_recovery.rs',
-        'runbooks/restate-postgres-workers/src/bin/mock_provider/load.rs',
-        'runbooks/restate-postgres-workers/src/bin/process_operations_worker.rs',
-        'runbooks/restate-postgres-workers/src/bin/runner/control_scenarios.rs',
-        'runbooks/restate-postgres-workers/src/bin/runner/environment.rs',
-        'runbooks/restate-postgres-workers/src/bin/runner/process_assertions.rs',
-        'runbooks/restate-postgres-workers/src/bin/runner/queued_work_assertions.rs',
-        'runbooks/restate-postgres-workers/src/bin/runner/response_assertions.rs',
-        'runbooks/restate-postgres-workers/src/bin/runner/segment_one.rs',
-        'runbooks/restate-postgres-workers/src/bin/runner/tests.rs',
-        'runbooks/restate-postgres-workers/src/bin/runner.rs',
-        'runbooks/restate-postgres-workers/src/bin/session_operator.rs',
-        'runbooks/restate-postgres-workers/src/bin/worker.rs',
-        'runbooks/restate-postgres-workers/src/lib.rs',
-        'runbooks/restate-postgres-workers/src/load/behavior.rs',
-        'runbooks/restate-postgres-workers/src/load/behavior_tests.rs',
-        'runbooks/restate-postgres-workers/src/load/behaviors.rs',
-        'runbooks/restate-postgres-workers/src/load/behaviors_replay_tests.rs',
-        'runbooks/restate-postgres-workers/src/load/cleanup_tests.rs',
-        'runbooks/restate-postgres-workers/src/load/control.rs',
-        'runbooks/restate-postgres-workers/src/load/fault_verify.rs',
-        'runbooks/restate-postgres-workers/src/load/mod.rs',
-        'runbooks/restate-postgres-workers/src/load/provider_watch.rs',
-        'runbooks/restate-postgres-workers/src/load/tools.rs',
-        'runbooks/restate-postgres-workers/src/load/upgrade_verify.rs',
-        'runbooks/restate-postgres-workers/src/load/verify.rs',
-        'runbooks/restate-postgres-workers/src/load/worker.rs',
-        'runbooks/restate-postgres-workers/src/local_restate.rs',
-        'runbooks/restate-postgres-workers/src/overflow_recovery_evidence.rs',
-        'runbooks/restate-postgres-workers/src/schema_admission_tests.rs',
-        'runbooks/restate-postgres-workers/src/scripted_provider.rs',
-    )
-)
+# This independent schema probe installs a captured provider transport. Host
+# sources, including the workers harness, use the facade without exemptions.
+RUNBOOK_INTERNAL_SOURCES = frozenset({
+    Path('runbooks/restate-postgres-workers/src/schema_admission_tests.rs'),
+})
 
 
 def dependency_tables(

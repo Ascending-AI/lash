@@ -141,12 +141,14 @@ pub use lash_lashlang_runtime::{
 /// [`ProtocolEvent`](crate::persistence::ProtocolEvent) envelope a session's
 /// history stores into the variant it commits, instead of walking the
 /// payload's serialized keys.
-pub use lash_protocol_rlm::{decode_rlm_protocol_event, is_rlm_protocol_output};
+pub use lash_protocol_rlm::decode_rlm_protocol_event;
+/// Identifies the RLM protocol's durable output by its typed message origin.
+pub use lash_protocol_rlm::is_rlm_protocol_output;
 pub use lash_protocol_rlm::{
     BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound,
     MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
-    TypeExpr, TypeField, UnsetBound, decode_rlm_protocol_event, format_type_expr,
+    TypeExpr, TypeField, UnsetBound, format_type_expr, rlm_protocol_event,
 };
 /// The code-mode dialect seam: a host selects one [`Dialect`] where it
 /// constructs the RLM protocol; [`TypescriptDialect`] is the shipped one.
@@ -180,11 +182,6 @@ pub use lash_protocol_rlm::{RlmProjectedBindings, RlmSeed, rlm_session_projectio
 pub use lash_render::{RenderParams, RenderParamsPatch};
 /// The committed RLM event variants [`decode_rlm_protocol_event`] returns and
 /// the record types their fields name.
-pub use lash_rlm_types::{
-    CellOutcome, HistoryCellOutcome, RlmAssistantContent, RlmDiagnosticEvent, RlmExecutedCall,
-    RlmExecutedCallOutcome, RlmGlobalsPatchPluginBody, RlmPrint, RlmProtocolEvent,
-    RlmTrajectoryEntry,
-};
 pub use lash_rlm_types::{
     CellOutcome, HistoryCellOutcome, RlmAssistantContent, RlmDiagnosticEvent, RlmExecutedCall,
     RlmExecutedCallOutcome, RlmGlobalsPatchPluginBody, RlmPrint, RlmProtocolEvent,

@@ -33,6 +33,8 @@ lash-core-store = { workspace = true }
 lash-core-worker = { workspace = true }
 lash-lashlang-runtime = { workspace = true, optional = true }
 lash-llm-tools = { workspace = true, optional = true }
+lash-llm-transport = { workspace = true, optional = true }
+lash-provider-auth = { workspace = true, optional = true }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-tool-support = { workspace = true }
 lash-provider-anthropic = { workspace = true, optional = true }
@@ -82,9 +84,9 @@ sqlite = ["dep:lash-sqlite-store"]
 postgres = ["dep:lash-postgres-store"]
 s3 = ["dep:lash-s3-store"]
 restate = ["dep:lash-restate"]
-openai = ["dep:lash-provider-openai"]
-anthropic = ["dep:lash-provider-anthropic"]
-google = ["dep:lash-provider-google"]
+openai = ["dep:lash-provider-openai", "dep:lash-llm-transport", "dep:lash-provider-auth"]
+anthropic = ["dep:lash-provider-anthropic", "dep:lash-llm-transport"]
+google = ["dep:lash-provider-google", "dep:lash-llm-transport", "dep:lash-provider-auth"]
 mcp = ["dep:lash-plugin-mcp"]
 subagents = ["dep:lash-subagents"]
 typescript = ["dep:lash-typescript"]

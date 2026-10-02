@@ -85,6 +85,10 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
 
     def test_runbook_exemptions_apply_to_exact_files_only(self) -> None:
         self.write(
+            "runbooks/restate-postgres-workers/src/schema_admission_tests.rs",
+            "use lash_core::LashCore;\n",
+        )
+        self.write(
             "runbooks/restate-postgres-workers/src/bin/worker.rs",
             "use lash_core::LashCore;\n",
         )
@@ -93,7 +97,10 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
             "use lash_core::LashCore;\n",
         )
         self.assertEqual(
-            [(Path("runbooks/restate-postgres-workers/src/bin/new_host.rs"), 1, "lash_core::")],
+            [
+                (Path("runbooks/restate-postgres-workers/src/bin/new_host.rs"), 1, "lash_core::"),
+                (Path("runbooks/restate-postgres-workers/src/bin/worker.rs"), 1, "lash_core::"),
+            ],
             gate.violations(),
         )
 

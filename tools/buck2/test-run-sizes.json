@@ -999,14 +999,6 @@
     "peak_bytes": 28835840,
     "samples": 196
   },
-  "//crates/lash-restate-test:session_send__test": {
-    "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 0.47,
-    "p99_peak_bytes": 77324288,
-    "peak_bytes": 83750912,
-    "samples": 167
-  },
   "//crates/lash-restate-test:session_shifts__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
@@ -1014,6 +1006,14 @@
     "p99_peak_bytes": 99360768,
     "peak_bytes": 163360768,
     "samples": 224
+  },
+  "//crates/lash-restate-test:session_send__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.47,
+    "p99_peak_bytes": 77324288,
+    "peak_bytes": 83750912,
+    "samples": 167
   },
   "//crates/lash-restate-test:start_gate_peek__test": {
     "cpu_count": 1,

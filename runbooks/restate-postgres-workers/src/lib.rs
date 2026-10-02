@@ -526,7 +526,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         )?))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
+        .plugin(Arc::new(lash::tools::LlmToolsPluginFactory::default()))
         // The `processes` module is catalogue presence, not an ability bit
         // (ADR 0095): the scripted programs this harness serves author
         // `processes.start`, `processes.await` and `processes.emit`.

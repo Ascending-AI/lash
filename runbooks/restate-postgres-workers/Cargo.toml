@@ -82,7 +82,6 @@ lash = { workspace = true, features = [
     "openai",
     "testing",
 ] }
-lash-llm-tools = { workspace = true }
 lash-perf = { path = "../../crates/lash-perf" }
 lash-plugin-standard-compaction = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }

@@ -878,37 +878,35 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     persisted
         .session_graph
         .append_protocol_event(lash::rlm::rlm_protocol_event(
-            lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(
-                lash::rlm::RlmTrajectoryEntry {
-                    id: "durable-tool-trajectory".to_string(),
-                    protocol_iteration: 1,
-                    code: "durable.tool_projection()".to_string(),
-                    output_archive: Some(Box::new(lash::attachments::RetainedOutput {
-                        reference: lash::attachments::AttachmentRef {
-                            id: "sha256:durable-print-archive"
-                                .parse()
-                                .expect("attachment id"),
-                            media_type: "application/json".parse().expect("media type"),
-                            byte_len: 90_000,
-                            type_metadata: None,
-                            label: None,
-                        },
-                        witness: "durable projection".to_string(),
-                    })),
-                    calls: vec![
-                        lash::persistence::ExecutedCallRecord {
-                            operation: "durable.success".to_string(),
-                            outcome: lash::persistence::ExecutedCallOutcome::Ok,
-                        },
-                        lash::persistence::ExecutedCallRecord {
-                            operation: "durable.failure".to_string(),
-                            outcome: lash::persistence::ExecutedCallOutcome::Err,
-                        },
-                    ],
-                    calls_omitted: 3,
-                    ..lash::rlm::RlmTrajectoryEntry::default()
-                },
-            ),
+            lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(lash::rlm::RlmTrajectoryEntry {
+                id: "durable-tool-trajectory".to_string(),
+                protocol_iteration: 1,
+                code: "durable.tool_projection()".to_string(),
+                output_archive: Some(Box::new(lash::attachments::RetainedOutput {
+                    reference: lash::attachments::AttachmentRef {
+                        id: "sha256:durable-print-archive"
+                            .parse()
+                            .expect("attachment id"),
+                        media_type: "application/json".parse().expect("media type"),
+                        byte_len: 90_000,
+                        type_metadata: None,
+                        label: None,
+                    },
+                    witness: "durable projection".to_string(),
+                })),
+                calls: vec![
+                    lash::persistence::ExecutedCallRecord {
+                        operation: "durable.success".to_string(),
+                        outcome: lash::persistence::ExecutedCallOutcome::Ok,
+                    },
+                    lash::persistence::ExecutedCallRecord {
+                        operation: "durable.failure".to_string(),
+                        outcome: lash::persistence::ExecutedCallOutcome::Err,
+                    },
+                ],
+                calls_omitted: 3,
+                ..lash::rlm::RlmTrajectoryEntry::default()
+            }),
         ));
     session
         .admin()
