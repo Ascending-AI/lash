@@ -1,15 +1,12 @@
 use lash::TurnId;
 use lash::sync::MutexExt;
-use std::convert::Infallible;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use axum::Json;
-use axum::body::Body;
 use axum::extract::{Path as AxumPath, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
-use bytes::Bytes;
 use lash::rlm::RlmSendBuilderExt as _;
 use lash::{TurnActivityFanout, TurnActivitySink, TurnInput};
 use lash_remote_protocol::RemoteTurnActivitySink;
@@ -77,7 +74,7 @@ pub(crate) async fn stream_raw_activities(
         .id(turn_id.clone())
         .require_finish()?
         .await?;
-    let (tx, rx) = mpsc::unbounded_channel::<Result<Bytes, Infallible>>();
+    let (tx, rx) = mpsc::unbounded_channel::<serde_json::Value>();
     let remote_events = Arc::new(RemoteTurnActivitySink::new(
         NdjsonChannelWriter::new(tx),
         0,
@@ -128,23 +125,31 @@ pub(crate) async fn stream_raw_activities(
         }
     });
 
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
-        .header(header::CACHE_CONTROL, "no-store")
-        .header("x-lash-turn-id", turn_id.as_str())
-        .header("x-lash-protocol-accept", accept_json)
-        .body(Body::from_stream(UnboundedReceiverStream::new(rx)))
-        .map_err(|err| AppError::internal(format!("build streaming response: {err}")))
+    let mut response = crate::ndjson::ndjson_response(UnboundedReceiverStream::new(rx));
+    let headers = response.headers_mut();
+    headers.insert(
+        "x-lash-turn-id",
+        HeaderValue::from_str(turn_id.as_str())
+            .map_err(|err| AppError::internal(format!("invalid turn-id header: {err}")))?,
+    );
+    headers.insert(
+        "x-lash-protocol-accept",
+        HeaderValue::from_str(&accept_json)
+            .map_err(|err| AppError::internal(format!("invalid protocol-accept header: {err}")))?,
+    );
+    Ok(response)
 }
 
+/// Frames the remote sink's already-encoded NDJSON bytes back into the
+/// stream items `ndjson_response` serves: one `Value` per line, reserialized
+/// verbatim.
 struct NdjsonChannelWriter {
-    tx: mpsc::UnboundedSender<Result<Bytes, Infallible>>,
+    tx: mpsc::UnboundedSender<serde_json::Value>,
     pending: Vec<u8>,
 }
 
 impl NdjsonChannelWriter {
-    fn new(tx: mpsc::UnboundedSender<Result<Bytes, Infallible>>) -> Self {
+    fn new(tx: mpsc::UnboundedSender<serde_json::Value>) -> Self {
         Self {
             tx,
             pending: Vec::new(),
@@ -164,8 +169,10 @@ impl Write for NdjsonChannelWriter {
         while let Some(newline) = self.pending.iter().position(|byte| *byte == b'\n') {
             let remainder = self.pending.split_off(newline + 1);
             let line = std::mem::replace(&mut self.pending, remainder);
+            let item =
+                serde_json::from_slice::<serde_json::Value>(&line).map_err(io::Error::other)?;
             self.tx
-                .send(Ok(Bytes::from(line)))
+                .send(item)
                 .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "HTTP stream closed"))?;
         }
         Ok(bytes.len())
@@ -179,6 +186,7 @@ impl Write for NdjsonChannelWriter {
 #[cfg(test)]
 mod tests {
     use axum::body::to_bytes;
+    use axum::http::{StatusCode, header};
     use lash::LashCore;
     use lash::direct::LlmOutputPart;
     use lash::provider::LlmResponse;

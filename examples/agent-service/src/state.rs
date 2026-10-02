@@ -4,7 +4,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use lash::sync::MutexExt;
-use lash::{LashCore, LashSession, TurnWorkDriver};
+use lash::{LashCore, LashSession};
 
 use crate::routes::LlmProfileChoice;
 use serde_json::json;
@@ -16,7 +16,6 @@ pub(crate) type AppResult<T> = Result<T, AppError>;
 #[derive(Clone)]
 pub(crate) struct AppStateData {
     core: Arc<LashCore>,
-    turn_work_driver: TurnWorkDriver,
     db: Arc<Mutex<AppDb>>,
     default_profile: String,
     default_profile_variant: Option<String>,
@@ -34,7 +33,6 @@ impl AppStateData {
         let core = Arc::new(core);
         db.lock_recover().context_core = Arc::downgrade(&core);
         Self {
-            turn_work_driver: core.turn_work_driver(),
             core,
             db,
             default_profile,
@@ -49,32 +47,18 @@ impl AppStateData {
     }
 
     pub(crate) async fn record_board_context(&self, session: &LashSession) -> AppResult<()> {
+        let chat_id = session.session_id().to_string();
+        let board = self.with_db(move |db| db.chat_board(&chat_id)).await?;
         let config = session.admin().config();
-        loop {
-            let chat_id = session.session_id().to_string();
-            let board = self.with_db(move |db| db.chat_board(&chat_id)).await?;
-            let revision = config.revision().await?;
-            let outcome = config
-                .apply(
-                    lash::config::ConfigWrite::new(
-                        format!("board-context:{}", uuid::Uuid::new_v4()),
-                        revision,
-                    ),
-                    lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext {
-                        context: vec![crate::board::board_prompt(&board)],
-                    }),
-                )
-                .await?;
-            match outcome {
-                lash::config::ConfigTransactionOutcome::Applied { .. } => return Ok(()),
-                lash::config::ConfigTransactionOutcome::Stale { .. } => continue,
-                outcome => {
-                    return Err(AppError::internal(format!(
-                        "the board context did not apply: {outcome:?}"
-                    )));
-                }
-            }
-        }
+        apply_config_transaction(
+            &config,
+            &format!("board-context:{}", uuid::Uuid::new_v4()),
+            &lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext {
+                context: vec![crate::board::board_prompt(&board)],
+            }),
+            config.revision().await?,
+        )
+        .await
     }
 
     pub(crate) async fn record_board_context_for_chat(&self, chat_id: &str) -> AppResult<()> {
@@ -84,10 +68,6 @@ impl AppStateData {
             .open()
             .await?;
         self.record_board_context(&session).await
-    }
-
-    pub(crate) fn turn_work_driver(&self) -> &TurnWorkDriver {
-        &self.turn_work_driver
     }
 
     pub(crate) fn default_profile(&self) -> &str {
@@ -108,11 +88,6 @@ impl AppStateData {
         chat_id: &str,
         model: LlmProfileChoice,
     ) -> AppResult<LashSession> {
-        // TypeScript is the sole RLM language (ADR 0096), so a chat states no
-        // language at its open: there is nothing left to pin, and a bag that
-        // still records the retired `dialect` field is refused by the protocol
-        // as an incompatible format rather than served under another language.
-        //
         // The model is creation config: the chat's session is created lazily,
         // after its app-DB chat row, and records the model then; a reopen runs
         // with what the session recorded (FIG-4099). Only `create` creates
@@ -168,33 +143,21 @@ impl AppStateData {
                 reasoning: recorded.reasoning,
             });
         if recorded.as_ref() != Some(&model) {
-            // Written against the revision this open read, under an id that
-            // names the change: a resubmission of the same change is the
-            // same transaction.
+            // Written under an id that names the change: a resubmission of
+            // the same change is the same transaction.
             let config = session.admin().config();
-            let revision = config.revision().await?;
-            let outcome = config
-                .apply(
-                    lash::config::ConfigWrite::new(
-                        format!("chat-model:{}:{:?}:{revision}", model.key, model.reasoning),
-                        revision,
-                    ),
-                    lash::config::ConfigTransaction::of(lash::config::SetLlmProfile {
-                        model: model.key,
-                    })
-                    .then(lash::config::SetReasoning {
-                        reasoning: model.reasoning,
-                    }),
-                )
-                .await?;
-            if !matches!(
-                outcome,
-                lash::config::ConfigTransactionOutcome::Applied { .. }
-            ) {
-                return Err(AppError::internal(format!(
-                    "the chat's model change did not apply: {outcome:?}"
-                )));
-            }
+            apply_config_transaction(
+                &config,
+                &format!("chat-model:{}:{:?}", model.key, model.reasoning),
+                &lash::config::ConfigTransaction::of(lash::config::SetLlmProfile {
+                    model: model.key.clone(),
+                })
+                .then(lash::config::SetReasoning {
+                    reasoning: model.reasoning.clone(),
+                }),
+                config.revision().await?,
+            )
+            .await?;
         }
         self.record_tool_loss_notice(chat_id, &session).await?;
         Ok(session)
@@ -263,6 +226,38 @@ impl AppStateData {
         }
         Ok(())
     }
+}
+
+/// Submit `transaction` under `write_id`, written against `expected`.
+///
+/// A stale base is the read racing another writer, so the write retries
+/// against the actual revision; the recorded submission digests its expected
+/// revision, which makes each retry a new write id suffix. A `Refused` is
+/// the owner's typed answer to the caller — a 400, never a 500.
+async fn apply_config_transaction(
+    config: &lash::config::SessionConfigAdmin,
+    write_id: &str,
+    transaction: &lash::config::ConfigTransaction,
+    mut expected: u64,
+) -> AppResult<()> {
+    for _ in 0..4 {
+        match config
+            .apply(
+                lash::config::ConfigWrite::new(format!("{write_id}:{expected}"), expected),
+                transaction.clone(),
+            )
+            .await?
+        {
+            lash::config::ConfigTransactionOutcome::Applied { .. } => return Ok(()),
+            lash::config::ConfigTransactionOutcome::Stale { actual, .. } => expected = actual,
+            lash::config::ConfigTransactionOutcome::Refused { refusal } => {
+                return Err(AppError::bad_request(refusal.to_string()));
+            }
+        }
+    }
+    Err(AppError::internal(format!(
+        "config change `{write_id}` kept racing other writers"
+    )))
 }
 
 /// The user-facing sentence for a tool-restore report that lost members.
@@ -888,6 +883,54 @@ mod session_language_tests {
             .await
             .expect("a chat reopens under the config it recorded");
         reopened.close().await.expect("close the reopened session");
+    }
+}
+
+#[cfg(test)]
+mod config_transaction_tests {
+    use super::test_support::{mock_llm_profile, test_core, test_double, test_state};
+    use super::*;
+
+    /// A write based on a stale revision is contention, not failure: the
+    /// helper re-reads the actual revision and lands the change (FIG-4686).
+    #[tokio::test]
+    async fn a_stale_config_write_retries_against_the_actual_revision() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let double = test_double().await;
+        let core = test_core(&double).await;
+        let state = test_state(
+            &double,
+            &core,
+            AppDb::open(&temp.path().join("app.db")).expect("app db"),
+        );
+        let session = state
+            .open_session("config-chat", mock_llm_profile())
+            .await
+            .expect("open session");
+        let config = session.admin().config();
+        let stale = config.revision().await.expect("read revision");
+        // A racing writer commits first, leaving `stale` behind.
+        config
+            .apply(
+                lash::config::ConfigWrite::new("racing-writer:1", stale),
+                lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext {
+                    context: vec!["first".to_string()],
+                }),
+            )
+            .await
+            .expect("the racing write applies");
+        apply_config_transaction(
+            &config,
+            "board-context:test",
+            &lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext {
+                context: vec!["second".to_string()],
+            }),
+            stale,
+        )
+        .await
+        .expect("a stale base retries and applies");
+        drop(config);
+        session.close().await.expect("close");
     }
 }
 

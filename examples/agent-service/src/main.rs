@@ -21,6 +21,10 @@ mod effect_groups;
 mod fork_compensation_tests;
 #[cfg(test)]
 mod fork_rewind_contract;
+#[path = "../../shared/local_restate.rs"]
+mod local_restate;
+#[path = "../../shared/ndjson.rs"]
+mod ndjson;
 mod raw_activities;
 mod remote_protocol;
 mod restate;
@@ -133,7 +137,6 @@ use crate::routes::{
 };
 use crate::state::{AppStateData, anyhow_like};
 use lash::durability::DurableProcessWorker;
-use lash_restate::RestateEngine;
 
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 
@@ -224,16 +227,14 @@ async fn async_main() -> anyhow_like::Result<()> {
         .unwrap_or_else(|_| "127.0.0.1:9080".to_string())
         .parse()
         .map_err(|err| format!("invalid AGENT_SERVICE_RESTATE_ADDR: {err}"))?;
-    let restate_ingress_url = std::env::var("RESTATE_INGRESS_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
-    // Parked-run verbs and park recovery run through Restate's admin API.
-    let restate_admin_url =
-        std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:9070".to_string());
-    let restate_authority_id = std::env::var("RESTATE_AUTHORITY_ID")
-        .map_err(|_| "RESTATE_AUTHORITY_ID is required".to_string())
-        .and_then(|value| {
-            lash_restate::RestateAuthorityId::new(value).map_err(|error| error.to_string())
-        })?;
+    // The server this deployment's engine reaches (ADR 0104: Restate is the
+    // effect engine). The shared helper reads its addresses and this
+    // deployment's authority from the environment.
+    let local_restate = local_restate::LocalRestate::from_env(
+        "`scripts/ci/with-service.sh restate -- <command>`, which runs a \
+         restate-server beside the service",
+    )
+    .map_err(|error| format!("{error:#}"))?;
     let data_dir = std::env::var("AGENT_SERVICE_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(".agent-service"));
@@ -252,12 +253,9 @@ async fn async_main() -> anyhow_like::Result<()> {
     // the host is what calls `close()` to release transports on the way out.
     let drain_provider = provider.clone();
 
-    // Worker identity for durable session-execution leases. WORKER_ID is stable
-    // across restarts (set one per replica in a fleet); the incarnation is
-    // bumped every boot. If this process crashes, the lease remains busy until
-    // its TTL expires. The identity is stable within a boot, so keep at most one
-    // in-flight turn per chat; the fenced head commit is the last-resort
-    // single-writer backstop.
+    // The host's stable worker identity: one owner id per worker or process
+    // (WORKER_ID, stable across restarts), and a fresh incarnation on every
+    // boot so a restarted process fences off its predecessor's leases.
     let worker_id = std::env::var("WORKER_ID").unwrap_or_else(|_| "agent-service-1".to_string());
     let worker_incarnation = std::env::var("AGENT_SERVICE_INCARNATION").unwrap_or_else(|_| {
         std::time::SystemTime::now()
@@ -278,34 +276,21 @@ async fn async_main() -> anyhow_like::Result<()> {
     let stores = lash_sqlite_store::SqliteStoreSet::open(&session_store_root)
         .await
         .map_err(|err| err.to_string())?;
-    let store_factory = stores.session_store_factory();
     let attachment_store = stores.attachment_store() as Arc<dyn lash::persistence::AttachmentStore>;
-    let restate_backend = Arc::new(RestateEngine::new(
-        Arc::new(stores),
-        lash::restate::RestateConfig::new(
-            restate_ingress_url.clone(),
-            restate_admin_url.clone(),
-            restate_authority_id.clone(),
-        ),
-    ));
-    // Turns run in lash's own `LashSession`/`LashTurn` handlers; the backend
-    // host serves paths outside a workflow scope and fails loudly if an
-    // effect tries to execute without a handler. The worked example keeps
-    // its Sleep-only resolver as the host's one answer, so no tool-child host
-    // is installed — the same shape the conformance suites use.
+    // One unbound handle on the store set's durable-core catalog is the
+    // retention pass's catalog and maintenance target (DeploymentStore).
+    let deployment_store = stores
+        .open_store()
+        .await
+        .map_err(|err| format!("open the deployment store: {err}"))?;
+    let restate_backend = local_restate.engine(Arc::new(stores));
+    // Turns run in lash's own `LashSession`/`LashTurn` endpoint handlers; the
+    // service registers only its demo effect-group executors beside them.
     restate_backend
         .restate_effect_host()
         .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
         .map_err(|err| err.to_string())?;
     let backend = lash::Backend::new(restate_backend.clone());
-    // An unbound handle is the factory-wide reachability-audit target. Vacuum
-    // deliberately uses separately opened, session-bound handles in the
-    // retention pass below.
-    let maintenance_store = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&session_store_root)
-            .await
-            .map_err(|err| err.to_string())?,
-    );
     let app_db = AppDb::open(&data_dir.join("app.db")).map_err(|err| err.to_string())?;
     let shared_db = Arc::new(Mutex::new(app_db));
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -355,9 +340,13 @@ async fn async_main() -> anyhow_like::Result<()> {
         // state, so host-scheduled retention runs through the same
         // `Processes::prune` lever every embedder uses.
         let retention_processes = core.processes();
-        let restate = lash_restate::RestateConnection::new(restate_ingress_url);
-        let chat_discard =
-            AgentServiceChatDiscardImpl::new(&core, restate.clone(), restate_authority_id).await;
+        let restate = lash_restate::RestateConnection::new(local_restate.ingress_url.clone());
+        let chat_discard = AgentServiceChatDiscardImpl::new(
+            &core,
+            restate.clone(),
+            local_restate.authority.clone(),
+        )
+        .await;
         let state = AppStateData::new(
             core,
             Arc::clone(&shared_db),
@@ -384,10 +373,16 @@ async fn async_main() -> anyhow_like::Result<()> {
                 .serve(),
             )
             .build();
-        let restate_listener = tokio::net::TcpListener::bind(restate_endpoint_addr)
+        // `serve_at` binds the endpoint and registers the deployment with the
+        // server; it serves until the returned handle drops at shutdown.
+        let deployment = local_restate
+            .serve_at(&restate_backend, restate_endpoint_addr, endpoint)
             .await
-            .map_err(|err| format!("bind agent-service Restate endpoint: {err}"))?;
-        println!("agent-service Restate endpoint listening on http://{restate_endpoint_addr}");
+            .map_err(|error| format!("{error:#}"))?;
+        println!(
+            "agent-service Restate endpoint listening on http://{}",
+            deployment.addr()
+        );
 
         // Keep a state clone for the drain; the router consumes the original.
         let drain_state = state.clone();
@@ -437,28 +432,13 @@ async fn async_main() -> anyhow_like::Result<()> {
         let retention_task = crate::retention::spawn_retention(
             drain_state.clone(),
             crate::retention::StoreRetentionTargets {
-                factory: store_factory,
-                gc_store: maintenance_store as Arc<dyn lash::persistence::StoreMaintenance>,
+                factory: deployment_store.clone() as Arc<dyn lash::persistence::DeploymentStore>,
+                gc_store: deployment_store as Arc<dyn lash::persistence::StoreMaintenance>,
                 attachment_store,
             },
             retention_processes,
             host_shutdown.subscribe(),
         );
-        let restate_task = {
-            let mut shutdown = host_shutdown.subscribe();
-            tokio::spawn(async move {
-                lash::restate::serve_endpoint(
-                    restate_listener,
-                    endpoint,
-                    lash::restate::RestateEndpointLimits::new(
-                        32 * 1024 * 1024,
-                        32 * 1024 * 1024 + 8,
-                    ),
-                    async move { while !*shutdown.borrow() && shutdown.changed().await.is_ok() {} },
-                )
-                .await;
-            })
-        };
         // This example's first drain step is to stop admitting. Axum's graceful
         // shutdown stops accepting connections and lets in-flight requests finish
         // once a signal arrives.
@@ -471,11 +451,9 @@ async fn async_main() -> anyhow_like::Result<()> {
             .await
             .map_err(|err| err.to_string());
         let _ = host_shutdown.send(true);
+        drop(deployment);
         if let Err(error) = retention_task.await {
             eprintln!("agent-service: retention task join failed: {error}");
-        }
-        if let Err(error) = restate_task.await {
-            eprintln!("agent-service: Restate endpoint task join failed: {error}");
         }
         serve_result
     }

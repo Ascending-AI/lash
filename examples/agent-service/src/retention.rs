@@ -3,20 +3,21 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lash::persistence::{
-    AttachmentReclamationPolicy, AttachmentReclamationReport, EmptyRootSetPolicy, GcReport,
-    SessionCatalogStore, SessionLookup, VacuumReport,
+    AttachmentReclamationPolicy, AttachmentReclamationReport, DeploymentStore, EmptyRootSetPolicy,
+    GcReport, SessionCatalogStore, SessionLookup, VacuumReport,
 };
 use lash::process::Processes;
-use lash_sqlite_store::SqliteStore;
 
 use crate::state::AppStateData;
 
 const RETENTION_WINDOW: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
+/// The deployment's catalog and maintenance handles, backend-neutral: any
+/// store set's `DeploymentStore` answers them.
 #[derive(Clone)]
 pub(crate) struct StoreRetentionTargets {
-    pub(crate) factory: Arc<SqliteStore>,
+    pub(crate) factory: Arc<dyn DeploymentStore>,
     pub(crate) gc_store: Arc<dyn lash::persistence::StoreMaintenance>,
     pub(crate) attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
 }
@@ -50,11 +51,11 @@ pub(crate) async fn run_store_retention_pass(
         failures: Vec::new(),
     };
 
-    // This factory-wide audit scans the whole catalog under `BEGIN IMMEDIATE`;
-    // live SQLite writers wait at most the store's 15-second busy timeout. The
-    // example runs it only hourly and reports contention. A deployment whose
-    // catalog can outgrow that window should place it in a quiet maintenance
-    // period rather than copy this cadence unchanged.
+    // This deployment-wide audit scans the whole catalog under one write
+    // window; live writers wait out the store's busy timeout. The example
+    // runs it only hourly and reports contention. A deployment whose catalog
+    // can outgrow that window should place it in a quiet maintenance period
+    // rather than copy this cadence unchanged.
     match lash::persistence::StoreMaintenance::gc_unreachable(targets.gc_store.as_ref()).await {
         Ok(gc) => report.gc = Some(gc),
         Err(failure) => report.failures.push(format!(
@@ -112,6 +113,9 @@ pub(crate) async fn run_store_retention_pass(
 /// session catalog; process-owned sessions are not represented here and need
 /// retention owned by their process host. Store GC is a verify/repair audit;
 /// owner-delete transactions remain the correctness path.
+///
+/// The targets are backend-neutral: the caller hands in the deployment's own
+/// `DeploymentStore`, so the same pass runs over any `StoreSet`.
 pub(crate) fn spawn_retention(
     state: AppStateData,
     targets: StoreRetentionTargets,
@@ -148,9 +152,10 @@ pub(crate) fn spawn_retention(
                     Vec::new()
                 }
             };
-            // The factory and attachment store must describe the same exclusive
-            // deployment. Pairing this backend with the wrong factory can make
-            // live content look unreachable and delete it after the grace window.
+            // The deployment store and attachment store must describe the
+            // same exclusive deployment. Pairing the attachment backend with
+            // the wrong store can make live content look unreachable and
+            // delete it after the grace window.
             let store_report =
                 run_store_retention_pass(&targets, &session_ids, scheduled_attachment_policy())
                     .await;

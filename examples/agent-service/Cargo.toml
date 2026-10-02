@@ -9,6 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = "0.8"
 bytes = { workspace = true }
@@ -22,6 +23,7 @@ lash-plugin-process-controls = { workspace = true }
 lash-sqlite-store = { workspace = true }
 lash = { workspace = true, features = ["rlm", "restate"] }
 lash-provider-openai = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 restate-sdk = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { workspace = true, features = ["derive"] }
@@ -34,5 +36,4 @@ uuid = { workspace = true, features = ["v4"] }
 lash = { workspace = true, features = ["rlm", "testing"] }
 lash-restate-test = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
-reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 tempfile = { workspace = true }

@@ -6,10 +6,10 @@ PACKAGE_DEPS = {
             "lash": "//crates/lash:lash",
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
-            "reqwest": "//third-party/rust:p0296",
             "tempfile": "//third-party/rust:p0390"
         },
         "normal": {
+            "anyhow": "//third-party/rust:p0011",
             "async_trait": "//third-party/rust:p0015",
             "axum": "//third-party/rust:p0021",
             "bytes": "//third-party/rust:p0038",
@@ -23,6 +23,7 @@ PACKAGE_DEPS = {
             "lash_remote_protocol": "//crates/lash-remote-protocol:lash-remote-protocol",
             "lash_restate": "//crates/lash-restate:lash-restate",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "reqwest": "//third-party/rust:p0296",
             "restate_sdk": "//third-party/rust:p0297",
             "rusqlite": "//third-party/rust:p0305",
             "serde": "//third-party/rust:p0331",

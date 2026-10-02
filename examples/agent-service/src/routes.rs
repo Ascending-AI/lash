@@ -2,23 +2,20 @@ use lash::SessionId;
 use lash::TurnId;
 use lash::sync::MutexExt;
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use axum::Json;
-use axum::body::Body;
 use axum::extract::{Path as AxumPath, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, Response};
-use bytes::Bytes;
 use futures_util::StreamExt;
 use lash::observe::{RemoteSessionObservationStreamItem, SessionCursor};
 use lash::rlm::RlmSendBuilderExt as _;
 use lash::{
-    LashSession, TurnActivity, TurnActivitySink, TurnCancelOutcome, TurnCancelRequest, TurnEvent,
-    TurnInput, TurnOutput,
+    LashSession, TurnActivity, TurnActivitySink, TurnCancelOutcome, TurnEvent, TurnInput,
+    TurnOutput,
 };
 use lash_remote_protocol::{
     Envelope, Negotiated, RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
@@ -87,7 +84,24 @@ pub(crate) struct ForkChatRequest {
 pub(crate) struct CancelTurnResponse {
     session_id: SessionId,
     turn_id: TurnId,
-    outcome: TurnCancelOutcome,
+    #[serde(flatten)]
+    outcome: CancelTurnOutcome,
+}
+
+/// The facade cancel's answer, projected onto the wire: which
+/// [`lash::CancelReceipt`] variant the durable session returned.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub(crate) enum CancelTurnOutcome {
+    /// The input was still queued: it was withdrawn and no run applied it.
+    Withdrawn,
+    /// A running run now holds the request; `cancellation` is the
+    /// cancellation gate's typed answer.
+    Requested { cancellation: TurnCancelOutcome },
+    /// The run had already settled.
+    AlreadySettled,
+    /// No accepted input or run answers to that id.
+    NotFound,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -287,29 +301,40 @@ pub(crate) async fn pin_chat_branch_point(
     State(state): State<AppStateData>,
     AxumPath(chat_id): AxumPath<String>,
 ) -> AppResult<Json<ChatBranchPoint>> {
-    let selection = state
+    state
         .with_db({
             let chat_id = chat_id.clone();
-            move |db| db.chat_llm_profile_selection(&chat_id)
+            move |db| db.require_chat(&chat_id).map(|_| ())
         })
         .await?;
     let session = state
-        .open_session(&chat_id, llm_profile_choice_for_chat_selection(&selection))
-        .await?;
-    // The chat names a branch point by the node its last turn ended at; lash
-    // names the same state by the head revision that published it. Pinning
-    // the revision keeps it through every collection.
+        .core()
+        .session(SessionId::parse(chat_id.as_str())?)
+        .durable()
+        .await
+        .map_err(branch_error)?;
+    // The chat names a branch point by the node its last turn ended at: the
+    // committed read view's leaf. A chat that has never messaged has no
+    // committed view and nothing to pin.
+    let node_id = session
+        .read()
+        .await
+        .map_err(branch_error)?
+        .and_then(|view| {
+            view.session_graph()
+                .leaf_node_id
+                .as_ref()
+                .map(ToString::to_string)
+        })
+        .ok_or_else(|| AppError::bad_request("the chat has no completed turn to pin"))?;
+    // The revision that published that leaf is what lash pins; pinning it
+    // keeps the state through every collection so a fork can name the node.
     let head = session
         .revisions()
         .await
         .map_err(branch_error)?
         .into_iter()
         .find(|revision| revision.head)
-        .ok_or_else(|| AppError::internal("the chat session records no head revision"))?;
-    let node_id = head
-        .leaf_node_id
-        .as_ref()
-        .map(ToString::to_string)
         .ok_or_else(|| AppError::bad_request("the chat has no completed turn to pin"))?;
     session
         .pin(lash::Target::Revision(head.head_revision))
@@ -330,20 +355,20 @@ pub(crate) async fn fork_chat(
     if node_id.is_empty() {
         return Err(AppError::bad_request("branch point is required"));
     }
+    let source_session_id = SessionId::parse(source_chat_id.clone())?;
     let observed_processes = state
         .core()
-        .process_registry()
+        .processes()
         .list_observed_by(
-            &source_chat_id.clone().try_into()?,
+            &lash::process::SessionScope::new(source_session_id.clone()),
             &lash::process::ProcessListFilter {
                 status: lash::process::ProcessStatusFilter::Any,
                 ..Default::default()
             },
         )
-        .await
-        .map_err(|error| AppError::internal(error.to_string()))?
+        .await?
         .into_iter()
-        .map(|record| record.id)
+        .map(|record| record.process_id)
         .collect();
     let target_chat_id = uuid::Uuid::new_v4().to_string();
     state
@@ -354,7 +379,6 @@ pub(crate) async fn fork_chat(
             move |db| db.prepare_chat_fork(&source_chat_id, &node_id, &target_chat_id)
         })
         .await?;
-    let source_session_id = SessionId::parse(source_chat_id)?;
     let forked = async {
         let target = branch_point_target(&state, &source_session_id, &node_id).await?;
         state
@@ -447,9 +471,8 @@ pub(crate) async fn send_message(
         })
         .await?;
 
-    // One path in every durability mode: the chat's session takes the input
-    // through `send()`, and the session's engine executes the turn -- in process
-    // for the local store, in a Restate handler for the Restate deployment.
+    // The chat's session takes the input through `send()`, and the session's
+    // engine -- Restate, in a `LashSession` handler -- executes the turn.
     let turn_profile = llm_profile_choice_for_chat_selection(&llm_profile_selection);
     let session = state.open_session(&chat_id, turn_profile).await?;
     state.record_board_context(&session).await?;
@@ -546,32 +569,28 @@ pub(crate) async fn send_message(
         let _ = tx.send(StreamItem::Done).await;
     });
 
-    let stream = ReceiverStream::new(rx).map(|item| {
-        let mut line = serde_json::to_string(&item).unwrap_or_else(|err| {
-            json!({
-                "type": "error",
-                "message": err.to_string(),
-            })
-            .to_string()
-        });
-        line.push('\n');
-        Ok::<Bytes, Infallible>(Bytes::from(line))
-    });
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
-        .header(header::CACHE_CONTROL, "no-store")
-        .header("x-lash-turn-id", turn_id.as_str())
-        .header("x-lash-protocol-accept", accept_json)
-        .body(Body::from_stream(stream))
-        .map_err(|err| AppError::internal(format!("build streaming response: {err}")))
+    let mut response = crate::ndjson::ndjson_response(ReceiverStream::new(rx));
+    let headers = response.headers_mut();
+    headers.insert(
+        "x-lash-turn-id",
+        HeaderValue::from_str(turn_id.as_str())
+            .map_err(|err| AppError::internal(format!("invalid turn-id header: {err}")))?,
+    );
+    headers.insert(
+        "x-lash-protocol-accept",
+        HeaderValue::from_str(&accept_json)
+            .map_err(|err| AppError::internal(format!("invalid protocol-accept header: {err}")))?,
+    );
+    Ok(response)
 }
 
-/// Request cooperative cancellation of one exact foreground turn.
+/// Request cooperative cancellation of the turn the host id names.
 ///
-/// The ids route the request; deployments exposing this endpoint beyond the
-/// local demo must authenticate the caller and authorize access to the chat.
+/// The session's durable handle re-derives the accepted input from
+/// `turn_id`, so a still-queued input is withdrawn outright and a running
+/// run gets a durable cancel request. The ids route the request;
+/// deployments exposing this endpoint beyond the local demo must
+/// authenticate the caller and authorize access to the chat.
 pub(crate) async fn cancel_turn(
     State(state): State<AppStateData>,
     AxumPath((chat_id, turn_id)): AxumPath<(String, TurnId)>,
@@ -583,28 +602,42 @@ pub(crate) async fn cancel_turn(
             move |db| db.require_chat(&chat_id).map(|_| ())
         })
         .await?;
-    let request_id = request
+    let session_id = SessionId::parse(chat_id.as_str())?;
+    let mut cancel = state
+        .core()
+        .session(session_id.clone())
+        .durable()
+        .await?
+        .attach_id(turn_id.clone())
+        .cancel()
+        .origin("user");
+    if let Some(request_id) = request
         .request_id
         .filter(|request_id| !request_id.trim().is_empty())
-        .unwrap_or_else(|| format!("agent-service-cancel:{}", uuid::Uuid::new_v4()));
-    let mut cancel = TurnCancelRequest::new(
-        lash::TurnAddress::new(
-            SessionId::parse(chat_id.as_str())?,
-            TurnId::parse(turn_id.as_str())?,
-        ),
-        request_id,
-        Some("user".to_string()),
-    );
-    cancel.reason = request.reason;
-    let receipt = state
-        .turn_work_driver()
-        .request_cancel(cancel)
-        .await
-        .map_err(|err| AppError::internal(err.to_string()))?;
+    {
+        cancel = cancel.request_id(request_id);
+    }
+    if let Some(reason) = request.reason {
+        cancel = cancel.reason(reason);
+    }
+    let outcome = match cancel.await? {
+        lash::CancelReceipt::Withdrawn(_) => CancelTurnOutcome::Withdrawn,
+        lash::CancelReceipt::Requested { receipt, .. } => CancelTurnOutcome::Requested {
+            cancellation: receipt.outcome,
+        },
+        lash::CancelReceipt::AlreadySettled { .. } => CancelTurnOutcome::AlreadySettled,
+        lash::CancelReceipt::NotFound => CancelTurnOutcome::NotFound,
+        // `CancelReceipt` is non-exhaustive.
+        _ => {
+            return Err(AppError::internal(
+                "the session answered cancel with an unrecognized receipt",
+            ));
+        }
+    };
     Ok(Json(CancelTurnResponse {
-        session_id: SessionId::parse(chat_id)?,
+        session_id,
         turn_id,
-        outcome: receipt.outcome,
+        outcome,
     }))
 }
 
@@ -1045,9 +1078,9 @@ pub(crate) enum TurnAttempt {
 /// the only place the board's `turn` flips back to `X`, and the UI disables
 /// every cell while `turn != "X"`, so an unguarded zero-move turn wedges the
 /// round for good (FIG-3181). This is the entire recovery policy -- one nudge,
-/// then forfeit the move and hand the board back -- and it belongs to the host,
-/// not to a durability mode: the session's engine runs each turn (`run_turn`)
-/// and the route streams each item (`emit`).
+/// then forfeit the move and hand the board back -- and it belongs to the
+/// host, not to lash: the session's engine runs each turn (`run_turn`) and
+/// the route streams each item (`emit`).
 pub(crate) async fn run_turn_with_zero_move_recovery<N, R, RF, E, EF>(
     state: &AppStateData,
     chat_id: &str,
@@ -1354,8 +1387,72 @@ finish("done through route");
         .expect("cancel endpoint");
         assert!(matches!(
             cancelled.0.outcome,
-            TurnCancelOutcome::CompletionWonRace
+            CancelTurnOutcome::AlreadySettled
         ));
+    }
+
+    /// A queued input cancels by withdrawal: no run ever applies it.
+    #[tokio::test]
+    async fn cancel_turn_withdraws_a_still_queued_input() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path();
+        // The first turn's provider never answers, so its run stays in flight
+        // and the second input waits queued behind it.
+        let provider = lash::testing::TestProvider::builder()
+            .kind("agent-service-cancel-test")
+            .complete(|_request| async {
+                std::future::pending::<Result<LlmResponse, lash::provider::LlmTransportError>>()
+                    .await
+            })
+            .build()
+            .into_handle();
+        let double = crate::state::test_support::test_double().await;
+        let core = crate::state::test_support::test_core_with_provider(&double, provider).await;
+        let state = crate::state::test_support::test_state(
+            &double,
+            &core,
+            AppDb::open(&data_dir.join("app.db")).expect("app db"),
+        );
+        let chat = state
+            .with_db(|db| db.create_chat("cancel queued", "mock-model", None))
+            .await
+            .expect("create chat");
+        let session = state
+            .open_session(&chat.id, crate::state::test_support::mock_llm_profile())
+            .await
+            .expect("open session");
+        let running_turn = TurnId::prefixed("agent-service-turn:", uuid::Uuid::new_v4());
+        let _running = session
+            .send(TurnInput::text("run forever"))
+            .id(running_turn)
+            .require_finish()
+            .expect("legal turn shape")
+            .await
+            .expect("first input accepted");
+        let queued_turn = TurnId::prefixed("agent-service-turn:", uuid::Uuid::new_v4());
+        let _queued = session
+            .send(TurnInput::text("still queued"))
+            .id(queued_turn.clone())
+            .require_finish()
+            .expect("legal turn shape")
+            .await
+            .expect("queued input accepted");
+
+        let cancelled = cancel_turn(
+            State(state),
+            AxumPath((chat.id, queued_turn)),
+            Json(CancelTurnRequest {
+                request_id: Some("route-test-queued-stop".to_string()),
+                reason: Some("test queued input".to_string()),
+            }),
+        )
+        .await
+        .expect("cancel endpoint");
+        assert!(
+            matches!(cancelled.0.outcome, CancelTurnOutcome::Withdrawn),
+            "a queued input cancels by withdrawal: {:?}",
+            cancelled.0.outcome
+        );
     }
 
     #[test]

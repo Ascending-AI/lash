@@ -1,65 +1,35 @@
 # Agent Service
 
-SQLite-backed localhost chat example for `lash`, RLM mode, typed session
-plugin activation, app-owned board tools, semantic streaming, and optional
-Restate-backed turns.
+SQLite-backed localhost chat example for `lash`: RLM turns on the Restate
+effect engine (ADR 0104), typed session plugin activation, app-owned board
+tools, and semantic streaming.
 
-Run it from a Kiln fork:
+## Run it
 
-```bash
-OPENROUTER_API_KEY=... AGENT_SERVICE_DATA_DIR="$PWD/.agent-service" \
-  kiln run //examples/agent-service:agent-service
-```
-
-From a checkout without Kiln, use `OPENROUTER_API_KEY=... cargo run -p agent-service`.
-
-## Raw turn activities
-
-`POST /api/chats/{chat_id}/activities` accepts `{"text":"..."}` and returns
-`application/x-ndjson; charset=utf-8`. Each line is exactly one
-`RemoteTurnActivity` JSON record. Sequence numbers are scoped to the request and
-start at `0`; a complete response contains exactly one `final_value`, and it is
-the last line.
-
-This is a raw lane: its response contains no app-owned product rows and no replay
-envelope. The fanout sends each activity to the remote sink before the
-persistence sink, so a client can observe an activity before its corresponding
-app row exists; clients must not perform read-after-see database reads. Once the
-HTTP 200 stream has started, a failed turn or a client that disconnects produces
-a silently truncated stream, with the error reported only in the server logs.
-That behavior is deliberate for this raw transport lane: the session's engine
-executes the turn, and the route only watches it.
-
-Validate the example build and unit tests:
+The service needs an OpenRouter API key and a local `restate-server`. Start
+Restate on the host network:
 
 ```bash
-kiln test //examples/agent-service:agent-service__unit_test //examples/agent-service:fresh_boot__test
+docker run --rm --network host restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
 ```
 
-## Retention
+Then run the service. From a Kiln fork:
 
-The host runs one maintenance pass per hour. It audits the shared runtime
-catalog with `gc_unreachable`, vacuums terminal evidence for the app's chat
-sessions, reclaims unreferenced attachments after a 7-day grace window, and
-prunes terminal processes older than the same window. Attachment reclamation
-refuses and reports an empty live root set; it never treats an empty catalog as
-standing authorization to delete every eligible blob. A non-zero store-GC
-result is a verify/repair finding to investigate, not routine throughput.
+```bash
+OPENROUTER_API_KEY=... \
+AGENT_SERVICE_DATA_DIR="$PWD/.agent-service" \
+RESTATE_INGRESS_URL=http://127.0.0.1:8080 \
+RESTATE_ADMIN_URL=http://127.0.0.1:9070 \
+RESTATE_AUTHORITY_ID=agent-service-local \
+kiln run //examples/agent-service:agent-service
+```
 
-This example's chat list is the vacuum catalog. Process-owned sessions are not
-listed there and need retention owned by their process host. The attachment
-backend and session factory must also belong exclusively to the same
-deployment; pairing the backend with the wrong factory can classify live bytes
-as unreachable.
-
-## Coverage
-
-The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
-source of truth for the CI split.
-
-- **Manual judged:** [`agent-service-branching`](../../runbooks/agent-service-branching/runbook.md),
-  [`agent-service-effect-groups`](../../runbooks/agent-service-effect-groups/runbook.md),
-  and [`tictactoe-full-game`](../../runbooks/tictactoe-full-game/runbook.md).
+From a checkout without Kiln, the same environment over
+`cargo run -p agent-service`. The three `RESTATE_*` variables are required:
+the service reads the server's addresses and its own deployment authority
+from them and refuses to boot without them. On boot it serves its Restate
+endpoint on `AGENT_SERVICE_RESTATE_ADDR` and registers it with the server —
+there is no manual `restate deployments register` step.
 
 Optional environment:
 
@@ -67,41 +37,19 @@ Optional environment:
 OPENROUTER_MODEL=anthropic/claude-sonnet-4.6
 OPENROUTER_MODEL_VARIANT=high
 AGENT_SERVICE_ADDR=127.0.0.1:3000
+AGENT_SERVICE_RESTATE_ADDR=127.0.0.1:9080
 AGENT_SERVICE_DATA_DIR=.agent-service
 AGENT_SERVICE_TRACE=.agent-service/trace.jsonl
+WORKER_ID=agent-service-1
 ```
 
-The service keeps its stores in one SQLite store set under
-`$AGENT_SERVICE_DATA_DIR/lash-sessions` and runs a `RestateEngine` over it
-(ADR 0104: Restate is the only effect engine, and zero-infra is a local
-`restate-server`). Every turn is executed by lash's `LashSession` service in a
-Restate handler. It uses these local defaults:
+Then open `http://127.0.0.1:3000`.
 
-| Path | App | Restate endpoint | Ingress | Admin |
-| --- | --- | --- | --- | --- |
-| App run | `127.0.0.1:3000` | `127.0.0.1:9080` | `127.0.0.1:8080` | `127.0.0.1:9070` |
-| Live E2E | in-process test | `127.0.0.1:19080` | `127.0.0.1:18080` | `127.0.0.1:19070` |
-
-For the app run, start Restate on the host network, run the binary, then
-register the endpoint:
+Validate the example build and unit tests:
 
 ```bash
-docker run --rm --network host restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
-OPENROUTER_API_KEY=... \
-AGENT_SERVICE_RESTATE_ADDR=127.0.0.1:9080 \
-RESTATE_INGRESS_URL=http://127.0.0.1:8080 \
-RESTATE_AUTHORITY_ID=agent-service-local \
-cargo run -p agent-service
-
-restate deployments register http://127.0.0.1:9080
+kiln test //examples/agent-service:agent-service__unit_test //examples/agent-service:fresh_boot__test
 ```
-
-`RESTATE_AUTHORITY_ID` is required: the service refuses to boot without it.
-
-If you run Restate in Docker bridge mode instead, bind the app endpoint to a
-container-reachable interface such as `AGENT_SERVICE_RESTATE_ADDR=0.0.0.0:9080`
-and register `http://host.docker.internal:9080` (or add
-`--add-host=host.docker.internal:host-gateway` on Linux).
 
 For the live E2E, use the one-command recipe. It starts the agent-service
 Restate endpoint in-process, registers it through the Restate Admin API, sends
@@ -119,6 +67,23 @@ The recipe starts `restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0
 `RESTATE_ADMIN_PORT`, `RESTATE_INGRESS_PORT`, `RESTATE_NODE_PORT`,
 `AGENT_SERVICE_E2E_ENDPOINT_BIND`, or `AGENT_SERVICE_E2E_ENDPOINT_URL` if your
 local Docker networking needs different addresses.
+
+## How it runs
+
+The service keeps its stores in one SQLite store set under
+`$AGENT_SERVICE_DATA_DIR/lash-sessions` and runs a `RestateEngine` over it
+(ADR 0104: Restate is the only effect engine, and zero-infra is a local
+`restate-server`). Every turn is executed by lash's `LashSession` service in a
+Restate handler; the host process only sends.
+
+| Path | App | Restate endpoint | Ingress | Admin |
+| --- | --- | --- | --- | --- |
+| App run | `127.0.0.1:3000` | `127.0.0.1:9080` | `127.0.0.1:8080` | `127.0.0.1:9070` |
+| Live E2E | in-process test | `127.0.0.1:19080` | `127.0.0.1:18080` | `127.0.0.1:19070` |
+
+The endpoint registers the address it bound. Running Restate in Docker bridge
+mode needs the endpoint reachable at that bound address; host networking is
+the supported local flow.
 
 The Axum app serves `AGENT_SERVICE_ADDR`, the same process
 also serves a Restate endpoint on `AGENT_SERVICE_RESTATE_ADDR`, and the chat
@@ -145,60 +110,6 @@ retryable refusal of its acceptance answers 503. A host whose HTTP process is
 not the `LashTurn` worker sees no live events for the turn; the outcome then
 reports that gap, and the settled outcome always resolves from the store.
 
-Among the Lash-owned services are the effect-group ones: `EffectGroupIndex`,
-`EffectGroupPayload`, `EffectGroupDispatch`, `LashDurableWaitWorkflow`, and
-`LashDurableWaitIndex`. The worked HTTP path
-runs a three-child deadline group with one short sleep and two long sleeps. It
-returns the first completed settlement at rank 1, closes under `Cancel`, and
-then reads all durable ranks so the cancelled losers are visible without a
-crate-internal test hook:
-
-```http
-POST /api/effect-groups
-Content-Type: application/json
-
-{"run_id":"worked-example-1"}
-```
-
-`GET /api/effect-groups/worked-example-1` reads the same terminal ranked
-report from the Restate index. Run ids are one-shot workflow identities;
-reusing one is rejected instead of attaching a new example request to old
-durable state.
-
-The same live E2E also exercises a directly cancelled await-event through the
-public `RestateEffectHost` and `AwaitEventResolver` APIs. This is deliberately
-separate from the group report: a `Cancelled` group member proves the group
-index classified a loser, while the direct witness proves the await-event
-terminal itself was persisted. It peeks `Cancelled` from a fresh call,
-re-awaits without hanging, and verifies that a late completion observes
-`AlreadyResolved { terminal: Cancelled }` instead of replacing the terminal.
-
-Every message response includes that stable id in the `x-lash-turn-id` header.
-An authenticated host can request cooperative cancellation from any process,
-without retaining the session handle that submitted the turn:
-
-```http
-POST /api/chats/{chat_id}/turns/{turn_id}/cancel
-Content-Type: application/json
-
-{
-  "request_id": "browser-stop-1",
-  "reason": "user pressed Stop"
-}
-```
-
-The response reports `requested`, `already_requested`, `escalated`,
-`policy_conflict`, `completion_won_race`, or `unknown_or_revoked`. The first
-request the gate accepts owns the undelivered-input policy for the rest of the
-turn: a repeat asking for the same disposition is idempotent, and one asking
-for a different disposition gets `policy_conflict` naming both the requested
-and the accepted policy and changes nothing. In Restate mode the cancel
-request and terminal attachment use the `RestateEngine` turn driver and
-`LashDurableWaitWorkflow`, so the request survives an Axum/web-process restart
-and is observed by a replayed turn owner. Cancellation is cooperative and does
-not guarantee detached effects have stopped. Chat and turn ids are routing
-identity, not authorization; this localhost example verifies that the chat
-exists, while a production service must authenticate and authorize callers.
 Semantic progress is sourced from the Lash session observation API rather than
 from a route-local side channel: the route captures
 `session.observe().current_observation().cursor` before the turn, emits that
@@ -209,9 +120,6 @@ until the session commit is observed. If the cursor is no longer in the bounded
 replay window, the stream emits `replay_gap` with the public
 `RemoteLiveReplayGap` payload plus a fresh remote observation snapshot,
 including the requested cursor, latest cursor, latest revision, and reason.
-Restate mode uses the same route and the same live replay path.
-
-Then open `http://127.0.0.1:3000`.
 
 The model and reasoning variant are also editable in the browser. The
 environment values are just the defaults for new chats; each chat persists its
@@ -282,3 +190,115 @@ finish("I played the center.");
 The browser also listens for submitted/tool value stream events and renders
 their JSON-shaped value with the same display rule as Lash: strings pass
 through, `null` is empty, and other values pretty-print.
+
+## Cancelling a turn
+
+Every message response includes the stable turn id in the `x-lash-turn-id`
+header. An authenticated host can request cooperative cancellation from any
+process, without retaining the session handle that submitted the turn:
+
+```http
+POST /api/chats/{chat_id}/turns/{turn_id}/cancel
+Content-Type: application/json
+
+{
+  "request_id": "browser-stop-1",
+  "reason": "user pressed Stop"
+}
+```
+
+The route reattaches to the turn through the facade's durable session
+(`session(chat).durable().attach_id(turn_id).cancel()`), so the request is
+recorded durably and survives an Axum/web-process restart. The response is
+`{"session_id","turn_id","outcome":...}`, where `outcome` is the
+`CancelReceipt` variant:
+
+- `withdrawn` — the input was still queued; it was withdrawn and no run
+  applies it.
+- `requested` — a running run now holds the request. The response's
+  `cancellation` field carries the cancellation gate's typed answer:
+  `requested`, `already_requested`, `escalated`, `policy_conflict`,
+  `completion_won_race`, or `unknown_or_revoked`.
+- `already_settled` — the run had already settled.
+- `not_found` — no accepted input or run answers to that id.
+
+The first request the gate accepts owns the undelivered-input policy for the
+rest of the turn: a repeat asking for the same disposition is idempotent, and
+one asking for a different disposition gets `policy_conflict` naming both the
+requested and the accepted policy and changes nothing. Cancellation is
+cooperative and does not guarantee detached effects have stopped. Chat and
+turn ids are routing identity, not authorization; this localhost example
+verifies that the chat exists, while a production service must authenticate
+and authorize callers.
+
+## Raw turn activities
+
+`POST /api/chats/{chat_id}/activities` accepts `{"text":"..."}` and returns
+`application/x-ndjson; charset=utf-8`. Each line is exactly one
+`RemoteTurnActivity` JSON record. Sequence numbers are scoped to the request and
+start at `0`; a complete response contains exactly one `final_value`, and it is
+the last line.
+
+This is a raw lane: its response contains no app-owned product rows and no replay
+envelope. The fanout sends each activity to the remote sink before the
+persistence sink, so a client can observe an activity before its corresponding
+app row exists; clients must not perform read-after-see database reads. Once the
+HTTP 200 stream has started, a failed turn or a client that disconnects produces
+a silently truncated stream, with the error reported only in the server logs.
+That behavior is deliberate for this raw transport lane: the session's engine
+executes the turn, and the route only watches it.
+
+## Effect groups
+
+Among the Lash-owned services are the effect-group ones: `EffectGroupIndex`,
+`EffectGroupPayload`, `EffectGroupDispatch`, `LashDurableWaitWorkflow`, and
+`LashDurableWaitIndex`. The worked HTTP path
+runs a three-child deadline group with one short sleep and two long sleeps. It
+returns the first completed settlement at rank 1, closes under `Cancel`, and
+then reads all durable ranks so the cancelled losers are visible without a
+crate-internal test hook:
+
+```http
+POST /api/effect-groups
+Content-Type: application/json
+
+{"run_id":"worked-example-1"}
+```
+
+`GET /api/effect-groups/worked-example-1` reads the same terminal ranked
+report from the Restate index. Run ids are one-shot workflow identities;
+reusing one is rejected instead of attaching a new example request to old
+durable state.
+
+The same live E2E also exercises a directly cancelled await-event through the
+public `RestateEffectHost` and `AwaitEventResolver` APIs. This is deliberately
+separate from the group report: a `Cancelled` group member proves the group
+index classified a loser, while the direct witness proves the await-event
+terminal itself was persisted. It peeks `Cancelled` from a fresh call,
+re-awaits without hanging, and verifies that a late completion observes
+`AlreadyResolved { terminal: Cancelled }` instead of replacing the terminal.
+
+## Retention
+
+The host runs one maintenance pass per hour. It audits the shared runtime
+catalog with `gc_unreachable`, vacuums terminal evidence for the app's chat
+sessions, reclaims unreferenced attachments after a 7-day grace window, and
+prunes terminal processes older than the same window. Attachment reclamation
+refuses and reports an empty live root set; it never treats an empty catalog as
+standing authorization to delete every eligible blob. A non-zero store-GC
+result is a verify/repair finding to investigate, not routine throughput.
+
+This example's chat list is the vacuum catalog. Process-owned sessions are not
+listed there and need retention owned by their process host. The attachment
+backend and deployment store must also belong exclusively to the same
+deployment; pairing the backend with the wrong store can classify live bytes
+as unreachable.
+
+## Coverage
+
+The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
+source of truth for the CI split.
+
+- **Manual judged:** [`agent-service-branching`](../../runbooks/agent-service-branching/runbook.md),
+  [`agent-service-effect-groups`](../../runbooks/agent-service-effect-groups/runbook.md),
+  and [`tictactoe-full-game`](../../runbooks/tictactoe-full-game/runbook.md).
