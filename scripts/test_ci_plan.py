@@ -1669,7 +1669,7 @@ class RollingUpgradeSelectionTests(unittest.TestCase):
             plan = self.plan("crates/lash-core/src/runtime/assembly.rs")
         self.assertEqual("true", plan["fail_open"])
         self.assertEqual("true", plan["rolling_upgrade"])
-        self.assertEqual("true", plan["release_journal_replay"])
+        self.assertEqual("true", plan["versioned_surface"])
         self.assertIn("marker ends early", plan["reason"])
 
     def test_a_surface_file_or_the_harness_selects_the_gate(self) -> None:
@@ -1701,95 +1701,155 @@ class RollingUpgradeSelectionTests(unittest.TestCase):
         self.assertEqual("true", plan["rolling_upgrade"])
 
 
-class ReleaseJournalReplaySelectionTests(unittest.TestCase):
-    def test_replay_job_runs_on_main_and_stays_non_required_until_the_cut(self):
-        workflow = yaml.safe_load((ROOT / ".github/workflows/release-journal-replay.yml").read_text())
-        triggers = workflow.get("on", workflow.get(True))
-        self.assertEqual(["main"], triggers["push"]["branches"])
-        self.assertIn("pull_request", triggers)
-        job = workflow["jobs"]["release-journal-replay"]
-        self.assertIn("release_journal_replay", job["if"])
-        self.assertFalse(job.get("continue-on-error", False))
-        self.assertIn("FIG-4097", (ROOT / ".github/workflows/release-journal-replay.yml").read_text())
-        self.assertEqual("fixtures/release-rehearsal/fig-4532-rehearsal-20261001/replay-corpus", job["env"]["LASH_REPLAY_CORPUS_ROOT"])
-        commands = "\n".join(step.get("run", "") for step in job["steps"])
-        self.assertIn("tests::replay_corpus::", commands)
-        self.assertIn("--test_env LASH_REPLAY_CORPUS_ROOT=", commands)
-        aggregator = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["ci-conclusion"]
-        self.assertNotIn("release-journal-replay", aggregator["needs"])
+CUT_GATE_JOBS = ("version-bumps", "release-journal-replay")
+RELEASE_JOURNAL_WORKFLOW = ROOT / ".github/workflows/release-journal-replay.yml"
+VERSION_BUMPS_WORKFLOW = ROOT / ".github/workflows/version-bumps.yml"
+RELEASE_WORKFLOW = ROOT / ".github/workflows/release.yml"
 
-    def test_every_registered_constant_selects_release_journal_replay(self):
+
+def _triggers(workflow: dict) -> dict:
+    # PyYAML reads the bare key `on` as the boolean True.
+    return workflow.get("on", workflow.get(True))
+
+
+def _commands(job: dict) -> str:
+    return "\n".join(step.get("run", "") for step in job["steps"])
+
+
+class VersionedSurfaceSelectionTests(unittest.TestCase):
+    """`versioned_surface` selects the strict bump gate and the journal replay.
+
+    A guarded shape often lives outside the file that defines its constant,
+    so the rule is the markers' paths, not the registry's constant files,
+    plus what only the two gates read.
+    """
+
+    def plan(self, *paths: str, event: str = "pull_request") -> dict[str, str]:
+        return ci_plan.classify([("M", path) for path in paths], event_name=event)
+
+    def test_every_registered_constant_selects_it(self) -> None:
         registry = tomllib.loads((ROOT / "scripts/versioned-surfaces.toml").read_text())
         constant_files = {surface["constant_path"] for surface in registry["surface"]}
         self.assertLessEqual(constant_files, ci_plan.versioned_surface_paths())
         for path in sorted(constant_files):
             with self.subTest(path=path):
-                plan = ci_plan.classify([("M", path)], event_name="pull_request")
-                self.assertEqual("true", plan.get("release_journal_replay"))
+                self.assertEqual("true", self.plan(path)["versioned_surface"])
 
-    def test_a_guarded_file_selects_release_journal_replay(self):
+    def test_a_guarded_file_selects_it(self) -> None:
         for path in GUARDED_SURFACE_FILES:
             with self.subTest(path=path):
-                plan = ci_plan.classify([("M", path)], event_name="pull_request")
-                self.assertEqual("true", plan.get("release_journal_replay"))
+                self.assertEqual("true", self.plan(path)["versioned_surface"])
 
-    def test_main_selects_release_journal_replay_even_for_docs(self):
-        plan = ci_plan.classify([("M", "docs/guide.md")], event_name="push")
-        self.assertEqual("true", plan.get("release_journal_replay"))
-
-    def test_unrelated_pull_requests_skip_release_journal_replay(self):
-        plan = ci_plan.classify([("M", "crates/lash-core/src/runtime/assembly.rs")], event_name="pull_request")
-        self.assertEqual("false", plan.get("release_journal_replay"))
-
-
-class VersionedSurfaceSelectionTests(unittest.TestCase):
-    """The strict bump gate's selector reads the surfaces' own markers.
-
-    A guarded shape often lives outside the file that defines its constant,
-    so the rule is the markers' paths, not the registry's constant files.
-    """
-
-    def test_a_constant_file_a_guarded_file_and_the_gate_select_it(self) -> None:
+    def test_the_gates_own_inputs_select_it(self) -> None:
         for path in (
-            "crates/lash-restate/src/process/admission.rs",
-            "crates/lash-restate/src/durable_wait/messages.rs",
-            "crates/lash-postgres-store/schema.sql",
-            "crates/lash-remote-protocol/src/lib.rs",
             "scripts/versioned-surfaces.toml",
             "scripts/check_version_bumps.py",
+            "scripts/ci/version-bump-gate.sh",
+            "scripts/release_baseline.py",
             ".github/workflows/version-bumps.yml",
+            ".github/workflows/release-journal-replay.yml",
+            "crates/lash-restate/src/tests/replay_corpus.rs",
+            "crates/lash-restate/testdata/replay-corpus/sleep-envelope/journal.json",
+            "fixtures/release/v1.0.0/replay-corpus/sleep-envelope/journal.json",
+            "fixtures/release-rehearsal/cut-1.0-dry-run/replay-corpus/sleep-envelope/journal.json",
+            "scripts/capture_release_fixtures.py",
         ):
             with self.subTest(path=path):
-                self.assertTrue(ci_plan.touches_versioned_surface([path]))
+                self.assertEqual("true", self.plan(path)["versioned_surface"])
 
     def test_docs_and_unguarded_paths_do_not_select_it(self) -> None:
-        self.assertFalse(
-            ci_plan.touches_versioned_surface(
-                ["docs/guide.md", "crates/lash-core/src/runtime/assembly.rs", "justfile"]
-            )
-        )
+        for paths in (
+            ("docs/guide.md",),
+            ("crates/lash-core/src/runtime/assembly.rs",),
+            ("docs/guide.md", "crates/lash-core/src/runtime/assembly.rs"),
+        ):
+            with self.subTest(paths=paths):
+                self.assertEqual("false", self.plan(*paths).get("versioned_surface"))
 
-    def test_the_command_fails_open_on_an_unreadable_diff(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            paths = Path(directory) / "changed"
-            paths.write_bytes(b"M\0docs/guide.md")
-            result = subprocess.run(
-                [sys.executable, str(ROOT / "scripts/ci_plan.py"), "versioned-surface",
-                 "--paths-file", str(paths)],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            self.assertEqual("versioned_surface=true\n", result.stdout)
-            paths.write_bytes(b"M\0docs/guide.md\0")
-            result = subprocess.run(
-                [sys.executable, str(ROOT / "scripts/ci_plan.py"), "versioned-surface",
-                 "--paths-file", str(paths)],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            self.assertEqual("versioned_surface=false\n", result.stdout)
+    def test_an_unclassifiable_diff_selects_it(self) -> None:
+        self.assertEqual("true", ci_plan.fail_open("no exact diff")["versioned_surface"])
+
+
+class CutGateWorkflowTests(unittest.TestCase):
+    """The two cut gates are required: they sit inside the CI conclusion, the
+    release cannot publish past the bump gate, and neither has a reporting
+    mode (FIG-4494, FIG-4097)."""
+
+    def jobs(self) -> dict:
+        return yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
+
+    def test_both_jobs_gate_the_ci_conclusion_on_the_surface_family(self) -> None:
+        jobs = self.jobs()
+        for name in CUT_GATE_JOBS:
+            with self.subTest(job=name):
+                job = jobs[name]
+                self.assertIn(name, jobs["ci-conclusion"]["needs"])
+                self.assertEqual("versioned_surface", ci_plan.GATED_JOBS[name])
+                self.assertEqual("needs.plan.outputs.versioned_surface == 'true'", job["if"])
+                self.assertFalse(job.get("continue-on-error", False))
+                for step in job["steps"]:
+                    self.assertFalse(step.get("continue-on-error", False), step.get("name"))
+
+    def test_a_selected_gate_that_fails_or_skips_fails_the_conclusion(self) -> None:
+        for event in ("pull_request", "merge_group", "workflow_dispatch"):
+            for name in CUT_GATE_JOBS:
+                for result in ("failure", "cancelled", "skipped"):
+                    with self.subTest(event=event, job=name, result=result):
+                        needs = apply_event_deferrals(successful_needs(), event)
+                        self.assertEqual([], ci_plan.evaluate_conclusion(needs, event))
+                        needs[name]["result"] = result
+                        problems = ci_plan.evaluate_conclusion(needs, event)
+                        self.assertTrue(any(name in problem for problem in problems), problems)
+
+    def test_an_unselected_gate_may_skip(self) -> None:
+        needs = apply_event_deferrals(successful_needs(), "pull_request")
+        needs["plan"]["outputs"]["versioned_surface"] = "false"
+        for name in CUT_GATE_JOBS:
+            needs[name]["result"] = "skipped"
+        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
+
+    def test_the_bump_gate_names_the_event_baseline_and_has_no_reporting_exit(self) -> None:
+        commands = _commands(self.jobs()["version-bumps"])
+        self.assertIn('bash scripts/ci/version-bump-gate.sh "${GITHUB_SHA}" "${BASE_SHA}"', commands)
+        self.assertIn('bash scripts/ci/version-bump-gate.sh "${GITHUB_SHA}"\n', commands)
+        self.assertIn("pull_request) base_sha=\"${PR_BASE_SHA}\"", commands)
+        self.assertIn("merge_group) base_sha=\"${MERGE_GROUP_BASE_SHA}\"", commands)
+        self.assertNotIn("|| true", commands)
+        gate = (ROOT / "scripts/ci/version-bump-gate.sh").read_text()
+        self.assertIn("set -euo pipefail", gate)
+        self.assertNotIn("|| true", gate)
+
+    def test_the_replay_reads_one_named_corpus_everywhere(self) -> None:
+        corpus = "fixtures/release-rehearsal/cut-1.0-dry-run/replay-corpus"
+        standalone = yaml.safe_load(RELEASE_JOURNAL_WORKFLOW.read_text())["jobs"]["release-journal-replay"]
+        for job in (self.jobs()["release-journal-replay"], standalone):
+            self.assertEqual(corpus, job["env"]["LASH_REPLAY_CORPUS_ROOT"])
+            commands = _commands(job)
+            self.assertIn("tests::replay_corpus::", commands)
+            self.assertIn("--test_env LASH_REPLAY_CORPUS_ROOT=", commands)
+        journals = sorted((ROOT / corpus).glob("*/journal.json"))
+        self.assertTrue(journals, "the corpus CI replays is committed")
+
+    def test_main_pushes_run_both_gates_outside_the_conclusion(self) -> None:
+        for path, name in ((VERSION_BUMPS_WORKFLOW, "version-bumps"),
+                           (RELEASE_JOURNAL_WORKFLOW, "release-journal-replay")):
+            with self.subTest(workflow=path.name):
+                workflow = yaml.safe_load(path.read_text())
+                self.assertEqual({"push"}, set(_triggers(workflow)))
+                self.assertEqual(["main"], _triggers(workflow)["push"]["branches"])
+                job = workflow["jobs"][name]
+                self.assertNotIn("if", job)
+                self.assertFalse(job.get("continue-on-error", False))
+        commands = _commands(yaml.safe_load(VERSION_BUMPS_WORKFLOW.read_text())["jobs"]["version-bumps"])
+        self.assertIn('bash scripts/ci/version-bump-gate.sh "${GITHUB_SHA}" "${BASE_SHA}"', commands)
+
+    def test_a_release_cannot_publish_past_the_bump_gate(self) -> None:
+        jobs = yaml.safe_load(RELEASE_WORKFLOW.read_text())["jobs"]
+        self.assertIn("version-bumps", jobs["publish-crates"]["needs"])
+        job = jobs["version-bumps"]
+        self.assertNotIn("if", job)
+        self.assertFalse(job.get("continue-on-error", False))
+        self.assertIn('bash scripts/ci/version-bump-gate.sh "${RELEASE_SHA}"', _commands(job))
 
 
 class ConclusionTests(unittest.TestCase):

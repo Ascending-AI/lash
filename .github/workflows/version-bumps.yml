@@ -1,29 +1,24 @@
 name: Version bumps
 
-# The strict version-bump gate (FIG-4494): a guarded shape that changes
-# without its version constant bumping, a bump without its upgrade evidence,
-# and a guard that cannot be evaluated all fail it. It has no report-only
-# mode.
+# The strict version-bump gate (FIG-4494) on main: a guarded shape that
+# changes without its version constant bumping, a bump without its upgrade
+# evidence, and a guard that cannot be evaluated all fail it. It has no
+# report-only mode.
 #
-# Until the lash 1.0 cut ends the version freeze (FIG-3846), shapes change in
-# place and this job reports those changes as failures; that is expected, and
-# is why the workflow is not a required check yet. The cut makes it required
-# and adds it to `publish-crates`' `needs` in release.yml.
-#
-# It runs on every push to main, and on a pull request or merge group whose
-# diff touches a registered versioned surface (`scripts/ci_plan.py
-# versioned-surface`, which reads the surfaces' own `version_guard` markers).
+# Pull requests, merge groups and dispatches run the same gate as the
+# `version-bumps` job of ci.yml, inside the required CI conclusion, and
+# release.yml runs it before it publishes. This workflow covers what those
+# cannot see: a commit pushed straight to main, compared with main's
+# previous tip.
 
 on:
   push:
     branches:
       - main
-  pull_request:
-  merge_group:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -59,24 +54,16 @@ jobs:
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
-      # The baseline is the commit the change lands on: the pull request's
-      # base, the merge group's base, or main's previous tip. A baseline that
-      # cannot be named or fetched fails the job; the gate never guesses one.
+      # The baseline is main's previous tip. A baseline that cannot be named
+      # or fetched fails the job; the gate never guesses one.
       - name: Fetch the baseline
         id: baseline
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          case "${GITHUB_EVENT_NAME}" in
-            pull_request) base_sha="${PR_BASE_SHA}" ;;
-            merge_group) base_sha="${MERGE_GROUP_BASE_SHA}" ;;
-            push) base_sha="${PUSH_BEFORE_SHA}" ;;
-            *) echo "::error::unsupported event ${GITHUB_EVENT_NAME}"; exit 1 ;;
-          esac
+          base_sha="${PUSH_BEFORE_SHA}"
           if [[ -z "${base_sha}" || "${base_sha}" == "0000000000000000000000000000000000000000" ]]; then
             echo "::error::the event names no baseline commit"
             exit 1
@@ -87,33 +74,13 @@ jobs:
           git rev-parse --verify "${base_sha}^{commit}" >/dev/null
           echo "sha=${base_sha}" >> "${GITHUB_OUTPUT}"
 
-      - name: Select the gate
-        id: select
-        env:
-          BASE_SHA: ${{ steps.baseline.outputs.sha }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            echo "versioned_surface=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          git diff --name-status --no-renames -z "${BASE_SHA}" "${GITHUB_SHA}" > "${RUNNER_TEMP}/changed-paths"
-          python3 scripts/ci_plan.py versioned-surface \
-            --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
-
       # What each constant guards is derived from its root types. The gate
       # below fails on a reachable type it cannot resolve; this prints the
       # closures it compares, with their cycles and opaque types.
       - name: Report the derived guard sets
-        if: steps.select.outputs.versioned_surface == 'true'
         run: python3 scripts/version_guard_closure.py >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Check version bumps
-        if: steps.select.outputs.versioned_surface == 'true'
         env:
           BASE_SHA: ${{ steps.baseline.outputs.sha }}
-        run: python3 scripts/check_version_bumps.py --base "${BASE_SHA}" --head "${GITHUB_SHA}"
-
-      - name: Report an untouched diff
-        if: steps.select.outputs.versioned_surface != 'true'
-        run: echo "The diff touches no registered versioned surface; the gate did not run." >> "${GITHUB_STEP_SUMMARY}"
+        run: bash scripts/ci/version-bump-gate.sh "${GITHUB_SHA}" "${BASE_SHA}"

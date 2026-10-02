@@ -2467,7 +2467,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             release_assets["files"].splitlines(),
         )
         self.assertIn(
-            "needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]",
+            "needs: [prepare-release, validate-release-ref, version-bumps, package-crates, crash-matrix-restate, latency-gate, chaos-soak]",
             publish_crates,
         )
         self.assertIn("runs-on: ubuntu-24.04", validate_release)

@@ -44,6 +44,7 @@ FAMILIES = (
     "workers_e2e",
     "restate_suites",
     "rolling_upgrade",
+    "versioned_surface",
     "feature_lanes",
     "workbench",
     "regress",
@@ -279,6 +280,8 @@ GATED_JOBS = {
     "postgres-store-synthetic-next": "stores",
     "pr-host-workers": "pr_host_restate",
     "rolling-upgrade": "rolling_upgrade",
+    "version-bumps": "versioned_surface",
+    "release-journal-replay": "versioned_surface",
     "s3-store": "stores",
     "functional-e2e": "functional_e2e",
     "functional-e2e-process-operations": "functional_e2e",
@@ -596,7 +599,6 @@ SHARD_DIR_READERS: Mapping[str, str] = {
 PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     **{family: frozenset({family}) for family in FAMILIES},
     "postgres_compatibility": frozenset({"schema"}),
-    "release_journal_replay": frozenset({"rolling_upgrade"}),
     "buck2_trusted": frozenset(),
     "fail_open": frozenset(),
     "docs_only": frozenset(),
@@ -1155,19 +1157,33 @@ def _is_rolling_upgrade_path(path: str, surface_paths: frozenset[str]) -> bool:
     )
 
 
-VERSION_BUMP_GATE_PATHS = frozenset(
-    {"scripts/check_version_bumps.py", ".github/workflows/version-bumps.yml"}
+# `versioned_surface` selects the two cut gates every change to a registered
+# surface owes: the strict version-bump gate (FIG-4494) and the release-journal
+# replay (FIG-4097). Besides the surfaces it selects on what only those gates
+# read: the gate and its standalone workflows, the corpora the replay reads,
+# its law, and the tool that captures a corpus.
+VERSIONED_SURFACE_GATE_PATHS = frozenset(
+    {
+        "scripts/check_version_bumps.py",
+        ".github/workflows/version-bumps.yml",
+        ".github/workflows/release-journal-replay.yml",
+        "crates/lash-restate/src/tests/replay_corpus.rs",
+        "scripts/capture_release_fixtures.py",
+        "scripts/test_capture_release_fixtures.py",
+    }
+)
+RELEASE_JOURNAL_CORPUS_DIRS = (
+    "crates/lash-restate/testdata/replay-corpus/",
+    "fixtures/release/",
+    "fixtures/release-rehearsal/",
 )
 
 
-def touches_versioned_surface(paths: list[str], root: Path | None = None) -> bool:
-    """Whether any of `paths` is a registered surface's constant file, a file
-    one of its guards reads, the registry, or the gate itself."""
-
-    patterns = VERSION_BUMP_GATE_PATHS | versioned_surface_paths(
-        None if root is None else str(root)
+def _is_versioned_surface_gate_path(path: str, surface_paths: frozenset[str]) -> bool:
+    return (
+        _is_versioned_surface_path(path, surface_paths | VERSIONED_SURFACE_GATE_PATHS)
+        or path.startswith(RELEASE_JOURNAL_CORPUS_DIRS)
     )
-    return any(_is_versioned_surface_path(path, patterns) for path in paths)
 
 
 # `facade` gates the untrusted Cargo seal lane: only the facade crate's public
@@ -1784,7 +1800,6 @@ def fail_open(reason: str) -> dict[str, str]:
     outputs = {
         "docs_only": "false",
         "fail_open": "true",
-        "release_journal_replay": "true",
         "reason": reason,
         "pr_tail_labels": tail,
         # The pull-request leg runs the whole fast suite plus the deferred
@@ -1871,24 +1886,6 @@ def classify(
     run_everything = global_invalidator or bool(ambiguous) or docs_deletion
 
     outputs = {
-        "release_journal_replay": str(
-            event_name in {"push", "workflow_dispatch"}
-            or run_everything
-            or any(
-                _is_versioned_surface_path(path, surface_paths)
-                or path.startswith("crates/lash-restate/testdata/replay-corpus/")
-                or path.startswith(("fixtures/release/", "fixtures/release-rehearsal/"))
-                or path in {
-                    "crates/lash-restate/src/tests/replay_corpus.rs",
-                    "scripts/capture_release_fixtures.py",
-                    "scripts/test_capture_release_fixtures.py",
-                    "scripts/ci_plan.py",
-                    "scripts/test_ci_plan.py",
-                    ".github/workflows/release-journal-replay.yml",
-                }
-                for path in paths
-            )
-        ).lower(),
         "docs_only": str(docs_only).lower(),
         "fail_open": str(bool(ambiguous)).lower(),
         "reason": (
@@ -1963,6 +1960,11 @@ def classify(
         ),
         "rolling_upgrade": any(
             _is_rolling_upgrade_path(path, surface_paths) for path in build
+        ),
+        # Over every path, not only the build inputs: the registry and a
+        # corpus are data the two gates read.
+        "versioned_surface": any(
+            _is_versioned_surface_gate_path(path, surface_paths) for path in paths
         ),
         "feature_lanes": any(
             _is_feature_gate_path(path, classes[path], lane_dirs) for path in build
@@ -2236,26 +2238,8 @@ def main() -> int:
     )
     scope_parser.add_argument("--repo", type=Path, default=REPO_ROOT, help=argparse.SUPPRESS)
 
-    surface_parser = subparsers.add_parser(
-        "versioned-surface",
-        help="say whether a diff touches a registered versioned surface",
-    )
-    surface_parser.add_argument("--paths-file", type=Path, required=True)
-
     subparsers.add_parser("conclusion")
     args = parser.parse_args()
-
-    if args.command == "versioned-surface":
-        # Fail open: a diff or a marker that cannot be read runs the gate,
-        # which then reports what is wrong with it.
-        try:
-            paths = [path for _, path in _read_nul_changes(args.paths_file)]
-            selected = touches_versioned_surface(paths)
-        except Exception as error:  # noqa: BLE001
-            print(f"versioned-surface selection failed open: {error}", file=sys.stderr)
-            selected = True
-        _write_outputs({"versioned_surface": str(selected).lower()})
-        return 0
 
     if args.command == "gate-scope":
         try:

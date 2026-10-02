@@ -155,7 +155,7 @@ jobs:
       workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
       restate_suites: ${{ steps.classify.outputs.restate_suites }}
       rolling_upgrade: ${{ steps.classify.outputs.rolling_upgrade }}
-      release_journal_replay: ${{ steps.classify.outputs.release_journal_replay }}
+      versioned_surface: ${{ steps.classify.outputs.versioned_surface }}
       feature_lanes: ${{ steps.classify.outputs.feature_lanes }}
       workbench: ${{ steps.classify.outputs.workbench }}
       regress: ${{ steps.classify.outputs.regress }}
@@ -560,6 +560,7 @@ jobs:
           python3 scripts/test_capture_release_fixtures.py
           python3 scripts/test_verify_release_fixtures.py
           python3 scripts/test_release_baseline.py
+          python3 scripts/test_version_bump_gate.py
           python3 scripts/test_checkout_step.py
           python3 scripts/test_ci_workspace_cache.py
           python3 scripts/test_ci_artifact_provenance.py
@@ -2062,6 +2063,131 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
+  # The strict version-bump gate (FIG-4494): a guarded shape that changes
+  # without its version constant bumping, a bump without its upgrade evidence,
+  # and a guard that cannot be evaluated all fail it. It has no report-only
+  # mode. It runs on every pull request and merge group whose diff touches a
+  # registered versioned surface and on every dispatch, which is the run a
+  # release certifies against.
+  version-bumps:
+    name: Strict version-bump gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: plan
+    if: needs.plan.outputs.versioned_surface == 'true'
+    steps:
+      - *checkout
+
+      # The baseline is the commit the change lands on: the pull request's
+      # base or the merge group's. A dispatch names none, so its baseline is
+      # the last release; scripts/ci/version-bump-gate.sh picks it from the
+      # release tags fetched here. A baseline that is named and cannot be
+      # fetched fails the job; the gate never guesses one.
+      - name: Fetch the baseline
+        id: baseline
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          authed() { git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" "$@"; }
+          case "${GITHUB_EVENT_NAME}" in
+            pull_request) base_sha="${PR_BASE_SHA}" ;;
+            merge_group) base_sha="${MERGE_GROUP_BASE_SHA}" ;;
+            workflow_dispatch)
+              authed ls-remote --tags --refs origin 'v[1-9]*' | while read -r _ ref; do
+                authed fetch --no-tags --depth=1 origin "+${ref}:${ref}"
+              done
+              echo "sha=" >> "${GITHUB_OUTPUT}"
+              exit 0
+              ;;
+            *) echo "::error::unsupported event ${GITHUB_EVENT_NAME}"; exit 1 ;;
+          esac
+          if [[ -z "${base_sha}" || "${base_sha}" == "0000000000000000000000000000000000000000" ]]; then
+            echo "::error::the event names no baseline commit"
+            exit 1
+          fi
+          authed fetch --no-tags --prune --depth=1 origin "${base_sha}"
+          git rev-parse --verify "${base_sha}^{commit}" >/dev/null
+          echo "sha=${base_sha}" >> "${GITHUB_OUTPUT}"
+
+      # What each constant guards is derived from its root types. The gate
+      # below fails on a reachable type it cannot resolve; this prints the
+      # closures it compares, with their cycles and opaque types.
+      - name: Report the derived guard sets
+        run: python3 scripts/version_guard_closure.py >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Check version bumps
+        env:
+          BASE_SHA: ${{ steps.baseline.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${BASE_SHA}" ]]; then
+            bash scripts/ci/version-bump-gate.sh "${GITHUB_SHA}" "${BASE_SHA}"
+          else
+            bash scripts/ci/version-bump-gate.sh "${GITHUB_SHA}"
+          fi
+
+  # The release-journal replay (FIG-4097): this build replays the journals the
+  # last release recorded. A replay that diverges while JOURNAL_LOGIC_EPOCH is
+  # the corpus's capture epoch fails with `journal logic changed: bump
+  # JOURNAL_LOGIC_EPOCH`. It runs on the same events as the version-bump gate.
+  release-journal-replay:
+    name: Release journal replay
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: plan
+    if: needs.plan.outputs.versioned_surface == 'true'
+    environment: build-cache
+    env:
+      # The dry-run capture of the 1.0 cut branch. The tagged capture
+      # (FIG-4495) repoints this at fixtures/release/v1.0.0/replay-corpus.
+      LASH_REPLAY_CORPUS_ROOT: fixtures/release-rehearsal/cut-1.0-dry-run/replay-corpus
+    steps:
+      - *checkout
+
+      - name: Configure shared build cache
+        if: needs.plan.outputs.buck2_trusted == 'true'
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Replay every release scenario and the added-step self-test
+        env:
+          TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
+        run: |
+          set -euo pipefail
+          execution=()
+          if [[ "$TRUSTED" != true ]]; then execution=(--local); fi
+          scripts/hermetic-build.sh "${execution[@]}" test \
+            //crates/lash-restate:lash-restate__unit_test \
+            --local-test-execution --no-test-cache \
+            --test_arg=tests::replay_corpus:: --test_arg=--nocapture \
+            --test_env LASH_REPLAY_CORPUS_ROOT="$LASH_REPLAY_CORPUS_ROOT" \
+            --test-report "$RUNNER_TEMP/release-journal-report.json" \
+            --test-output-dir "$RUNNER_TEMP/release-journal-results"
+
+      - name: Upload replay evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-journal-replay
+          path: |
+            ${{ runner.temp }}/release-journal-report.json
+            ${{ runner.temp }}/release-journal-results
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
   worker-artifacts:
     name: Build worker release artifacts
     runs-on: ubuntu-24.04
@@ -3058,6 +3184,8 @@ jobs:
       - functional-e2e-process-operations
       - pr-host-workers
       - rolling-upgrade
+      - version-bumps
+      - release-journal-replay
       - worker-artifacts
       - restate-postgres-workers
       - restate-postgres-workers-summary

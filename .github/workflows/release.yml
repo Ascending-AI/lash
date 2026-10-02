@@ -291,6 +291,46 @@ jobs:
           path: .benchmarks/perf-guard/*
           if-no-files-found: warn
 
+  # The strict version-bump gate (FIG-4494) between the last release and this
+  # one. Nothing publishes unless it passes: a guarded shape that changed
+  # since the last release without its version constant bumping, a bump
+  # without its upgrade evidence, and a guard that cannot be evaluated all
+  # fail it. The first release has no predecessor, so it must be exactly the
+  # release baseline (scripts/release_baseline.py check).
+  version-bumps:
+    name: Strict version-bump gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: prepare-release
+
+    steps:
+      - name: Check out the release commit with release tags
+        env:
+          CHECKOUT_REF: ${{ needs.prepare-release.outputs.release_sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
+          umask 077
+          {
+            printf '[http]\n'
+            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
+          } > "${auth_config}"
+          git config --local include.path "${auth_config}"
+          git fetch --no-tags --prune --depth=1 origin "${CHECKOUT_REF}"
+          git checkout --force --detach FETCH_HEAD
+          git ls-remote --tags --refs origin 'v[1-9]*' | while read -r _ ref; do
+            git fetch --no-tags --depth=1 origin "+${ref}:${ref}"
+          done
+
+      - name: Check version bumps since the last release
+        env:
+          RELEASE_SHA: ${{ needs.prepare-release.outputs.release_sha }}
+        run: bash scripts/ci/version-bump-gate.sh "${RELEASE_SHA}"
+
   crash-matrix-restate:
     name: Crash-point matrix on live Restate
     runs-on: ubuntu-24.04
@@ -580,7 +620,7 @@ jobs:
     runs-on: ubuntu-latest
     # Per-layer crates.io index-visibility waits are externally paced.
     timeout-minutes: 20
-    needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]
+    needs: [prepare-release, validate-release-ref, version-bumps, package-crates, crash-matrix-restate, latency-gate, chaos-soak]
     # CARGO_REGISTRY_TOKEN lives in the `main` GitHub Environment; a job must
     # declare the environment to read its secrets.
     environment: main
