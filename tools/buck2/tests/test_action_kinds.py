@@ -391,13 +391,42 @@ class AnonymousMemoryTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             sizes.check_compile_memory(evidence, sizes.CLIPPY_FLOOR_KB, ("clippy", KEY))
 
-    def test_test_runs_keep_cgroup_peaks_and_the_ninety_percent_rule(self):
+    def test_test_runs_use_anonymous_peaks_and_keep_headroom(self):
         label = "//crates/lash-core:runtime_turns__test"
         line = usage(peak_bytes=3 * GIB, anon_peak_bytes=GIB).replace("test=-", f"test=run:-:{label}")
         row = sizes.test_run_table(sizes.collect_test_runs([line] * 3, {label}))[label]
-        self.assertEqual(row["p99_peak_bytes"], 3 * GIB)
-        self.assertEqual(row["memory_kb"], 3840 * 1024)
+        self.assertEqual(row["p99_peak_bytes"], GIB)
+        self.assertEqual(row["memory_kb"], 1280 * 1024)
         self.assertEqual(sizes.HEADROOM, 0.9)
+
+
+class SmallAdmissionTest(unittest.TestCase):
+    def test_test_run_prices_anonymous_p99_instead_of_page_cache(self):
+        label = "//crates/lash-core:runtime_turns__test"
+        line = usage(peak_bytes=3 * GIB, anon_peak_bytes=100 * 1024**2).replace("test=-", f"test=run:-:{label}")
+        row = sizes.test_run_table(sizes.collect_test_runs([line] * 3, {label}))[label]
+        self.assertEqual(row["memory_kb"], 256 * 1024)
+        self.assertEqual(row["p99_peak_bytes"], 100 * 1024**2)
+
+    def test_unmeasured_compile_and_test_defaults_are_half_a_gib(self):
+        import generate_model as model
+        self.assertEqual(model.DEFAULT_MEMORY_KB, 512 * 1024)
+        self.assertEqual(model.UNSIZED_ACTION_BUDGET, (1, 512 * 1024))
+        self.assertEqual(model.UNMEASURED_TEST_RUN["memory_kb"], 512 * 1024)
+
+    def test_a_killed_unmeasured_test_requires_an_explicit_floor(self):
+        label = "//crates/lash-core:runtime_turns__test"
+        line = usage(peak_bytes=3 * GIB, anon_peak_bytes=2 * GIB).replace("test=-", f"test=run:-:{label}").replace("exit=0", "exit=137")
+        with self.assertRaisesRegex(ValueError, "explicit floor"):
+            sizes.test_run_table(sizes.collect_test_runs([line], {label}))
+
+    def test_killed_test_peak_raises_the_floor_without_becoming_a_sample(self):
+        label = "//crates/lash-core:runtime_turns__test"
+        line = usage(peak_bytes=3 * GIB, anon_peak_bytes=2 * GIB).replace("test=-", f"test=run:-:{label}")
+        killed = line.replace("exit=0", "exit=137")
+        row = sizes.test_run_table(sizes.collect_test_runs([line] * 3 + [killed], {label}))[label]
+        self.assertGreaterEqual(row["memory_kb"], 3840 * 1024)
+        self.assertEqual(row["samples"], 3)
 
 
 class CategoryTableTest(unittest.TestCase):

@@ -3,11 +3,13 @@
 load("@prelude//rust:cargo_buildscript.bzl", _prelude_buildscript_run = "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo", "get_reindeer_platforms")
 load("@prelude//utils:selects.bzl", "selects")
+load(":exec_sizes.bzl", "HELPER_BUDGET")
+load(":platforms.bzl", "pool_constraint")
 load(":profile.bzl", "THIRD_PARTY_OPT_LEVELS")
 
 _DEFAULT_CPU = "1"
-_DEFAULT_MEMORY_KB = "1572864"
-_DEFAULT_CONSTRAINT = "//tools/buck2:pool_1_1572864"
+_DEFAULT_MEMORY_KB = "524288"
+_DEFAULT_CONSTRAINT = "//tools/buck2:pool_1_524288"
 _HOST_TRANSITION = "//tools/buck2:host_transition"
 _OPTIMIZED_FLAGS = [
     "-Copt-level=3",
@@ -78,21 +80,24 @@ def third_party_rust_binary(name, platform = {}, **kwargs):
     )
 
 def third_party_buildscript_run(name, package_name, env = {}, **kwargs):
-    # A third-party build-script run keeps the default request, unlike a
-    # first-party one (`HELPER_BUDGET`): the request is part of its action
-    # key, and `ring`, `aws-lc-sys` and `rustix` do not rebuild to the same
-    # bytes, so a re-keyed run would relink everything that links them.
+    cpu, memory = HELPER_BUDGET
+    helper_kwargs = dict(kwargs)
+    helper_kwargs.update({
+        "kiln_action_cpu_count": str(cpu),
+        "kiln_action_memory_kb": str(memory),
+        "exec_compatible_with": kwargs.get("exec_compatible_with", []) + [pool_constraint(cpu, memory)],
+    })
     action_env = dict(env)
     action_env.update({
-        "KILN_ACTION_CPU_COUNT": _DEFAULT_CPU,
-        "KILN_ACTION_MEMORY_KB": _DEFAULT_MEMORY_KB,
+        "KILN_ACTION_CPU_COUNT": str(cpu),
+        "KILN_ACTION_MEMORY_KB": str(memory),
     })
     _prelude_buildscript_run(
         name = name,
         package_name = package_name,
         cargo_rustc_flags = _profile_kwargs({"env": {"CARGO_PKG_NAME": package_name}})["rustc_flags"],
         env = action_env,
-        **_resource_kwargs(kwargs)
+        **helper_kwargs
     )
 
 

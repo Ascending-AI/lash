@@ -1,0 +1,215 @@
+{
+  "anonymous_denominator": {
+    "actions_with_anon": 18588,
+    "after_all_reservations_ratio": 1.972881495158223,
+    "after_byte_ms": 436141379551232000,
+    "after_same_rows_ratio": 1.9709392731921966,
+    "anonymous_peak_byte_ms": 221286056594145280,
+    "before_all_reservations_ratio": 2.1269525092755583,
+    "before_byte_ms": 470203125035171840,
+    "before_same_rows_ratio": 2.1248655802003764,
+    "missing_anon_actions": 23
+  },
+  "executed_test_cases": 1143,
+  "formula": "sum(requested_kb * 1024 * wall_ms) / sum(max(peak_bytes, anon_peak_bytes) * wall_ms)",
+  "fresh_window": {
+    "actions": 492196,
+    "first_epoch": 1790848523,
+    "last_epoch": 1790934858,
+    "workers": [
+      "bazelbox-02",
+      "bazelbox-03",
+      "bazelbox-04",
+      "bazelbox-05"
+    ]
+  },
+  "lash_unit_test": {
+    "actions": 808,
+    "anon_peak_bytes": 3043880960,
+    "new_request_kb": 3932160,
+    "oom_kills": 3,
+    "peak_bytes": 3420241920
+  },
+  "projection": "Preserve recorded sized compile and Clippy requests. Replace unsized defaults and helper requests with 512 MiB; eliminate retired deps reservations. Resolve owned test labels through refreshed rows. Preserve unrelated test helpers. Usage logs cannot separate target kinds or profiles; sized recorded requests are retained. Denominator retains observed peaks, including retired deps actions.",
+  "regression_before_fix": {
+    "expected_new_compile_default_kb": 524288,
+    "expected_new_test_request_kb": 262144,
+    "failed_laws": [
+      "SmallAdmissionTest.test_test_run_prices_anonymous_p99_instead_of_page_cache",
+      "SmallAdmissionTest.test_unmeasured_compile_and_test_defaults_are_half_a_gib"
+    ],
+    "failures": 2,
+    "observed_old_compile_default_kb": 1572864,
+    "observed_old_test_request_kb": 3932160,
+    "tests": 3
+  },
+  "source": "/workspace/notes/lash-buck2-migration-2026-09-30/evidence-usage-1h-20261002.tsv",
+  "source_sha256": "079e5c38aca267cb033c6590e2db124fba5160f8a244165398ffd2806b34742f",
+  "supervisor_sources": {
+    "action-supervisor": [
+      55,
+      60,
+      285
+    ],
+    "install.sh": [
+      261,
+      264
+    ],
+    "manifest.env": [
+      133
+    ]
+  },
+  "target_met": false,
+  "target_ratio": 1.4,
+  "test_request_join": "Exact owned label, exit 0, unique worker record within 250 ms of the uncached report duration.",
+  "test_request_proof": [
+    {
+      "action_digest": "af4484b8128856f0cfb6d149c46247d7115b3c7e5f354db14fa7c5d0962197e4:147",
+      "anon_peak_bytes": "23543808",
+      "category": "-",
+      "cpu_usec": "1577639",
+      "crate": "lash_remote_protocol",
+      "epoch": 1790936033,
+      "exit": "0",
+      "kind": "-",
+      "op": "2bfb4908-35c1-4299-a0ab-5a781a4ce4f7",
+      "peak_bytes": "27463680",
+      "pkg": "lash-internal-remote-protocol",
+      "report_duration_seconds": 1.815536633,
+      "requested_cpu": "1",
+      "requested_kb": "262144",
+      "test": "run:-://crates/lash-remote-protocol:lash-remote-protocol__unit_test",
+      "tool": "bash",
+      "wall_ms": "1750",
+      "worker": "04"
+    },
+    {
+      "action_digest": "99d4be24a8fd78f0d8e9f846d3a94e976481bfdd281e5f0d9568573654418ba2:147",
+      "anon_peak_bytes": "349990912",
+      "category": "-",
+      "cpu_usec": "5147849",
+      "crate": "lash_core",
+      "epoch": 1790936090,
+      "exit": "0",
+      "kind": "-",
+      "op": "41f3a1d6-270d-48f8-b79f-5ef6a4638d30",
+      "peak_bytes": "356872192",
+      "pkg": "lash-internal-core",
+      "report_duration_seconds": 3.702246004,
+      "requested_cpu": "2",
+      "requested_kb": "524288",
+      "test": "run:-://crates/lash-core:lash-core__unit_test",
+      "tool": "bash",
+      "wall_ms": "3550",
+      "worker": "05"
+    },
+    {
+      "action_digest": "99e5694c47888f8bc1ebb222e46be13378708ad6dee1bd34d79794206bbc6f1b:147",
+      "anon_peak_bytes": "1298395136",
+      "category": "-",
+      "cpu_usec": "164125197",
+      "crate": "lash",
+      "epoch": 1790936198,
+      "exit": "0",
+      "kind": "-",
+      "op": "deb827c5-ef67-49d4-bb46-2690f40b17db",
+      "peak_bytes": "1433178112",
+      "pkg": "lash-runtime",
+      "report_duration_seconds": 48.583313661,
+      "requested_cpu": "4",
+      "requested_kb": "3932160",
+      "test": "run:-://crates/lash:lash__unit_test",
+      "tool": "bash",
+      "wall_ms": "48510",
+      "worker": "05"
+    }
+  ],
+  "totals": {
+    "all": {
+      "actions": 18611,
+      "after_byte_ms": 436571166191124480,
+      "after_ratio": 1.815772872334382,
+      "before_byte_ms": 470664933340610560,
+      "before_ratio": 1.9575745814253123,
+      "peak_byte_ms": 240432695544053760
+    },
+    "buildscript": {
+      "actions": 10,
+      "after_byte_ms": 3414499000320,
+      "after_ratio": 20.84424686399096,
+      "before_byte_ms": 4101693767680,
+      "before_ratio": 25.039315415234427,
+      "peak_byte_ms": 163810140160
+    },
+    "clippy": {
+      "actions": 3076,
+      "after_byte_ms": 24753982270341120,
+      "after_ratio": 1.8640658414646705,
+      "before_byte_ms": 24823947287592960,
+      "before_ratio": 1.8693344644010659,
+      "peak_byte_ms": 13279564337111040
+    },
+    "deps": {
+      "actions": 437,
+      "after_byte_ms": 0,
+      "after_ratio": 0.0,
+      "before_byte_ms": 441001873244160,
+      "before_ratio": 102.46440433483453,
+      "peak_byte_ms": 4303951953920
+    },
+    "failure_filter": {
+      "actions": 45,
+      "after_byte_ms": 81223200276480,
+      "after_ratio": 226.25643094631198,
+      "before_byte_ms": 81223200276480,
+      "before_ratio": 226.25643094631198,
+      "peak_byte_ms": 358987366400
+    },
+    "rustc": {
+      "actions": 14269,
+      "after_byte_ms": 393074953273999360,
+      "after_ratio": 1.7878534189206665,
+      "before_byte_ms": 418804502469017600,
+      "before_ratio": 1.9048811310973193,
+      "peak_byte_ms": 219858602005135360
+    },
+    "rustdoc_json": {
+      "actions": 127,
+      "after_byte_ms": 1301061021204480,
+      "after_ratio": 2.4825532518010456,
+      "before_byte_ms": 1485143319511040,
+      "before_ratio": 2.833800503706948,
+      "peak_byte_ms": 524081817886720
+    },
+    "schema_check": {
+      "actions": 6,
+      "after_byte_ms": 1277752770560,
+      "after_ratio": 29.429484639564677,
+      "before_byte_ms": 1277752770560,
+      "before_ratio": 29.429484639564677,
+      "peak_byte_ms": 43417436160
+    },
+    "schema_generate": {
+      "actions": 15,
+      "after_byte_ms": 4633195970560,
+      "after_ratio": 24.31635493516184,
+      "before_byte_ms": 4633195970560,
+      "before_ratio": 24.31635493516184,
+      "peak_byte_ms": 190538260480
+    },
+    "test_or_unattributed": {
+      "actions": 626,
+      "after_byte_ms": 17350620977561600,
+      "after_ratio": 2.5646163037546725,
+      "before_byte_ms": 25019102548459520,
+      "before_ratio": 3.698103853693127,
+      "peak_byte_ms": 6765386678763520
+    }
+  },
+  "worker_memory_max_bytes": {
+    "bazelbox-02": 2147483648,
+    "bazelbox-03": 2147483648,
+    "bazelbox-04": 2147483648,
+    "bazelbox-05": 2572505088
+  }
+}

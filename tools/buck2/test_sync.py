@@ -190,7 +190,9 @@ def check_sizing() -> None:
     assert set(measured_kinds) <= joined.shared_identities(load_json("target-inventory.json"))
     assert set(compile_requests) == set(measured_compile) | set(measured_kinds)
     assert set(test_compile_requests) <= set(compile_requests)
-    default = {"cpu_count": sizes.DEFAULT_CPU_COUNT, "memory_kb": sizes.DEFAULT_MEMORY_KB}
+    import generate_model as model
+
+    default = {"cpu_count": model.DEFAULT_CPU_COUNT, "memory_kb": model.DEFAULT_MEMORY_KB}
     for key, target in compile_requests.items():
         crate = request(measured_compile[key]) if key in measured_compile else default
         kinds = measured_kinds.get(key, {})
@@ -242,7 +244,10 @@ def check_sizing() -> None:
         target = compile_requests.get(key, default)
         requests = [target, test_compile_requests.get(key, target)]
         requests += list(optimized_requests.get(key, {}).values())
-        sizes.check_compile_memory(measured, max(row["memory_kb"] for row in requests), key)
+        memory_kb = max(row["memory_kb"] for row in requests)
+        if key not in compile_requests and key not in optimized_requests:
+            memory_kb = max(memory_kb, sizes.ACTION_MEMORY_FLOOR_KB)
+        sizes.check_compile_memory(measured, memory_kb, key)
     for profile, measured in (("kinds", evidence["kinds"]), ("optimized", evidence["optimized"])):
         for key, kinds in measured.items():
             assert set(kinds) <= {"target", "test"}, key
@@ -286,10 +291,7 @@ def check_sizing() -> None:
         if key in clippy_requests:
             memory_kb = clippy_requests[key]["memory_kb"]
         else:
-            target = compile_requests.get(key, default)
-            requests = [target, test_compile_requests.get(key, target)]
-            requests += list(optimized_requests.get(key, {}).values())
-            memory_kb = max(row["memory_kb"] for row in requests)
+            memory_kb = max(model.DEFAULT_MEMORY_KB, sizes.ACTION_MEMORY_FLOOR_KB)
         sizes.check_compile_memory(measured, memory_kb, ("clippy", key))
 
     # Compile requests resolve through one registered platform each; a test
@@ -302,12 +304,12 @@ def check_sizing() -> None:
         + list(test_compile_requests.values())
         + list(clippy_requests.values())
         + [request for kinds in optimized_requests.values() for request in kinds.values()]
-    } | {(1, 1572864), (2, 3145728), helper}
+    } | {(model.DEFAULT_CPU_COUNT, model.DEFAULT_MEMORY_KB), (2, 3145728), helper}
     assert requested <= set(budgets), f"unregistered pool budgets: {sorted(requested - set(budgets))}"
     # A target that names no budget takes the first platform: it must stay the
     # unsized request, not whichever row sorts first. Helper and Clippy
     # requests may be smaller; a target names those.
-    assert budgets[0] == (1, 1048576), budgets[0]
+    assert budgets[0] == model.UNSIZED_ACTION_BUDGET, budgets[0]
     assert budgets[1:] == sorted(budgets[1:]), budgets
     assert 'load(":exec_sizes.bzl", "POOL_BUDGETS")' in (HERE / "platforms.bzl").read_text(
         encoding="utf-8"
@@ -336,11 +338,12 @@ def check_action_categories() -> None:
     """Every remote action category resolves to a deliberate request."""
     sys.path.insert(0, str(HERE))
     import generate_model as model
+    import action_sizes_from_log as sizes
 
     sized = model.ACTION_CATEGORY_SIZES
     assert set(sized.values()) <= {"clippy", "compile", "daemon", "default", "helper", "probe", "unsized"}
     assert sized["clippy"] == "clippy" and sized["deps"] == "daemon"
-    assert model.UNSIZED_ACTION_BUDGET == (1, 1048576)
+    assert model.UNSIZED_ACTION_BUDGET == (1, 524288)
     assert (model.DEFAULT_CPU_COUNT, model.DEFAULT_MEMORY_KB) in model.FIXED_POOL_BUDGETS
     assert model.HELPER_ACTION_BUDGET in model.FIXED_POOL_BUDGETS
     assert model.HELPER_ACTION_BUDGET[1] == model.CLIPPY_FLOOR_KB
@@ -380,7 +383,7 @@ def check_action_categories() -> None:
 
     # What the pool recorded. A category the workers ran is sized here, and an
     # action no row sizes -- a helper, a build script, a third-party compile --
-    # never held more than the smallest request its category can run under.
+    # must fit the category's enforced cgroup limit, including the 2 GiB floor.
     smallest = {
         "clippy": model.CLIPPY_FLOOR_KB,
         "compile": model.DEFAULT_MEMORY_KB,
@@ -398,7 +401,10 @@ def check_action_categories() -> None:
             "samples",
             "unsized_peak_bytes",
         ], category
-        assert measured["unsized_peak_bytes"] <= smallest[sized[category]] * 1024, category
+        limit_kb = smallest[sized[category]]
+        if sized[category] in {"compile", "default"}:
+            limit_kb = max(limit_kb, sizes.ACTION_MEMORY_FLOOR_KB)
+        assert measured["unsized_peak_bytes"] <= limit_kb * 1024, category
 
     # A rule of ours that runs an action names its request to the supervisor
     # and its platform to the scheduler; nothing falls through to the first
@@ -408,12 +414,12 @@ def check_action_categories() -> None:
         assert "KILN_ACTION_CPU_COUNT" in text, name
         assert "pool_constraint(" in text, name
     third_party = (HERE / "third_party.bzl").read_text(encoding="utf-8")
-    assert '_DEFAULT_CONSTRAINT = "//tools/buck2:pool_1_1572864"' in third_party
-    # First-party build-script runs and the schema actions are helpers, on
-    # the helper budget. A third-party build-script run keeps the default:
-    # three of them are not reproducible, so re-keying them relinks the
-    # workspace.
-    assert "exec_sizes.bzl" not in third_party
+    assert '_DEFAULT_CONSTRAINT = "//tools/buck2:pool_1_524288"' in third_party
+    # Build-script runs and schema actions use the small helper budget.
+    # Third-party macros state that same budget as their default.
+    assert 'load(":exec_sizes.bzl", "HELPER_BUDGET")' in third_party
+    assert "cpu, memory = HELPER_BUDGET" in third_party
+    assert "pool_constraint(cpu, memory)" in third_party
     assert "pool_constraint(*HELPER_BUDGET)" in (HERE / "schema_checks.bzl").read_text(encoding="utf-8")
     rust = (HERE / "lash_rust.bzl").read_text(encoding="utf-8")
     assert rust.count("cpu, memory = HELPER_BUDGET") == 1
@@ -470,11 +476,11 @@ def check_ownership() -> None:
 def check_action_bridge() -> None:
     overlay = (HERE / "prelude_overlay.py").read_text(encoding="utf-8")
     assert "rust_identity = True" in overlay
-    assert 'exec_compatible_with = ["root//tools/buck2:pool_1_1572864"]' in overlay
+    assert 'exec_compatible_with = ["root//tools/buck2:pool_1_524288"]' in overlay
     assert "action_allow_cache_upload = True" in overlay
     third_party = (HERE / "third_party.bzl").read_text(encoding="utf-8")
-    assert '"KILN_ACTION_CPU_COUNT": _DEFAULT_CPU' in third_party
-    assert '"KILN_ACTION_MEMORY_KB": _DEFAULT_MEMORY_KB' in third_party
+    assert '"KILN_ACTION_CPU_COUNT": str(cpu)' in third_party
+    assert '"KILN_ACTION_MEMORY_KB": str(memory)' in third_party
     assert "_DEFAULT_CONSTRAINT" in third_party
     for name in ("schema_checks.bzl", "test_rules.bzl", "test_batch.bzl", "platforms.bzl"):
         text = (HERE / name).read_text(encoding="utf-8")
@@ -573,7 +579,7 @@ def check_repo_rooted_source_remap() -> None:
             continue
         raise AssertionError("source remap overlay accepted a changed prelude")
     decls = '''            "kiln_action_cpu_count": attrs.string(default = "1"),
-            "kiln_action_memory_kb": attrs.string(default = "1572864"),
+            "kiln_action_memory_kb": attrs.string(default = "524288"),
 '''
     declared = overlay.add_repo_rooted_srcs_attr(decls)
     assert declared.count('"kiln_repo_rooted_srcs": attrs.bool(default = False),') == 1

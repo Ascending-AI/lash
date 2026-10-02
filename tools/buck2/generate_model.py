@@ -56,16 +56,15 @@ OPTIMIZED_SIZES_PATH = ROOT / "tools/buck2/optimized-sizes.json"
 # Every generated Rust target has a Clippy twin, `<label>__clippy`: the same
 # rule and attributes on a platform of its own (Buck2 gives a target one), so
 # Clippy no longer reserves the compile request. This table carries its
-# measured request, keyed `<package>/<crate>`; a crate without a row keeps
-# its compile request for Clippy. `action_sizes_from_log.py` documents the
+# measured request, keyed `<package>/<crate>`; a crate without a row requests
+# the 512 MiB default for Clippy. `action_sizes_from_log.py` documents the
 # rule.
 CLIPPY_SIZES_PATH = ROOT / "tools/buck2/clippy-sizes.json"
 # The least a Clippy row asks for. Must match `CLIPPY_FLOOR_KB` in
 # `tools/buck2/action_sizes_from_log.py`.
 CLIPPY_FLOOR_KB = 512 * 1024
-# Must match the default execution platform in `tools/buck2/platforms.bzl` and
-# `DEFAULT_MEMORY_KB` in `tools/buck2/action_sizes_from_log.py`.
-DEFAULT_MEMORY_KB = 1572864
+# Admission default; measured compile sizing keeps its independent 1.5 GiB floor.
+DEFAULT_MEMORY_KB = 524288
 DEFAULT_CPU_COUNT = 1
 # A test run is sized separately from its compile by the external test rule.
 # A run is a whole libtest binary with a tokio runtime and a store, so the
@@ -78,7 +77,7 @@ TEST_RUN_SIZES_PATH = ROOT / "tools/buck2/test-run-sizes.json"
 # comes down once the pool has seen it; sizing it for the worst suite in the
 # workspace reserved roughly twice the cores and six times the memory an
 # ordinary libtest binary uses.
-UNMEASURED_TEST_RUN = {"cpu_count": 2, "memory_kb": 1048576}
+UNMEASURED_TEST_RUN = {"cpu_count": 2, "memory_kb": 524288}
 # Per-package test-run policy (`[test_runs]` in tools/buck2/package-policy.toml):
 # the large suites' unmeasured requests, which also keep them out of every
 # `:test_batch`, the contention core floor of the timing-sensitive suites, and
@@ -98,12 +97,12 @@ PINNED_TEST_RUNS = PACKAGE_POLICY["test_runs"].get("pinned", {})
 # and `//tools/buck2:runtime_probe_large`. `exec_sizes.bzl` adds one platform
 # per distinct compile request; test runs and batches state their request to
 # the test executor directly and need no platform.
-UNSIZED_ACTION_BUDGET = (1, 1048576)
+UNSIZED_ACTION_BUDGET = (1, 524288)
 # The request of a helper target: a first-party build-script run
 # (`buildscript`) and the schema actions. Build-script runs peaked at 233 MiB
 # and the schema actions at 25 MiB over 3 days to 2026-10-02 on the pool; the
-# largest peak x 1.25, rounded up to 256 MiB, is 512 MiB. A third-party
-# build-script run keeps the default request (see `third_party.bzl`). It is also `CLIPPY_FLOOR_KB`, so the
+# largest peak x 1.25, rounded up to 256 MiB, is 512 MiB. Third-party
+# build-script runs use this budget too. It is also `CLIPPY_FLOOR_KB`, so the
 # smallest Clippy rows add no platform of their own.
 HELPER_ACTION_BUDGET = (1, 524288)
 FIXED_POOL_BUDGETS = [
@@ -122,10 +121,10 @@ FIXED_POOL_BUDGETS = [
 #             failed compile, ...) run on that same platform for well under a
 #             second.
 #   clippy    the Rust target's Clippy twin, `<label>__clippy`: its crate's
-#             row in `clippy-sizes.json`, else the compile request.
+#             row in `clippy-sizes.json`, else the 512 MiB default.
 #   helper    `HELPER_ACTION_BUDGET` for the schema actions and first-party
 #             build-script runs (`schema_checks.bzl`, `lash_rust.bzl`); a
-#             third-party build-script run states the default request
+#             third-party build-script run states the same 512 MiB request
 #             (`third_party.bzl`), which the category check below allows.
 #   daemon    no remote action at all: the overlay lays it out in the daemon
 #             (`deps`, the dependency directories; see `prelude_overlay.py`).

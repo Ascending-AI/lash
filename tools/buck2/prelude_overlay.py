@@ -42,10 +42,10 @@ INPUT_SHA256 = {
 # Filled from the deterministic transform below.  These hashes make a second
 # invocation a full verification, rather than trusting an on-disk receipt.
 OUTPUT_SHA256 = {
-    "decls/rust_rules.bzl": "89ee8309c0f24763adb0bc0276243c022640f489c17223f0597152e188c07885",
+    "decls/rust_rules.bzl": "47697afc63938954bec4b58038ccc2b74b501b5aef7b528d808afcf7c1a9dc53",
     "rust/build.bzl": "ae771a2c0dab138cb63a4d37e6fb7a7efe29076ed83c9b45c990a698cf1577ba",
     "rust/cargo_buildscript.bzl": "ff69fa677037ce6414d80b326f0565168ced5e0a916d0e7f456df4cfc07420a8",
-    "rust/clippy_configuration.bzl": "9f7db7c7c8e0f34d65e0a71f1eebfb36ffd8749e6061123cab71a46d548d16a2",
+    "rust/clippy_configuration.bzl": "e786cb238303595ccad5606bfc3599bee8ef0971cd0c4cceb88ad07f536eb6a3",
     "rust/failure_filter.bzl": "a4b818d0f799a4a32d5ffd3aab5753cd61956e3471e0faa687cc2e46470bd0a3",
     "rust/link_info.bzl": "3ac50277c98282863c8be30a8fee1d9fc3fa294e363cc4374578ba2c97f46eec",
     "rust/named_deps.bzl": "894b0f405b7dfbe9380b3c671999efb70ac2209747ab87b8b2322d621c8f35d9",
@@ -53,8 +53,8 @@ OUTPUT_SHA256 = {
     "rust/rust_binary.bzl": "15c839433910cd64edd2cf0e90666ec062e784aa3591c101a2090b123dc246f9",
     "rust/rust_library.bzl": "8370e69403329e492a0c19074a8e7fa88fff767c2cefceb43618323b516968d3",
     "rust/sources.bzl": "5505f55458faba390a75f50118877d16f57f08a41a5924e7c901de51f74c1b69",
-    "rust/tools/tool_rules.bzl": "447a2c751cbd20a29663d0c14d641f7055195ca874c9ddcff0dbfaac6f9ff590",
-    "rust/tools/BUCK": "1e1f72a05eaab95e347fd69a4c396134017161a59e833ff215b1cbd3e48eb086",
+    "rust/tools/tool_rules.bzl": "475f951c1b209c338a3c16ef25baaeb432138234e20d21db26d3977a2add0e91",
+    "rust/tools/BUCK": "625137314c14e59a005af6361c02d94836931d3ae7dd6d59942675590fadbe70",
     "rust/tools/buildscript_run.py": "6c6e7aff95ccfa9a022dce9cfb0391e635f2d760e34327eb72ae9cb4bb8ff51a",
     "rust/kiln_action_env.bzl": "7fb049e416a5d18b7e25d4324e83ed9f1b3bfa45009da3065b434d8e0c3ff630",
 }
@@ -63,7 +63,11 @@ OUTPUT_SHA256 = {
 # a narrow upgrade path for existing private state; arbitrary modified prelude
 # files still fail closed.
 PREVIOUS_OUTPUT_SHA256 = {
+    "rust/tools/tool_rules.bzl": {"447a2c751cbd20a29663d0c14d641f7055195ca874c9ddcff0dbfaac6f9ff590"},
+    "rust/clippy_configuration.bzl": {"9f7db7c7c8e0f34d65e0a71f1eebfb36ffd8749e6061123cab71a46d548d16a2"},
+    "rust/tools/BUCK": {"1e1f72a05eaab95e347fd69a4c396134017161a59e833ff215b1cbd3e48eb086"},
     "decls/rust_rules.bzl": {
+        "89ee8309c0f24763adb0bc0276243c022640f489c17223f0597152e188c07885",
         "97769fd0b4afced56705a34fd4f3e8404f8da78997d57fa161678b79c4ed82bc",
     },
     "rust/build.bzl": {
@@ -107,7 +111,7 @@ def kiln_action_env(ctx, existing = {}, rust_identity = False):
 '''
 
 RESOURCE_ATTRS = '''            "kiln_action_cpu_count": attrs.string(default = "1"),
-            "kiln_action_memory_kb": attrs.string(default = "1572864"),
+            "kiln_action_memory_kb": attrs.string(default = "524288"),
 '''
 
 REPO_ROOTED_SRCS_ATTR = '''            "kiln_repo_rooted_srcs": attrs.bool(default = False),
@@ -391,7 +395,7 @@ def preserve_relative_manifest_dir(text: str) -> str:
 def add_repo_rooted_srcs_attr(text: str) -> str:
     if '"kiln_repo_rooted_srcs"' in text:
         return text
-    anchor = '            "kiln_action_memory_kb": attrs.string(default = "1572864"),\n'
+    anchor = '            "kiln_action_memory_kb": attrs.string(default = "524288"),\n'
     if text.count(anchor) != 1:
         raise ValueError("Rust common resource attributes changed")
     return text.replace(anchor, anchor + REPO_ROOTED_SRCS_ATTR, 1)
@@ -797,7 +801,7 @@ def transform(relative: str, text: str) -> str:
 )'''
         new_cfg = '''get_rustc_cfg(
     name = "rustc_cfg",
-    exec_compatible_with = ["root//tools/buck2:pool_1_1572864"],
+    exec_compatible_with = ["root//tools/buck2:pool_1_524288"],
     visibility = ["PUBLIC"],
 )'''
         old_host = '''get_rustc_host_tuple(
@@ -806,7 +810,7 @@ def transform(relative: str, text: str) -> str:
 )'''
         new_host = '''get_rustc_host_tuple(
     name = "rustc_host_tuple",
-    exec_compatible_with = ["root//tools/buck2:pool_1_1572864"],
+    exec_compatible_with = ["root//tools/buck2:pool_1_524288"],
     visibility = ["PUBLIC"],
 )'''
         if old_cfg not in text or old_host not in text:
@@ -910,7 +914,7 @@ def transform(relative: str, text: str) -> str:
 def clippy_configuration(name, **kwargs):
     _clippy_configuration_rule(
         name = name,
-        exec_compatible_with = ["root//tools/buck2:pool_1_1572864"],
+        exec_compatible_with = ["root//tools/buck2:pool_1_524288"],
         **kwargs
     )
 '''
@@ -927,6 +931,13 @@ def clippy_configuration(name, **kwargs):
 
 
 def upgrade_previous(relative: str, text: str) -> str:
+    if "1572864" in text and relative in {
+        "decls/rust_rules.bzl", "rust/tools/BUCK",
+        "rust/clippy_configuration.bzl", "rust/tools/tool_rules.bzl",
+    }:
+        text = text.replace("1572864", "524288")
+        if relative != "decls/rust_rules.bzl":
+            return text
     if relative == "decls/rust_rules.bzl":
         return add_repo_rooted_srcs_attr(text)
     if relative == "rust/build.bzl":

@@ -3,7 +3,7 @@
 
 Every remote action carries a `cpu_count` and a `memory_kb` request. Both are
 part of the action key, so the defaults in `tools/buck2/platforms.bzl` are the small
-action (1 CPU, 1.5 GiB) and move only deliberately; a compile that needs more
+action (1 CPU, 512 MiB) and move only deliberately; a compile that needs more
 says so per target, from this measured table.
 
 The input is the usage log every pool worker appends to, one tab-separated
@@ -131,7 +131,7 @@ target one platform and Clippy needs a fraction of a compile's memory.
 from the records of category `clippy` (a library's and its unit-test binary's
 Clippy share the identity, so the row covers the heavier). The rule is the
 compile rule above with a 512 MiB floor (`CLIPPY_FLOOR_KB`) in place of the
-1.5 GiB default. A crate without a row keeps its compile request for Clippy.
+1.5 GiB default. A crate without a row requests 512 MiB for Clippy.
 A refresh adds a row for every crate with at least 20 samples, and a row in
 force moves only as a compile row does.
 
@@ -167,16 +167,11 @@ the compile fields are empty for it. The rule, per label:
   label Buck2 has run less often also counts its Bazel-era runs
   (`tool=test-setup.sh`): the wrapper differed, the libtest binary and its
   cgroup did not.
-* `memory_kb` = the p99 of `memory_need(max(peak, anon), request)`, rounded
-  up to 256 MiB, at least 1 GiB,
-  and never below the label's entry in `TEST_RUN_MINIMUM_MEMORY_KB`. A
-  measured row in force stays unless the request moves by a whole CPU or by
-  at least 512 MiB, or the p99 peak reaches 90% of it. The
-  largest peak is not a floor here: a test that writes files fills the page
-  cache to its cgroup limit (`tool_batch_parallelism__test` peaks at exactly
-  the devbox's 7.5 GiB slot share with a p99 of 0.8 GiB), so one such run
-  would price the label at the box it happened to land on. A `__fv_`
-  feature-variant label inherits its base label's floor.
+* `memory_kb` = p99 anonymous peak x 1.25, rounded up to 256 MiB,
+  with a 256 MiB floor and the explicit per-label floors below. Anonymous
+  rows move on every refresh. A killed run's total peak x 1.25 supplies a
+  minimum even when successful runs were warm. Legacy records without an
+  anonymous measurement retain cgroup sizing and a 1 GiB floor.
 * `cpu_count` = ceil(p95 cores - 0.2), at least 1, capped at 8, over the
   samples of at least one second. A run does not lean on the slot share as a
   compile does: a throttled compile is slower, a throttled test can pass its
@@ -200,8 +195,11 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-# Must match the default request in platforms.bzl and the Rust rule macros.
+# Measured compile sizing retains its existing baseline. Admission defaults
+# live in generate_model.py and may be below the executor's cgroup floor.
 DEFAULT_MEMORY_KB = 1572864
+# The executor raises every cgroup to at least this limit, independently of admission.
+ACTION_MEMORY_FLOOR_KB = 2097152
 DEFAULT_CPU_COUNT = 1
 # The least a measured Clippy row asks for: Clippy's median peak is under
 # 100 MiB, and a smaller floor would only register more execution platforms.
@@ -498,7 +496,7 @@ def collect_optimized(labelled, *, include_killed: bool = False) -> dict[tuple[s
 
 
 TEST_MIN_SAMPLES = 3
-TEST_MEMORY_FLOOR_KB = 1024 * 1024
+TEST_MEMORY_FLOOR_KB = 256 * 1024
 TEST_RUN_KINDS = ("unit-test", "bin-unit-test", "test")
 
 # Explicit per-label floors, in KiB. The `peak_bytes` the log measures is the
@@ -555,6 +553,8 @@ class TestRuns:
         self.peaks: list[int] = []
         self.needs: list[float] = []
         self.timed = Samples()
+        self.killed_peak_bytes = 0
+        self.anonymous = False
 
     @property
     def count(self) -> int:
@@ -569,6 +569,8 @@ class TestRuns:
         self.needs += other.needs
         self.timed.records += other.timed.records
         self.timed.needs += other.timed.needs
+        self.killed_peak_bytes = max(self.killed_peak_bytes, other.killed_peak_bytes)
+        self.anonymous = self.anonymous or other.anonymous
 
     def observe(
         self,
@@ -577,9 +579,12 @@ class TestRuns:
         peak_bytes: int,
         requested_cpu: int,
         requested_kb: int = 0,
+        anon_peak_bytes: int | None = None,
     ) -> None:
-        self.peaks.append(peak_bytes)
-        self.needs.append(memory_need(peak_bytes, requested_kb))
+        self.anonymous = self.anonymous or anon_peak_bytes is not None
+        basis = peak_bytes if anon_peak_bytes is None else anon_peak_bytes
+        self.peaks.append(basis)
+        self.needs.append(memory_need(peak_bytes, requested_kb) if anon_peak_bytes is None else basis * MEMORY_MARGIN)
         if wall_ms >= MIN_WALL_MS:
             self.timed.observe(cpu_usec / 1000 / wall_ms, peak_bytes, requested_cpu)
 
@@ -595,7 +600,7 @@ def collect_test_runs(lines, labels: set[str]) -> dict[str, TestRuns]:
     legacy: dict[str, TestRuns] = collections.defaultdict(TestRuns)
     for line in lines:
         record = parse_record(line)
-        if record is None or record.get("exit") != "0":
+        if record is None:
             continue
         role, _, rest = record.get("test", "-").partition(":")
         _shard, _, label = rest.partition(":")
@@ -605,18 +610,25 @@ def collect_test_runs(lines, labels: set[str]) -> dict[str, TestRuns]:
             continue
         wall_ms = as_int(record.get("wall_ms"))
         cpu_usec = as_int(record.get("cpu_usec"))
-        peak_bytes = held_bytes(record)
+        era = legacy if record.get("tool") in BAZEL_TEST_TOOLS else measured
+        if oom_killed(record):
+            era[label].killed_peak_bytes = max(era[label].killed_peak_bytes, held_bytes(record) or 0)
+        if record.get("exit") != "0":
+            continue
+        peak_bytes = as_int(record.get("anon_peak_bytes"))
+        if peak_bytes is None:
+            peak_bytes = held_bytes(record)
         if wall_ms is None or cpu_usec is None or peak_bytes is None:
             continue
         requested_cpu = as_int(record.get("requested_cpu")) or DEFAULT_CPU_COUNT
-        era = legacy if record.get("tool") in BAZEL_TEST_TOOLS else measured
         era[label].observe(
-            cpu_usec, wall_ms, peak_bytes, requested_cpu, as_int(record.get("requested_kb")) or 0
+            cpu_usec, wall_ms, peak_bytes, requested_cpu, as_int(record.get("requested_kb")) or 0,
+            as_int(record.get("anon_peak_bytes"))
         )
     for label, runs in legacy.items():
         if measured[label].count < TEST_MIN_SAMPLES:
             measured[label].absorb(runs)
-    return {label: runs for label, runs in measured.items() if runs.count}
+    return {label: runs for label, runs in measured.items() if runs.count or runs.killed_peak_bytes}
 
 
 def test_run_table(
@@ -631,6 +643,8 @@ def test_run_table(
             label, TEST_RUN_MINIMUM_MEMORY_KB.get(label.split("__fv_", 1)[0])
         )
         if runs.count < TEST_MIN_SAMPLES and minimum is None:
+            if runs.killed_peak_bytes:
+                raise ValueError(f"test run {label} was killed without enough samples; set an explicit floor")
             if label in current:
                 sizes[label] = with_headroom(current[label])
             continue
@@ -642,17 +656,17 @@ def test_run_table(
         p99_peak_bytes = percentile(runs.peaks, MEMORY_PERCENTILE) if runs.peaks else 0
         cpu_count = cpu_count_for(p95, within_share=False)
         memory_kb = max(
-            memory_kb_for(runs.needs, floor_kb=TEST_MEMORY_FLOOR_KB)
+            memory_kb_for(runs.needs, floor_kb=TEST_MEMORY_FLOOR_KB if runs.anonymous else 1024 * 1024)
             if runs.peaks
             else TEST_MEMORY_FLOOR_KB,
             minimum or 0,
+            math.ceil(runs.killed_peak_bytes * MEMORY_MARGIN / 1024 / MEMORY_GRANULARITY_KB) * MEMORY_GRANULARITY_KB,
         )
-        if label in current:
+        if label in current and not runs.anonymous:
             cpu_count, memory_kb = settled(
                 (current[label]["cpu_count"], current[label]["memory_kb"]),
-                cpu_count,
-                memory_kb,
-                max(math.floor(p99_peak_bytes / HEADROOM) + 1, (minimum or 0) * 1024),
+                cpu_count, memory_kb,
+                max(math.floor(p99_peak_bytes / HEADROOM) + 1, memory_kb * 1024 if runs.killed_peak_bytes else (minimum or 0) * 1024),
             )
         sizes[label] = {
             "cpu_count": cpu_count,
@@ -1033,12 +1047,6 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         collect_test_runs(lines, labels),
         {label: row for label, row in stored("test-run-sizes.json").items() if label in labels},
     )
-    # This refresh changes requests only for a >=512 MiB memory move. Keep
-    # CPU-only test corrections from changing unrelated test action digests.
-    for label, old in stored("test-run-sizes.json").items():
-        row = test_rows.get(label)
-        if row and abs(row["memory_kb"] - old["memory_kb"]) < MEMORY_HYSTERESIS_KB:
-            row["cpu_count"], row["memory_kb"] = old["cpu_count"], old["memory_kb"]
     evidence = {
         "crates": compile_evidence(collect(lines, crates, optimized_ops, include_killed=True)),
         "clippy": compile_evidence(collect(lines, crates, optimized_ops, clippy=True, include_killed=True)),

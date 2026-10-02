@@ -34,7 +34,7 @@ elapsed=$((${EPOCHREALTIME/./} - started))
 exec {copy}>&-
 
 # The copy ends when every writer of the pipe is gone. A process the test left
-# behind can hold it open; test-setup.sh kills that group once this exits, so
+# behind can hold it open; the launcher kills that group once this exits, so
 # report what arrived within two seconds rather than wait on it.
 for ((i = 0; i < 200; i++)); do
     kill -0 "$copier" 2>/dev/null || break

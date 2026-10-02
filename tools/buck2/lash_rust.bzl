@@ -13,7 +13,7 @@ load(":test_rules.bzl", "lash_test_wrapper")
 load(":ui_fixtures.bzl", "ui_fixture_harness")
 
 _DEFAULT_CPU = 1
-_DEFAULT_MEMORY_KB = 1572864
+_DEFAULT_MEMORY_KB = 524288
 _IGNORED = ["BUCK", "**/__pycache__/**", "**/node_modules/**"]
 _TIMEOUTS = {None: 300, "short": 60, "moderate": 300, "long": 900, "eternal": 3600}
 _HOST_TRANSITION = "//tools/buck2:host_transition"
@@ -106,12 +106,10 @@ def _resource_attrs(exec_properties):
 
 def _clippy_attrs(exec_properties):
     """The Clippy twin's request: its crate's measured Clippy row, else the
-    target's own compile request."""
-    if "clippy.cpu_count" not in exec_properties:
-        return _resource_attrs(exec_properties)
+    512 MiB default."""
     return _pool(
-        int(exec_properties["clippy.cpu_count"]),
-        int(exec_properties["clippy.memory_kb"]) * MEMORY_SCALE,
+        int(exec_properties.get("clippy.cpu_count", str(_DEFAULT_CPU))),
+        int(exec_properties.get("clippy.memory_kb", str(_DEFAULT_MEMORY_KB))) * MEMORY_SCALE,
     )
 
 def _rust_rule(rule, name, clippy_name, exec_properties, **attrs):

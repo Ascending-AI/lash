@@ -307,9 +307,9 @@ Platforms preserve `cpu_count`, `memory_kb`, `cpu_arch`, `OSFamily` and
 `tools/buck2/target-kind-sizes.json`, which sizes a library apart from the
 unit-test binary built from the same crate; test runs use the separate
 `tools/buck2/test-run-sizes.json`. Generated `exec_sizes.bzl` resolves measured rows,
-inherited feature rows, policy floors and pinned exceptions. Inherited compiles
-request 1 CPU and 1.5 GiB. Unmeasured tests retain their existing policy requests,
-including large-suite and timing-sensitive floors. Batches reserve a measured
+inherited feature rows, policy floors and pinned exceptions. Unmeasured compiles
+and Clippy twins request 1 CPU and 512 MiB. Unmeasured tests request 512 MiB,
+with explicit large-suite and timing-sensitive policy exceptions. Batches reserve a measured
 row or the two largest member requests side by side and run at most two members.
 
 The pool books worker slots by these requests, so an oversized request is lost
@@ -321,18 +321,23 @@ capacity and an undersized one is a throttled or killed action. The rule, in
   not under a one-core quota. Above that, and for every test run, the request
   is `ceil(p95 - 0.2)`, capped at 8: there the cgroup's `cpu.max` is the request.
 - Compile memory is p99 anonymous peak x 1.25 plus 512 MiB, rounded up to
-  256 MiB, with the existing 1.5 GiB default and per-crate floors. The anonymous
+  256 MiB, with the existing 1.5 GiB measured-row floor and per-crate floors. The anonymous
   measurement is sampled every 250 ms and is a lower bound. The fixed allowance
   covers sampling error and a working set of file-backed pages. Older records
   without anonymous measurements use the previous cgroup-peak formula, including
   its bound at a request the run fit inside and its largest-peak floor.
-- Test runs retain p99 of the larger of cgroup and anonymous peaks x 1.25,
-  bounded at a request the run fit inside, rounded up to 256 MiB and at least
-  1 GiB. Tests can retain mmap or tmpfs pages whose reclaim can cost time or
-  cannot proceed without swap. The logs do not distinguish these pages from
-  disposable page cache, so test reservations retain that conservative rule.
-  The [kernel's memory accounting](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files)
-  distinguishes anonymous memory, mmap-backed file pages and swap-backed shmem.
+- Test runs with anonymous measurements reserve p99 anonymous peak x 1.25,
+  rounded up to 256 MiB with a 256 MiB floor. Every refresh applies that
+  request without compile hysteresis. Legacy records without anonymous peaks
+  retain their conservative cgroup sizing. Killed runs contribute their total
+  peak x 1.25 as a minimum, separately from successful p99 samples. Explicit
+  floors keep `lash__unit_test` at 3.75 GiB and `lash-sim__unit_test` at 3.5 GiB.
+- Admission and the cgroup limit are separate. The executor's action budget
+  sets `memory.max` to at least 2 GiB or the worker's slot share, whichever is
+  larger, then raises it for a larger request. Lowering a request below 2 GiB
+  changes admission without reducing that minimum. Unsized memory contracts
+  check the enforced cgroup floor; measured compile rows keep their existing
+  headroom contracts and requests.
 - Buck2 resolves one execution platform per target, so a request covers every
   category the target runs: a library's metadata, rlib and Rustdoc actions
   share one, as do a test binary's check and link. The split that is possible
@@ -340,11 +345,14 @@ capacity and an undersized one is a throttled or killed action. The rule, in
   Clippy twin, `<label>__clippy`, the same rule and attributes on a platform
   of its own, and `kiln clippy` builds the twin's `[clippy.txt]`. Its request
   is the crate's row in `tools/buck2/clippy-sizes.json` (the anonymous compile rule
-  over Clippy's own records, with a 512 MiB floor), else the compile request.
+  over Clippy's own records, with a 512 MiB floor), else 512 MiB.
   First-party build-script runs and the schema actions are helper targets
   and request 512 MiB (`HELPER_ACTION_BUDGET`); a third-party build-script
-  run keeps the default, because `ring`, `aws-lc-sys` and `rustix` do not
-  rebuild to the same bytes and a new key would relink their dependents.
+  run also requests 512 MiB. Changing its request rekeys that run and can
+  relink consumers when the build-script output is not reproducible.
+  Lash's XML writer runs inside the test action. `generate-xml.sh` and
+  `test-setup.sh` in shared usage logs belong to other repositories' Bazel
+  runners; Lash declares no separate remote action for either.
   A library and its unit-test binary share a crate name and so a crate row, but the test binary's link peaks
   several times higher than anything the library runs; where Buck2's event
   logs told the two apart at least 20 times, each has its own row in
@@ -358,14 +366,15 @@ capacity and an undersized one is a throttled or killed action. The rule, in
   it was until 20 optimized samples say otherwise. A dev build takes the
   select's default branch, so its action keys do not depend on this table.
 - A request is a platform property and so part of the action key. A refresh
-  keeps the row in force unless the request moves by a whole CPU or at least
-  512 MiB. The legacy fallback and test rows also move for unsafe peaks.
+  keeps a compile row in force unless the request moves by a whole CPU or at
+  least 512 MiB. Legacy rows also move for unsafe peaks; anonymous test rows
+  apply every measured change.
   A smaller correction is not worth
   re-executing the row's targets on a cold cache.
 - Each remote action category takes its request from the target that runs it;
   `ACTION_CATEGORY_SIZES` in `tools/buck2/generate_model.py` names the source
   for every category. A target that names no budget resolves to the first
-  platform in `POOL_BUDGETS`, 1 CPU and 1 GiB.
+  platform in `POOL_BUDGETS`, 1 CPU and 512 MiB.
 
 Refresh the sizes from the workers' usage logs
 (`/workspace/kiln-executor/usage/actions.log*` on each pool box) with one
