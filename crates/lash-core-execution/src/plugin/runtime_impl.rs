@@ -287,6 +287,40 @@ impl PluginHost {
         Ok(runtime_host)
     }
 
+    /// The registered executable composition, in declaration order.
+    pub fn plugin_revisions(&self) -> Vec<PluginRevision> {
+        self.factories()
+            .iter()
+            .map(|factory| {
+                PluginRevision::new(factory.id(), factory.declaration().behavior_revision)
+            })
+            .collect()
+    }
+
+    /// A recorded segment never adopts this build's different code.
+    pub fn validate_plugin_admission(
+        &self,
+        admission: &crate::store::plugin_writers::PluginAdmission,
+    ) -> Result<(), PluginError> {
+        let recorded: Vec<_> = admission
+            .plugins()
+            .iter()
+            .map(|plugin| PluginRevision::new(&plugin.plugin, plugin.behavior_revision))
+            .collect();
+        let available = self.plugin_revisions();
+        if recorded != available {
+            return Err(PluginError::Runtime(
+                PluginExecutionRefusal {
+                    recorded,
+                    available,
+                    callback: None,
+                }
+                .into_runtime_error(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn build_session(
         &self,
         request: PluginSessionRequest<'_>,
@@ -422,10 +456,23 @@ impl PluginHost {
         }
         let state = Arc::new(StdMutex::new(registry));
         let mut plugins = Vec::new();
-        let mut reg = PluginRegistrar::new();
+        let mut contributions = PluginContributions::default();
+        let mut tool_names = Default::default();
         for factory in self.factories() {
             let plugin = factory.build(ctx)?;
-            reg.registering_plugin_id = Some(plugin.id().to_string());
+            if plugin.id() != factory.id() {
+                return Err(PluginError::Registration(format!(
+                    "factory `{}` built plugin `{}`",
+                    factory.id(),
+                    plugin.id()
+                )));
+            }
+            let mut reg = PluginRegistrar::new(PluginRevision::new(
+                factory.id(),
+                factory.declaration().behavior_revision,
+            ));
+            reg.contributions = contributions;
+            reg.tool_names = tool_names;
             reg.state = Some(PluginStateStore::bind(
                 &ctx.owner,
                 plugin.id(),
@@ -441,10 +488,11 @@ impl PluginHost {
                         .push(plugin.id().to_string());
                 }
             }
-            reg.registering_plugin_id = None;
+            contributions = reg.contributions;
+            tool_names = reg.tool_names;
             plugins.push(plugin);
         }
-        let mut contributions = reg.contributions;
+
         let protocol_session = contributions.protocol_session.take().ok_or_else(|| {
             PluginError::Registration("missing protocol session capability".to_string())
         })?;
@@ -536,7 +584,7 @@ fn build_tool_registry(
     let mut providers_by_source = BTreeMap::<String, Vec<Arc<dyn crate::ToolProvider>>>::new();
     for registered in &contributions.tool_providers {
         providers_by_source
-            .entry(registered.plugin_id.clone())
+            .entry(registered.identity.owner.plugin.clone())
             .or_default()
             .push(Arc::clone(&registered.hook));
     }

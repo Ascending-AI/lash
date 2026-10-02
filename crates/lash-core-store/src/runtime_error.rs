@@ -381,6 +381,8 @@ pub enum RuntimeErrorCode {
     /// (FIG-3587). The binding is served only from recorded results: a call
     /// that would reach the live tool refuses, before anything is claimed.
     LashlangCellBindingDrift,
+    /// Unfinished work requires a declared plugin revision this build cannot execute.
+    PluginRevisionUnavailable,
     /// A durable effect controller that does not answer the recorded-frontier
     /// read was asked for it: a replayed lashlang run cannot know which of its
     /// commands the journal holds, so it refuses to run rather than dispatch
@@ -725,6 +727,7 @@ impl RuntimeErrorCode {
             Self::LashlangCellReplayDivergence => "lashlang_cell_replay_divergence",
             Self::RetiredGeneration => "retired_generation",
             Self::LashlangCellBindingDrift => "lashlang_cell_binding_drift",
+            Self::PluginRevisionUnavailable => "plugin_revision_unavailable",
             Self::RecordedJournalReadUnsupported => "recorded_journal_read_unsupported",
             Self::EffectReplayDivergence => "effect_replay_divergence",
             Self::EngineJournaledEffectPoisoned => "engine_journaled_effect_poisoned",
@@ -870,6 +873,7 @@ impl RuntimeErrorCode {
             |Self::EngineProcessJournalIdentityDrift| Self::EffectReplayDivergence
                 | Self::LashlangCellReplayDivergence
                 | Self::RetiredGeneration
+                | Self::PluginRevisionUnavailable
                 | Self::LashlangCellBindingDrift
         )
     }
@@ -1019,6 +1023,7 @@ impl RuntimeErrorCode {
             "lashlang_cell_replay_divergence" => Self::LashlangCellReplayDivergence,
             "retired_generation" => Self::RetiredGeneration,
             "lashlang_cell_binding_drift" => Self::LashlangCellBindingDrift,
+            "plugin_revision_unavailable" => Self::PluginRevisionUnavailable,
             "recorded_journal_read_unsupported" => Self::RecordedJournalReadUnsupported,
             "effect_replay_divergence" => Self::EffectReplayDivergence,
             "engine_effect_host_requires_handler_scope" => {
@@ -1433,6 +1438,7 @@ impl RuntimeError {
             | RuntimeErrorCause::StoreRefusal { .. }
             | RuntimeErrorCause::PluginStateEffectOwnerMismatch
             | RuntimeErrorCause::PluginStateEffectReplayMismatch { .. }
+            | RuntimeErrorCause::PluginExecution { .. }
             | RuntimeErrorCause::PluginFormat { .. }
             | RuntimeErrorCause::ProcessParentEnded { .. }
             | RuntimeErrorCause::ProcessStartKeyConflict { .. }

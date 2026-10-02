@@ -25,6 +25,64 @@ use crate::plugin_state::{FormatNamespace, FormatVersion, PluginState};
 
 use super::StoreError;
 
+/// The declared executable owner of a callback or tool admission.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct PluginRevision {
+    pub plugin: String,
+    #[schemars(with = "std::num::NonZeroU32")]
+    pub behavior_revision: lash_core_ids::BehaviorRevision,
+}
+
+impl PluginRevision {
+    pub fn new(
+        plugin: impl Into<String>,
+        behavior_revision: lash_core_ids::BehaviorRevision,
+    ) -> Self {
+        Self {
+            plugin: plugin.into(),
+            behavior_revision,
+        }
+    }
+}
+
+/// A callback slot within one declared plugin revision. Keys are derived from
+/// the capability kind and its registration ordinal within that plugin.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct PluginCallbackIdentity {
+    pub owner: PluginRevision,
+    pub key: String,
+}
+
+/// Recorded executable requirements this build cannot fulfill.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct PluginExecutionRefusal {
+    pub recorded: Vec<PluginRevision>,
+    pub available: Vec<PluginRevision>,
+    pub callback: Option<PluginCallbackIdentity>,
+}
+
+impl PluginExecutionRefusal {
+    pub fn into_runtime_error(self) -> crate::RuntimeError {
+        let mut error = crate::RuntimeError::new(
+            crate::RuntimeErrorCode::PluginRevisionUnavailable,
+            format!(
+                "recorded plugin execution {:?} is unavailable in composition {:?}",
+                self.recorded, self.available
+            ),
+        );
+        error.cause = Some(crate::RuntimeErrorCause::PluginExecution {
+            refusal: Box::new(self),
+        });
+        error
+    }
+}
+
 /// What one registered plugin declares about the formats it writes: the
 /// store-side view of its declaration.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

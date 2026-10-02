@@ -79,9 +79,14 @@ mod tests {
     /// a source builds it. Only its tools matter here.
     fn context(tools: Arc<CountingTools>) -> ToolDispatchContext<'static> {
         ToolDispatchContext {
-            plugins: crate::support::plugin_host(Vec::new())
-                .build_session(PluginSessionRequest::creation(SESSION, Default::default()))
-                .expect("plugin session"),
+            plugins: crate::support::plugin_host(vec![Arc::new(
+                crate::plugin::StaticPluginFactory::new(
+                    crate::plugin::PluginDeclaration::initial("fixture-tools"),
+                    crate::plugin::PluginSpec::new().with_tool_provider(tools.clone()),
+                ),
+            )])
+            .build_session(PluginSessionRequest::creation(SESSION, Default::default()))
+            .expect("plugin session"),
             tools,
             tool_registry: None,
             tool_catalog: Arc::new(crate::ToolCatalog::default()),
@@ -226,6 +231,10 @@ mod tests {
                     prepared_payload: serde_json::Value::Null,
                 },
                 ToolChildAdmission::Catalog {
+                    owner: crate::plugin::PluginRevision::new(
+                        "fixture-tools",
+                        crate::plugin::BehaviorRevision::ONE,
+                    ),
                     manifest: Box::new(manifest(retry_policy)),
                 },
                 ToolAttemptLineage::default(),
@@ -415,6 +424,72 @@ mod tests {
             .tool_children
             .openers()
             .register(crate::EffectOpener::turn(SESSION, TURN), live)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_inline_child_with_equal_schema_and_another_revision_refuses_before_callbacks_or_effects()
+     {
+        let backend = Backend::new().await;
+        let worker = backend.worker();
+        let counted_tools = tools(Behavior::Answer);
+        let callbacks = Arc::new(AtomicUsize::new(0));
+        let counted_callbacks = callbacks.clone();
+        let mut lent = context(counted_tools.clone());
+        lent.plugins = crate::support::plugin_host(vec![
+            Arc::new(crate::plugin::StaticPluginFactory::new(
+                crate::plugin::PluginDeclaration::initial("fixture-tools"),
+                crate::plugin::PluginSpec::new().with_tool_provider(counted_tools.clone()),
+            )),
+            Arc::new(crate::plugin::StaticPluginFactory::new(
+                crate::plugin::PluginDeclaration::initial("catalog-probe"),
+                crate::plugin::PluginSpec::new().with_tool_catalog_contributor(Arc::new(
+                    move |_| {
+                        counted_callbacks.fetch_add(1, Ordering::SeqCst);
+                        Ok(Default::default())
+                    },
+                )),
+            )),
+        ])
+        .build_session(PluginSessionRequest::creation(SESSION, Default::default()))
+        .unwrap();
+        let controller = worker
+            .host
+            .scoped_static(crate::AdmittedScope::turn(SESSION, TURN))
+            .unwrap()
+            .unwrap();
+        let live = LiveOpenerContext::capture(
+            &lent,
+            controller,
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let (_guard, _) = worker
+            .tool_children
+            .openers()
+            .register(crate::EffectOpener::turn(SESSION, TURN), live);
+        let mut request = backend.request(ToolRetryPolicy::Never).await;
+        let ToolChildAdmission::Catalog { owner, .. } = &mut request.admission else {
+            unreachable!()
+        };
+        owner.behavior_revision = crate::plugin::BehaviorRevision::new(2).unwrap();
+        let recorded_owner = owner.clone();
+        let child = envelope(request, "revision-child");
+        let group_key = child.group.as_ref().unwrap().group_key.clone();
+        let (_controller, _handle) = open_group(&backend, &worker, child).await;
+        let (_, failure) =
+            await_child_retry(&backend, &group_key, "plugin_revision_unavailable").await;
+        assert_eq!(callbacks.load(Ordering::SeqCst), 0);
+        assert_eq!(counted_tools.executions.load(Ordering::SeqCst), 0);
+        let error = crate::RuntimeEffectControllerError::in_text(&failure)
+            .unwrap_or_else(|| panic!("the engine retains the typed refusal: {failure}"));
+        let crate::RuntimeErrorCause::PluginExecution { refusal } = error.cause.as_ref().unwrap()
+        else {
+            panic!("a revision refusal")
+        };
+        assert_eq!(refusal.recorded, vec![recorded_owner]);
+        assert!(matches!(
+            crate::store::ParkReason::of_error(&error.into_runtime_error()),
+            Some(crate::store::ParkReason::PluginRevisionUnavailable { .. })
+        ));
     }
 
     /// With no source installed, a child with no live opener here is not

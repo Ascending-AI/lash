@@ -2859,6 +2859,72 @@
       ],
       "type": "string"
     },
+    "PluginCallbackIdentity": {
+      "description": "A callback slot within one declared plugin revision. Keys are derived from\nthe capability kind and its registration ordinal within that plugin.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "owner": {
+          "$ref": "#/$defs/PluginRevision"
+        }
+      },
+      "required": [
+        "owner",
+        "key"
+      ],
+      "type": "object"
+    },
+    "PluginExecutionRefusal": {
+      "description": "Recorded executable requirements this build cannot fulfill.",
+      "properties": {
+        "available": {
+          "items": {
+            "$ref": "#/$defs/PluginRevision"
+          },
+          "type": "array"
+        },
+        "callback": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginCallbackIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recorded": {
+          "items": {
+            "$ref": "#/$defs/PluginRevision"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "recorded",
+        "available"
+      ],
+      "type": "object"
+    },
+    "PluginRevision": {
+      "description": "The declared executable owner of a callback or tool admission.",
+      "properties": {
+        "behavior_revision": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "plugin": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin",
+        "behavior_revision"
+      ],
+      "type": "object"
+    },
     "PluginStateError": {
       "description": "Rejections are atomic: neither values nor generation change.",
       "oneOf": [
@@ -9563,6 +9629,22 @@
           "required": [
             "kind",
             "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "plugin_execution",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/PluginExecutionRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
           ],
           "type": "object"
         },

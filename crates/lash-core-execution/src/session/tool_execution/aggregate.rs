@@ -185,9 +185,12 @@ impl RuntimeExecutionContext<'_> {
                 ));
             }
         }
+        let tool_leaves = match self.tool_child_leaves(&batch_id, entries) {
+            Ok(leaves) => leaves,
+            Err(error) => return self.aggregate_host_control(error.into()),
+        };
         children.extend(
-            self.tool_child_leaves(&batch_id, entries)
-                .into_iter()
+            tool_leaves.into_iter()
                 // A leaf's attempts key under its `ToolCallId`, which the
                 // language runtime derived from the leaf's first-appearance
                 // index under the aggregate's command.

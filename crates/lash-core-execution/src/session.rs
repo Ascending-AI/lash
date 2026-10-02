@@ -129,8 +129,8 @@ impl ToolSurfaceDrift {
 
     /// The grant a call on the drifted tool is authorized under: the recorded
     /// definition, so its envelope is the one the journal recorded.
-    pub fn recorded_binding(&self) -> crate::ToolExecutionGrant {
-        crate::ToolExecutionGrant::from_definition(self.recorded.clone())
+    pub fn recorded_binding(&self) -> crate::ToolDefinition {
+        self.recorded.clone()
     }
 
     /// The refusal a call on the drifted tool meets when the journal does not

@@ -112,12 +112,17 @@ impl std::fmt::Debug for RetriedAttempt {
 impl std::error::Error for RetriedAttempt {}
 
 /// The retryable failure [`parked_turn_failure`] ends a parked attempt with.
-#[derive(Debug)]
 struct ParkedTurn(String);
 
 impl std::fmt::Display for ParkedTurn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "parked on a replay divergence: {}", self.0)
+    }
+}
+
+impl std::fmt::Debug for ParkedTurn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
     }
 }
 

@@ -41,7 +41,7 @@ enum ToolCallAuthorization {
     /// the pass that journaled the cell (FIG-3587): authorized under the
     /// cell's recorded binding instead of the live catalog, and otherwise the
     /// catalog call it was, so its attempt envelope is the recorded one.
-    Recorded(Box<crate::ToolExecutionGrant>),
+    Recorded(Box<crate::ToolDefinition>),
 }
 
 impl ToolCallAuthorization {
@@ -58,7 +58,8 @@ impl ToolCallAuthorization {
     fn tool_id(&self) -> &crate::ToolId {
         match self {
             Self::Catalog(tool_id) => tool_id,
-            Self::Granted(grant) | Self::Recorded(grant) => &grant.manifest().id,
+            Self::Granted(grant) => &grant.manifest().id,
+            Self::Recorded(binding) => &binding.manifest.id,
         }
     }
 
@@ -74,7 +75,8 @@ impl ToolCallAuthorization {
             Self::Catalog(tool_id) => {
                 crate::tool_dispatch::resolve_callable_manifest_by_id(dispatch, tool_id)
             }
-            Self::Granted(grant) | Self::Recorded(grant) => Some(grant.manifest().clone()),
+            Self::Granted(grant) => Some(grant.manifest().clone()),
+            Self::Recorded(binding) => Some(binding.manifest.clone()),
         }
     }
 
@@ -107,16 +109,18 @@ impl ToolCallAuthorization {
     /// The grant the attempt carries, and the one its retry policy resolves
     /// under. A recorded binding carries none, as the catalog call it replays
     /// carried none, but its retry policy is the recorded manifest's.
-    fn into_execution_grant(
-        self,
-    ) -> (
-        Option<Box<crate::ToolExecutionGrant>>,
-        Option<Box<crate::ToolExecutionGrant>>,
-    ) {
+    fn into_execution_grant(self) -> Option<Box<crate::ToolExecutionGrant>> {
         match self {
-            Self::Catalog(_) => (None, None),
-            Self::Granted(grant) => (Some(grant.clone()), Some(grant)),
-            Self::Recorded(binding) => (None, Some(binding)),
+            Self::Granted(grant) => Some(grant),
+            Self::Catalog(_) | Self::Recorded(_) => None,
+        }
+    }
+
+    fn recorded_retry_policy(&self) -> Option<crate::ToolRetryPolicy> {
+        match self {
+            Self::Granted(grant) => Some(grant.manifest().retry_policy),
+            Self::Recorded(binding) => Some(binding.manifest.retry_policy),
+            Self::Catalog(_) => None,
         }
     }
 }
@@ -131,7 +135,7 @@ pub struct ToolInvocation {
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     /// The binding a replayed code cell recorded for this call when the live
     /// tool has since drifted (FIG-3587). Never part of the call's identity.
-    pub recorded_binding: Option<Box<crate::ToolExecutionGrant>>,
+    pub recorded_binding: Option<Box<crate::ToolDefinition>>,
     pub child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     pub issuing_language_node_id: Option<String>,
 }
@@ -165,7 +169,7 @@ impl ToolInvocation {
     }
 
     /// Authorizes this call under a code cell's recorded binding (FIG-3587).
-    pub fn with_recorded_binding(mut self, binding: crate::ToolExecutionGrant) -> Self {
+    pub fn with_recorded_binding(mut self, binding: crate::ToolDefinition) -> Self {
         self.recorded_binding = Some(Box::new(binding));
         self
     }
@@ -275,6 +279,7 @@ mod tests {
     #[test]
     fn granted_batch_identity_pins_present_grant_routing_grammar() {
         let grant = crate::ToolExecutionGrant::from_definition(
+            crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
             crate::ToolDefinition::raw(
                 "tool:granted",
                 "granted",
@@ -304,6 +309,7 @@ mod tests {
         );
 
         let without_source = crate::ToolExecutionGrant::from_definition(
+            crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
             crate::ToolDefinition::raw(
                 "tool:granted",
                 "granted",
@@ -457,6 +463,8 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
             // This exhaustive destructure is the guard: adding a grant field must fail
             // compilation here until its batch-identity inclusion is ruled in or out.
             let crate::ToolExecutionGrant {
+                // The executable owner is retained by admission; a redrive keeps the logical call identity.
+                owner: _,
                 manifest,
                 contract: _,
                 source_id,
@@ -564,6 +572,14 @@ mod turn_cancel_gate_tests;
 mod scalar_presentation_tests;
 
 impl RuntimeExecutionContext<'_> {
+    pub fn tool_execution_owner(
+        &self,
+        tool: &crate::ToolId,
+        source: Option<&str>,
+    ) -> Result<crate::plugin::PluginRevision, crate::PluginError> {
+        self.dispatch.plugins.tool_execution_owner(tool, source)
+    }
+
     /// `call_key` is the material the call's observation lanes key under —
     /// the call's own effect-invocation replay key where it has one (a group
     /// child's `{group}:child:{position}`, a command's key), else the
@@ -623,7 +639,7 @@ impl RuntimeExecutionContext<'_> {
     /// one the journal recorded and the live tool is not consulted.
     pub async fn prepare_recorded_tool_call(
         &self,
-        binding: &crate::ToolExecutionGrant,
+        binding: &crate::ToolDefinition,
         pending: crate::sansio::PendingToolCall,
         call_key: &str,
     ) -> ToolPreparationOutcome {
@@ -1383,12 +1399,10 @@ impl RuntimeExecutionContext<'_> {
         };
         let launch = match authorization.prepare(&dispatch, pending).await {
             ToolPreparationOutcome::Prepared(prepared) => {
-                let (execution_grant, retry_grant) = authorization.into_execution_grant();
-                let retry_policy = crate::tool_dispatch::resolve_retry_policy(
-                    &dispatch,
-                    &prepared.tool_id,
-                    retry_grant.as_deref(),
-                );
+                let retry_policy = authorization.recorded_retry_policy().unwrap_or_else(|| {
+                    crate::tool_dispatch::resolve_retry_policy(&dispatch, &prepared.tool_id, None)
+                });
+                let execution_grant = authorization.into_execution_grant();
                 let intent_trace_hook = child_execution_trace_hook.clone();
                 let trace_hooks: BTreeMap<crate::ToolCallId, crate::ToolChildExecutionTraceHook> =
                     child_execution_trace_hook

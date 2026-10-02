@@ -84,6 +84,10 @@ mod tests {
                 prepared_payload: serde_json::Value::Null,
             },
             ToolChildAdmission::Catalog {
+                owner: crate::plugin::PluginRevision::new(
+                    "test_protocol",
+                    crate::plugin::BehaviorRevision::ONE,
+                ),
                 manifest: Box::new(manifest("search")),
             },
             identity,

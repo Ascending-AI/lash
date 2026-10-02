@@ -211,6 +211,8 @@ pub enum ToolChildAdmission {
     /// Catalog membership at admission, pinned so a reopen never re-reads the
     /// live Tool Catalog.
     Catalog {
+        /// The plugin revision selected before this child can dispatch.
+        owner: crate::plugin::PluginRevision,
         /// The manifest the catalog answered with when the child was admitted.
         manifest: Box<ToolManifest>,
     },
@@ -223,11 +225,18 @@ pub enum ToolChildAdmission {
 }
 
 impl ToolChildAdmission {
+    pub fn owner(&self) -> &crate::plugin::PluginRevision {
+        match self {
+            Self::Catalog { owner, .. } => owner,
+            Self::Granted { grant } => &grant.owner,
+        }
+    }
+
     /// The admitted manifest, whichever way the child was authorized.
     #[must_use]
     pub fn manifest(&self) -> &ToolManifest {
         match self {
-            Self::Catalog { manifest } => manifest,
+            Self::Catalog { manifest, .. } => manifest,
             Self::Granted { grant } => grant.manifest(),
         }
     }

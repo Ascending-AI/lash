@@ -148,11 +148,11 @@ pub async fn prepare_granted_tool_call_with_context(
 /// live provider prepares it.
 pub async fn prepare_recorded_tool_call_with_context(
     context: &ToolDispatchContext<'_>,
-    binding: &ToolExecutionGrant,
+    binding: &crate::ToolDefinition,
     mut pending: crate::sansio::PendingToolCall,
 ) -> ToolPreparationOutcome {
-    pending.tool_name = binding.manifest().name.clone();
-    let tool_id = &binding.manifest().id;
+    pending.tool_name = binding.manifest.name.clone();
+    let tool_id = &binding.manifest.id;
     let preparation = if context.attempt_may_defer(tool_id, None) {
         ProviderPreparation::Live(None)
     } else {
@@ -160,8 +160,8 @@ pub async fn prepare_recorded_tool_call_with_context(
     };
     prepare_authorized_tool_call_with_context(
         context,
-        binding.manifest().clone(),
-        Arc::new(binding.contract().clone()),
+        binding.manifest.clone(),
+        Arc::new(binding.contract.clone()),
         pending,
         preparation,
     )

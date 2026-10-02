@@ -186,6 +186,10 @@ async fn incorporate(world: &World, scoped: &crate::ScopedEffectController<'_>) 
                     prepared_payload: serde_json::Value::Null,
                 },
                 crate::runtime::effect::ToolChildAdmission::Catalog {
+                    owner: crate::plugin::PluginRevision::new(
+                        "conformance-usage-accounting",
+                        crate::plugin::BehaviorRevision::ONE,
+                    ),
                     manifest: Box::new(definition.manifest()),
                 },
                 crate::tool_dispatch::ToolAttemptLineage::under(parent.clone()),

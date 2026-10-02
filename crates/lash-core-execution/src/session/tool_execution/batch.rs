@@ -156,7 +156,7 @@ impl RuntimeExecutionContext<'_> {
         &self,
         batch_id: &crate::BatchId,
         entries: Vec<PreparedToolLeafEntry>,
-    ) -> Vec<PreparedToolChildLeaf> {
+    ) -> Result<Vec<PreparedToolChildLeaf>, crate::PluginError> {
         let batch = crate::PreparedToolBatch::new_with_grants(
             batch_id.clone(),
             entries
@@ -181,15 +181,19 @@ impl RuntimeExecutionContext<'_> {
                     // journaled call had, under its recorded manifest.
                     ToolCallAuthorization::Catalog(_) | ToolCallAuthorization::Recorded(_) => {
                         crate::runtime::effect::ToolChildAdmission::Catalog {
+                            owner: self
+                                .dispatch
+                                .plugins
+                                .tool_execution_owner(&entry.manifest.id, None)?,
                             manifest: Box::new(entry.manifest),
                         }
                     }
                 };
-                PreparedToolChildLeaf {
+                Ok(PreparedToolChildLeaf {
                     input_index: entry.index,
                     call,
                     admission,
-                }
+                })
             })
             .collect()
     }
@@ -247,8 +251,15 @@ impl RuntimeExecutionContext<'_> {
             // rank — durable final-commit order — rather than a source-ordered
             // launch vector (§5).
             let group_invocation = self.tool_batch_invocation(&batch_id);
-            let leaves = self
-                .tool_child_leaves(&batch_id, prepared_entries)
+            let prepared_leaves = match self.tool_child_leaves(&batch_id, prepared_entries) {
+                Ok(leaves) => leaves,
+                Err(error) => {
+                    let error = crate::RuntimeEffectControllerError::from(error);
+                    self.record_nested_effect_error(error.clone());
+                    return fail_batch(error.to_string(), &mut replies);
+                }
+            };
+            let leaves = prepared_leaves
                 .into_iter()
                 .map(|leaf| PreparedGroupChild::Tool(Box::new(leaf)))
                 .collect::<Vec<_>>();

@@ -7,6 +7,10 @@ pub use transition::{PluginTransitionId, PluginTransitionRecord, PluginTransitio
 use crate::runtime::AssembledTurn;
 use crate::{MessageRole, SessionPolicy, ToolManifest, ToolOutcome, ToolProvider};
 
+pub use lash_core_store::store::plugin_writers::{
+    PluginCallbackIdentity, PluginExecutionRefusal, PluginRevision,
+};
+
 pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginConfigNamespace};
 
 pub use lash_sansio::{CheckpointKind, PluginMessage, PluginRuntimeEvent, ToolCatalogContribution};
@@ -252,8 +256,8 @@ mod tests {
 
     #[test]
     fn plugin_registrar_preserves_typed_duplicate_tool_name_refusal() {
-        let mut registrar = PluginRegistrar::new();
-        registrar.registering_plugin_id = Some("duplicate-law".to_string());
+        let mut registrar =
+            PluginRegistrar::new(PluginRevision::new("duplicate-law", BehaviorRevision::ONE));
         registrar
             .tools()
             .provider(Arc::new(MockToolProvider))
@@ -995,7 +999,7 @@ mod tests {
                 .contributions
                 .presentation_steps
                 .iter()
-                .map(|registered| registered.plugin_id.as_str())
+                .map(|registered| registered.identity.owner.plugin.as_str())
                 .collect::<Vec<_>>(),
             vec!["projector-a", "projector-b"],
         );

@@ -362,6 +362,11 @@ pub struct TurnPark {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ParkReason {
+    /// The exact recorded plugin composition or tool owner is unavailable.
+    PluginRevisionUnavailable {
+        refusal: Box<crate::store::plugin_writers::PluginExecutionRefusal>,
+        message: String,
+    },
     /// The deployment must supply the configured worker before redrive can run it.
     WorkerDeployment {
         executable: std::path::PathBuf,
@@ -478,6 +483,7 @@ impl ParkReason {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ParkReasonCode {
+    PluginRevisionUnavailable,
     /// See [`ParkReason::WorkerDeployment`].
     WorkerDeployment,
     /// See [`ParkReason::ReplayDivergence`].
@@ -501,6 +507,7 @@ impl ParkReasonCode {
         Self::WorkerDeployment,
         Self::ReplayDivergence,
         Self::RetiredGeneration,
+        Self::PluginRevisionUnavailable,
         Self::BindingDrift,
         Self::EffectReplayDivergence,
         Self::SessionStateGenerationRefused,
@@ -516,6 +523,7 @@ impl ParkReasonCode {
             Self::ReplayDivergence => "replay_divergence",
             Self::RetiredGeneration => "retired_generation",
             Self::BindingDrift => "binding_drift",
+            Self::PluginRevisionUnavailable => "plugin_revision_unavailable",
             Self::EffectReplayDivergence => "effect_replay_divergence",
             Self::SessionStateGenerationRefused => "session_state_generation_refused",
             Self::EngineRetryExhausted => "engine_retry_exhausted",
@@ -530,6 +538,7 @@ impl ParkReasonCode {
             "replay_divergence" => Some(Self::ReplayDivergence),
             "retired_generation" => Some(Self::RetiredGeneration),
             "binding_drift" => Some(Self::BindingDrift),
+            "plugin_revision_unavailable" => Some(Self::PluginRevisionUnavailable),
             "effect_replay_divergence" => Some(Self::EffectReplayDivergence),
             "session_state_generation_refused" => Some(Self::SessionStateGenerationRefused),
             "engine_retry_exhausted" => Some(Self::EngineRetryExhausted),
@@ -637,6 +646,15 @@ impl ParkReason {
             }
             RuntimeErrorCode::RetiredGeneration => Some(Self::of_retired_generation(error)),
             RuntimeErrorCode::LashlangCellBindingDrift => Some(Self::BindingDrift { message }),
+            RuntimeErrorCode::PluginRevisionUnavailable => match &error.cause {
+                Some(crate::RuntimeErrorCause::PluginExecution { refusal }) => {
+                    Some(Self::PluginRevisionUnavailable {
+                        refusal: refusal.clone(),
+                        message,
+                    })
+                }
+                _ => None,
+            },
             RuntimeErrorCode::EffectReplayDivergence => Some(Self::EffectReplayDivergence {
                 effect_kind: error
                     .summary
@@ -657,6 +675,7 @@ impl ParkReason {
             Self::ReplayDivergence { .. } => ParkReasonCode::ReplayDivergence,
             Self::RetiredGeneration { .. } => ParkReasonCode::RetiredGeneration,
             Self::BindingDrift { .. } => ParkReasonCode::BindingDrift,
+            Self::PluginRevisionUnavailable { .. } => ParkReasonCode::PluginRevisionUnavailable,
             Self::EffectReplayDivergence { .. } => ParkReasonCode::EffectReplayDivergence,
             Self::SessionStateGenerationRefused { .. } => {
                 ParkReasonCode::SessionStateGenerationRefused
@@ -682,6 +701,7 @@ impl ParkReason {
             Self::WorkerDeployment { message, .. }
             | Self::ReplayDivergence { message }
             | Self::RetiredGeneration { message, .. }
+            | Self::PluginRevisionUnavailable { message, .. }
             | Self::BindingDrift { message }
             | Self::EffectReplayDivergence { message, .. }
             | Self::SessionStateGenerationRefused { message, .. }

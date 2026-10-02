@@ -65,6 +65,10 @@ mod tests {
         ToolChildRequest::new(
             call(tool.id.as_str()),
             ToolChildAdmission::Catalog {
+                owner: lash_core_execution::plugin::PluginRevision::new(
+                    "test_protocol",
+                    lash_core_execution::plugin::BehaviorRevision::ONE,
+                ),
                 manifest: Box::new(tool),
             },
             ToolAttemptLineage::default(),
@@ -182,6 +186,10 @@ mod tests {
         let pinned = ToolChildRequest::new(
             call(tool.id.as_str()),
             ToolChildAdmission::Catalog {
+                owner: lash_core_execution::plugin::PluginRevision::new(
+                    "test_protocol",
+                    lash_core_execution::plugin::BehaviorRevision::ONE,
+                ),
                 manifest: Box::new(tool),
             },
             ToolAttemptLineage::default(),
@@ -203,12 +211,22 @@ mod tests {
     #[test]
     fn a_granted_admission_answers_from_its_own_grant() {
         let admission = ToolChildAdmission::Granted {
-            grant: Box::new(ToolExecutionGrant::from_definition(definition("search"))),
+            grant: Box::new(ToolExecutionGrant::from_definition(
+                lash_core_execution::plugin::PluginRevision::new(
+                    "mock",
+                    lash_core_execution::plugin::BehaviorRevision::ONE,
+                ),
+                definition("search"),
+            )),
         };
         assert_eq!(admission.manifest().id, ToolId::from("search"));
         assert!(admission.grant().is_some());
         assert!(
             ToolChildAdmission::Catalog {
+                owner: lash_core_execution::plugin::PluginRevision::new(
+                    "test_protocol",
+                    lash_core_execution::plugin::BehaviorRevision::ONE
+                ),
                 manifest: Box::new(manifest("search"))
             }
             .grant()

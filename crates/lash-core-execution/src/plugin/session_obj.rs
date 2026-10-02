@@ -25,7 +25,7 @@ where
 {
     let mut out = Vec::new();
     for registered in hooks {
-        let phase_name = plugin_hook_phase_name(hook_kind, &registered.plugin_id);
+        let phase_name = plugin_hook_phase_name(hook_kind, &registered.identity.owner.plugin);
         if let Some(probe) = phase_probe {
             probe.begin_named(&phase_name);
         }
@@ -35,7 +35,7 @@ where
         }
         for value in result? {
             out.push(PluginOwned {
-                plugin_id: registered.plugin_id.clone(),
+                plugin_id: registered.identity.owner.plugin.clone(),
                 value,
             });
         }
@@ -175,7 +175,7 @@ where
     let mut out = Vec::new();
     for registered in hooks {
         out.push(PluginOwned {
-            plugin_id: registered.plugin_id.clone(),
+            plugin_id: registered.identity.owner.plugin.clone(),
             value: invoke(&registered.hook, ctx.clone())?,
         });
     }
@@ -240,6 +240,7 @@ impl PluginDispatchContext<'_> {
         &self,
         ctx: TurnHookContext,
     ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
+        self.session.validate_recorded_admission()?;
         collect_owned_async(
             &self.session.contributions.before_turn_hooks,
             ctx,
@@ -254,6 +255,7 @@ impl PluginDispatchContext<'_> {
         &self,
         ctx: TurnResultHookContext,
     ) -> Result<Vec<PluginOwned<AfterTurnPluginDirective>>, PluginError> {
+        self.session.validate_recorded_admission()?;
         collect_owned_async(
             &self.session.contributions.after_turn_hooks,
             ctx,
@@ -268,12 +270,14 @@ impl PluginDispatchContext<'_> {
         &self,
         event: PluginLifecycleEvent<'_>,
     ) -> Result<(), PluginError> {
+        self.session.validate_recorded_admission()?;
         let hook_kind = lifecycle_event_hook_kind(&event);
         let mut pending = FuturesUnordered::new();
         for registered in &self.session.contributions.runtime_event_hooks {
             let hook = Arc::clone(&registered.hook);
-            let plugin_id = registered.plugin_id.clone();
-            let phase_name = plugin_hook_phase_name(hook_kind, registered.plugin_id.as_str());
+            let plugin_id = registered.identity.owner.plugin.clone();
+            let phase_name =
+                plugin_hook_phase_name(hook_kind, registered.identity.owner.plugin.as_str());
             let event = event.clone();
             let phase_probe = self.phase_probe.cloned();
             pending.push(async move {
@@ -342,6 +346,45 @@ impl PluginSession {
     /// fleet record permits by then.
     pub fn adopt_plugin_admission(&self, admission: crate::store::plugin_writers::PluginAdmission) {
         *self.admission.lock_recover() = Some(admission);
+    }
+
+    pub fn validate_recorded_admission(&self) -> Result<(), PluginError> {
+        if let Some(admission) = self.plugin_admission() {
+            self.host.validate_plugin_admission(&admission)?;
+        }
+        Ok(())
+    }
+
+    /// Check a tool's recorded owner without invoking a provider or hook.
+    pub fn validate_tool_owner(&self, owner: &PluginRevision) -> Result<(), crate::RuntimeError> {
+        let available = self.host.plugin_revisions();
+        if !available.contains(owner) {
+            return Err(PluginExecutionRefusal {
+                recorded: vec![owner.clone()],
+                available,
+                callback: None,
+            }
+            .into_runtime_error());
+        }
+        Ok(())
+    }
+
+    /// Resolve ownership from the registered tool source, before admission.
+    pub fn tool_execution_owner(
+        &self,
+        tool: &crate::ToolId,
+        source: Option<&str>,
+    ) -> Result<PluginRevision, PluginError> {
+        let source = source
+            .map(str::to_owned)
+            .or_else(|| self.tool_registry.execution_source_id(tool));
+        self.host
+            .plugin_revisions()
+            .into_iter()
+            .find(|owner| source.as_deref() == Some(owner.plugin.as_str()))
+            .ok_or_else(|| {
+                PluginError::Registration(format!("tool `{tool}` has no registered plugin owner"))
+            })
     }
 
     /// The plugin admission this session writes under, if it adopted one.
@@ -511,7 +554,9 @@ impl PluginSession {
             .protocol_session
             .as_ref()
             .expect("plugin session must have a protocol session")
-            .plugin_id
+            .identity
+            .owner
+            .plugin
     }
 
     #[expect(
@@ -587,10 +632,13 @@ impl PluginSession {
         input: crate::session_model::context::PreparedContext,
         phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     ) -> Result<crate::session_model::context::PreparedContext, ContextError> {
+        self.validate_recorded_admission()?;
         let mut current = input;
         for (_, registered) in &self.contributions.turn_context_transforms {
-            let phase_name =
-                plugin_hook_phase_name("context_transform", registered.plugin_id.as_str());
+            let phase_name = plugin_hook_phase_name(
+                "context_transform",
+                registered.identity.owner.plugin.as_str(),
+            );
             if let Some(probe) = phase_probe.as_ref() {
                 probe.begin_named(&phase_name);
             }
@@ -616,10 +664,13 @@ impl PluginSession {
         ctx: &ContextPressureContext<'_>,
         phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     ) -> Result<Vec<DecidedContextPressure>, ContextError> {
+        self.validate_recorded_admission()?;
         let mut decided = Vec::new();
         for (_, registered) in &self.contributions.context_pressure_hooks {
-            let phase_name =
-                plugin_hook_phase_name("context_pressure", registered.plugin_id.as_str());
+            let phase_name = plugin_hook_phase_name(
+                "context_pressure",
+                registered.identity.owner.plugin.as_str(),
+            );
             if let Some(probe) = phase_probe.as_ref() {
                 probe.begin_named(&phase_name);
             }
@@ -631,7 +682,7 @@ impl PluginSession {
             let opens_frame = matches!(decision, ContextPressureDecision::OpenFrame { .. });
             if !matches!(decision, ContextPressureDecision::Continue) {
                 decided.push(DecidedContextPressure {
-                    plugin_id: registered.plugin_id.clone(),
+                    plugin_id: registered.identity.owner.plugin.clone(),
                     hook_id: registered.hook.id(),
                     decision,
                 });
@@ -648,6 +699,7 @@ impl PluginSession {
         &self,
         ctx: &CompactionContext<'_>,
     ) -> Result<Option<ContextCompaction>, ContextError> {
+        self.validate_recorded_admission()?;
         for (_, registered) in &self.contributions.context_compactors {
             if let Some(compaction) = registered.hook.compact(ctx).await?
                 && !compaction.is_empty()
@@ -662,13 +714,14 @@ impl PluginSession {
         &self,
         mut ctx: ToolCallHookContext,
     ) -> Result<Vec<PluginOwned<BeforeToolCallPluginDirective>>, PluginError> {
+        self.validate_recorded_admission()?;
         let mut out = Vec::new();
         for (index, registered) in self.contributions.before_tool_call_hooks.iter().enumerate() {
             let directives = (registered.hook)(ctx.clone()).await?;
             for directive in directives {
                 let replacement_args = directive.replacement_args().cloned();
                 out.push(PluginOwned {
-                    plugin_id: registered.plugin_id.clone(),
+                    plugin_id: registered.identity.owner.plugin.clone(),
                     value: directive,
                 });
                 if let Some(replacement_args) = replacement_args {
@@ -678,8 +731,8 @@ impl PluginSession {
                         for directive in repeated {
                             if directive.replacement_args().is_some() {
                                 return Err(PluginError::BeforeToolCallReplacementConflict {
-                                    replacing_plugin_id: registered.plugin_id.clone(),
-                                    repeated_plugin_id: earlier.plugin_id.clone(),
+                                    replacing_plugin_id: registered.identity.owner.plugin.clone(),
+                                    repeated_plugin_id: earlier.identity.owner.plugin.clone(),
                                 });
                             }
                             let is_terminal_restriction =
@@ -688,7 +741,7 @@ impl PluginSession {
                                 });
                             if is_terminal_restriction {
                                 out.push(PluginOwned {
-                                    plugin_id: earlier.plugin_id.clone(),
+                                    plugin_id: earlier.identity.owner.plugin.clone(),
                                     value: directive,
                                 });
                             }
@@ -704,6 +757,7 @@ impl PluginSession {
         &self,
         mut ctx: ToolResultHookContext,
     ) -> Result<Vec<PluginOwned<AfterToolCallPluginDirective>>, PluginError> {
+        self.validate_recorded_admission()?;
         let mut out = Vec::new();
         let mut effective_replacement: Option<ToolOutcome> = None;
         for (index, registered) in self.contributions.after_tool_call_hooks.iter().enumerate() {
@@ -711,7 +765,7 @@ impl PluginSession {
             for directive in directives {
                 let replacement = directive.successful_replacement();
                 out.push(PluginOwned {
-                    plugin_id: registered.plugin_id.clone(),
+                    plugin_id: registered.identity.owner.plugin.clone(),
                     value: directive,
                 });
                 if let Some(replacement) = replacement {
@@ -721,8 +775,8 @@ impl PluginSession {
                         for directive in repeated {
                             if directive.successful_replacement().is_some() {
                                 return Err(PluginError::AfterToolCallReplacementConflict {
-                                    replacing_plugin_id: registered.plugin_id.clone(),
-                                    repeated_plugin_id: earlier.plugin_id.clone(),
+                                    replacing_plugin_id: registered.identity.owner.plugin.clone(),
+                                    repeated_plugin_id: earlier.identity.owner.plugin.clone(),
                                 });
                             }
                             let is_terminal_restriction =
@@ -731,7 +785,7 @@ impl PluginSession {
                                 });
                             if is_terminal_restriction {
                                 out.push(PluginOwned {
-                                    plugin_id: earlier.plugin_id.clone(),
+                                    plugin_id: earlier.identity.owner.plugin.clone(),
                                     value: directive,
                                 });
                             }
@@ -752,6 +806,7 @@ impl PluginSession {
         &self,
         ctx: CheckpointHookContext,
     ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
+        self.validate_recorded_admission()?;
         collect_owned_async(
             &self.contributions.checkpoint_hooks,
             ctx,
@@ -767,6 +822,7 @@ impl PluginSession {
         session_id: &SessionId,
         chunk: String,
     ) -> Result<Vec<PluginOwned<AssistantStreamTransform>>, PluginError> {
+        self.validate_recorded_admission()?;
         let mut current = chunk;
         let mut transforms = Vec::new();
         for registered in &self.contributions.assistant_stream_hooks {
@@ -778,7 +834,7 @@ impl PluginSession {
             .await?;
             current = transform.chunk.clone();
             transforms.push(PluginOwned {
-                plugin_id: registered.plugin_id.clone(),
+                plugin_id: registered.identity.owner.plugin.clone(),
                 value: transform,
             });
         }
@@ -791,12 +847,13 @@ impl PluginSession {
         response: crate::llm::types::LlmResponse,
         stream_hook_states: &[crate::runtime::AssistantStreamHookState],
     ) -> Result<Vec<PluginOwned<AssistantResponseTransform>>, PluginError> {
+        self.validate_recorded_admission()?;
         let mut current = response;
         let mut transforms = Vec::new();
         for registered in &self.contributions.assistant_response_hooks {
             let stream_state = stream_hook_states
                 .iter()
-                .find(|recorded| recorded.plugin_id == registered.plugin_id)
+                .find(|recorded| recorded.plugin_id == registered.identity.owner.plugin)
                 .map(|recorded| recorded.state.clone());
             let transform = (registered.hook)(AssistantResponseHookContext {
                 session_id: session_id.clone(),
@@ -807,7 +864,7 @@ impl PluginSession {
             .await?;
             current = transform.response.clone();
             transforms.push(PluginOwned {
-                plugin_id: registered.plugin_id.clone(),
+                plugin_id: registered.identity.owner.plugin.clone(),
                 value: transform,
             });
         }
@@ -821,6 +878,7 @@ impl PluginSession {
         session_id: &SessionId,
         reason: AssistantStreamFinishReason,
     ) -> Result<Vec<crate::runtime::AssistantStreamHookState>, PluginError> {
+        self.validate_recorded_admission()?;
         let mut states = Vec::new();
         for registered in &self.contributions.assistant_stream_finished_hooks {
             let state = (registered.hook)(AssistantStreamFinishedContext {
@@ -831,7 +889,7 @@ impl PluginSession {
             .await?;
             if let Some(state) = state {
                 states.push(crate::runtime::AssistantStreamHookState {
-                    plugin_id: registered.plugin_id.to_string(),
+                    plugin_id: registered.identity.owner.plugin.to_string(),
                     state,
                 });
             }
@@ -870,6 +928,8 @@ impl PluginSession {
     > {
         use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 
+        self.validate_recorded_admission()
+            .map_err(crate::RuntimeEffectControllerError::from)?;
         let mut model_return =
             crate::ModelToolReturn::from_output(ctx.tool_name.clone(), &ctx.output);
         if let Some(presenter) = &self.contributions.presentation_presenter {
@@ -1094,6 +1154,11 @@ impl PluginSession {
         sessions: Arc<dyn SessionReadService>,
         processes: Arc<dyn ProcessReadService>,
     ) -> Result<(String, serde_json::Value), PluginOperationInvokeError> {
+        self.validate_recorded_admission().map_err(|error| {
+            PluginOperationInvokeError::AdmissionRefused(Box::new(
+                error.into_turn_failure(crate::RuntimeErrorCode::Plugin),
+            ))
+        })?;
         let (plugin_id, outcome) = self
             .invoke_plugin_operation(
                 name,
@@ -1125,6 +1190,11 @@ impl PluginSession {
         processes: Arc<dyn crate::ProcessService>,
     ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
     {
+        self.validate_recorded_admission().map_err(|error| {
+            PluginOperationInvokeError::AdmissionRefused(Box::new(
+                error.into_turn_failure(crate::RuntimeErrorCode::Plugin),
+            ))
+        })?;
         let (plugin_id, outcome) = self
             .invoke_plugin_operation(
                 name,
@@ -1167,6 +1237,11 @@ impl PluginSession {
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
     {
+        self.validate_recorded_admission().map_err(|error| {
+            PluginOperationInvokeError::AdmissionRefused(Box::new(
+                error.into_turn_failure(crate::RuntimeErrorCode::Plugin),
+            ))
+        })?;
         let (plugin_id, outcome) = self
             .invoke_plugin_operation(
                 name,

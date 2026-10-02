@@ -152,6 +152,16 @@ impl LashRuntime {
                     admission.generation.as_ref(),
                 )
                 .map_err(abort)?;
+                if let Err(error) = self
+                    .services
+                    .plugins
+                    .host()
+                    .validate_plugin_admission(&admission.plugins)
+                {
+                    let error = error.into_turn_failure(RuntimeErrorCode::Plugin);
+                    self.record_turn_park_after_abort(&error, &run, None).await;
+                    return Err(abort(error));
+                }
                 let transition = self
                     .record_plugin_transition(run_controller, admitted, &admission)
                     .await?;
@@ -447,6 +457,11 @@ impl LashRuntime {
         // formats the decision recorded (FIG-4747), on this execution and on
         // every replay of it.
         if let Some(session) = self.session.as_ref() {
+            if let Err(error) = session.plugins().host().validate_plugin_admission(&plugins) {
+                let error = error.into_turn_failure(RuntimeErrorCode::Plugin);
+                self.record_turn_park_after_abort(&error, &run, None).await;
+                return Err(shift_abort(Some(&run), error));
+            }
             session.plugins().adopt_plugin_admission(plugins);
         }
         // The follow-on's turn runs on the head its decision recorded, at the

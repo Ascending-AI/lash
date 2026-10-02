@@ -2,6 +2,105 @@ use super::*;
 use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
 
+#[tokio::test]
+async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_effects() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let callbacks = Arc::new(AtomicUsize::new(0));
+    let effects = Arc::new(AtomicUsize::new(0));
+    let mut declaration = crate::plugin::PluginDeclaration::initial("revision-probe");
+    declaration.behavior_revision = crate::plugin::BehaviorRevision::new(2).unwrap();
+    let counted_callbacks = callbacks.clone();
+    let counted_effects = effects.clone();
+    let host = crate::PluginHost::new(vec![Arc::new(crate::plugin::StaticPluginFactory::new(
+        declaration,
+        crate::plugin::PluginSpec::new().with_before_turn(Arc::new(move |_| {
+            counted_callbacks.fetch_add(1, Ordering::SeqCst);
+            let effects = counted_effects.clone();
+            Box::pin(async move {
+                effects.fetch_add(1, Ordering::SeqCst);
+                Ok(Vec::new())
+            })
+        })),
+    ))]);
+    let recorded = crate::store::plugin_writers::PluginAdmission::from_plugins(
+        host.factories()
+            .iter()
+            .map(|factory| {
+                let declaration = factory.declaration();
+                crate::store::plugin_writers::AdmittedPlugin {
+                    plugin: factory.id().into(),
+                    behavior_revision: crate::plugin::BehaviorRevision::ONE,
+                    writer: declaration.format_version,
+                }
+            })
+            .collect(),
+    );
+    let session = host
+        .build_session(PluginSessionRequest::creation(
+            "revision-redrive",
+            Default::default(),
+        ))
+        .unwrap();
+    let identity = &session.contributions.before_turn_hooks[0].identity;
+    assert_eq!(identity.key, "before_turn:0");
+    assert_eq!(identity.owner.plugin, "revision-probe");
+    assert_eq!(identity.owner.behavior_revision.get(), 2);
+    let rebuilt = host
+        .isolated_registry()
+        .build_session(PluginSessionRequest::creation(
+            "revision-redrive",
+            Default::default(),
+        ))
+        .unwrap();
+    assert_eq!(
+        identity,
+        &rebuilt.contributions.before_turn_hooks[0].identity
+    );
+    session.adopt_plugin_admission(recorded);
+    let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
+    let result = session
+        .dispatch(None)
+        .before_turn(crate::plugin::TurnHookContext {
+            session_id: "revision-redrive".into(),
+            plugin_config: Default::default(),
+            state: state.read_view(),
+            sessions: Arc::new(crate::testing::MockSessionManager::default()),
+            turn_context: Default::default(),
+        })
+        .await;
+    assert_eq!(
+        callbacks.load(Ordering::SeqCst),
+        0,
+        "the substituted revision must never enter a callback"
+    );
+    assert_eq!(effects.load(Ordering::SeqCst), 0);
+    let error = result
+        .unwrap_err()
+        .into_turn_failure(crate::RuntimeErrorCode::Plugin);
+    assert!(
+        crate::store::ParkReason::of_error(&error).is_some(),
+        "the refusal must park unfinished work"
+    );
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::PluginRevisionUnavailable
+    );
+    let park = crate::store::ParkReason::of_error(&error).unwrap();
+    let park_bytes = serde_json::to_vec(&park).unwrap();
+    let replayed: crate::store::ParkReason = serde_json::from_slice(&park_bytes).unwrap();
+    assert_eq!(park, replayed);
+    let controller = crate::RuntimeEffectControllerError::from(error);
+    let plugin = crate::PluginError::RuntimeEffectController(controller.clone());
+    let bytes = serde_json::to_vec(&plugin).unwrap();
+    let plugin: crate::PluginError = serde_json::from_slice(&bytes).unwrap();
+    let replayed = crate::RuntimeEffectControllerError::from(plugin);
+    assert_eq!(controller.cause, replayed.cause);
+    assert_eq!(controller.code, replayed.code);
+}
+
 #[derive(Clone)]
 struct FormatProbe(Arc<std::sync::atomic::AtomicUsize>);
 

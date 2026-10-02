@@ -402,9 +402,15 @@ fn leaf_grant() -> crate::ToolExecutionGrant {
         .into_iter()
         .find(|definition| definition.manifest().id == crate::ToolId::from(LEAF_GRANTED))
         .unwrap_or_else(|| unreachable!("the granted leaf definition exists"));
-    crate::ToolExecutionGrant::from_definition(definition)
-        .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
-        .with_execution_binding(serde_json::json!({ "route": "granted-by-request" }))
+    crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new(
+            crate::PLUGIN_TOOL_SOURCE_ID,
+            crate::plugin::BehaviorRevision::ONE,
+        ),
+        definition,
+    )
+    .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
+    .with_execution_binding(serde_json::json!({ "route": "granted-by-request" }))
 }
 
 /// The leaf provider every child executes under.
@@ -1608,6 +1614,10 @@ fn catalog_admission(tool_id: &str) -> crate::runtime::effect::ToolChildAdmissio
         .unwrap_or_else(|| unreachable!("every leaf has a definition"))
         .manifest();
     crate::runtime::effect::ToolChildAdmission::Catalog {
+        owner: crate::plugin::PluginRevision::new(
+            crate::PLUGIN_TOOL_SOURCE_ID,
+            crate::plugin::BehaviorRevision::ONE,
+        ),
         manifest: Box::new(manifest),
     }
 }

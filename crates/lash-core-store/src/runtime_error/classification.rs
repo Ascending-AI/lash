@@ -292,7 +292,7 @@ impl RuntimeErrorCode {
             // the re-executed program no longer issues its recorded commands; only the build that wrote the journal serves it.
             Self::LashlangCellReplayDivergence => Parked,
             // the turn was admitted under another executable generation; only a build of it serves it.
-            Self::RetiredGeneration => Parked,
+            Self::RetiredGeneration | Self::PluginRevisionUnavailable => Parked,
             // a binding the cell's journal names moved; only its recorded results serve it.
             Self::LashlangCellBindingDrift => Parked,
             // the controller cannot answer the frontier read; wiring, not the attempt.

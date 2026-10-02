@@ -26,7 +26,8 @@ use restate_sdk::prelude::Endpoint;
 
 use super::conformance_and_poison::prepared_tool_call;
 use super::endpoint_protocol::{
-    invoke_endpoint_with_named_call_responses, restate_call_parameters, restate_command_frame_types,
+    invoke_endpoint_with_named_call_responses, protobuf_len_field, restate_call_frames,
+    restate_command_frame_types,
 };
 use crate::effect_group::{
     EffectGroupChildRequest, EffectGroupRecordSettlementRequest, EffectGroupSettlementTerminal,
@@ -102,6 +103,10 @@ fn tool_request(scope: &ExecutionScope) -> lash_core::runtime::effect::ToolChild
     lash_core::runtime::effect::ToolChildRequest::new(
         prepared_tool_call(),
         lash_core::runtime::effect::ToolChildAdmission::Catalog {
+            owner: lash_core::plugin::PluginRevision::new(
+                "test_protocol",
+                lash_core::plugin::BehaviorRevision::ONE,
+            ),
             manifest: Box::new(definition.manifest()),
         },
         lash_core::tool_dispatch::ToolAttemptLineage::default(),
@@ -169,6 +174,25 @@ fn endpoint(sessions: Arc<dyn DeploymentStore>, executors: Arc<CountingExecutors
     )
 }
 
+fn child_call_parameters(output: &[u8]) -> Vec<(String, serde_json::Value)> {
+    restate_call_frames(output)
+        .expect("decode the child's call frames")
+        .into_iter()
+        .map(|call| {
+            let bytes = protobuf_len_field(&call.frame[8..], 3).expect("the call has a body");
+            let envelope = crate::Call::<serde_json::Value>::decode_json_with_limits(
+                bytes,
+                Default::default(),
+            )
+            .expect("the child sends the declared Call envelope");
+            let (_, body) = envelope
+                .open()
+                .expect("the call's wire and release line are admitted");
+            (call.handler, body)
+        })
+        .collect()
+}
+
 /// The scenario from FIG-3619: the pre-cutover turn's tool child lands on
 /// this build and is refused, typed, before anything of it runs.
 #[tokio::test]
@@ -214,7 +238,7 @@ async fn a_pre_cutover_sessions_group_child_is_refused_before_its_tool_is_dispat
     .await
     .expect("shift the child invocation");
 
-    let calls = restate_call_parameters(&output).expect("decode the child's calls");
+    let calls = child_call_parameters(&output);
     assert_eq!(
         calls
             .iter()
@@ -281,7 +305,7 @@ async fn a_current_sessions_group_child_passes_the_gate_to_admission() {
     .await
     .expect("shift the child invocation");
 
-    let calls = restate_call_parameters(&output).expect("decode the child's calls");
+    let calls = child_call_parameters(&output);
     assert_eq!(
         calls.first().map(|(handler, _)| handler.as_str()),
         Some("admit_child"),

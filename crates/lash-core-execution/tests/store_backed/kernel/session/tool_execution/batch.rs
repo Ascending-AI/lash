@@ -42,7 +42,11 @@ mod tests {
         scoped: crate::ScopedEffectController<'run>,
         observer: Arc<dyn crate::engine::ObservationSink>,
     ) -> crate::RuntimeExecutionContext<'run> {
-        let plugins = crate::support::plugin_host(Vec::new())
+        let plugins =
+            crate::support::plugin_host(vec![Arc::new(crate::plugin::StaticPluginFactory::new(
+                crate::plugin::PluginDeclaration::initial("granted_tools"),
+                crate::plugin::PluginSpec::new().with_tool_provider(Arc::new(GrantedLeafTool)),
+            ))])
             .build_session(PluginSessionRequest::creation(
                 "granted-call-session",
                 Default::default(),
@@ -120,7 +124,13 @@ mod tests {
     }
 
     fn granted_call() -> crate::ToolExecutionGrant {
-        crate::ToolExecutionGrant::from_definition(granted_tool_definition())
+        crate::ToolExecutionGrant::from_definition(
+            crate::plugin::PluginRevision::new(
+                "granted_tools",
+                crate::plugin::BehaviorRevision::ONE,
+            ),
+            granted_tool_definition(),
+        )
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -144,6 +144,7 @@ first_party_codes! {
         Self::EffectReplayDivergence,
         Self::LashlangCellReplayDivergence,
         Self::RetiredGeneration,
+        Self::PluginRevisionUnavailable,
         Self::LashlangCellBindingDrift,
         Self::RecordedJournalReadUnsupported,
         Self::EngineEffectHostRequiresHandlerScope,
@@ -570,6 +571,7 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
         [
             RuntimeErrorCode::LashlangCellReplayDivergence,
             RuntimeErrorCode::RetiredGeneration,
+            RuntimeErrorCode::PluginRevisionUnavailable,
             RuntimeErrorCode::LashlangCellBindingDrift,
             RuntimeErrorCode::EffectReplayDivergence,
             RuntimeErrorCode::VmWorkerUnavailable,
@@ -705,6 +707,7 @@ fn replay_refusals_park_the_turn() {
                 RuntimeErrorCode::LashlangCellReplayDivergence
                     | RuntimeErrorCode::RetiredGeneration
                     | RuntimeErrorCode::LashlangCellBindingDrift
+                    | RuntimeErrorCode::PluginRevisionUnavailable
                     | RuntimeErrorCode::EffectReplayDivergence
                     | RuntimeErrorCode::VmWorkerUnavailable
             ),

@@ -1189,6 +1189,11 @@ impl RuntimeExecutionContext<'_> {
                 input_index,
                 call,
                 admission: ToolChildAdmission::Catalog {
+                    owner: self
+                        .dispatch
+                        .plugins
+                        .tool_execution_owner(&manifest.id, None)
+                        .map_err(crate::RuntimeEffectControllerError::from)?,
                     manifest: Box::new(manifest),
                 },
             })));
@@ -1452,7 +1457,7 @@ fn retained_request_digest(
     identity.string(&call.tool_name);
     identity.bytes(&crate::identity_json::payload_leaf(&call.args));
     match admission {
-        ToolChildAdmission::Catalog { manifest } => {
+        ToolChildAdmission::Catalog { manifest, .. } => {
             identity.tag(0);
             identity.string(manifest.id.as_str());
         }

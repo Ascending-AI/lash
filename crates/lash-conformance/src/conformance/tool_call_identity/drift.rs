@@ -82,9 +82,15 @@ async fn retained_request_replay(tier: &ToolCallIdentityTier, change: &str) {
         replay: None,
         prepared_payload: serde_json::json!({"seal": 1}),
     };
-    let grant = crate::ToolExecutionGrant::from_definition(definition.clone())
-        .with_source_id("original-source")
-        .with_execution_binding(serde_json::json!({"owner": "original"}));
+    let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new(
+            crate::PLUGIN_TOOL_SOURCE_ID,
+            crate::plugin::BehaviorRevision::ONE,
+        ),
+        definition.clone(),
+    )
+    .with_source_id("original-source")
+    .with_execution_binding(serde_json::json!({"owner": "original"}));
     let authority = ToolChildAdmission::Granted {
         grant: Box::new(grant.clone()),
     };
@@ -108,6 +114,10 @@ async fn retained_request_replay(tier: &ToolCallIdentityTier, change: &str) {
         }
         "admission" => {
             changed_authority = ToolChildAdmission::Catalog {
+                owner: crate::plugin::PluginRevision::new(
+                    crate::PLUGIN_TOOL_SOURCE_ID,
+                    crate::plugin::BehaviorRevision::ONE,
+                ),
                 manifest: Box::new(definition.manifest()),
             }
         }

@@ -411,20 +411,23 @@ impl PluginOperationRegistration {
 
 #[derive(Clone)]
 pub(crate) struct RegisteredPluginOperation {
-    plugin_id: String,
+    identity: super::PluginCallbackIdentity,
     operation: PluginOperationRegistration,
 }
 
 impl RegisteredPluginOperation {
-    pub(crate) fn new(plugin_id: String, operation: PluginOperationRegistration) -> Self {
+    pub(crate) fn new(
+        identity: super::PluginCallbackIdentity,
+        operation: PluginOperationRegistration,
+    ) -> Self {
         Self {
-            plugin_id,
+            identity,
             operation,
         }
     }
 
     pub(crate) fn plugin_id(&self) -> &str {
-        &self.plugin_id
+        &self.identity.owner.plugin
     }
 
     pub(crate) fn def(&self) -> &PluginOperationDef {

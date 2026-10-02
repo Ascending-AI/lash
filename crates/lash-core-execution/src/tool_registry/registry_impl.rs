@@ -49,6 +49,17 @@ impl ToolRegistry {
         }
     }
 
+    pub(crate) fn execution_source_id(&self, tool: &ToolId) -> Option<String> {
+        let authority = self.inner.read_recover();
+        authority
+            .state
+            .surface
+            .get(tool)?
+            .binding
+            .source_key()
+            .map(ToString::to_string)
+    }
+
     pub fn generation(&self) -> u64 {
         self.inner.read_recover().state.generation
     }

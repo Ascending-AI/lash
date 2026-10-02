@@ -993,7 +993,7 @@ fn admitted_tool_drift(
     lent: &ToolDispatchContext<'_>,
     request: &ToolChildRequest,
 ) -> Result<Option<crate::ToolSurfaceDrift>, RuntimeEffectControllerError> {
-    let super::tool_child::ToolChildAdmission::Catalog { manifest } = &request.admission else {
+    let super::tool_child::ToolChildAdmission::Catalog { manifest, .. } = &request.admission else {
         return Ok(None);
     };
     // The opener records its whole surface, the admitted tool included. A
@@ -1034,13 +1034,8 @@ fn admitted_tool_drift(
             request.session.subagent.clone(),
         )
         .map_err(|error| {
-            RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
-                format!(
-                    "tool child `{}` could not resolve the live catalog its tool is judged \
-                     against: {error}",
-                    request.call.call_id
-                ),
+            RuntimeEffectControllerError::from(
+                error.into_turn_failure(crate::RuntimeErrorCode::ToolCatalogResolutionFailed),
             )
         })?;
     Ok(crate::ToolSurfaceDrift::judge(&recorded, &live))
@@ -1087,12 +1082,21 @@ async fn run_tool_child<'run>(
     // issues carries the drift refusal to its engine, which serves a recorded
     // outcome and refuses — running and recording nothing — one it would run
     // live (FIG-3719).
-    let served_only =
-        admitted_tool_drift(live.dispatch().as_ref(), request)?.map(|drift| {
-            Arc::new(crate::CommandJournalGuard::open().served_only(
-                crate::ServedOnlyRange::every_key(drift.refusal(&request.call)),
-            ))
-        });
+    let refusal = match live
+        .dispatch()
+        .plugins
+        .validate_tool_owner(request.admission.owner())
+    {
+        Err(error) => Some(crate::RuntimeEffectControllerError::from(error)),
+        Ok(()) => admitted_tool_drift(live.dispatch().as_ref(), request)?
+            .map(|drift| drift.refusal(&request.call)),
+    };
+    let served_only = refusal.map(|refusal| {
+        Arc::new(
+            crate::CommandJournalGuard::open()
+                .served_only(crate::ServedOnlyRange::every_key(refusal)),
+        )
+    });
     let controller = match &served_only {
         Some(guard) => controller.with_journal_guard(Arc::clone(guard)),
         None => controller,

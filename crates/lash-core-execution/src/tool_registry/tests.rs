@@ -1163,9 +1163,12 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
             .any(|manifest| manifest.name == "host_only")
     );
 
-    let grant = crate::ToolExecutionGrant::from_definition(test_tool("host_only", "host-only"))
-        .with_source_id("exact")
-        .with_execution_binding(json!({ "kind": "test", "route": "grant" }));
+    let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        test_tool("host_only", "host-only"),
+    )
+    .with_source_id("exact")
+    .with_execution_binding(json!({ "kind": "test", "route": "grant" }));
     let prepare_context = crate::ToolPrepareContext::with_execution_binding(
         crate::RuntimeOwner::Session(SessionId::from("registry-test")),
         Arc::new(crate::testing::MockSessionManager::default()),
@@ -1241,9 +1244,12 @@ async fn run_tool_granted_honors_the_granted_source_binding() {
         .compose_session_catalog(Vec::new())
         .expect("resident catalog with live grant sources");
 
-    let grant = crate::ToolExecutionGrant::from_definition(test_tool("host_only", "host-only"))
-        .with_source_id("exact")
-        .with_execution_binding(json!({ "kind": "test", "route": "grant" }));
+    let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        test_tool("host_only", "host-only"),
+    )
+    .with_source_id("exact")
+    .with_execution_binding(json!({ "kind": "test", "route": "grant" }));
     let args = json!({});
 
     // The catalog route cannot admit the tool: the grant is the authority,
@@ -1285,7 +1291,10 @@ async fn execution_grant_without_source_does_not_infer_registry_route() {
         }))
         .expect("source registered");
 
-    let grant = crate::ToolExecutionGrant::from_definition(test_tool("host_only", "host-only"));
+    let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        test_tool("host_only", "host-only"),
+    );
     let context = crate::testing::mock_attempt_context_from(
         &test_tool_context().with_granted_source_id(grant.source_id.clone()),
     );
@@ -1362,6 +1371,7 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
         .compose_session_catalog(Vec::new())
         .expect("resident snapshot keeps hidden providers out of its admitted source");
     let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
         ToolDefinition::raw(
             "tool:hidden_zeta",
             "shared_hidden_name",

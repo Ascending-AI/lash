@@ -134,9 +134,12 @@ async fn grant_probe_dispatch<'h>(
         mode,
         observed_execution_bindings,
     });
-    let grant = crate::ToolExecutionGrant::from_definition(definition)
-        .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
-        .with_execution_binding(json!({ "kind": "grant-probe" }));
+    let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        definition,
+    )
+    .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
+    .with_execution_binding(json!({ "kind": "grant-probe" }));
     (exact_dispatch_context(ports, provider).await, grant)
 }
 

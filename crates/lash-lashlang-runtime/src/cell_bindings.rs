@@ -75,8 +75,8 @@ impl CellBindingDrift {
     }
 
     /// The recorded tool, as the grant a replayed call is authorized under.
-    pub fn recorded_binding(&self) -> lash_core::ToolExecutionGrant {
-        lash_core::ToolExecutionGrant::from_definition(self.recorded.clone())
+    pub fn recorded_binding(&self) -> lash_core::ToolDefinition {
+        self.recorded.clone()
     }
 }
 

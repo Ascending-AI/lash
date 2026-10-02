@@ -24,6 +24,9 @@ pub enum RuntimeErrorCause {
     VmWorker {
         outcome: Box<lash_vm_protocol::InfrastructureOutcome>,
     },
+    PluginExecution {
+        refusal: Box<crate::store::plugin_writers::PluginExecutionRefusal>,
+    },
     PluginFormat {
         refusal: Box<crate::plugin_state::FormatRefusal>,
     },

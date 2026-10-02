@@ -830,8 +830,9 @@ pub mod plugins {
     /// and the formats it reads and writes. The build generation is computed
     /// from every registered factory's declaration, in hook order.
     pub use lash_core::plugin::{
-        BehaviorRevision, FormatVersion, PluginComposition, PluginDeclaration,
-        PluginDeclarationError, PluginId,
+        BehaviorRevision, FormatVersion, PluginCallbackIdentity, PluginComposition,
+        PluginDeclaration, PluginDeclarationError, PluginExecutionRefusal, PluginId,
+        PluginRevision,
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{

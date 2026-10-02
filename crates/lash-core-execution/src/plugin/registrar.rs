@@ -5,80 +5,74 @@ use super::*;
 
 #[derive(Clone)]
 pub(crate) struct RegisteredHook<T> {
-    pub(crate) plugin_id: String,
+    pub(crate) identity: PluginCallbackIdentity,
     pub(crate) hook: T,
 }
 
-#[derive(Clone)]
-pub(crate) struct RegisteredExclusiveHook<T> {
-    pub(crate) plugin_id: String,
-    pub(crate) hook: T,
-}
-
-pub(crate) fn current_registration_owner(registering_plugin_id: &Option<String>) -> String {
-    registering_plugin_id
-        .clone()
-        .unwrap_or_else(|| "__unknown__".to_string())
-}
+pub(crate) type RegisteredExclusiveHook<T> = RegisteredHook<T>;
 
 fn push_registered_hook<T>(
     hooks: &mut Vec<RegisteredHook<T>>,
-    registering_plugin_id: &Option<String>,
+    owner: &PluginRevision,
+    kind: &str,
     hook: T,
 ) {
+    let ordinal = hooks
+        .iter()
+        .filter(|registered| registered.identity.owner.plugin == owner.plugin)
+        .count();
     hooks.push(RegisteredHook {
-        plugin_id: current_registration_owner(registering_plugin_id),
+        identity: PluginCallbackIdentity {
+            owner: owner.clone(),
+            key: format!("{kind}:{ordinal}"),
+        },
         hook,
     });
 }
 
 fn push_prioritized_registered_hook<T>(
     hooks: &mut Vec<(i32, RegisteredHook<T>)>,
-    registering_plugin_id: &Option<String>,
+    owner: &PluginRevision,
+    kind: &str,
     priority: i32,
     hook: T,
 ) {
+    let ordinal = hooks
+        .iter()
+        .filter(|(_, registered)| registered.identity.owner.plugin == owner.plugin)
+        .count();
     hooks.push((
         priority,
         RegisteredHook {
-            plugin_id: current_registration_owner(registering_plugin_id),
+            identity: PluginCallbackIdentity {
+                owner: owner.clone(),
+                key: format!("{kind}:{ordinal}"),
+            },
             hook,
         },
     ));
 }
 
-fn exclusive_hook_owner(
-    existing_owner: Option<&str>,
-    registering_plugin_id: &Option<String>,
-    hook_kind: &str,
-    hook_name: &str,
-) -> Result<String, PluginError> {
-    let plugin_id = registering_plugin_id
-        .clone()
-        .ok_or_else(|| PluginError::Registration("missing registering plugin id".to_string()))?;
-    if let Some(existing) = existing_owner {
-        return Err(PluginError::Registration(format!(
-            "duplicate {hook_kind} for `{hook_name}`: `{plugin_id}` conflicts with `{existing}`"
-        )));
-    }
-    Ok(plugin_id)
-}
-
 fn register_singleton_hook<H>(
     slot: &mut Option<RegisteredExclusiveHook<H>>,
-    registering_plugin_id: &Option<String>,
+    owner: &PluginRevision,
     hook_kind: &str,
     hook_name: &str,
     hook: H,
 ) -> Result<(), PluginError> {
-    let plugin_id = exclusive_hook_owner(
-        slot.as_ref()
-            .map(|registered| registered.plugin_id.as_str()),
-        registering_plugin_id,
-        hook_kind,
-        hook_name,
-    )?;
-    *slot = Some(RegisteredExclusiveHook { plugin_id, hook });
+    if let Some(existing) = slot {
+        return Err(PluginError::Registration(format!(
+            "duplicate {hook_kind} for `{hook_name}`: `{}` conflicts with `{}`",
+            owner.plugin, existing.identity.owner.plugin,
+        )));
+    }
+    *slot = Some(RegisteredHook {
+        identity: PluginCallbackIdentity {
+            owner: owner.clone(),
+            key: hook_name.into(),
+        },
+        hook,
+    });
     Ok(())
 }
 
@@ -116,8 +110,8 @@ pub(crate) struct PluginContributions {
 pub struct PluginRegistrar {
     pub(super) state: Option<super::PluginStateStore>,
     pub(crate) contributions: PluginContributions,
-    pub(crate) registering_plugin_id: Option<String>,
-    tool_names: BTreeSet<String>,
+    pub(crate) owner: PluginRevision,
+    pub(super) tool_names: BTreeSet<String>,
 }
 
 pub struct ToolRegistrations<'a> {
@@ -233,7 +227,8 @@ impl SessionRegistrations<'_> {
     pub fn on_event(self, hook: PluginLifecycleEventHook) {
         push_registered_hook(
             &mut self.reg.contributions.runtime_event_hooks,
-            &self.reg.registering_plugin_id,
+            &self.reg.owner,
+            "runtime_event",
             hook,
         );
     }
@@ -428,7 +423,8 @@ impl ContextRegistrations<'_> {
     pub fn prepare_turn(self, priority: i32, transform: Arc<dyn TurnContextTransform>) {
         push_prioritized_registered_hook(
             &mut self.reg.contributions.turn_context_transforms,
-            &self.reg.registering_plugin_id,
+            &self.reg.owner,
+            "turn_context_transform",
             priority,
             transform,
         );
@@ -438,7 +434,8 @@ impl ContextRegistrations<'_> {
     pub fn compact(self, priority: i32, compactor: Arc<dyn ContextCompactor>) {
         push_prioritized_registered_hook(
             &mut self.reg.contributions.context_compactors,
-            &self.reg.registering_plugin_id,
+            &self.reg.owner,
+            "context_compactor",
             priority,
             compactor,
         );
@@ -449,7 +446,8 @@ impl ContextRegistrations<'_> {
     pub fn pressure(self, priority: i32, hook: Arc<dyn ContextPressureHook>) {
         push_prioritized_registered_hook(
             &mut self.reg.contributions.context_pressure_hooks,
-            &self.reg.registering_plugin_id,
+            &self.reg.owner,
+            "context_pressure",
             priority,
             hook,
         );
@@ -498,11 +496,11 @@ impl PluginRegistrar {
             .expect("registrar is bound during registration")
     }
 
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(owner: PluginRevision) -> Self {
         Self {
             state: None,
             contributions: PluginContributions::default(),
-            registering_plugin_id: None,
+            owner,
             tool_names: BTreeSet::new(),
         }
     }
@@ -566,7 +564,8 @@ impl PluginRegistrar {
         }
         push_registered_hook(
             &mut self.contributions.tool_providers,
-            &self.registering_plugin_id,
+            &self.owner,
+            "tool_provider",
             provider,
         );
         Ok(())
@@ -591,7 +590,8 @@ impl PluginRegistrar {
     fn add_tool_catalog_contributor(&mut self, contributor: ToolCatalogContributor) {
         push_registered_hook(
             &mut self.contributions.tool_catalog_contributors,
-            &self.registering_plugin_id,
+            &self.owner,
+            "tool_catalog",
             contributor,
         );
     }
@@ -599,7 +599,8 @@ impl PluginRegistrar {
     fn add_before_turn_hook(&mut self, hook: BeforeTurnHook) {
         push_registered_hook(
             &mut self.contributions.before_turn_hooks,
-            &self.registering_plugin_id,
+            &self.owner,
+            "before_turn",
             hook,
         );
     }
@@ -607,7 +608,8 @@ impl PluginRegistrar {
     fn add_before_tool_call_hook(&mut self, hook: BeforeToolCallHook) {
         push_registered_hook(
             &mut self.contributions.before_tool_call_hooks,
-            &self.registering_plugin_id,
+            &self.owner,
+            "before_tool_call",
             hook,
         );
     }
@@ -615,7 +617,8 @@ impl PluginRegistrar {
     fn add_after_tool_call_hook(&mut self, hook: AfterToolCallHook) {
         push_registered_hook(
             &mut self.contributions.after_tool_call_hooks,
-            &self.registering_plugin_id,
+            &self.owner,
+            "after_tool_call",
             hook,
         );
     }
@@ -623,7 +626,8 @@ impl PluginRegistrar {
     fn add_after_turn_hook(&mut self, hook: AfterTurnHook) {
         push_registered_hook(
             &mut self.contributions.after_turn_hooks,
-            &self.registering_plugin_id,
+            &self.owner,
+            "after_turn",
             hook,
         );
     }
@@ -631,7 +635,8 @@ impl PluginRegistrar {
     fn add_checkpoint_hook(&mut self, hook: CheckpointHook) {
         push_registered_hook(
             &mut self.contributions.checkpoint_hooks,
-            &self.registering_plugin_id,
+            &self.owner,
+            "checkpoint",
             hook,
         );
     }
@@ -639,7 +644,8 @@ impl PluginRegistrar {
     fn add_assistant_stream_hook(&mut self, hook: AssistantStreamHook) {
         push_registered_hook(
             &mut self.contributions.assistant_stream_hooks,
-            &self.registering_plugin_id,
+            &self.owner,
+            "assistant_stream",
             hook,
         );
     }
@@ -647,7 +653,8 @@ impl PluginRegistrar {
     fn add_assistant_response_hook(&mut self, hook: AssistantResponseHook) {
         push_registered_hook(
             &mut self.contributions.assistant_response_hooks,
-            &self.registering_plugin_id,
+            &self.owner,
+            "assistant_response",
             hook,
         );
     }
@@ -655,7 +662,8 @@ impl PluginRegistrar {
     fn add_assistant_stream_finished_hook(&mut self, hook: AssistantStreamFinishedHook) {
         push_registered_hook(
             &mut self.contributions.assistant_stream_finished_hooks,
-            &self.registering_plugin_id,
+            &self.owner,
+            "assistant_stream_finished",
             hook,
         );
     }
@@ -666,7 +674,7 @@ impl PluginRegistrar {
     ) -> Result<(), PluginError> {
         register_singleton_hook(
             &mut self.contributions.assistant_prose_projector,
-            &self.registering_plugin_id,
+            &self.owner,
             "assistant prose projector",
             "assistant_prose_projector",
             provider,
@@ -676,7 +684,8 @@ impl PluginRegistrar {
     fn add_presentation_step(&mut self, step: ToolPresentationStep) {
         push_registered_hook(
             &mut self.contributions.presentation_steps,
-            &self.registering_plugin_id,
+            &self.owner,
+            "presentation_step",
             step,
         );
     }
@@ -687,17 +696,11 @@ impl PluginRegistrar {
     ) -> Result<(), PluginError> {
         register_singleton_hook(
             &mut self.contributions.presentation_presenter,
-            &self.registering_plugin_id,
+            &self.owner,
             "tool presentation presenter",
             "presentation_presenter",
             presenter,
         )
-    }
-
-    fn operation_owner(&self) -> Result<String, PluginError> {
-        self.registering_plugin_id
-            .clone()
-            .ok_or_else(|| PluginError::Registration("missing registering plugin id".to_string()))
     }
 
     fn ensure_unique_operation_name(&self, name: &str) -> Result<(), PluginError> {
@@ -714,10 +717,13 @@ impl PluginRegistrar {
         operation: PluginOperationRegistration,
     ) -> Result<(), PluginError> {
         self.ensure_unique_operation_name(&operation.def().name)?;
-        let plugin_id = self.operation_owner()?;
+        let identity = PluginCallbackIdentity {
+            owner: self.owner.clone(),
+            key: format!("operation:{}", operation.def().name),
+        };
         self.contributions.plugin_operations.insert(
             operation.def().name.clone(),
-            RegisteredPluginOperation::new(plugin_id, operation),
+            RegisteredPluginOperation::new(identity, operation),
         );
         Ok(())
     }
@@ -728,7 +734,7 @@ impl PluginRegistrar {
     ) -> Result<(), PluginError> {
         register_singleton_hook(
             &mut self.contributions.protocol_session,
-            &self.registering_plugin_id,
+            &self.owner,
             "protocol session capability",
             "protocol_session",
             provider,
@@ -741,7 +747,7 @@ impl PluginRegistrar {
     ) -> Result<(), PluginError> {
         register_singleton_hook(
             &mut self.contributions.code_executor,
-            &self.registering_plugin_id,
+            &self.owner,
             "code executor capability",
             "code_executor",
             provider,
@@ -754,7 +760,7 @@ impl PluginRegistrar {
     ) -> Result<(), PluginError> {
         register_singleton_hook(
             &mut self.contributions.protocol_driver,
-            &self.registering_plugin_id,
+            &self.owner,
             "protocol driver capability",
             "protocol_driver",
             provider,

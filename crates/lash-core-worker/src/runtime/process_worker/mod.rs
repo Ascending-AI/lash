@@ -378,6 +378,13 @@ impl DurableProcessWorker {
             registration,
             process_id: process_id.clone(),
         };
+        if let Some(plugins) = plugin_admission.as_ref()
+            && let Err(error) = self.config.plugin_host.validate_plugin_admission(plugins)
+        {
+            self.park_refused_process(&process_id, &error, &park_authority)
+                .await?;
+            return Err(error);
+        }
         let runtime = Box::pin(ProcessRuntimeContext::for_admitted(
             ProcessRuntimePorts {
                 host: self.config.runtime_host.clone(),

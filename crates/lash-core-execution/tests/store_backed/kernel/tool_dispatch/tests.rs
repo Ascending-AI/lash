@@ -1704,9 +1704,12 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
         provider,
     )
     .await;
-    let grant = crate::ToolExecutionGrant::from_definition(named_beta_tool("host_only"))
-        .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
-        .with_execution_binding(json!({ "kind": "test", "route": "deferred" }));
+    let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        named_beta_tool("host_only"),
+    )
+    .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
+    .with_execution_binding(json!({ "kind": "test", "route": "deferred" }));
     let pending = crate::sansio::PendingToolCall {
         call_id: lash_core_execution::ToolCallId::fixture("grant-call"),
         provider_call_id: None,

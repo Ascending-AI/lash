@@ -91,6 +91,7 @@ fn request_with_identity(identity: ToolAttemptLineage) -> ToolChildRequest {
             prepared_payload: serde_json::Value::Null,
         },
         ToolChildAdmission::Catalog {
+            owner: crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
             manifest: Box::new(manifest("search")),
         },
         identity,

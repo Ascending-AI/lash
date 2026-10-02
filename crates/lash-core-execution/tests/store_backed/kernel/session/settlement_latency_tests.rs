@@ -376,8 +376,11 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
         probe_tool("granted_retry_probe").with_retry_policy(crate::ToolRetryPolicy::Never);
     let granted_definition =
         probe_tool("granted_retry_probe").with_retry_policy(crate::ToolRetryPolicy::safe(2, 0, 0));
-    let grant = crate::ToolExecutionGrant::from_definition(granted_definition)
-        .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID);
+    let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new("probe_tools", crate::plugin::BehaviorRevision::ONE),
+        granted_definition,
+    )
+    .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID);
     let provider: Arc<dyn crate::ToolProvider> = Arc::new(GrantedRetryProbeTools {
         catalog_definition,
         attempts: Arc::clone(&attempts),

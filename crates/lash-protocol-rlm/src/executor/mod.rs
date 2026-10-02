@@ -769,11 +769,23 @@ async fn execute_code_in_worker_scope(
     }
     let deferred_execution_grants = match &resumed {
         Some(resumed) => resumed.deferred_execution_grants.clone(),
-        None => state
+        None => match state
             .deferred_link
             .as_ref()
-            .map(deferred_execution_grants)
-            .unwrap_or_default(),
+            .map(|record| deferred_execution_grants(record, &ctx))
+            .transpose()
+        {
+            Ok(grants) => grants.unwrap_or_default(),
+            Err(error) => {
+                ctx.record_nested_effect_error(error.clone().into());
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    error.to_string(),
+                );
+            }
+        },
     };
     let lashlang_execution_trace =
         foreground_lashlang_execution_trace(&ctx, &linked_module.artifact, dialect.language_id());
@@ -1416,7 +1428,8 @@ fn select_deferred_resolution_link(
 
 fn deferred_execution_grants(
     record: &lash_lashlang_runtime::DeferredLink,
-) -> BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant> {
+    ctx: &RuntimeExecutionContext<'_>,
+) -> Result<BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>, lash_core::PluginError> {
     record
         .outcomes
         .values()
@@ -1424,13 +1437,19 @@ fn deferred_execution_grants(
             let lash_lashlang_runtime::Resolution::Resolved(grant) = resolution else {
                 return None;
             };
+            let owner = match ctx
+                .tool_execution_owner(&grant.definition.manifest.id, grant.source_id.as_deref())
+            {
+                Ok(owner) => owner,
+                Err(error) => return Some(Err(error)),
+            };
             let mut execution_grant =
-                lash_core::ToolExecutionGrant::from_definition(grant.definition.clone())
+                lash_core::ToolExecutionGrant::from_definition(owner, grant.definition.clone())
                     .with_execution_binding(grant.execution_binding.clone());
             if let Some(source_id) = grant.source_id.as_deref() {
                 execution_grant = execution_grant.with_source_id(source_id);
             }
-            Some((execution_grant.manifest().id.clone(), execution_grant))
+            Some(Ok((execution_grant.manifest().id.clone(), execution_grant)))
         })
         .collect()
 }

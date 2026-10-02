@@ -127,9 +127,10 @@ impl EffectGroupDispatchImpl {
             "effect group {} child {}",
             request.group_key, request.position
         );
+        let failure = refusal.attempt_failure_text();
         if self.opener_released(&request.group_key).await {
             return Err(crate::parked_turn_failure(format!(
-                "{label}: its group is closed, so no turn is parked for it: {refusal}"
+                "{label}: its group is closed, so no turn is parked for it: {failure}"
             )));
         }
         let parked = crate::turn_handler::park_refused_group_child(
@@ -139,7 +140,7 @@ impl EffectGroupDispatchImpl {
         )
         .await;
         match parked {
-            Ok(Some(_)) => Err(crate::parked_turn_failure(format!("{label}: {refusal}"))),
+            Ok(Some(_)) => Err(crate::parked_turn_failure(format!("{label}: {failure}"))),
             Ok(None) if refusal.code == RuntimeErrorCode::LashlangCellBindingDrift => {
                 tracing::warn!(
                     group_key = %request.group_key,
@@ -156,7 +157,7 @@ impl EffectGroupDispatchImpl {
                 )
                 .await
             }
-            Ok(None) => Err(crate::parked_turn_failure(format!("{label}: {refusal}"))),
+            Ok(None) => Err(crate::parked_turn_failure(format!("{label}: {failure}"))),
             Err(error) => Err(std::io::Error::other(format!(
                 "{label} parked on `{}` and its turn's park could not be recorded: {error}",
                 refusal.code
@@ -1271,12 +1272,15 @@ fn refuse_unrecorded_abort(
     match outcome {
         EffectGroupChildRunOutcome::Completed {
             outcome: Err(error),
-        } if is_engine_retried_fault(error) => Err(std::io::Error::other(format!(
-            "effect group {} child {} aborted with a live fault, which is never its \
-             recorded outcome; the engine retries the child: {error}",
-            request.group_key, request.position
-        ))
-        .into()),
+        } if is_engine_retried_fault(error) => {
+            Err(crate::turn_handler::retried_attempt_failure(format!(
+                "effect group {} child {} aborted with a live fault, which is never its \
+             recorded outcome; the engine retries the child: {}",
+                request.group_key,
+                request.position,
+                error.attempt_failure_text()
+            )))
+        }
         // A child whose replay diverged parks: it is found mid-replay, where
         // recording a settlement would propose a command the journal does not
         // hold, so the attempt ends the one way a park ends (FIG-3697).
@@ -1284,8 +1288,10 @@ fn refuse_unrecorded_abort(
             outcome: Err(error),
         } if error.turn_failure_cause() == lash_core::TurnFailureCause::Parked => {
             Err(crate::parked_turn_failure(format!(
-                "effect group {} child {}: {error}",
-                request.group_key, request.position
+                "effect group {} child {}: {}",
+                request.group_key,
+                request.position,
+                error.attempt_failure_text()
             )))
         }
         _ => Ok(()),
