@@ -1,0 +1,186 @@
+# Tool-run contract
+
+This is the contract every worker of the tool execution end state (FIG-4864)
+builds against. Every ordinary tool body becomes one recorded attempt in its
+logical Run's opener journal. The Run owns admission, retries, the
+final-or-cancel decision, protected drain, presentation, incorporation,
+aggregates and surviving losers. Long, isolated or independently living work
+is a process admitted before its body runs.
+
+The seams below are pinned as types, pure transitions and codec/refusal
+witnesses. They are expansion interfaces: each names the ticket that wires
+it into production, and no production route reads it before that ticket
+lands. The normative specification behind them is the FIG-4864 arc
+specification (`tool-final-spec.md`), including the binding Q2-Q5 rulings,
+the hook policy and the adopted hook-composition ruling. FIG-529's
+effect-host simulator targets these seams, not `ToolChildHost`.
+
+## Seams
+
+| Seam | Contract | Pinned in | Witness | Implementing owner | Consumers |
+| --- | --- | --- | --- | --- | --- |
+| K0 | SDK `Endpoint`, contexts, serde and named `run` with a retry policy, reached only through `lash_restate::restate_sdk` | `crates/lash-restate/src/tests/tool_run_sdk_contract.rs` | compile | FIG-4870 (fork intake) | FIG-4871-4874, every host |
+| K1 | Whole-round admission: owner, call ids, operand aliases, prepared request, three-capability declaration, automatic callback binding, runtime retry/cancel policy, before-check record, reserved capacity | `lash_core_store::tool_run::admission` | codec, refusal | FIG-4875 | FIG-4877, FIG-4879, FIG-4855 |
+| K1/K3/K10 hooks | Tool hook phases, occurrences, verdicts, reducer and selection | `lash_core_store::tool_run::tool_hooks` | codec, reducer permutations | FIG-1399 (API cutover, ADR 0059 replacement) | FIG-4875, FIG-4877, FIG-4878 |
+| K2 | Owner-qualified material references and typed retained-result refusals (Q4) | `lash_core_store::tool_run::material` | codec, refusal | FIG-4876, FIG-4889 | FIG-4877, FIG-4883, FIG-4739 |
+| K3/K9 | Run events with stable ordinals, the sole-active-segment fold, final-or-cancel once, protected drain frontier, reported-retry schedule, `Live`/`Closing`/`Settled` | `lash_core_store::tool_run::run_event` | codec, fold refusals | FIG-4877, FIG-4879, FIG-4880, FIG-4882 | FIG-4881, FIG-4892, FIG-529 |
+| K4 | Immutable `Resolved(ref)`/`Cancelled` source seal, authority, short subscriptions | `lash_core_store::tool_run::source_seal` | codec, refusal | FIG-4883, FIG-4740, FIG-4891 | FIG-4886, FIG-4887 |
+| K5 | Declared start obligation: stable `StartKey`, registration, environment, consumer hold; cancel before/after admission | `crates/lash-core-execution/src/runtime/process/declared_start.rs` | codec, refusal | FIG-4884, FIG-4885 | FIG-4887, FIG-4888 |
+| K6 | RequestCut, Quiescing, Capturable; complete Run transfer bound to its owner | `lash_core_store::tool_run::continuation` | codec, refusal, L10 protocol witness | FIG-4881, FIG-4739, FIG-4890, FIG-4889 | FIG-4891, FIG-4892 |
+| K7 | One accepted and one terminal business receipt per call id; observation permits minted from records | `lash_core_store::tool_run::receipt` | transition | FIG-4830 | FIG-4848, tracing |
+| K8 | Operation Run input kind over the session-operation opener (Q2) | `lash_core_store::tool_run::operation` | codec, identity | FIG-4888, FIG-4893 | host operations |
+| K10 | Callback slots and state authority, command batches, resolutions, applied frontier (Q5) | `lash_core_store::tool_run::state_command` | codec, refusal, frontier | FIG-4878 (FIG-4857 for construction) | FIG-4879, FIG-4880 |
+
+The plugin registrar mints every callback key from `CallbackSlot`, so a
+callback slot cannot exist without its key prefix and its state authority.
+
+## Binding rulings the seams encode
+
+**Declaration (Q3).** The author declares exactly `may_defer`, `intents` and
+`isolated`. An isolated call is a process from its start with no inline body,
+so it declares neither `may_defer` nor intents. There is no per-call
+timeout, duration, budget or idempotent capability, and the declaration
+refuses those fields when decoding. Retry and cancel policy are recorded
+runtime policy. Crash recovery is at-least-once under the stable
+`ToolCallId` and attempt ordinal; only a reported retry advances the ordinal.
+`ToolCallId` is the external idempotency key.
+
+**Binding (FIG-4854).** Admission binds the executable, preparation and
+presentation callbacks as `PluginCallbackIdentity { owner: PluginRevision,
+key }`. A resumed call whose bound plugin revision is unavailable refuses
+with `PluginExecutionRefusal` (`plugin_revision_unavailable`) before any
+body, route or identity is chosen.
+
+**Material (Q4).** A reference carries owner (Run, process or source), role
+(prepared request, attempt output, presentation), location (journal-local or
+retained artifact) and a digest. Retention moves bytes, never identity. A
+failed read is a typed `MaterialRefusal` and never re-executes a body.
+
+**Operation (Q2).** A tool-bearing host operation is a Run with its own input
+kind, driven by the session's keyed turn service, over the existing
+session-operation opener. Its call ids and start keys keep their bytes.
+
+**State (Q5) and hook policy.** Only before-turn, after-turn, checkpoint and
+after-tool (result check) callbacks may return state commands; every other
+callback is decision-only. Commands are reduced privately, recorded with their
+predecessor, published after durable acceptance, and replayed without running
+a body, hook, reducer or converter. One refusal publishes nothing.
+
+**Hook composition.** For one admitted call: argument transforms, provider
+preparation, then every before-check on one immutable prepared call. Checks
+reduce by AbortRun > Deny/Cancel > CachedSuccess > Allow, ties broken by
+ascending UTF-8 plugin id and then callback key. A cached success is data
+only and still passes the result transforms and after-checks. After-checks
+return only Allow, Deny, Cancel or AbortRun and never replace a result.
+AbortRun fails the call and stops the owning logical Run: the fold refuses
+any later admission and retry. Every reply is recorded with its callback, in
+reduction order; a recorded record is served, never re-reduced. Each reply
+is keyed by its occurrence: admission, attempt ordinal, Deferred completion
+of an attempt, or cached.
+
+## Field ownership
+
+| Record | Owns | Refers to |
+| --- | --- | --- |
+| A, admission | prepared request material, declaration, binding, policy, before-check record, operand slots, capacity | owner opener |
+| X, attempt | attempt output and captures, or the Deferred source key | attempt ordinal |
+| D, decision | final-or-cancel, rank, after-check record, declarations flag, resolved state batch | X or the cached result |
+| V, presentation | presentation bytes distinct from the output, incorporation | D |
+| Source seal | the resolved result, owned by the source | source key |
+| Run transfer | event prefix, retained material, subscriptions, owed starts and cancels, state frontier, capacity, VM continuation flag | owner opener |
+
+Coordination records hold references, never payload copies. A handover may
+copy material into a retained artifact; that copy is counted, and it is not
+a second canonical owner.
+
+## Identity preimages
+
+Stored shapes change in place before the 1.0 cut; identities do not move
+with them. The goldens in
+`crates/lash-core-store/src/tool_run/identity_tests.rs` pin these preimages
+byte for byte (removal row M0201):
+
+- `ToolCallId`: `tc_` plus BLAKE3 under `lash-tool-call-id/v1`, rooted in the
+  opener's admission (ADR 0117 §2).
+- Opener encodings: `turn:`, `drain:` (session operation) and `process:`,
+  each component length-prefixed.
+- `StartKey`: `process-start-key:v1:<namespace>:blake3:<hex>` for the
+  intent, trigger, host and keyless families; keyless keys take scope tags
+  1 turn, 2 process, 3 session operation, 4 session delete and
+  5 runtime operation.
+
+A change that moves one of these is an identity change, never a shape change.
+
+## Journal generation lanes
+
+A build's drain generation hashes every drain-surface format version,
+`JOURNAL_LOGIC_EPOCH`, the session admission window and the ordered plugin
+composition (ADR 0106 §1). Every landing that changes a handler's journaled
+command structure — what it records, the order of its records, or a step's
+name — moves that handler's lane in the same commit:
+
+| Handler | Lane | Moves with |
+| --- | --- | --- |
+| `LashTurn` `run`/`close` and the Run's A/X/D/V records | pinned | `EFFECT_JOURNAL_VERSION` for recorded effect bytes or positions; `LASH_SESSION_SHIFT_VERSION` for run requests and replies |
+| `LashSession` `shift`, including the operation input kind | pinned | `LASH_SESSION_SHIFT_VERSION` |
+| `LashProcessWorkflow` segments and declared starts | pinned | `RESTATE_PROCESS_JOURNAL_VERSION`, `PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION`, and `EFFECT_JOURNAL_VERSION` for the effects it records |
+| `EffectGroupDispatch` | generation only | `EFFECT_GROUP_DISPATCH_JOURNAL_VERSION`; no new structure, removed by FIG-4900 |
+| `LashDurableWaitWorkflow` source seal requests | shared | `DURABLE_WAIT_REQUEST_VERSION` |
+| Step order or names with unchanged bytes | all pinned | `JOURNAL_LOGIC_EPOCH` |
+
+Shared object state keeps its stamped coexistence rules and has no lane.
+The release replay corpus (`crates/lash-restate/src/tests/replay_corpus.rs`)
+refuses an added or reordered step under an unchanged generation. Moving a
+lane is the one version change the pre-1.0 freeze still requires: stored
+shapes change in place, but a journal never replays under another command
+structure. No revision replays old and new structure together. FIG-4862's
+`unfinished_invocations` drain hold keeps the old deployment registered until
+its invocations finish.
+
+The landings that change command structure are FIG-4876, FIG-4877, FIG-4879,
+FIG-4880, FIG-4882, FIG-4883, FIG-4740, FIG-4884 through FIG-4888, FIG-4893,
+FIG-4894, FIG-1863, FIG-4895, FIG-4855 and FIG-4878. Each owns its lane move.
+
+## Laws
+
+| Law | Subject | Owners | Tiers |
+| --- | --- | --- | --- |
+| L01 | Independent parallel receipts | FIG-4871, FIG-4879 | Double first; live SDK |
+| L02 | Partial-result and proposal replay | FIG-4871, FIG-4872, FIG-4877, FIG-4879 | Double and live SDK; stores when retained |
+| L03 | Final and cancel choose once | FIG-4871, FIG-4877, FIG-4879, FIG-4880 | Double; live cancellation |
+| L04 | Protected final precedes effects and observations | FIG-4880, FIG-4830 | Double; store tiers for intents |
+| L05 | Aggregate semantics remain distinct | FIG-4879, FIG-4882, FIG-4894, FIG-1863, FIG-4895 | Double; protocol tests |
+| L06 | Losers and program effects keep progressing | FIG-4882, FIG-4881, FIG-4739 | Double; handover stores |
+| L07 | Deferred terminals are immutable | FIG-4883, FIG-4740, FIG-4891 | Double, SQLite memory/file-reopen, PostgreSQL; live transfer |
+| L08 | Declared starts have one recoverable identity | FIG-4884, FIG-4885, FIG-4887, FIG-4888 | Double and all store tiers |
+| L09 | Continuation carries the entire logical Run | FIG-4739, FIG-4890, FIG-4889 | SQLite memory/file-reopen, PostgreSQL, double and live |
+| L10 | Cancelled continuation cannot infect a fresh Run | FIG-4739, FIG-4893; FIG-4867 protocol witness | All store tiers; protocol witness |
+| L11 | Old deployments can drain while transferred sources stay pending | FIG-4891 | Double plus live deployment gate |
+| L12 | Admission, binding and material cannot drift | FIG-4875, FIG-4876, FIG-4855, FIG-4857, FIG-4878, FIG-4889; FIG-4867 codec witnesses | Codec witnesses, double, relevant store tiers |
+| L13 | Retention is bounded without resurrection | FIG-4889, FIG-1509, FIG-4900 | SQLite memory/file-reopen and PostgreSQL |
+| L14 | Receipts and usage describe logical facts | FIG-4830, FIG-4852 | Double and tracing fixtures |
+| L15 | The full cost is counted | FIG-4868, FIG-4876, FIG-4878, FIG-4905 | Controlled double/live measurement |
+| L16 | A physical cut waits for local durability | FIG-4881, FIG-4739, FIG-4890 | Double plus SQLite memory/file-reopen, PostgreSQL and live handover |
+| L17 | Reported retries replay their dynamic schedule | FIG-4879 | Double first; live SDK |
+| L18 | Protected drain is transitive across empty ranks | FIG-4880 | Double; intent store tiers |
+| L19 | Overlapping plugin state never depends on unrecorded work | FIG-4878, FIG-4857 | Double and SQLite memory/file-reopen/PostgreSQL checkpoint tiers; live ACK witness |
+| L20 | Park recovery needs no group catalog | FIG-4892, FIG-4898 | All three store tiers plus double |
+| L21 | Every intermediate command and surface change has a compiling generation closure | FIG-4867, FIG-4870, FIG-4873, FIG-4894, FIG-1863, FIG-4895, FIG-4897 through FIG-4903 | Owning kiln check/test, schema/facade gates; live old-route drain |
+| L22 | Runtime never invents a per-call timeout | FIG-4875, FIG-4740, FIG-4886 | Double, schema/facade witnesses and continuation store tiers |
+
+## File inventory
+
+`tool-run-inventory.tsv` beside this document lists all 742 files the end
+state touches: 55 delete, 608 edit and 79 survive with a recorded job. Each
+row names its owning ticket, the earlier tickets whose closures stage edits
+in the same file, the matched families and the replacement or surviving job.
+Line anchors are intake anchors at 48f11c5fa7; owners re-run the census at
+intake, classify new hits and inspect every match in their files. The
+hook-composition removal rows HC01-HC17 belong to FIG-1399, FIG-4855,
+FIG-4856 and FIG-4878.
+
+Completion means no unresolved row. A survivor keeps an explicit job and is
+disconnected from removed transport. A contraction removes a definition with
+its imports, re-exports, constructors, trait methods, exhaustive matches,
+format tables, guards, codecs, tests, corpus loaders, generated schemas and
+target membership in one compiling landing.

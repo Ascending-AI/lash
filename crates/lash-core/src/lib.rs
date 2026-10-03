@@ -94,6 +94,8 @@ pub mod stable_hash {
 pub use lash_core_execution::store;
 pub use lash_core_ids::task;
 pub use lash_core_store::store_backend_support;
+/// The tool-run contract's pinned seams (FIG-4867).
+pub use lash_core_store::tool_run;
 /// Standard-lock poison recovery traits used across Lash hosts and runtimes.
 pub mod sync {
     pub use lash_sansio::sync::*;

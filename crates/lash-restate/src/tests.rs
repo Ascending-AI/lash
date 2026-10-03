@@ -302,6 +302,7 @@ mod segment_redrive_on_the_double;
 mod session_shift_roll_on_the_double;
 mod shift_laws_on_the_double;
 mod tool_context_conformance;
+mod tool_run_sdk_contract;
 mod trigger_authority;
 mod turn_cancel_modes;
 mod turn_crash_on_the_double;

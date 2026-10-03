@@ -1,4 +1,5 @@
 mod awaiter;
+mod declared_start;
 mod definition;
 mod definition_ref;
 mod definition_store;
@@ -34,6 +35,10 @@ mod wake;
 pub use awaiter::{
     ProcessChangeHub, ProcessChangeSubscription, ProcessEventSink, ProcessEventSinkRegistration,
     WatchedRegistry, watch_process_registry, watch_process_registry_with_sink,
+};
+pub use declared_start::{
+    DeclaredStartObligation, DeclaredStartObligationRefusal, DeclaredStartPhase,
+    StartCancelDecision,
 };
 pub use definition::{
     InvalidProcessDefinitionId, ProcessDefinition, ProcessDefinitionDraft,

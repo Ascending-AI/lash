@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use lash_core_store::tool_run::CallbackSlot;
+
 use super::*;
 
 #[derive(Clone)]
@@ -14,7 +16,7 @@ pub(crate) type RegisteredExclusiveHook<T> = RegisteredHook<T>;
 fn push_registered_hook<T>(
     hooks: &mut Vec<RegisteredHook<T>>,
     owner: &PluginRevision,
-    kind: &str,
+    slot: CallbackSlot,
     hook: T,
 ) {
     let ordinal = hooks
@@ -24,7 +26,7 @@ fn push_registered_hook<T>(
     hooks.push(RegisteredHook {
         identity: PluginCallbackIdentity {
             owner: owner.clone(),
-            key: format!("{kind}:{ordinal}"),
+            key: format!("{}:{ordinal}", slot.key_prefix()),
         },
         hook,
     });
@@ -33,7 +35,7 @@ fn push_registered_hook<T>(
 fn push_prioritized_registered_hook<T>(
     hooks: &mut Vec<(i32, RegisteredHook<T>)>,
     owner: &PluginRevision,
-    kind: &str,
+    slot: CallbackSlot,
     priority: i32,
     hook: T,
 ) {
@@ -46,7 +48,7 @@ fn push_prioritized_registered_hook<T>(
         RegisteredHook {
             identity: PluginCallbackIdentity {
                 owner: owner.clone(),
-                key: format!("{kind}:{ordinal}"),
+                key: format!("{}:{ordinal}", slot.key_prefix()),
             },
             hook,
         },
@@ -57,19 +59,21 @@ fn register_singleton_hook<H>(
     slot: &mut Option<RegisteredExclusiveHook<H>>,
     owner: &PluginRevision,
     hook_kind: &str,
-    hook_name: &str,
+    callback_slot: CallbackSlot,
     hook: H,
 ) -> Result<(), PluginError> {
     if let Some(existing) = slot {
         return Err(PluginError::Registration(format!(
-            "duplicate {hook_kind} for `{hook_name}`: `{}` conflicts with `{}`",
-            owner.plugin, existing.identity.owner.plugin,
+            "duplicate {hook_kind} for `{}`: `{}` conflicts with `{}`",
+            callback_slot.key_prefix(),
+            owner.plugin,
+            existing.identity.owner.plugin,
         )));
     }
     *slot = Some(RegisteredHook {
         identity: PluginCallbackIdentity {
             owner: owner.clone(),
-            key: hook_name.into(),
+            key: callback_slot.key_prefix().into(),
         },
         hook,
     });
@@ -231,7 +235,7 @@ impl SessionRegistrations<'_> {
         push_registered_hook(
             &mut self.reg.contributions.runtime_event_hooks,
             &self.reg.owner,
-            "runtime_event",
+            CallbackSlot::RuntimeEvent,
             hook,
         );
     }
@@ -427,7 +431,7 @@ impl ContextRegistrations<'_> {
         push_prioritized_registered_hook(
             &mut self.reg.contributions.turn_context_transforms,
             &self.reg.owner,
-            "turn_context_transform",
+            CallbackSlot::TurnContextTransform,
             priority,
             transform,
         );
@@ -438,7 +442,7 @@ impl ContextRegistrations<'_> {
         push_prioritized_registered_hook(
             &mut self.reg.contributions.context_compactors,
             &self.reg.owner,
-            "context_compactor",
+            CallbackSlot::ContextCompactor,
             priority,
             compactor,
         );
@@ -450,7 +454,7 @@ impl ContextRegistrations<'_> {
         push_prioritized_registered_hook(
             &mut self.reg.contributions.context_pressure_hooks,
             &self.reg.owner,
-            "context_pressure",
+            CallbackSlot::ContextPressure,
             priority,
             hook,
         );
@@ -568,7 +572,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.tool_providers,
             &self.owner,
-            "tool_provider",
+            CallbackSlot::ToolProvider,
             provider,
         );
         Ok(())
@@ -594,7 +598,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.tool_catalog_contributors,
             &self.owner,
-            "tool_catalog",
+            CallbackSlot::ToolCatalog,
             contributor,
         );
     }
@@ -603,7 +607,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.before_turn_hooks,
             &self.owner,
-            "before_turn",
+            CallbackSlot::BeforeTurn,
             hook,
         );
     }
@@ -612,7 +616,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.before_tool_call_hooks,
             &self.owner,
-            "before_tool_call",
+            CallbackSlot::BeforeToolCall,
             hook,
         );
     }
@@ -621,7 +625,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.after_tool_call_hooks,
             &self.owner,
-            "after_tool_call",
+            CallbackSlot::AfterToolCall,
             hook,
         );
     }
@@ -630,7 +634,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.after_turn_hooks,
             &self.owner,
-            "after_turn",
+            CallbackSlot::AfterTurn,
             hook,
         );
     }
@@ -639,7 +643,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.checkpoint_hooks,
             &self.owner,
-            "checkpoint",
+            CallbackSlot::Checkpoint,
             hook,
         );
     }
@@ -648,7 +652,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.assistant_stream_hooks,
             &self.owner,
-            "assistant_stream",
+            CallbackSlot::AssistantStream,
             hook,
         );
     }
@@ -657,7 +661,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.assistant_response_hooks,
             &self.owner,
-            "assistant_response",
+            CallbackSlot::AssistantResponse,
             hook,
         );
     }
@@ -666,7 +670,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.assistant_stream_finished_hooks,
             &self.owner,
-            "assistant_stream_finished",
+            CallbackSlot::AssistantStreamFinished,
             hook,
         );
     }
@@ -679,7 +683,7 @@ impl PluginRegistrar {
             &mut self.contributions.assistant_prose_projector,
             &self.owner,
             "assistant prose projector",
-            "assistant_prose_projector",
+            CallbackSlot::AssistantProseProjector,
             provider,
         )
     }
@@ -688,7 +692,7 @@ impl PluginRegistrar {
         push_registered_hook(
             &mut self.contributions.presentation_steps,
             &self.owner,
-            "presentation_step",
+            CallbackSlot::PresentationStep,
             step,
         );
     }
@@ -701,7 +705,7 @@ impl PluginRegistrar {
             &mut self.contributions.presentation_presenter,
             &self.owner,
             "tool presentation presenter",
-            "presentation_presenter",
+            CallbackSlot::PresentationPresenter,
             presenter,
         )
     }
@@ -722,7 +726,11 @@ impl PluginRegistrar {
         self.ensure_unique_operation_name(&operation.def().name)?;
         let identity = PluginCallbackIdentity {
             owner: self.owner.clone(),
-            key: format!("operation:{}", operation.def().name),
+            key: format!(
+                "{}:{}",
+                CallbackSlot::Operation.key_prefix(),
+                operation.def().name
+            ),
         };
         self.contributions.plugin_operations.insert(
             operation.def().name.clone(),
@@ -739,7 +747,7 @@ impl PluginRegistrar {
             &mut self.contributions.protocol_session,
             &self.owner,
             "protocol session capability",
-            "protocol_session",
+            CallbackSlot::ProtocolSession,
             provider,
         )
     }
@@ -752,7 +760,7 @@ impl PluginRegistrar {
             &mut self.contributions.code_executor,
             &self.owner,
             "code executor capability",
-            "code_executor",
+            CallbackSlot::CodeExecutor,
             provider,
         )
     }
@@ -765,7 +773,7 @@ impl PluginRegistrar {
             &mut self.contributions.protocol_driver,
             &self.owner,
             "protocol driver capability",
-            "protocol_driver",
+            CallbackSlot::ProtocolDriver,
             provider,
         )
     }
