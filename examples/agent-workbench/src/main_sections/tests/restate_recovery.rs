@@ -922,29 +922,35 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() -
 }
 
 fn assert_single_retry_marker_message(projection: &str, messages: &[lash::messages::Message]) {
-    // Settled: no turn of this session is running any more, so a protocol-owned
-    // reply would be admitted here if one stood as this turn's answer. The
-    // workbench's own committed copy follows it, so none does (FIG-1406).
-    let rlm_reply_ids = durable_rlm_reply_message_ids(messages, &BTreeSet::new());
-    let messages = messages
-        .iter()
-        .filter_map(|message| project_committed_chat_message(message, &rlm_reply_ids))
-        .collect::<Vec<_>>();
     let marker_messages = messages
         .iter()
         .filter(|message| {
-            message.role == "assistant"
-                && message.text.contains("retry observer single-copy marker")
+            message.reply_marker.is_some()
+                && lash::message_text(message).contains("retry observer single-copy marker")
         })
         .collect::<Vec<_>>();
     assert_eq!(
         marker_messages.len(),
         1,
-        "{projection} workbench projection duplicated retry prose: {messages:#?}"
+        "{projection} duplicated committed retry prose: {messages:#?}"
     );
+    let message = marker_messages[0];
+    let marker = message
+        .reply_marker
+        .as_ref()
+        .expect("selected committed reply");
     assert!(
-        marker_messages[0].id.starts_with("workbench-assistant:"),
-        "{projection} workbench projection retained protocol-owned prose: {messages:#?}"
+        matches!(message.origin.as_ref(), Some(lash::messages::MessageOrigin::TurnOutput { turn_id, .. }) if turn_id == marker.turn_id()),
+        "{projection} lost committed typed provenance"
+    );
+    assert_eq!(
+        message
+            .parts
+            .iter()
+            .filter(|part| part.id() == marker.part_id())
+            .count(),
+        1,
+        "{projection} reply marker does not name exactly one stored part"
     );
 }
 
@@ -1714,10 +1720,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         .await
         .expect("read the workbench state");
         let queued_reply_committed = snapshot.transcript.iter().any(|row| {
-            matches!(
-                row,
-                TranscriptRow::Message { message } if message.text.contains("queued turn settled")
-            )
+            row.provenance.is_turn_reply && row.content.text.contains("queued turn settled")
         });
         if snapshot.observation.turn_index >= 2 && queued_reply_committed {
             break snapshot;
@@ -1795,12 +1798,8 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     let committed = snapshot
         .transcript
         .iter()
-        .filter_map(|row| match row {
-            TranscriptRow::Message { message } => Some(message.text.clone()),
-            TranscriptRow::Reasoning { .. }
-            | TranscriptRow::CodeBlock { .. }
-            | TranscriptRow::Note { .. } => None,
-        })
+        .filter_map(chat_message_from_row)
+        .map(|message| message.text)
         .collect::<Vec<_>>();
     assert!(
         committed

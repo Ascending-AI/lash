@@ -97,10 +97,11 @@ fn transcript_answers(snapshot: &StateReadSnapshot) -> Vec<String> {
     snapshot
         .transcript
         .iter()
-        .flat_map(|row| match row {
-            TranscriptRow::Message { message } => vec![message.text.clone()],
-            TranscriptRow::CodeBlock { output, .. } => vec![output.clone()],
-            TranscriptRow::Reasoning { .. } | TranscriptRow::Note { .. } => Vec::new(),
+        .filter(|row| row.suppressed.is_none())
+        .flat_map(|row| {
+            [Some(row.content.text.clone()), row.content.output.clone()]
+                .into_iter()
+                .flatten()
         })
         .collect()
 }
@@ -109,9 +110,10 @@ pub(crate) fn transcript_code_languages(snapshot: &StateReadSnapshot) -> Vec<Str
     snapshot
         .transcript
         .iter()
-        .filter_map(|row| match row {
-            TranscriptRow::CodeBlock { language, .. } => Some(language.clone()),
-            _ => None,
+        .filter_map(|row| {
+            (row.kind == lash::transcript::TranscriptRowKind::CodeBlock)
+                .then(|| row.content.language.clone())
+                .flatten()
         })
         .collect()
 }
@@ -179,8 +181,9 @@ fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
         .expect("trigger resource operations are unique");
     lash::rlm::lang::add_trigger_register_tool_binding(&mut resources)
         .expect("trigger register tool binding is unique");
-    let modules: [(&[&str], &str, &[&str]); 4] = [
+    let modules: [(&[&str], &str, &[&str]); 5] = [
         (&["agents"], "Agents", &["spawn"]),
+        (&["control"], "Control", &["continue_as"]),
         (&["inbox", "work"], "Inbox", &["list", "send", "delete"]),
         (&["inbox", "personal"], "Inbox", &["list", "send", "delete"]),
         // The `tool-value` scenario's own tool, installed by
@@ -586,6 +589,7 @@ fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
         failure_provider::DevProviderScenario::RenderedSurface,
         failure_provider::DevProviderScenario::CodeFailure,
         failure_provider::DevProviderScenario::RetryResetPartial,
+        failure_provider::DevProviderScenario::TranscriptProjection,
     ];
     let environment = workbench_link_environment();
     let mut hits = Vec::new();
@@ -662,11 +666,13 @@ async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
     let blocks = projected
         .transcript
         .iter()
-        .filter_map(|row| match row {
-            TranscriptRow::CodeBlock {
-                language, success, ..
-            } => Some((language.clone(), *success)),
-            _ => None,
+        .filter_map(|row| {
+            (row.kind == lash::transcript::TranscriptRowKind::CodeBlock).then(|| {
+                (
+                    row.content.language.clone().unwrap(),
+                    row.content.success.unwrap(),
+                )
+            })
         })
         .collect::<Vec<_>>();
     assert!(
@@ -864,10 +870,7 @@ async fn a_name_no_one_has_is_still_refused_in_both_dialects() {
     let failures = projected
         .transcript
         .iter()
-        .filter_map(|row| match row {
-            TranscriptRow::CodeBlock { error, .. } => error.clone(),
-            _ => None,
-        })
+        .filter_map(|row| row.content.error.clone())
         .collect::<Vec<_>>();
     assert!(
         failures

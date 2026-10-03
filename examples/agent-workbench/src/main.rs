@@ -53,7 +53,7 @@ use lash::provider::ProviderHandle;
 use lash::sync::MutexExt;
 use lash::triggers::TriggerEvent;
 use lash::{
-    LashCore, SessionSpec, TurnActivity, TurnActivitySink, TurnEvent, TurnReport,
+    LashCore, SessionSpec, TurnActivity, TurnActivitySink, TurnEvent,
     tracing::{
         JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceContext, TraceEvent,
         TraceLashlangGraph, TraceLashlangGraphStore, TraceLevel, TraceRecord, TraceSink,
@@ -148,9 +148,9 @@ pub(crate) use unknown_terminals::*;
 #[path = "main_sections/attachment_media.rs"]
 mod attachment_media;
 pub(crate) use attachment_media::*;
-#[path = "main_sections/chat_projection.rs"]
-mod chat_projection;
-pub(crate) use chat_projection::*;
+#[path = "main_sections/chat_rows.rs"]
+mod chat_rows;
+pub(crate) use chat_rows::*;
 #[path = "main_sections/state_reads.rs"]
 mod state_reads;
 pub(crate) use state_reads::*;

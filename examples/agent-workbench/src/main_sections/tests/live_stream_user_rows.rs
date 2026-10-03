@@ -84,32 +84,58 @@ async fn the_live_stream_carries_one_user_row_per_input_through_settlement() {
     )
     .await
     .expect("inject an input into the running turn");
-    let injected_committed_id = format!("m_ingress_{}", injected.input_id);
+    let opening_id = product_user_rows(&state, &session_id)
+        .into_iter()
+        .find(|(_, text)| text == sent_text)
+        .expect("published UI input")
+        .0;
 
     provider_release.notify_waiters();
     turn.await.expect("the submitted turn task");
 
-    // What the browser holds after settlement, without a snapshot rebuild: the
-    // product-event log is the live stream.
+    let transcript = state
+        .core
+        .session(session_id.clone())
+        .durable()
+        .await
+        .expect("durable session")
+        .transcript()
+        .await
+        .expect("committed rows");
+    let injected_row = transcript
+        .visible()
+        .find(|row| {
+            row.provenance
+                .input_id
+                .as_ref()
+                .is_some_and(|input_id| input_id == injected.input_id.as_str())
+        })
+        .expect("injected input row");
+    let injected_id = serde_json::to_value(&injected_row.row_id)
+        .expect("wire identity")
+        .as_str()
+        .expect("token")
+        .to_owned();
+    let opening_row = transcript
+        .visible()
+        .find(|row| row.content.text == sent_text)
+        .expect("opening input row");
+    let canonical_opening_id = serde_json::to_value(&opening_row.row_id)
+        .expect("wire identity")
+        .as_str()
+        .expect("token")
+        .to_owned();
     let live_rows = product_user_rows(&state, &session_id);
     assert_eq!(
         live_rows,
         vec![
-            (
-                workbench_turn_user_message_id(&turn_id),
-                sent_text.to_string()
-            ),
-            (injected_committed_id.clone(), injected_text.to_string()),
-        ],
-        "the live stream must carry the send once, on the UI-owned row, and the \
-         injected input once, on its committed row"
+            (opening_id, sent_text.to_string()),
+            (injected_id, injected_text.to_string())
+        ]
     );
     assert!(
-        live_rows
-            .iter()
-            .all(|(id, _)| !(id.starts_with("m_ingress_") && id != &injected_committed_id)),
-        "the settlement republish must not add the opening input's committed \
-         copy beside the UI-owned row it duplicates: {live_rows:?}"
+        live_rows.iter().all(|(id, _)| id != &canonical_opening_id),
+        "the UI copy replaces the opening committed input by turn provenance"
     );
 
     // The snapshot the next `/api/state` builds agrees, so the live page never

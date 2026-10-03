@@ -7,10 +7,9 @@
 //! The transport is the client half of `/api/observations`. It consumes
 //! [`ObservationStreamItem`]s — decoded either in-process or from the route's
 //! NDJSON body — and folds every delivery leg into one [`TurnOutputRow`] per
-//! `TurnId`. The row renders under the workbench's stable
-//! `workbench-assistant:{turn_id}` identity, so a second subscription leg, a
-//! replay-gap replacement, or a redriven turn can never mint a second output
-//! row for the same turn.
+//! `TurnId`. Provisional output is owned by typed turn provenance. Committed
+//! records retain their opaque source row identity across subscription legs,
+//! replay-gap replacement and redriven turns.
 //!
 //! The mapping, in the order the wire presents it:
 //!
@@ -25,8 +24,7 @@
 //! * Turn activity folds into the turn's one output row: prose deltas
 //!   accumulate under their activity correlation id (so a
 //!   `model_attempt_reset` retracts only the superseded attempt) and the
-//!   reported final value stays provisional until the settled read view
-//!   confirms it.
+//!   preview stays provisional until canonical committed rows replace it.
 //! * `terminal_replacement`, `resident_replacement`, and `replay_gap` all ask
 //!   for one thing — a refetch of the settled read view. The gap additionally
 //!   clears the applied-identity window: everything at or before the
@@ -88,7 +86,7 @@ pub(crate) enum TransportDirective {
     RefetchSettled,
 }
 
-/// One turn's single output row: the slot `workbench-assistant:{turn_id}`
+/// One turn's single output row: the slot `{turn_id}`
 /// renders. Live copies are provisional; the settled read view owns the
 /// canonical text.
 #[derive(Clone, Debug, Default)]
@@ -99,7 +97,6 @@ pub(crate) struct TurnOutputRow {
     provisional_prose: BTreeMap<String, String>,
     /// The turn's reported terminal value — provisional until the settled
     /// read view speaks for the turn.
-    terminal_value: Option<serde_json::Value>,
     /// Text the settled read view last confirmed for this turn.
     settled_text: Option<String>,
 }
@@ -128,9 +125,7 @@ impl TurnOutputRow {
         if !provisional.is_empty() {
             return Some(provisional);
         }
-        self.settled_text
-            .clone()
-            .or_else(|| self.terminal_value.as_ref().map(ToString::to_string))
+        self.settled_text.clone()
     }
 }
 
@@ -174,6 +169,7 @@ impl ReferenceTransport {
                 if !self.mark_applied(DeliveredEventId::of(&event.body)) {
                     return TransportDirective::None;
                 }
+                self.fold_event(&event.body);
                 if let Some(turn_id) = event.body.turn_id.clone() {
                     self.outputs.entry(turn_id).or_default();
                 }
@@ -201,24 +197,17 @@ impl ReferenceTransport {
     /// redriven turn that committed twice collapses to the newest copy.
     pub(crate) fn replace_from_settled(&mut self, snapshot: &StateReadSnapshot) {
         self.resume_cursor = Some(snapshot.observation.cursor.clone());
-        for message in &snapshot.state.messages {
-            if message.role != "assistant" {
-                continue;
-            }
-            let Some(turn_id) = message
-                .provenance
-                .as_ref()
-                .map(|ChatMessageProvenance::TurnOutput { turn_id }| turn_id.clone())
-                .or_else(|| {
-                    workbench_turn_id_from_assistant_message_id(&message.id).map(TurnId::fixture)
-                })
-            else {
+        for record in snapshot
+            .transcript
+            .iter()
+            .filter(|record| record.suppressed.is_none() && record.provenance.is_turn_reply)
+        {
+            let Some(turn_id) = &record.provenance.turn_id else {
                 continue;
             };
-            let row = self.outputs.entry(turn_id).or_default();
-            row.settled_text = Some(message.text.clone());
+            let row = self.outputs.entry(turn_id.clone()).or_default();
+            row.settled_text = Some(record.content.text.clone());
             row.provisional_prose.clear();
-            row.terminal_value = None;
         }
     }
 
@@ -237,13 +226,10 @@ impl ReferenceTransport {
         &self.outputs
     }
 
-    /// The rendered row identities — always `workbench-assistant:{turn_id}`,
+    /// The rendered row identities — always `{turn_id}`,
     /// one per turn no matter how many delivery legs produced the row.
     pub(crate) fn output_keys(&self) -> Vec<String> {
-        self.outputs
-            .keys()
-            .map(workbench_turn_assistant_message_id)
-            .collect()
+        self.outputs.keys().map(ToString::to_string).collect()
     }
 
     fn mark_applied(&mut self, id: DeliveredEventId) -> bool {
@@ -278,7 +264,6 @@ impl ReferenceTransport {
                 // left behind. The settled text stays — it is still the last
                 // canonical word until the next refetch.
                 row.provisional_prose.clear();
-                row.terminal_value = None;
             }
             RemoteTurnEvent::AssistantProseDelta { text, .. } => {
                 row.provisional_prose
@@ -293,9 +278,6 @@ impl ReferenceTransport {
                 for correlation_id in assistant_prose_correlation_ids {
                     row.provisional_prose.remove(correlation_id);
                 }
-            }
-            RemoteTurnEvent::FinalValue { value } => {
-                row.terminal_value = Some(value.clone());
             }
             _ => {}
         }
@@ -726,10 +708,7 @@ async fn one_output_identity_per_turn_across_disconnect_and_redelivery() {
     );
     assert_eq!(
         transport.output_keys(),
-        vec![
-            "workbench-assistant:turn-one".to_string(),
-            "workbench-assistant:turn-two".to_string()
-        ]
+        vec!["turn-one".to_string(), "turn-two".to_string()]
     );
     assert_eq!(
         transport
@@ -837,10 +816,7 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
     );
     assert_eq!(
         transport.output_keys(),
-        vec![
-            "workbench-assistant:turn-one".to_string(),
-            "workbench-assistant:turn-two".to_string()
-        ],
+        vec!["turn-one".to_string(), "turn-two".to_string()],
         "gap recovery replaces rows, it never mints new ones"
     );
     assert_eq!(
@@ -925,7 +901,7 @@ async fn a_retried_attempt_replaces_partial_prose_on_the_same_row() {
         .expect("turn-one output row");
     assert_eq!(
         transport.output_keys(),
-        vec!["workbench-assistant:turn-one".to_string()],
+        vec!["turn-one".to_string()],
         "a retried attempt must not mint a second output identity"
     );
     assert_eq!(row.settled_text(), Some(ANSWER));
@@ -995,10 +971,7 @@ async fn a_redriven_turn_keeps_its_output_identity() {
     // it once, and the second call twice — the crashed attempt and the
     // redrive.
     assert_eq!(provider_calls.load(Ordering::SeqCst), 3);
-    assert_eq!(
-        transport.output_keys(),
-        vec!["workbench-assistant:turn-one".to_string()]
-    );
+    assert_eq!(transport.output_keys(), vec!["turn-one".to_string()]);
     let row = transport
         .outputs()
         .get(&TurnId::from("turn-one"))
@@ -1019,10 +992,7 @@ async fn a_redriven_turn_keeps_its_output_identity() {
         .expect("same-id retry observes the settled run");
     assert_eq!(retried.assistant_message(), Some(REDRIVEN_ANSWER));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 3);
-    assert_eq!(
-        transport.output_keys(),
-        vec!["workbench-assistant:turn-one".to_string()]
-    );
+    assert_eq!(transport.output_keys(), vec!["turn-one".to_string()]);
 
     drive_reference_turn(
         &state,
@@ -1041,10 +1011,7 @@ async fn a_redriven_turn_keeps_its_output_identity() {
     .await;
     assert_eq!(
         transport.output_keys(),
-        vec![
-            "workbench-assistant:turn-one".to_string(),
-            "workbench-assistant:turn-two".to_string()
-        ],
+        vec!["turn-one".to_string(), "turn-two".to_string()],
     );
     assert_eq!(
         transport

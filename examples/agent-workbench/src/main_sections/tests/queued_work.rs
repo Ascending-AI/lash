@@ -603,13 +603,16 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .expect("read the committed session")
             .expect("the session has committed state");
         let committed_agent_replies = committed
-            .messages()
-            .iter()
-            .filter(|message| {
-                lash::message_role(message) == "assistant"
-                    && lash::message_text(message).contains(WAKE_REPLY)
+            .transcript()
+            .visible()
+            .filter(|row| row.provenance.is_turn_reply && row.content.text.contains(WAKE_REPLY))
+            .map(|row| {
+                serde_json::to_value(&row.row_id)
+                    .expect("row wire")
+                    .as_str()
+                    .expect("token")
+                    .to_owned()
             })
-            .map(|message| message.id.clone())
             .collect::<Vec<_>>();
         assert_eq!(
             committed_agent_replies.len(),
@@ -624,16 +627,13 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
         let rendered_agent_rows = snapshot
             .transcript
             .iter()
-            .filter_map(|row| match row {
-                TranscriptRow::Message { message }
-                    if message.role == "assistant" && message.text.contains(WAKE_REPLY) =>
-                {
-                    Some(message.id.clone())
-                }
-                TranscriptRow::Message { .. }
-                | TranscriptRow::Reasoning { .. }
-                | TranscriptRow::CodeBlock { .. }
-                | TranscriptRow::Note { .. } => None,
+            .filter(|row| row.provenance.is_turn_reply && row.content.text.contains(WAKE_REPLY))
+            .map(|row| {
+                serde_json::to_value(&row.row_id)
+                    .expect("wire row id")
+                    .as_str()
+                    .expect("token")
+                    .to_owned()
             })
             .collect::<Vec<_>>();
         assert_eq!(

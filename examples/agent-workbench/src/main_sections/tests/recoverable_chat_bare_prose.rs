@@ -28,11 +28,8 @@ async fn settled_assistant_rows(
     let reasoning_rows = snapshot
         .transcript
         .iter()
-        .filter_map(|row| match row {
-            TranscriptRow::Reasoning { text, .. } => Some(text.clone()),
-            TranscriptRow::Message { .. }
-            | TranscriptRow::CodeBlock { .. }
-            | TranscriptRow::Note { .. } => None,
+        .filter_map(|row| {
+            (!row.content.reasoning.is_empty()).then(|| row.content.reasoning.join("\n"))
         })
         .collect::<Vec<_>>();
     (assistant_texts, reasoning_rows)
@@ -87,25 +84,20 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     .expect("record bare prose turn output");
     let committed_agent_replies = session
         .read_view()
-        .messages()
-        .iter()
-        .filter(|message| {
-            lash::message_role(message) == "assistant"
-                && lash::message_text(message).contains(BARE_PROSE_REPLY)
+        .transcript()
+        .visible()
+        .filter(|row| {
+            row.provenance.is_turn_reply
+                && row.provenance.turn_id.as_ref() == Some(&TurnId::from("bare-prose-turn"))
         })
-        .map(|message| message.id.clone())
+        .cloned()
         .collect::<Vec<_>>();
     assert_eq!(
         committed_agent_replies.len(),
         1,
-        "a bare-prose termination must commit the agent reply exactly once, \
-         got {committed_agent_replies:?}"
+        "one committed reply for the typed turn"
     );
-    assert!(
-        !committed_agent_replies[0].starts_with("workbench-assistant:"),
-        "the runtime's own terminal message is the committed copy on this path, \
-         got {committed_agent_replies:?}"
-    );
+    assert_eq!(committed_agent_replies[0].content.text, BARE_PROSE_REPLY);
     crate::restate::settle_workbench_turn(
         &state,
         &session.session_id(),

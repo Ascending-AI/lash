@@ -279,7 +279,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     .await
     .expect("load state snapshot");
     assert!(snapshot.messages.iter().any(|message| {
-        message.id == workbench_turn_user_message_id(&TurnId::from("running-turn"))
+        message.id == format!("fixture-user:{}", &TurnId::from("running-turn"))
             && message.role == "user"
             && message.text == "restored active prompt"
     }));
@@ -548,14 +548,9 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
         "the pruned turn's unknown terminal must ride the projection"
     );
     let note_rows = snapshot
-        .transcript
+        .unknown_turn_terminals
         .iter()
-        .filter_map(|row| match row {
-            TranscriptRow::Note { turn_id, text, .. } => Some((turn_id.to_string(), text.clone())),
-            TranscriptRow::Message { .. }
-            | TranscriptRow::Reasoning { .. }
-            | TranscriptRow::CodeBlock { .. } => None,
-        })
+        .map(|terminal| (terminal.turn_id.to_string(), terminal.note.to_string()))
         .collect::<Vec<_>>();
     assert_eq!(
         note_rows,

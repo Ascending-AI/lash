@@ -103,7 +103,7 @@ pub(crate) struct StateSnapshot {
 pub(crate) struct StateReadSnapshot {
     #[serde(flatten)]
     pub(crate) state: StateSnapshot,
-    pub(crate) transcript: Vec<TranscriptRow>,
+    pub(crate) transcript: Vec<lash::transcript::TranscriptRowRecord>,
 }
 
 impl std::ops::Deref for StateReadSnapshot {
@@ -190,7 +190,16 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum ChatMessageProvenance {
+    TurnInput { turn_id: TurnId },
     TurnOutput { turn_id: TurnId },
+}
+
+impl ChatMessageProvenance {
+    pub(crate) fn turn_id(&self) -> &TurnId {
+        match self {
+            Self::TurnInput { turn_id } | Self::TurnOutput { turn_id } => turn_id,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -225,82 +234,6 @@ pub(crate) fn attachment_retrieve_url(attachment_id: &str) -> String {
     let encoded =
         percent_encoding::utf8_percent_encode(attachment_id, percent_encoding::NON_ALPHANUMERIC);
     format!("/api/attachments/{encoded}")
-}
-
-/// The id of the optimistic user row this workbench publishes when a send is
-/// accepted. It lives in the workbench's own id namespace — symmetric with
-/// `workbench-assistant:{turn_id}` — because the UI owns the rows it renders.
-/// The runtime's committed copy of the same text keeps its runtime-minted id
-/// and is correlated by `MessageOrigin::TurnInput`, never by id shape
-/// (FIG-972).
-pub(crate) fn workbench_turn_user_message_id(turn_id: &TurnId) -> String {
-    format!("workbench-user:{turn_id}")
-}
-
-pub(crate) fn workbench_turn_id_from_user_message_id(message_id: &str) -> Option<&str> {
-    message_id.strip_prefix("workbench-user:")
-}
-
-/// The id of the live agent row this workbench publishes when a turn produces a
-/// reply, in the same workbench-owned namespace as the user row above.
-///
-/// The durable copy of that reply is usually the runtime's own terminal
-/// assistant message, minted by the runtime under an id the workbench never
-/// predicts, so this row retires from the product-event log when its turn stops
-/// running rather than when a committed message happens to share its id
-/// (FIG-984).
-pub(crate) fn workbench_turn_assistant_message_id(turn_id: &TurnId) -> String {
-    format!("workbench-assistant:{turn_id}")
-}
-
-pub(crate) fn workbench_turn_id_from_assistant_message_id(message_id: &str) -> Option<&str> {
-    message_id.strip_prefix("workbench-assistant:")
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub(crate) enum TranscriptRow {
-    Message {
-        message: ChatMessage,
-    },
-    Reasoning {
-        id: String,
-        text: String,
-    },
-    CodeBlock {
-        id: String,
-        language: String,
-        code: String,
-        output: String,
-        error: Option<String>,
-        success: bool,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        tools: Vec<TranscriptTool>,
-    },
-    /// A disclosure about a turn that the projection owns, rendered by the same
-    /// timeline code as every other row.
-    ///
-    /// The workbench used to append these straight to the DOM, outside the
-    /// projection, so the next `/api/state` re-render deleted them about a
-    /// second after they appeared (FIG-3163). A row the projection carries is
-    /// re-rendered instead of destroyed.
-    Note {
-        id: String,
-        turn_id: TurnId,
-        text: String,
-    },
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub(crate) enum TranscriptTool {
-    DurableSummary {
-        operation: String,
-        status: &'static str,
-    },
-    Omitted {
-        count: usize,
-    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -851,14 +784,15 @@ impl SessionEventRegistry {
             .events
             .iter()
             .filter_map(|event| match &event.item {
-                StreamItem::Message { message } => {
-                    workbench_turn_id_from_user_message_id(&message.id)
-                }
+                StreamItem::Message { message } => match &message.provenance {
+                    Some(ChatMessageProvenance::TurnInput { turn_id }) => Some(turn_id),
+                    _ => None,
+                },
                 StreamItem::TurnInput { .. }
                 | StreamItem::ModelCallRecorded { .. }
                 | StreamItem::Done { .. } => None,
             })
-            .filter_map(|turn_id| TurnId::parse(turn_id).ok())
+            .cloned()
             .filter(|turn_id| committed_input_turn_ids.contains(turn_id))
             .collect::<BTreeSet<_>>();
         let committed_status_before = history.committed_user_turn_ids.len();
@@ -870,7 +804,12 @@ impl SessionEventRegistry {
         let before = history.events.len();
         history.events.retain(|event| match &event.item {
             StreamItem::Message { message } => {
-                if workbench_turn_id_from_user_message_id(&message.id).is_some() {
+                if match &message.provenance {
+                    Some(ChatMessageProvenance::TurnInput { turn_id }) => Some(turn_id),
+                    _ => None,
+                }
+                .is_some()
+                {
                     // A submitted user row is session-scoped host state and
                     // survives this rebuild unconditionally. Retiring it here
                     // for looking uncommitted raced the durable commit of the
@@ -885,9 +824,10 @@ impl SessionEventRegistry {
                     // through the ordered failure path, `publish_turn_failed`,
                     // which is what FIG-1000 actually specified.
                     true
-                } else if let Some(turn_id) =
-                    workbench_turn_id_from_assistant_message_id(&message.id)
-                {
+                } else if let Some(turn_id) = match &message.provenance {
+                    Some(ChatMessageProvenance::TurnOutput { turn_id }) => Some(turn_id),
+                    _ => None,
+                } {
                     // The live assistant row is turn-scoped. The committed
                     // reply replaces it at settlement; old-frame replies then
                     // collapse naturally when the active frame changes. Its
@@ -939,9 +879,10 @@ impl SessionEventRegistry {
             let StreamItem::Message { message } = &event.item else {
                 return true;
             };
-            let owned_by_turn = workbench_turn_id_from_user_message_id(&message.id)
-                .or_else(|| workbench_turn_id_from_assistant_message_id(&message.id))
-                .is_some_and(|owner| owner == turn_id);
+            let owned_by_turn = message
+                .provenance
+                .as_ref()
+                .is_some_and(|provenance| provenance.turn_id() == turn_id);
             if owned_by_turn {
                 retired.insert(message.id.clone());
             }

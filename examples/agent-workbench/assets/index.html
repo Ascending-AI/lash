@@ -3542,7 +3542,6 @@
       sessionCopy.dataset.copyValue = copyable ? knownSessionLabel : "";
     }
 
-    const renderedMessages = new Set();
     const projectionState = createWorkbenchProjectionState();
     const renderedProductEvents = projectionState.renderedProductEvents;
     const appliedObservationEvents = projectionState.appliedObservationEvents;
@@ -3988,10 +3987,8 @@
 
     // BEGIN WORKBENCH_MESSAGE_RENDER
     function renderMessage(message) {
-      if (renderedMessages.has(message.id)) return;
-      renderedMessages.add(message.id);
       clearEmpty();
-      if (message.role === "assistant" && assistantDraft) {
+      if (message.role === "assistant" && assistantDraft && assistantDraftTurnId && message.provenance?.turn_id === assistantDraftTurnId) {
         const parent = assistantDraft.closest(".message");
         if (parent) parent.remove();
         assistantDraft = null;
@@ -4396,10 +4393,13 @@
       el.innerHTML = '<summary></summary><pre class="code-source"></pre><pre class="code-output" hidden></pre>';
       renderCodeBlockSummary(el, event, linkedTools);
       el.querySelector(".code-source").textContent = event.code || "";
-      const output = [event.output, event.error?.message].filter(Boolean).join("\n");
+      const output = [event.output, typeof event.error === "string" ? event.error : event.error?.message].filter(Boolean).join("\n");
       const outputNode = el.querySelector(".code-output");
       outputNode.hidden = !output;
       outputNode.textContent = output;
+      if (event.attachments?.length && typeof renderMessageAttachments === "function") {
+        renderMessageAttachments(el, event.attachments.map(attachment => ({ attachment_id: attachment.id, retrieve_url: `/api/attachments/${encodeURIComponent(attachment.id)}` })));
+      }
       for (const tool of linkedTools) appendProjectedTool(tool, el);
       return el;
     }
@@ -4425,7 +4425,7 @@
       renderCodeBlockSummary(el, event, linkedTools);
       const pre = el.querySelector(".code-source");
       pre.textContent = event.code || pre.textContent || "";
-      const output = [event.output, event.error?.message].filter(Boolean).join("\n");
+      const output = [event.output, typeof event.error === "string" ? event.error : event.error?.message].filter(Boolean).join("\n");
       const outputNode = el.querySelector(".code-output");
       outputNode.hidden = !output;
       outputNode.textContent = output;
@@ -5098,7 +5098,6 @@
     function clearTranscript() {
       clearRetryStatus();
       timeline.innerHTML = "";
-      renderedMessages.clear();
       renderedIngressInputs.clear();
       assistantDraft = null;
       assistantDraftTurnId = null;
@@ -5120,32 +5119,63 @@
 
     // BEGIN WORKBENCH_SETTLED_TRANSCRIPT
     function renderStateTranscript(state) {
-      const transcript = state.transcript ||
-        (state.messages || []).map(message => ({ type: "message", message }));
-      for (const row of transcript) {
-        if (row.type === "message") renderMessage(row.message);
-        if (row.type === "reasoning") appendReasoning(row.text, row.id, null);
-        if (row.type === "code_block") appendCodeBlock(row, row.tools || []);
-        /* FIG-3163: the unknown-terminal disclosure rides the projection, so a
-           re-render redraws it instead of deleting it. It dedupes on the same
-           set the message rows use, so an appending poll does not stack it. */
-        if (row.type === "note" && !renderedMessages.has(row.id)) {
-          renderedMessages.add(row.id);
-          renderNote(row.text);
+      const ownedInputs = new Map();
+      for (const event of state.product_events?.events || []) {
+        const message = event.message;
+        if (message?.provenance?.kind === "turn_input") {
+          ownedInputs.set(message.provenance.turn_id, message);
         }
+      }
+      const coveredInputs = new Set();
+      const turnAnchors = new Map();
+      for (const row of state.transcript) {
+        if (row.suppressed) continue;
+        const start = timeline.children.length;
+        const content = row.content;
+        const provenance = row.provenance;
+        for (const text of content.reasoning) {
+          appendReasoning(text, row.row_id, null);
+        }
+        if (row.kind === "code_block") {
+          const tools = content.tools.map(tool => ({ kind: "durable_summary", ...tool }));
+          if (content.tools_omitted) tools.push({ kind: "omitted", count: content.tools_omitted });
+          appendCodeBlock({ id: row.row_id, ...content }, tools);
+        } else if (["user", "assistant_reply", "event", "tool_call", "attachment"].includes(row.kind)) {
+          let message = {
+            id: row.row_id,
+            role: row.kind === "user" ? "user" : row.kind === "assistant_reply" ? "assistant" : "event",
+            text: content.text,
+            at: row.timestamp,
+            provenance: provenance.turn_id ? { kind: row.kind === "user" ? "turn_input" : "turn_output", turn_id: provenance.turn_id } : null,
+            attachments: content.attachments.map(attachment => ({ attachment_id: attachment.id, retrieve_url: `/api/attachments/${encodeURIComponent(attachment.id)}` }))
+          };
+          if (row.kind === "user" && provenance.turn_id && !coveredInputs.has(provenance.turn_id)) {
+            coveredInputs.add(provenance.turn_id);
+            message = ownedInputs.get(provenance.turn_id) || message;
+          }
+          renderMessage(message);
+        }
+        for (const node of Array.from(timeline.children).slice(start)) {
+          node.dataset.transcriptRowId = row.row_id;
+          node.dataset.turnId = provenance.turn_id || "";
+          if (provenance.turn_id) turnAnchors.set(provenance.turn_id, node);
+        }
+      }
+      for (const [turnId, message] of ownedInputs) {
+        if (!coveredInputs.has(turnId)) renderMessage(message);
+      }
+      for (const event of state.product_events?.events || []) {
+        if (event.message?.role === "event") renderMessage(event.message);
+      }
+      for (const terminal of state.unknown_turn_terminals || []) {
+        renderNote(terminal.note);
+        const anchor = turnAnchors.get(terminal.turn_id);
+        if (anchor) anchor.insertAdjacentElement("afterend", timeline.lastElementChild);
       }
       for (const pending of state.pending_turn_inputs || []) {
         const admission = pending.input;
-        const textItem = (admission?.input?.items || []).find(
-          item => item?.type === "text" && typeof item.text === "string"
-        );
-        renderIngressReceipt({
-          input_id: admission?.input_id,
-          ingress: admission?.ingress,
-          state: admission?.state,
-          status: pending.status,
-          text: textItem?.text || "pending input"
-        });
+        const textItem = (admission?.input?.items || []).find(item => item?.type === "text" && typeof item.text === "string");
+        renderIngressReceipt({ input_id: admission?.input_id, ingress: admission?.ingress, state: admission?.state, status: pending.status, text: textItem?.text || "pending input" });
       }
     }
     // END WORKBENCH_SETTLED_TRANSCRIPT

@@ -25,6 +25,7 @@ pub(crate) enum DevProviderScenario {
     ExecBlocked,
     ToolValue,
     RenderedSurface,
+    TranscriptProjection,
     CodeFailure,
     RetryResetPartial,
     ReplayRouteChange,
@@ -49,6 +50,7 @@ impl DevProviderScenario {
             "exec-blocked" => Self::ExecBlocked,
             "tool-value" => Self::ToolValue,
             "rendered-surface" => Self::RenderedSurface,
+            "transcript-projection" => Self::TranscriptProjection,
             "code-failure" => Self::CodeFailure,
             "retry-reset-partial" => Self::RetryResetPartial,
             "replay-route-change" => Self::ReplayRouteChange,
@@ -65,7 +67,7 @@ impl DevProviderScenario {
             other => bail!(
                 "invalid {DEV_PROVIDER_SCENARIO_ENV} `{other}`; expected one of: \
                  auth-failure-once, rate-limit-once, partial-output-failure, failed-process, \
-                 exec-blocked, tool-value, rendered-surface, code-failure, retry-reset-partial, \
+                 exec-blocked, tool-value, rendered-surface, transcript-projection, code-failure, retry-reset-partial, \
                  replay-route-change, valid-empty-completion"
             ),
         };
@@ -81,6 +83,7 @@ impl DevProviderScenario {
             Self::ExecBlocked => "exec-blocked",
             Self::ToolValue => "tool-value",
             Self::RenderedSurface => "rendered-surface",
+            Self::TranscriptProjection => "transcript-projection",
             Self::CodeFailure => "code-failure",
             Self::RetryResetPartial => "retry-reset-partial",
             Self::ReplayRouteChange => "replay-route-change",
@@ -167,6 +170,10 @@ finish("started deterministic failing process");"#,
             }
             (Self::ExecBlocked, _) => finish_cell("\"session recovered after break glass\""),
             (Self::ToolValue, _) => cell("await workbench_surface.terminal({});"),
+            (Self::TranscriptProjection, 0) => cell(
+                "await control.continue_as({task: \"canonical follow-frame task\", seed: {marker: \"hidden-seed\"}});",
+            ),
+            (Self::TranscriptProjection, _) => finish_cell("\"canonical follow-frame reply\""),
             (Self::RenderedSurface, _) => finish_cell(
                 "{ event_class: \"final_value\", marker: \"FIG-1350 deterministic final value\" }",
             ),
@@ -353,7 +360,7 @@ impl Provider for DevFailureProvider {
             | DevProviderScenario::ExecBlocked
             | DevProviderScenario::ToolValue
             | DevProviderScenario::CodeFailure => Ok(streamed_response(&request, &self.cell(call))),
-            DevProviderScenario::RenderedSurface => {
+            DevProviderScenario::RenderedSurface | DevProviderScenario::TranscriptProjection => {
                 send_reasoning(&request, "FIG-1350 deterministic reasoning");
                 Ok(streamed_response(&request, &self.cell(call)))
             }

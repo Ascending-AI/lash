@@ -805,16 +805,19 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     let mut committed =
         lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "two printed images")
             .with_id("rlm-printed-images");
-    for id in ["sha256:rlm-printed-image-a", "sha256:rlm-printed-image-b"] {
+    let printed_images = ["sha256:rlm-printed-image-a", "sha256:rlm-printed-image-b"]
+        .into_iter()
+        .map(|id| lash::attachments::AttachmentRef {
+            id: lash::attachments::AttachmentId::parse(id).expect("valid attachment id"),
+            media_type: lash::attachments::MediaType::parse("image/png").expect("PNG media type"),
+            byte_len: 68,
+            type_metadata: None,
+            label: None,
+        })
+        .collect::<Vec<_>>();
+    for attachment in &printed_images {
         committed.parts.push(injected_attachment_part(
-            lash::direct::AttachmentSource::stored(lash::attachments::AttachmentRef {
-                id: lash::attachments::AttachmentId::parse(id).expect("valid attachment id"),
-                media_type: lash::attachments::MediaType::parse("image/png")
-                    .expect("valid PNG media type"),
-                byte_len: 68,
-                type_metadata: None,
-                label: None,
-            }),
+            lash::direct::AttachmentSource::stored(attachment.clone()),
         ));
     }
     session
@@ -859,6 +862,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
                     },
                 ],
                 calls_omitted: 3,
+                images: printed_images,
                 ..lash::rlm::RlmTrajectoryEntry::default()
             }),
         ));
@@ -876,11 +880,11 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         .expect("commit durable tool trajectory fixture");
     let committed_message = session
         .read_view()
-        .messages()
-        .iter()
-        .find(|message| message.id == "rlm-printed-images")
-        .map(chat_message_from_committed)
-        .expect("project committed RLM printed images");
+        .transcript()
+        .visible()
+        .filter_map(chat_message_from_row)
+        .find(|message| !message.attachments.is_empty())
+        .expect("project committed printed images");
     session
         .close()
         .await
@@ -888,11 +892,9 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     let Json(durable_tool_state) = app_state(State(state.clone()), Query(SessionQuery::default()))
         .await
         .expect("reload and project committed durable tool trajectory");
-    assert!(durable_tool_state.transcript.iter().any(|row| matches!(
-        row,
-        TranscriptRow::CodeBlock { id, output, .. }
-            if id == "durable-tool-trajectory" && output == "durable projection"
-    )));
+    assert!(durable_tool_state.transcript.iter().any(|row| row.kind
+        == lash::transcript::TranscriptRowKind::CodeBlock
+        && row.content.output.as_deref() == Some("durable projection")));
 
     let node = std::env::var_os("LASH_WORKBENCH_TEST_NODE").unwrap_or_else(|| "node".into());
     let output = std::process::Command::new(node)
@@ -989,7 +991,7 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
 fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
     let registry = SessionEventRegistry::new(4);
     let session_id = SessionId::from("reconciled-session");
-    let committed_id = workbench_turn_user_message_id(&TurnId::from("reconciled-turn"));
+    let committed_id = format!("fixture-user:{}", &TurnId::from("reconciled-turn"));
     registry.publish_identified(
         &session_id,
         "provisional-message",
@@ -1000,7 +1002,9 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 text: "settled prompt".to_string(),
                 at: String::new(),
                 attachments: Vec::new(),
-                provenance: None,
+                provenance: Some(ChatMessageProvenance::TurnInput {
+                    turn_id: TurnId::from("reconciled-turn"),
+                }),
             },
         },
     );
@@ -1089,7 +1093,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
     assert!(matches!(
         &reconciled.events[0].item,
         StreamItem::Message { message }
-            if message.id == workbench_turn_user_message_id(&TurnId::from("reconciled-turn"))
+            if message.id == format!("fixture-user:{}", &TurnId::from("reconciled-turn"))
     ));
     let StreamItem::ModelCallRecorded { record } = &reconciled.events[1].item else {
         panic!("reconciliation must retain the model-call record");
@@ -1203,22 +1207,11 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
         .await
         .expect("open canonical session");
     session
-        .admin()
-        .state()
-        .append_messages(vec![
-            lash::plugins::PluginMessage::text(
-                lash::messages::MessageRole::User,
-                "canonical question",
-            )
-            .with_id("canonical-user"),
-            lash::plugins::PluginMessage::text(
-                lash::messages::MessageRole::Assistant,
-                "canonical answer",
-            )
-            .with_id("canonical-assistant"),
-        ])
+        .send(lash::TurnInput::text("canonical question"))
+        .id("canonical-turn")
+        .output()
         .await
-        .expect("append canonical history");
+        .expect("commit real reply");
     session.close().await.expect("close canonical session");
 
     state.push_message_with_id_for_session(
@@ -1241,14 +1234,21 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
         snapshot
             .messages
             .iter()
-            .map(|message| (message.id.as_str(), message.text.as_str()))
+            .map(|message| (message.role.as_str(), message.text.as_str()))
             .collect::<Vec<_>>(),
         vec![
-            ("canonical-user", "canonical question"),
-            ("canonical-assistant", "canonical answer"),
-            ("host-only-event", "host-only row"),
-        ],
-        "the Lash read view remains authoritative and product-only rows supplement it"
+            ("user", "canonical question"),
+            ("assistant", "canonical answer"),
+            ("event", "host-only row")
+        ]
+    );
+    assert_eq!(
+        snapshot
+            .transcript
+            .iter()
+            .filter(|row| row.suppressed.is_none() && row.provenance.is_turn_reply)
+            .count(),
+        1
     );
 }
 
@@ -1267,12 +1267,7 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
         "one send".to_string(),
         None,
     );
-    state.push_message_with_id_for_session(
-        &session_id,
-        workbench_turn_user_message_id(&TurnId::from(turn_id)),
-        "user",
-        "one send",
-    );
+    state.push_user_message_for_turn(&session_id, &TurnId::from(turn_id), "one send");
     // What the runtime commits for the same send: a runtime-minted id — here the
     // queued-ingress spelling, which no host can predict — carrying the turn
     // provenance the runtime stamps.
@@ -1306,12 +1301,31 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
     );
 
     let ui_row = (
-        workbench_turn_user_message_id(&TurnId::from(turn_id)),
+        format!("fixture-user:{}", &TurnId::from(turn_id)),
         "one send".to_string(),
     );
+    let canonical = state
+        .core
+        .session(session_id.clone())
+        .durable()
+        .await
+        .expect("durable")
+        .transcript()
+        .await
+        .expect("rows");
     let committed_row = (
-        "m_ingress_workbench-input-1".to_string(),
-        "one send".to_string(),
+        serde_json::to_value(
+            &canonical
+                .visible()
+                .find(|row| row.content.text == "one send")
+                .expect("committed input")
+                .row_id,
+        )
+        .expect("row id")
+        .as_str()
+        .expect("token")
+        .to_owned(),
+        "one send".to_owned(),
     );
 
     let Json(running) = Box::pin(app_state(
@@ -1327,7 +1341,7 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
     );
     assert_eq!(
         transcript_user_rows(&running),
-        vec![ui_row.clone()],
+        vec![committed_row.clone()],
         "the transcript projection suppresses the same committed copy"
     );
 
@@ -1346,7 +1360,7 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
     );
     assert_eq!(
         transcript_user_rows(&settled),
-        vec![ui_row],
+        vec![committed_row.clone()],
         "the settled transcript keeps the UI-owned send"
     );
     assert_ne!(
@@ -1510,12 +1524,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
 
     let first_turn_id = "workbench-turn-before-continue-as";
     let first_prompt = "first submitted row";
-    state.push_message_with_id_for_session(
-        &session_id,
-        workbench_turn_user_message_id(&TurnId::from(first_turn_id)),
-        "user",
-        first_prompt,
-    );
+    state.push_user_message_for_turn(&session_id, &TurnId::from(first_turn_id), first_prompt);
     let session = crate::created_session(&state.core, session_id.clone())
         .await
         .open()
@@ -1535,9 +1544,10 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
                 lash::messages::MessageRole::Assistant,
                 "old frame answer",
             )
-            .with_id(workbench_turn_assistant_message_id(&TurnId::from(
-                first_turn_id,
-            ))),
+            .with_id(format!(
+                "fixture-assistant:{}",
+                &TurnId::from(first_turn_id,)
+            )),
         ])
         .await
         .expect("seed the durable pre-switch conversation");
@@ -1550,12 +1560,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
         switch_prompt.to_string(),
         None,
     );
-    state.push_message_with_id_for_session(
-        &session_id,
-        workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
-        "user",
-        switch_prompt,
-    );
+    state.push_user_message_for_turn(&session_id, &TurnId::from(switch_turn_id), switch_prompt);
     let switch_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let switch_output = session
         .send(lash::TurnInput::text(switch_prompt))
@@ -1611,32 +1616,39 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
     .await
     .expect("project continue_as boundary state");
     let expected_rows = vec![
-        (
-            workbench_turn_user_message_id(&TurnId::from(first_turn_id)),
-            "user".to_string(),
-            first_prompt.to_string(),
-        ),
-        (
-            workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
-            "user".to_string(),
-            switch_prompt.to_string(),
-        ),
-        // The task that opened the follow frame is the prompt the answer below
-        // replies to, so it renders between them (FIG-3143). Its seed stays
-        // protocol state.
-        (
-            format!("m_turn_{switch_turn_id}:agent-frame:1_input"),
-            "user".to_string(),
-            "finish in the follow frame".to_string(),
-        ),
-        (
-            workbench_turn_assistant_message_id(&TurnId::from(switch_turn_id)),
-            "assistant".to_string(),
-            "follow frame answer".to_string(),
-        ),
+        ("user", first_prompt),
+        ("user", switch_prompt),
+        ("user", "finish in the follow frame"),
+        ("assistant", "follow frame answer"),
     ];
-    let projected_rows = boundary
-        .state
+    assert_eq!(
+        boundary
+            .messages
+            .iter()
+            .map(|message| (message.role.as_str(), message.text.as_str()))
+            .collect::<Vec<_>>(),
+        expected_rows
+    );
+    assert!(
+        boundary
+            .messages
+            .iter()
+            .all(|message| message.text != "old frame answer"
+                && message.text != "protocol-only-seed")
+    );
+    let canonical = boundary
+        .transcript
+        .iter()
+        .filter_map(transcript_message)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        canonical
+            .iter()
+            .map(|message| (message.role.as_str(), message.text.as_str()))
+            .collect::<Vec<_>>(),
+        expected_rows
+    );
+    let boundary_rows = boundary
         .messages
         .iter()
         .map(|message| {
@@ -1647,21 +1659,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(projected_rows, expected_rows);
-    assert!(boundary.state.messages.iter().all(|message| {
-        message.text != "old frame answer" && message.text != "protocol-only-seed"
-    }));
-    assert_eq!(
-        boundary
-            .transcript
-            .iter()
-            .filter_map(|row| {
-                transcript_message(row).map(|m| (m.id.clone(), m.role.clone(), m.text.clone()))
-            })
-            .collect::<Vec<_>>(),
-        expected_rows,
-        "the browser transcript projection must match /api/state at the boundary"
-    );
+    let boundary_transcript = serde_json::to_value(&boundary.transcript).expect("canonical rows");
 
     drop(state);
     let reload_provider = lash::testing::TestProvider::builder()
@@ -1695,8 +1693,12 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
                 message.text.clone()
             ))
             .collect::<Vec<_>>(),
-        expected_rows,
+        boundary_rows,
         "reload must reproduce the same session-scoped projection"
+    );
+    assert_eq!(
+        serde_json::to_value(&reloaded.transcript).expect("reload rows"),
+        boundary_transcript
     );
 }
 
@@ -1729,12 +1731,15 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
         "one attached send".to_string(),
         Some(attachment.id.to_string()),
     );
-    state.push_message_with_id_and_attachments_for_session(
+    state.push_message_with_id_and_attachments_and_provenance_for_session(
         &session_id,
-        workbench_turn_user_message_id(&TurnId::from(turn_id)),
+        format!("fixture-user:{turn_id}"),
         "user",
         "one attached send",
         vec![ChatAttachment::from_id(attachment.id.to_string())],
+        Some(ChatMessageProvenance::TurnInput {
+            turn_id: TurnId::from(turn_id),
+        }),
     );
 
     let Json(optimistic) = Box::pin(app_state(
@@ -1746,7 +1751,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     assert_eq!(
         user_row_attachments(&optimistic),
         vec![(
-            workbench_turn_user_message_id(&TurnId::from(turn_id)),
+            format!("fixture-user:{}", &TurnId::from(turn_id)),
             vec![expected_attachment.clone()],
         )],
         "the live UI-owned row carries the uploaded attachment reference once"
@@ -1787,7 +1792,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     assert_eq!(
         user_row_attachments(&running),
         vec![(
-            workbench_turn_user_message_id(&TurnId::from(turn_id)),
+            format!("fixture-user:{}", &TurnId::from(turn_id)),
             vec![expected_attachment.clone()],
         )],
         "the committed copy stays suppressed while the attached UI row survives"
@@ -1802,7 +1807,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     assert_eq!(
         user_row_attachments(&settled),
         vec![(
-            workbench_turn_user_message_id(&TurnId::from(turn_id)),
+            format!("fixture-user:{}", &TurnId::from(turn_id)),
             vec![expected_attachment],
         )],
         "the UI-owned attachment row remains session-scoped after settlement"
@@ -1865,6 +1870,16 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
         .append_messages(vec![committed])
         .await
         .expect("commit attached turn input");
+    let projected = session.read_view().transcript();
+    let committed_row = projected
+        .visible()
+        .find(|row| row.provenance.turn_id.as_ref() == Some(&TurnId::from(turn_id)))
+        .expect("committed attached input row");
+    let committed_id = serde_json::to_value(&committed_row.row_id)
+        .expect("serialize opaque row identity")
+        .as_str()
+        .expect("wire row identity")
+        .to_owned();
     session
         .close()
         .await
@@ -1877,10 +1892,7 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
         .expect("materialize replayed attachment snapshot");
     assert_eq!(
         user_row_attachments(&replayed),
-        vec![(
-            workbench_turn_user_message_id(&TurnId::from(turn_id)),
-            vec![expected_attachment],
-        )],
+        vec![(committed_id, vec![expected_attachment],)],
         "the lost-product-row replay must retain the uploaded attachment reference"
     );
 }
@@ -1949,13 +1961,10 @@ pub(crate) fn user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
 }
 
 /// The chat message a transcript row carries, if it carries one.
-pub(crate) fn transcript_message(row: &TranscriptRow) -> Option<&ChatMessage> {
-    match row {
-        TranscriptRow::Message { message } => Some(message),
-        TranscriptRow::Reasoning { .. }
-        | TranscriptRow::CodeBlock { .. }
-        | TranscriptRow::Note { .. } => None,
-    }
+pub(crate) fn transcript_message(
+    row: &lash::transcript::TranscriptRowRecord,
+) -> Option<ChatMessage> {
+    chat_message_from_row(row)
 }
 
 pub(crate) fn transcript_user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
@@ -2070,6 +2079,9 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         .await
         .expect("/api/state must remain readable while the turn lease is held");
     assert_eq!(running.active_turns.len(), 1);
+    let original_input_id = running.messages.iter().find(|message| {
+        matches!(&message.provenance, Some(ChatMessageProvenance::TurnInput { turn_id: owner }) if owner == turn_id)
+    }).expect("UI input exists before the commit").id.clone();
     let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
         state.session_store_factory.clone();
     let in_flight_store =
@@ -2121,28 +2133,34 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         settled
             .transcript
             .iter()
-            .filter_map(|row| transcript_message(row).map(|m| (m.role.as_str(), m.text.as_str())))
+            .filter_map(|row| transcript_message(row).map(|m| (m.role, m.text)))
             .collect::<Vec<_>>(),
-        vec![("user", turn_text), ("assistant", "settled answer")],
+        vec![
+            ("user".to_owned(), turn_text.to_owned()),
+            ("assistant".to_owned(), "settled answer".to_owned())
+        ],
         "the browser transcript projection must contain the committed message set once"
     );
     assert!(
-        settled.transcript.iter().any(|row| matches!(
-            row,
-            TranscriptRow::Reasoning { id, text }
-                if id == &format!("m_rlm_{turn_id}_0_assistant_content.p0")
-                    && text == "durable reasoning disclosure"
-        )),
-        "settled state must reconstruct reasoning disclosure with durable part provenance"
+        settled.transcript.iter().any(|row| row
+            .content
+            .reasoning
+            .iter()
+            .any(|text| text == "durable reasoning disclosure")),
+        "settled state must reconstruct reasoning disclosure"
     );
     assert!(
-        settled.transcript.iter().any(|row| matches!(
-            row,
-            TranscriptRow::CodeBlock { code, output, .. }
-                if code.contains("durable execution disclosure")
-                    && output.contains("durable execution disclosure")
-        )),
-        "settled state must reconstruct code execution and output from durable history"
+        settled.transcript.iter().any(|row| row
+            .content
+            .code
+            .as_ref()
+            .is_some_and(|code| code.contains("durable execution disclosure"))
+            && row
+                .content
+                .output
+                .as_ref()
+                .is_some_and(|output| output.contains("durable execution disclosure"))),
+        "settled state must reconstruct code execution and output"
     );
     assert_eq!(
         settled
@@ -2162,11 +2180,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
                 | StreamItem::Done { .. } => None,
             })
             .collect::<Vec<_>>(),
-        vec![(
-            workbench_turn_user_message_id(&turn_id),
-            "user".to_string(),
-            turn_text.to_string(),
-        )],
+        vec![(original_input_id, "user".to_string(), turn_text.to_string(),)],
         "settlement must retain only the session-scoped UI-owned user row"
     );
     assert!(

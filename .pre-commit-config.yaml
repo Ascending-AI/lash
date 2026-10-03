@@ -24,9 +24,9 @@ repos:
       # Apply the formatter before CI checks it. If files change, prek stops
       # the commit so the author can review and restage them.
       - id: cargo-fmt
-        name: cargo fmt --all
+        name: kiln fmt
         language: system
-        entry: cargo fmt --all
+        entry: kiln fmt
         files: '\.rs$'
         pass_filenames: false
 

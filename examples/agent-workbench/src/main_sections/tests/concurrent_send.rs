@@ -58,13 +58,8 @@ fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
     snapshot
         .transcript
         .iter()
-        .filter_map(|row| match row {
-            TranscriptRow::Message { message } => {
-                Some((message.role.clone(), message.text.clone()))
-            }
-            TranscriptRow::Reasoning { .. }
-            | TranscriptRow::CodeBlock { .. }
-            | TranscriptRow::Note { .. } => None,
+        .filter_map(|row| {
+            chat_message_from_row(row).map(|message| (message.role.clone(), message.text.clone()))
         })
         .collect()
 }

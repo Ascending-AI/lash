@@ -444,28 +444,6 @@ fn turn_routing_state_survives_web_process_reconstruction() {
 #[cfg(test)]
 #[path = "tests/session_resume.rs"]
 mod session_resume_tests;
-#[test]
-fn assistant_display_keeps_streamed_prose_with_terminal_value() {
-    assert_eq!(
-        combine_assistant_display_parts(
-            Some("I started the background checks.".to_string()),
-            Some("summary ready".to_string()),
-        ),
-        "I started the background checks.\n\nsummary ready"
-    );
-}
-
-#[test]
-fn assistant_display_does_not_duplicate_matching_terminal_value() {
-    assert_eq!(
-        combine_assistant_display_parts(
-            Some("summary ready".to_string()),
-            Some("summary ready".to_string())
-        ),
-        "summary ready"
-    );
-}
-
 #[cfg(test)]
 #[path = "tests/ui_contract.rs"]
 mod ui_contract_tests;

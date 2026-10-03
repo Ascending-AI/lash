@@ -32,7 +32,7 @@ pub(crate) async fn app_state(
     let StateProjectionReads {
         read_view,
         durable,
-        has_durable_head,
+        has_durable_head: _,
         cursor,
         pending_turn_inputs,
         queued_work,
@@ -43,49 +43,21 @@ pub(crate) async fn app_state(
         .iter()
         .map(|active_turn| active_turn.address.turn_id.clone())
         .collect::<BTreeSet<_>>();
-    let committed_message_ids = read_view
-        .messages()
+    let transcript = durable
+        .transcript()
+        .await
+        .map_err(AppError::internal)?
+        .into_records();
+    let committed_message_ids = transcript
         .iter()
-        .map(|message| message.id.clone())
+        .filter_map(chat_message_from_row)
+        .map(|message| message.id)
         .collect::<BTreeSet<_>>();
-    let current_frame_input_turn_ids = read_view
-        .messages()
+    let committed_input_turn_ids = transcript
         .iter()
-        .filter_map(|message| match message.origin.as_ref() {
-            Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) => Some(turn_id.clone()),
-            _ => None,
-        })
+        .filter(|row| row.kind == lash::transcript::TranscriptRowKind::User)
+        .filter_map(|row| row.provenance.turn_id.clone())
         .collect::<BTreeSet<_>>();
-    let mut committed_input_turn_ids = BTreeSet::new();
-    let mut anchor = lash::persistence::HistoryAnchor::Head;
-    if has_durable_head {
-        loop {
-            let page = durable
-                .history(
-                    anchor,
-                    lash::persistence::HistoryBudget {
-                        max_nodes: std::num::NonZeroU32::MIN.saturating_add(128 - 1),
-                        max_bytes: std::num::NonZeroU64::MIN.saturating_add(32 * 1024 * 1024 - 1),
-                    },
-                )
-                .await
-                .map_err(AppError::internal)?;
-            for node in page.nodes {
-                if let lash::persistence::SessionNodePayload::Event {
-                    event: lash::persistence::SessionHistoryRecord::Conversation(message),
-                } = node.record.payload
-                    && let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) =
-                        message.origin
-                {
-                    committed_input_turn_ids.insert(turn_id);
-                }
-            }
-            match page.next {
-                Some(next) => anchor = lash::persistence::HistoryAnchor::Cursor(next),
-                None => break,
-            }
-        }
-    }
     state.event_tx.reconcile_settled(
         &session_id,
         &committed_message_ids,
@@ -94,17 +66,8 @@ pub(crate) async fn app_state(
     );
     let product_events = state.event_tx.snapshot(&session_id);
     let product_messages = product_chat_messages(&state, &session_id);
+    let messages = displayed_messages(&transcript, &product_messages);
     let unknown_turn_terminals = state.unknown_turn_terminals.for_session(&session_id);
-    let ChatProjection {
-        messages,
-        mut transcript,
-    } = project_chat(
-        &read_view,
-        active_turn.as_ref(),
-        &current_frame_input_turn_ids,
-        product_messages,
-    );
-    splice_unknown_turn_terminal_notes(&mut transcript, &unknown_turn_terminals);
     let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
     let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
         read_view,
@@ -256,12 +219,15 @@ pub(crate) async fn commit_and_start_user_turn(
     request: restate::UserTurnRequest,
     chat_attachments: Vec<ChatAttachment>,
 ) -> Result<tokio::task::JoinHandle<restate::TurnSettlement>, AppError> {
-    state.push_message_with_id_and_attachments_for_session(
+    state.push_message_with_id_and_attachments_and_provenance_for_session(
         &request.session_id,
-        workbench_turn_user_message_id(&request.turn_id),
+        uuid::Uuid::new_v4().to_string(),
         "user",
         request.text.clone(),
         chat_attachments,
+        Some(ChatMessageProvenance::TurnInput {
+            turn_id: request.turn_id.clone(),
+        }),
     );
     state.trace_for_session(
         &request.session_id,

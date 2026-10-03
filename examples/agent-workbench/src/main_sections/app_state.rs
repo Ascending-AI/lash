@@ -565,6 +565,25 @@ impl AppState {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn push_user_message_for_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        text: impl Into<String>,
+    ) -> ChatMessage {
+        self.push_message_with_id_and_attachments_and_provenance_for_session(
+            session_id,
+            format!("fixture-user:{turn_id}"),
+            "user",
+            text,
+            Vec::new(),
+            Some(ChatMessageProvenance::TurnInput {
+                turn_id: turn_id.clone(),
+            }),
+        )
+    }
+
     pub(crate) fn push_assistant_message_for_turn(
         &self,
         session_id: &SessionId,
@@ -1133,45 +1152,6 @@ pub(crate) async fn apply_llm_profile_selection_to_session(
         }),
     );
     Ok(())
-}
-
-pub(crate) fn assistant_text_for_display(output: &TurnReport, streamed_prose: &str) -> String {
-    let terminal = output.final_value().map(terminal_value_text).or_else(|| {
-        output
-            .tool_value()
-            .map(|(_tool_name, value)| terminal_value_text(value))
-    });
-    let assistant = (!streamed_prose.trim().is_empty())
-        .then(|| streamed_prose.to_string())
-        .or_else(|| {
-            output
-                .assistant_message()
-                .filter(|text| !text.trim().is_empty())
-                .map(str::to_string)
-        });
-    combine_assistant_display_parts(assistant, terminal)
-}
-
-pub(crate) fn combine_assistant_display_parts(
-    assistant: Option<String>,
-    terminal: Option<String>,
-) -> String {
-    let assistant = assistant.filter(|text| !text.trim().is_empty());
-    let terminal = terminal.filter(|text| !text.trim().is_empty());
-    match (assistant, terminal) {
-        (Some(assistant), Some(terminal)) if assistant.trim() == terminal.trim() => assistant,
-        (Some(assistant), Some(terminal)) => format!("{}\n\n{}", assistant.trim_end(), terminal),
-        (Some(assistant), None) => assistant,
-        (None, Some(terminal)) => terminal,
-        (None, None) => String::new(),
-    }
-}
-
-pub(crate) fn terminal_value_text(value: &Value) -> String {
-    value
-        .as_str()
-        .map(str::to_string)
-        .unwrap_or_else(|| value.to_string())
 }
 
 pub(crate) fn compact_payload(value: Value) -> Value {

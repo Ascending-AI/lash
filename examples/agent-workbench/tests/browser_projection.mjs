@@ -154,6 +154,7 @@ test("resident replacement async refetch preserves an actual provisional tool ro
     const selectors = new Map();
     const node = {
       tagName,
+      dataset: {},
       className: "",
       children: [],
       parentNode: null,
@@ -369,6 +370,7 @@ test("provider failure settles to the same durable row for sender and observer",
     function element(tagName) {
       return {
         tagName,
+        dataset: {},
         className: "",
         textContent: "",
         children: [],
@@ -805,6 +807,7 @@ test("retry status ownership survives another turn's delayed Done", () => {
   function element(tagName) {
     const node = {
       tagName,
+      dataset: {},
       className: "",
       children: [],
       parentNode: null,
@@ -917,6 +920,7 @@ test("delayed same-turn retry status after Done is ignored without affecting ano
   function element(tagName) {
     const node = {
       tagName,
+      dataset: {},
       className: "",
       children: [],
       parentNode: null,
@@ -1004,6 +1008,7 @@ test("tool start and completion remain one nested code-block row", () => {
     const selectors = new Map();
     const node = {
       tagName,
+      dataset: {},
       className: "",
       children: [],
       parentNode: null,
@@ -1091,7 +1096,7 @@ test("tool start and completion remain one nested code-block row", () => {
      };
      timeline.children = [];
      renderStateTranscript({ transcript: [
-       { ...${JSON.stringify(turnEvents.codeCompleted)}, type: "code_block", tools: [${JSON.stringify(turnEvents.toolCompleted)}] }
+       { row_id: "settled-code", kind: "code_block", provenance: { turn_id: "tool-turn" }, content: { ...${JSON.stringify(turnEvents.codeCompleted)}, reasoning: [], attachments: [], tools: [{ operation: ${JSON.stringify(turnEvents.toolCompleted.name)}, status: "success" }], tools_omitted: 0 } }
      ] });
      const settledCodeBlock = timeline.children[0];
      const settledTools = settledCodeBlock.children.filter(child => child.className.startsWith("tool"));
@@ -1118,28 +1123,18 @@ test("tool start and completion remain one nested code-block row", () => {
 });
 
 test("Rust durable tool summaries render success, failure, and explicit omission honestly", () => {
-  const codeRow = durableToolTranscript.find((row) => row.id === "durable-tool-trajectory");
-  assert.deepEqual(codeRow.tools, [
-    {
-      kind: "durable_summary",
-      operation: "durable.success",
-      status: "success",
-    },
-    {
-      kind: "durable_summary",
-      operation: "durable.failure",
-      status: "failure",
-    },
-    {
-      kind: "omitted",
-      count: 3,
-    },
+  const codeRow = durableToolTranscript.find((row) => row.kind === "code_block" && row.content.code === "durable.tool_projection()");
+  assert.deepEqual(codeRow.content.tools, [
+    { operation: "durable.success", status: "success" },
+    { operation: "durable.failure", status: "failure" },
   ]);
+  assert.equal(codeRow.content.tools_omitted, 3);
 
   function element(tagName) {
     const selectors = new Map();
     const node = {
       tagName,
+      dataset: {},
       className: "",
       children: [],
       parentNode: null,
@@ -1199,7 +1194,8 @@ test("Rust durable tool summaries render success, failure, and explicit omission
     appendReasoning() {},
   };
   vm.runInNewContext(
-    `${markedSource("WORKBENCH_TOOL_CODE_PROJECTION", "WORKBENCH_TOOL_CODE_PROJECTION")}
+    `${markedSource("WORKBENCH_MESSAGE_ATTACHMENTS", "WORKBENCH_MESSAGE_ATTACHMENTS")}
+     ${markedSource("WORKBENCH_TOOL_CODE_PROJECTION", "WORKBENCH_TOOL_CODE_PROJECTION")}
      ${markedSource("WORKBENCH_SETTLED_TRANSCRIPT", "WORKBENCH_SETTLED_TRANSCRIPT")}
      renderStateTranscript({ transcript: ${JSON.stringify(durableToolTranscript)} });`,
     projectionContext,
@@ -1209,6 +1205,10 @@ test("Rust durable tool summaries render success, failure, and explicit omission
   const renderedTools = codeBlock.children.filter((child) => child.className.startsWith("tool"));
   assert.equal(codeBlock.querySelector("summary").textContent, "typescript completed · 5 tools · 3 omitted");
   assert.equal(renderedTools.length, 3);
+  const gallery = codeBlock.children.find(child => child.className === "message-attachments");
+  assert.deepEqual(gallery.children.map(link => link.dataset.attachmentId), codeRow.content.attachments.map(attachment => attachment.id));
+  const failed = projectionContext.createCodeBlockElement({...codeRow.content, error:"canonical cell failure", success:false}, []);
+  assert.ok(failed.querySelector(".code-output").textContent.includes("canonical cell failure"));
   assert.deepEqual(
     renderedTools.slice(0, 2).map((tool) => ({
       operation: tool.querySelector("strong").textContent,
@@ -1239,6 +1239,7 @@ test("durable failure and postCommand client errors remain distinct rows", async
   function element(tagName) {
     const node = {
       tagName,
+      dataset: {},
       className: "",
       textContent: "",
       children: [],
@@ -3276,44 +3277,29 @@ test("renderTriggers wires the projected name and detail into the rail", () => {
   assert.match(row.children[1].title, /trigger key wired-key/);
 });
 
-test("settled transcript rendering consumes durable reasoning and code disclosure", () => {
+test("settled transcript rendering consumes canonical reasoning and code disclosure", () => {
   const rendered = [];
+  const timeline = { children: [] };
+  const append = () => timeline.children.push({ dataset: {} });
   const renderContext = {
-    renderMessage(message) {
-      rendered.push(["message", message.id]);
-    },
-    appendReasoning(text, id, turnId) {
-      rendered.push(["reasoning", id, text, turnId]);
-    },
-    appendCodeBlock(row) {
-      rendered.push(["code_block", row.id, row.code, row.output]);
-    },
+    timeline,
+    renderMessage(message) { rendered.push(["message", message.id]); append(); },
+    appendReasoning(text, id, turnId) { rendered.push(["reasoning", id, text, turnId]); append(); },
+    appendCodeBlock(row) { rendered.push(["code_block", row.id, row.code, row.output]); append(); },
   };
-  vm.runInNewContext(
-    `${markedSource("WORKBENCH_SETTLED_TRANSCRIPT", "WORKBENCH_SETTLED_TRANSCRIPT")}
-     renderStateTranscript({
-       transcript: [
-         { type: "message", message: { id: "committed-user" } },
-         { type: "reasoning", id: "reasoning-1", text: "durable thought" },
-         {
-           type: "code_block",
-           id: "code-1",
-           code: "print(\\"durable\\")",
-           output: "durable"
-         }
-       ]
-     });`,
-    renderContext,
-  );
-
-  assert.deepEqual(
-    rendered,
-    [
-      ["message", "committed-user"],
-      ["reasoning", "reasoning-1", "durable thought", null],
-      ["code_block", "code-1", 'print("durable")', "durable"],
-    ],
-  );
+  const row = (row_id, kind, content) => ({ row_id, kind, timestamp: "recorded", provenance: {},
+    content: { text: "", reasoning: [], attachments: [], tools: [], tools_omitted: 0, ...content } });
+  vm.runInNewContext(`${markedSource("WORKBENCH_SETTLED_TRANSCRIPT", "WORKBENCH_SETTLED_TRANSCRIPT")}
+    renderStateTranscript({ transcript: ${JSON.stringify([
+      row("committed-user", "user", { text: "question" }),
+      row("reasoning-1", "reasoning", { reasoning: ["durable thought"] }),
+      row("code-1", "code_block", { code: 'print("durable")', output: "durable" }),
+    ])} });`, renderContext);
+  assert.deepEqual(rendered, [
+    ["message", "committed-user"], ["reasoning", "reasoning-1", "durable thought", null],
+    ["code_block", "code-1", 'print("durable")', "durable"],
+  ]);
+  assert.deepEqual(timeline.children.map(node => node.dataset.transcriptRowId), ["committed-user", "reasoning-1", "code-1"]);
 });
 
 test("pending ingress receipts survive transcript replay until their turn commits", () => {
@@ -3845,4 +3831,21 @@ test("execution scorecard renders typed retry decisions and policy evidence", ()
     "typed-retries #2 failed · retry declined · retry cause charge_safety · policy duplicate_cost_limit_exceeded · tokens at stake 50 · unsafe attempt 2",
     "typed-retries #3 failed · retry declined · retry cause retry_after_exceeds_cap",
   ].join("\n"));
+});
+
+
+
+test("canonical reply adoption removes only the matching typed preview", () => {
+  const removed = [];
+  const target = {children: [], appendChild(node) { this.children.push(node); }};
+  const make = () => ({children: [], append(...children) {this.children.push(...children);}, appendChild(child) {this.children.push(child);}});
+  const context = { document: {createElement: make}, timeline: target, clearEmpty() {}, scrollToEnd() {}, roleLabel: role => role,
+    setMessageBody(body, role, text) {body.textContent = text;}, assistantDraft: {closest() {return {remove() {removed.push('preview');}};}},
+    assistantDraftTurnId: 'live-turn', assistantDraftText: 'partial', assistantDraftChunks: [] };
+  vm.runInNewContext(markedSource("WORKBENCH_MESSAGE_RENDER", "WORKBENCH_MESSAGE_RENDER"), context);
+  context.renderMessage({role: 'assistant', text: 'another reply', provenance: {turn_id: 'other-turn'}});
+  assert.equal(removed.length, 0);
+  context.renderMessage({role: 'assistant', text: 'committed reply', provenance: {turn_id: 'live-turn'}});
+  assert.deepEqual(removed, ['preview']);
+  assert.equal(context.assistantDraft, null);
 });

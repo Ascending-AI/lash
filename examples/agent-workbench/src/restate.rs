@@ -33,10 +33,9 @@ use serde_json::{Value, json};
 use crate::{
     AppError, AppErrorVerdict, AppState, ButtonChoice, CRON_SCHEDULE_SOURCE_TYPE,
     ChannelTurnEvents, LlmProfileSelection, TurnStreamState,
-    apply_llm_profile_selection_to_session, assistant_text_for_display,
-    enqueue_button_trigger_command, enqueue_mail_received_trigger_command,
+    apply_llm_profile_selection_to_session, enqueue_button_trigger_command,
+    enqueue_mail_received_trigger_command,
     restate_ingress::{submit_restate_empty, submit_restate_workflow_json},
-    workbench_turn_assistant_message_id,
 };
 
 #[path = "restate_session_delete.rs"]
@@ -1046,7 +1045,11 @@ pub(crate) async fn record_turn_output_for_profile(
         turn_state.settle_terminal();
         streamed_prose
     };
-    let assistant_text = assistant_text_for_display(&output, &streamed_prose);
+    let projection = session.read_view().transcript();
+    let assistant_text = projection
+        .reply(identity.durable_turn_id)
+        .map(|row| row.content.text.clone())
+        .unwrap_or_default();
     state.trace_for_session(
         &session.session_id(),
         trace_name,
@@ -1101,7 +1104,7 @@ pub(crate) async fn record_turn_output_for_profile(
             // row carries that turn so the committed copy supersedes it.
             state.push_assistant_message_for_turn(
                 &session.session_id(),
-                workbench_turn_assistant_message_id(identity.turn_id),
+                uuid::Uuid::new_v4().to_string(),
                 identity.durable_turn_id,
                 assistant_text,
             );

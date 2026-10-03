@@ -313,31 +313,3 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     assert_eq!(after.messages[5].text, "resume answer three");
     let _ = std::fs::remove_dir_all(data_dir);
 }
-
-#[test]
-fn committed_chat_projection_keeps_provider_reasoning_hidden() {
-    let message = lash::messages::Message {
-        id: "assistant-with-replay".to_string(),
-        role: lash::messages::MessageRole::Assistant,
-        parts: Arc::new(vec![
-            lash::messages::Part::text(
-                "assistant-with-replay.p0".to_string(),
-                "visible answer".to_string(),
-                None,
-            ),
-            lash::messages::Part::reasoning(
-                "assistant-with-replay.p1".to_string(),
-                "hidden portable reasoning".to_string(),
-                Some(lash::direct::ProviderReasoningReplay {
-                    signature: Some("opaque".to_string()),
-                    ..Default::default()
-                }),
-            ),
-        ]),
-        origin: None,
-        reply_marker: None,
-    };
-
-    assert_eq!(committed_chat_text(&message), "visible answer");
-    assert_eq!(chat_message_from_committed(&message).text, "visible answer");
-}

@@ -130,79 +130,77 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         .collect::<BTreeSet<_>>();
     assert!(all_frame_turn_ids.contains(&initial_turn_id));
     assert!(all_frame_turn_ids.contains(&ordinary_turn_id));
+    let switched_reply_turn_id = support::durable_history_messages(&state, &session_id)
+        .await
+        .into_iter()
+        .find(|message| {
+            message.reply_marker.is_some() && lash::message_text(message) == "third frame answer"
+        })
+        .and_then(|message| match message.origin {
+            Some(lash::messages::MessageOrigin::TurnOutput { turn_id, .. }) => Some(turn_id),
+            _ => None,
+        })
+        .expect("the switched reply has committed typed provenance");
     session.close().await.expect("close projected follow frame");
 
     let Json(projected) = app_state(State(state), Query(SessionQuery::default()))
         .await
         .expect("project three-frame conversation");
-    // The task that opened the current frame is the prompt its answer replies
-    // to. Hiding it left the follow frame's transcript opening on an assistant
-    // row answering something the operator could not see (FIG-3143). The task
-    // of a frame that has itself been retired is gone with that frame, and the
-    // seeds stay protocol state in every frame.
     let expected_rows = vec![
-        (
-            workbench_turn_user_message_id(&initial_turn_id),
-            "user".to_string(),
-            initial_prompt.to_string(),
-        ),
-        (
-            format!("m_turn_{initial_turn_id}:agent-frame:2_input"),
-            "user".to_string(),
-            "enter the final follow frame".to_string(),
-        ),
-        (
-            workbench_turn_assistant_message_id(&initial_turn_id),
-            "assistant".to_string(),
-            "third frame answer".to_string(),
-        ),
-        (
-            workbench_turn_user_message_id(&ordinary_turn_id),
-            "user".to_string(),
-            ordinary_prompt.to_string(),
-        ),
-        (
-            workbench_turn_assistant_message_id(&ordinary_turn_id),
-            "assistant".to_string(),
-            "ordinary follow-frame answer".to_string(),
-        ),
+        ("user", initial_prompt),
+        ("user", "enter the middle follow frame"),
+        ("user", "enter the final follow frame"),
+        ("assistant", "third frame answer"),
+        ("user", ordinary_prompt),
+        ("assistant", "ordinary follow-frame answer"),
     ];
     assert_eq!(
         projected
             .messages
             .iter()
-            .map(|message| (
-                message.id.clone(),
-                message.role.clone(),
-                message.text.clone()
-            ))
+            .map(|message| (message.role.as_str(), message.text.as_str()))
+            .collect::<Vec<_>>(),
+        expected_rows
+    );
+    let canonical = projected
+        .transcript
+        .iter()
+        .filter_map(chat_message_from_row)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        canonical
+            .iter()
+            .map(|message| (message.role.as_str(), message.text.as_str()))
             .collect::<Vec<_>>(),
         expected_rows
     );
     assert_eq!(
-        projected
-            .transcript
+        canonical
             .iter()
-            .filter_map(|row| match row {
-                TranscriptRow::Message { message } => {
-                    Some((
-                        message.id.clone(),
-                        message.role.clone(),
-                        message.text.clone(),
-                    ))
-                }
-                TranscriptRow::Reasoning { .. }
-                | TranscriptRow::CodeBlock { .. }
-                | TranscriptRow::Note { .. } => None,
-            })
-            .collect::<Vec<_>>(),
-        expected_rows
+            .map(|message| &message.id)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        expected_rows.len()
     );
-    assert!(projected.messages.iter().all(|message| {
-        !message.text.contains("enter the middle follow frame")
-            && !message.text.contains("hidden-middle-seed")
-            && !message.text.contains("hidden-final-seed")
-    }));
+    assert_eq!(
+        canonical
+            .iter()
+            .filter(|message| message.role == "assistant")
+            .filter_map(|message| message
+                .provenance
+                .as_ref()
+                .map(ChatMessageProvenance::turn_id))
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![switched_reply_turn_id, ordinary_turn_id]
+    );
+    assert!(
+        projected
+            .messages
+            .iter()
+            .all(|message| !message.text.contains("hidden-middle-seed")
+                && !message.text.contains("hidden-final-seed"))
+    );
 }
 
 #[tokio::test]
@@ -245,12 +243,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         let turn_id = TurnId::fixture(format!("committed-before-switch-{index}"));
         let prompt = format!("committed prompt before switch {index}");
         committed_turn_ids.insert(turn_id.clone());
-        state.push_message_with_id_for_session(
-            &session_id,
-            workbench_turn_user_message_id(&turn_id),
-            "user",
-            &prompt,
-        );
+        state.push_user_message_for_turn(&session_id, &turn_id, &prompt);
         committed_inputs.push(
             lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, &prompt)
                 .with_id(format!("runtime-{turn_id}"))
@@ -281,12 +274,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         switch_prompt.to_string(),
         None,
     );
-    state.push_message_with_id_for_session(
-        &session_id,
-        workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
-        "user",
-        switch_prompt,
-    );
+    state.push_user_message_for_turn(&session_id, &TurnId::from(switch_turn_id), switch_prompt);
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
         .send(lash::TurnInput::text(switch_prompt))
@@ -336,7 +324,9 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
     let transcript_user_rows = boundary
         .transcript
         .iter()
-        .filter(|row| matches!(row, TranscriptRow::Message { message } if message.role == "user"))
+        .filter(|row| {
+            row.suppressed.is_none() && row.kind == lash::transcript::TranscriptRowKind::User
+        })
         .count();
     let product_user_rows = boundary
         .state
@@ -358,7 +348,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         "committed user rows disappeared from the rendered transcript"
     );
     assert_eq!(
-        product_user_rows, 7,
+        product_user_rows, 8,
         "product user rows were retired at the switch"
     );
 
@@ -416,17 +406,10 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
         .expect("open unobserved-commit session");
 
     let mut committed_inputs = Vec::new();
-    let mut submitted_prompts = Vec::new();
     for index in 0..4 {
         let turn_id = TurnId::fixture(format!("unobserved-before-switch-{index}"));
         let prompt = format!("submitted prompt before switch {index}");
-        state.push_message_with_id_for_session(
-            &session_id,
-            workbench_turn_user_message_id(&turn_id),
-            "user",
-            &prompt,
-        );
-        submitted_prompts.push((workbench_turn_user_message_id(&turn_id), prompt.clone()));
+        state.push_user_message_for_turn(&session_id, &turn_id, &prompt);
         committed_inputs.push(
             lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, &prompt)
                 .with_id(format!("runtime-{turn_id}"))
@@ -460,12 +443,7 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
         switch_prompt.to_string(),
         None,
     );
-    state.push_message_with_id_for_session(
-        &session_id,
-        workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
-        "user",
-        switch_prompt,
-    );
+    state.push_user_message_for_turn(&session_id, &TurnId::from(switch_turn_id), switch_prompt);
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
         .send(lash::TurnInput::text(switch_prompt))
@@ -504,41 +482,56 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
     ))
     .await
     .expect("read state after an unobserved-commit frame switch");
+    let expected_text = (0..4)
+        .map(|index| format!("submitted prompt before switch {index}"))
+        .chain([
+            switch_prompt.to_owned(),
+            "carry on in the next frame".to_owned(),
+        ])
+        .collect::<Vec<_>>();
     let user_rows = boundary
         .state
         .messages
         .iter()
         .filter(|message| message.role == "user")
-        .map(|message| (message.id.clone(), message.text.clone()))
         .collect::<Vec<_>>();
-    let mut expected_user_rows = submitted_prompts;
-    expected_user_rows.push((
-        workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
-        switch_prompt.to_string(),
-    ));
-    expected_user_rows.push((
-        format!("m_turn_{switch_turn_id}:agent-frame:1_input"),
-        "carry on in the next frame".to_string(),
-    ));
     assert_eq!(
-        user_rows, expected_user_rows,
-        "a submitted row must not depend on the workbench winning a race with the durable commit"
+        user_rows
+            .iter()
+            .map(|message| message.text.clone())
+            .collect::<Vec<_>>(),
+        expected_text
     );
-    let transcript_user_rows = boundary
+    assert_eq!(
+        user_rows
+            .iter()
+            .map(|message| &message.id)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        6
+    );
+    let canonical = boundary
         .transcript
         .iter()
-        .filter_map(|row| match row {
-            TranscriptRow::Message { message } if message.role == "user" => {
-                Some((message.id.clone(), message.text.clone()))
-            }
-            _ => None,
+        .filter(|row| {
+            row.suppressed.is_none() && row.kind == lash::transcript::TranscriptRowKind::User
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        transcript_user_rows, expected_user_rows,
-        "the rendered transcript must match /api/state across the switch"
+        canonical
+            .iter()
+            .map(|row| row.content.text.clone())
+            .collect::<Vec<_>>(),
+        expected_text
     );
-
+    assert_eq!(
+        canonical
+            .iter()
+            .map(|row| &row.row_id)
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        6
+    );
     crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(switch_turn_id))
         .await
         .expect("settle unobserved-commit switch turn");
@@ -546,4 +539,58 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
         .close()
         .await
         .expect("close unobserved-commit session");
+}
+
+#[tokio::test]
+async fn canonical_transcript_scenario_survives_a_frame_switch() {
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state_with_provider(
+        &double,
+        16,
+        crate::failure_provider::DevProviderScenario::TranscriptProjection.provider(),
+    )
+    .await;
+    let session_id = state.current_session_id();
+    let session = state
+        .create_or_open_session(&session_id, "test")
+        .await
+        .expect("open scenario");
+    let output = session
+        .send(lash::TurnInput::text("canonical initial question"))
+        .output()
+        .await
+        .expect("settle scenario");
+    assert_eq!(
+        output.final_value(),
+        Some(&json!("canonical follow-frame reply"))
+    );
+    session.close().await.expect("close scenario");
+    let Json(snapshot) = app_state(State(state), Query(SessionQuery::default()))
+        .await
+        .expect("read scenario");
+    let users = snapshot
+        .transcript
+        .iter()
+        .filter(|row| {
+            row.suppressed.is_none() && row.kind == lash::transcript::TranscriptRowKind::User
+        })
+        .map(|row| row.content.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        users,
+        ["canonical initial question", "canonical follow-frame task"]
+    );
+    let replies = snapshot
+        .transcript
+        .iter()
+        .filter(|row| row.provenance.is_turn_reply)
+        .collect::<Vec<_>>();
+    assert_eq!(replies.len(), 1);
+    assert_eq!(replies[0].content.text, "canonical follow-frame reply");
+    assert!(
+        snapshot
+            .transcript
+            .iter()
+            .any(|row| row.kind == lash::transcript::TranscriptRowKind::CodeBlock)
+    );
 }
