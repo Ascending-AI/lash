@@ -84,7 +84,7 @@ pub use lash_sansio::{CausalRef, EffectAddress};
 #[cfg(any(test, feature = "testing"))]
 pub use layered_host::{EffectLayer, LayeredEffectHost};
 pub use llm_outcome::{
-    AssistantResponsePhase, AssistantStreamHookState, LlmStreamRecord, RuntimeLlmCallOutcome,
+    AssistantResponsePlan, AssistantStreamHookState, LlmStreamRecord, RuntimeLlmCallOutcome,
 };
 pub use validation::{
     CanonicalRuntimeEffectEnvelope, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,

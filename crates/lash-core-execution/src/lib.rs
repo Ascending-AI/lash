@@ -766,7 +766,7 @@ pub use runtime::TurnCancelWait;
 pub use runtime::publish_process_execution_env;
 pub use runtime::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, AdmittedScope, AdmittedTurnInputs,
-    Ancestry, AssistantResponseHookEvents, AssistantResponsePhase, AssistantStreamHookState,
+    Ancestry, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BindingId, BoundaryReason,
     CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
     ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,

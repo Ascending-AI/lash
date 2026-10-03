@@ -514,7 +514,7 @@ impl lash_core::testing::EffectLayer for CapturingRuntimeReplayController {
                     text_streamed: false,
                     call_record: None,
                     stream: Box::new(lash_core::LlmStreamRecord::unstreamed(
-                        lash_core::AssistantResponsePhase::Raw,
+                        lash_core::AssistantResponsePlan::default(),
                     )),
                 })
             }

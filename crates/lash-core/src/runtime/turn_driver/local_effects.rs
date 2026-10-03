@@ -106,10 +106,11 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
             }
             RuntimeEffectCommand::AssistantResponseHooks {
                 response,
+                plan,
                 stream_hook_states,
             } => runner
                 .driver
-                .run_assistant_response_hooks(*response, &stream_hook_states)
+                .run_assistant_response_hooks(*response, &plan, &stream_hook_states)
                 .await
                 .map(
                     |(response, events)| RuntimeEffectOutcome::AssistantResponseHooks {

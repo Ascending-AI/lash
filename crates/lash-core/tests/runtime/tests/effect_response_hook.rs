@@ -397,6 +397,7 @@ async fn recording_response_hook_terminal_error_replays() {
             ),
             RuntimeEffectCommand::AssistantResponseHooks {
                 response: Box::default(),
+                plan: Default::default(),
                 stream_hook_states: Vec::new(),
             },
         );

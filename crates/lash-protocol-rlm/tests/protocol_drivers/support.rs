@@ -1137,6 +1137,7 @@ fn drive_plugin_stream(
                 .transform_assistant_response(
                     &SessionId::from("rlm-protocol-scenario-hooks"),
                     response.clone(),
+                    &plugins.assistant_response_plan(),
                     &stream_hook_states,
                 )
                 .await

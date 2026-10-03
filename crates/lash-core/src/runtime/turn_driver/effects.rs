@@ -330,6 +330,7 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         response: LlmResponse,
+        plan: crate::runtime::AssistantResponsePlan,
         stream_hook_states: Vec<crate::runtime::AssistantStreamHookState>,
         event_tx: &TurnObserver,
     ) -> Result<LlmResponse, RuntimeEffectControllerError> {
@@ -351,6 +352,7 @@ impl RuntimeTurnDriver<'_> {
                     invocation,
                     RuntimeEffectCommand::AssistantResponseHooks {
                         response: Box::new(response),
+                        plan,
                         stream_hook_states,
                     },
                 ),

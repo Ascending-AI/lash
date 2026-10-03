@@ -191,6 +191,9 @@ impl OutputRegistrations<'_> {
         self.reg.add_assistant_response_hook(hook);
     }
 
+    /// Pairs with the response hook at the same registration ordinal within
+    /// this plugin. Its state is recorded under that response callback's key
+    /// and owning revision, and is discarded when no paired response exists.
     pub fn stream_finished(self, hook: AssistantStreamFinishedHook) {
         self.reg.add_assistant_stream_finished_hook(hook);
     }

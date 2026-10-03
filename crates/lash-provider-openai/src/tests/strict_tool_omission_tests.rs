@@ -737,7 +737,7 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
                                 text_streamed: false,
                                 call_record: Some(completion.call_record),
                                 stream: Box::new(lash_core::LlmStreamRecord::unstreamed(
-                                    lash_core::AssistantResponsePhase::Raw,
+                                    lash_core::AssistantResponsePlan::default(),
                                 )),
                             })
                         }),

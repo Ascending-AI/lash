@@ -1417,7 +1417,7 @@ pub mod runtime {
     /// against uses the same reading rather than its own.
     pub use lash_core::runtime::current_epoch_ms;
     pub use lash_core::runtime::{
-        AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantResponsePhase,
+        AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantResponsePlan,
         AssistantStreamHookState, AwaitEventResolver, CheckpointAdmittedSet,
         CompletionKeyPreparation, DirectCompletionClient, EffectAddress, EffectGroupHandle,
         EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,

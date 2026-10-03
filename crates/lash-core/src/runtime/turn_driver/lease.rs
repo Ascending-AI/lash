@@ -29,6 +29,22 @@ impl<'run> RuntimeTurnDriver<'run> {
         // but its outcome: every decision it made rides the recorded outcome,
         // so a replay that never ran the body reconstructs the same state.
         let scoped_effect_controller = self.scoped_effect_controller.clone();
+        let scoped_effect_controller = match &envelope.command {
+            RuntimeEffectCommand::AssistantResponseHooks { plan, .. } => {
+                match self
+                    .session
+                    .plugins()
+                    .validate_assistant_response_plan(plan)
+                {
+                    Ok(()) => scoped_effect_controller,
+                    Err(error) => scoped_effect_controller.with_journal_guard(Arc::new(
+                        crate::CommandJournalGuard::open()
+                            .served_only(crate::ServedOnlyRange::every_key(error.into())),
+                    )),
+                }
+            }
+            _ => scoped_effect_controller,
+        };
         let outcome = if let Some(task_controller) = scoped_effect_controller.to_static() {
             let local_executor = super::local_effects::turn_effect_executor(
                 self,
@@ -56,6 +72,8 @@ impl<'run> RuntimeTurnDriver<'run> {
                 task_controller,
                 envelope.invocation.effect_replay_key(),
             );
+            let local_executor =
+                scoped_effect_controller.guard_local_executor(&envelope, local_executor)?;
             crate::runtime::effect::drive_effect_controller_task(
                 scoped_effect_controller.controller(),
                 scoped_effect_controller.execution_scope().clone(),

@@ -280,10 +280,13 @@ that committed frame in place. The write is a store operation under §9, not
 an extra controller command variant.
 
 The phases a model call issues are recorded with it. Phase 1 journals the raw
-completion together with its response phase plan: whether assistant-response
-hooks derive the served response in a phase 2. Replay follows the recorded
-plan, never the hooks installed at replay, so adding or removing a response
-hook reaches only calls recorded after the change.
+completion together with its ordered response callback plan. Each entry names
+its callback key and owning plugin revision, selected before the paid call.
+An empty plan serves the raw completion. Replay follows the recorded order,
+and a completed derivation serves its journaled result without callbacks.
+An unfinished derivation resolves every recorded callback before invoking any
+and parks if a key or revision is unavailable. Stream end state pairs with
+one response callback identity, including its revision.
 
 Evidence: `crates/lash-sansio/src/sansio/turn_protocol.rs:699`,
 `crates/lash-sansio/src/sansio/turn_protocol.rs:779`,

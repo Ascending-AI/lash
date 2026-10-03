@@ -52,6 +52,7 @@ enum HookChange {
     /// The first attempt ran with no response hook; the replay has one.
     Added,
     StateRetained,
+    CallbackUnavailable,
 }
 
 impl HookChange {
@@ -62,7 +63,7 @@ impl HookChange {
     /// The response the run serves: what its first attempt recorded.
     fn served(self) -> &'static str {
         match self {
-            Self::Removed | Self::StateRetained => DERIVED,
+            Self::Removed | Self::StateRetained | Self::CallbackUnavailable => DERIVED,
             Self::Added => RAW,
         }
     }
@@ -70,7 +71,7 @@ impl HookChange {
     /// The response the run must never serve.
     fn not_served(self) -> &'static str {
         match self {
-            Self::Removed | Self::StateRetained => RAW,
+            Self::Removed | Self::StateRetained | Self::CallbackUnavailable => RAW,
             Self::Added => DERIVED,
         }
     }
@@ -421,6 +422,7 @@ fn core_over(
     engine: &Engine,
     with_hook: bool,
     stateful: bool,
+    callback_available: bool,
     provider_calls: &Arc<AtomicUsize>,
     hook_calls: &Arc<AtomicUsize>,
 ) -> LashCore {
@@ -439,8 +441,15 @@ fn core_over(
         .serve_test_llm_profile(provider, mock_llm_profile_spec());
     if stateful {
         builder = builder.plugin(Arc::new(StateDeriver(Arc::clone(hook_calls))));
-    } else if with_hook {
-        builder = builder.plugin(Arc::new(deriving_plugin(hook_calls)));
+    } else {
+        builder = builder.plugin(Arc::new(if with_hook && callback_available {
+            deriving_plugin(hook_calls)
+        } else {
+            StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("response-phase-replay-deriver"),
+                lash_core::facade_support::PluginSpec::new(),
+            )
+        }));
     }
     builder
         .build(crate::testing::runtime_lease_owner())
@@ -525,6 +534,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
         &engine,
         change.first_has_hook(),
         change == HookChange::StateRetained,
+        true,
         &provider_calls,
         &hook_calls,
     );
@@ -537,14 +547,21 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
             .await?,
     );
     let run = lash_core::TurnId::fixture(format!("{session}-run"));
-    // The step after the LLM call's phases: the turn's completion
-    // checkpoint, which both hook sets issue.
-    engine.crash_on(
-        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRunEnding {
+    // An owed derivation loses its result; the other cases lose the step
+    // after both phases, so the replay serves their completed derivation.
+    let crash = if change == HookChange::CallbackUnavailable {
+        lash_restate_test::CrashPoint::BeforeRunResultEnding {
+            suffix: "assistant_response_hooks".to_owned(),
+        }
+    } else {
+        lash_restate_test::CrashPoint::BeforeRunEnding {
             suffix: CHECKPOINT_SUFFIX.to_owned(),
-        })
-        .service(lash_restate_test::TURN_DRIVER_SERVICE)
-        .key(lash_restate::turn_workflow_key(&session_id, &run)),
+        }
+    };
+    engine.crash_on(
+        lash_restate_test::CrashRule::new(crash)
+            .service(lash_restate_test::TURN_DRIVER_SERVICE)
+            .key(lash_restate::turn_workflow_key(&session_id, &run)),
     );
     let store = lash_core::runtime::live_session_view(&core.store_factory, &session_id)
         .await?
@@ -604,8 +621,9 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
     let hook_calls_before_replay = hook_calls.load(Ordering::SeqCst);
     let second = core_over(
         &engine,
-        !change.first_has_hook(),
+        change == HookChange::CallbackUnavailable || !change.first_has_hook(),
         change == HookChange::StateRetained,
+        change != HookChange::CallbackUnavailable,
         &provider_calls,
         &hook_calls,
     );
@@ -616,6 +634,58 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
             executed.target.starts_with("LashTurn/") && executed.target.contains(run.as_str())
         })
     };
+    if change == HookChange::CallbackUnavailable {
+        let parked = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                if let Some(park) = store.load_turn_park().await.expect("read the run's park") {
+                    break park;
+                }
+                for executed in engine.runs(&session_id).await {
+                    if executed.status == "paused" {
+                        engine.resume(&executed);
+                    }
+                }
+                assert!(
+                    lash_core::store::RunStore::run_terminal(
+                        second.store_factory.as_ref(),
+                        &session_id,
+                        &run,
+                    )
+                    .await
+                    .expect("read the run's terminal")
+                    .is_none(),
+                    "an owed callback cannot commit the raw response"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the unavailable callback parks the run");
+        let lash_core::store::ParkReason::PluginRevisionUnavailable { refusal, .. } = parked.reason
+        else {
+            panic!("the callback park remains typed: {parked:?}");
+        };
+        let callback = refusal
+            .callback
+            .expect("the park names the recorded callback");
+        assert_eq!(callback.key, "assistant_response:0");
+        assert_eq!(callback.owner.plugin, "response-phase-replay-deriver");
+        assert_eq!(callback.owner.behavior_revision.get(), 1);
+        assert_eq!(
+            provider_calls.load(Ordering::SeqCst),
+            1,
+            "the paid completion replays"
+        );
+        assert_eq!(
+            hook_calls.load(Ordering::SeqCst),
+            hook_calls_before_replay,
+            "the unavailable callback never runs during replay"
+        );
+        assert_eq!(hook_calls_before_replay, 1, "the first result was lost");
+        assert!(crashes.get() >= 1);
+        drop(second);
+        return Ok(());
+    }
     let settled = tokio::time::timeout(std::time::Duration::from_secs(90), async {
         loop {
             // A replay that found no `SessionShifts` installed may have spent its
@@ -649,8 +719,19 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
         .await
         .expect("the run's execution is an invocation");
     let outcome = engine.outcome(&executed).await;
+    let terminal =
+        lash_core::store::RunStore::run_terminal(second.store_factory.as_ref(), &session_id, &run)
+            .await?
+            .expect("the completed run has a stored terminal");
+    let lash_core::store::RunTerminalCause::Committed {
+        outcome: committed, ..
+    } = terminal.cause
+    else {
+        panic!("the run commits its recorded response: {terminal:?}");
+    };
+    let committed = serde_json::to_string(&committed)?;
     let evidence = format!(
-        "last failure {:?}, outcome {outcome:?}, journals {:?}",
+        "last failure {:?}, outcome {outcome:?}, committed {committed}, journals {:?}",
         executed.last_failure,
         session_journals(&engine, &session_id).await,
     );
@@ -668,9 +749,9 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
     );
     assert!(
         matches!(&outcome, Some(Ok(value))
-            if value.contains("\"run_outcome\":\"committed\"")
-                && value.contains(change.served())
-                && !value.contains(change.not_served())),
+            if value.contains("\"run_outcome\":\"committed\""))
+            && committed.contains(change.served())
+            && !committed.contains(change.not_served()),
         "the run commits the response its first attempt recorded, `{}`: {evidence}",
         change.served(),
     );
@@ -717,6 +798,8 @@ macro_rules! response_phase_replay_laws {
 }
 
 response_phase_replay_laws! {
+    owed_unavailable_callback_parks_sqlite_memory: HookChange::CallbackUnavailable, Storage::SqliteMemory, false;
+    owed_unavailable_callback_parks_sqlite_file: HookChange::CallbackUnavailable, Storage::SqliteFile, false;
     completed_callback_state_survives_cold_replay_sqlite_memory: HookChange::StateRetained, Storage::SqliteMemory, false;
     completed_callback_state_survives_cold_replay_sqlite_file: HookChange::StateRetained, Storage::SqliteFile, false;
     removed_hook_sqlite_memory: HookChange::Removed, Storage::SqliteMemory, false;
@@ -747,4 +830,181 @@ async fn live_removed_hook() -> Result<()> {
 #[ignore = "requires an isolated Restate server; run by the recorded-runs suite"]
 async fn live_added_hook() -> Result<()> {
     on_live_restate(HookChange::Added).await
+}
+
+fn callback_session(
+    mut plugins: Vec<Arc<dyn lash_core::plugin::PluginFactory>>,
+) -> Arc<lash_core::facade_support::PluginSession> {
+    plugins.push(Arc::new(
+        lash_protocol_standard::StandardProtocolPluginFactory::new(),
+    ));
+    lash_core::facade_support::PluginHost::new(plugins)
+        .build_session(lash_core::plugin::PluginSessionRequest::creation(
+            "recorded-response-plan",
+            Default::default(),
+        ))
+        .expect("materialize the callback registry")
+}
+
+fn appending_callback(
+    plugin: &'static str,
+    revision: u32,
+    suffix: &'static str,
+    calls: &Arc<AtomicUsize>,
+) -> Arc<dyn lash_core::plugin::PluginFactory> {
+    let calls = Arc::clone(calls);
+    let mut declaration = lash_core::plugin::PluginDeclaration::initial(plugin);
+    declaration.behavior_revision = lash_core::plugin::BehaviorRevision::new(revision).unwrap();
+    Arc::new(StaticPluginFactory::new(
+        declaration,
+        lash_core::facade_support::PluginSpec::new().with_assistant_response(Arc::new(
+            move |ctx| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let response = text_response(&format!("{}{suffix}", ctx.response.full_text()));
+                Box::pin(async move {
+                    Ok(lash_core::facade_support::AssistantResponseTransform {
+                        response,
+                        events: Vec::new(),
+                    })
+                })
+            },
+        )),
+    ))
+}
+
+async fn replay_callbacks(
+    recorded: &lash_core::facade_support::PluginSession,
+    live: &lash_core::facade_support::PluginSession,
+    states: &[lash_core::AssistantStreamHookState],
+) -> std::result::Result<String, lash_core::PluginError> {
+    let plan: lash_core::AssistantResponsePlan =
+        serde_json::from_value(serde_json::to_value(recorded.assistant_response_plan()).unwrap())
+            .unwrap();
+    let transforms = live
+        .transform_assistant_response(
+            &lash_core::SessionId::fixture("recorded-response-plan"),
+            text_response(RAW),
+            &plan,
+            states,
+        )
+        .await?;
+    Ok(transforms
+        .last()
+        .map_or_else(|| RAW.into(), |t| t.value.response.full_text()))
+}
+
+#[tokio::test]
+async fn recorded_callback_order_survives_reordered_installation() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let a = appending_callback("response-a", 1, ":a", &calls);
+    let b = appending_callback("response-b", 1, ":b", &calls);
+    let recorded = callback_session(vec![a.clone(), b.clone()]);
+    let live = callback_session(vec![b, a]);
+    assert_eq!(
+        replay_callbacks(&recorded, &live, &[]).await.unwrap(),
+        format!("{RAW}:a:b")
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn an_unavailable_recorded_callback_refuses_before_any_callback() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let a = appending_callback("response-a", 1, ":a", &calls);
+    let b = appending_callback("response-b", 1, ":b", &calls);
+    let recorded = callback_session(vec![b.clone(), a]);
+    let live = callback_session(vec![b]);
+    let error = replay_callbacks(&recorded, &live, &[])
+        .await
+        .expect_err("the recorded callback is owed");
+    let error = lash_core::RuntimeEffectControllerError::from(error).into_runtime_error();
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::PluginRevisionUnavailable
+    );
+    let Some(lash_core::RuntimeErrorCause::PluginExecution { refusal }) = error.cause else {
+        panic!("the missing callback remains typed");
+    };
+    assert_eq!(
+        refusal.callback.as_ref().unwrap().owner.plugin,
+        "response-a"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_recorded_callback_revision_never_runs_a_substitute() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let recorded = callback_session(vec![appending_callback("response-a", 1, ":old", &calls)]);
+    let live = callback_session(vec![appending_callback("response-a", 2, ":new", &calls)]);
+    let error = replay_callbacks(&recorded, &live, &[])
+        .await
+        .expect_err("revision one is owed");
+    let error = lash_core::RuntimeEffectControllerError::from(error).into_runtime_error();
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::PluginRevisionUnavailable
+    );
+    let Some(lash_core::RuntimeErrorCause::PluginExecution { refusal }) = error.cause else {
+        panic!("the revision refusal remains typed");
+    };
+    let callback = refusal.callback.as_ref().unwrap();
+    assert_eq!(callback.key, "assistant_response:0");
+    assert_eq!(callback.owner.behavior_revision.get(), 1);
+    assert_eq!(
+        refusal
+            .available
+            .iter()
+            .find(|revision| revision.plugin == "response-a")
+            .unwrap()
+            .behavior_revision
+            .get(),
+        2
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn stream_state_pairs_multiple_callbacks_of_one_plugin_on_cold_replay() {
+    let mut spec = lash_core::facade_support::PluginSpec::new();
+    for state in ["first", "second"] {
+        spec = spec.with_assistant_stream_finished(Arc::new(move |_| {
+            Box::pin(async move { Ok(Some(serde_json::json!(state))) })
+        }));
+        spec = spec.with_assistant_response(Arc::new(move |ctx| {
+            let state = ctx
+                .stream_state
+                .expect("this callback's recorded stream state");
+            let response = text_response(&format!(
+                "{}:{}",
+                ctx.response.full_text(),
+                state.as_str().unwrap()
+            ));
+            Box::pin(async move {
+                Ok(lash_core::facade_support::AssistantResponseTransform {
+                    response,
+                    events: Vec::new(),
+                })
+            })
+        }));
+    }
+    let plugin: Arc<dyn lash_core::plugin::PluginFactory> = Arc::new(StaticPluginFactory::new(
+        lash_core::plugin::PluginDeclaration::initial("paired-responses"),
+        spec,
+    ));
+    let recorded = callback_session(vec![plugin.clone()]);
+    let states = recorded
+        .finish_assistant_stream(
+            &lash_core::SessionId::fixture("recorded-response-plan"),
+            lash_core::plugin::AssistantStreamFinishReason::Complete,
+        )
+        .await
+        .unwrap();
+    let states: Vec<lash_core::AssistantStreamHookState> =
+        serde_json::from_value(serde_json::to_value(states).unwrap()).unwrap();
+    let live = callback_session(vec![plugin]);
+    assert_eq!(
+        replay_callbacks(&recorded, &live, &states).await.unwrap(),
+        format!("{RAW}:first:second")
+    );
 }

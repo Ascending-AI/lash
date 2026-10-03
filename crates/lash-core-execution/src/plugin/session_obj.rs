@@ -606,11 +606,16 @@ impl PluginSession {
             .collect()
     }
 
-    /// With none registered the runtime skips phase 2 of the staged LLM-call
-    /// effect boundary entirely, so a hook-free session journals exactly one
-    /// entry per call as before.
-    pub fn has_assistant_response_hooks(&self) -> bool {
-        !self.contributions.assistant_response_hooks.is_empty()
+    /// Select response callbacks in registration order before the model call.
+    pub fn assistant_response_plan(&self) -> crate::runtime::AssistantResponsePlan {
+        crate::runtime::AssistantResponsePlan {
+            callbacks: self
+                .contributions
+                .assistant_response_hooks
+                .iter()
+                .map(|registered| registered.identity.clone())
+                .collect(),
+        }
     }
 
     pub fn has_assistant_stream_hooks(&self) -> bool {
@@ -841,19 +846,54 @@ impl PluginSession {
         Ok(transforms)
     }
 
+    /// Check every recorded key and revision without invoking a callback.
+    pub fn validate_assistant_response_plan(
+        &self,
+        plan: &crate::runtime::AssistantResponsePlan,
+    ) -> Result<(), PluginError> {
+        self.resolve_assistant_response_plan(plan).map(drop)
+    }
+
+    fn resolve_assistant_response_plan(
+        &self,
+        plan: &crate::runtime::AssistantResponsePlan,
+    ) -> Result<Vec<&RegisteredHook<AssistantResponseHook>>, PluginError> {
+        plan.callbacks
+            .iter()
+            .map(|callback| {
+                self.contributions
+                    .assistant_response_hooks
+                    .iter()
+                    .find(|registered| &registered.identity == callback)
+                    .ok_or_else(|| {
+                        PluginError::Runtime(
+                            PluginExecutionRefusal {
+                                recorded: vec![callback.owner.clone()],
+                                available: self.host.plugin_revisions(),
+                                callback: Some(callback.clone()),
+                            }
+                            .into_runtime_error(),
+                        )
+                    })
+            })
+            .collect()
+    }
+
     pub async fn transform_assistant_response(
         &self,
         session_id: &SessionId,
         response: crate::llm::types::LlmResponse,
+        plan: &crate::runtime::AssistantResponsePlan,
         stream_hook_states: &[crate::runtime::AssistantStreamHookState],
     ) -> Result<Vec<PluginOwned<AssistantResponseTransform>>, PluginError> {
+        let callbacks = self.resolve_assistant_response_plan(plan)?;
         self.validate_recorded_admission()?;
         let mut current = response;
         let mut transforms = Vec::new();
-        for registered in &self.contributions.assistant_response_hooks {
+        for registered in callbacks {
             let stream_state = stream_hook_states
                 .iter()
-                .find(|recorded| recorded.plugin_id == registered.identity.owner.plugin)
+                .find(|recorded| recorded.callback == registered.identity)
                 .map(|recorded| recorded.state.clone());
             let transform = (registered.hook)(AssistantResponseHookContext {
                 session_id: session_id.clone(),
@@ -871,8 +911,8 @@ impl PluginSession {
         Ok(transforms)
     }
 
-    /// Runs every stream-finished hook and collects the end states they
-    /// returned, attributed to their plugins in registration order.
+    /// Runs every stream-finished hook. Its per-plugin registration ordinal
+    /// selects the response callback that receives the recorded state.
     pub async fn finish_assistant_stream(
         &self,
         session_id: &SessionId,
@@ -880,16 +920,31 @@ impl PluginSession {
     ) -> Result<Vec<crate::runtime::AssistantStreamHookState>, PluginError> {
         self.validate_recorded_admission()?;
         let mut states = Vec::new();
-        for registered in &self.contributions.assistant_stream_finished_hooks {
+        for (index, registered) in self
+            .contributions
+            .assistant_stream_finished_hooks
+            .iter()
+            .enumerate()
+        {
             let state = (registered.hook)(AssistantStreamFinishedContext {
                 session_id: session_id.clone(),
                 plugin_config: self.admitted_plugin_config(),
                 reason,
             })
             .await?;
-            if let Some(state) = state {
+            let ordinal = self.contributions.assistant_stream_finished_hooks[..index]
+                .iter()
+                .filter(|previous| previous.identity.owner == registered.identity.owner)
+                .count();
+            let response = self
+                .contributions
+                .assistant_response_hooks
+                .iter()
+                .filter(|response| response.identity.owner == registered.identity.owner)
+                .nth(ordinal);
+            if let (Some(state), Some(response)) = (state, response) {
                 states.push(crate::runtime::AssistantStreamHookState {
-                    plugin_id: registered.identity.owner.plugin.to_string(),
+                    callback: response.identity.clone(),
                     state,
                 });
             }

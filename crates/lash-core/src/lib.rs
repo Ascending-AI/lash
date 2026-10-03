@@ -692,7 +692,7 @@ pub use lash_core_execution::runtime::publish_process_execution_env;
 pub use lash_core_execution::runtime::{ArtifactReferrerPorts, ReferrerAcquisition};
 pub use runtime::{
     AbandonEvidence, AbandonWriter, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
-    AdmittedTurnInputs, Ancestry, AssistantResponseHookEvents, AssistantResponsePhase,
+    AdmittedTurnInputs, Ancestry, AssistantResponseHookEvents, AssistantResponsePlan,
     AssistantStreamHookState, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BindingId,
     BoundaryReason, CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet,
     Clock, ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation,

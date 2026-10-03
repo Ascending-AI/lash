@@ -58,7 +58,7 @@ pub use effect::TurnCancelWait;
 pub use effect::await_event_identity;
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
-    AdmittedScope, AssistantResponseHookEvents, AssistantResponsePhase, AssistantStreamHookState,
+    AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointAdmittedSet, CommandJournalGuard,
     CompletionKeyPreparation, EffectAddress, EffectGroupHandle, EffectGroupMembership, EffectHost,

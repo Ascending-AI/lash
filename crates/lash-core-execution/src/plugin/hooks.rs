@@ -174,27 +174,23 @@ pub type AssistantStreamHook =
 /// this phase's outcome and served from it on replay, so they keep their
 /// placement and are never re-emitted by a redrive that replays the entry.
 ///
-/// Whether phase 2 runs is recorded with the completion (ADR 0105 §1): phase 1
-/// journals the call's
-/// [`AssistantResponsePhase`](crate::runtime::AssistantResponsePhase), decided
-/// from the response hooks installed as it ran, and every replay, retry and
-/// redrive of that call follows the record. Adding or removing a response hook
-/// therefore never changes what an already-recorded call serves: a call
-/// recorded with no response phase serves its raw completion and never runs a
-/// hook installed since, and a call recorded with one serves its journaled
-/// derivation. A phase 2 owed but not yet journaled runs under the hooks
-/// installed when it runs; with none left, it derives the raw completion
-/// unchanged. A hook set change reaches only calls whose phase 1 records
-/// after it.
+/// Phase 1 records an ordered
+/// [`AssistantResponsePlan`](crate::runtime::AssistantResponsePlan) of callback
+/// keys and owning revisions selected before the paid call. Replay and redrive
+/// follow that plan. An empty plan serves the raw completion even if hooks
+/// were installed later. A completed derivation serves its recorded outcome
+/// without invoking hooks. An unfinished derivation resolves every recorded
+/// callback before invoking any, and parks if a key or revision is unavailable.
 pub type AssistantResponseHook = Arc<
     dyn Fn(AssistantResponseHookContext) -> PluginFuture<AssistantResponseTransform> + Send + Sync,
 >;
 /// Runs once the provider stream of an LLM call finished, in phase 1 of the
 /// staged boundary. The value it returns for a stream that produced a
 /// response ([`AssistantStreamFinishReason::Complete`] or
-/// [`AssistantStreamFinishReason::Aborted`]) is the plugin's stream end state:
-/// it is journaled with the raw completion and handed to the same plugin's
-/// [`AssistantResponseHook`] as [`AssistantResponseHookContext::stream_state`].
+/// [`AssistantStreamFinishReason::Aborted`]) is recorded with the raw completion
+/// for the response hook at the same registration ordinal within its plugin.
+/// The receiving callback's key and owning revision identify that state in
+/// [`AssistantResponseHookContext::stream_state`].
 /// Return `None` when phase 2 needs nothing from the stream. The hook should
 /// leave no per-stream state behind: the next stream starts from nothing.
 pub type AssistantStreamFinishedHook = Arc<
@@ -485,9 +481,10 @@ pub struct AssistantResponseHookContext {
     /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub response: crate::LlmResponse,
-    /// The state this plugin's [`AssistantStreamFinishedHook`] returned when
-    /// the completion's stream finished, as phase 1 journaled it. `None` when
-    /// the hook returned nothing or the completion did not stream.
+    /// The state the paired [`AssistantStreamFinishedHook`] returned when
+    /// the completion's stream finished. Phase 1 records it under this exact
+    /// response callback identity and revision. `None` when the paired hook
+    /// returned nothing or the completion did not stream.
     pub stream_state: Option<serde_json::Value>,
 }
 

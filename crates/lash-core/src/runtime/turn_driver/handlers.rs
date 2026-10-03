@@ -101,7 +101,7 @@ impl RuntimeTurnDriver<'_> {
                 crate::runtime::LlmStreamRecord {
                     reasoning_published,
                     stream_hook_states,
-                    response_phase,
+                    response_plan,
                 },
         } = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx)
@@ -145,12 +145,13 @@ impl RuntimeTurnDriver<'_> {
         // the response hooks installed now: a replay after a hook was added or
         // removed issues the phases its first execution did.
         let result = match result {
-            Ok(raw) if response_phase == crate::runtime::AssistantResponsePhase::DerivedByHooks => {
+            Ok(raw) if !response_plan.callbacks.is_empty() => {
                 match self
                     .invoke_assistant_response_hooks_effect(
                         machine,
                         id,
                         raw,
+                        response_plan,
                         stream_hook_states,
                         event_tx,
                     )

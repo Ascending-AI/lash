@@ -21,7 +21,7 @@ use crate::{
 
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
-use super::llm_outcome::{AssistantStreamHookState, LlmStreamRecord};
+use super::llm_outcome::{AssistantResponsePlan, AssistantStreamHookState, LlmStreamRecord};
 use super::tool_settlement::{ToolAttemptCapture, ToolSettlement};
 
 /// Effect-specific header whose address is present by construction.
@@ -458,6 +458,8 @@ pub enum RuntimeEffectCommand {
     /// outcome, so this command is reconstructed identically on redrive.
     AssistantResponseHooks {
         response: Box<LlmResponse>,
+        /// The exact ordered callback keys and revisions phase 1 recorded.
+        plan: AssistantResponsePlan,
         /// The stream-hook end states phase 1 recorded. The response hooks
         /// read these, never state a stream hook left in plugin memory, so
         /// phase 2 derives the same response on any worker.

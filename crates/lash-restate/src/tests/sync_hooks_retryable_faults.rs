@@ -278,6 +278,7 @@ async fn an_assistant_hook_session_fault_retries_the_step_without_journaling_it(
         runtime_invocation(RuntimeEffectKind::AssistantResponseHooks, "fig3726-hooks"),
         RuntimeEffectCommand::AssistantResponseHooks {
             response: Box::default(),
+            plan: Default::default(),
             stream_hook_states: Vec::new(),
         },
     );
@@ -372,6 +373,7 @@ async fn a_deterministic_assistant_hook_failure_is_the_steps_recorded_outcome() 
         runtime_invocation(RuntimeEffectKind::AssistantResponseHooks, "fig3726-hooks"),
         RuntimeEffectCommand::AssistantResponseHooks {
             response: Box::default(),
+            plan: Default::default(),
             stream_hook_states: Vec::new(),
         },
     );

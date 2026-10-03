@@ -157,6 +157,7 @@ impl RuntimeTurnDriver<'_> {
     pub(in crate::runtime) async fn run_assistant_response_hooks(
         &mut self,
         response: LlmResponse,
+        plan: &crate::runtime::AssistantResponsePlan,
         stream_hook_states: &[crate::runtime::AssistantStreamHookState],
     ) -> Result<crate::runtime::RuntimeAssistantResponseHooksOutcome, RuntimeEffectControllerError>
     {
@@ -164,12 +165,17 @@ impl RuntimeTurnDriver<'_> {
         let transforms = self
             .session
             .plugins()
-            .transform_assistant_response(&self.session_id, response, stream_hook_states)
+            .transform_assistant_response(&self.session_id, response, plan, stream_hook_states)
             .await
-            .map_err(|err| {
-                RuntimeEffectControllerError::retryable_response_derivation(format!(
+            .map_err(|err| match err {
+                crate::PluginError::Runtime(error)
+                    if error.code == crate::RuntimeErrorCode::PluginRevisionUnavailable =>
+                {
+                    RuntimeEffectControllerError::from(error)
+                }
+                err => RuntimeEffectControllerError::retryable_response_derivation(format!(
                     "assistant response hook failed: {err}"
-                ))
+                )),
             })?;
         let mut current: Option<LlmResponse> = None;
         let mut events = Vec::new();
@@ -195,6 +201,7 @@ impl RuntimeTurnDriver<'_> {
         cancel: &CancellationToken,
         dispatch: LlmCallDispatch,
     ) -> RuntimeLlmCallOutcome {
+        let response_plan = self.session.plugins().assistant_response_plan();
         let LlmCallDispatch { provider } = dispatch;
         let request = (*request).clone();
         let protocol_suppressed_stop_sequences =
@@ -222,9 +229,7 @@ impl RuntimeTurnDriver<'_> {
                     }),
                     text_streamed: false,
                     call_record: None,
-                    stream: crate::runtime::LlmStreamRecord::unstreamed(
-                        self.assistant_response_phase(),
-                    ),
+                    stream: crate::runtime::LlmStreamRecord::unstreamed(response_plan),
                 };
             }
         };
@@ -684,19 +689,8 @@ impl RuntimeTurnDriver<'_> {
             stream: crate::runtime::LlmStreamRecord {
                 reasoning_published: reasoning_publication.into_published_blocks(),
                 stream_hook_states,
-                response_phase: self.assistant_response_phase(),
+                response_plan,
             },
-        }
-    }
-
-    /// The response phase plan phase 1 records with its completion: phase 2
-    /// follows exactly when response hooks are installed as the paid
-    /// completion is recorded. Replays follow the recorded plan, never this.
-    fn assistant_response_phase(&self) -> crate::runtime::AssistantResponsePhase {
-        if self.session.plugins().has_assistant_response_hooks() {
-            crate::runtime::AssistantResponsePhase::DerivedByHooks
-        } else {
-            crate::runtime::AssistantResponsePhase::Raw
         }
     }
 

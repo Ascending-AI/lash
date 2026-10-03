@@ -312,6 +312,7 @@ mod tests {
             ),
             RuntimeEffectCommand::AssistantResponseHooks {
                 response: Box::new(response.clone()),
+                plan: Default::default(),
                 stream_hook_states: Vec::new(),
             },
         );

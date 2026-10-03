@@ -783,7 +783,12 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
         ..Default::default()
     };
     let transforms = session
-        .transform_assistant_response(&SessionId::from("native-plugin"), response, &[])
+        .transform_assistant_response(
+            &SessionId::from("native-plugin"),
+            response,
+            &session.assistant_response_plan(),
+            &[],
+        )
         .await
         .unwrap();
     let names = transforms

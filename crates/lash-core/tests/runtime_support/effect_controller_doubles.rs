@@ -572,7 +572,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                         text_streamed: false,
                         call_record: None,
                         stream: Box::new(lash_core::LlmStreamRecord::unstreamed(
-                            lash_core::AssistantResponsePhase::Raw,
+                            lash_core::AssistantResponsePlan::default(),
                         )),
                     })
                 }
@@ -597,6 +597,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             }
             RuntimeEffectCommand::AssistantResponseHooks {
                 response,
+                plan,
                 stream_hook_states,
             } => {
                 local_executor
@@ -604,6 +605,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                         envelope.invocation,
                         RuntimeEffectCommand::AssistantResponseHooks {
                             response,
+                            plan,
                             stream_hook_states,
                         },
                     ))

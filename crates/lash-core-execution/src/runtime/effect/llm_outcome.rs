@@ -21,55 +21,45 @@ pub struct LlmStreamRecord {
     /// publishes the completed response's remaining reasoning the same way on
     /// every replay.
     pub reasoning_published: Vec<crate::llm::types::StreamBlockIdentity>,
-    /// Each plugin's stream-hook end state, which phase 2's
+    /// Each response callback's stream end state, which phase 2's
     /// [`RuntimeEffectCommand::AssistantResponseHooks`](super::RuntimeEffectCommand::AssistantResponseHooks) carries.
     pub stream_hook_states: Vec<AssistantStreamHookState>,
-    /// Whether phase 2 follows this completion, decided once with the paid
-    /// completion it belongs to.
-    pub response_phase: AssistantResponsePhase,
+    /// The exact ordered callbacks selected before the paid completion.
+    pub response_plan: AssistantResponsePlan,
 }
 
 impl LlmStreamRecord {
     /// The record of a call whose provider stream published nothing and
     /// whose stream hooks left no state.
-    pub fn unstreamed(response_phase: AssistantResponsePhase) -> Self {
+    pub fn unstreamed(response_plan: AssistantResponsePlan) -> Self {
         Self {
             reasoning_published: Vec::new(),
             stream_hook_states: Vec::new(),
-            response_phase,
+            response_plan,
         }
     }
 }
 
-/// The response phase plan of one LLM call (ADR 0105 §1): whether the served
-/// response is the raw completion phase 1 journaled or the one phase 2's
-/// assistant-response hooks derive from it.
+/// The ordered response callbacks selected before one paid LLM call.
 ///
-/// Phase 1 records it from the response hooks installed when it ran, and
-/// every replay follows the record, never the hook set installed at the
-/// replay. A replay of a call recorded [`Self::Raw`] serves the raw
-/// completion even where a response hook was installed since; one recorded
-/// [`Self::DerivedByHooks`] runs or replays phase 2 even where every
-/// response hook was removed since, and a phase 2 that runs with none
-/// derives the raw completion unchanged.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AssistantResponsePhase {
-    /// No response hook was installed: the raw completion is the served
-    /// response, and no phase 2 follows.
-    Raw,
-    /// Response hooks were installed: phase 2 derives the served response.
-    DerivedByHooks,
+/// Phase 1 journals this plan with its raw completion. An unfinished
+/// derivation resolves these exact keys and owning revisions before invoking
+/// any callback, then executes in recorded order. An empty plan serves the
+/// raw completion. Completed derivations replay without resolving callbacks.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantResponsePlan {
+    pub callbacks: Vec<crate::plugin::PluginCallbackIdentity>,
 }
 
-/// The state one plugin's stream hooks reached when the provider stream
-/// finished (see [`crate::plugin::AssistantStreamFinishedHook`]).
+/// The stream end state for one recorded response callback.
 ///
-/// Recorded with phase 1's outcome and handed to the same plugin's
-/// assistant-response hook in phase 2, so the derivation never depends on
-/// which worker streamed the completion.
+/// A plugin's stream-finished and response registrations pair by their
+/// ordinal within that plugin. Phase 1 records the receiving callback's full
+/// identity, so multiple callbacks and different revisions cannot share state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AssistantStreamHookState {
-    pub plugin_id: String,
+    pub callback: crate::plugin::PluginCallbackIdentity,
     pub state: serde_json::Value,
 }

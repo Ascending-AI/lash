@@ -16,6 +16,7 @@ where
         (
             RuntimeEffectCommand::AssistantResponseHooks {
                 response: Box::default(),
+                plan: Default::default(),
                 stream_hook_states: Vec::new(),
             },
             RuntimeEffectControllerError::new(
@@ -32,6 +33,7 @@ where
         (
             RuntimeEffectCommand::AssistantResponseHooks {
                 response: Box::default(),
+                plan: Default::default(),
                 stream_hook_states: Vec::new(),
             },
             serde_json::from_value(
@@ -219,7 +221,7 @@ where
             text_streamed: true,
             call_record: Some(record),
             stream: Box::new(lash_core::LlmStreamRecord::unstreamed(
-                lash_core::AssistantResponsePhase::Raw,
+                lash_core::AssistantResponsePlan::default(),
             )),
         };
         let expected = serde_json::to_value(&outcome).expect("result JSON");
