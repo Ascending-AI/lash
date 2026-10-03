@@ -136,6 +136,8 @@ struct Starter {
     isolation: Option<ProcessExecutionBoundary>,
     worker: Option<Arc<IsolatedEngine>>,
     slow: bool,
+    materials: std::sync::OnceLock<Arc<dyn lash_core::store::ToolMaterialStore>>,
+    ingress: std::sync::OnceLock<crate::RestateIngressClient>,
 }
 
 impl Starter {
@@ -156,6 +158,8 @@ impl Starter {
             isolation: None,
             worker: None,
             slow: false,
+            materials: Default::default(),
+            ingress: Default::default(),
         })
     }
 
@@ -170,6 +174,101 @@ impl Starter {
 
 #[async_trait::async_trait]
 impl SingletonToolHandlers for Starter {
+    fn tool_material_store(&self) -> Option<&dyn lash_core::store::ToolMaterialStore> {
+        self.materials.get().map(AsRef::as_ref)
+    }
+
+    async fn attach_start_terminal(
+        &self,
+        descriptor: &lash_core::tool_run::SourceDescriptor,
+        process_id: &ProcessId,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        let ingress = self
+            .ingress
+            .get()
+            .ok_or(lash_core::tool_run::SourceRefusal::NotArmed)?;
+        let subscription = crate::ProcessTerminalSubscription::for_source(descriptor.clone())?;
+        let address =
+            crate::durable_wait::RestateDurableWaitAddress::for_key(&subscription.receiver);
+        ingress
+            .call_lash_object::<_, bool>(
+                "LashDurableWaitIndex",
+                &address.index_key(),
+                "attach_process_terminal",
+                &subscription,
+            )
+            .await
+            .map_err(|error| {
+                lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::EngineProcessAwait,
+                    error.to_string(),
+                )
+            })?;
+        let source = crate::RestateDurableWaitAddress::for_key(&subscription.terminal);
+        let output: Option<lash_core::ProcessAwaitOutput> = ingress
+            .call_lash_object(
+                "LashDurableWaitIndex",
+                &source.index_key(),
+                "subscribe_process_terminal",
+                &subscription,
+            )
+            .await
+            .map_err(|error| {
+                lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::EngineProcessAwait,
+                    error.to_string(),
+                )
+            })?;
+        if let Some(output) = output {
+            ingress
+                .call_lash_object::<_, ()>(
+                    "LashDurableWaitIndex",
+                    &address.index_key(),
+                    "deliver_process_terminal",
+                    &crate::ProcessTerminalDelivery {
+                        subscription,
+                        output,
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::EngineProcessAwait,
+                        error.to_string(),
+                    )
+                })?;
+        }
+        let output = lash_core::ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::success(serde_json::json!(OUTPUT)),
+        );
+        // Process terminals can arrive before the Run subscribes. First write wins.
+        for value in [
+            output,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!("late result must not replace the terminal"),
+            )),
+        ] {
+            ingress
+                .call_lash_workflow::<_, ()>(
+                    "LashProcessWorkflow",
+                    process_id.as_str(),
+                    "complete_terminal",
+                    &crate::RestateProcessCompleteRequest {
+                        process_id: process_id.clone(),
+                        output: value,
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::EngineProcessAwait,
+                        error.to_string(),
+                    )
+                })?;
+        }
+        Ok(())
+    }
+
     fn process_engines(&self) -> Option<&lash_core::ProcessEngineRegistry> {
         self.engines.as_ref()
     }
@@ -466,6 +565,22 @@ async fn drive_with_replay(
     let backend = lash_restate_test::backend(0x4884, ServerConfig::default())
         .await
         .unwrap();
+    starter
+        .materials
+        .set(backend.engine_stores().tool_material_store())
+        .ok();
+    let ingress = crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
+        backend.server().ingress_url(),
+        backend.server().transport(),
+    ));
+    starter.ingress.set(ingress.clone()).ok();
+    if let Some(replay) = &replay {
+        replay
+            .materials
+            .set(backend.engine_stores().tool_material_store())
+            .ok();
+        replay.ingress.set(ingress).ok();
+    }
     if let Some(step) = crash {
         let name = format!("lash:run:{}:{step}", call.call_id);
         let point = if replay.is_some() {
@@ -490,7 +605,37 @@ async fn drive_with_replay(
             };
             let returned = Arc::clone(&returned);
             Box::pin(async move {
-                let outcome = run_singleton_tool(&scoped, &call, starter.as_ref()).await;
+                let outcome = if matches!(starter.body, SingletonBodyOutcome::DeferredStart { .. })
+                {
+                    async {
+                        let mut run = lash_core::tool_dispatch::RunCoordinator::open(
+                            &scoped,
+                            call.owner.clone(),
+                            call.segment,
+                            call.available.clone(),
+                        );
+                        run.decide(&call, starter.as_ref()).await?;
+                        run.await_deferred().await?;
+                        let terminal = run
+                            .drain()
+                            .await?
+                            .pop()
+                            .ok_or_else(|| {
+                                lash_core::RuntimeEffectControllerError::new(
+                                    lash_core::RuntimeErrorCode::EngineProcessAwait,
+                                    "the Deferred call has no final",
+                                )
+                            })?
+                            .1;
+                        Ok::<_, SingletonRunError>(SingletonRunOutcome {
+                            terminal,
+                            records: run.into_records(),
+                        })
+                    }
+                    .await
+                } else {
+                    run_singleton_tool(&scoped, &call, starter.as_ref()).await
+                };
                 returned.lock().unwrap().push(outcome);
             })
         })
@@ -1176,5 +1321,133 @@ async fn slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process() {
         assert_eq!(starter.executions.load(Ordering::SeqCst), 1);
         assert!(starter.launches().is_empty());
         assert!(stores.rows().await.is_empty());
+    }
+}
+
+/// L07/L08: a lost launch result recovers one start and consumes its immutable K4 terminal.
+#[tokio::test]
+async fn a_deferred_start_replays_one_identity_and_consumes_its_terminal() {
+    for (cancel_at, policy, cut) in [
+        (
+            CancelAt::Never,
+            ExternalCancelPolicy::Ignore,
+            Some("start:launch"),
+        ),
+        (
+            CancelAt::Body,
+            ExternalCancelPolicy::CancelExternalWork,
+            None,
+        ),
+        (CancelAt::Launch, ExternalCancelPolicy::Ignore, None),
+        (
+            CancelAt::Launch,
+            ExternalCancelPolicy::CancelExternalWork,
+            None,
+        ),
+    ] {
+        let stores = Stores::open(Tier::Memory).await;
+        let mut call = call("deferred", policy);
+        call.declaration =
+            ToolDeclaration::deferring().with_intents([ToolIntentKind::StartProcess]);
+        let SingletonBodyOutcome::Done {
+            start: Some(start), ..
+        } = declaring(Some(start_key("deferred")))
+        else {
+            panic!("the fixture declares one start");
+        };
+        let starter = Starter::new(
+            stores.set.process_registry(),
+            SingletonBodyOutcome::DeferredStart { start },
+            cancel_at,
+        );
+        let driven = drive(cut, call.clone(), Arc::clone(&starter)).await;
+        let (terminal, records) = driven.finished();
+        if cancel_at == CancelAt::Body {
+            assert_eq!(
+                terminal,
+                SingletonTerminal::Withheld {
+                    decision: CallDecision::Cancelled
+                }
+            );
+            assert!(
+                starter.launches().is_empty(),
+                "pre-admission cancel forbids launch"
+            );
+            assert!(starter.discharges().is_empty());
+            assert!(stores.rows().await.is_empty());
+            assert!(start_events(&records).is_empty());
+            continue;
+        }
+        let SingletonTerminal::Final {
+            source: lash_core::tool_run::ResultSource::DeferredCompletion { .. },
+            capture,
+            ..
+        } = terminal
+        else {
+            panic!("the process source must supply the final result: {terminal:?}");
+        };
+        let output: lash_core::ProcessAwaitOutput =
+            serde_json::from_str(capture.output().unwrap()).unwrap();
+        assert_eq!(
+            output,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!(OUTPUT)
+            ))
+        );
+        assert_eq!(starter.executions.load(Ordering::SeqCst), 1);
+        let launches = starter.launches();
+        assert_eq!(
+            launches.len(),
+            1 + usize::from(cut.is_some()),
+            "only an unacknowledged launch is retried"
+        );
+        assert_eq!(
+            launches[0],
+            *launches.last().unwrap(),
+            "StartKey recovers the same minted ProcessId"
+        );
+        let cancelled =
+            cancel_at == CancelAt::Launch && policy == ExternalCancelPolicy::CancelExternalWork;
+        assert_eq!(starter.discharges(), vec![(launches[0].clone(), cancelled)]);
+        assert_eq!(
+            stores.rows().await,
+            vec![Row::drained(
+                &launches[0],
+                &start_key("deferred"),
+                cancelled
+            )]
+        );
+        let events: Vec<_> = records.iter().flat_map(|record| &record.events).collect();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, RunEvent::StartAdmitted { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, RunEvent::StartLaunched { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, RunEvent::StartDischarged { .. }))
+                .count(),
+            1
+        );
+        assert!(
+            driven
+                .backend
+                .server()
+                .invocations()
+                .iter()
+                .all(|view| !view.target.starts_with("LashProcessAttach/")
+                    && !view.target.ends_with("/await_terminal")),
+            "no process waiter invocation survives"
+        );
     }
 }

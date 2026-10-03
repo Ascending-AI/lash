@@ -1,8 +1,5 @@
 //! Live Restate registration of the shared durable effect-group laws.
 
-// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
-// access is sanctioned here (the workspace clippy ban targets production
-// library code).
 #![allow(clippy::disallowed_methods)]
 
 use std::collections::HashMap;
@@ -578,6 +575,7 @@ impl LiveConformanceHarness {
                 ingress,
                 admin: invocation_admin,
                 sessions: stores.session_store_factory(),
+                materials: stores.tool_material_store(),
                 attachments: stores.attachment_referrers(),
                 process_workflow: LashProcessWorkflowImpl::new_for_test(
                     Arc::clone(&process_runner),
@@ -784,6 +782,7 @@ impl LiveConformanceHarness {
                     ingress: RestateIngressClient::new(connection.clone()),
                     admin: admin.clone(),
                     sessions,
+                    materials: stores.tool_material_store(),
                     attachments: stores.attachment_referrers(),
                     process_workflow: LashProcessWorkflowImpl::new_for_test(
                         Arc::clone(&process_runner),

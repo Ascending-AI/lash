@@ -187,6 +187,11 @@ impl Backend {
         self.stores().process_env_store()
     }
 
+    /// Retained results published by process-terminal sources.
+    pub fn tool_material_store(&self) -> Arc<dyn crate::store::ToolMaterialStore> {
+        self.stores().tool_material_store()
+    }
+
     /// The store of immutable process-definition descriptors.
     pub fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
         self.stores().definition_store()
@@ -310,6 +315,9 @@ pub trait StoreSet: Send + Sync {
 
     /// The store of process execution environments.
     fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore>;
+
+    /// Retained results published by Deferred sources.
+    fn tool_material_store(&self) -> Arc<dyn crate::store::ToolMaterialStore>;
 
     /// The store of immutable process-definition descriptors (ADR 0113
     /// §3.6), in the same database as the modules and environments their

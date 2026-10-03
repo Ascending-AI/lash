@@ -42,7 +42,7 @@
 //!
 //! # The cancel obligation (ADR 0116 §3.4)
 //!
-//! A parked wait on a process terminal whose wait is cancelled or times out
+//! A parked wait on a process terminal whose wait is cancelled
 //! cancels that process when its [`CancelHint`](crate::CancelHint) is
 //! `CancelExternalWork`. The cancel is one replay-keyed process command under
 //! `{call id}:cancel-work`, so a redrive re-issues the same command and the
@@ -165,10 +165,10 @@ pub async fn arm_pending_resolver(
             };
             match arm_terminal(site, &process_id, key, armed).await {
                 armed @ (ResolverArming::Armed(_) | ResolverArming::Resolved { .. }) => Ok(armed),
-                // The call will not wait for the child it launched, so the
-                // child is cancelled rather than left running unobserved.
                 ResolverArming::Settled { failure, armed } => {
-                    if cancel_owned_process(site, &process_id).await? == CancelDischarge::Met {
+                    if pending.on_cancel == crate::CancelHint::Ignore
+                        || cancel_owned_process(site, &process_id).await? == CancelDischarge::Met
+                    {
                         release_consumer_hold(site, &armed, key).await;
                     }
                     Ok(ResolverArming::Settled { failure, armed })

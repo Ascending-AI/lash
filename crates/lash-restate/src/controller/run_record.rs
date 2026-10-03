@@ -178,7 +178,8 @@ mod tests {
             );
         }
     }
-    // FIG-4920 restores the command transition in deleted-session replay.
+    // D06 replaces terminal waiter calls with short subscriptions and publication.
+    // Its predecessor retains FIG-4920's deleted-session command transition.
     // The immediate predecessor remains addressable by its drain lane.
     #[tokio::test]
     async fn l21_a_predecessor_run_journal_parks_before_decode_and_keeps_its_lane() {

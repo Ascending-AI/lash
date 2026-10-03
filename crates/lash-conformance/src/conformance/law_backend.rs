@@ -298,6 +298,10 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("trigger store")
     }
 
+    fn tool_material_store(&self) -> Arc<dyn crate::store::ToolMaterialStore> {
+        Self::no_second_substrate("tool material store")
+    }
+
     fn process_env_store(&self) -> Arc<dyn crate::ProcessExecutionEnvStore> {
         Arc::new(crate::testing::UnavailableProcessExecutionEnvStore)
     }

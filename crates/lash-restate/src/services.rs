@@ -544,6 +544,10 @@ lash_clients! {
         seal_source(crate::durable_wait::RestateSourceSealRequest) -> crate::durable_wait::RestateSourceSealReply;
         subscribe_source(crate::durable_wait::RestateSourceSubscribeRequest) -> crate::durable_wait::RestateSourceSubscribeReply;
         unsubscribe_source(crate::durable_wait::RestateSourceSubscribeRequest) -> ();
+        attach_process_terminal(crate::durable_wait::ProcessTerminalSubscription) -> bool;
+        subscribe_process_terminal(crate::durable_wait::ProcessTerminalSubscription) -> Option<lash_core::ProcessAwaitOutput>;
+        unsubscribe_process_terminal(crate::durable_wait::ProcessTerminalSubscription) -> ();
+        deliver_process_terminal(crate::durable_wait::ProcessTerminalDelivery) -> ();
         is_revoked() -> bool;
         peek_turn_gate(crate::durable_wait::RestateDurableWaitIndexRequest)
             -> crate::durable_wait::RestateTurnGatePeek;
@@ -587,11 +591,7 @@ lash_clients! {
     }
 
 
-    /// Calls to one `LashProcessAttach` workflow.
-    ProcessAttachCalls, process_attach: ProcessAttach workflow,
-    pinned to crate::process_attach::LashProcessAttachClient {
-        run(crate::process_attach::RestateProcessAttachRequest) -> ();
-    }
+
 
     /// Calls to one `EffectGroupIndex` object.
     EffectGroupStateCalls, effect_group_state: EffectGroupState object,
@@ -805,6 +805,7 @@ pub(crate) struct LashServiceParts<'a, R> {
     pub(crate) sessions: Arc<dyn lash_core::DeploymentStore>,
     /// The deployment's attachment referrers, which a parked process await
     /// acquires the waiter's edges through (ADR 0124).
+    pub(crate) materials: Arc<dyn lash_core::store::ToolMaterialStore>,
     pub(crate) attachments: Arc<dyn lash_core::AttachmentReferrers>,
     /// The process workflow over the deployment's process worker.
     pub(crate) process_workflow: LashProcessWorkflowImpl<R>,
@@ -849,6 +850,7 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
         admin,
         sessions,
         attachments,
+        materials,
         process_workflow,
         session_shifts,
         build_generation,
@@ -920,6 +922,8 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
                         fleet.clone(),
                         admin.clone(),
                     )
+                    .with_attachments(Arc::clone(&attachments))
+                    .with_materials(Arc::clone(&materials))
                     .serve(),
                     &name,
                     claimed().enable_lazy_state(true),

@@ -159,7 +159,14 @@ impl RlmSubagentToolsProvider {
         // The host's policy, resolved against the spawn's admitted start
         // context. The decision rides the declaration; a redrive presents the
         // same key and gets the retained child back.
-        let lifetime = (self.lifetime)(&context.start_cx().map_err(|err| err.to_string())?);
+        let start_cx = context.start_cx().map_err(|err| err.to_string())?;
+        let lifetime = (self.lifetime)(&start_cx);
+        let on_cancel = match &lifetime {
+            lash_core::Lifetime::Until(scope) if scope.id() == start_cx.starter().id() => {
+                lash_core::CancelHint::CancelExternalWork
+            }
+            _ => lash_core::CancelHint::Ignore,
+        };
         let owner = context.owner().runtime_owner();
         // A child spawned from inside a running process belongs to the chain
         // that started the process; any other spawn belongs to the session
@@ -212,7 +219,8 @@ impl RlmSubagentToolsProvider {
             lash_core::StartProcessIntent { owner, declaration },
         )
         .map_err(|err| format!("spawn_agent could not declare its child: {err}"))?;
-        let pending = lash_core::PendingCompletion::new();
+        let mut pending = lash_core::PendingCompletion::new();
+        pending.on_cancel = on_cancel;
         Ok(lash_core::ToolAttemptOutcome::pending(
             pending.resolved_by_declared_start(start),
         ))
@@ -370,7 +378,7 @@ fn spawn_agent_definition(capability_names: &[String], examples: Vec<String>) ->
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["agents"], "spawn"))
     .with_output_from_input_schema("output", None)
     // The child runs as a declared process start the call parks on.
-    .with_declaration(lash_core::ToolDeclaration::deferring())
+    .with_declaration(lash_core::ToolDeclaration::deferring().with_intents([lash_core::ToolIntentKind::StartProcess]))
 }
 
 fn capability_detail_for_tool_description(capability_names: &[String]) -> String {

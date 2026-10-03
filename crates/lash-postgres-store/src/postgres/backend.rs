@@ -139,6 +139,10 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         PostgresStoreSet::trigger_store(self)
     }
 
+    fn tool_material_store(&self) -> Arc<dyn lash_core_execution::store::ToolMaterialStore> {
+        PostgresStoreSet::process_env_store(self)
+    }
+
     fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessExecutionEnvStore> {
         PostgresStoreSet::process_env_store(self)
     }

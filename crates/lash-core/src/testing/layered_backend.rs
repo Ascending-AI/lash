@@ -457,6 +457,10 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.trigger_store)
     }
 
+    fn tool_material_store(&self) -> Arc<dyn crate::store::ToolMaterialStore> {
+        self.inner.tool_material_store()
+    }
+
     fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
         Arc::clone(&self.process_env_store)
     }

@@ -168,7 +168,9 @@ pub use batch_sugar::*;
 pub use cancelled_turn_withheld_input::*;
 pub use cell_binding_drift::*;
 pub use completion_routing::*;
-pub use declared_start::{DeclaredStartTier, SubagentPlugin};
+pub use declared_start::{
+    DeclaredStartTier, SubagentPlugin, a_session_lifetime_subagent_survives_its_waiting_turn,
+};
 pub use definitions::*;
 pub use direct_turn_acceptance::*;
 pub use effect_group_host::*;

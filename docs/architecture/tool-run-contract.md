@@ -304,6 +304,21 @@ segment owes. Registration arms the process's start obligation, which the
 process outbox delivers; production park sites keep their launch until
 FIG-4740 turns them into Deferred attempts.
 
+**Process-backed Deferred starts (D06, FIG-4887).**
+`SingletonBodyOutcome::DeferredStart` records one K5 obligation in X, with a
+reserved process-terminal source distinct from the external completion key.
+The protected start drain decides cancellation before admission, then records
+`StartAdmitted` and `StartLaunched` under the stable `StartKey`. It arms a K4
+`ProcessTerminal` descriptor using the minted `ProcessId`, and the call stays
+open without a rank. Short terminal registrations retain records at the process
+and receiver indexes; no `ProcessAttach` or terminal-wait invocation runs.
+Delivery acquires the receiver's attachment ownership, retains the canonical
+capture and seals the source through the existing K4 writer. The Run accepts
+that immutable winner before discharging the start's policy and consumer hold.
+Session-owned subagents record `Ignore` for cancellation of their observing turn;
+starter-owned work records `CancelExternalWork`. `processes.await` observes work
+with `Ignore`. Production round activation remains F01's responsibility.
+
 ## Field ownership
 
 | Record | Owns | Refers to |

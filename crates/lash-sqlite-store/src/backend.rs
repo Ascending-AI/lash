@@ -479,6 +479,10 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         SqliteStoreSet::trigger_store(self)
     }
 
+    fn tool_material_store(&self) -> Arc<dyn lash_core_execution::store::ToolMaterialStore> {
+        SqliteStoreSet::process_env_store(self)
+    }
+
     fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessExecutionEnvStore> {
         SqliteStoreSet::process_env_store(self)
     }

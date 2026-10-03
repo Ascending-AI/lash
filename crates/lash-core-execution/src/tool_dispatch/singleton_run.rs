@@ -268,6 +268,10 @@ pub enum SingletonBodyOutcome {
         output: String,
         after_ms: Option<u64>,
     },
+    /// Declare one K5 start; the Run launches it and waits on its K4 terminal.
+    DeferredStart {
+        start: Box<ProcessStartRegistration>,
+    },
     /// Parked on a Deferred source; the source's seal supplies the result.
     Deferred {
         source: AwaitEventKey,
@@ -390,6 +394,16 @@ pub trait SingletonToolHandlers: Send + Sync {
     /// answer the process it registered first.
     async fn launch_start(&self, obligation: &DeclaredStartObligation)
     -> Result<ProcessId, String>;
+
+    /// Arm a short process-terminal subscription after the K5 launch is durable.
+    async fn attach_start_terminal(
+        &self,
+        source: &crate::tool_run::SourceDescriptor,
+        process_id: &ProcessId,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let _ = (source, process_id);
+        Err(crate::tool_run::SourceRefusal::NotArmed.into())
+    }
 
     /// Discharge a launched start: cancel `process_id` when `cancel`, then
     /// release the obligation's consumer hold. A crash before the discharge

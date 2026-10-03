@@ -1,5 +1,5 @@
 use super::*;
-use crate::process_attach::RestateProcessAttachRequest;
+use crate::durable_wait::process_terminal::RestateProcessTerminalRequest;
 use restate_sdk::serde::Json;
 
 /// Version stamped on the Restate-journaled process-command admission payload;
@@ -514,7 +514,7 @@ where
                     context
                         .attach_process_terminal(
                             namespace,
-                            RestateProcessAttachRequest { process_id, key },
+                            RestateProcessTerminalRequest { process_id, key },
                         )
                         .await
                         .map_err(|err| {
@@ -982,7 +982,7 @@ where
             context
                 .attach_process_terminal(
                     namespace,
-                    RestateProcessAttachRequest {
+                    RestateProcessTerminalRequest {
                         process_id: process_id.clone(),
                         key: await_key.clone(),
                     },
@@ -1160,7 +1160,7 @@ where
                     context
                         .attach_process_terminal(
                             namespace,
-                            RestateProcessAttachRequest {
+                            RestateProcessTerminalRequest {
                                 process_id: process_id.clone(),
                                 key: after_key.clone(),
                             },

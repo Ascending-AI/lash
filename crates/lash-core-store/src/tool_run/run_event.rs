@@ -94,6 +94,12 @@ pub enum AttemptResult {
     Done { output: MaterialRef },
     /// Parked on a Deferred source; the source's seal supplies the result.
     Deferred { source: AwaitEventKey },
+    /// One start whose terminal supplies this call's result.
+    DeferredStart {
+        source: AwaitEventKey,
+        start_key: StartKey,
+        obligation: MaterialRef,
+    },
     /// A failure the body reported. Only a `retryable` one may be retried,
     /// and only under the call's recorded retry policy.
     Failed {
@@ -893,7 +899,13 @@ impl RunLedger {
             call.decision,
             Some((_, CallDecision::Final { declares: true, .. }))
         );
-        if !declaring || !call.declarations_issued || call.seated || call.start.is_some() {
+        let deferred = call.decision.is_none()
+            && matches!(call.attempts.values().next_back(),
+            Some(AttemptResult::DeferredStart { start_key: recorded, .. }) if recorded == start_key);
+        if !(deferred || declaring && call.declarations_issued)
+            || call.seated
+            || call.start.is_some()
+        {
             return Err(RunEventRefusal::StartOrder {
                 call_id: call_id.clone(),
                 start_key: start_key.clone(),
@@ -938,7 +950,14 @@ impl RunLedger {
                 let cancel_owed = matches!(call.decision, Some((_, CallDecision::Cancelled)))
                     && call.cancel == super::ExternalCancelPolicy::CancelExternalWork
                     && !call.cancel_discharged;
-                if protected_owed || cancel_owed || call.outstanding.is_some() {
+                if protected_owed
+                    || cancel_owed
+                    || call.outstanding.is_some()
+                    || call
+                        .start
+                        .as_ref()
+                        .is_some_and(|(_, progress)| progress != &StartProgress::Discharged)
+                {
                     return Err(RunEventRefusal::UnsettledWork {
                         call_id: call_id.clone(),
                     });
@@ -979,7 +998,7 @@ fn decision_follows(
                 ResultSource::DeferredCompletion { attempt, .. } => {
                     matches!(
                         call.attempts.get(attempt),
-                        Some(AttemptResult::Deferred { .. })
+                        Some(AttemptResult::Deferred { .. } | AttemptResult::DeferredStart { .. })
                     )
                 }
             };

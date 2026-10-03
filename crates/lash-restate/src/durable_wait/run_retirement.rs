@@ -105,6 +105,9 @@ pub(super) async fn retire_run(
         ctx.clear(&state_key);
     }
 
+    let detached = super::process_terminal::detach(namespace, &ctx, &mut metadata, |key| {
+        belongs_to_closed_run(key, &request.session_id, &request.run)
+    });
     let before = metadata.cancel_decided.len() + metadata.awakeables.len();
     let prefix = closed_run_cancel_prefix(&request.run);
     metadata
@@ -119,7 +122,7 @@ pub(super) async fn retire_run(
         }
     }
     metadata.awakeables = retained;
-    if metadata.cancel_decided.len() + metadata.awakeables.len() != before {
+    if detached || metadata.cancel_decided.len() + metadata.awakeables.len() != before {
         object_state::set_stamped(
             &ctx,
             DURABLE_WAIT_INDEX_METADATA_KEY,

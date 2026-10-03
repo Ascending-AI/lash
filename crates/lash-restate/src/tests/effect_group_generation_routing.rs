@@ -148,6 +148,7 @@ async fn build_endpoint_builder(
             ingress: ingress.clone(),
             admin: crate::RestateAdminClient::new(connection.clone()),
             sessions: stores.session_store_factory(),
+            materials: stores.tool_material_store(),
             attachments: stores.attachment_referrers(),
             process_workflow: LashProcessWorkflowImpl::new(
                 Arc::new(IdleRunner),

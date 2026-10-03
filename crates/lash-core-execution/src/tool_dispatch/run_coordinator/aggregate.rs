@@ -248,6 +248,7 @@ impl<'a> RunCoordinator<'a> {
         through: u64,
         consumed: &BTreeSet<ToolCallId>,
     ) -> Result<(), SingletonRunError> {
+        self.drain_starts().await?;
         while self
             .owed
             .first_key_value()
@@ -301,6 +302,7 @@ impl<'a> RunCoordinator<'a> {
         while !self.pending.is_empty() {
             self.progress_inner().await?;
         }
+        self.drain_starts().await?;
         let waiting: Vec<_> = self.waiting.keys().cloned().collect();
         for call_id in waiting {
             let source = self

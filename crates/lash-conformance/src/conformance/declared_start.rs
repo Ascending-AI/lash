@@ -1394,6 +1394,68 @@ pub async fn spawn_agent_record_carries_child_identity(tier: DeclaredStartTier) 
     );
 }
 
+/// L08: a session-owned subagent outlives cancellation and close of the turn
+/// that observes it. Its recorded session lifetime still ends it.
+#[expect(
+    clippy::expect_used,
+    reason = "the law fixture establishes these results"
+)]
+pub async fn a_session_lifetime_subagent_survives_its_waiting_turn(tier: DeclaredStartTier) {
+    let world = World::new(&tier, "session-lifetime", Shape::one_child()).await;
+    world.script.child_gate.0.send_replace(false);
+    let cancelled = {
+        let world = world.clone();
+        tokio::spawn(async move {
+            world.script.child_steps(1).await;
+            world.request_cancel().await;
+        })
+    };
+    let _ = world.run().await;
+    cancelled.await.expect("the observing turn was cancelled");
+    let child = world.only_child().await;
+    assert!(
+        child.outcome().is_none() && child.cancel_request.is_none(),
+        "the observing turn must not cancel session-lifetime work: {child:#?}"
+    );
+    crate::end_parent_scope(
+        world.registry.as_ref(),
+        tier.delivery.as_ref(),
+        &crate::ScopeId::turn(&world.session_id, &world.turn_id),
+        crate::current_epoch_ms(),
+    )
+    .await
+    .expect("close the observing turn");
+    let child = world
+        .registry
+        .get_process(&child.id)
+        .await
+        .expect("read the child")
+        .expect("child retained");
+    assert!(
+        child.outcome().is_none() && child.cancel_request.is_none(),
+        "turn close must preserve the child's session lifetime: {child:#?}"
+    );
+    crate::end_parent_scope(
+        world.registry.as_ref(),
+        tier.delivery.as_ref(),
+        &crate::ScopeId::Session(world.session_id.clone()),
+        crate::current_epoch_ms(),
+    )
+    .await
+    .expect("close the child's recorded owner");
+    world.release_children();
+    let terminal = world.terminal(&child.id).await;
+    assert_eq!(terminal.status(), crate::ProcessStatus::Cancelled);
+    assert_eq!(
+        terminal
+            .cancel_request
+            .as_ref()
+            .expect("recorded lifetime cancel")
+            .origin,
+        crate::CancelOrigin::ParentEnded
+    );
+}
+
 /// A spawned child and the process that runs it run under the facts their
 /// parent recorded, on a worker whose plugin set has other defaults
 /// (FIG-4396).

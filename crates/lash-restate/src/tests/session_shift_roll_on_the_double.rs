@@ -336,6 +336,7 @@ impl SessionRoll {
                     effect_host: &host,
                     ingress: ingress.clone(),
                     admin: crate::RestateAdminClient::new(connection.clone()),
+                    materials: stores.process_env_store(),
                     attachments: Arc::clone(&sessions) as Arc<dyn lash_core::AttachmentReferrers>,
                     sessions: Arc::clone(&sessions),
                     process_workflow: LashProcessWorkflowImpl::new(

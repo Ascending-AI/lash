@@ -130,6 +130,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// and ordinal, and records selection in that invocation before execution.
 /// Epoch 15 (FIG-4882) records aggregate membership and timer wakes, separates
 /// consumer possession from protected drain, and records logical Closing.
+/// Epoch 16 (FIG-4887) publishes process terminals to short subscriptions
+/// instead of attach workflows.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -143,14 +145,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 15;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 16;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 16;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 17;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

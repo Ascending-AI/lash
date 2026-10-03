@@ -42,6 +42,8 @@ mod aggregate;
 mod deferred;
 mod drain;
 mod parallel;
+mod start;
+use start::{bind_start, discharge_start, drain_start, launch_start, recorded_obligation};
 
 pub use aggregate::RunAggregateOutcome;
 
@@ -608,6 +610,7 @@ struct Waiting<'a> {
     member: AdmittedCall,
     handlers: Handlers<'a>,
     attempt: AttemptOrdinal,
+    start: Option<SingletonStart>,
 }
 
 struct PresentedCall {
@@ -631,6 +634,8 @@ pub struct RunCoordinator<'a> {
     active_frame: bool,
     sources: BTreeMap<ToolCallId, crate::tool_run::SourceDescriptor>,
     waiting: BTreeMap<ToolCallId, Waiting<'a>>,
+    process_sources: BTreeMap<ToolCallId, AwaitEventKey>,
+    pending_starts: BTreeMap<ToolCallId, (Waiting<'a>, AwaitEventKey)>,
 }
 
 impl<'a> RunCoordinator<'a> {
@@ -669,6 +674,8 @@ impl<'a> RunCoordinator<'a> {
             active_frame: false,
             sources: BTreeMap::new(),
             waiting: BTreeMap::new(),
+            process_sources: BTreeMap::new(),
+            pending_starts: BTreeMap::new(),
         }
     }
 
@@ -723,6 +730,7 @@ impl<'a> RunCoordinator<'a> {
                     &request,
                     handlers,
                     self.sources.get(&call.call_id).map(|source| &source.source),
+                    self.process_sources.get(&call.call_id),
                 )
                 .await?
                 {
@@ -744,6 +752,16 @@ impl<'a> RunCoordinator<'a> {
                             capture,
                         ))
                     }
+                    AttemptCaptured::DeferredStart { source, start } => {
+                        return Ok(self.queue_deferred_start(
+                            call,
+                            member,
+                            Handlers::Borrowed(handlers),
+                            AttemptOrdinal::FIRST,
+                            source,
+                            *start,
+                        ));
+                    }
                     AttemptCaptured::Deferred(source) => {
                         self.waiting.insert(
                             call.call_id.clone(),
@@ -752,6 +770,7 @@ impl<'a> RunCoordinator<'a> {
                                 member,
                                 handlers: Handlers::Borrowed(handlers),
                                 attempt: AttemptOrdinal::FIRST,
+                                start: None,
                             },
                         );
                         return Ok(DecidedCall::Deferred { source });
@@ -949,6 +968,19 @@ impl<'a> RunCoordinator<'a> {
                     .controller()
                     .arm_run_source(descriptor.clone())
                     .await?;
+                let process_source = journal
+                    .scoped
+                    .controller()
+                    .await_event_key(
+                        call.owner.admitted_scope().scope(),
+                        crate::AwaitEventWaitIdentity::Custom {
+                            key: format!("declared-process-terminal:{}", call.call_id),
+                        },
+                    )
+                    .await
+                    .map_err(RuntimeEffectControllerError::from)?;
+                self.process_sources
+                    .insert(call.call_id.clone(), process_source);
                 self.sources.insert(call.call_id.clone(), descriptor);
             }
         }
@@ -1026,54 +1058,6 @@ impl<'a> RunCoordinator<'a> {
     }
 }
 
-/// The hold key of a call's declared start: the call's own id, so a call
-/// holds at most one process.
-fn start_hold_key(call_id: &ToolCallId) -> String {
-    format!("{call_id}:start")
-}
-
-/// Bind a body's declared start to the Run: the Run's environment, when lash
-/// executes the process, and a consumer hold, owned by the Run's opener, that
-/// carries the call's recorded cancel policy.
-fn bind_start(
-    call: &SingletonToolCall,
-    policy: &RuntimeCallPolicy,
-    mut registration: ProcessStartRegistration,
-) -> Result<DeclaredStartObligation, DeclaredStartObligationRefusal> {
-    registration.env_ref = if registration.input.is_externally_owned() {
-        None
-    } else {
-        call.environment.clone()
-    };
-    registration.consumer_hold = Some(ConsumerHold {
-        key: start_hold_key(&call.call_id),
-        owner: ScopeId::Opener(call.owner.clone()),
-        cancels: policy.cancel == ExternalCancelPolicy::CancelExternalWork,
-    });
-    DeclaredStartObligation::new(call.call_id.clone(), registration)
-}
-
-/// The obligation a recorded attempt owns, checked against the key and call
-/// the capture names.
-fn recorded_obligation(
-    journal: &RunJournal<'_>,
-    call_id: &ToolCallId,
-    start: &SingletonStart,
-) -> Result<DeclaredStartObligation, SingletonRunError> {
-    let obligation: DeclaredStartObligation = journal.materials.decode(&start.obligation)?;
-    if obligation.start_key() != &start.start_key || &obligation.call_id != call_id {
-        return Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::EffectReplayDivergence,
-            format!(
-                "call {call_id}'s recorded start obligation does not name start {}",
-                start.start_key
-            ),
-        )
-        .into());
-    }
-    Ok(obligation)
-}
-
 fn boundary(call_id: &ToolCallId) -> SingletonRunError {
     RunEventRefusal::BoundaryOrder {
         call_id: call_id.clone(),
@@ -1084,6 +1068,15 @@ fn boundary(call_id: &ToolCallId) -> SingletonRunError {
 enum AttemptCaptured {
     Captured(SingletonCapture),
     Deferred(AwaitEventKey),
+    DeferredStart {
+        source: AwaitEventKey,
+        start: Box<SingletonStart>,
+    },
+}
+
+struct AttemptSources<'a> {
+    completion: Option<&'a AwaitEventKey>,
+    process: Option<&'a AwaitEventKey>,
 }
 
 /// X: attempt 1 of the body, checked against the recorded declaration
@@ -1096,6 +1089,7 @@ async fn attempt(
     request: &SingletonPreparedRequest,
     handlers: &dyn SingletonToolHandlers,
     completion_key: Option<&AwaitEventKey>,
+    process_source: Option<&AwaitEventKey>,
 ) -> Result<AttemptCaptured, SingletonRunError> {
     let record = journal.record(Vec::new());
     let owner = journal.materials.owner.clone();
@@ -1107,7 +1101,10 @@ async fn attempt(
             request,
             handlers,
             AttemptOrdinal::FIRST,
-            completion_key,
+            AttemptSources {
+                completion: completion_key,
+                process: process_source,
+            },
         )
         .await?;
         let result = captured.result;
@@ -1134,6 +1131,21 @@ async fn attempt(
     let recorded = journal.accept(entry)?;
     match recorded.events.first() {
         Some(RunEvent::AttemptRecorded {
+            result:
+                AttemptResult::DeferredStart {
+                    source,
+                    start_key,
+                    obligation,
+                },
+            ..
+        }) => Ok(AttemptCaptured::DeferredStart {
+            source: source.clone(),
+            start: Box::new(SingletonStart {
+                start_key: start_key.clone(),
+                obligation: obligation.clone(),
+            }),
+        }),
+        Some(RunEvent::AttemptRecorded {
             result: AttemptResult::Deferred { source },
             ..
         }) => Ok(AttemptCaptured::Deferred(source.clone())),
@@ -1152,8 +1164,12 @@ async fn capture_attempt(
     request: &SingletonPreparedRequest,
     handlers: &dyn SingletonToolHandlers,
     ordinal: AttemptOrdinal,
-    completion_key: Option<&AwaitEventKey>,
+    sources: AttemptSources<'_>,
 ) -> Result<crate::tool_run::RunAttemptEntry, String> {
+    let AttemptSources {
+        completion: completion_key,
+        process: process_source,
+    } = sources;
     let declaration = &member.declaration;
     // The obligation material a declared start owns in this record.
     let mut started = Vec::new();
@@ -1183,6 +1199,36 @@ async fn capture_attempt(
                     .ok_or("the isolated route has no admission")?,
             ),
         }),
+        Some(SingletonBodyOutcome::DeferredStart { start }) => {
+            let admitted = declaration.admits(OutcomeShape::Deferred).and_then(|()| {
+                declaration.admits(OutcomeShape::Done {
+                    intents: &[ToolIntentKind::StartProcess],
+                })
+            });
+            match admitted {
+                Err(refusal) => Ok(SingletonCapture::Refused { refusal }),
+                Ok(()) => match bind_start(call, &member.policy, *start) {
+                    Err(refusal) => Ok(SingletonCapture::StartRefused { refusal }),
+                    Ok(obligation) => {
+                        let source = process_source
+                            .ok_or("the process-terminal source was not reserved")?
+                            .clone();
+                        let (reference, entry) =
+                            mint(&owner, MaterialRole::AttemptOutput, encode(&obligation)?)?;
+                        return Ok(crate::tool_run::RunAttemptEntry {
+                            call_id: call.call_id.clone(),
+                            attempt: ordinal,
+                            result: AttemptResult::DeferredStart {
+                                source,
+                                start_key: obligation.start_key().clone(),
+                                obligation: reference,
+                            },
+                            materials: vec![entry],
+                        });
+                    }
+                },
+            }
+        }
         Some(SingletonBodyOutcome::Deferred { source }) => {
             match declaration.admits(OutcomeShape::Deferred) {
                 Ok(()) if completion_key == Some(&source) => Err(source),
@@ -1329,6 +1375,7 @@ impl RunCoordinator<'_> {
         let observed = cut.observe(
             self.pending
                 .len()
+                .saturating_add(self.pending_starts.len())
                 .saturating_add(usize::from(self.active_frame || self.faulted)),
         );
         self.cut = Some(observed);
@@ -1342,6 +1389,7 @@ impl RunCoordinator<'_> {
             cut.observe(
                 self.pending
                     .len()
+                    .saturating_add(self.pending_starts.len())
                     .saturating_add(usize::from(self.active_frame || self.faulted)),
             )
         })

@@ -30,6 +30,7 @@ pub use super::process_scheduling::ProcessWorkflowStartFailure;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::compat::Reply;
+use crate::durable_wait::process_terminal::RestateProcessTerminalRequest;
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitEffectRequest,
     RestateDurableWaitGroupChildMembershipRequest, RestateDurableWaitGroupRequest,
@@ -52,7 +53,6 @@ use crate::process::{
     RestateProcessCancelRequest, RestateProcessWorkflowInput, RestateProcessWorkflowOutput,
     RestateProcessWorkflowPayload,
 };
-use crate::process_attach::RestateProcessAttachRequest;
 
 #[macro_use]
 mod child_cancel;
@@ -514,13 +514,12 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     /// Hand one process terminal wait to the attach workflow and return without
     /// waiting for it.
     ///
-    /// One-way by construction: the calling handler must go on to park on the
-    /// wait's own promise, so the terminal read has to happen in another
-    /// invocation's journal, not in this one's.
+    /// Record a short process-terminal subscription before returning to the
+    /// Run's wait. No separate invocation waits on the process terminal.
     fn attach_process_terminal<'run>(
         &'run self,
         namespace: &'run crate::RestateNamespace,
-        request: RestateProcessAttachRequest,
+        request: RestateProcessTerminalRequest,
     ) -> crate::JournaledFuture<'run, ()>
     where
         'ctx: 'run;
@@ -1322,18 +1321,38 @@ macro_rules! impl_restate_controller_context {
                 fn attach_process_terminal<'run>(
                     &'run self,
                     namespace: &'run crate::RestateNamespace,
-                    request: RestateProcessAttachRequest,
+                    request: RestateProcessTerminalRequest,
                 ) -> crate::JournaledFuture<'run, ()>
                 where
                     'ctx: 'run,
                 {
-                    let send = namespace.process_attach(self,
-                            crate::process_attach::process_attach_workflow_key(&request.key),
-                        )
-                        .run(request)
-                        .send();
                     Box::pin(async move {
-                        send.await?;
+                        let owner = lash_core::EffectOpener::for_scope(&lash_core::AdmittedScope::new(request.key.scope.clone()))
+                            .map_err(TerminalError::from_error)?;
+                        let call_id = match &request.key.wait {
+                            AwaitEventWaitIdentity::ToolCompletion { tool_call_id } => tool_call_id.clone(),
+                            _ => owner.tool_call_admission().call_id(&[lash_sansio::ToolCallPosition::CodeCell(&request.key.key_id)]),
+                        };
+                        let descriptor = lash_core::tool_run::SourceDescriptor {
+                            source: request.key.clone(), call_id, owner,
+                            resolver: lash_core::plugin::PluginRevision::new("lash.process-terminal",
+                                lash_core::plugin::BehaviorRevision::ONE),
+                            authority: lash_core::tool_run::SourceAuthority::ProcessTerminal { process_id: request.process_id },
+                            cancel: lash_core::tool_run::ExternalCancelPolicy::Ignore,
+                        };
+                        let subscription = crate::durable_wait::ProcessTerminalSubscription::for_source(descriptor)
+                            .map_err(|error| TerminalError::new(error.to_record()))?;
+                        let address = RestateDurableWaitAddress::for_key(&request.key);
+                        let receiver = namespace.durable_wait_registry(self, address.index_key());
+                        if !receiver.attach_process_terminal(subscription.clone()).call().await?.into_body() {
+                            return Ok(());
+                        }
+                        let source = RestateDurableWaitAddress::for_key(&subscription.terminal);
+                        let output = namespace.durable_wait_registry(self, source.index_key())
+                            .subscribe_process_terminal(subscription.clone()).call().await?.into_body();
+                        if let Some(output) = output {
+                            receiver.deliver_process_terminal(crate::durable_wait::ProcessTerminalDelivery { subscription, output }).call().await?;
+                        }
                         Ok(())
                     })
                 }

@@ -59,7 +59,11 @@ pub(super) async fn revoke_index(
     // retirement open; an unconditional revocation seals it `Cancelled`.
     let open_sources = load_sources(ctx, &keys, |armed| armed.seal.is_none()).await?;
     if (only_if_quiescent
-        && (!waits.is_empty() || !metadata.awakeables.is_empty() || !open_sources.is_empty()))
+        && (!waits.is_empty()
+            || !metadata.awakeables.is_empty()
+            || !metadata.process_sources.is_empty()
+            || !metadata.process_receivers.is_empty()
+            || !open_sources.is_empty()))
         || (process_scope && !open_sources.is_empty())
         || ((only_if_quiescent || process_scope)
             && !scope_effects_and_groups_are_quiescent(ctx, namespace).await?)
@@ -67,6 +71,7 @@ pub(super) async fn revoke_index(
         return Ok(false);
     }
     retire_sources(namespace, ctx, object.writer, open_sources).await?;
+    super::process_terminal::detach(namespace, ctx, &mut metadata, |_| true);
     let awakeables = std::mem::take(&mut metadata.awakeables);
     metadata.revoked = true;
     // A revoked index keeps its `_compat` record: it fences a stale handler

@@ -486,6 +486,17 @@ where
             let key = restate_process_terminal_await_key(&self.authority_id, process_id)
                 .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
             context.peek_promise::<String>(&key.promise_key()).await?;
+            let address = crate::durable_wait::RestateDurableWaitAddress::for_key(&key);
+            self.route
+                .namespace()
+                .durable_wait_registry(context, address.index_key())
+                .resolve(crate::durable_wait::RestateDurableWaitResolveRequest {
+                    key,
+                    resolution: super::restate_process_terminal_resolution(&output)
+                        .map_err(TerminalError::from_error)?,
+                })
+                .call()
+                .await?;
         } else {
             routed_workflow::<_, _, ()>(
                 context,
@@ -1509,22 +1520,40 @@ where
         call: Call<RestateProcessCompleteRequest>,
     ) -> HandlerResult<Reply<()>> {
         let (wire, request) = call.open()?;
+        if ctx.key() != request.process_id.as_str() {
+            return Err(TerminalError::new(
+                lash_core::RuntimeEffectControllerError::from(
+                    lash_core::tool_run::SourceRefusal::Seal {
+                        seal: lash_core::tool_run::SealRefusal::WrongAuthority,
+                    },
+                )
+                .to_record(),
+            )
+            .into());
+        }
+
         let key = restate_process_terminal_await_key(&self.authority_id, &request.process_id)
             .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
-        if ctx
-            .peek_promise::<String>(&key.promise_key())
-            .await?
-            .is_some()
-        {
-            // Published already: the first terminal stands.
-            return Ok(Reply::at(wire, ()));
-        }
-        resolve_process_terminal_promise(
-            &ctx,
-            &self.authority_id,
-            &request.process_id,
-            &request.output,
-        )?;
+        let resolution = match ctx.peek_promise::<String>(&key.promise_key()).await? {
+            Some(payload) => serde_json::from_str(&payload).map_err(TerminalError::from_error)?,
+            None => {
+                resolve_process_terminal_promise(
+                    &ctx,
+                    &self.authority_id,
+                    &request.process_id,
+                    &request.output,
+                )?;
+                super::restate_process_terminal_resolution(&request.output)
+                    .map_err(TerminalError::from_error)?
+            }
+        };
+        let address = crate::durable_wait::RestateDurableWaitAddress::for_key(&key);
+        self.route
+            .namespace()
+            .durable_wait_registry(&ctx, address.index_key())
+            .resolve(crate::durable_wait::RestateDurableWaitResolveRequest { key, resolution })
+            .call()
+            .await?;
         Ok(Reply::at(wire, ()))
     }
 

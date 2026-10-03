@@ -457,6 +457,7 @@ impl HandOff {
             &registry,
             &(Arc::clone(&gated_n) as Arc<dyn lash_core::ProcessContinuationStore>),
             &sessions,
+            stores.process_env_store(),
             "N",
         )
         .await;
@@ -466,6 +467,7 @@ impl HandOff {
             &registry,
             &continuations,
             &sessions,
+            stores.process_env_store(),
             "N+1",
         )
         .await;
@@ -497,6 +499,7 @@ impl HandOff {
         registry: &Arc<dyn ProcessRegistry>,
         continuations: &Arc<dyn lash_core::ProcessContinuationStore>,
         sessions: &Arc<dyn lash_core::DeploymentStore>,
+        materials: Arc<dyn lash_core::store::ToolMaterialStore>,
         build: &'static str,
     ) -> (Arc<RestateEffectHost>, Endpoint) {
         let generation = lash_core::engine::BuildGeneration::for_test(build);
@@ -514,6 +517,7 @@ impl HandOff {
                 effect_host: &host,
                 ingress: ingress.clone(),
                 admin: crate::RestateAdminClient::new(connection.clone()),
+                materials,
                 attachments: Arc::clone(sessions) as Arc<dyn lash_core::AttachmentReferrers>,
                 sessions: Arc::clone(sessions),
                 process_workflow: LashProcessWorkflowImpl::new(

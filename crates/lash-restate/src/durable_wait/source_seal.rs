@@ -162,34 +162,40 @@ pub(super) async fn arm_source(
 ) -> HandlerResult<Reply<RestateSourceArmReply>> {
     let (wire, request) = call.open()?;
     let object = registry.admit(&ctx).await?;
-    let address = derive_durable_wait_index_address(ctx.key(), &request.descriptor.source)?;
-    let refused = |refusal| Ok(Reply::at(wire, RestateSourceArmReply::Refused { refusal }));
-    if load_durable_wait_index_metadata(&ctx, object.writer)
-        .await?
-        .revoked
-    {
+    arm_descriptor(registry, &ctx, object.writer, request.descriptor)
+        .await
+        .map(|reply| Reply::at(wire, reply))
+        .map_err(Into::into)
+}
+
+pub(super) async fn arm_descriptor(
+    _registry: &LashDurableWaitRegistryImpl,
+    ctx: &ObjectContext<'_>,
+    writer: object_state::StoredValueWriter,
+    descriptor: SourceDescriptor,
+) -> Result<RestateSourceArmReply, TerminalError> {
+    let address = derive_durable_wait_index_address(ctx.key(), &descriptor.source)?;
+    let refused = |refusal| Ok(RestateSourceArmReply::Refused { refusal });
+    if load_durable_wait_index_metadata(ctx, writer).await?.revoked {
         return refused(SourceRefusal::Retired);
     }
-    if let Some(armed) = load_source(&ctx, &address).await? {
-        if armed.descriptor != request.descriptor {
+    if let Some(armed) = load_source(ctx, &address).await? {
+        if armed.descriptor != descriptor {
             return refused(SourceRefusal::DescriptorMismatch);
         }
-        return Ok(Reply::at(
-            wire,
-            RestateSourceArmReply::Armed { seal: armed.seal },
-        ));
+        return Ok(RestateSourceArmReply::Armed { seal: armed.seal });
     }
     object_state::set_stamped(
-        &ctx,
+        ctx,
         &source_state_key(&address),
-        object.writer,
+        writer,
         IndexedSource {
-            descriptor: request.descriptor,
+            descriptor,
             seal: None,
             subscribers: Vec::new(),
         },
     );
-    Ok(Reply::at(wire, RestateSourceArmReply::Armed { seal: None }))
+    Ok(RestateSourceArmReply::Armed { seal: None })
 }
 
 pub(super) async fn subscribe_source(
@@ -267,15 +273,24 @@ pub(super) async fn seal_source(
 ) -> HandlerResult<Reply<RestateSourceSealReply>> {
     let (wire, request) = call.open()?;
     let object = registry.admit(&ctx).await?;
+    seal_descriptor(registry, &ctx, object.writer, request)
+        .await
+        .map(|reply| Reply::at(wire, reply))
+        .map_err(Into::into)
+}
+
+pub(super) async fn seal_descriptor(
+    registry: &LashDurableWaitRegistryImpl,
+    ctx: &ObjectContext<'_>,
+    writer: object_state::StoredValueWriter,
+    request: RestateSourceSealRequest,
+) -> Result<RestateSourceSealReply, TerminalError> {
     let address = derive_durable_wait_index_address(ctx.key(), &request.source)?;
-    let refused = |refusal| Ok(Reply::at(wire, RestateSourceSealReply::Refused { refusal }));
-    if load_durable_wait_index_metadata(&ctx, object.writer)
-        .await?
-        .revoked
-    {
+    let refused = |refusal| Ok(RestateSourceSealReply::Refused { refusal });
+    if load_durable_wait_index_metadata(ctx, writer).await?.revoked {
         return refused(SourceRefusal::Retired);
     }
-    let Some(armed) = load_source(&ctx, &address).await? else {
+    let Some(armed) = load_source(ctx, &address).await? else {
         return refused(SourceRefusal::NotArmed);
     };
     if armed.descriptor.source != request.source {
@@ -288,18 +303,10 @@ pub(super) async fn seal_source(
         Err(seal) => return refused(SourceRefusal::Seal { seal }),
         Ok(outcome @ SealOutcome::AlreadySealed { .. }) => outcome,
         Ok(SealOutcome::Sealed { seal }) => {
-            seal_and_wake(
-                &registry.namespace,
-                &ctx,
-                object.writer,
-                &address,
-                armed,
-                seal,
-            )
-            .await?
+            seal_and_wake(&registry.namespace, ctx, writer, &address, armed, seal).await?
         }
     };
-    Ok(Reply::at(wire, RestateSourceSealReply::Outcome { outcome }))
+    Ok(RestateSourceSealReply::Outcome { outcome })
 }
 
 /// Hand `seal` to the source's workflow, then wake every subscribed segment

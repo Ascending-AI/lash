@@ -254,6 +254,7 @@ impl RestateEngine {
                 ingress: RestateIngressClient::new(self.connection.clone()),
                 admin: self.admin.clone(),
                 sessions: self.stores.session_store_factory(),
+                materials: self.stores.tool_material_store(),
                 attachments: self.stores.attachment_referrers(),
                 process_workflow: self.process.workflow(
                     processes.into(),

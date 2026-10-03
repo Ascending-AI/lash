@@ -24,6 +24,7 @@
 //! classification, and workflow address locally.
 
 use lash_sansio::SessionId;
+use std::sync::Arc;
 
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome, RuntimeError,
@@ -37,7 +38,16 @@ use restate_sdk::serde::Json;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+mod notifications;
 mod observer;
+use notifications::{
+    mirror_resolve_outcome, resolve_durable_wait_awakeable, revoke_durable_wait_awakeable,
+    wake_ended_waits,
+};
+pub(crate) mod process_terminal;
+pub use process_terminal::{
+    ProcessTerminalDelivery, ProcessTerminalSubscription, RestateProcessTerminalRequest,
+};
 mod run_retirement;
 mod scope_retirement;
 pub(crate) mod source_seal;
@@ -318,6 +328,12 @@ pub(crate) struct RestateDurableWaitIndexMetadata {
     /// encoding while empty.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     cancel_decided: std::collections::BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    process_sources: Vec<ProcessTerminalSubscription>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    process_receivers: Vec<ProcessTerminalSubscription>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    process_unsubscribed: Vec<AwaitEventKey>,
 }
 
 impl RestateDurableWaitIndexMetadata {
@@ -345,58 +361,6 @@ fn cancel_decided_id(
 ) -> Result<String, TerminalError> {
     lash_core::facade_support::await_event_identity::derive_key_id(scope, wait)
         .map_err(|error| TerminalError::new(error.to_string()))
-}
-/// Fire a gate entry because the turn-control wait it guards has settled.
-///
-/// The wait's own `Resolution` is not forwarded whole: a gate entry only ever
-/// guards a turn-control address, so the waiter needs to know that the turn
-/// was asked to stop and in which mode, and nothing more.
-fn resolve_durable_wait_awakeable(
-    ctx: &ObjectContext<'_>,
-    request: &RestateDurableWaitAwakeableRequest,
-    resolution: &Resolution,
-) {
-    ctx.resolve_awakeable(
-        &request.awakeable_id,
-        Json(RestateTurnCancelWake::for_gate_resolution(resolution)),
-    );
-}
-
-/// Fire a gate entry because the whole session was revoked out from under it.
-fn revoke_durable_wait_awakeable(
-    ctx: &ObjectContext<'_>,
-    request: &RestateDurableWaitAwakeableRequest,
-) {
-    ctx.resolve_awakeable(
-        &request.awakeable_id,
-        Json(RestateTurnCancelWake::SessionRevoked),
-    );
-}
-
-/// Wake and drop every awakeable entry watching a wait `ended` selects,
-/// because that wait has ended with `resolution`. Answers whether an entry
-/// was dropped, so the caller stores the metadata it changed.
-///
-/// An entry is owed its wake by every way its wait can end: a resolve, a
-/// settle, its owning group child's cancel decision and a cancellation of
-/// the scope's waits. A watcher left unwoken outlives the wait it watches;
-/// a process attach would then hold its terminal read for a caller that is
-/// gone.
-fn wake_ended_waits(
-    ctx: &ObjectContext<'_>,
-    metadata: &mut RestateDurableWaitIndexMetadata,
-    resolution: &Resolution,
-    mut ended: impl FnMut(&AwaitEventKey) -> bool,
-) -> bool {
-    let before = metadata.awakeables.len();
-    metadata.awakeables.retain(|entry| {
-        let ended = ended(&entry.key);
-        if ended {
-            resolve_durable_wait_awakeable(ctx, entry, resolution);
-        }
-        !ended
-    });
-    metadata.awakeables.len() != before
 }
 pub(crate) fn restate_durable_wait_request(key: &AwaitEventKey) -> RestateDurableWaitAwaitRequest {
     RestateDurableWaitAwaitRequest { key: key.clone() }
@@ -656,6 +620,18 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
 #[restate_sdk::object]
 #[name = "LashDurableWaitIndex"]
 pub trait LashDurableWaitRegistry {
+    async fn attach_process_terminal(
+        call: Call<ProcessTerminalSubscription>,
+    ) -> HandlerResult<Reply<bool>>;
+    async fn subscribe_process_terminal(
+        call: Call<ProcessTerminalSubscription>,
+    ) -> HandlerResult<Reply<Option<lash_core::ProcessAwaitOutput>>>;
+    async fn unsubscribe_process_terminal(
+        call: Call<ProcessTerminalSubscription>,
+    ) -> HandlerResult<Reply<()>>;
+    async fn deliver_process_terminal(
+        call: Call<ProcessTerminalDelivery>,
+    ) -> HandlerResult<Reply<()>>;
     async fn is_revoked(call: Call<()>) -> HandlerResult<Reply<bool>>;
     /// A turn cancellation gate's peek: the session's revocation and the
     /// gate's terminal in one read that never queues on the exclusive
@@ -773,12 +749,26 @@ pub trait LashDurableWaitRegistry {
 }
 
 /// [`LashDurableWaitRegistry`] in one deployment's namespace (FIG-3898).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone)]
 pub(crate) struct LashDurableWaitRegistryImpl {
     namespace: crate::RestateNamespace,
     /// Where the handlers read the fleet epoch their writes are stamped at.
     fleet: FleetView,
     admin: Option<crate::RestateAdminClient>,
+    attachments: Arc<dyn lash_core::AttachmentReferrers>,
+    materials: Option<Arc<dyn lash_core::store::ToolMaterialStore>>,
+}
+
+impl Default for LashDurableWaitRegistryImpl {
+    fn default() -> Self {
+        Self {
+            namespace: Default::default(),
+            fleet: Default::default(),
+            admin: None,
+            attachments: Arc::new(lash_core::attachments::NoopAttachmentReferrers),
+            materials: None,
+        }
+    }
 }
 
 impl LashDurableWaitRegistryImpl {
@@ -791,7 +781,24 @@ impl LashDurableWaitRegistryImpl {
             namespace,
             fleet,
             admin: Some(admin),
+            ..Self::default()
         }
+    }
+
+    pub(crate) fn with_attachments(
+        mut self,
+        attachments: Arc<dyn lash_core::AttachmentReferrers>,
+    ) -> Self {
+        self.attachments = attachments;
+        self
+    }
+
+    pub(crate) fn with_materials(
+        mut self,
+        materials: Arc<dyn lash_core::store::ToolMaterialStore>,
+    ) -> Self {
+        self.materials = Some(materials);
+        self
     }
 
     /// The registry's `_compat` gate for a handler that may write.
@@ -1014,22 +1021,6 @@ async fn resolve_indexed_waits(
     Ok(())
 }
 
-fn mirror_resolve_outcome(
-    ctx: &ObjectContext<'_>,
-    writer: StoredValueWriter,
-    key: &AwaitEventKey,
-    address: &RestateDurableWaitAddress,
-    accepted_terminal: Resolution,
-    outcome: &ResolveOutcome,
-) {
-    let terminal = match outcome {
-        ResolveOutcome::AlreadyResolved { terminal } => terminal.clone(),
-        ResolveOutcome::Accepted => accepted_terminal,
-        ResolveOutcome::UnknownOrRevoked => return,
-    };
-    store_indexed_wait(ctx, writer, key, address, Some(terminal));
-}
-
 fn store_indexed_wait(
     ctx: &ObjectContext<'_>,
     writer: StoredValueWriter,
@@ -1073,6 +1064,34 @@ pub(crate) fn split_cancellable_waits(
         .partition(|key| !key.wait.is_turn_control())
 }
 impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
+    async fn attach_process_terminal(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<ProcessTerminalSubscription>,
+    ) -> HandlerResult<Reply<bool>> {
+        process_terminal::attach(self, ctx, call).await
+    }
+    async fn subscribe_process_terminal(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<ProcessTerminalSubscription>,
+    ) -> HandlerResult<Reply<Option<lash_core::ProcessAwaitOutput>>> {
+        process_terminal::subscribe(self, ctx, call).await
+    }
+    async fn unsubscribe_process_terminal(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<ProcessTerminalSubscription>,
+    ) -> HandlerResult<Reply<()>> {
+        process_terminal::unsubscribe(self, ctx, call).await
+    }
+    async fn deliver_process_terminal(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<ProcessTerminalDelivery>,
+    ) -> HandlerResult<Reply<()>> {
+        process_terminal::deliver(self, ctx, call).await
+    }
     async fn upgrade(
         &self,
         ctx: ObjectContext<'_>,
@@ -1219,9 +1238,13 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         // invocation's cancel, reaches the index only here. A turn-control
         // gate settles its entries through `resolve`.
         if !request.key.wait.is_turn_control()
-            && wake_ended_waits(&ctx, &mut metadata, &request.resolution, |key| {
-                *key == request.key
-            })
+            && wake_ended_waits(
+                &self.namespace,
+                &ctx,
+                &mut metadata,
+                &request.resolution,
+                |key| *key == request.key,
+            )
         {
             object_state::set_stamped(
                 &ctx,
@@ -1380,6 +1403,20 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         .await?
         .and_then(|wait| wait.terminal)
         {
+            process_terminal::publish(
+                &self.namespace,
+                &ctx,
+                &mut metadata,
+                &request.key,
+                &terminal,
+            )
+            .await?;
+            object_state::set_stamped(
+                &ctx,
+                DURABLE_WAIT_INDEX_METADATA_KEY,
+                object.writer,
+                metadata,
+            );
             return Ok(Reply::at(
                 wire,
                 RestateDurableWaitResolveResponse::Outcome(ResolveOutcome::AlreadyResolved {
@@ -1421,7 +1458,11 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
                 RestateDurableWaitResolveResponse::Outcome(outcome),
             ));
         }
-        wake_ended_waits(&ctx, &mut metadata, &settled, |key| *key == request.key);
+        process_terminal::publish(&self.namespace, &ctx, &mut metadata, &request.key, &settled)
+            .await?;
+        wake_ended_waits(&self.namespace, &ctx, &mut metadata, &settled, |key| {
+            *key == request.key
+        });
         object_state::set_stamped(
             &ctx,
             DURABLE_WAIT_INDEX_METADATA_KEY,
@@ -1461,9 +1502,13 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             return Ok(Reply::at(wire, ()));
         }
         // The closed key's wait is over, parked or not: wake what watches it.
-        let woke = wake_ended_waits(&ctx, &mut metadata, &Resolution::Cancelled, |key| {
-            key.scope == request.scope && key.wait == request.wait
-        });
+        let woke = wake_ended_waits(
+            &self.namespace,
+            &ctx,
+            &mut metadata,
+            &Resolution::Cancelled,
+            |key| key.scope == request.scope && key.wait == request.wait,
+        );
         if metadata.cancel_decided.insert(id) || woke {
             object_state::set_stamped(
                 &ctx,
@@ -1486,9 +1531,13 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
                 .map(|wait| wait.key)
                 .collect(),
         );
-        if wake_ended_waits(&ctx, &mut metadata, &Resolution::Cancelled, |key| {
-            waits.contains(key)
-        }) {
+        if wake_ended_waits(
+            &self.namespace,
+            &ctx,
+            &mut metadata,
+            &Resolution::Cancelled,
+            |key| waits.contains(key),
+        ) {
             object_state::set_stamped(
                 &ctx,
                 DURABLE_WAIT_INDEX_METADATA_KEY,

@@ -129,14 +129,14 @@ pub use controller::{
 };
 pub use deployment_registry::RestateDeploymentRegistry;
 pub use durable_wait::{
-    DURABLE_WAIT_REGISTRY_FORMAT_VERSION, RestateDurableWaitAddress,
-    RestateDurableWaitAwaitRequest, RestateDurableWaitAwakeableRequest,
+    DURABLE_WAIT_REGISTRY_FORMAT_VERSION, ProcessTerminalDelivery, ProcessTerminalSubscription,
+    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitAwakeableRequest,
     RestateDurableWaitCancelDecidedRequest, RestateDurableWaitClassification,
     RestateDurableWaitEffectRequest, RestateDurableWaitGroupRequest,
     RestateDurableWaitHandOverRequest, RestateDurableWaitIndexRequest,
     RestateDurableWaitRegistration, RestateDurableWaitResolveRefusal,
     RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse, RestateDurableWaitScope,
-    RestateDurableWaitSettleRequest, RestateTurnGatePeek,
+    RestateDurableWaitSettleRequest, RestateProcessTerminalRequest, RestateTurnGatePeek,
 };
 pub use effect_group::{
     EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,

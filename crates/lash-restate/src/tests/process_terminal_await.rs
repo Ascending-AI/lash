@@ -188,6 +188,7 @@ impl World {
                     Some(_) => connection.clone(),
                     None => RestateConnection::new(required("RESTATE_ADMIN_URL")),
                 }),
+                materials: stores.tool_material_store(),
                 attachments: stores.attachment_referrers(),
                 sessions: stores.session_store_factory(),
                 process_workflow: LashProcessWorkflowImpl::new_for_test(
@@ -561,86 +562,4 @@ async fn live_terminal_await_replays_after_pruning_on_sqlite() {
 async fn live_terminal_await_replays_after_pruning_on_postgres() {
     let (_directory, stores) = postgres().await;
     replay_after_prune(stores, true).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cancelled_terminal_and_revoked_session_keep_the_durable_wait_path() {
-    for attach in [false, true] {
-        control_paths(attach).await;
-    }
-}
-
-async fn control_paths(attach: bool) {
-    let world = World::new(sqlite().await, false).await;
-    let cancelled = process_cancellation("the child was cancelled".to_string(), None);
-    let process_id = world.terminal(&cancelled).await;
-    let output = tokio::time::timeout(
-        BOUND,
-        world.ingress.call_workflow_json::<_, ProcessAwaitOutput>(
-            PROBE,
-            "cancelled",
-            "run",
-            &Input {
-                process_id,
-                park: false,
-                attach,
-            },
-        ),
-    )
-    .await
-    .expect("the cancelled await completes")
-    .expect("the cancelled terminal is returned");
-    assert_eq!(output, cancelled);
-    let server = world.server.as_ref().expect("the double");
-    let invocation = server
-        .find_invocation(PROBE, "cancelled", "run", "completed")
-        .expect("the cancelled await");
-    assert!(
-        server
-            .journal(&invocation.id)
-            .expect("the journal")
-            .iter()
-            .any(|e| e.ty == MessageType::OneWayCallCommand),
-        "a cancelled child still arms the attach"
-    );
-
-    let process_id = world
-        .terminal(&process_success(serde_json::json!("completed")))
-        .await;
-    world
-        .ingress
-        .call_lash_object::<_, ()>("LashDurableWaitIndex", "session", "revoke_all", &())
-        .await
-        .expect("revoke the waiting session");
-    let refused = tokio::time::timeout(
-        BOUND,
-        world.ingress.call_workflow_json::<_, ProcessAwaitOutput>(
-            PROBE,
-            "revoked",
-            "run",
-            &Input {
-                process_id,
-                park: false,
-                attach,
-            },
-        ),
-    )
-    .await
-    .expect("the revoked await ends");
-    assert!(
-        refused.is_err(),
-        "a revoked session cannot receive a terminal"
-    );
-    let invocation = server
-        .find_invocation(PROBE, "revoked", "run", "completed")
-        .expect("the revoked await");
-    assert!(
-        server
-            .journal(&invocation.id)
-            .expect("the journal")
-            .iter()
-            .any(|e| e.ty == MessageType::OneWayCallCommand),
-        "revocation keeps the ordinary wait's refusal path"
-    );
-    world.finish().await;
 }

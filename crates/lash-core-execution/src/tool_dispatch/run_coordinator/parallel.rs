@@ -91,7 +91,7 @@ fn captured(
     available: &[PluginRevision],
 ) -> Result<Option<SingletonCapture>, RuntimeEffectControllerError> {
     let output = match &entry.result {
-        AttemptResult::Deferred { .. } => return Ok(None),
+        AttemptResult::Deferred { .. } | AttemptResult::DeferredStart { .. } => return Ok(None),
         AttemptResult::Done { output } | AttemptResult::Failed { output, .. } => output,
     };
     let mut materials = Materials {
@@ -561,6 +561,30 @@ impl<'a> RunCoordinator<'a> {
             match selected.events.as_slice() {
                 [
                     RunEvent::AttemptRecorded {
+                        result:
+                            AttemptResult::DeferredStart {
+                                source,
+                                start_key,
+                                obligation,
+                            },
+                        ..
+                    },
+                ] => {
+                    let terminal = self.queue_deferred_start(
+                        call,
+                        member.clone(),
+                        Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                        ordinal,
+                        source.clone(),
+                        SingletonStart {
+                            start_key: start_key.clone(),
+                            obligation: obligation.clone(),
+                        },
+                    );
+                    decision = Some((call.call_id.clone(), terminal));
+                }
+                [
+                    RunEvent::AttemptRecorded {
                         result: AttemptResult::Deferred { source },
                         ..
                     },
@@ -572,6 +596,7 @@ impl<'a> RunCoordinator<'a> {
                             member: member.clone(),
                             handlers: Handlers::Owned(std::sync::Arc::clone(&handlers)),
                             attempt: ordinal,
+                            start: None,
                         },
                     );
                     decision = Some((
@@ -706,6 +731,7 @@ impl<'a> RunCoordinator<'a> {
             .sources
             .get(&call.call_id)
             .map(|source| source.source.clone());
+        let process_source = self.process_sources.get(&call.call_id).cloned();
         let (call, member, request) = (call.clone(), member.clone(), request.clone());
         let step = Box::pin(async move {
             capture_attempt(
@@ -715,7 +741,10 @@ impl<'a> RunCoordinator<'a> {
                 &request,
                 handlers.as_ref(),
                 ordinal,
-                completion_key.as_ref(),
+                AttemptSources {
+                    completion: completion_key.as_ref(),
+                    process: process_source.as_ref(),
+                },
             )
             .await
         });

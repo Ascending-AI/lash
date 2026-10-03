@@ -247,7 +247,8 @@ pub(super) struct RecordingContext {
     pub(super) process_command_log: Mutex<Vec<String>>,
     pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
     pub(super) resolved_events: Mutex<Vec<RestateDurableWaitResolveRequest>>,
-    pub(super) process_attachments: Mutex<Vec<crate::process_attach::RestateProcessAttachRequest>>,
+    pub(super) process_attachments:
+        Mutex<Vec<crate::durable_wait::process_terminal::RestateProcessTerminalRequest>>,
     pub(super) scope_effect_begins: AtomicUsize,
     pub(super) scope_group_records: AtomicUsize,
     pub(super) awaited_replay_keys: Mutex<Vec<String>>,
@@ -507,7 +508,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     fn attach_process_terminal<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
-        request: crate::process_attach::RestateProcessAttachRequest,
+        request: crate::durable_wait::process_terminal::RestateProcessTerminalRequest,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -1876,7 +1877,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     fn attach_process_terminal<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
-        request: crate::process_attach::RestateProcessAttachRequest,
+        request: crate::durable_wait::process_terminal::RestateProcessTerminalRequest,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,

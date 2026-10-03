@@ -1,7 +1,6 @@
 //! Protected declarations, declared starts and presentation in rank order.
 
 use super::*;
-use crate::runtime::process::{DeclaredStartPhase, StartCancelDecision, WorkerTerminationReceipt};
 use crate::tool_dispatch::singleton_run::IsolatedProcessDescriptor;
 
 impl<'a> RunCoordinator<'a> {
@@ -27,6 +26,7 @@ impl<'a> RunCoordinator<'a> {
     async fn drain_inner(
         &mut self,
     ) -> Result<Vec<(ToolCallId, SingletonTerminal)>, SingletonRunError> {
+        self.drain_starts().await?;
         let owed = std::mem::take(&mut self.owed);
         let mut terminals = Vec::with_capacity(owed.len());
         for (rank, owed) in owed {
@@ -234,127 +234,6 @@ impl<'a> RunCoordinator<'a> {
             launched,
         })
     }
-}
-
-/// K5 inside the protected drain: register the admitted start under its key,
-/// then discharge it. The Run's cancellation is read once, inside the
-/// discharge step, and the recorded cancel policy decides what it does to
-/// the launched process.
-async fn drain_start(
-    journal: &mut RunJournal<'_>,
-    call_id: &ToolCallId,
-    obligation: &DeclaredStartObligation,
-    isolated: Option<&RecordedIsolatedStart>,
-    handlers: &dyn SingletonToolHandlers,
-) -> Result<(ProcessId, Option<WorkerTerminationReceipt>), SingletonRunError> {
-    let start_key = obligation.start_key().clone();
-    let launch_record = journal.record(Vec::new());
-    let (step_call, key) = (call_id.clone(), start_key.clone());
-    let launch = Box::pin(async move {
-        let process_id = handlers.launch_start(obligation).await?;
-        Ok(RunJournalEntry {
-            state: Vec::new(),
-            record: RunRecord {
-                events: vec![RunEvent::StartLaunched {
-                    call_id: step_call,
-                    start_key: key,
-                    process_id,
-                }],
-                ..launch_record
-            },
-            materials: Vec::new(),
-        })
-    });
-    let launched = journal
-        .append(record_name(call_id, "start:launch"), launch)
-        .await?;
-    let Some(RunEvent::StartLaunched { process_id, .. }) = launched.events.first() else {
-        return Err(RunEventRefusal::StartOrder {
-            call_id: call_id.clone(),
-            start_key,
-        }
-        .into());
-    };
-    let process_id = process_id.clone();
-
-    let engine = isolated
-        .map(|binding| require_isolated_engine(handlers, &binding.engine_kind, binding.boundary))
-        .transpose()?;
-    let hard =
-        isolated.is_some_and(|binding| binding.boundary == ProcessExecutionBoundary::WorkerProcess);
-    let owner = journal.materials.owner.clone();
-    let closing = journal.ledger.lifecycle() == crate::tool_run::RunLifecycle::Closing;
-    let discharge_record = journal.record(Vec::new());
-    let (step_call, launched_id) = (call_id.clone(), process_id.clone());
-    let discharge = Box::pin(async move {
-        let cancel = (closing || handlers.run_cancel_requested())
-            && matches!(
-                obligation.on_cancel(DeclaredStartPhase::Launched),
-                StartCancelDecision::RecoverAndDischarge {
-                    cancel_process: true,
-                    ..
-                }
-            );
-        let mut materials = Vec::new();
-        if cancel && hard {
-            let worker = engine
-                .as_ref()
-                .and_then(|engine| engine.physical_worker())
-                .ok_or("the admitted physical worker is unavailable")?;
-            let receipt = worker
-                .terminate_worker(&launched_id)
-                .await
-                .map_err(|error| error.to_string())?;
-            if receipt.process_id != launched_id {
-                return Err(IsolatedStartRefusal::TerminationOwner.to_string());
-            }
-            let (_, entry) = mint(&owner, MaterialRole::AttemptOutput, encode(&receipt)?)?;
-            materials.push(entry);
-        }
-        handlers
-            .discharge_start(obligation, &launched_id, cancel)
-            .await?;
-        Ok(RunJournalEntry {
-            state: Vec::new(),
-            record: RunRecord {
-                events: vec![RunEvent::StartDischarged {
-                    call_id: step_call,
-                    start_key,
-                    cancelled: cancel,
-                }],
-                ..discharge_record
-            },
-            materials,
-        })
-    });
-    let (record, references) = journal
-        .append_entry(record_name(call_id, "start:discharge"), discharge)
-        .await?;
-    let receipt = match references.first() {
-        Some(reference) => {
-            let receipt: WorkerTerminationReceipt = journal.materials.decode(reference)?;
-            if receipt.process_id != process_id {
-                return Err(IsolatedStartRefusal::TerminationOwner.into());
-            }
-            Some(receipt)
-        }
-        _ => None,
-    };
-    if hard
-        && receipt.is_none()
-        && record.events.iter().any(|event| {
-            matches!(
-                event,
-                RunEvent::StartDischarged {
-                    cancelled: true,
-                    ..
-                }
-            )
-        })
-    {
-        return Err(IsolatedStartRefusal::TerminationMissing.into());
-    }
-    Ok((process_id, receipt))
 }
 
 fn presented(

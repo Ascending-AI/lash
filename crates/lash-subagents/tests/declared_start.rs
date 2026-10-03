@@ -193,3 +193,26 @@ mod in_process {
 mod double {
     lash_conformance::declared_start_tests!({ super::tier("double", true).await });
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_session_lifetime_subagent_survives_its_waiting_turn() {
+    let (_guard, mut tier) = tier("session-lifetime", false).await;
+    tier.subagents = Arc::new(|| {
+        let registry = lash_subagents::CapabilityRegistry::new().with(Arc::new(
+            lash_subagents::StaticCapability::new(
+                "default",
+                lash_core::facade_support::SessionSpec::inherit(),
+            ),
+        ));
+        Arc::new(lash_subagents::SubagentsPluginFactory::new(
+            Arc::new(registry),
+            lash_core::lifetime::session_or_starter,
+        ))
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(240),
+        lash_conformance::a_session_lifetime_subagent_survives_its_waiting_turn(tier),
+    )
+    .await
+    .expect("the session lifetime law completes");
+}

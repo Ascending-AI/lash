@@ -347,9 +347,9 @@ pub fn execute_process_await_tool_call(
     if let Err(err) = context.completion_key() {
         return done_without_intents(ToolOutcome::err_fmt(err));
     }
-    lash_core::ToolAttemptOutcome::pending(
-        lash_core::PendingCompletion::new().resolved_by_process_terminal(process_id),
-    )
+    let mut pending = lash_core::PendingCompletion::new().resolved_by_process_terminal(process_id);
+    pending.on_cancel = lash_core::CancelHint::Ignore;
+    lash_core::ToolAttemptOutcome::pending(pending)
 }
 
 pub async fn execute_process_list_tool_call(
