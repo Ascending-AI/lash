@@ -30,7 +30,7 @@ kiln test --test_output=all \
 Expect **44 executed tests** in total across the six targets — the sim binary
 runs sharded, so sum the per-target `passed` counts — covering Responses, Codex,
 Chat, both Anthropic modes, Gemini, Code Assist, real RLM output-limit retries,
-and checkpoint directives. Pin the count, not "nonzero": a filter that has
+and checkpoint contributions. Pin the count, not "nonzero": a filter that has
 drifted to select two of the forty-four still reports a nonzero pass and reads
 as green.
 The Anthropic witnesses must include native/fallback

@@ -95,7 +95,6 @@ The generated region below is checked against the live filenames and headings.
 | 0056 | [Checkpoint components generalize to a keyed set](0056-checkpoint-components-generalize-to-a-keyed-set.md) |
 | 0057 | [History generations accelerate edge-authoritative reads](0057-history-generations-accelerate-edge-authoritative-reads.md) |
 | 0058 | [Runtime commit budgets are explicit host policy](0058-runtime-commit-budgets-are-explicit-host-policy.md) |
-| 0059 | [Tool-call directives compose monotonically](0059-before-tool-call-directives-compose-monotonically.md) |
 | 0060 | [The lashlang VM is a heap substrate with dialect-lowered value semantics](0060-the-lashlang-vm-is-a-heap-substrate-with-dialect-lowered-value-semantics.md) |
 | 0061 | [RLM dialects share one IR and VM](0061-two-first-class-rlm-dialects-with-full-parity-and-session-pinning.md) |
 | 0062 | [The TypeScript dialect is an exact ECMA-262 subset](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md) |
@@ -160,4 +159,5 @@ The generated region below is checked against the live filenames and headings.
 | 0125 | [Model usage is engine-owned accounting delivered per call](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md) |
 | 0126 | [Session config changes are typed owner commands](0126-session-config-changes-are-typed-owner-commands.md) |
 | 0127 | [Usage is result data; hosts meter spend](0127-usage-is-result-data-hosts-meter-spend.md) |
+| 0128 | [Tool hooks compose as transforms, then checks](0128-tool-hooks-compose-as-transforms-then-checks.md) |
 <!-- adr-index:end -->

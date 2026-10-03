@@ -880,17 +880,13 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         plugin_config: Default::default(),
         session_graph: manager.clone(),
     };
-    let directives = overflow_recovery_after_turn(&overflow)
+    let contributions = overflow_recovery_after_turn(&overflow)
         .await
         .expect("hook runs");
-    assert_eq!(directives.len(), 2);
-    let lash_core::plugin::AfterTurnPluginDirective::AppendPluginNode { plugin_type, body } =
-        &directives[1]
-    else {
-        panic!("expected plugin-node append: {:?}", directives[1]);
-    };
-    assert_eq!(plugin_type, OVERFLOW_RECOVERY_PLUGIN_TYPE);
-    assert_eq!(body, &json!({"kind": "pending"}));
+    assert_eq!(contributions.records.len(), 1);
+    let record = &contributions.records[0];
+    assert_eq!(record.plugin_type, OVERFLOW_RECOVERY_PLUGIN_TYPE);
+    assert_eq!(record.body, json!({"kind": "pending"}));
 
     // The control row: a plain provider error names no recovery trigger.
     let provider_error = lash_core::plugin::TurnResultHookContext {
@@ -906,6 +902,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         overflow_recovery_after_turn(&provider_error)
             .await
             .expect("hook runs")
+            .records
             .is_empty()
     );
 
@@ -927,6 +924,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         overflow_recovery_after_turn(&guided)
             .await
             .expect("hook runs")
+            .records
             .is_empty(),
         "cooperative handoff guidance must not open a recovery"
     );

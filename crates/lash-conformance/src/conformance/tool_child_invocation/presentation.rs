@@ -86,9 +86,19 @@ fn retaining_step() -> crate::plugin::ToolPresentationStep {
 fn steps_factory(
     steps: Vec<crate::plugin::ToolPresentationStep>,
 ) -> Arc<dyn crate::plugin::PluginFactory> {
+    const KEYS: [crate::plugin::HookKey; 4] = [
+        lash_core::hook_key!("first"),
+        lash_core::hook_key!("second"),
+        lash_core::hook_key!("third"),
+        lash_core::hook_key!("fourth"),
+    ];
+    assert!(
+        steps.len() <= KEYS.len(),
+        "the law names at most four steps"
+    );
     let mut spec = crate::plugin::PluginSpec::new();
-    for step in steps {
-        spec = spec.with_presentation_step(step);
+    for (step, key) in steps.into_iter().zip(KEYS) {
+        spec = spec.with_presentation_step(key, step);
     }
     Arc::new(crate::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("law-presentation"),

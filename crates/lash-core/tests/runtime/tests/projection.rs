@@ -138,14 +138,17 @@ async fn presentation_step_only_changes_model_observation() {
             Ok(Arc::new(RuntimeTestPlugin {
                 before_turn: None,
                 checkpoint: None,
-                presentation_steps: vec![Arc::new(|input| {
-                    Box::pin(async move {
-                        Ok(lash_core::facade_support::ModelToolReturn::text(
-                            input.context.tool_name,
-                            "model projection",
-                        ))
-                    })
-                })],
+                presentation_steps: vec![(
+                    lash_core::hook_key!("model-projection"),
+                    Arc::new(|input| {
+                        Box::pin(async move {
+                            Ok(lash_core::facade_support::ModelToolReturn::text(
+                                input.context.tool_name,
+                                "model projection",
+                            ))
+                        })
+                    }),
+                )],
                 runtime_event: Some(Arc::new(move |event| {
                     let committed_results = Arc::clone(&committed_results);
                     Box::pin(async move {

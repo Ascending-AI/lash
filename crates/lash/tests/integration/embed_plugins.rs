@@ -136,14 +136,17 @@ impl SessionPlugin for TestSessionPlugin {
         };
         let hook_seen = Arc::clone(&self.hook_seen);
         let hook_label = label.clone();
-        reg.turn().before(Arc::new(move |_ctx| {
-            let hook_seen = Arc::clone(&hook_seen);
-            let label = hook_label.clone();
-            Box::pin(async move {
-                hook_seen.lock_recover().push(label);
-                Ok(Vec::new())
-            })
-        }));
+        reg.turn().before(
+            lash::hook_key!("turn-before-1"),
+            Arc::new(move |_ctx| {
+                let hook_seen = Arc::clone(&hook_seen);
+                let label = hook_label.clone();
+                Box::pin(async move {
+                    hook_seen.lock_recover().push(label);
+                    Ok(Default::default())
+                })
+            }),
+        )?;
         reg.tools().provider(Arc::new(TestTools {
             label,
             seen: Arc::clone(&self.tool_seen),

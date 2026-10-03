@@ -149,25 +149,34 @@ async fn held_loser_survives(
         )
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .tools(Arc::clone(&held) as Arc<dyn ToolProvider>)
-        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-            lash_core::lifetime::session_or_starter,
-        )))
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
+        ))
         .plugin(lash_core::testing::process_engine_plugin_fixture())
         .plugin(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("loser-facts"),
-            lash_core::facade_support::PluginSpec::new().with_after_tool_call(Arc::new(|context| {
-                Box::pin(async move {
-                    Ok(if context.tool_name == "segment_hold" && context.args["gate"] != true {
-                        vec![lash_core::facade_support::AfterToolCallPluginDirective::EnqueueMessages(
-                            lash_core::facade_support::EnqueueMessagesDirective {
-                                messages: vec![lash_core::PluginMessage::text(
-                                    lash_core::MessageRole::User, "loser-fact",
-                                )],
+            lash_core::facade_support::PluginSpec::new().with_tool_result_check(
+                crate::hook_key!("loser-fact"),
+                Arc::new(|input| {
+                    let loser = input.prepared.tool_name() == "segment_hold"
+                        && input.prepared.args()["gate"] != true;
+                    Box::pin(async move {
+                        Ok(lash_core::plugin::AfterToolContributions {
+                            messages: if loser {
+                                vec![lash_core::PluginMessage::text(
+                                    lash_core::MessageRole::User,
+                                    "loser-fact",
+                                )]
+                            } else {
+                                Vec::new()
                             },
-                        )]
-                    } else { Vec::new() })
-                })
-            })),
+                            ..Default::default()
+                        })
+                    })
+                }),
+            ),
         )))
         .build(crate::testing::runtime_lease_owner())?;
     double.install_process_worker(

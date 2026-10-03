@@ -1577,7 +1577,6 @@ pub(crate) async fn complete_deferred_tool(
         .effect_replay_key()
         .to_owned();
     let resolver = pending.pending.resolved_by.clone();
-    let settle_started = dispatch.clock.now();
     crate::tool_dispatch::finish_parked_wait(
         &site,
         &pending.pending,
@@ -1593,15 +1592,9 @@ pub(crate) async fn complete_deferred_tool(
             call_id: pending.call_id.clone(),
             provider_call_id: pending.provider_call_id.clone(),
         },
-        pending.tool_name,
-        pending.args,
+        &crate::plugin::PreparedCallReadView::new(completion.request.call.clone()),
         resolution,
         resolver.as_ref(),
-        dispatch
-            .clock
-            .now()
-            .saturating_duration_since(settle_started)
-            .as_millis() as u64,
         pending.attempts,
     )
     .await;

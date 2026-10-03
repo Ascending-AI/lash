@@ -8030,6 +8030,28 @@
             "failure"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A plugin's tool check stopped the owning Run.",
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/FailureCode"
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "abort_run",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "code",
+            "message"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -13062,72 +13084,6 @@
             },
             "type": {
               "const": "invoke",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A bounded before-tool-call reinspection attempted to replace arguments again.",
-          "properties": {
-            "message": {
-              "additionalProperties": false,
-              "properties": {
-                "repeated_plugin_id": {
-                  "description": "Earlier plugin that attempted another replacement during reinspection.",
-                  "type": "string"
-                },
-                "replacing_plugin_id": {
-                  "description": "Plugin whose replacement caused earlier hooks to be reinspected.",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "replacing_plugin_id",
-                "repeated_plugin_id"
-              ],
-              "type": "object"
-            },
-            "type": {
-              "const": "before_tool_call_replacement_conflict",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A bounded after-tool-call reinspection attempted to replace the result again.",
-          "properties": {
-            "message": {
-              "additionalProperties": false,
-              "properties": {
-                "repeated_plugin_id": {
-                  "description": "Earlier plugin that attempted another replacement during reinspection.",
-                  "type": "string"
-                },
-                "replacing_plugin_id": {
-                  "description": "Plugin whose replacement caused earlier hooks to be reinspected.",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "replacing_plugin_id",
-                "repeated_plugin_id"
-              ],
-              "type": "object"
-            },
-            "type": {
-              "const": "after_tool_call_replacement_conflict",
               "type": "string"
             }
           },

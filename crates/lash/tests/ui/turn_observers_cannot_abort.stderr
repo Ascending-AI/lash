@@ -1,0 +1,7 @@
+error[E0560]: struct `TurnContributions` has no field named `abort`
+ --> tests/ui/turn_observers_cannot_abort.rs:5:9
+  |
+5 |         abort: Some("before-turn and checkpoint observers cannot abort"),
+  |         ^^^^^ `TurnContributions` does not have this field
+  |
+  = note: available fields are: `messages`, `events`

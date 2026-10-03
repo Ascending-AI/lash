@@ -278,38 +278,26 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
     );
 }
 
+/// A tool check's AbortRun stops an admitted queued run: the run commits
+/// with the plugin-abort stop and settles its input.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn admitted_plugin_abort_commits_and_settles_input() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
-    let plugin = Arc::new(RuntimeTestPluginFactory {
-        build: Arc::new(|_| {
-            Ok(Arc::new(RuntimeTestPlugin {
-                before_turn: Some(Arc::new(|_| {
-                    Box::pin(async {
-                        Ok(vec![
-                            lash_core::facade_support::TurnPluginDirective::AbortTurn(
-                                lash_core::facade_support::AbortTurnDirective {
-                                    code: "blocked".to_string(),
-                                    message: "plugin stopped admitted turn".to_string(),
-                                },
-                            ),
-                        ])
-                    })
-                })),
-                checkpoint: None,
-                presentation_steps: vec![],
-                runtime_event: None,
-                external_registrar: None,
-            }))
-        }),
+    let plugin = super::tool_check_control::tool_policy_plugin(|| {
+        lash_core::plugin::BeforeToolDecision::AbortRun(lash_core::plugin::PluginAbort::new(
+            "blocked",
+            "plugin stopped admitted turn",
+        ))
     });
     let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],
-        Arc::new(EmptyTools),
-        mock_provider(Vec::new()),
+        Arc::new(EchoTool),
+        mock_provider(vec![super::tool_check_control::echo_call(
+            "call-admitted-abort",
+        )]),
         test_host_config(&backend),
         runtime_store,
     )

@@ -21,7 +21,7 @@ Two seams, one identity:
   world, records the effect it intends, applies the write, and marks the
   row applied. The row is the difference between "died before the write"
   and "died after it" — the crash window is exactly the `pending` stage.
-- **The correlator is the after-tool hook.** `ToolResultHookContext::call_id`
+- **The correlator is a tool result check.** Its `ToolHookContext::call_id`
   carries the same durable call id the executed-call record carries, so the
   hook can note the call's outcome on the row. The hook *observes*; it never
   decides whether the effect landed.
@@ -111,10 +111,10 @@ failure — and correctly refuse to automate the tools it cannot instrument?
 
 ## Limits — read before adopting
 
-- **The hook is a correlator, not a receipt.** Retry and hook-result
-  reinspection invoke it more than once for one call, so observations
-  deduplicate on `call_id`; an append-only log keyed by anything else will
-  double-count.
+- **The hook is a correlator, not a receipt.** Each retried attempt runs
+  the result check once, so one call can be observed more than once and
+  observations deduplicate on `call_id`; an append-only log keyed by
+  anything else will double-count.
 - **Replay skips the hook.** A journaled redrive serves the recorded outcome
   without re-running the attempt or the hook. A ledger whose only write seam
   is the hook cannot tell replay from silence — the claim must live inside

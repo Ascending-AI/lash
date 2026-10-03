@@ -1074,7 +1074,7 @@ impl crate::PluginFactory for RuntimeTestPluginFactory {
 pub struct RuntimeTestPlugin {
     pub before_turn: Option<crate::plugin::BeforeTurnHook>,
     pub checkpoint: Option<crate::plugin::CheckpointHook>,
-    pub presentation_steps: Vec<crate::plugin::ToolPresentationStep>,
+    pub presentation_steps: Vec<(crate::plugin::HookKey, crate::plugin::ToolPresentationStep)>,
     pub runtime_event: Option<crate::plugin::PluginLifecycleEventHook>,
     pub external_registrar: Option<Arc<RuntimeExternalRegistrar>>,
 }
@@ -1086,16 +1086,20 @@ impl crate::SessionPlugin for RuntimeTestPlugin {
 
     fn register(&self, reg: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
         if let Some(hook) = &self.before_turn {
-            reg.turn().before(Arc::clone(hook));
+            reg.turn()
+                .before(crate::hook_key!("runtime-test"), Arc::clone(hook))?;
         }
         if let Some(hook) = &self.checkpoint {
-            reg.turn().checkpoint(Arc::clone(hook));
+            reg.turn()
+                .checkpoint(crate::hook_key!("runtime-test"), Arc::clone(hook))?;
         }
-        for step in &self.presentation_steps {
-            reg.tool_results().presentation_step(Arc::clone(step));
+        for (key, step) in &self.presentation_steps {
+            reg.tool_results()
+                .presentation_step(*key, Arc::clone(step))?;
         }
         if let Some(hook) = &self.runtime_event {
-            reg.session().on_event(Arc::clone(hook));
+            reg.session()
+                .on_event(crate::hook_key!("runtime-test"), Arc::clone(hook))?;
         }
         if let Some(register) = &self.external_registrar {
             register(reg)?;

@@ -48,6 +48,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             environment: None,
             observed_cancellation: None,
             resume_work: None,
+            run_abort: None,
         }
     }
 
@@ -236,6 +237,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             environment: checkpoint.environment,
             observed_cancellation: None,
             resume_work: None,
+            run_abort: None,
         })
     }
 
@@ -311,6 +313,18 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     pub fn finish_with_outcome(&mut self, outcome: TurnOutcome) {
         self.finish(outcome);
+    }
+
+    /// Stop the Run for a tool check's abort: report the plugin's typed
+    /// cause, then finish with the plugin-abort stop.
+    fn finish_run_abort(&mut self, abort: RunAbort) {
+        self.emit(make_error_event(
+            crate::session_model::TurnFailureKind::Plugin,
+            Some(abort.code),
+            abort.message,
+            None,
+        ));
+        self.finish(TurnOutcome::Stopped(TurnStop::PluginAbort));
     }
 
     fn finish(&mut self, outcome: TurnOutcome) {
@@ -455,7 +469,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         progress_dirty = true;
                     }
                 }
-                DriverAction::Start(work) => self.start(work),
+                DriverAction::Start(work) => {
+                    if let Some(abort) = self.run_abort.take() {
+                        if progress_dirty {
+                            self.emit_progress();
+                            progress_dirty = false;
+                        }
+                        self.finish_run_abort(abort);
+                        break;
+                    }
+                    self.start(work);
+                }
                 DriverAction::ReportToolCalls { completed } => {
                     let accounting = completed
                         .iter()
@@ -490,7 +514,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         self.emit_progress();
                         progress_dirty = false;
                     }
-                    self.finish(outcome);
+                    match self.run_abort.take() {
+                        Some(abort) => self.finish_run_abort(abort),
+                        None => self.finish(outcome),
+                    }
                     break;
                 }
             }
@@ -937,7 +964,18 @@ impl<M: TurnProtocol> TurnMachine<M> {
             });
         }
 
+        self.run_abort = RunAbort::first_in(completed.iter().map(|outcome| &outcome.output));
         self.shift(|driver, ctx| driver.handle_tool_results(ctx, completed));
+        self.finish_pending_run_abort();
+    }
+
+    /// Finish for a Run abort the driver's actions did not reach.
+    fn finish_pending_run_abort(&mut self) {
+        if let Some(abort) = self.run_abort.take()
+            && !matches!(self.state, MachineState::Finished)
+        {
+            self.finish_run_abort(abort);
+        }
     }
 
     fn handle_exec_result(
@@ -945,6 +983,16 @@ impl<M: TurnProtocol> TurnMachine<M> {
         driver_state: M::DriverState,
         result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) {
+        self.run_abort = result.as_ref().ok().and_then(|response| {
+            RunAbort::first_in(
+                response
+                    .calls
+                    .iter()
+                    .filter_map(|call| call.host_record.as_ref())
+                    .map(|record| &record.output),
+            )
+        });
         self.shift(|driver, ctx| driver.handle_exec_result(ctx, driver_state, result));
+        self.finish_pending_run_abort();
     }
 }

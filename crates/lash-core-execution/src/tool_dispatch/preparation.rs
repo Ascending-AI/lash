@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 #[cfg(any(test, feature = "testing"))]
 use crate::ToolContext;
-use crate::plugin::ToolCallHookContext;
 use crate::validate_tool_input;
 use crate::{
     ToolExecutionGrant, ToolFailureClass, ToolManifest, ToolPrepareCall, ToolPrepareContext,
@@ -14,7 +13,6 @@ use super::context::{
     ToolCallIds, ToolDispatchContext, ToolPreparationOutcome, completed_preparation,
     runtime_failure,
 };
-use super::directives::apply_before_tool_directives;
 #[cfg(any(test, feature = "testing"))]
 use super::execution::dispatch_prepared_tool_call_with_execution_context;
 use super::retry::normalized_outcome;
@@ -176,6 +174,10 @@ enum ProviderPreparation<'grant> {
     Recorded,
 }
 
+/// Admits one call (ADR 0128): argument transforms chain, the result is
+/// validated, the provider prepares the call and its identity is checked,
+/// then every before-check inspects that one sealed call. No argument
+/// changes after the checks.
 async fn prepare_authorized_tool_call_with_context(
     context: &ToolDispatchContext<'_>,
     manifest: ToolManifest,
@@ -201,77 +203,118 @@ async fn prepare_authorized_tool_call_with_context(
         );
     }
     let mut pending = pending;
-    let mut args = pending.args;
-
-    let directives = match context
+    let hook_context = super::hooks::hook_context(
+        context,
+        &pending.call_id,
+        &manifest.id,
+        &tool_name,
+        manifest.argument_projection.clone(),
+    );
+    let original_args = Arc::new(std::mem::take(&mut pending.args));
+    let args = match context
         .plugins
-        .before_tool_call(ToolCallHookContext::new(
-            context.owner.runtime_owner(),
-            context.plugins.admitted_plugin_config(),
-            tool_name.clone(),
-            args.clone(),
-            manifest.argument_projection.clone(),
-            context.turn_context.clone(),
-            Arc::clone(&context.sessions),
-        ))
+        .transform_tool_args(&hook_context, (*original_args).clone())
         .await
     {
-        Ok(directives) => directives,
-        Err(err) => {
+        Ok(args) => args,
+        Err(failure) => {
             return completed_preparation(
                 normalized_outcome(
                     context,
                     &ids,
                     tool_name,
-                    args,
-                    runtime_failure(
-                        ToolFailureClass::Internal,
-                        "before_tool_call_failed",
-                        err.to_string(),
-                    ),
+                    (*original_args).clone(),
+                    crate::ToolOutcome::failure(*failure),
                 )
                 .await,
             );
         }
     };
-
-    let applied = apply_before_tool_directives(context, args, directives).await;
-    args = applied.args;
-    if let Some(result) = applied.short_circuit {
+    if let Err(result) = validate_args(&contract, &args, "invalid_tool_args") {
         return completed_preparation(
             normalized_outcome(context, &ids, tool_name, args, result).await,
         );
     }
-    if let Err(err) = validate_tool_input(&contract, &args) {
+
+    pending.args = args.clone();
+    let prepared = match preparation {
+        ProviderPreparation::Live(grant) => {
+            match prepare_with_provider(context, &manifest, &ids, grant, pending).await {
+                Ok(prepared) => prepared,
+                Err(result) => {
+                    return completed_preparation(
+                        normalized_outcome(context, &ids, tool_name, args, result).await,
+                    );
+                }
+            }
+        }
+        ProviderPreparation::Recorded => {
+            crate::PreparedToolCall::identity(manifest.id.clone(), pending)
+        }
+    };
+    if prepared.args != args
+        && let Err(result) = validate_args(&contract, &prepared.args, "invalid_prepared_tool_args")
+    {
         return completed_preparation(
-            normalized_outcome(
-                context,
-                &ids,
-                tool_name,
-                args,
-                crate::ToolOutcome::failure(
-                    crate::ToolFailure::runtime(
-                        ToolFailureClass::InvalidRequest,
-                        "invalid_tool_args",
-                        err.to_string(),
-                    )
-                    .with_cause(crate::ToolFailureCause::ValueMismatch { source: err }),
-                ),
-            )
-            .await,
+            normalized_outcome(context, &ids, tool_name, args, result).await,
         );
     }
 
-    pending.args = args.clone();
-    let grant = match preparation {
-        ProviderPreparation::Live(grant) => grant,
-        ProviderPreparation::Recorded => {
-            return ToolPreparationOutcome::Prepared(Box::new(crate::PreparedToolCall::identity(
-                manifest.id.clone(),
-                pending,
-            )));
+    let prepared = crate::plugin::PreparedCallReadView::new(prepared);
+    match super::hooks::check_prepared_call(context, &hook_context, &original_args, &prepared).await
+    {
+        crate::plugin::BeforeSelection::Execute => {
+            ToolPreparationOutcome::Prepared(Box::new(prepared.into_prepared()))
         }
-    };
+        crate::plugin::BeforeSelection::Cached(candidate) => {
+            let args = prepared.args().clone();
+            let result = super::finalize_tool_result_with_execution_context(
+                context,
+                &prepared,
+                crate::plugin::ToolHookOccurrence::Cached,
+                crate::ToolOutcome::from_output(candidate.into_output(None)),
+            )
+            .await;
+            completed_preparation(normalized_outcome(context, &ids, tool_name, args, result).await)
+        }
+        crate::plugin::BeforeSelection::Terminal(output) => {
+            let args = prepared.args().clone();
+            completed_preparation(
+                normalized_outcome(
+                    context,
+                    &ids,
+                    tool_name,
+                    args,
+                    crate::ToolOutcome::from_output(output),
+                )
+                .await,
+            )
+        }
+    }
+}
+
+fn validate_args(
+    contract: &crate::ToolContract,
+    args: &serde_json::Value,
+    code: &'static str,
+) -> Result<(), crate::ToolOutcome> {
+    validate_tool_input(contract, args).map_err(|err| {
+        crate::ToolOutcome::failure(
+            crate::ToolFailure::runtime(ToolFailureClass::InvalidRequest, code, err.to_string())
+                .with_cause(crate::ToolFailureCause::ValueMismatch { source: err }),
+        )
+    })
+}
+
+/// The bound provider's preparation of `pending`, whose identity is fixed:
+/// a preparation that names another call or tool fails the call.
+async fn prepare_with_provider(
+    context: &ToolDispatchContext<'_>,
+    manifest: &ToolManifest,
+    ids: &ToolCallIds,
+    grant: Option<&ToolExecutionGrant>,
+    pending: crate::sansio::PendingToolCall,
+) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
     let execution_binding = grant
         .map(|grant| grant.execution_binding.clone())
         .unwrap_or(serde_json::Value::Null);
@@ -293,71 +336,38 @@ async fn prepare_authorized_tool_call_with_context(
         pending,
         context: &prepare_context,
     };
-    let prepared = context.tools.prepare_tool_call(prepare_call).await;
-    match prepared {
-        Ok(prepared)
-            if prepared.call_id != ids.call_id
-                || prepared.provider_call_id != ids.provider_call_id =>
-        {
-            completed_preparation(
-                normalized_outcome(
-                    context,
-                    &ids,
-                    tool_name,
-                    args,
-                    runtime_failure(
-                        ToolFailureClass::Internal,
-                        "prepared_call_id_mismatch",
-                        format!(
-                            "Tool provider prepared call `{}` for admitted call `{}`: a call's identity is fixed at admission",
-                            prepared.call_id, ids.call_id
-                        ),
-                    ),
-                )
-                .await,
-            )
-        }
-        Ok(prepared) if prepared.tool_id == manifest.id && prepared.tool_name == manifest.name => {
-            ToolPreparationOutcome::Prepared(Box::new(prepared))
-        }
-        Ok(prepared) if prepared.tool_id != manifest.id => completed_preparation(
-            normalized_outcome(
-                context,
-                &ids,
-                tool_name,
-                args,
-                runtime_failure(
-                    ToolFailureClass::Internal,
-                    "prepared_tool_id_mismatch",
-                    format!(
-                        "Tool provider prepared id `{}` for tool `{}`, expected `{}`",
-                        prepared.tool_id, prepared.tool_name, manifest.id
-                    ),
-                ),
-            )
-            .await,
-        ),
-        Ok(prepared) => completed_preparation(
-            normalized_outcome(
-                context,
-                &ids,
-                tool_name,
-                args,
-                runtime_failure(
-                    ToolFailureClass::Internal,
-                    "prepared_tool_name_mismatch",
-                    format!(
-                        "Tool provider prepared name `{}` for tool `{}`, expected `{}`",
-                        prepared.tool_name, prepared.tool_id, manifest.name
-                    ),
-                ),
-            )
-            .await,
-        ),
-        Err(result) => {
-            completed_preparation(normalized_outcome(context,&ids, tool_name, args, result).await)
-        }
+    let prepared = context.tools.prepare_tool_call(prepare_call).await?;
+    if prepared.call_id != ids.call_id || prepared.provider_call_id != ids.provider_call_id {
+        return Err(runtime_failure(
+            ToolFailureClass::Internal,
+            "prepared_call_id_mismatch",
+            format!(
+                "Tool provider prepared call `{}` for admitted call `{}`: a call's identity is fixed at admission",
+                prepared.call_id, ids.call_id
+            ),
+        ));
     }
+    if prepared.tool_id != manifest.id {
+        return Err(runtime_failure(
+            ToolFailureClass::Internal,
+            "prepared_tool_id_mismatch",
+            format!(
+                "Tool provider prepared id `{}` for tool `{}`, expected `{}`",
+                prepared.tool_id, prepared.tool_name, manifest.id
+            ),
+        ));
+    }
+    if prepared.tool_name != manifest.name {
+        return Err(runtime_failure(
+            ToolFailureClass::Internal,
+            "prepared_tool_name_mismatch",
+            format!(
+                "Tool provider prepared name `{}` for tool `{}`, expected `{}`",
+                prepared.tool_name, prepared.tool_id, manifest.name
+            ),
+        ));
+    }
+    Ok(prepared)
 }
 
 pub fn resolve_callable_manifest(

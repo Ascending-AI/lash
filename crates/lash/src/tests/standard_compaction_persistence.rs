@@ -1295,22 +1295,20 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         Arc::new(move |_| {
             let ordinal = next_injection.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
-                Ok(vec![
-                    lash_core::facade_support::TurnPluginDirective::EnqueueMessages(
-                        lash_core::facade_support::EnqueueMessagesDirective {
-                            messages: vec![lash_core::PluginMessage::text(
-                                lash_core::MessageRole::User,
-                                format!("plugin injection {ordinal}"),
-                            )],
-                        },
-                    ),
-                ])
+                Ok(lash_core::plugin::TurnContributions {
+                    messages: vec![lash_core::PluginMessage::text(
+                        lash_core::MessageRole::User,
+                        format!("plugin injection {ordinal}"),
+                    )],
+                    ..Default::default()
+                })
             }) as lash_core::plugin::PluginFuture<_>
         })
     };
     let injection_plugin = crate::plugins::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("standard-compaction-injection-test"),
-        lash_core::facade_support::PluginSpec::new().with_before_turn(injection_hook),
+        lash_core::facade_support::PluginSpec::new()
+            .with_before_turn(crate::hook_key!("before-turn-1"), injection_hook),
     );
     // Every turn after the first crosses the threshold, so its pressure
     // compaction's summary is answered before the turn's own response.
@@ -1510,20 +1508,20 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
     );
     let plugin = crate::plugins::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("after-turn-injection"),
-        lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(|_| {
-            Box::pin(async {
-                Ok(vec![
-                    lash_core::facade_support::AfterTurnPluginDirective::EnqueueMessages(
-                        lash_core::facade_support::EnqueueMessagesDirective {
-                            messages: vec![lash_core::PluginMessage::text(
-                                lash_core::MessageRole::User,
-                                "enqueued after turn",
-                            )],
-                        },
-                    ),
-                ])
-            })
-        })),
+        lash_core::facade_support::PluginSpec::new().with_after_turn(
+            crate::hook_key!("after-turn-2"),
+            Arc::new(|_| {
+                Box::pin(async {
+                    Ok(lash_core::plugin::AfterTurnContributions {
+                        messages: vec![lash_core::PluginMessage::text(
+                            lash_core::MessageRole::User,
+                            "enqueued after turn",
+                        )],
+                        ..Default::default()
+                    })
+                })
+            }),
+        ),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(
@@ -1626,48 +1624,52 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
     let hook_append_error = Arc::clone(&append_error);
     let plugin = crate::plugins::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("mid-turn-append"),
-        lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new(move |ctx| {
-            let appended = Arc::clone(&hook_appended);
-            let completions = Arc::clone(&completions);
-            let append_error = Arc::clone(&hook_append_error);
-            Box::pin(async move {
-                if ctx.checkpoint != lash_core::CheckpointKind::BeforeCompletion {
-                    return Ok(Vec::new());
-                }
-                // Fire on the second turn only: turn one must have committed a durable read tail.
-                if completions.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0
-                    || appended.swap(true, std::sync::atomic::Ordering::SeqCst)
-                {
-                    return Ok(Vec::new());
-                }
-                let outcome = match ctx
-                    .session_graph
-                    .append_session_nodes(
-                        &ctx.session_id,
-                        lash_core::AppendSessionNodesRequest {
-                            operation_id: "mid-turn-append".to_string(),
-                            nodes: vec![lash_core::SessionAppendNode::plugin(
-                                "test.mid-turn",
-                                serde_json::json!({"probe": true}),
-                            )],
-                            requires_ancestor_node_id: None,
-                        },
-                    )
-                    .await
-                {
-                    Ok(outcome) => outcome,
-                    Err(error) => {
-                        *append_error.lock().expect("append error slot") = Some(error.to_string());
-                        return Err(error);
+        lash_core::facade_support::PluginSpec::new().with_checkpoint(
+            crate::hook_key!("checkpoint-3"),
+            Arc::new(move |ctx| {
+                let appended = Arc::clone(&hook_appended);
+                let completions = Arc::clone(&completions);
+                let append_error = Arc::clone(&hook_append_error);
+                Box::pin(async move {
+                    if ctx.checkpoint != lash_core::CheckpointKind::BeforeCompletion {
+                        return Ok(Default::default());
                     }
-                };
-                assert!(matches!(
-                    outcome,
-                    lash_core::AppendSessionNodesOutcome::Appended { .. }
-                ));
-                Ok(Vec::new())
-            })
-        })),
+                    // Fire on the second turn only: turn one must have committed a durable read tail.
+                    if completions.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0
+                        || appended.swap(true, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        return Ok(Default::default());
+                    }
+                    let outcome = match ctx
+                        .session_graph
+                        .append_session_nodes(
+                            &ctx.session_id,
+                            lash_core::AppendSessionNodesRequest {
+                                operation_id: "mid-turn-append".to_string(),
+                                nodes: vec![lash_core::SessionAppendNode::plugin(
+                                    "test.mid-turn",
+                                    serde_json::json!({"probe": true}),
+                                )],
+                                requires_ancestor_node_id: None,
+                            },
+                        )
+                        .await
+                    {
+                        Ok(outcome) => outcome,
+                        Err(error) => {
+                            *append_error.lock().expect("append error slot") =
+                                Some(error.to_string());
+                            return Err(error);
+                        }
+                    };
+                    assert!(matches!(
+                        outcome,
+                        lash_core::AppendSessionNodesOutcome::Appended { .. }
+                    ));
+                    Ok(Default::default())
+                })
+            }),
+        ),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(
@@ -1769,49 +1771,54 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
     let hook_visible_in_turn = Arc::clone(&visible_in_turn);
     let plugin = crate::plugins::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("same-turn-append"),
-        lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new(move |ctx| {
-            let draft_node_ids = Arc::clone(&hook_draft_node_ids);
-            let visible_in_turn = Arc::clone(&hook_visible_in_turn);
-            Box::pin(async move {
-                if ctx.checkpoint != lash_core::CheckpointKind::BeforeCompletion
-                    || !draft_node_ids.lock().expect("draft ids").is_empty()
-                {
-                    return Ok(Vec::new());
-                }
-                let outcome = ctx
-                    .session_graph
-                    .append_session_nodes(
-                        &ctx.session_id,
-                        lash_core::AppendSessionNodesRequest {
-                            operation_id: "same-turn-append".to_string(),
-                            nodes: vec![lash_core::SessionAppendNode::plugin(
-                                "test.same-turn",
-                                serde_json::json!({"probe": "same-turn"}),
-                            )],
-                            requires_ancestor_node_id: None,
-                        },
-                    )
-                    .await?;
-                let lash_core::AppendSessionNodesOutcome::Appended {
-                    node_ids,
-                    leaf_node_id,
-                } = outcome
-                else {
-                    panic!("an unconditional append on a fresh session is never a stale branch");
-                };
-                assert_eq!(node_ids.len(), 1);
-                assert_eq!(leaf_node_id.as_ref(), Some(&node_ids[0]));
-                // In-turn readers see the appended node before the turn commits.
-                let snapshot = ctx.sessions.snapshot_session(&ctx.session_id).await?;
-                visible_in_turn.store(
-                    snapshot.session_graph.find_node(&node_ids[0]).is_some(),
-                    std::sync::atomic::Ordering::SeqCst,
-                );
-                *draft_node_ids.lock().expect("draft ids") =
-                    node_ids.iter().map(ToString::to_string).collect();
-                Ok(Vec::new())
-            })
-        })),
+        lash_core::facade_support::PluginSpec::new().with_checkpoint(
+            crate::hook_key!("checkpoint-4"),
+            Arc::new(move |ctx| {
+                let draft_node_ids = Arc::clone(&hook_draft_node_ids);
+                let visible_in_turn = Arc::clone(&hook_visible_in_turn);
+                Box::pin(async move {
+                    if ctx.checkpoint != lash_core::CheckpointKind::BeforeCompletion
+                        || !draft_node_ids.lock().expect("draft ids").is_empty()
+                    {
+                        return Ok(Default::default());
+                    }
+                    let outcome = ctx
+                        .session_graph
+                        .append_session_nodes(
+                            &ctx.session_id,
+                            lash_core::AppendSessionNodesRequest {
+                                operation_id: "same-turn-append".to_string(),
+                                nodes: vec![lash_core::SessionAppendNode::plugin(
+                                    "test.same-turn",
+                                    serde_json::json!({"probe": "same-turn"}),
+                                )],
+                                requires_ancestor_node_id: None,
+                            },
+                        )
+                        .await?;
+                    let lash_core::AppendSessionNodesOutcome::Appended {
+                        node_ids,
+                        leaf_node_id,
+                    } = outcome
+                    else {
+                        panic!(
+                            "an unconditional append on a fresh session is never a stale branch"
+                        );
+                    };
+                    assert_eq!(node_ids.len(), 1);
+                    assert_eq!(leaf_node_id.as_ref(), Some(&node_ids[0]));
+                    // In-turn readers see the appended node before the turn commits.
+                    let snapshot = ctx.sessions.snapshot_session(&ctx.session_id).await?;
+                    visible_in_turn.store(
+                        snapshot.session_graph.find_node(&node_ids[0]).is_some(),
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
+                    *draft_node_ids.lock().expect("draft ids") =
+                        node_ids.iter().map(ToString::to_string).collect();
+                    Ok(Default::default())
+                })
+            }),
+        ),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(
@@ -1916,7 +1923,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
     Ok(())
 }
 
-/// FIG-2478: an after-turn `EnqueueMessages` directive lands the enqueued
+/// FIG-2478: an after-turn message contribution lands the enqueued
 /// message after the reply inside the same final commit. Terminal
 /// materialization must recognize the reply the protocol already appended by
 /// identity, not by last-message position, or the reply is persisted twice
@@ -1932,20 +1939,20 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
     );
     let plugin = crate::plugins::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("after-turn-injection"),
-        lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(|_| {
-            Box::pin(async {
-                Ok(vec![
-                    lash_core::facade_support::AfterTurnPluginDirective::EnqueueMessages(
-                        lash_core::facade_support::EnqueueMessagesDirective {
-                            messages: vec![lash_core::PluginMessage::text(
-                                lash_core::MessageRole::User,
-                                "enqueued after turn",
-                            )],
-                        },
-                    ),
-                ])
-            })
-        })),
+        lash_core::facade_support::PluginSpec::new().with_after_turn(
+            crate::hook_key!("after-turn-5"),
+            Arc::new(|_| {
+                Box::pin(async {
+                    Ok(lash_core::plugin::AfterTurnContributions {
+                        messages: vec![lash_core::PluginMessage::text(
+                            lash_core::MessageRole::User,
+                            "enqueued after turn",
+                        )],
+                        ..Default::default()
+                    })
+                })
+            }),
+        ),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(

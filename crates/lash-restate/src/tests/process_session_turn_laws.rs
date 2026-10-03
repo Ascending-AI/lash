@@ -1478,15 +1478,18 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     let panic_once = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let panic_plugin = Arc::new(lash_core::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("child-panic-test"),
-        lash_core::plugin::PluginSpec::new().with_before_turn(Arc::new(move |_| {
-            let panic_once = Arc::clone(&panic_once);
-            Box::pin(async move {
-                if panic_once.swap(false, std::sync::atomic::Ordering::SeqCst) {
-                    panic!("child turn payload only");
-                }
-                Ok(Vec::new())
-            })
-        })),
+        lash_core::plugin::PluginSpec::new().with_before_turn(
+            lash_core::hook_key!("before-turn-1"),
+            Arc::new(move |_| {
+                let panic_once = Arc::clone(&panic_once);
+                Box::pin(async move {
+                    if panic_once.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                        panic!("child turn payload only");
+                    }
+                    Ok(Default::default())
+                })
+            }),
+        ),
     )) as Arc<dyn lash_core::facade_support::PluginFactory>;
     let worker = worker_for(
         memory_engine_backend().await,

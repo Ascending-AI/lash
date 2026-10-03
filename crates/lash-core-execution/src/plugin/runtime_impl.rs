@@ -530,6 +530,7 @@ impl PluginHost {
                 Arc::clone(&state),
             ));
             plugin.register(&mut reg)?;
+            reg.validate_stream_state_pairs()?;
             if let Some(store) = reg.state.take() {
                 let probe = store.retention_probe();
                 drop(store);

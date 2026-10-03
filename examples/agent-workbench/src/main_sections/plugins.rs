@@ -147,45 +147,54 @@ impl SessionPlugin for WorkbenchSessionPlugin {
             self.mail_world.clone(),
         )))?;
         reg.context()
-            .prepare_turn(0, Arc::new(self.context_budget.clone()));
+            .prepare_turn(0, Arc::new(self.context_budget.clone()))?;
         let derived_notes = self.derived_notes.clone();
-        reg.turn().before(Arc::new(move |ctx| {
-            let derived_notes = derived_notes.clone();
-            Box::pin(async move {
-                if ctx.state.turn_index() > 0 {
-                    derived_notes.derive_note(&ctx.state);
-                }
-                Ok(Vec::new())
-            })
-        }));
+        reg.turn().before(
+            lash::hook_key!("derive-note"),
+            Arc::new(move |ctx| {
+                let derived_notes = derived_notes.clone();
+                Box::pin(async move {
+                    if ctx.state.turn_index() > 0 {
+                        derived_notes.derive_note(&ctx.state);
+                    }
+                    Ok(lash::plugins::TurnContributions::default())
+                })
+            }),
+        )?;
         let derived_notes = self.derived_notes.clone();
-        reg.turn().after(Arc::new(move |ctx| {
-            let derived_notes = derived_notes.clone();
-            Box::pin(async move {
-                for note in derived_notes.take_pending() {
-                    derived_notes.write_back(&ctx, note).await;
-                }
-                Ok(Vec::new())
-            })
-        }));
+        reg.turn().after(
+            lash::hook_key!("write-back-notes"),
+            Arc::new(move |ctx| {
+                let derived_notes = derived_notes.clone();
+                Box::pin(async move {
+                    for note in derived_notes.take_pending() {
+                        derived_notes.write_back(&ctx, note).await;
+                    }
+                    Ok(lash::plugins::AfterTurnContributions::default())
+                })
+            }),
+        )?;
         let config_changes = self.config_changes.clone();
         let derived_notes = self.derived_notes.clone();
-        reg.session().on_event(Arc::new(move |event| {
-            let config_changes = config_changes.clone();
-            let derived_notes = derived_notes.clone();
-            Box::pin(async move {
-                match event {
-                    lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {
-                        config_changes.observe(&ctx).await?;
+        reg.session().on_event(
+            lash::hook_key!("observe"),
+            Arc::new(move |event| {
+                let config_changes = config_changes.clone();
+                let derived_notes = derived_notes.clone();
+                Box::pin(async move {
+                    match event {
+                        lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {
+                            config_changes.observe(&ctx).await?;
+                        }
+                        lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {
+                            derived_notes.observe_committed(&ctx.state);
+                        }
+                        _ => {}
                     }
-                    lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {
-                        derived_notes.observe_committed(&ctx.state);
-                    }
-                    _ => {}
-                }
-                Ok(())
-            })
-        }));
+                    Ok(())
+                })
+            }),
+        )?;
         Ok(())
     }
 }

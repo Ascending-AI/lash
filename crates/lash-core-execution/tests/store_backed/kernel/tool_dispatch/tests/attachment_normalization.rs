@@ -32,26 +32,37 @@ fn attachment_call_output(
         .expect("attachment probe returns a completed output")
 }
 
-fn before_attachment_hook(bytes: &'static [u8]) -> crate::plugin::BeforeToolCallHook {
-    Arc::new(move |_context| {
+/// A before-check that serves a cached success carrying `bytes` as an
+/// inline attachment.
+fn before_attachment_hook(bytes: &'static [u8]) -> crate::plugin::ToolArgsCheckHook {
+    Arc::new(move |_input| {
         Box::pin(async move {
-            Ok(vec![crate::BeforeToolCallPluginDirective::from(
-                crate::ShortCircuitToolDirective {
-                    output: attachment_call_output([inline_attachment(bytes)]),
+            let output = attachment_call_output([inline_attachment(bytes)]);
+            let crate::ToolCallOutcome::Success(value) = output.outcome else {
+                panic!("the attachment probe output is a success");
+            };
+            Ok(crate::plugin::BeforeToolDecision::Cached(
+                crate::plugin::CachedToolSuccess {
+                    value,
+                    view: output.view,
+                    projection_value: output.projection_value,
                 },
-            )])
+            ))
         })
     })
 }
 
-fn after_attachment_hook(bytes: &'static [u8]) -> crate::plugin::AfterToolCallHook {
-    Arc::new(move |_context| {
+/// A result transform that replaces every result with one carrying `bytes`
+/// as an inline attachment.
+fn after_attachment_hook(bytes: &'static [u8]) -> crate::plugin::ToolResultTransformHook {
+    Arc::new(move |_input| {
         Box::pin(async move {
-            Ok(vec![crate::AfterToolCallPluginDirective::from(
-                crate::ShortCircuitToolDirective {
-                    output: attachment_call_output([inline_attachment(bytes)]),
-                },
-            )])
+            let output = attachment_call_output([inline_attachment(bytes)]);
+            Ok(crate::plugin::ToolResultCandidate {
+                outcome: output.outcome,
+                view: output.view,
+                projection_value: output.projection_value,
+            })
         })
     })
 }
@@ -258,7 +269,10 @@ async fn before_tool_attachment_replacement_is_normalized_before_leaf_recording(
         lash_core_execution::plugin::PluginDeclaration::initial("before_hook_attachment_probe"),
         crate::PluginSpec::new()
             .with_tool_provider(provider)
-            .with_before_tool_call(before_attachment_hook(DENIED_BYTES)),
+            .with_tool_args_check(
+                lash_core_execution::hook_key!("cache"),
+                before_attachment_hook(DENIED_BYTES),
+            ),
     ))])
     .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
@@ -296,7 +310,10 @@ async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording()
         lash_core_execution::plugin::PluginDeclaration::initial("after_hook_leaf_attachment_probe"),
         crate::PluginSpec::new()
             .with_tool_provider(provider)
-            .with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
+            .with_tool_result_transform(
+                lash_core_execution::hook_key!("attach"),
+                after_attachment_hook(DENIED_BYTES),
+            ),
     ))])
     .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
@@ -329,7 +346,10 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
         lash_core_execution::plugin::PluginDeclaration::initial(
             "deferred_completion_attachment_probe",
         ),
-        crate::PluginSpec::new().with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
+        crate::PluginSpec::new().with_tool_result_transform(
+            lash_core_execution::hook_key!("attach"),
+            after_attachment_hook(DENIED_BYTES),
+        ),
     ))])
     .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");

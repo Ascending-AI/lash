@@ -825,6 +825,13 @@ pub enum ToolControl {
     Fail {
         failure: ToolFailure,
     },
+    /// A plugin's tool check stopped the owning logical Run (ADR 0128). The
+    /// call's outcome carries the failure the model reads; this is the Run
+    /// control, under the aborting plugin's namespaced code.
+    AbortRun {
+        code: crate::FailureCode,
+        message: String,
+    },
 }
 
 /// Why Lash replaced an attachment with a model-visible placeholder.

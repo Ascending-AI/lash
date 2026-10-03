@@ -199,8 +199,8 @@ pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 6;
 pub struct ToolAttemptCapture {
     /// The durable format version, refused rather than defaulted.
     pub version: u16,
-    /// The concrete `EnqueueMessages` facts after-tool directives committed
-    /// during this attempt, in the order they were enqueued.
+    /// The messages tool result checks contributed during this attempt, in
+    /// the order they were enqueued.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<PluginMessage>,
 }

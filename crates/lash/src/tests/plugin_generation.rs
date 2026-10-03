@@ -63,13 +63,16 @@ fn revisioned(revision: u32, ran: &Arc<std::sync::Mutex<Vec<u32>>>) -> Arc<dyn P
     let ran = Arc::clone(ran);
     Arc::new(StaticPluginFactory::new(
         declaration,
-        lash_core::plugin::PluginSpec::new().with_after_turn(Arc::new(move |_| {
-            let ran = Arc::clone(&ran);
-            Box::pin(async move {
-                ran.lock_recover().push(revision);
-                Ok(Vec::new())
-            })
-        })),
+        lash_core::plugin::PluginSpec::new().with_after_turn(
+            crate::hook_key!("after-turn-1"),
+            Arc::new(move |_| {
+                let ran = Arc::clone(&ran);
+                Box::pin(async move {
+                    ran.lock_recover().push(revision);
+                    Ok(Default::default())
+                })
+            }),
+        ),
     ))
 }
 
@@ -512,13 +515,16 @@ fn ordered(
     let ran = Arc::clone(ran);
     Arc::new(StaticPluginFactory::new(
         PluginDeclaration::initial(id),
-        lash_core::plugin::PluginSpec::new().with_after_turn(Arc::new(move |_| {
-            let ran = Arc::clone(&ran);
-            Box::pin(async move {
-                ran.lock_recover().push(id);
-                Ok(Vec::new())
-            })
-        })),
+        lash_core::plugin::PluginSpec::new().with_after_turn(
+            crate::hook_key!("after-turn-2"),
+            Arc::new(move |_| {
+                let ran = Arc::clone(&ran);
+                Box::pin(async move {
+                    ran.lock_recover().push(id);
+                    Ok(Default::default())
+                })
+            }),
+        ),
     ))
 }
 

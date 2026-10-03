@@ -1,8 +1,8 @@
-use lash::plugins::{AbortTurnDirective, AfterTurnPluginDirective};
+use lash::plugins::AfterTurnContributions;
 
 fn main() {
-    let _ = AfterTurnPluginDirective::AbortTurn(AbortTurnDirective {
-        code: "blocked".to_string(),
-        message: "after-turn hooks cannot abort".to_string(),
-    });
+    let _ = AfterTurnContributions {
+        abort: Some("after-turn observers cannot abort"),
+        ..AfterTurnContributions::default()
+    };
 }

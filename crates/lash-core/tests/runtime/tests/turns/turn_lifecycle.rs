@@ -49,8 +49,8 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let post_commit_entered = Arc::new(AtomicBool::new(false));
-    let plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
-        RuntimeTestPluginFactory {
+    let plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
+        Arc::new(RuntimeTestPluginFactory {
             build: Arc::new(|_| {
                 Ok(Arc::new(RuntimeTestPlugin {
                     before_turn: None,
@@ -58,24 +58,25 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
                     presentation_steps: vec![],
                     runtime_event: None,
                     external_registrar: Some(Arc::new(|reg| {
-                        reg.turn().after(Arc::new(|_| {
-                        Box::pin(async {
-                            Ok(vec![lash_core::facade_support::AfterTurnPluginDirective::from(
-                                lash_core::facade_support::PluginDirective::emit_runtime_events(vec![
-                                    lash_core::PluginRuntimeEvent::Custom {
-                                        name: "post_commit_suspend".to_string(),
-                                        payload: serde_json::json!({"test": true}),
-                                    },
-                                ]),
-                            )])
-                        })
-                    }));
+                        reg.turn().after(
+                            lash_core::hook_key!("suspend-event"),
+                            Arc::new(|_| {
+                                Box::pin(async {
+                                    Ok(lash_core::plugin::AfterTurnContributions {
+                                        events: vec![lash_core::PluginRuntimeEvent::Custom {
+                                            name: "post_commit_suspend".to_string(),
+                                            payload: serde_json::json!({"test": true}),
+                                        }],
+                                        ..Default::default()
+                                    })
+                                })
+                            }),
+                        )?;
                         Ok(())
                     })),
                 }))
             }),
-        },
-    );
+        });
     let store = double_unbound_recording_store(&double).await;
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],

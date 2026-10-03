@@ -268,9 +268,6 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
         tool_context.with_prepared_payload(prepared.prepared_payload.clone()),
     );
     let completion_context = tool_context.clone();
-    // Measured for the result hook's observation input only; nothing journaled
-    // may read it.
-    let tool_started = context.clock.now();
     let attempt_result = Box::pin(execute_leaf_tool_attempt(
         context,
         &authority,
@@ -280,7 +277,6 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
         max_attempts,
     ))
     .await;
-    let duration_ms = context.clock.now().duration_since(tool_started).as_millis() as u64;
     let (result, intents) = match attempt_result {
         crate::ToolAttemptOutcome::Done { result, intents } => {
             let kinds: Vec<_> = intents
@@ -346,11 +342,9 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
 
     let result = super::finalize_tool_result_with_execution_context(
         context,
-        &prepared.call_id,
-        &tool_name,
-        &args,
+        &crate::plugin::PreparedCallReadView::new(prepared),
+        super::attempt_occurrence(attempt),
         result,
-        duration_ms,
     )
     .await;
 

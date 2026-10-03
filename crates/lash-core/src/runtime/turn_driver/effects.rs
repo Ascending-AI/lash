@@ -558,17 +558,6 @@ impl RuntimeTurnDriver<'_> {
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginCheckpoint))?;
         committed.extend(applied.messages);
         emit_session_events(event_tx, applied.events);
-        if let Some(abort) = applied.abort {
-            // A plugin's abort code is plugin-authored vocabulary: it lands
-            // in `ForeignCode` verbatim (namespace included) and is never
-            // re-parsed into a Lash `RuntimeErrorCode` arm.
-            return Err(RuntimeError::foreign(
-                abort.code.namespaced(),
-                crate::TurnFailureCause::Outcome,
-                abort.message,
-            ));
-        }
-
         normalize_plugin_message_attachments(
             &mut committed,
             self.host.core.durability.attachment_store.as_ref(),

@@ -525,11 +525,14 @@ impl SessionPlugin for StandardProtocolPlugin {
             }))?;
         let discovery = self.config.discovery.clone();
         let batch = self.config.batch;
-        reg.tool_catalog().contribute(Arc::new(move |ctx| {
-            validate_discovery(&ctx.tools, discovery.as_ref())?;
-            validate_batch_name(&ctx.tools, batch)?;
-            Ok(Default::default())
-        }));
+        reg.tool_catalog().contribute(
+            lash_core::hook_key!("standard-catalog"),
+            Arc::new(move |ctx| {
+                validate_discovery(&ctx.tools, discovery.as_ref())?;
+                validate_batch_name(&ctx.tools, batch)?;
+                Ok(Default::default())
+            }),
+        )?;
         Ok(())
     }
 }

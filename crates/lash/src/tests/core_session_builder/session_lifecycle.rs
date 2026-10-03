@@ -76,7 +76,7 @@ impl lash_core::facade_support::SessionPlugin for ReconciliationProbePlugin {
         &self,
         reg: &mut lash_core::facade_support::PluginRegistrar,
     ) -> std::result::Result<(), lash_core::PluginError> {
-        reg.context().prepare_turn(0, Arc::clone(&self.transform));
+        reg.context().prepare_turn(0, Arc::clone(&self.transform))?;
         Ok(())
     }
 }

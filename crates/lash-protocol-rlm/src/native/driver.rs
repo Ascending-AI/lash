@@ -724,6 +724,10 @@ fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
         ToolControl::Fail { failure } => ToolControl::Fail {
             failure: bounded_tool_failure(failure),
         },
+        ToolControl::AbortRun { code, message } => ToolControl::AbortRun {
+            code: code.clone(),
+            message: message.clone(),
+        },
     });
     ToolCallOutput {
         outcome,
@@ -798,7 +802,7 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
                 .map(ToolValue::attachments)
                 .unwrap_or_default(),
         ),
-        Some(ToolControl::SwitchAgentFrame { .. }) | None => {}
+        Some(ToolControl::SwitchAgentFrame { .. } | ToolControl::AbortRun { .. }) | None => {}
     }
     attachments
 }

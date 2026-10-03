@@ -168,14 +168,14 @@ impl lash::plugins::ContextPressureHook for LoadCompaction {
 pub(crate) fn register(
     reg: &mut lash::plugins::PluginRegistrar,
 ) -> Result<(), lash::plugins::PluginError> {
-    reg.turn().after(Arc::new(|ctx:lash::plugins::TurnResultHookContext| Box::pin(async move {
+    reg.turn().after(lash::hook_key!("load-behavior"), Arc::new(|ctx:lash::plugins::TurnResultHookContext| Box::pin(async move {
         if !ctx.turn.errors.is_empty() {
             tracing::error!(session_id=%ctx.session_id, errors=?ctx.turn.errors, outcome=?ctx.turn.outcome,"load turn failed");
         }
-        Ok(vec![])
-    })));
-    reg.context().compact(100, Arc::new(LoadCompaction));
-    reg.context().pressure(100, Arc::new(LoadCompaction));
+        Ok(Default::default())
+    })))?;
+    reg.context().compact(100, Arc::new(LoadCompaction))?;
+    reg.context().pressure(100, Arc::new(LoadCompaction))?;
     reg.triggers().declare(lash::triggers::TriggerEvent::new("Event", "load.external", "event", lash::triggers::JsonSchema::admit(json!({"type":"object","properties":{"schedule":{"type":"string"},"tick":{"type":"string"}},"required":["schedule","tick"],"additionalProperties":false})).expect("valid declared payload schema")))?;
     Ok(())
 }

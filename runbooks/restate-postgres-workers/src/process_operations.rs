@@ -74,13 +74,16 @@ impl SessionPlugin for StatePlugin {
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         let state = reg.state();
-        reg.turn().before(Arc::new(move |_| {
-            let state = state.clone();
-            Box::pin(async move {
-                state.set(STATE_KEY, json!({"value": "survives replacement"}))?;
-                Ok(Vec::new())
-            })
-        }));
+        reg.turn().before(
+            lash::hook_key!("process-operations"),
+            Arc::new(move |_| {
+                let state = state.clone();
+                Box::pin(async move {
+                    state.set(STATE_KEY, json!({"value": "survives replacement"}))?;
+                    Ok(Default::default())
+                })
+            }),
+        )?;
         Ok(())
     }
 

@@ -264,4 +264,33 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     /// the observed cancellation is: the host that builds the machine hands
     /// it over again.
     pub(crate) resume_work: Option<PendingWork<M>>,
+    /// A tool check's request to stop the Run, found in the results being
+    /// delivered (ADR 0128). The driver still records those results; the
+    /// machine then finishes instead of starting further work.
+    pub(super) run_abort: Option<RunAbort>,
+}
+
+/// The Run control a tool result carried: the namespaced code and message
+/// of the plugin check that stopped the Run.
+#[derive(Clone, Debug)]
+pub(super) struct RunAbort {
+    pub(super) code: crate::FailureCode,
+    pub(super) message: String,
+}
+
+impl RunAbort {
+    /// The first Run abort among `outputs`, in delivery order.
+    pub(super) fn first_in<'a>(
+        outputs: impl IntoIterator<Item = &'a crate::ToolCallOutput>,
+    ) -> Option<Self> {
+        outputs
+            .into_iter()
+            .find_map(|output| match &output.control {
+                Some(crate::ToolControl::AbortRun { code, message }) => Some(Self {
+                    code: code.clone(),
+                    message: message.clone(),
+                }),
+                _ => None,
+            })
+    }
 }

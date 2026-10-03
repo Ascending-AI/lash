@@ -698,27 +698,19 @@ impl SessionPlugin for StandardCompactionPlugin {
         reg.context().pressure(
             100,
             Arc::new(StandardCompactionPressureHook::new(config.clone())),
-        );
+        )?;
         reg.context().prepare_turn(
             100,
             Arc::new(StandardCompactionTurnTransform::new(config.clone())),
-        );
+        )?;
         reg.context()
-            .compact(100, Arc::new(StandardContextCompactor::new(config)));
-        reg.turn()
-            .after(Arc::new(|ctx: lash_core::plugin::TurnResultHookContext| {
+            .compact(100, Arc::new(StandardContextCompactor::new(config)))?;
+        reg.turn().after(
+            lash_core::hook_key!("overflow-recovery"),
+            Arc::new(|ctx: lash_core::plugin::TurnResultHookContext| {
                 Box::pin(async move { overflow_recovery_after_turn(&ctx).await })
-                    as std::pin::Pin<
-                        Box<
-                            dyn Future<
-                                    Output = Result<
-                                        Vec<lash_core::plugin::AfterTurnPluginDirective>,
-                                        PluginError,
-                                    >,
-                                > + Send,
-                        >,
-                    >
-            }));
+            }),
+        )?;
         Ok(())
     }
 }

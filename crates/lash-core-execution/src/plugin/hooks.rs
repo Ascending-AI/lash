@@ -10,28 +10,9 @@ pub type PluginLifecycleFuture = PluginFuture<()>;
 pub type PluginLifecycleEventHook =
     Arc<dyn Fn(PluginLifecycleEvent) -> PluginLifecycleFuture + Send + Sync>;
 pub type PluginSessionTask = PluginFuture<()>;
+/// A before-turn observer: what it contributes to the turn being prepared.
 pub type BeforeTurnHook =
-    Arc<dyn Fn(TurnHookContext) -> PluginFuture<Vec<TurnPluginDirective>> + Send + Sync>;
-/// Inspects a tool call before dispatch and returns directives for the runtime to apply.
-///
-/// A hook may be invoked more than once for one call when a later hook replaces the arguments.
-/// That bounded reinspection honors only restrictive terminal directives (`AbortTurn` and denied
-/// or cancelled `ShortCircuitTool`); side effects already applied from the initial pass are not
-/// applied again. A replacement emitted during reinspection is rejected as a typed composition
-/// error.
-pub type BeforeToolCallHook = Arc<
-    dyn Fn(ToolCallHookContext) -> PluginFuture<Vec<BeforeToolCallPluginDirective>> + Send + Sync,
->;
-/// Inspects a tool result after execution and returns directives for the runtime.
-///
-/// A hook may be invoked more than once for one call when a later hook successfully replaces the
-/// result. Earlier hooks then reinspect that candidate once before the chain continues with the
-/// effective first-emitted replacement. Reinspection honors only restrictive terminal directives
-/// (`AbortTurn` and denied or cancelled `ShortCircuitTool`); side effects are not applied again. A
-/// successful replacement emitted during reinspection is rejected as a typed composition error.
-pub type AfterToolCallHook = Arc<
-    dyn Fn(ToolResultHookContext) -> PluginFuture<Vec<AfterToolCallPluginDirective>> + Send + Sync,
->;
+    Arc<dyn Fn(TurnHookContext) -> PluginFuture<TurnContributions> + Send + Sync>;
 /// One composable presentation step (ADR 0099 §6 presentation boundary,
 /// FIG-3420): folds the previous step's `ModelToolReturn` with the recorded
 /// settlement into the next. Pure over its inputs; anything impure it needs
@@ -142,10 +123,12 @@ impl ToolPresentationArtifacts for NoPresentationArtifacts {
         })
     }
 }
+/// An after-turn observer: what it contributes before the turn commits.
 pub type AfterTurnHook =
-    Arc<dyn Fn(TurnResultHookContext) -> PluginFuture<Vec<AfterTurnPluginDirective>> + Send + Sync>;
+    Arc<dyn Fn(TurnResultHookContext) -> PluginFuture<AfterTurnContributions> + Send + Sync>;
+/// A checkpoint observer: what it contributes at the checkpoint.
 pub type CheckpointHook =
-    Arc<dyn Fn(CheckpointHookContext) -> PluginFuture<Vec<TurnPluginDirective>> + Send + Sync>;
+    Arc<dyn Fn(CheckpointHookContext) -> PluginFuture<TurnContributions> + Send + Sync>;
 pub type ToolCatalogContributor =
     Arc<dyn Fn(ToolCatalogContext) -> Result<ToolCatalogContribution, PluginError> + Send + Sync>;
 pub type AssistantStreamHook =
@@ -187,9 +170,9 @@ pub type AssistantResponseHook = Arc<
 /// staged boundary. The value it returns for a stream that produced a
 /// response ([`AssistantStreamFinishReason::Complete`] or
 /// [`AssistantStreamFinishReason::Aborted`]) is recorded with the raw completion
-/// for the response hook at the same registration ordinal within its plugin.
-/// The receiving callback's key and owning revision identify that state in
-/// [`AssistantResponseHookContext::stream_state`].
+/// for each response callback of its plugin that names this callback's key
+/// as its `stream_state_from`. The receiving callback's key and owning
+/// revision identify that state in [`AssistantResponseHookContext::stream_state`].
 /// Return `None` when phase 2 needs nothing from the stream. The hook should
 /// leave no per-stream state behind: the next stream starts from nothing.
 pub type AssistantStreamFinishedHook = Arc<
@@ -267,140 +250,6 @@ impl TurnHookReport {
 }
 
 #[derive(Clone)]
-pub struct ToolCallHookContext {
-    /// Who the call runs for: a session, or a process runtime.
-    pub owner: crate::RuntimeOwner,
-    /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running run's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a run — never today's head
-    /// inside a run.
-    pub plugin_config: super::AdmittedPluginConfig,
-    pub tool_name: String,
-    pub args: serde_json::Value,
-    pub argument_projection: crate::ToolArgumentProjectionPolicy,
-    pub turn_context: crate::TurnContext,
-    pub(crate) sessions: Arc<dyn SessionStateService>,
-}
-
-impl ToolCallHookContext {
-    pub fn new(
-        owner: crate::RuntimeOwner,
-        plugin_config: super::AdmittedPluginConfig,
-        tool_name: String,
-        args: serde_json::Value,
-        argument_projection: crate::ToolArgumentProjectionPolicy,
-        turn_context: crate::TurnContext,
-        sessions: Arc<dyn SessionStateService>,
-    ) -> Self {
-        Self {
-            owner,
-            plugin_config,
-            tool_name,
-            args,
-            argument_projection,
-            turn_context,
-            sessions,
-        }
-    }
-
-    /// A snapshot of the session the call runs in; a process runtime has
-    /// none and is refused.
-    pub async fn session_snapshot(&self) -> Result<SessionSnapshot, PluginError> {
-        self.sessions
-            .snapshot_session(require_session_owner(&self.owner, "hook_session_snapshot")?)
-            .await
-    }
-
-    pub async fn set_tool_membership(
-        &self,
-        names: &[String],
-        present: bool,
-    ) -> Result<u64, PluginError> {
-        self.sessions
-            .set_tool_membership(
-                require_session_owner(&self.owner, "hook_set_tool_membership")?,
-                names,
-                present,
-            )
-            .await
-    }
-}
-
-#[derive(Clone)]
-pub struct ToolResultHookContext {
-    /// Who the call runs for: a session, or a process runtime.
-    pub owner: crate::RuntimeOwner,
-    /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running run's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a run — never today's head
-    /// inside a run.
-    pub plugin_config: super::AdmittedPluginConfig,
-    /// The durable identity of the prepared call this observation belongs to:
-    /// the same value the attempt body saw as [`crate::AttemptContext::call_id`]
-    /// and the executed-call record carries as [`crate::ToolCallRecord::call_id`].
-    /// A host correlating this observation with its own records — an effect
-    /// ledger, an audit trail — keys on this rather than on tool name or args.
-    /// It is a correlator, not a receipt: retry and reinspection invoke the
-    /// hook more than once for one call, so observations deduplicate on it.
-    pub call_id: crate::ToolCallId,
-    pub tool_name: String,
-    pub args: serde_json::Value,
-    pub result: ToolOutcome,
-    pub duration_ms: u64,
-    pub turn_context: crate::TurnContext,
-    pub(crate) sessions: Arc<dyn SessionStateService>,
-}
-
-impl ToolResultHookContext {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        owner: crate::RuntimeOwner,
-        plugin_config: super::AdmittedPluginConfig,
-        call_id: crate::ToolCallId,
-        tool_name: String,
-        args: serde_json::Value,
-        result: ToolOutcome,
-        duration_ms: u64,
-        turn_context: crate::TurnContext,
-        sessions: Arc<dyn SessionStateService>,
-    ) -> Self {
-        Self {
-            owner,
-            plugin_config,
-            call_id,
-            tool_name,
-            args,
-            result,
-            duration_ms,
-            turn_context,
-            sessions,
-        }
-    }
-
-    /// A snapshot of the session the call runs in; a process runtime has
-    /// none and is refused.
-    pub async fn session_snapshot(&self) -> Result<SessionSnapshot, PluginError> {
-        self.sessions
-            .snapshot_session(require_session_owner(&self.owner, "hook_session_snapshot")?)
-            .await
-    }
-
-    pub async fn set_tool_membership(
-        &self,
-        names: &[String],
-        present: bool,
-    ) -> Result<u64, PluginError> {
-        self.sessions
-            .set_tool_membership(
-                require_session_owner(&self.owner, "hook_set_tool_membership")?,
-                names,
-                present,
-            )
-            .await
-    }
-}
-
-#[derive(Clone)]
 pub struct ToolResultProjectionContext {
     /// Who the call runs for: a session, or a process runtime.
     pub owner: crate::RuntimeOwner,
@@ -462,9 +311,10 @@ pub struct AssistantStreamTransform {
     pub reasoning_deltas: Vec<String>,
     pub events: Vec<PluginRuntimeEvent>,
     /// When `true`, the runtime cancels the in-flight LLM call the
-    /// moment this hook returns and finalizes the turn using whatever
-    /// text has been streamed so far. Any plugin may set this — the
-    /// first to raise it wins. Used by protocol plugins to enforce
+    /// moment the chunk's hooks return and finalizes the turn using
+    /// whatever text has been streamed so far. The stop is sticky: once
+    /// any hook raises it for a chunk, the stream stops, whatever later
+    /// hooks return. Used by protocol plugins to enforce
     /// one-block-per-turn contracts (for example, aborting as soon as
     /// the first protocol-owned code fence closes).
     pub abort_stream: bool,

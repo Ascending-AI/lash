@@ -54,53 +54,64 @@ pub(super) fn register_native_plugin(
             dialect.worker_service(),
         ),
     ))?;
-    reg.tool_catalog().contribute(Arc::new(move |ctx| {
-        crate::tool_catalog::validate_discovery(
-            &ctx.tools,
-            discovery.as_ref(),
-            discovery_dialect.as_ref(),
-        )?;
-        crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialect)
-    }));
-    reg.tool_calls().before(Arc::new(|ctx| {
-        Box::pin(async move { normalize_projected_tool_args(ctx) })
-    }));
+    reg.tool_catalog().contribute(
+        lash_core::hook_key!("rlm-catalog"),
+        Arc::new(move |ctx| {
+            crate::tool_catalog::validate_discovery(
+                &ctx.tools,
+                discovery.as_ref(),
+                discovery_dialect.as_ref(),
+            )?;
+            crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialect)
+        }),
+    )?;
+    reg.tool_calls().transform_args(
+        lash_core::hook_key!("projected-args"),
+        Arc::new(|input| Box::pin(async move { normalize_projected_tool_args(input) })),
+    )?;
 
     let warn_session = protocol_session.clone();
-    reg.turn().checkpoint(Arc::new(move |ctx| {
-        let session = warn_session.clone();
-        Box::pin(async move { session.soft_warn_directives(ctx) })
-    }));
+    reg.turn().checkpoint(
+        lash_core::hook_key!("soft-warnings"),
+        Arc::new(move |ctx| {
+            let session = warn_session.clone();
+            Box::pin(async move { session.soft_warn_contributions(ctx) })
+        }),
+    )?;
 
-    reg.output().response(Arc::new(
-        move |ctx: lash_core::plugin::AssistantResponseHookContext| {
-            let dialect = Arc::clone(&dialect);
-            Box::pin(async move {
-                let parts = lash_core::facade_support::normalized_response_parts(&ctx.response);
-                let events = if matches!(
-                    super::tool::normalize_output(&parts),
-                    super::tool::NativeAction::Execute { .. }
-                ) {
-                    [
-                        dialect.stream_cell_start_event_name(),
-                        dialect.stream_cell_end_event_name(),
-                    ]
-                    .into_iter()
-                    .map(|name| lash_core::PluginRuntimeEvent::Custom {
-                        name,
-                        payload: serde_json::json!({}),
+    reg.output().response(
+        lash_core::hook_key!("native-cell-events"),
+        None,
+        Arc::new(
+            move |ctx: lash_core::plugin::AssistantResponseHookContext| {
+                let dialect = Arc::clone(&dialect);
+                Box::pin(async move {
+                    let parts = lash_core::facade_support::normalized_response_parts(&ctx.response);
+                    let events = if matches!(
+                        super::tool::normalize_output(&parts),
+                        super::tool::NativeAction::Execute { .. }
+                    ) {
+                        [
+                            dialect.stream_cell_start_event_name(),
+                            dialect.stream_cell_end_event_name(),
+                        ]
+                        .into_iter()
+                        .map(|name| lash_core::PluginRuntimeEvent::Custom {
+                            name,
+                            payload: serde_json::json!({}),
+                        })
+                        .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(lash_core::plugin::AssistantResponseTransform {
+                        response: ctx.response,
+                        events,
                     })
-                    .collect()
-                } else {
-                    Vec::new()
-                };
-                Ok(lash_core::plugin::AssistantResponseTransform {
-                    response: ctx.response,
-                    events,
                 })
-            })
-        },
-    ));
+            },
+        ),
+    )?;
     Ok(())
 }
 

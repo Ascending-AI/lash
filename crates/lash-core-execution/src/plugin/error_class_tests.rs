@@ -119,14 +119,6 @@ plugin_error_samples! {
         },
     ),
     Invoke(_) => PluginError::Invoke("sampled".to_string()),
-    BeforeToolCallReplacementConflict { .. } => PluginError::BeforeToolCallReplacementConflict {
-        replacing_plugin_id: "first".to_string(),
-        repeated_plugin_id: "second".to_string(),
-    },
-    AfterToolCallReplacementConflict { .. } => PluginError::AfterToolCallReplacementConflict {
-        replacing_plugin_id: "first".to_string(),
-        repeated_plugin_id: "second".to_string(),
-    },
     Session(_) => PluginError::Session("sampled".to_string()),
     State(_) => PluginError::State(crate::PluginStateError::StoreTooLarge { bytes: 2, limit: 1 }),
     TriggerOperation(_) => PluginError::TriggerOperation(Box::new(

@@ -1041,31 +1041,38 @@ impl RuntimeExecutionContext<'_> {
         mut captures: Vec<crate::runtime::ToolAttemptCapture>,
         mut triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
     ) -> ToolDispatchOutcome {
-        // The resume's own producers — the after-tool hook's directives —
+        // The resume's own producers — the after-checks' contributions —
         // write into buffers fresh to this resume, so what they commit is
         // captured into the outcome rather than into a buffer a sibling
-        // attempt may still be writing into. The hook's duration input is an
-        // observation of this resume's window: the journaled pending row
-        // carries no clock facts (FIG-3696).
-        let settle_started = self.dispatch.clock.now();
+        // attempt may still be writing into.
         let mut resumed_dispatch = (*self.dispatch).clone();
         resumed_dispatch.observation_call_key = Some(self.call_observation_key(call_key));
         resumed_dispatch.checkpoint_messages =
             crate::tool_dispatch::CheckpointMessageBuffer::default();
         resumed_dispatch.trigger_outcomes =
             crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
+        // The parked row keeps the call's name, not its tool id: the catalog
+        // names the id while the tool is still a member.
+        let tool_id = crate::tool_dispatch::resolve_callable_manifest(&self.dispatch, &tool_name)
+            .map_or_else(
+                || crate::ToolId::from(tool_name.as_str()),
+                |manifest| manifest.id,
+            );
+        let prepared = crate::plugin::PreparedCallReadView::new(crate::PreparedToolCall {
+            call_id: ids.call_id.clone(),
+            provider_call_id: ids.provider_call_id.clone(),
+            tool_id,
+            tool_name,
+            args,
+            replay: None,
+            prepared_payload: serde_json::Value::Null,
+        });
         let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
             &resumed_dispatch,
             ids,
-            tool_name,
-            args,
+            &prepared,
             resolution,
             resolver,
-            self.dispatch
-                .clock
-                .now()
-                .saturating_duration_since(settle_started)
-                .as_millis() as u64,
             attempts,
         )
         .await;

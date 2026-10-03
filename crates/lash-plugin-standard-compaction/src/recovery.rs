@@ -387,25 +387,37 @@ pub(crate) async fn overflow_recovery_decision(
 /// Appends the pending recovery node with the overflowing turn's commit.
 pub(crate) async fn overflow_recovery_after_turn(
     ctx: &lash_core::plugin::TurnResultHookContext,
-) -> Result<Vec<lash_core::plugin::AfterTurnPluginDirective>, PluginError> {
+) -> Result<lash_core::plugin::AfterTurnContributions, PluginError> {
     use lash_core::facade_support::{TurnOutcome, TurnStop};
-    use lash_core::plugin::{AfterTurnPluginDirective, PluginDirective};
+    use lash_core::plugin::{AfterTurnContributions, PluginRecordContribution};
     if !matches!(
         ctx.turn.outcome,
         TurnOutcome::Stopped(TurnStop::ContextOverflow)
     ) {
-        return Ok(Vec::new());
+        return Ok(AfterTurnContributions::default());
     }
     let body = serde_json::to_value(OverflowRecoveryRecord::Pending {})
         .map_err(|error| PluginError::Invoke(error.to_string()))?;
-    Ok(vec![
-        AfterTurnPluginDirective::Ambient(PluginDirective::emit_trace(
-            TRACE_OVERFLOW_RECOVERY_TRIGGER,
-            serde_json::json!({ "trigger": "persisted_context_overflow", "marker": "queued" }),
-        )),
-        AfterTurnPluginDirective::AppendPluginNode {
+    ctx.session_graph
+        .emit_trace_event(
+            lash_core::TraceContext::default().for_session(ctx.session_id.clone()),
+            lash_core::TraceEvent::Custom {
+                name: format!(
+                    "plugin.{}.{TRACE_OVERFLOW_RECOVERY_TRIGGER}",
+                    crate::STANDARD_COMPACTION_PLUGIN_ID
+                ),
+                payload: serde_json::json!({
+                    "trigger": "persisted_context_overflow",
+                    "marker": "queued",
+                }),
+            },
+        )
+        .await?;
+    Ok(AfterTurnContributions {
+        records: vec![PluginRecordContribution {
             plugin_type: OVERFLOW_RECOVERY_PLUGIN_TYPE.to_string(),
             body,
-        },
-    ])
+        }],
+        ..AfterTurnContributions::default()
+    })
 }

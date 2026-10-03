@@ -174,31 +174,35 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         ) -> Result<(), crate::PluginError> {
             let state = reg.state();
             let hosts = self.hosts.clone();
-            reg.turn().before(Arc::new(move |ctx| {
-                let hosts = hosts.clone();
-                let state = state.clone();
-                Box::pin(async move {
-                    assert_eq!(state.keys(), vec![state.plugin_id().to_string()]);
-                    for (id, host) in hosts.lock_recover().iter() {
-                        let session = host.session(&SessionId::from(id)).unwrap();
-                        assert!(session.export_state().plugins.is_empty());
-                        let mut exported =
-                            crate::RuntimeSessionState::new(crate::testing::mock_session_policy());
-                        exported
-                            .refresh_plugin_states(&session)
-                            .expect("the live plugin state is captured");
-                        assert!(
+            reg.turn().before(
+                crate::hook_key!("turn-before-1"),
+                Arc::new(move |ctx| {
+                    let hosts = hosts.clone();
+                    let state = state.clone();
+                    Box::pin(async move {
+                        assert_eq!(state.keys(), vec![state.plugin_id().to_string()]);
+                        for (id, host) in hosts.lock_recover().iter() {
+                            let session = host.session(&SessionId::from(id)).unwrap();
+                            assert!(session.export_state().plugins.is_empty());
+                            let mut exported = crate::RuntimeSessionState::new(
+                                crate::testing::mock_session_policy(),
+                            );
                             exported
-                                .plugin_state()
-                                .is_none_or(|state| state.plugins.is_empty()),
-                            "public refresh must respect restricted namespace exports"
-                        );
-                    }
-                    let snapshot = serde_json::to_string(&ctx.state.to_snapshot()).unwrap();
-                    assert!(!snapshot.contains("neighbor-secret-key"));
-                    Ok(Vec::new())
-                })
-            }));
+                                .refresh_plugin_states(&session)
+                                .expect("the live plugin state is captured");
+                            assert!(
+                                exported
+                                    .plugin_state()
+                                    .is_none_or(|state| state.plugins.is_empty()),
+                                "public refresh must respect restricted namespace exports"
+                            );
+                        }
+                        let snapshot = serde_json::to_string(&ctx.state.to_snapshot()).unwrap();
+                        assert!(!snapshot.contains("neighbor-secret-key"));
+                        Ok(Default::default())
+                    })
+                }),
+            )?;
             Ok(())
         }
         fn session_ready(

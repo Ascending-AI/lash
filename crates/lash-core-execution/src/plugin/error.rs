@@ -460,48 +460,6 @@ define_plugin_errors! {
         => Self::Invoke(_)
         => "invoke"
         => crate::ToolFailureClass::Execution;
-/// A bounded before-tool-call reinspection attempted to replace arguments again.
-    #[error(
-        "before_tool_call replacement from `{replacing_plugin_id}` was replaced again by `{repeated_plugin_id}` during bounded reinspection"
-    )]
-    BeforeToolCallReplacementConflict {
-        /// Plugin whose replacement caused earlier hooks to be reinspected.
-        replacing_plugin_id: String,
-        /// Earlier plugin that attempted another replacement during reinspection.
-        repeated_plugin_id: String,
-    }
-        => PluginError::BeforeToolCallReplacementConflict { replacing_plugin_id, repeated_plugin_id }
-        => {
-        /// Plugin whose replacement caused earlier hooks to be reinspected.
-        replacing_plugin_id: String,
-        /// Earlier plugin that attempted another replacement during reinspection.
-        repeated_plugin_id: String,
-    }
-        => Self::BeforeToolCallReplacementConflict { replacing_plugin_id: replacing_plugin_id.clone(), repeated_plugin_id: repeated_plugin_id.clone() }
-        => Self::BeforeToolCallReplacementConflict { .. }
-        => "before_tool_call_replacement_conflict"
-        => crate::ToolFailureClass::Internal;
-/// A bounded after-tool-call reinspection attempted to replace the result again.
-    #[error(
-        "after_tool_call replacement from `{replacing_plugin_id}` was replaced again by `{repeated_plugin_id}` during bounded reinspection"
-    )]
-    AfterToolCallReplacementConflict {
-        /// Plugin whose replacement caused earlier hooks to be reinspected.
-        replacing_plugin_id: String,
-        /// Earlier plugin that attempted another replacement during reinspection.
-        repeated_plugin_id: String,
-    }
-        => PluginError::AfterToolCallReplacementConflict { replacing_plugin_id, repeated_plugin_id }
-        => {
-        /// Plugin whose replacement caused earlier hooks to be reinspected.
-        replacing_plugin_id: String,
-        /// Earlier plugin that attempted another replacement during reinspection.
-        repeated_plugin_id: String,
-    }
-        => Self::AfterToolCallReplacementConflict { replacing_plugin_id: replacing_plugin_id.clone(), repeated_plugin_id: repeated_plugin_id.clone() }
-        => Self::AfterToolCallReplacementConflict { .. }
-        => "after_tool_call_replacement_conflict"
-        => crate::ToolFailureClass::Internal;
 #[error("plugin session error: {0}")]
     Session (String)
         => PluginError::Session(source)
@@ -1173,8 +1131,6 @@ impl PluginError {
             | Self::ResidentToolDuplicateName { .. }
             | Self::ResidentToolRouteUnavailable { .. }
             | Self::SessionAlreadyExists { .. }
-            | Self::BeforeToolCallReplacementConflict { .. }
-            | Self::AfterToolCallReplacementConflict { .. }
             | Self::SessionInitTooLarge { .. }
             | Self::MissingRecordedSessionConfig { .. }
             | Self::RecordedSessionConfigConflict { .. }

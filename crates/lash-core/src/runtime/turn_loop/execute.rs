@@ -4,7 +4,6 @@
 //! gate peeks and the recorded outcomes of its steps (FIG-3672 P9).
 
 use super::*;
-use crate::TurnId;
 
 struct TurnDriverSessionLoan<'slot, 'run> {
     session: &'slot mut Option<Session>,
@@ -49,22 +48,6 @@ struct TurnPreambleContext<'preamble> {
     effective_protocol_turn_options: &'preamble crate::ProtocolTurnOptions,
     turn_context: &'preamble crate::TurnContext,
     turn_scope_id: &'preamble str,
-}
-
-/// The state a plugin abort inherits from the preamble, so the abort commit can
-/// run on its own async frame without carrying the preamble's read view.
-struct PreparedTurnAbortContext<'abort, 'run> {
-    trace_metadata: std::collections::BTreeMap<String, serde_json::Value>,
-    prepared: crate::plugin::TurnPreparation,
-    recorded_assembly: RecordedTurnAssembly,
-    turn_index: usize,
-    trace_turn_id: TurnId,
-    admissions: &'abort LogicalTurnAdmissions,
-    scoped_effect_controller: &'abort ScopedEffectController<'run>,
-    shift_fence: Option<&'abort ShiftFence>,
-    turn_control: &'abort ActiveTurnControl,
-    turn_graph_appends: TurnGraphAppendDraft,
-    observer: &'abort TurnObserver,
 }
 
 /// The effect loop's own inputs: the driver, the observer it publishes
@@ -226,7 +209,6 @@ impl LashRuntime {
                 ),
                 messages,
                 sessions: manager.state_service(),
-                session_graph: manager.graph_service(),
                 turn_context: turn_context.clone(),
             },
             turn_scope_id,
@@ -236,78 +218,6 @@ impl LashRuntime {
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?;
         self.mark_phase_end(RuntimeTurnPhase::BeforeTurnHooks);
         Ok(prepared)
-    }
-
-    async fn finish_prepared_turn_abort(
-        &mut self,
-        context: PreparedTurnAbortContext<'_, '_>,
-    ) -> Result<PhysicalTurnExecution, RuntimeError> {
-        let PreparedTurnAbortContext {
-            trace_metadata,
-            prepared,
-            mut recorded_assembly,
-            turn_index,
-            trace_turn_id,
-            admissions,
-            scoped_effect_controller,
-            shift_fence,
-            turn_control,
-            turn_graph_appends,
-            observer,
-        } = context;
-        let Some(abort) = prepared.abort else {
-            unreachable!("abort finisher requires a prepared plugin abort");
-        };
-
-        // The preparation future and its SessionReadView are gone before this state clone.
-        // That keeps the graph from being held twice while the turn boundary takes ownership
-        // of its working state.
-        let mut turn_pipeline = TurnBoundary::from_state_with_graph_appends(
-            self.state.clone(),
-            Arc::clone(&self.host.core.clock),
-            self.state.turn_scope(&trace_turn_id),
-            self.host.core.durability.commit_budget,
-            turn_graph_appends,
-        )
-        .with_definition_engines(self.host.core.process_engines.clone())
-        .with_metrics(self.host.core.tracing.metrics().clone())
-        .with_trace_metadata(trace_metadata)
-        .with_trace(self.host.core.tracing.shift(
-            scoped_effect_controller.trace_scope().cloned(),
-            scoped_effect_controller,
-        ));
-        turn_pipeline.apply_prepared_messages(&prepared.messages);
-        hold_terminal_sequence(
-            &mut recorded_assembly,
-            observer,
-            &mut turn_observation_cursor(scoped_effect_controller, &trace_turn_id, "terminal"),
-            Some(TerminalDiagnostic {
-                kind: TerminalDiagnosticKind::Plugin,
-                code: Some(abort.code),
-                message: abort.message,
-                retryable: None,
-                activity: TerminalActivityTarget::TurnScoped(observer),
-            }),
-            TurnStop::PluginAbort,
-        );
-        Box::pin(self.finish_turn(TurnCommitContext {
-            opener: None,
-            finish: TurnFinishInput {
-                turn_pipeline,
-                recorded_assembly,
-                new_messages: prepared.messages,
-                turn_index,
-                trace_turn_id,
-                segment_boundary: None,
-            },
-            admissions,
-            scoped_effect_controller,
-            honoured_cancel: None,
-            shift_fence,
-            turn_control,
-            observer,
-        }))
-        .await
     }
 
     /// Run one prepared physical turn. Everything it publishes goes through
@@ -396,30 +306,6 @@ impl LashRuntime {
             recorded_assembly.record(event);
         }
         emit_session_events(observer, std::mem::take(&mut prepared.events));
-        if prepared.abort.is_some() {
-            return Box::pin(self.finish_prepared_turn_abort(PreparedTurnAbortContext {
-                trace_metadata: trace_metadata.clone(),
-                prepared,
-                recorded_assembly,
-                turn_index,
-                trace_turn_id,
-                admissions: &initial_admissions,
-                scoped_effect_controller: &scoped_effect_controller,
-                shift_fence,
-                turn_control: turn_control.as_ref(),
-                turn_graph_appends,
-                observer,
-            }))
-            .await
-            .map(|mut execution| {
-                execution.withheld_terminal_work =
-                    initial_admissions.take_follow_on_work(matches!(
-                        execution.turn.outcome,
-                        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-                    ));
-                execution
-            });
-        }
         // `prepare_turn_preamble` has returned and dropped its read-view frame
         // before this clone, avoiding a transient second graph owner.
         // Restore the basis captured before preparation cleared the resident

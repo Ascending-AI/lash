@@ -4,87 +4,6 @@ use lash_core::testing::TestTurnExecution as _;
 const SEED: u64 = 0x5_f450;
 
 #[tokio::test]
-pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
-    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let plugin = Arc::new(RuntimeTestPluginFactory {
-        build: Arc::new(|_| {
-            Ok(Arc::new(RuntimeTestPlugin {
-                before_turn: Some(Arc::new(|_| {
-                    Box::pin(async {
-                        Ok(vec![
-                            lash_core::facade_support::TurnPluginDirective::EnqueueMessages(
-                                lash_core::facade_support::EnqueueMessagesDirective {
-                                    messages: vec![lash_core::PluginMessage::text(
-                                        lash_core::MessageRole::System,
-                                        "plugin preface",
-                                    )],
-                                },
-                            ),
-                            lash_core::facade_support::TurnPluginDirective::AbortTurn(
-                                lash_core::facade_support::AbortTurnDirective {
-                                    code: "blocked".to_string(),
-                                    message: "plugin stopped the turn".to_string(),
-                                },
-                            ),
-                        ])
-                    })
-                })),
-                checkpoint: None,
-                presentation_steps: vec![],
-                runtime_event: None,
-                external_registrar: None,
-            }))
-        }),
-    });
-    let transport = mock_provider(Vec::new());
-    let mut runtime = runtime_with_plugins(&backend, vec![plugin], transport).await;
-
-    let handler = double
-        .open_handler(AdmittedScope::turn(
-            SessionId::from("root"),
-            TurnId::from("plugin-extension-turn"),
-        ))
-        .await
-        .expect("open the turn's handler");
-    let turn = runtime
-        .execute_turn(
-            TurnInput {
-                items: vec![InputItem::Text {
-                    text: "hello".to_string(),
-                }],
-                trace_turn_id: None,
-                turn_context: lash_core::TurnContext::default(),
-            },
-            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
-        )
-        .await
-        .expect("turn");
-    handler.close().await.expect("close the turn's handler");
-
-    assert!(matches!(&turn.outcome, TurnOutcome::Stopped(_)));
-    assert!(matches!(
-        &turn.outcome,
-        TurnOutcome::Stopped(TurnStop::PluginAbort)
-    ));
-    assert!(
-        turn.errors
-            .iter()
-            .any(|issue| issue.kind == lash_core::TurnFailureKind::Plugin)
-    );
-    assert!(
-        active_conversation_messages(&turn.state)
-            .iter()
-            .any(|message| {
-                message
-                    .parts
-                    .iter()
-                    .any(|part| part.content().contains("plugin preface"))
-            })
-    );
-}
-
-#[tokio::test]
 pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
     let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
@@ -550,18 +469,15 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
                 checkpoint: Some(Arc::new(|ctx| {
                     Box::pin(async move {
                         if ctx.checkpoint == lash_core::CheckpointKind::BeforeCompletion {
-                            Ok(vec![
-                                lash_core::facade_support::TurnPluginDirective::EnqueueMessages(
-                                    lash_core::facade_support::EnqueueMessagesDirective {
-                                        messages: vec![lash_core::PluginMessage::text(
-                                            lash_core::MessageRole::System,
-                                            "checkpoint injected",
-                                        )],
-                                    },
-                                ),
-                            ])
+                            Ok(lash_core::plugin::TurnContributions {
+                                messages: vec![lash_core::PluginMessage::text(
+                                    lash_core::MessageRole::System,
+                                    "checkpoint injected",
+                                )],
+                                ..Default::default()
+                            })
                         } else {
-                            Ok(Vec::new())
+                            Ok(Default::default())
                         }
                     })
                 })),
@@ -633,7 +549,7 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
 }
 
 #[tokio::test]
-pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_application_evidence()
+pub(super) async fn checkpoint_observer_failure_leaves_active_input_pending_without_application_evidence()
  {
     let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
@@ -641,16 +557,13 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         build: Arc::new(|_| {
             Ok(Arc::new(RuntimeTestPlugin {
                 before_turn: None,
+                // An observer has no veto; its failure fails the checkpoint
+                // phase, which accepts nothing.
                 checkpoint: Some(Arc::new(|_| {
                     Box::pin(async {
-                        Ok(vec![
-                            lash_core::facade_support::TurnPluginDirective::AbortTurn(
-                                lash_core::facade_support::AbortTurnDirective {
-                                    code: "checkpoint_rejected".to_string(),
-                                    message: "reject checkpoint delivery".to_string(),
-                                },
-                            ),
-                        ])
+                        Err(lash_core::PluginError::Session(
+                            "reject checkpoint delivery".to_string(),
+                        ))
                     })
                 })),
                 presentation_steps: vec![],
@@ -813,13 +726,10 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
                                 ),
                             }),
                         ));
-                        Ok(vec![
-                            lash_core::facade_support::TurnPluginDirective::EnqueueMessages(
-                                lash_core::facade_support::EnqueueMessagesDirective {
-                                    messages: vec![message],
-                                },
-                            ),
-                        ])
+                        Ok(lash_core::plugin::TurnContributions {
+                            messages: vec![message],
+                            ..Default::default()
+                        })
                     })
                 })),
                 presentation_steps: vec![],

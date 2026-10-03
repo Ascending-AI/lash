@@ -444,6 +444,7 @@ mod drop_cancel_owner_failure;
 mod effects_and_queue;
 mod frame_residency;
 mod lease_and_admissions;
+mod tool_check_control;
 mod turn_lifecycle;
 mod withheld_frame_switch;
 

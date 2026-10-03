@@ -392,6 +392,7 @@ impl From<lash_core::ToolControl> for RemoteToolControlProjection {
             lash_core::ToolControl::Fail { failure } => Self::Fail {
                 failure: failure.into(),
             },
+            lash_core::ToolControl::AbortRun { code, message } => Self::AbortRun { code, message },
         }
     }
 }

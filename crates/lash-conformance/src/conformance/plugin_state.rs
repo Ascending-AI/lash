@@ -72,15 +72,18 @@ impl SessionPlugin for MockPlugin {
             .lock_recover()
             .insert(owner_key(state.owner()), state.clone());
         if self.writes_on_ready {
-            registrar.turn().before(Arc::new(move |_| {
-                let state = state.clone();
-                Box::pin(async move {
-                    state.set("failed-hook", serde_json::json!(true))?;
-                    Err(PluginError::Session(
-                        "deliberate hook failure after accepted write".into(),
-                    ))
-                })
-            }));
+            registrar.turn().before(
+                crate::hook_key!("failing-writer"),
+                Arc::new(move |_| {
+                    let state = state.clone();
+                    Box::pin(async move {
+                        state.set("failed-hook", serde_json::json!(true))?;
+                        Err(PluginError::Session(
+                            "deliberate hook failure after accepted write".into(),
+                        ))
+                    })
+                }),
+            )?;
         }
         Ok(())
     }

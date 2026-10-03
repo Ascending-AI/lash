@@ -184,14 +184,18 @@ fn plugin_operation_failure_reaches_the_facade_as_a_typed_settlement() -> Result
         let journal_failure = Arc::new(std::sync::Mutex::new(None::<PluginOperationFailure>));
         let response_failure = Arc::clone(&journal_failure);
         let spec = lash_core::facade_support::PluginSpec::new()
-            .with_assistant_response(Arc::new(move |_| {
-                let failure = response_failure
-                    .lock()
-                    .unwrap()
-                    .clone()
-                    .expect("capture the operation failure before the journal turn");
-                Box::pin(async move { Err(PluginError::Operation(Box::new(failure))) })
-            }))
+            .with_assistant_response(
+                crate::hook_key!("assistant-response-1"),
+                None,
+                Arc::new(move |_| {
+                    let failure = response_failure
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .expect("capture the operation failure before the journal turn");
+                    Box::pin(async move { Err(PluginError::Operation(Box::new(failure))) })
+                }),
+            )
             .with_plugin_command_typed::<FailureProbe, _, _>(move |_, _| {
                 let error = returned.clone();
                 async move { Err(error) }

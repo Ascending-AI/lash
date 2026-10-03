@@ -65,6 +65,7 @@ pub mod panic_containment {
     };
     pub use lash_core_ids::panic_containment::{is_loud, set_loud};
 }
+pub use lash_core_execution::hook_key;
 pub use lash_core_execution::plugin;
 pub(crate) use lash_core_execution::plugin_stack;
 pub(crate) use lash_core_execution::protocol_build;
@@ -186,11 +187,8 @@ pub mod facade_support {
     pub use crate::direct::DirectRequest;
     pub use crate::direct::DirectRole;
     pub use crate::llm::transport::LlmTransportError;
-    pub use crate::plugin::AbortTurnDirective;
-    pub use crate::plugin::AfterToolCallPluginDirective;
-    pub use crate::plugin::AfterTurnPluginDirective;
+    pub use crate::plugin::AfterTurnContributions;
     pub use crate::plugin::AssistantResponseTransform;
-    pub use crate::plugin::BeforeToolCallPluginDirective;
     pub use crate::plugin::CheckpointHookContext;
     pub use crate::plugin::CompactionContext;
     pub use crate::plugin::ContextCompaction;
@@ -201,11 +199,9 @@ pub mod facade_support {
     pub use crate::plugin::ContextPressureHook;
     pub use crate::plugin::DirectCompletion;
     pub use crate::plugin::DirectLlmCompletion;
-    pub use crate::plugin::EnqueueMessagesDirective;
     pub use crate::plugin::NoPresentationArtifacts;
     pub use crate::plugin::PersistentRuntimeServices;
     pub use crate::plugin::PluginCommand;
-    pub use crate::plugin::PluginDirective;
     pub use crate::plugin::PluginExtensionContribution;
     pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PluginHost;
@@ -226,7 +222,6 @@ pub mod facade_support {
     pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTraceEmitter;
-    pub use crate::plugin::ReplaceToolArgsDirective;
     pub use crate::plugin::SessionConfigChangedContext;
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
@@ -234,7 +229,6 @@ pub mod facade_support {
     pub use crate::plugin::SessionParam;
     pub use crate::plugin::SessionPlugin;
     pub use crate::plugin::SessionStateChangedContext;
-    pub use crate::plugin::ShortCircuitToolDirective;
     pub use crate::plugin::ToolCatalogContribution;
     pub use crate::plugin::ToolPresentationArtifacts;
     pub use crate::plugin::ToolPresentationInput;
@@ -244,9 +238,14 @@ pub mod facade_support {
     pub use crate::plugin::TurnContextTransform;
     pub use crate::plugin::TurnHookContext;
     pub use crate::plugin::TurnHookReport;
-    pub use crate::plugin::TurnPluginDirective;
     pub use crate::plugin::TurnResultHookContext;
     pub use crate::plugin::TurnTransformContext;
+    pub use crate::plugin::{
+        AfterToolContributions, AfterToolDecision, BeforeToolDecision, CachedToolSuccess, HookKey,
+        PluginAbort, PluginRecordContribution, PreparedCallReadView, ToolArgsCheckInput,
+        ToolArgsTransformInput, ToolHookContext, ToolHookOccurrence, ToolResultCandidate,
+        ToolResultCheckInput, ToolResultTransformInput, TurnContributions,
+    };
     pub use crate::plugin::{KeyRejection, PluginStateEdit, PluginStateError, PluginStateStore};
     pub use crate::plugin::{
         PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginOperationFailure,

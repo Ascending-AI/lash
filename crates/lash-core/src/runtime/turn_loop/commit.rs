@@ -1052,7 +1052,7 @@ impl LashRuntime {
                 code: Some(code.into()),
                 message,
                 retryable: Some(false),
-                activity: TerminalActivityTarget::ForTurn {
+                activity: TerminalActivityTarget {
                     observer,
                     turn_id: &trace_turn_id,
                 },

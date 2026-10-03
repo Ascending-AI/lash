@@ -934,17 +934,20 @@ async fn try_build_runtime_over_host_with_delivery_failure(
     if tools.fail_post_commit_delivery {
         plugin_factories.push(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("turn_crash_post_commit_failure"),
-            PluginSpec::new().with_runtime_event(Arc::new(|event| {
-                Box::pin(async move {
-                    if matches!(event, crate::plugin::PluginLifecycleEvent::TurnPersisted(_)) {
-                        Err(crate::PluginError::Session(
-                            "injected post-commit delivery failure".to_string(),
-                        ))
-                    } else {
-                        Ok(())
-                    }
-                })
-            })),
+            PluginSpec::new().with_runtime_event(
+                crate::hook_key!("post-commit-failure"),
+                Arc::new(|event| {
+                    Box::pin(async move {
+                        if matches!(event, crate::plugin::PluginLifecycleEvent::TurnPersisted(_)) {
+                            Err(crate::PluginError::Session(
+                                "injected post-commit delivery failure".to_string(),
+                            ))
+                        } else {
+                            Ok(())
+                        }
+                    })
+                }),
+            ),
         )));
     }
     Box::pin(

@@ -241,7 +241,9 @@ fn probe_context_with<'run>(
 ) -> crate::RuntimeExecutionContext<'run> {
     let spec = crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider));
     let spec = match step {
-        Some(step) => spec.with_presentation_step(step),
+        Some(step) => {
+            spec.with_presentation_step(lash_core_execution::hook_key!("presentation-step-1"), step)
+        }
         None => spec,
     };
     let plugins =

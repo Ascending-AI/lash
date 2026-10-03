@@ -593,18 +593,22 @@ impl lash_core::facade_support::SessionPlugin for SurfacePlugin {
         &self,
         reg: &mut lash_core::facade_support::PluginRegistrar,
     ) -> std::result::Result<(), lash_core::PluginError> {
-        reg.output().response(Arc::new(|ctx| {
-            Box::pin(async move {
-                Ok(lash_core::facade_support::AssistantResponseTransform {
-                    response: ctx.response,
-                    events: vec![lash_core::PluginRuntimeEvent::Status {
-                        key: "surface".to_string(),
-                        label: "working".to_string(),
-                        detail: Some("details".to_string()),
-                    }],
+        reg.output().response(
+            crate::hook_key!("output-response-1"),
+            None,
+            Arc::new(|ctx| {
+                Box::pin(async move {
+                    Ok(lash_core::facade_support::AssistantResponseTransform {
+                        response: ctx.response,
+                        events: vec![lash_core::PluginRuntimeEvent::Status {
+                            key: "surface".to_string(),
+                            label: "working".to_string(),
+                            detail: Some("details".to_string()),
+                        }],
+                    })
                 })
-            })
-        }));
+            }),
+        )?;
         Ok(())
     }
 }

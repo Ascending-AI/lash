@@ -2,8 +2,9 @@ mod admission;
 mod atomic_attempt;
 mod attempt_coordinator;
 mod context;
-mod directives;
+#[cfg(any(test, feature = "testing"))]
 mod execution;
+mod hooks;
 mod intent_executor;
 mod pending_resolver;
 mod preparation;
@@ -38,16 +39,12 @@ pub use context::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
-pub use execution::finalize_tool_result_with_execution_context;
+pub use hooks::finalize_tool_result_with_execution_context;
+pub(crate) use hooks::{attempt_occurrence, deferred_occurrence};
 #[cfg(feature = "testing")]
 pub use intent_executor::execute_final_tool_intents;
 #[cfg(not(feature = "testing"))]
 pub(crate) use intent_executor::execute_final_tool_intents;
-// The store-backed dispatch tests (`tests/store_backed`) shift a single call
-// and the directive fold the way a turn does; nothing in the runtime calls
-// these outside a turn.
-#[cfg(any(test, feature = "testing"))]
-pub use directives::{BeforeToolDirectiveOutcome, apply_before_tool_directives};
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use preparation::dispatch_tool_call_with_execution_context;
 pub use preparation::resolve_callable_manifest_by_id;

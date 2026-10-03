@@ -443,12 +443,13 @@ mod tests {
             )),
             Arc::new(crate::plugin::StaticPluginFactory::new(
                 crate::plugin::PluginDeclaration::initial("catalog-probe"),
-                crate::plugin::PluginSpec::new().with_tool_catalog_contributor(Arc::new(
-                    move |_| {
+                crate::plugin::PluginSpec::new().with_tool_catalog_contributor(
+                    lash_core_execution::hook_key!("tool-catalog-contributor-1"),
+                    Arc::new(move |_| {
                         counted_callbacks.fetch_add(1, Ordering::SeqCst);
                         Ok(Default::default())
-                    },
-                )),
+                    }),
+                ),
             )),
         ])
         .build_session(PluginSessionRequest::creation(SESSION, Default::default()))

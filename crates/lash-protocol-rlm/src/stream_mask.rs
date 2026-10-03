@@ -31,40 +31,48 @@ pub fn register_stream_mask(
     let state = Arc::new(Mutex::new(CellDetector::with_dialect(Arc::clone(&dialect))));
 
     let stream_state = Arc::clone(&state);
-    reg.output()
-        .stream(Arc::new(move |ctx: AssistantStreamHookContext| {
+    reg.output().stream(
+        lash_core::hook_key!("cell-mask"),
+        Arc::new(move |ctx: AssistantStreamHookContext| {
             let state = Arc::clone(&stream_state);
             Box::pin(async move {
                 let mut detector = state.lock_recover();
                 Ok(detector.process_chunk(&ctx.chunk))
             })
-        }));
+        }),
+    )?;
 
     let finished_state = Arc::clone(&state);
-    reg.output()
-        .stream_finished(Arc::new(move |ctx: AssistantStreamFinishedContext| {
+    reg.output().stream_finished(
+        lash_core::hook_key!("cell-mask"),
+        Arc::new(move |ctx: AssistantStreamFinishedContext| {
             let state = Arc::clone(&finished_state);
             Box::pin(async move { state.lock_recover().finish_stream(ctx.reason) })
-        }));
+        }),
+    )?;
 
-    reg.output().response(Arc::new(
-        move |ctx: lash_core::plugin::AssistantResponseHookContext| {
-            let dialect = Arc::clone(&dialect);
-            Box::pin(async move {
-                let Some(recorded) = ctx.stream_state else {
-                    // Nothing streamed that phase 2 could splice.
-                    return Ok(lash_core::plugin::AssistantResponseTransform {
-                        response: ctx.response,
-                        events: Vec::new(),
-                    });
-                };
-                let mut detector = CellDetector::from_recorded(dialect, recorded)?;
-                let events = detector.finish_response();
-                let response = transform_final_response(&detector, ctx.response);
-                Ok(lash_core::plugin::AssistantResponseTransform { response, events })
-            })
-        },
-    ));
+    reg.output().response(
+        lash_core::hook_key!("cell-mask"),
+        Some(lash_core::hook_key!("cell-mask")),
+        Arc::new(
+            move |ctx: lash_core::plugin::AssistantResponseHookContext| {
+                let dialect = Arc::clone(&dialect);
+                Box::pin(async move {
+                    let Some(recorded) = ctx.stream_state else {
+                        // Nothing streamed that phase 2 could splice.
+                        return Ok(lash_core::plugin::AssistantResponseTransform {
+                            response: ctx.response,
+                            events: Vec::new(),
+                        });
+                    };
+                    let mut detector = CellDetector::from_recorded(dialect, recorded)?;
+                    let events = detector.finish_response();
+                    let response = transform_final_response(&detector, ctx.response);
+                    Ok(lash_core::plugin::AssistantResponseTransform { response, events })
+                })
+            },
+        ),
+    )?;
 
     Ok(())
 }

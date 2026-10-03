@@ -1,21 +1,16 @@
-use lash_core::plugin::{
-    BeforeToolCallPluginDirective, PluginError, ReplaceToolArgsDirective, ToolCallHookContext,
-};
+use lash_core::plugin::{PluginError, ToolArgsTransformInput};
 
+/// The argument transform both RLM paths register: projected values in a
+/// call's arguments become what the tool's projection policy asks for. It
+/// returns the arguments even when nothing changed.
 pub(crate) fn normalize_projected_tool_args(
-    ctx: ToolCallHookContext,
-) -> Result<Vec<BeforeToolCallPluginDirective>, PluginError> {
-    let original = ctx.args;
-    let normalized = crate::projection::normalize_tool_args_for_projection(
-        original.clone(),
-        &ctx.argument_projection,
+    input: ToolArgsTransformInput,
+) -> Result<serde_json::Value, PluginError> {
+    crate::projection::normalize_tool_args_for_projection(
+        input.current,
+        &input.context.argument_projection,
     )
-    .map_err(|error| PluginError::Session(error.to_string()))?;
-    if normalized == original {
-        Ok(Vec::new())
-    } else {
-        Ok(vec![ReplaceToolArgsDirective { args: normalized }.into()])
-    }
+    .map_err(|error| PluginError::Session(error.to_string()))
 }
 
 #[cfg(test)]
@@ -167,23 +162,13 @@ mod tests {
             lash_core::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed");
 
         for tool_name in ["continue_as", "renamed_control_tool", "arbitrary_tool_name"] {
-            let context = lash_core::plugin::ToolCallHookContext::new(
-                lash_core::RuntimeOwner::Session(lash_sansio::SessionId::from("session")),
-                lash_core::AdmittedPluginConfig::default(),
-                tool_name.to_string(),
-                args.clone(),
-                policy.clone(),
-                lash_core::TurnContext::default(),
-                std::sync::Arc::new(lash_core::testing::MockSessionManager::default()),
-            );
-            let directives = super::normalize_projected_tool_args(context)
-                .expect("projection normalization succeeds");
-            let [lash_core::plugin::BeforeToolCallPluginDirective::ReplaceToolArgs(directive)] =
-                directives.as_slice()
-            else {
-                panic!("projection-aware args must be rewritten for {tool_name}")
+            let input = lash_core::plugin::ToolArgsTransformInput {
+                context: lash_core::testing::tool_hook_context(tool_name, policy.clone()),
+                original: std::sync::Arc::new(args.clone()),
+                current: args.clone(),
             };
-            let normalized = &directive.args;
+            let normalized = &super::normalize_projected_tool_args(input)
+                .expect("projection normalization succeeds");
             assert_eq!(
                 normalized,
                 &serde_json::json!({

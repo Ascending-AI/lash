@@ -268,31 +268,30 @@ pub(crate) fn mark_retry_exhausted(result: ToolOutcome, attempts: u32) -> ToolOu
 /// context, so the two callers share one settlement rather than each spelling
 /// the projection, the after-tool hook and the trailing trace attempt.
 ///
-/// `call_id` is the parked call's durable identity, re-derived by the caller
-/// from the journaled park rather than read out of it — the pending row does
-/// not carry it — so the after-tool observation still names the call it
-/// settles.
-#[allow(clippy::too_many_arguments)]
+/// `prepared` is the parked call as admitted, so the result phase of its
+/// Deferred completion inspects the call that executed. `attempts` are the
+/// attempts before the one that parked.
 pub(crate) async fn settle_completed_pending_tool_call(
     context: &ToolDispatchContext<'_>,
     ids: &super::context::ToolCallIds,
-    tool_name: String,
-    args: serde_json::Value,
+    prepared: &crate::plugin::PreparedCallReadView,
     resolution: crate::Resolution,
     resolver: Option<&crate::PendingResolver>,
-    duration_ms: u64,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
 ) -> ToolDispatchOutcome {
     let output = crate::tool_result::tool_output_from_completion_resolution(resolution, resolver);
+    let parked_attempt = u32::try_from(attempts.len())
+        .unwrap_or(u32::MAX)
+        .saturating_add(1);
     let result = super::finalize_tool_result_with_execution_context(
         context,
-        &ids.call_id,
-        &tool_name,
-        &args,
+        prepared,
+        super::deferred_occurrence(parked_attempt),
         ToolOutcome::from_output(output),
-        duration_ms,
     )
     .await;
+    let tool_name = prepared.tool_name().to_string();
+    let args = prepared.args().clone();
     let mut outcome = normalized_outcome(context, ids, tool_name, args, result).await;
     let mut attempts = attempts;
     attempts.push(crate::trace::trace_tool_attempt(

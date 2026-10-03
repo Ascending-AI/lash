@@ -4,13 +4,6 @@ use std::sync::Arc;
 use super::*;
 use crate::session_model::plugin_message_to_message;
 
-enum DirectiveAction {
-    Abort(PluginAbort),
-    EnqueueMessages(Vec<PluginMessage>),
-    EmitRuntimeEvents(Vec<crate::SessionStreamEvent>),
-    None,
-}
-
 fn append_plugin_messages(
     messages: &mut crate::MessageSequence,
     plugin_messages: &[PluginMessage],
@@ -31,108 +24,45 @@ fn append_plugin_messages(
     }
 }
 
-async fn interpret_ambient(
-    emitted: PluginOwned<PluginDirective>,
-    session_graph: &Arc<dyn SessionGraphService>,
-) -> Result<crate::plugin::AmbientDirectiveAction, PluginError> {
-    crate::plugin::interpret_ambient_directive(emitted, session_graph)
-        .await
-        .map_err(|error| error.into_plugin_error())
-}
-
-async fn interpret_directive(
-    emitted: PluginOwned<TurnPluginDirective>,
-    session_graph: &Arc<dyn SessionGraphService>,
-) -> Result<DirectiveAction, PluginError> {
-    let PluginOwned { plugin_id, value } = emitted;
-    match value {
-        TurnPluginDirective::Ambient(directive) => {
-            match interpret_ambient(
-                PluginOwned {
-                    plugin_id,
-                    value: directive,
-                },
-                session_graph,
-            )
-            .await?
-            {
-                crate::plugin::AmbientDirectiveAction::EmitRuntimeEvents { plugin_id, events } => {
-                    Ok(DirectiveAction::EmitRuntimeEvents(
-                        crate::plugin::plugin_runtime_session_events(&plugin_id, events),
-                    ))
-                }
-                crate::plugin::AmbientDirectiveAction::None => Ok(DirectiveAction::None),
-            }
-        }
-        TurnPluginDirective::AbortTurn(directive) => Ok(DirectiveAction::Abort(PluginAbort::new(
-            &plugin_id,
-            directive.code,
-            directive.message,
-        ))),
-        TurnPluginDirective::EnqueueMessages(directive) => {
-            Ok(DirectiveAction::EnqueueMessages(directive.messages))
-        }
-    }
-}
-
 impl PluginSession {
-    async fn apply_turn_directives(
-        &self,
-        directives: Vec<PluginOwned<TurnPluginDirective>>,
+    /// Apply before-turn contributions in recorded callback order.
+    fn apply_turn_contributions(
+        contributions: Vec<PluginOwned<TurnContributions>>,
         mut messages: crate::MessageSequence,
-        session_graph: Arc<dyn SessionGraphService>,
         message_scope_id: &str,
-    ) -> Result<TurnPreparation, PluginError> {
+    ) -> TurnPreparation {
         let mut events = Vec::new();
-        let mut abort = None;
         let mut next_message_ordinal = 0usize;
-
-        for emitted in directives {
-            match interpret_directive(emitted, &session_graph).await? {
-                DirectiveAction::Abort(next) => abort = Some(next),
-                DirectiveAction::EnqueueMessages(plugin_messages) => {
-                    append_plugin_messages(
-                        &mut messages,
-                        &plugin_messages,
-                        message_scope_id,
-                        &mut next_message_ordinal,
-                    );
-                }
-                DirectiveAction::EmitRuntimeEvents(next_events) => events.extend(next_events),
-                DirectiveAction::None => {}
-            }
+        for PluginOwned { plugin_id, value } in contributions {
+            append_plugin_messages(
+                &mut messages,
+                &value.messages,
+                message_scope_id,
+                &mut next_message_ordinal,
+            );
+            events.extend(crate::plugin::plugin_runtime_session_events(
+                &plugin_id,
+                value.events,
+            ));
         }
-
-        Ok(TurnPreparation {
-            messages,
-            events,
-            abort,
-        })
+        TurnPreparation { messages, events }
     }
 
     pub async fn apply_checkpoint(
         &self,
         ctx: CheckpointHookContext,
     ) -> Result<CheckpointApplication, PluginError> {
-        let directives = self.at_checkpoint(ctx.clone()).await?;
+        let contributions = self.at_checkpoint(ctx).await?;
         let mut messages = Vec::new();
         let mut events = Vec::new();
-        let mut abort = None;
-
-        for emitted in directives {
-            match interpret_directive(emitted, &ctx.session_graph).await? {
-                DirectiveAction::Abort(next) => abort = Some(next),
-                DirectiveAction::EnqueueMessages(queued) => messages.extend(queued),
-                DirectiveAction::EmitRuntimeEvents(next_events) => events.extend(next_events),
-                DirectiveAction::None => {}
-            }
+        for PluginOwned { plugin_id, value } in contributions {
+            messages.extend(value.messages);
+            events.extend(crate::plugin::plugin_runtime_session_events(
+                &plugin_id,
+                value.events,
+            ));
         }
-
-        Ok(CheckpointApplication {
-            messages,
-            events,
-            abort,
-        })
+        Ok(CheckpointApplication { messages, events })
     }
 }
 
@@ -147,10 +77,9 @@ impl PluginDispatchContext<'_> {
             state,
             messages,
             sessions,
-            session_graph,
             turn_context,
         } = request;
-        let directives = self
+        let contributions = self
             .before_turn(TurnHookContext {
                 session_id,
                 plugin_config: self.session.admitted_plugin_config(),
@@ -159,14 +88,11 @@ impl PluginDispatchContext<'_> {
                 turn_context,
             })
             .await?;
-        self.session
-            .apply_turn_directives(
-                directives,
-                messages,
-                session_graph,
-                &format!("{turn_scope_id}:before_turn"),
-            )
-            .await
+        Ok(PluginSession::apply_turn_contributions(
+            contributions,
+            messages,
+            &format!("{turn_scope_id}:before_turn"),
+        ))
     }
 
     pub async fn finalize_turn(
@@ -178,7 +104,7 @@ impl PluginDispatchContext<'_> {
         clock: &dyn crate::Clock,
     ) -> Result<TurnFinalization, PluginError> {
         let session_id = turn.state.session_id.clone();
-        let directives = if self
+        let contributions = if self
             .session
             .capabilities()
             .contributions
@@ -200,68 +126,43 @@ impl PluginDispatchContext<'_> {
         let mut updated_messages: Option<crate::MessageSequence> = None;
         let mut next_message_ordinal = 0usize;
         let mut next_plugin_ordinal = 0usize;
-        for emitted in directives {
-            let PluginOwned { plugin_id, value } = emitted;
-            match value {
-                AfterTurnPluginDirective::Ambient(directive) => {
-                    match interpret_ambient(
-                        PluginOwned {
-                            plugin_id,
-                            value: directive,
-                        },
-                        &session_graph,
-                    )
-                    .await?
-                    {
-                        crate::plugin::AmbientDirectiveAction::EmitRuntimeEvents {
-                            plugin_id,
-                            events: next_events,
-                        } => {
-                            events.extend(crate::plugin::plugin_runtime_session_events(
-                                &plugin_id,
-                                next_events,
-                            ));
-                        }
-                        crate::plugin::AmbientDirectiveAction::None => {}
-                    }
-                }
-                AfterTurnPluginDirective::AppendPluginNode { plugin_type, body } => {
-                    if let Some(messages) = updated_messages.take() {
-                        turn.state.replace_active_read_state(messages.as_slice());
-                    }
-                    turn.state.session_graph.append_node_drafts_at(
-                        &format!(
-                            "{turn_scope_id}:after_turn:{plugin_id}:plugin:{next_plugin_ordinal}"
-                        ),
-                        [crate::session_graph::SessionNodeDraft::plugin(
-                            plugin_type,
-                            body,
-                        )],
-                        clock.timestamp_rfc3339(),
-                    );
-                    next_plugin_ordinal += 1;
-                }
-                AfterTurnPluginDirective::EnqueueMessages(directive) => {
-                    if updated_messages.is_none() {
-                        let read_view = turn.state.read_view();
-                        updated_messages = Some(crate::MessageSequence::from_base(
-                            read_view.messages().to_vec().into(),
-                        ));
-                    }
-                    #[expect(
-                        clippy::expect_used,
-                        reason = "the branch above initializes `updated_messages` on exactly the path that reaches here"
-                    )]
-                    let messages = updated_messages
-                        .as_mut()
-                        .expect("message sequence was initialized above");
-                    append_plugin_messages(
-                        messages,
-                        &directive.messages,
-                        &format!("{turn_scope_id}:after_turn"),
-                        &mut next_message_ordinal,
-                    );
-                }
+        for PluginOwned { plugin_id, value } in contributions {
+            let AfterTurnContributions {
+                messages,
+                events: plugin_events,
+                records,
+            } = value;
+            events.extend(crate::plugin::plugin_runtime_session_events(
+                &plugin_id,
+                plugin_events,
+            ));
+            if !records.is_empty()
+                && let Some(messages) = updated_messages.take()
+            {
+                turn.state.replace_active_read_state(messages.as_slice());
+            }
+            for PluginRecordContribution { plugin_type, body } in records {
+                turn.state.session_graph.append_node_drafts_at(
+                    &format!("{turn_scope_id}:after_turn:{plugin_id}:plugin:{next_plugin_ordinal}"),
+                    [crate::session_graph::SessionNodeDraft::plugin(
+                        plugin_type,
+                        body,
+                    )],
+                    clock.timestamp_rfc3339(),
+                );
+                next_plugin_ordinal += 1;
+            }
+            if !messages.is_empty() {
+                let messages_so_far = updated_messages.get_or_insert_with(|| {
+                    let read_view = turn.state.read_view();
+                    crate::MessageSequence::from_base(read_view.messages().to_vec().into())
+                });
+                append_plugin_messages(
+                    messages_so_far,
+                    &messages,
+                    &format!("{turn_scope_id}:after_turn"),
+                    &mut next_message_ordinal,
+                );
             }
         }
         if let Some(messages) = updated_messages.as_ref() {

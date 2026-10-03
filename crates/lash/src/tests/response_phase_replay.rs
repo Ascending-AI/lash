@@ -354,7 +354,11 @@ fn deriving_plugin(calls: &Arc<AtomicUsize>) -> StaticPluginFactory {
     });
     StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("response-phase-replay-deriver"),
-        lash_core::facade_support::PluginSpec::new().with_assistant_response(hook),
+        lash_core::facade_support::PluginSpec::new().with_assistant_response(
+            crate::hook_key!("derive"),
+            None,
+            hook,
+        ),
     )
 }
 
@@ -390,27 +394,31 @@ impl lash_core::plugin::SessionPlugin for StateDeriver {
     ) -> std::result::Result<(), lash_core::PluginError> {
         let state = registrar.state();
         let calls = Arc::clone(&self.0);
-        registrar.output().response(Arc::new(move |context| {
-            let state = state.clone();
-            let calls = Arc::clone(&calls);
-            Box::pin(async move {
-                calls.fetch_add(1, Ordering::SeqCst);
-                state.set("accepted", serde_json::json!(17))?;
-                let before = state.generation();
-                assert!(state.set("invalid key", serde_json::json!(1)).is_err());
-                assert_eq!(state.generation(), before);
-                state.set("second", serde_json::json!(23))?;
-                let mut response = context.response;
-                response.parts = vec![LlmOutputPart::Text {
-                    text: DERIVED.to_owned(),
-                    response_meta: None,
-                }];
-                Ok(lash_core::facade_support::AssistantResponseTransform {
-                    response,
-                    events: Vec::new(),
+        registrar.output().response(
+            crate::hook_key!("count"),
+            None,
+            Arc::new(move |context| {
+                let state = state.clone();
+                let calls = Arc::clone(&calls);
+                Box::pin(async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    state.set("accepted", serde_json::json!(17))?;
+                    let before = state.generation();
+                    assert!(state.set("invalid key", serde_json::json!(1)).is_err());
+                    assert_eq!(state.generation(), before);
+                    state.set("second", serde_json::json!(23))?;
+                    let mut response = context.response;
+                    response.parts = vec![LlmOutputPart::Text {
+                        text: DERIVED.to_owned(),
+                        response_meta: None,
+                    }];
+                    Ok(lash_core::facade_support::AssistantResponseTransform {
+                        response,
+                        events: Vec::new(),
+                    })
                 })
-            })
-        }));
+            }),
+        )?;
         Ok(())
     }
 }
@@ -668,7 +676,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
         let callback = refusal
             .callback
             .expect("the park names the recorded callback");
-        assert_eq!(callback.key, "assistant_response:0");
+        assert_eq!(callback.key, "assistant_response:derive");
         assert_eq!(callback.owner.plugin, "response-phase-replay-deriver");
         assert_eq!(callback.owner.behavior_revision.get(), 1);
         assert_eq!(
@@ -857,8 +865,10 @@ fn appending_callback(
     declaration.behavior_revision = lash_core::plugin::BehaviorRevision::new(revision).unwrap();
     Arc::new(StaticPluginFactory::new(
         declaration,
-        lash_core::facade_support::PluginSpec::new().with_assistant_response(Arc::new(
-            move |ctx| {
+        lash_core::facade_support::PluginSpec::new().with_assistant_response(
+            crate::hook_key!("append"),
+            None,
+            Arc::new(move |ctx| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let response = text_response(&format!("{}{suffix}", ctx.response.full_text()));
                 Box::pin(async move {
@@ -867,8 +877,8 @@ fn appending_callback(
                         events: Vec::new(),
                     })
                 })
-            },
-        )),
+            }),
+        ),
     ))
 }
 
@@ -949,7 +959,7 @@ async fn a_recorded_callback_revision_never_runs_a_substitute() {
         panic!("the revision refusal remains typed");
     };
     let callback = refusal.callback.as_ref().unwrap();
-    assert_eq!(callback.key, "assistant_response:0");
+    assert_eq!(callback.key, "assistant_response:append");
     assert_eq!(callback.owner.behavior_revision.get(), 1);
     assert_eq!(
         refusal
@@ -968,25 +978,31 @@ async fn a_recorded_callback_revision_never_runs_a_substitute() {
 async fn stream_state_pairs_multiple_callbacks_of_one_plugin_on_cold_replay() {
     let mut spec = lash_core::facade_support::PluginSpec::new();
     for state in ["first", "second"] {
-        spec = spec.with_assistant_stream_finished(Arc::new(move |_| {
-            Box::pin(async move { Ok(Some(serde_json::json!(state))) })
-        }));
-        spec = spec.with_assistant_response(Arc::new(move |ctx| {
-            let state = ctx
-                .stream_state
-                .expect("this callback's recorded stream state");
-            let response = text_response(&format!(
-                "{}:{}",
-                ctx.response.full_text(),
-                state.as_str().unwrap()
-            ));
-            Box::pin(async move {
-                Ok(lash_core::facade_support::AssistantResponseTransform {
-                    response,
-                    events: Vec::new(),
+        let key = lash_core::plugin::HookKey::new(state).unwrap();
+        spec = spec.with_assistant_stream_finished(
+            key,
+            Arc::new(move |_| Box::pin(async move { Ok(Some(serde_json::json!(state))) })),
+        );
+        spec = spec.with_assistant_response(
+            key,
+            Some(key),
+            Arc::new(move |ctx| {
+                let state = ctx
+                    .stream_state
+                    .expect("this callback's recorded stream state");
+                let response = text_response(&format!(
+                    "{}:{}",
+                    ctx.response.full_text(),
+                    state.as_str().unwrap()
+                ));
+                Box::pin(async move {
+                    Ok(lash_core::facade_support::AssistantResponseTransform {
+                        response,
+                        events: Vec::new(),
+                    })
                 })
-            })
-        }));
+            }),
+        );
     }
     let plugin: Arc<dyn lash_core::plugin::PluginFactory> = Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("paired-responses"),

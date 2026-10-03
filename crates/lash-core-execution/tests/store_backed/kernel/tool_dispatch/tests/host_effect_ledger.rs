@@ -8,8 +8,9 @@
 //! A host that owns an external system builds a durable undo ledger on the
 //! tool boundary with no new core primitive: the attempt body claims a row
 //! keyed by [`crate::AttemptContext::tool_call_id`] *before* touching the
-//! world, and the after-tool hook notes the call's durable outcome under the
-//! same [`crate::plugin::ToolResultHookContext::call_id`]. Deduplication,
+//! world, and the after-check notes the call's durable outcome under the
+//! same call id ([`crate::plugin::PreparedCallReadView::call_id`]). The check
+//! runs at least once per final result, so the ledger deduplicates on it. Deduplication,
 //! crash reconciliation, and reverse compensation are host passes over that
 //! ledger — the runtime's only obligation is that both seams carry the same
 //! call id.
@@ -231,20 +232,19 @@ fn ledger_tool(name: &str, retry_policy: ToolRetryPolicy) -> crate::ToolDefiniti
 fn ledger_hook(
     ledger: Arc<HostEffectLedger>,
     observations: Arc<std::sync::Mutex<Vec<(String, bool)>>>,
-) -> crate::plugin::AfterToolCallHook {
-    Arc::new(move |ctx| {
+) -> crate::plugin::ToolResultCheckHook {
+    Arc::new(move |input| {
         let ledger = Arc::clone(&ledger);
         let observations = Arc::clone(&observations);
         Box::pin(async move {
             let ok = matches!(
-                ctx.result.as_done_output().map(|output| &output.outcome),
-                Some(crate::ToolCallOutcome::Success(_))
+                input.final_result.outcome,
+                crate::ToolCallOutcome::Success(_)
             );
-            observations
-                .lock_recover()
-                .push((ctx.call_id.to_string(), ok));
-            ledger.note_outcome(ctx.call_id.as_str(), ok);
-            Ok(Vec::new())
+            let call_id = input.prepared.call_id();
+            observations.lock_recover().push((call_id.to_string(), ok));
+            ledger.note_outcome(call_id.as_str(), ok);
+            Ok(crate::plugin::AfterToolContributions::default())
         })
     })
 }
@@ -252,11 +252,11 @@ fn ledger_hook(
 async fn ledger_dispatch_context<'h>(
     ports: crate::support::DispatchPorts<'h>,
     provider: Arc<dyn ToolProvider>,
-    hook: crate::plugin::AfterToolCallHook,
+    hook: crate::plugin::ToolResultCheckHook,
 ) -> ToolDispatchContext<'h> {
     let spec = crate::PluginSpec::new()
         .with_tool_provider(provider)
-        .with_after_tool_call(hook);
+        .with_tool_result_check(lash_core_execution::hook_key!("ledger"), hook);
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
         lash_core_execution::plugin::PluginDeclaration::initial("ledger_tools"),
         spec,

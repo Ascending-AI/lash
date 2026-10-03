@@ -138,7 +138,7 @@ impl RuntimeExecutionContext<'_> {
             args: call.args,
             replay: None,
         };
-        // The leaf's own key namespaces the prepare's directive lanes —
+        // The leaf's own key namespaces the prepare's observation lanes —
         // `observation_keyed` qualifies it under this dispatch's base, which
         // for a batch opened under a parent effect is that effect's invocation
         // (ADR 0105 §1).

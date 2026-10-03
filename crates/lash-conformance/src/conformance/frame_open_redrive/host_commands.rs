@@ -453,43 +453,46 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
                     append_note(&ctx.session_graph, ctx.session_id, &args).await
                 }
             })
-            .with_after_turn(Arc::new(move |ctx| {
-                let probe = event_probe.clone();
-                Box::pin(async move {
-                    if !probe.terminal_note.load(Ordering::SeqCst) {
-                        return Ok(Vec::new());
-                    }
-                    let ordinal = probe
-                        .terminal_appends
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .len()
-                        + 1;
-                    let appended = ctx
-                        .session_graph
-                        .append_session_nodes(
-                            &ctx.session_id,
-                            crate::AppendSessionNodesRequest {
-                                operation_id: format!("terminal-note-{ordinal}"),
-                                nodes: vec![crate::SessionAppendNode::message(
-                                    crate::PluginMessage::text(
-                                        crate::MessageRole::Assistant,
-                                        terminal_note(ordinal),
-                                    ),
-                                )],
-                                requires_ancestor_node_id: None,
-                            },
-                        )
-                        .await
-                        .map_err(|error| error.to_string());
-                    probe
-                        .terminal_appends
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(appended);
-                    Ok(Vec::new())
-                })
-            })),
+            .with_after_turn(
+                crate::hook_key!("terminal-note"),
+                Arc::new(move |ctx| {
+                    let probe = event_probe.clone();
+                    Box::pin(async move {
+                        if !probe.terminal_note.load(Ordering::SeqCst) {
+                            return Ok(crate::plugin::AfterTurnContributions::default());
+                        }
+                        let ordinal = probe
+                            .terminal_appends
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .len()
+                            + 1;
+                        let appended = ctx
+                            .session_graph
+                            .append_session_nodes(
+                                &ctx.session_id,
+                                crate::AppendSessionNodesRequest {
+                                    operation_id: format!("terminal-note-{ordinal}"),
+                                    nodes: vec![crate::SessionAppendNode::message(
+                                        crate::PluginMessage::text(
+                                            crate::MessageRole::Assistant,
+                                            terminal_note(ordinal),
+                                        ),
+                                    )],
+                                    requires_ancestor_node_id: None,
+                                },
+                            )
+                            .await
+                            .map_err(|error| error.to_string());
+                        probe
+                            .terminal_appends
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .push(appended);
+                        Ok(crate::plugin::AfterTurnContributions::default())
+                    })
+                }),
+            ),
     ))
 }
 

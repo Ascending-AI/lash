@@ -227,33 +227,30 @@ impl crate::ToolProvider for SugarTools {
     }
 }
 
-/// The law's tools and its before-tool hook: the hook records every tool name
+/// The law's tools and its before-check: the check records every tool name
 /// it is asked about and denies `guarded`.
 fn sugar_plugin(witness: Arc<Witness>) -> Arc<dyn crate::facade_support::PluginFactory> {
     let hooked = Arc::clone(&witness);
     let spec = crate::facade_support::PluginSpec::new()
         .with_tool_provider(Arc::new(SugarTools { witness }))
-        .with_before_tool_call(Arc::new(move |context| {
-            hooked.hooked.lock_recover().push(context.tool_name.clone());
-            let deny = context.tool_name == "guarded";
-            Box::pin(async move {
-                Ok(if deny {
-                    vec![
-                        crate::facade_support::BeforeToolCallPluginDirective::ShortCircuitTool(
-                            crate::facade_support::ShortCircuitToolDirective::new(
-                                crate::ToolOutcome::failure(crate::ToolFailure::tool(
-                                    crate::ToolFailureClass::PermissionDenied,
-                                    "approval_denied",
-                                    "the law denies `guarded`",
-                                )),
-                            ),
-                        ),
-                    ]
-                } else {
-                    Vec::new()
+        .with_tool_args_check(
+            crate::hook_key!("guard"),
+            Arc::new(move |input| {
+                let tool_name = input.prepared.tool_name().to_string();
+                hooked.hooked.lock_recover().push(tool_name.clone());
+                Box::pin(async move {
+                    Ok(if tool_name == "guarded" {
+                        crate::facade_support::BeforeToolDecision::Deny(crate::ToolFailure::tool(
+                            crate::ToolFailureClass::PermissionDenied,
+                            "approval_denied",
+                            "the law denies `guarded`",
+                        ))
+                    } else {
+                        crate::facade_support::BeforeToolDecision::Allow
+                    })
                 })
-            })
-        }));
+            }),
+        );
     Arc::new(crate::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("conformance-batch-sugar"),
         spec,

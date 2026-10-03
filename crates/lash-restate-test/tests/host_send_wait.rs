@@ -1936,7 +1936,7 @@ fn follow_on_core(
                     "the inline follow-on fails before its commit".to_owned(),
                 ));
             }
-            Ok(Vec::new())
+            Ok(Default::default())
         }) as lash_core::plugin::PluginFuture<_>
     });
     lash::LashCore::standard_builder(backend)
@@ -1959,7 +1959,8 @@ fn follow_on_core(
         .tools(Arc::new(SwitchFrameTool) as Arc<dyn lash_core::ToolProvider>)
         .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("host-send-wait-follow-on-failure"),
-            lash_core::facade_support::PluginSpec::new().with_before_turn(hook),
+            lash_core::facade_support::PluginSpec::new()
+                .with_before_turn(lash_core::hook_key!("before-turn-1"), hook),
         )))
         .build(owner())
         .expect("build the lash core")

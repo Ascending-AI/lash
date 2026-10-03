@@ -18,10 +18,11 @@ use lash::persistence::{
     TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState, commit_runtime_state_verified,
 };
 use lash::plugins::{
-    AfterToolCallHook, AfterToolCallPluginDirective, BeforeToolCallHook,
-    BeforeToolCallPluginDirective, CompactionContext, ContextCompaction, ContextCompactor,
-    ContextError, PluginHost, PluginSpec, PluginSpecBuilder, PluginSpecFactory,
-    ReplaceToolArgsDirective, ToolCallHookContext, ToolCatalogContribution, ToolResultHookContext,
+    AfterToolContributions, AfterToolDecision, BeforeToolDecision, CompactionContext,
+    ContextCompaction, ContextCompactor, ContextError, PluginHost, PluginSpec, PluginSpecBuilder,
+    PluginSpecFactory, ToolArgsCheckHook, ToolArgsCheckInput, ToolArgsTransformHook,
+    ToolArgsTransformInput, ToolCatalogContribution, ToolResultCheckHook, ToolResultCheckInput,
+    ToolResultTransformHook, ToolResultTransformInput,
 };
 use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy};
 use lash::tools::{ToolCallRecord, ToolOutputContract};
@@ -66,24 +67,24 @@ fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
 }
 
 fn plugin_types_are_nameable() -> PluginHost {
-    let before: BeforeToolCallHook = Arc::new(|ctx: ToolCallHookContext| {
-        Box::pin(async move {
-            Ok(vec![BeforeToolCallPluginDirective::ReplaceToolArgs(
-                ReplaceToolArgsDirective { args: ctx.args },
-            )])
-        })
+    let normalize: ToolArgsTransformHook =
+        Arc::new(|input: ToolArgsTransformInput| Box::pin(async move { Ok(input.current) }));
+    let policy: ToolArgsCheckHook = Arc::new(|input: ToolArgsCheckInput| {
+        let _ = (input.prepared.call_id(), input.prepared.args());
+        Box::pin(async move { Ok(BeforeToolDecision::Allow) })
     });
-    let after: AfterToolCallHook = Arc::new(|ctx: ToolResultHookContext| {
-        Box::pin(async move {
-            Ok(vec![AfterToolCallPluginDirective::short_circuit(
-                ctx.result,
-            )])
-        })
+    let recover: ToolResultTransformHook =
+        Arc::new(|input: ToolResultTransformInput| Box::pin(async move { Ok(input.current) }));
+    let audit: ToolResultCheckHook = Arc::new(|input: ToolResultCheckInput| {
+        let _ = input.final_result.outcome.clone();
+        Box::pin(async move { Ok(AfterToolContributions::from(AfterToolDecision::Allow)) })
     });
     let builder: PluginSpecBuilder = Arc::new(move |_ctx| {
         Ok(PluginSpec::new()
-            .with_before_tool_call(Arc::clone(&before))
-            .with_after_tool_call(Arc::clone(&after)))
+            .with_tool_args_transform(lash::hook_key!("normalize"), Arc::clone(&normalize))
+            .with_tool_args_check(lash::hook_key!("policy"), Arc::clone(&policy))
+            .with_tool_result_transform(lash::hook_key!("recover"), Arc::clone(&recover))
+            .with_tool_result_check(lash::hook_key!("audit"), Arc::clone(&audit)))
     });
     PluginHost::new(vec![Arc::new(PluginSpecFactory::new(
         lash::plugins::PluginDeclaration::initial("facade"),

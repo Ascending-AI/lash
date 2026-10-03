@@ -645,13 +645,16 @@ pub(super) fn crash_before_commit_plugin(
 ) -> Arc<dyn crate::facade_support::PluginFactory> {
     Arc::new(crate::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("conformance-crash-before-commit"),
-        crate::facade_support::PluginSpec::new().with_before_turn(Arc::new(move |_ctx| {
-            let died = Arc::clone(&died);
-            Box::pin(async move {
-                died.notify_one();
-                std::future::pending().await
-            })
-        })),
+        crate::facade_support::PluginSpec::new().with_before_turn(
+            crate::hook_key!("die-before-commit"),
+            Arc::new(move |_ctx| {
+                let died = Arc::clone(&died);
+                Box::pin(async move {
+                    died.notify_one();
+                    std::future::pending().await
+                })
+            }),
+        ),
     ))
 }
 

@@ -53,7 +53,7 @@ pub use lash_core_execution::testing::{
     standard_test_llm_profiles, standard_test_policy, store_fixtures, test_code_protocol_factories,
     test_llm_profile_config, test_llm_profile_metadata, test_plugin_host,
     test_protocol_factories_ending_without_done, test_standard_protocol_factories,
-    test_standard_protocol_factory_with_runtime_state, test_trigger_router,
+    test_standard_protocol_factory_with_runtime_state, test_trigger_router, tool_hook_context,
     tool_registry_with_live_provider, trace_capture,
 };
 

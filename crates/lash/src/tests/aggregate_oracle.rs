@@ -520,7 +520,7 @@ fn oracle_builder(
             StaticPluginFactory::new(
                 lash_core::plugin::PluginDeclaration::initial("aggregate-oracle"),
                 lash_core::facade_support::PluginSpec::new()
-                    .with_presentation_step(oracle_presentation_step(Arc::clone(&theatre))),
+                    .with_presentation_step(crate::hook_key!("presentation-step-1"), oracle_presentation_step(Arc::clone(&theatre))),
             ),
         ) as Arc<dyn PluginFactory>]))
         .tools(Arc::new(OracleTools {

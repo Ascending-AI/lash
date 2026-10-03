@@ -13,14 +13,17 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
     let counted_effects = effects.clone();
     let host = crate::PluginHost::new(vec![Arc::new(crate::plugin::StaticPluginFactory::new(
         declaration,
-        crate::plugin::PluginSpec::new().with_before_turn(Arc::new(move |_| {
-            counted_callbacks.fetch_add(1, Ordering::SeqCst);
-            let effects = counted_effects.clone();
-            Box::pin(async move {
-                effects.fetch_add(1, Ordering::SeqCst);
-                Ok(Vec::new())
-            })
-        })),
+        crate::plugin::PluginSpec::new().with_before_turn(
+            crate::hook_key!("probe"),
+            Arc::new(move |_| {
+                counted_callbacks.fetch_add(1, Ordering::SeqCst);
+                let effects = counted_effects.clone();
+                Box::pin(async move {
+                    effects.fetch_add(1, Ordering::SeqCst);
+                    Ok(Default::default())
+                })
+            }),
+        ),
     ))]);
     let recorded = crate::store::plugin_writers::PluginAdmission::from_plugins(
         host.factories()
@@ -42,7 +45,7 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
         ))
         .unwrap();
     let identity = &session.capabilities().contributions.before_turn_hooks[0].identity;
-    assert_eq!(identity.key, "before_turn:0");
+    assert_eq!(identity.key, "before_turn:probe");
     assert_eq!(identity.owner.plugin, "revision-probe");
     assert_eq!(identity.owner.behavior_revision.get(), 2);
     let rebuilt = host

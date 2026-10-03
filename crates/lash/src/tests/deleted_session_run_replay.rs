@@ -124,7 +124,7 @@ fn fail_the_inline_follow_on(
         let catalog = catalog.get().cloned();
         Box::pin(async move {
             let Some(catalog) = catalog else {
-                return Ok(Vec::new());
+                return Ok(Default::default());
             };
             let owed =
                 match lash_core::runtime::live_session_view(&catalog, &context.session_id).await {
@@ -138,12 +138,13 @@ fn fail_the_inline_follow_on(
                     "the inline follow-on fails before its commit".to_owned(),
                 ));
             }
-            Ok(Vec::new())
+            Ok(Default::default())
         }) as lash_core::plugin::PluginFuture<_>
     });
     crate::plugins::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("deleted-session-follow-on-failure"),
-        lash_core::facade_support::PluginSpec::new().with_before_turn(hook),
+        lash_core::facade_support::PluginSpec::new()
+            .with_before_turn(crate::hook_key!("before-turn-1"), hook),
     )
 }
 

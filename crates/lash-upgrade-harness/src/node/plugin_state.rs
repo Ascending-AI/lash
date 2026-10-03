@@ -266,21 +266,24 @@ impl SessionPlugin for ProbePlugin {
         let state = registrar.state();
         let key = self.native_key();
         let calls = Arc::clone(&self.calls);
-        registrar.turn().after(Arc::new(move |ctx| {
-            let state = state.clone();
-            let calls = Arc::clone(&calls);
-            Box::pin(async move {
-                let value = ctx.plugin_config.config.get(PLUGIN).ok_or_else(|| {
-                    PluginError::Session("missing recorded counter config".into())
-                })?;
-                let config: ProbeConfig = serde_json::from_value(value.clone())
-                    .map_err(|error| PluginError::Session(error.to_string()))?;
-                let next = state.get_as::<u64>(key)?.unwrap_or(config.seed) + config.step;
-                state.set(key, serde_json::json!(next))?;
-                calls.fetch_add(1, Ordering::SeqCst);
-                Ok(Vec::new())
-            })
-        }));
+        registrar.turn().after(
+            lash_core::hook_key!("counter"),
+            Arc::new(move |ctx| {
+                let state = state.clone();
+                let calls = Arc::clone(&calls);
+                Box::pin(async move {
+                    let value = ctx.plugin_config.config.get(PLUGIN).ok_or_else(|| {
+                        PluginError::Session("missing recorded counter config".into())
+                    })?;
+                    let config: ProbeConfig = serde_json::from_value(value.clone())
+                        .map_err(|error| PluginError::Session(error.to_string()))?;
+                    let next = state.get_as::<u64>(key)?.unwrap_or(config.seed) + config.step;
+                    state.set(key, serde_json::json!(next))?;
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(lash_core::plugin::AfterTurnContributions::default())
+                })
+            }),
+        )?;
         Ok(())
     }
 }

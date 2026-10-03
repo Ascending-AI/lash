@@ -925,20 +925,23 @@ impl lash_core::facade_support::SessionPlugin for RuntimeBuildProbePlugin {
         reg: &mut lash_core::facade_support::PluginRegistrar,
     ) -> std::result::Result<(), lash_core::PluginError> {
         let counters = Arc::clone(&self.counters);
-        reg.session().on_event(Arc::new(move |event| {
-            let counters = Arc::clone(&counters);
-            Box::pin(async move {
-                if matches!(
-                    event,
-                    lash_core::facade_support::PluginLifecycleEvent::SessionRestored(_)
-                ) {
-                    counters
-                        .session_restored_events
-                        .fetch_add(1, Ordering::SeqCst);
-                }
-                Ok(())
-            })
-        }));
+        reg.session().on_event(
+            crate::hook_key!("session-on-event-1"),
+            Arc::new(move |event| {
+                let counters = Arc::clone(&counters);
+                Box::pin(async move {
+                    if matches!(
+                        event,
+                        lash_core::facade_support::PluginLifecycleEvent::SessionRestored(_)
+                    ) {
+                        counters
+                            .session_restored_events
+                            .fetch_add(1, Ordering::SeqCst);
+                    }
+                    Ok(())
+                })
+            }),
+        )?;
         Ok(())
     }
 }

@@ -235,6 +235,9 @@ pub use lash_core::facade_support::{
     TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
     TurnCancelUndeliveredInputPolicy,
 };
+/// A plugin hook's [`HookKey`](plugins::HookKey) for a string literal,
+/// validated at compile time.
+pub use lash_core::hook_key;
 pub use lash_core::runtime::ExternalCompletionError;
 /// The immediate delivery verdict carried by a session deletion's wait.
 pub use lash_core::shift::relay::RelayVerdict;
@@ -818,23 +821,29 @@ pub mod plugins {
     /// `#[derive(lash::plugins::schemars::JsonSchema)]` with
     /// `#[schemars(crate = "lash::plugins::schemars")]`.
     pub use lash_core::facade_support::schemars;
-    pub use lash_core::facade_support::{
-        AbortTurnDirective, AfterToolCallPluginDirective, AfterTurnPluginDirective,
-        BeforeToolCallPluginDirective, EnqueueMessagesDirective, PluginDirective,
-        ReplaceToolArgsDirective, ShortCircuitToolDirective, TurnPluginDirective,
-    };
-    /// Hook contracts and reports used by plugin authors.
+    /// The tool hook phases (ADR 0128): argument transforms, before-checks
+    /// over the prepared call, result transforms, and after-checks over the
+    /// final result.
     pub use lash_core::plugin::{
-        AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
+        AfterToolContributions, AfterToolDecision, AttemptOrdinal, BeforeToolDecision,
+        CachedToolSuccess, CheckRank, PreparedCallReadView, RankedVerdict, ToolArgsCheckHook,
+        ToolArgsCheckInput, ToolArgsTransformHook, ToolArgsTransformInput, ToolHookContext,
+        ToolHookOccurrence, ToolHookPhase, ToolResultCandidate, ToolResultCheckHook,
+        ToolResultCheckInput, ToolResultTransformHook, ToolResultTransformInput,
+    };
+    /// Hook contracts and reports used by plugin authors. Every hook
+    /// registers under a [`HookKey`] (see [`hook_key!`](crate::hook_key));
+    /// ADR 0128 is the composition table every seam follows.
+    pub use lash_core::plugin::{
+        AfterTurnContributions, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
         AssistantResponseTransform, AssistantStreamFinishReason, AssistantStreamFinishedContext,
-        AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform,
-        BeforeToolCallHook, BeforeTurnHook, CheckpointHook, CheckpointHookContext,
-        CompactionContext, ContextCompaction, ContextCompactor, ContextError,
-        ContextPressureContext, ContextPressureDecision, ContextPressureHook,
-        PluginExtensionContribution, PluginSessionMaterialization, PluginSpecBuilder,
-        PluginTraceEmitter, StaticPluginFactory, ToolCallHookContext, ToolCatalogContext,
-        ToolPresentationPresenter, ToolResultHookContext, ToolResultProjectionContext,
-        TurnHookReport,
+        AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform, BeforeTurnHook,
+        CheckpointHook, CheckpointHookContext, CompactionContext, ContextCompaction,
+        ContextCompactor, ContextError, ContextPressureContext, ContextPressureDecision,
+        ContextPressureHook, HookKey, PluginExtensionContribution, PluginRecordContribution,
+        PluginSessionMaterialization, PluginSpecBuilder, PluginTraceEmitter, StaticPluginFactory,
+        ToolCatalogContext, ToolPresentationPresenter, ToolResultProjectionContext,
+        TurnContributions, TurnHookReport,
     };
     /// What a plugin factory declares about itself: its behaviour revision
     /// and the formats it reads and writes. The build generation is computed

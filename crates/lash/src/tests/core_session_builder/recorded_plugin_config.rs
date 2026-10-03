@@ -154,15 +154,16 @@ impl lash_core::facade_support::SessionPlugin for ProbePlugin {
         reg: &mut lash_core::facade_support::PluginRegistrar,
     ) -> std::result::Result<(), lash_core::PluginError> {
         let hooks = Arc::clone(&self.hooks);
-        reg.turn().before(Arc::new(
-            move |ctx: lash_core::facade_support::TurnHookContext| {
+        reg.turn().before(
+            crate::hook_key!("turn-before-1"),
+            Arc::new(move |ctx: lash_core::facade_support::TurnHookContext| {
                 hooks.lock_recover().push((
                     ctx.plugin_config.revision,
                     ctx.plugin_config.config.get(PROBE).cloned(),
                 ));
-                Box::pin(async { Ok(Vec::new()) })
-            },
-        ));
+                Box::pin(async { Ok(Default::default()) })
+            }),
+        )?;
         Ok(())
     }
 }

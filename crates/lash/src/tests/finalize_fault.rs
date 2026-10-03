@@ -93,15 +93,18 @@ fn failing_after_turn(
 ) -> Arc<dyn PluginFactory> {
     plugin(
         "finalize-fault-after-turn",
-        lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(move |_| {
-            let calls = Arc::clone(&calls);
-            Box::pin(async move {
-                if calls.fetch_add(1, Ordering::SeqCst) < failures {
-                    return Err(fault());
-                }
-                Ok(Vec::new())
-            })
-        })),
+        lash_core::facade_support::PluginSpec::new().with_after_turn(
+            crate::hook_key!("after-turn-1"),
+            Arc::new(move |_| {
+                let calls = Arc::clone(&calls);
+                Box::pin(async move {
+                    if calls.fetch_add(1, Ordering::SeqCst) < failures {
+                        return Err(fault());
+                    }
+                    Ok(Default::default())
+                })
+            }),
+        ),
     )
 }
 
@@ -386,18 +389,21 @@ async fn a_journaled_failure_settles_the_run_failed_after_a_live_finalize_fault(
     let finalize_calls = Arc::new(AtomicUsize::new(0));
     let failing_checkpoint = plugin(
         "finalize-fault-checkpoint",
-        lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new({
-            let checkpoint_calls = Arc::clone(&checkpoint_calls);
-            move |_| {
+        lash_core::facade_support::PluginSpec::new().with_checkpoint(
+            crate::hook_key!("checkpoint-2"),
+            Arc::new({
                 let checkpoint_calls = Arc::clone(&checkpoint_calls);
-                Box::pin(async move {
-                    checkpoint_calls.fetch_add(1, Ordering::SeqCst);
-                    Err(lash_core::PluginError::attempt_fault(
-                        "checkpoint store unavailable".to_string(),
-                    ))
-                })
-            }
-        })),
+                move |_| {
+                    let checkpoint_calls = Arc::clone(&checkpoint_calls);
+                    Box::pin(async move {
+                        checkpoint_calls.fetch_add(1, Ordering::SeqCst);
+                        Err(lash_core::PluginError::attempt_fault(
+                            "checkpoint store unavailable".to_string(),
+                        ))
+                    })
+                }
+            }),
+        ),
     );
     let fixture = Fixture::with_plugins(vec![
         failing_checkpoint,

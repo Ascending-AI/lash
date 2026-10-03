@@ -1390,8 +1390,8 @@ pub enum RuntimeEffectOutcome {
         launch: Box<ToolAttemptLaunch>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         triggers: Vec<ToolTriggerEffectOutcome>,
-        /// The attempt-local facts the attempt produced: `EnqueueMessages`
-        /// directives and managed LLM usage. Journaled with the attempt so a
+        /// The attempt-local facts the attempt produced: tool result check
+        /// messages and managed LLM usage. Journaled with the attempt so a
         /// replay restores them rather than re-running their producers — a
         /// crash after the attempt committed but before its invocation settled
         /// would otherwise drop them (ADR 0099 §13). Absent when the attempt

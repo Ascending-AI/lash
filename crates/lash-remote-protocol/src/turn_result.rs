@@ -672,6 +672,11 @@ pub enum RemoteToolControlProjection {
     Fail {
         failure: RemoteToolFailure,
     },
+    /// A plugin's tool check stopped the owning Run.
+    AbortRun {
+        code: lash_sansio::FailureCode,
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

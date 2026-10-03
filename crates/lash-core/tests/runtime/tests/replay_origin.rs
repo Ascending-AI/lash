@@ -215,8 +215,9 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() {
     let abort_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("abort-first-chunk"),
-            lash_core::facade_support::PluginSpec::new().with_assistant_stream(Arc::new(
-                |context| {
+            lash_core::facade_support::PluginSpec::new().with_assistant_stream(
+                lash_core::hook_key!("assistant-stream-1"),
+                Arc::new(|context| {
                     Box::pin(async move {
                         Ok(AssistantStreamTransform {
                             chunk: context.chunk,
@@ -224,8 +225,8 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() {
                             ..Default::default()
                         })
                     })
-                },
-            )),
+                }),
+            ),
         ));
     let mut runtime =
         runtime_with_foreign_replay(&backend, provider, vec![abort_plugin], &trace_path).await;
@@ -361,8 +362,9 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
     let abort_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("abort-before-provider-failure"),
-            lash_core::facade_support::PluginSpec::new().with_assistant_stream(Arc::new(
-                |context| {
+            lash_core::facade_support::PluginSpec::new().with_assistant_stream(
+                lash_core::hook_key!("assistant-stream-2"),
+                Arc::new(|context| {
                     Box::pin(async move {
                         Ok(AssistantStreamTransform {
                             chunk: context.chunk,
@@ -370,8 +372,8 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
                             ..Default::default()
                         })
                     })
-                },
-            )),
+                }),
+            ),
         ));
     let mut runtime =
         runtime_with_foreign_replay(&backend, provider, vec![abort_plugin], &trace_path).await;
@@ -445,8 +447,9 @@ async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_fai
     let abort_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("abort-complete-cell"),
-            lash_core::facade_support::PluginSpec::new().with_assistant_stream(Arc::new(
-                |context| {
+            lash_core::facade_support::PluginSpec::new().with_assistant_stream(
+                lash_core::hook_key!("assistant-stream-3"),
+                Arc::new(|context| {
                     Box::pin(async move {
                         Ok(AssistantStreamTransform {
                             chunk: context.chunk,
@@ -454,8 +457,8 @@ async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_fai
                             ..Default::default()
                         })
                     })
-                },
-            )),
+                }),
+            ),
         ));
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         vec![abort_plugin],

@@ -482,7 +482,7 @@ impl SessionPlugin for FaultPlugin {
         // pauses the run and parks it with the paid completion journaled. A
         // checkpoint records every fault as its outcome, so a fault there
         // fails the run for good (FIG-4636).
-        reg.output().response(Arc::new(move |ctx| {
+        reg.output().response(lash::hook_key!("fault-injection"), None, Arc::new(move |ctx| {
             let repaired = repaired.clone();
             let pool = pool.clone();
             Box::pin(async move {
@@ -506,7 +506,7 @@ impl SessionPlugin for FaultPlugin {
                     events: Vec::new(),
                 })
             })
-        }));
+        }))?;
         Ok(())
     }
 }

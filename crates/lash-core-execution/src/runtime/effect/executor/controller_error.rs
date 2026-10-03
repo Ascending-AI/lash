@@ -165,8 +165,6 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ResidentToolDuplicateName { .. }
             | PluginError::ResidentToolRouteUnavailable { .. }
             | PluginError::SessionAlreadyExists { .. }
-            | PluginError::BeforeToolCallReplacementConflict { .. }
-            | PluginError::AfterToolCallReplacementConflict { .. }
             | PluginError::SessionInitTooLarge { .. }
             | PluginError::MissingRecordedSessionConfig { .. }
             | PluginError::RecordedSessionConfigConflict { .. }

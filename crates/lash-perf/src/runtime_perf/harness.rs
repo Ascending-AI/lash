@@ -830,12 +830,15 @@ fn benchmark_plugin_factories(
         let composition_observer = Arc::clone(observer);
         factories.push(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("runtime_perf_tool_catalog_observer"),
-            PluginSpec::new().with_tool_catalog_contributor(Arc::new(move |context| {
-                if let Some(session_id) = context.owner.session_id() {
-                    composition_observer.observe_session_catalog_composition(session_id)?;
-                }
-                Ok(Default::default())
-            })),
+            PluginSpec::new().with_tool_catalog_contributor(
+                lash_core::hook_key!("observe-catalog"),
+                Arc::new(move |context| {
+                    if let Some(session_id) = context.owner.session_id() {
+                        composition_observer.observe_session_catalog_composition(session_id)?;
+                    }
+                    Ok(Default::default())
+                }),
+            ),
         )));
     }
     if wiring.workbench_trigger_plugin {

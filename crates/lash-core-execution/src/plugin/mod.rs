@@ -8,7 +8,7 @@ pub use transition::{
 };
 
 use crate::runtime::AssembledTurn;
-use crate::{MessageRole, SessionPolicy, ToolManifest, ToolOutcome, ToolProvider};
+use crate::{MessageRole, SessionPolicy, ToolManifest, ToolProvider};
 
 pub use lash_core_store::store::plugin_writers::{
     PluginCallbackIdentity, PluginExecutionRefusal, PluginRevision,
@@ -24,6 +24,7 @@ mod error;
 #[cfg(test)]
 mod error_class_tests;
 pub(crate) mod history;
+mod hook_key;
 mod hooks;
 pub(crate) mod protocol;
 mod registrar;
@@ -37,6 +38,7 @@ pub(crate) mod session_types;
 pub(crate) mod state;
 use state::PluginStateRegistry;
 mod tool_catalog;
+mod tool_hooks;
 mod trigger_registry;
 
 pub(crate) use actions::{
@@ -69,19 +71,19 @@ pub use history::{
     ContextPressureContext, ContextPressureDecision, ContextPressureHook, DecidedContextPressure,
     PluginTraceEmitter, SessionReadView, TurnContextTransform, TurnTransformContext,
 };
+pub use hook_key::HookKey;
 pub(crate) use hooks::owner_trace_context;
 pub use hooks::require_session_owner;
 pub use hooks::{
-    AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
-    AssistantResponseTransform, AssistantStreamFinishReason, AssistantStreamFinishedContext,
-    AssistantStreamFinishedHook, AssistantStreamHook, AssistantStreamHookContext,
-    AssistantStreamTransform, BeforeToolCallHook, BeforeTurnHook, CheckpointHook,
-    CheckpointHookContext, NoPresentationArtifacts, PluginFuture, PluginLifecycleEvent,
-    PluginLifecycleEventHook, PluginLifecycleFuture, PluginSessionTask,
-    SessionConfigChangedContext, SessionStateChangedContext, ToolCallHookContext,
-    ToolCatalogContributor, ToolPresentationArtifacts, ToolPresentationInput,
-    ToolPresentationPresenter, ToolPresentationStep, ToolResultHookContext,
-    ToolResultProjectionContext, TurnHookContext, TurnHookReport, TurnResultHookContext,
+    AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext, AssistantResponseTransform,
+    AssistantStreamFinishReason, AssistantStreamFinishedContext, AssistantStreamFinishedHook,
+    AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform, BeforeTurnHook,
+    CheckpointHook, CheckpointHookContext, NoPresentationArtifacts, PluginFuture,
+    PluginLifecycleEvent, PluginLifecycleEventHook, PluginLifecycleFuture, PluginSessionTask,
+    SessionConfigChangedContext, SessionStateChangedContext, ToolCatalogContributor,
+    ToolPresentationArtifacts, ToolPresentationInput, ToolPresentationPresenter,
+    ToolPresentationStep, ToolResultProjectionContext, TurnHookContext, TurnHookReport,
+    TurnResultHookContext,
 };
 pub use protocol::{
     AssistantProseProjectorPlugin, CheckpointComponentKey, CodeExecutionOutcome,
@@ -129,14 +131,20 @@ pub use state::{
     PluginStateError, PluginStateMutation, PluginStateStore,
 };
 pub use tool_catalog::{
-    AbortTurnDirective, AfterToolCallPluginDirective, AfterTurnPluginDirective,
-    BeforeToolCallPluginDirective, CheckpointApplication, EnqueueMessagesDirective, PluginAbort,
-    PluginDirective, PrepareTurnRequest, ReplaceToolArgsDirective, ShortCircuitToolDirective,
-    ToolCatalogContext, TurnFinalization, TurnPluginDirective, TurnPreparation,
+    AfterTurnContributions, CheckpointApplication, PluginAbort, PluginRecordContribution,
+    PrepareTurnRequest, ToolCatalogContext, TurnContributions, TurnFinalization, TurnPreparation,
 };
-pub use tool_catalog::{
-    AmbientDirectiveAction, AmbientDirectiveError, PluginTerminalStrength,
-    interpret_ambient_directive, observe_plugin_runtime_events, plugin_runtime_session_events,
+pub use tool_catalog::{observe_plugin_runtime_events, plugin_runtime_session_events};
+pub use tool_hooks::{
+    AfterToolContributions, AfterToolDecision, AttemptOrdinal, BeforeToolDecision,
+    CachedToolSuccess, CheckRank, PreparedCallReadView, RankedVerdict, ToolArgsCheckHook,
+    ToolArgsCheckInput, ToolArgsTransformHook, ToolArgsTransformInput, ToolHookContext,
+    ToolHookOccurrence, ToolHookPhase, ToolResultCandidate, ToolResultCheckHook,
+    ToolResultCheckInput, ToolResultTransformHook, ToolResultTransformInput,
+};
+pub(crate) use tool_hooks::{
+    AttributedContributions, BeforeSelection, ResultChecks, after_resolution, before_selection,
+    displaced_terminals, failed_check, failed_transform,
 };
 pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
     // Protocol plugins must be registered by the embedder before calling
@@ -159,6 +167,7 @@ pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
 #[cfg(test)]
 mod tests {
     use crate::SessionId;
+    use crate::ToolOutcome;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
@@ -188,28 +197,31 @@ mod tests {
             .map(|id| {
                 Arc::new(StaticPluginFactory::new(
                     PluginDeclaration::initial(id),
-                    PluginSpec::new().with_runtime_event(Arc::new(move |_| {
-                        Box::pin(async move {
-                            if id == "first" {
-                                tokio::task::yield_now().await;
-                            }
-                            let error = PluginError::StoredDataCorrupt {
-                                record_kind: id.into(),
-                                message: "broken record".into(),
-                            };
-                            if id == "first" {
-                                let mut failure = PluginOperationFailure::from(error);
-                                failure.origin = Some(PluginFailureOrigin {
-                                    plugin_id: "original-owner".into(),
-                                    behavior_revision: std::num::NonZeroU32::new(7).unwrap(),
-                                    operation: "original-operation".into(),
-                                });
-                                Err(PluginError::Operation(Box::new(failure)))
-                            } else {
-                                Err(error)
-                            }
-                        })
-                    })),
+                    PluginSpec::new().with_runtime_event(
+                        crate::hook_key!("fail"),
+                        Arc::new(move |_| {
+                            Box::pin(async move {
+                                if id == "first" {
+                                    tokio::task::yield_now().await;
+                                }
+                                let error = PluginError::StoredDataCorrupt {
+                                    record_kind: id.into(),
+                                    message: "broken record".into(),
+                                };
+                                if id == "first" {
+                                    let mut failure = PluginOperationFailure::from(error);
+                                    failure.origin = Some(PluginFailureOrigin {
+                                        plugin_id: "original-owner".into(),
+                                        behavior_revision: std::num::NonZeroU32::new(7).unwrap(),
+                                        operation: "original-operation".into(),
+                                    });
+                                    Err(PluginError::Operation(Box::new(failure)))
+                                } else {
+                                    Err(error)
+                                }
+                            })
+                        }),
+                    ),
                 )) as Arc<dyn PluginFactory>
             })
             .collect();
@@ -279,7 +291,7 @@ mod tests {
         for (cause, owner) in causes.iter().zip(["first", "second"]) {
             assert_eq!(cause.origin.plugin_id, owner);
             assert_eq!(cause.origin.behavior_revision.get(), 1);
-            assert_eq!(cause.origin.operation, "runtime_event:0");
+            assert_eq!(cause.origin.operation, "runtime_event:fail");
             assert_eq!(cause.failure.class, PluginFailureClass::Terminal);
             let original: PluginError =
                 serde_json::from_value(cause.failure.payload.clone()).unwrap();

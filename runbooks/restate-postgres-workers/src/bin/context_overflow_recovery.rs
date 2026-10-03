@@ -635,7 +635,7 @@ impl SessionPlugin for OverflowPlugin {
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), lash::plugins::PluginError> {
         if self.protocol == Protocol::Rlm {
-            reg.context().compact(100, Arc::new(ReportCompactor));
+            reg.context().compact(100, Arc::new(ReportCompactor))?;
         }
         reg.tools()
             .provider(oversized_tool_provider(Arc::clone(&self.tool_bytes)))

@@ -62,15 +62,20 @@ fn response_hook_fixture(hook_failures: usize, hook_events: usize) -> ResponseHo
                         runtime_event: None,
                         external_registrar: Some(Arc::new(move |reg| {
                             let hook_calls = Arc::clone(&hook_calls);
-                            reg.output().response(Arc::new(move |context| {
-                                let hook_calls = Arc::clone(&hook_calls);
-                                Box::pin(async move {
-                                    if hook_calls.fetch_add(1, Ordering::SeqCst) < hook_failures {
-                                        return Err(lash_core::PluginError::Invoke(
-                                            "injected assistant response hook failure".to_string(),
-                                        ));
-                                    }
-                                    Ok(lash_core::facade_support::AssistantResponseTransform {
+                            reg.output().response(
+                                lash_core::hook_key!("inject-failure"),
+                                None,
+                                Arc::new(move |context| {
+                                    let hook_calls = Arc::clone(&hook_calls);
+                                    Box::pin(async move {
+                                        if hook_calls.fetch_add(1, Ordering::SeqCst) < hook_failures
+                                        {
+                                            return Err(lash_core::PluginError::Invoke(
+                                                "injected assistant response hook failure"
+                                                    .to_string(),
+                                            ));
+                                        }
+                                        Ok(lash_core::facade_support::AssistantResponseTransform {
                                     response: context.response,
                                     events: (0..hook_events)
                                         .map(|index| lash_core::PluginRuntimeEvent::Custom {
@@ -79,8 +84,9 @@ fn response_hook_fixture(hook_failures: usize, hook_events: usize) -> ResponseHo
                                         })
                                         .collect(),
                                 })
-                                })
-                            }));
+                                    })
+                                }),
+                            )?;
                             Ok(())
                         })),
                     }))
@@ -441,41 +447,51 @@ fn stream_state_plugin() -> Arc<dyn lash_core::facade_support::PluginFactory> {
                 external_registrar: Some(Arc::new(|reg| {
                     let seen = Arc::new(std::sync::Mutex::new(String::new()));
                     let stream_seen = Arc::clone(&seen);
-                    reg.output().stream(Arc::new(move |context| {
-                        stream_seen.lock_recover().push_str(&context.chunk);
-                        Box::pin(async move {
-                            Ok(lash_core::plugin::AssistantStreamTransform {
-                                chunk: context.chunk,
-                                reasoning_deltas: Vec::new(),
-                                events: Vec::new(),
-                                abort_stream: false,
+                    reg.output().stream(
+                        lash_core::hook_key!("transcript"),
+                        Arc::new(move |context| {
+                            stream_seen.lock_recover().push_str(&context.chunk);
+                            Box::pin(async move {
+                                Ok(lash_core::plugin::AssistantStreamTransform {
+                                    chunk: context.chunk,
+                                    reasoning_deltas: Vec::new(),
+                                    events: Vec::new(),
+                                    abort_stream: false,
+                                })
                             })
-                        })
-                    }));
+                        }),
+                    )?;
                     let finished_seen = Arc::clone(&seen);
-                    reg.output().stream_finished(Arc::new(move |_| {
-                        let seen = std::mem::take(&mut *finished_seen.lock_recover());
-                        Box::pin(async move { Ok(Some(serde_json::json!({ "seen": seen }))) })
-                    }));
-                    reg.output().response(Arc::new(move |context| {
-                        let seen = context
-                            .stream_state
-                            .as_ref()
-                            .and_then(|state| state["seen"].as_str())
-                            .unwrap_or("<nothing>")
-                            .to_string();
-                        let mut response = context.response;
-                        response.parts = vec![LlmOutputPart::Text {
-                            text: format!("derived from the stream: {seen}"),
-                            response_meta: None,
-                        }];
-                        Box::pin(async move {
-                            Ok(lash_core::facade_support::AssistantResponseTransform {
-                                response,
-                                events: Vec::new(),
+                    reg.output().stream_finished(
+                        lash_core::hook_key!("transcript"),
+                        Arc::new(move |_| {
+                            let seen = std::mem::take(&mut *finished_seen.lock_recover());
+                            Box::pin(async move { Ok(Some(serde_json::json!({ "seen": seen }))) })
+                        }),
+                    )?;
+                    reg.output().response(
+                        lash_core::hook_key!("transcript"),
+                        Some(lash_core::hook_key!("transcript")),
+                        Arc::new(move |context| {
+                            let seen = context
+                                .stream_state
+                                .as_ref()
+                                .and_then(|state| state["seen"].as_str())
+                                .unwrap_or("<nothing>")
+                                .to_string();
+                            let mut response = context.response;
+                            response.parts = vec![LlmOutputPart::Text {
+                                text: format!("derived from the stream: {seen}"),
+                                response_meta: None,
+                            }];
+                            Box::pin(async move {
+                                Ok(lash_core::facade_support::AssistantResponseTransform {
+                                    response,
+                                    events: Vec::new(),
+                                })
                             })
-                        })
-                    }));
+                        }),
+                    )?;
                     Ok(())
                 })),
             }))

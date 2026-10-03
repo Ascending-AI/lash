@@ -417,8 +417,6 @@ enum TerminalDiagnosticKind {
     Runtime,
     /// Turn input failed normalization before any provider work.
     InputValidation,
-    /// A plugin aborted the prepared turn.
-    Plugin,
 }
 
 impl TerminalDiagnosticKind {
@@ -426,20 +424,15 @@ impl TerminalDiagnosticKind {
         match self {
             Self::Runtime => crate::TurnFailureKind::Runtime,
             Self::InputValidation => crate::TurnFailureKind::InputValidation,
-            Self::Plugin => crate::TurnFailureKind::Plugin,
         }
     }
 }
 
-/// How a terminal diagnostic's turn activity is addressed on the observer.
-enum TerminalActivityTarget<'a> {
-    /// The observer is already turn-scoped, so the activity publishes as is.
-    TurnScoped(&'a TurnObserver),
-    /// The observer is unscoped, so the activity is addressed to `turn_id`.
-    ForTurn {
-        observer: &'a TurnObserver,
-        turn_id: &'a TurnId,
-    },
+/// Where a terminal diagnostic's turn activity is addressed: the unscoped
+/// observer, for `turn_id`.
+struct TerminalActivityTarget<'a> {
+    observer: &'a TurnObserver,
+    turn_id: &'a TurnId,
 }
 
 /// Typed diagnostic emitted immediately ahead of a terminal `TurnOutcome`.
@@ -494,14 +487,8 @@ fn hold_terminal_sequence(
                 message: diagnostic.message,
             },
         };
-        match diagnostic.activity {
-            TerminalActivityTarget::TurnScoped(sink) => {
-                cursor.observe(sink, activity);
-            }
-            TerminalActivityTarget::ForTurn { observer, turn_id } => {
-                cursor.observe(&observer.for_turn(turn_id), activity);
-            }
-        }
+        let target = diagnostic.activity;
+        cursor.observe(&target.observer.for_turn(target.turn_id), activity);
         observer.publish(crate::runtime::RuntimeStreamEvent::Session(error_event));
     }
     let outcome_event = SessionStreamEvent::TurnOutcome {

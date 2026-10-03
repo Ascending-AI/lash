@@ -197,7 +197,8 @@ impl World {
             .into_iter()
             .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
                 lash_core::plugin::PluginDeclaration::initial("conformance-live-fault-park"),
-                crate::facade_support::PluginSpec::new().with_tool_catalog_contributor(contributor),
+                crate::facade_support::PluginSpec::new()
+                    .with_tool_catalog_contributor(crate::hook_key!("live-fault"), contributor),
             ))
                 as Arc<dyn crate::facade_support::PluginFactory>])
             .collect();

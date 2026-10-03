@@ -8,13 +8,14 @@ use crate::SessionId;
 use std::sync::Arc;
 
 use super::{
-    AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantStreamFinishedHook,
-    AssistantStreamHook, BeforeToolCallHook, BeforeTurnHook, CheckpointHook, ContextCompactor,
-    ContextPressureHook, ErasedPluginOperationInvokeFuture, PluginCommand, PluginCommandHandler,
-    PluginError, PluginHost, PluginLifecycleEventHook, PluginOperationOutcome,
-    PluginOperationRegistration, PluginOperationSpec, PluginQuery, PluginQueryHandler,
-    PluginQueryInvokeFuture, PluginRegistrar, PluginTask, PluginTaskHandler, SessionToolAccess,
-    SubagentSessionContext, ToolCatalogContributor, ToolPresentationStep, TurnContextTransform,
+    AfterTurnHook, AssistantResponseHook, AssistantStreamFinishedHook, AssistantStreamHook,
+    BeforeTurnHook, CheckpointHook, ContextCompactor, ContextPressureHook,
+    ErasedPluginOperationInvokeFuture, HookKey, PluginCommand, PluginCommandHandler, PluginError,
+    PluginHost, PluginLifecycleEventHook, PluginOperationOutcome, PluginOperationRegistration,
+    PluginOperationSpec, PluginQuery, PluginQueryHandler, PluginQueryInvokeFuture, PluginRegistrar,
+    PluginTask, PluginTaskHandler, SessionToolAccess, SubagentSessionContext, ToolArgsCheckHook,
+    ToolArgsTransformHook, ToolCatalogContributor, ToolPresentationStep, ToolResultCheckHook,
+    ToolResultTransformHook, TurnContextTransform,
 };
 use crate::ToolProvider;
 
@@ -82,18 +83,22 @@ pub struct PluginSpec {
     pub extension_contributions: Vec<PluginExtensionContribution>,
     pub tool_providers: Vec<Arc<dyn ToolProvider>>,
     pub triggers: Vec<crate::TriggerEvent>,
-    pub tool_catalog_contributors: Vec<ToolCatalogContributor>,
-    pub before_turn_hooks: Vec<BeforeTurnHook>,
-    pub before_tool_call_hooks: Vec<BeforeToolCallHook>,
-    pub after_tool_call_hooks: Vec<AfterToolCallHook>,
-    pub after_turn_hooks: Vec<AfterTurnHook>,
-    pub checkpoint_hooks: Vec<CheckpointHook>,
-    pub assistant_stream_hooks: Vec<AssistantStreamHook>,
-    pub assistant_response_hooks: Vec<AssistantResponseHook>,
-    pub assistant_stream_finished_hooks: Vec<AssistantStreamFinishedHook>,
+    pub tool_catalog_contributors: Vec<(HookKey, ToolCatalogContributor)>,
+    pub before_turn_hooks: Vec<(HookKey, BeforeTurnHook)>,
+    pub tool_args_transforms: Vec<(HookKey, ToolArgsTransformHook)>,
+    pub tool_args_checks: Vec<(HookKey, ToolArgsCheckHook)>,
+    pub tool_result_transforms: Vec<(HookKey, ToolResultTransformHook)>,
+    pub tool_result_checks: Vec<(HookKey, ToolResultCheckHook)>,
+    pub after_turn_hooks: Vec<(HookKey, AfterTurnHook)>,
+    pub checkpoint_hooks: Vec<(HookKey, CheckpointHook)>,
+    pub assistant_stream_hooks: Vec<(HookKey, AssistantStreamHook)>,
+    /// Response callbacks, each with the stream-finished key whose state it
+    /// receives.
+    pub assistant_response_hooks: Vec<(HookKey, Option<HookKey>, AssistantResponseHook)>,
+    pub assistant_stream_finished_hooks: Vec<(HookKey, AssistantStreamFinishedHook)>,
     /// Composable presentation steps, applied in list order (FIG-3420).
-    pub presentation_steps: Vec<ToolPresentationStep>,
-    pub runtime_event_hooks: Vec<PluginLifecycleEventHook>,
+    pub presentation_steps: Vec<(HookKey, ToolPresentationStep)>,
+    pub runtime_event_hooks: Vec<(HookKey, PluginLifecycleEventHook)>,
     pub(crate) plugin_operations: Vec<PluginOperationRegistration>,
     pub turn_context_transforms: Vec<(i32, Arc<dyn TurnContextTransform>)>,
     pub context_compactors: Vec<(i32, Arc<dyn ContextCompactor>)>,
@@ -123,60 +128,90 @@ impl PluginSpec {
         self
     }
 
-    pub fn with_tool_catalog_contributor(mut self, contributor: ToolCatalogContributor) -> Self {
-        self.tool_catalog_contributors.push(contributor);
+    /// The spec's keyed entries register as [`PluginRegistrar`] calls; a
+    /// duplicate key in one seam fails registration.
+    pub fn with_tool_catalog_contributor(
+        mut self,
+        key: HookKey,
+        contributor: ToolCatalogContributor,
+    ) -> Self {
+        self.tool_catalog_contributors.push((key, contributor));
         self
     }
 
-    pub fn with_before_turn(mut self, hook: BeforeTurnHook) -> Self {
-        self.before_turn_hooks.push(hook);
+    pub fn with_before_turn(mut self, key: HookKey, hook: BeforeTurnHook) -> Self {
+        self.before_turn_hooks.push((key, hook));
         self
     }
 
-    pub fn with_before_tool_call(mut self, hook: BeforeToolCallHook) -> Self {
-        self.before_tool_call_hooks.push(hook);
+    pub fn with_tool_args_transform(mut self, key: HookKey, hook: ToolArgsTransformHook) -> Self {
+        self.tool_args_transforms.push((key, hook));
         self
     }
 
-    pub fn with_after_tool_call(mut self, hook: AfterToolCallHook) -> Self {
-        self.after_tool_call_hooks.push(hook);
+    pub fn with_tool_args_check(mut self, key: HookKey, hook: ToolArgsCheckHook) -> Self {
+        self.tool_args_checks.push((key, hook));
         self
     }
 
-    pub fn with_after_turn(mut self, hook: AfterTurnHook) -> Self {
-        self.after_turn_hooks.push(hook);
+    pub fn with_tool_result_transform(
+        mut self,
+        key: HookKey,
+        hook: ToolResultTransformHook,
+    ) -> Self {
+        self.tool_result_transforms.push((key, hook));
         self
     }
 
-    pub fn with_checkpoint(mut self, hook: CheckpointHook) -> Self {
-        self.checkpoint_hooks.push(hook);
+    pub fn with_tool_result_check(mut self, key: HookKey, hook: ToolResultCheckHook) -> Self {
+        self.tool_result_checks.push((key, hook));
         self
     }
 
-    pub fn with_assistant_stream(mut self, hook: AssistantStreamHook) -> Self {
-        self.assistant_stream_hooks.push(hook);
+    pub fn with_after_turn(mut self, key: HookKey, hook: AfterTurnHook) -> Self {
+        self.after_turn_hooks.push((key, hook));
         self
     }
 
-    pub fn with_assistant_response(mut self, hook: AssistantResponseHook) -> Self {
-        self.assistant_response_hooks.push(hook);
+    pub fn with_checkpoint(mut self, key: HookKey, hook: CheckpointHook) -> Self {
+        self.checkpoint_hooks.push((key, hook));
         self
     }
 
-    pub fn with_assistant_stream_finished(mut self, hook: AssistantStreamFinishedHook) -> Self {
-        self.assistant_stream_finished_hooks.push(hook);
+    pub fn with_assistant_stream(mut self, key: HookKey, hook: AssistantStreamHook) -> Self {
+        self.assistant_stream_hooks.push((key, hook));
+        self
+    }
+
+    pub fn with_assistant_response(
+        mut self,
+        key: HookKey,
+        stream_state_from: Option<HookKey>,
+        hook: AssistantResponseHook,
+    ) -> Self {
+        self.assistant_response_hooks
+            .push((key, stream_state_from, hook));
+        self
+    }
+
+    pub fn with_assistant_stream_finished(
+        mut self,
+        key: HookKey,
+        hook: AssistantStreamFinishedHook,
+    ) -> Self {
+        self.assistant_stream_finished_hooks.push((key, hook));
         self
     }
 
     /// Appends one composable presentation step (FIG-3420). Steps run in the
     /// order `with_presentation_step` calls list them.
-    pub fn with_presentation_step(mut self, step: ToolPresentationStep) -> Self {
-        self.presentation_steps.push(step);
+    pub fn with_presentation_step(mut self, key: HookKey, step: ToolPresentationStep) -> Self {
+        self.presentation_steps.push((key, step));
         self
     }
 
-    pub fn with_runtime_event(mut self, hook: PluginLifecycleEventHook) -> Self {
-        self.runtime_event_hooks.push(hook);
+    pub fn with_runtime_event(mut self, key: HookKey, hook: PluginLifecycleEventHook) -> Self {
+        self.runtime_event_hooks.push((key, hook));
         self
     }
 
@@ -982,50 +1017,60 @@ impl SessionPlugin for SpecPlugin {
         for event in &self.spec.triggers {
             reg.triggers().declare(event.clone())?;
         }
-        for contributor in &self.spec.tool_catalog_contributors {
-            reg.tool_catalog().contribute(Arc::clone(contributor));
+        for (key, contributor) in &self.spec.tool_catalog_contributors {
+            reg.tool_catalog()
+                .contribute(*key, Arc::clone(contributor))?;
         }
-        for hook in &self.spec.before_turn_hooks {
-            reg.turn().before(Arc::clone(hook));
+        for (key, hook) in &self.spec.before_turn_hooks {
+            reg.turn().before(*key, Arc::clone(hook))?;
         }
-        for hook in &self.spec.before_tool_call_hooks {
-            reg.tool_calls().before(Arc::clone(hook));
+        for (key, hook) in &self.spec.tool_args_transforms {
+            reg.tool_calls().transform_args(*key, Arc::clone(hook))?;
         }
-        for hook in &self.spec.after_tool_call_hooks {
-            reg.tool_calls().after(Arc::clone(hook));
+        for (key, hook) in &self.spec.tool_args_checks {
+            reg.tool_calls().check_args(*key, Arc::clone(hook))?;
         }
-        for hook in &self.spec.after_turn_hooks {
-            reg.turn().after(Arc::clone(hook));
+        for (key, hook) in &self.spec.tool_result_transforms {
+            reg.tool_calls().transform_result(*key, Arc::clone(hook))?;
         }
-        for hook in &self.spec.checkpoint_hooks {
-            reg.turn().checkpoint(Arc::clone(hook));
+        for (key, hook) in &self.spec.tool_result_checks {
+            reg.tool_calls().check_result(*key, Arc::clone(hook))?;
         }
-        for hook in &self.spec.assistant_stream_hooks {
-            reg.output().stream(Arc::clone(hook));
+        for (key, hook) in &self.spec.after_turn_hooks {
+            reg.turn().after(*key, Arc::clone(hook))?;
         }
-        for hook in &self.spec.assistant_response_hooks {
-            reg.output().response(Arc::clone(hook));
+        for (key, hook) in &self.spec.checkpoint_hooks {
+            reg.turn().checkpoint(*key, Arc::clone(hook))?;
         }
-        for hook in &self.spec.assistant_stream_finished_hooks {
-            reg.output().stream_finished(Arc::clone(hook));
+        for (key, hook) in &self.spec.assistant_stream_hooks {
+            reg.output().stream(*key, Arc::clone(hook))?;
         }
-        for step in &self.spec.presentation_steps {
-            reg.tool_results().presentation_step(Arc::clone(step));
+        for (key, hook) in &self.spec.assistant_stream_finished_hooks {
+            reg.output().stream_finished(*key, Arc::clone(hook))?;
         }
-        for hook in &self.spec.runtime_event_hooks {
-            reg.session().on_event(Arc::clone(hook));
+        for (key, stream_state_from, hook) in &self.spec.assistant_response_hooks {
+            reg.output()
+                .response(*key, *stream_state_from, Arc::clone(hook))?;
+        }
+        for (key, step) in &self.spec.presentation_steps {
+            reg.tool_results()
+                .presentation_step(*key, Arc::clone(step))?;
+        }
+        for (key, hook) in &self.spec.runtime_event_hooks {
+            reg.session().on_event(*key, Arc::clone(hook))?;
         }
         for operation in &self.spec.plugin_operations {
             reg.operations().register(operation.clone())?;
         }
         for (priority, transform) in &self.spec.turn_context_transforms {
-            reg.context().prepare_turn(*priority, Arc::clone(transform));
+            reg.context()
+                .prepare_turn(*priority, Arc::clone(transform))?;
         }
         for (priority, compactor) in &self.spec.context_compactors {
-            reg.context().compact(*priority, Arc::clone(compactor));
+            reg.context().compact(*priority, Arc::clone(compactor))?;
         }
         for (priority, hook) in &self.spec.context_pressure_hooks {
-            reg.context().pressure(*priority, Arc::clone(hook));
+            reg.context().pressure(*priority, Arc::clone(hook))?;
         }
         Ok(())
     }

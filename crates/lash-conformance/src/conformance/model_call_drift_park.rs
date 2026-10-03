@@ -136,20 +136,20 @@ impl crate::plugin::SessionPlugin for DriftNote {
         registrar: &mut crate::plugin::PluginRegistrar,
     ) -> Result<(), lash_core::PluginError> {
         let note = self.0;
-        registrar.turn().before(Arc::new(move |_| {
-            Box::pin(async move {
-                Ok(vec![
-                    lash_core::facade_support::TurnPluginDirective::EnqueueMessages(
-                        lash_core::facade_support::EnqueueMessagesDirective {
-                            messages: vec![lash_core::PluginMessage::text(
-                                lash_core::MessageRole::System,
-                                note,
-                            )],
-                        },
-                    ),
-                ])
-            })
-        }));
+        registrar.turn().before(
+            crate::hook_key!("drift-note"),
+            Arc::new(move |_| {
+                Box::pin(async move {
+                    Ok(lash_core::facade_support::TurnContributions {
+                        messages: vec![lash_core::PluginMessage::text(
+                            lash_core::MessageRole::System,
+                            note,
+                        )],
+                        events: Vec::new(),
+                    })
+                })
+            }),
+        )?;
         Ok(())
     }
 }
@@ -473,23 +473,27 @@ pub async fn runtime_shift_cold_replay_ignores_live_input_and_hook_drift(
                     runtime_event: None,
                     external_registrar: Some(Arc::new(move |reg| {
                         let calls = Arc::clone(&calls);
-                        reg.output().response(Arc::new(move |context| {
-                            calls.fetch_add(1, Ordering::SeqCst);
-                            let mut response = context.response;
-                            if drift {
-                                response.parts = vec![crate::LlmOutputPart::Text {
-                                    text: "<typescript>finish(\"wrong replay\");</typescript>"
-                                        .into(),
-                                    response_meta: None,
-                                }];
-                            }
-                            Box::pin(async move {
-                                Ok(crate::AssistantResponseTransform {
-                                    response,
-                                    events: Vec::new(),
+                        reg.output().response(
+                            crate::hook_key!("drift"),
+                            None,
+                            Arc::new(move |context| {
+                                calls.fetch_add(1, Ordering::SeqCst);
+                                let mut response = context.response;
+                                if drift {
+                                    response.parts = vec![crate::LlmOutputPart::Text {
+                                        text: "<typescript>finish(\"wrong replay\");</typescript>"
+                                            .into(),
+                                        response_meta: None,
+                                    }];
+                                }
+                                Box::pin(async move {
+                                    Ok(crate::AssistantResponseTransform {
+                                        response,
+                                        events: Vec::new(),
+                                    })
                                 })
-                            })
-                        }));
+                            }),
+                        )?;
                         Ok(())
                     })),
                 }))

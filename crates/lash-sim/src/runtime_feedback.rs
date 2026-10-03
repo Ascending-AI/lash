@@ -451,27 +451,27 @@ impl lash_core::plugin::PluginFactory for FeedbackPlugin {
         ctx: &lash_core::plugin::PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
         let injected = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let spec = lash_core::plugin::PluginSpec::new().with_checkpoint(Arc::new(move |ctx| {
-            let injected = injected.clone();
-            Box::pin(async move {
-                if ctx.checkpoint == lash_core::CheckpointKind::BeforeCompletion
-                    && !injected.swap(true, std::sync::atomic::Ordering::SeqCst)
-                {
-                    Ok(vec![
-                        lash_core::plugin::TurnPluginDirective::EnqueueMessages(
-                            lash_core::plugin::EnqueueMessagesDirective {
-                                messages: vec![lash_core::PluginMessage::text(
-                                    lash_core::MessageRole::System,
-                                    "checkpoint feedback nonce 2505",
-                                )],
-                            },
-                        ),
-                    ])
-                } else {
-                    Ok(vec![])
-                }
-            })
-        }));
+        let spec = lash_core::plugin::PluginSpec::new().with_checkpoint(
+            lash_core::hook_key!("feedback"),
+            Arc::new(move |ctx| {
+                let injected = injected.clone();
+                Box::pin(async move {
+                    if ctx.checkpoint == lash_core::CheckpointKind::BeforeCompletion
+                        && !injected.swap(true, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        Ok(lash_core::plugin::TurnContributions {
+                            messages: vec![lash_core::PluginMessage::text(
+                                lash_core::MessageRole::System,
+                                "checkpoint feedback nonce 2505",
+                            )],
+                            events: Vec::new(),
+                        })
+                    } else {
+                        Ok(lash_core::plugin::TurnContributions::default())
+                    }
+                })
+            }),
+        );
         lash_core::plugin::PluginFactory::build(
             &lash_core::plugin::StaticPluginFactory::new(
                 lash_core::plugin::PluginDeclaration::initial(self.id()),

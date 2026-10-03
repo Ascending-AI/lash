@@ -67,9 +67,14 @@ callback_slots! {
     ToolProvider => "tool_provider", DecisionOnly;
     ToolCatalog => "tool_catalog", DecisionOnly;
     BeforeTurn => "before_turn", Commands;
-    BeforeToolCall => "before_tool_call", DecisionOnly;
+    /// Argument transforms, chained before provider preparation.
+    ToolArgsTransform => "tool_args_transform", DecisionOnly;
+    /// Before-checks over the immutable prepared call.
+    ToolArgsCheck => "tool_args_check", DecisionOnly;
+    /// Result transforms, chained over the original and preceding candidate.
+    ToolResultTransform => "tool_result_transform", DecisionOnly;
     /// The after-tool result check, on the Run's sequential path.
-    AfterToolCall => "after_tool_call", Commands;
+    ToolResultCheck => "tool_result_check", Commands;
     AfterTurn => "after_turn", Commands;
     Checkpoint => "checkpoint", Commands;
     AssistantStream => "assistant_stream", DecisionOnly;

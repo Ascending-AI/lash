@@ -164,7 +164,7 @@ impl ToolDispatchContext<'_> {
     /// A fresh observation cursor for one emission lane of this dispatch —
     /// `lane` keeps sibling lanes distinct under one base key. A dispatch
     /// carrying a per-call key ([`Self::observation_keyed`]) resolves it
-    /// instead of the base, so every lane the call emits — directive folds,
+    /// instead of the base, so every lane the call emits — hook evidence,
     /// stream events, activities — lands under the call's own key.
     pub fn observation_cursor(&self, lane: &str) -> crate::engine::ObservationCursor {
         let base = self

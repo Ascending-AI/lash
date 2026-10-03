@@ -1,5 +1,7 @@
-error[E0599]: no variant, associated function, or constant named `AbortTurn` found for enum `AfterTurnPluginDirective` in the current scope
- --> tests/ui/after_turn_cannot_abort.rs:4:39
+error[E0560]: struct `AfterTurnContributions` has no field named `abort`
+ --> tests/ui/after_turn_cannot_abort.rs:5:9
   |
-4 |     let _ = AfterTurnPluginDirective::AbortTurn(AbortTurnDirective {
-  |                                       ^^^^^^^^^ variant, associated function, or constant not found in `AfterTurnPluginDirective`
+5 |         abort: Some("after-turn observers cannot abort"),
+  |         ^^^^^ `AfterTurnContributions` does not have this field
+  |
+  = note: available fields are: `messages`, `events`, `records`

@@ -196,7 +196,7 @@ impl LashRuntime {
                         code: Some(crate::TurnFailureCode::InvalidTurnInput.into()),
                         message: e,
                         retryable: Some(false),
-                        activity: TerminalActivityTarget::ForTurn {
+                        activity: TerminalActivityTarget {
                             observer,
                             turn_id: &trace_turn_id,
                         },

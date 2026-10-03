@@ -558,6 +558,24 @@ pub fn mock_session_policy() -> SessionPolicy {
     standard_test_policy()
 }
 
+/// The context a tool hook of a session's call to `tool_name` reads, built
+/// for a test that calls the hook directly.
+pub fn tool_hook_context(
+    tool_name: &str,
+    argument_projection: crate::ToolArgumentProjectionPolicy,
+) -> crate::plugin::ToolHookContext {
+    crate::plugin::ToolHookContext {
+        owner: crate::RuntimeOwner::Session(crate::SessionId::from("session")),
+        call_id: crate::ToolCallId::fixture("hook"),
+        tool_id: crate::ToolId::from(format!("tool:{tool_name}")),
+        tool_name: tool_name.to_string(),
+        plugin_config: Default::default(),
+        argument_projection,
+        turn_context: crate::TurnContext::default(),
+        sessions: std::sync::Arc::new(MockSessionManager::default()),
+    }
+}
+
 /// The runtime's per-call dispatch state for one tool call, built for a test.
 ///
 /// That state is crate-private: a test configures it here, then projects the

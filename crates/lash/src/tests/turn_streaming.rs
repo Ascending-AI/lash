@@ -166,26 +166,29 @@ impl lash_core::facade_support::SessionPlugin for TurnPersistedObserverPlugin {
     ) -> std::result::Result<(), lash_core::PluginError> {
         let observation_count = Arc::clone(&self.observation_count);
         let max_failures = self.max_failures;
-        reg.session().on_event(Arc::new(move |event| {
-            let observation_count = Arc::clone(&observation_count);
-            Box::pin(async move {
-                let lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(ctx) = event
-                else {
-                    return Ok(());
-                };
-                let Ok(_observation_index) =
-                    observation_count.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-                        (current < max_failures).then_some(current + 1)
-                    })
-                else {
-                    return Ok(());
-                };
-                assert_eq!(ctx.state.session_id(), &ctx.session_id);
-                Err(lash_core::PluginError::Session(
-                    "observer sink unavailable".into(),
-                ))
-            })
-        }));
+        reg.session().on_event(
+            crate::hook_key!("session-on-event-1"),
+            Arc::new(move |event| {
+                let observation_count = Arc::clone(&observation_count);
+                Box::pin(async move {
+                    let lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(ctx) = event
+                    else {
+                        return Ok(());
+                    };
+                    let Ok(_observation_index) = observation_count.fetch_update(
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                        |current| (current < max_failures).then_some(current + 1),
+                    ) else {
+                        return Ok(());
+                    };
+                    assert_eq!(ctx.state.session_id(), &ctx.session_id);
+                    Err(lash_core::PluginError::Session(
+                        "observer sink unavailable".into(),
+                    ))
+                })
+            }),
+        )?;
         Ok(())
     }
 }

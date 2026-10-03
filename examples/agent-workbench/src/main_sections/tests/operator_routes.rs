@@ -171,23 +171,27 @@ impl SessionPlugin for OperatorFault {
     }
     fn register(&self, registrar: &mut PluginRegistrar) -> Result<(), PluginError> {
         let repaired = self.repaired.clone();
-        registrar.output().response(Arc::new(move |ctx| {
-            let repaired = repaired.clone();
-            Box::pin(async move {
-                if !repaired.load(Ordering::SeqCst) {
-                    return Err(PluginError::RuntimeEffectController(
-                        lash::runtime::RuntimeEffectControllerError::new(
-                            lash::runtime::RuntimeErrorCode::LashlangCellReplayDivergence,
-                            "operator test replay refusal",
-                        ),
-                    ));
-                }
-                Ok(lash::plugins::AssistantResponseTransform {
-                    response: ctx.response,
-                    events: Vec::new(),
+        registrar.output().response(
+            lash::hook_key!("fault"),
+            None,
+            Arc::new(move |ctx| {
+                let repaired = repaired.clone();
+                Box::pin(async move {
+                    if !repaired.load(Ordering::SeqCst) {
+                        return Err(PluginError::RuntimeEffectController(
+                            lash::runtime::RuntimeEffectControllerError::new(
+                                lash::runtime::RuntimeErrorCode::LashlangCellReplayDivergence,
+                                "operator test replay refusal",
+                            ),
+                        ));
+                    }
+                    Ok(lash::plugins::AssistantResponseTransform {
+                        response: ctx.response,
+                        events: Vec::new(),
+                    })
                 })
-            })
-        }));
+            }),
+        )?;
         Ok(())
     }
 }

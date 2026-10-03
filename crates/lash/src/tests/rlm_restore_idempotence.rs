@@ -1141,21 +1141,24 @@ impl lash_core::facade_support::SessionPlugin for FailFirstTurnPersisted {
         reg: &mut lash_core::facade_support::PluginRegistrar,
     ) -> Result<(), lash_core::PluginError> {
         let deliveries = Arc::new(AtomicUsize::new(0));
-        reg.session().on_event(Arc::new(move |event| {
-            let deliveries = Arc::clone(&deliveries);
-            Box::pin(async move {
-                if matches!(
-                    event,
-                    lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(_)
-                ) && deliveries.fetch_add(1, Ordering::SeqCst) == 0
-                {
-                    return Err(lash_core::PluginError::attempt_fault(
-                        "injected post-commit delivery failure (FIG-2521)",
-                    ));
-                }
-                Ok(())
-            })
-        }));
+        reg.session().on_event(
+            crate::hook_key!("session-on-event-3"),
+            Arc::new(move |event| {
+                let deliveries = Arc::clone(&deliveries);
+                Box::pin(async move {
+                    if matches!(
+                        event,
+                        lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(_)
+                    ) && deliveries.fetch_add(1, Ordering::SeqCst) == 0
+                    {
+                        return Err(lash_core::PluginError::attempt_fault(
+                            "injected post-commit delivery failure (FIG-2521)",
+                        ));
+                    }
+                    Ok(())
+                })
+            }),
+        )?;
         Ok(())
     }
 }
@@ -1321,18 +1324,21 @@ fn refuse_second_turn_finalize() -> Arc<dyn PluginFactory> {
     let calls = Arc::new(AtomicUsize::new(0));
     Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("fig2521-refuse-second-finalize"),
-        PluginSpec::new().with_after_turn(Arc::new(move |_| {
-            let calls = Arc::clone(&calls);
-            Box::pin(async move {
-                if calls.fetch_add(1, Ordering::SeqCst) == 1 {
-                    Err(lash_core::PluginError::attempt_fault(
-                        "injected pre-commit finalize failure".to_string(),
-                    ))
-                } else {
-                    Ok(Vec::new())
-                }
-            })
-        })),
+        PluginSpec::new().with_after_turn(
+            crate::hook_key!("after-turn-1"),
+            Arc::new(move |_| {
+                let calls = Arc::clone(&calls);
+                Box::pin(async move {
+                    if calls.fetch_add(1, Ordering::SeqCst) == 1 {
+                        Err(lash_core::PluginError::attempt_fault(
+                            "injected pre-commit finalize failure".to_string(),
+                        ))
+                    } else {
+                        Ok(Default::default())
+                    }
+                })
+            }),
+        ),
     ))
 }
 
@@ -1510,9 +1516,9 @@ async fn rlm_cold_replay_preserves_terminal_payload_and_zero_exec_usage() {
             let fail = Arc::clone(&finalize);
             let plugins: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
                 lash_core::plugin::PluginDeclaration::initial("cold-terminal-fixture"),
-                PluginSpec::new()
-                    .with_tool_provider(tool)
-                    .with_after_turn(Arc::new(move |_| {
+                PluginSpec::new().with_tool_provider(tool).with_after_turn(
+                    crate::hook_key!("after-turn-2"),
+                    Arc::new(move |_| {
                         let fail = Arc::clone(&fail);
                         Box::pin(async move {
                             if fail.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -1520,9 +1526,10 @@ async fn rlm_cold_replay_preserves_terminal_payload_and_zero_exec_usage() {
                                     "lose the resident runtime before commit",
                                 ));
                             }
-                            Ok(Vec::new())
+                            Ok(Default::default())
                         })
-                    })),
+                    }),
+                ),
             ))];
             let seeded = Box::pin(backend.seeded_session_with_plugins(
                 "cold-terminal",

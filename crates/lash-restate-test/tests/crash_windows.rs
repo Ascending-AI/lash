@@ -842,8 +842,10 @@ fn presentation_core(
             .build()
             .into_handle()
     };
-    let spec = lash_core::plugin::PluginSpec::new()
-        .with_presentation_step(retaining_step(Arc::clone(witness)));
+    let spec = lash_core::plugin::PluginSpec::new().with_presentation_step(
+        lash_core::hook_key!("presentation-step-1"),
+        retaining_step(Arc::clone(witness)),
+    );
     lash::LashCore::standard_builder(engine.lash_backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

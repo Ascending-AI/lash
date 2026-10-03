@@ -1,5 +1,4 @@
-//! The tool hook contract the Run records (the adopted hook-composition
-//! ruling; FIG-1399 owns the hook API cutover and the ADR 0059 replacement).
+//! The tool hook contract the Run records (ADR 0128).
 //!
 //! For one admitted call the sequence is fixed: argument transforms chain in
 //! recorded order, the bound provider prepares the call, then every

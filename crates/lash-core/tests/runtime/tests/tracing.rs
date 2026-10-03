@@ -894,15 +894,20 @@ async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() {
     let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
     let refusal = Arc::new(lash_core::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("tool-refusal"),
-        lash_core::facade_support::PluginSpec::new().with_before_tool_call(Arc::new(|_ctx| {
-            Box::pin(async {
-                Ok(vec![
-                    lash_core::facade_support::BeforeToolCallPluginDirective::short_circuit(
-                        lash_core::ToolOutcome::err_fmt("refused by test hook"),
-                    ),
-                ])
-            })
-        })),
+        lash_core::facade_support::PluginSpec::new().with_tool_args_check(
+            lash_core::hook_key!("refuse"),
+            Arc::new(|_input| {
+                Box::pin(async {
+                    Ok(lash_core::plugin::BeforeToolDecision::Deny(
+                        lash_core::ToolFailure::tool(
+                            lash_core::ToolFailureClass::PermissionDenied,
+                            "refused",
+                            "refused by test hook",
+                        ),
+                    ))
+                })
+            }),
+        ),
     ));
     Box::pin(assert_standard_tool_lifecycle(
         &double,

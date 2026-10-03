@@ -190,7 +190,8 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
         .tools(Arc::new(RetentionTools))
         .plugin(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("output-retention-appendix"),
-            lash_core::plugin::PluginSpec::new().with_presentation_step(appendix_step()),
+            lash_core::plugin::PluginSpec::new()
+                .with_presentation_step(crate::hook_key!("presentation-step-1"), appendix_step()),
         )))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;

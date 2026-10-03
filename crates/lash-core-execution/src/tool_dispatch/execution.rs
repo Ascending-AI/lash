@@ -1,20 +1,15 @@
+//! The test dispatch path: one prepared call coordinated outside a turn.
+
 use std::sync::Arc;
 
-use crate::plugin::ToolResultHookContext;
-#[cfg(any(test, feature = "testing"))]
+use crate::ToolFailureClass;
 use crate::{PreparedToolCall, ToolContext};
-use crate::{ToolFailureClass, ToolOutcome};
 
-#[cfg(any(test, feature = "testing"))]
-use super::context::ToolCallIds;
-#[cfg(any(test, feature = "testing"))]
-use super::context::{ToolCallLaunch, ToolDispatchOutcome};
-use super::context::{ToolDispatchContext, runtime_failure};
-use super::directives::apply_after_tool_directives;
-#[cfg(any(test, feature = "testing"))]
+use super::context::{
+    ToolCallIds, ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome, runtime_failure,
+};
 use super::retry::normalized_outcome;
 
-#[cfg(any(test, feature = "testing"))]
 pub(crate) async fn dispatch_prepared_tool_call_with_execution_context<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: PreparedToolCall,
@@ -31,7 +26,6 @@ pub(crate) async fn dispatch_prepared_tool_call_with_execution_context<'run>(
     tool_call_launch_into_done_or_runtime_failure(context, &ids, launch).await
 }
 
-#[cfg(any(test, feature = "testing"))]
 pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: PreparedToolCall,
@@ -70,39 +64,6 @@ pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
     .launch
 }
 
-pub async fn finalize_tool_result_with_execution_context(
-    context: &ToolDispatchContext<'_>,
-    call_id: &lash_sansio::ToolCallId,
-    tool_name: &str,
-    args: &serde_json::Value,
-    result: ToolOutcome,
-    duration_ms: u64,
-) -> ToolOutcome {
-    match context
-        .plugins
-        .after_tool_call(ToolResultHookContext::new(
-            context.owner.runtime_owner(),
-            context.plugins.admitted_plugin_config(),
-            call_id.clone(),
-            tool_name.to_string(),
-            args.clone(),
-            result.clone(),
-            duration_ms,
-            context.turn_context.clone(),
-            Arc::clone(&context.sessions),
-        ))
-        .await
-    {
-        Ok(directives) => Box::pin(apply_after_tool_directives(context, result, directives)).await,
-        Err(err) => runtime_failure(
-            ToolFailureClass::Internal,
-            "after_tool_call_failed",
-            err.to_string(),
-        ),
-    }
-}
-
-#[cfg(any(test, feature = "testing"))]
 async fn tool_call_launch_into_done_or_runtime_failure(
     context: &ToolDispatchContext<'_>,
     ids: &ToolCallIds,

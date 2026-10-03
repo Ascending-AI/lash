@@ -98,19 +98,16 @@ pub(super) async fn work_withheld_before_a_frame_switch_waits_for_its_follow_on(
                         if ctx.checkpoint != lash_core::CheckpointKind::BeforeCompletion
                             || injected.swap(true, Ordering::SeqCst)
                         {
-                            return Ok(Vec::new());
+                            return Ok(lash_core::plugin::TurnContributions::default());
                         }
                         protocol.switch_next.store(true, Ordering::SeqCst);
-                        Ok(vec![
-                            lash_core::facade_support::TurnPluginDirective::EnqueueMessages(
-                                lash_core::facade_support::EnqueueMessagesDirective {
-                                    messages: vec![lash_core::PluginMessage::text(
-                                        lash_core::MessageRole::System,
-                                        "one more step before finishing",
-                                    )],
-                                },
-                            ),
-                        ])
+                        Ok(lash_core::plugin::TurnContributions {
+                            messages: vec![lash_core::PluginMessage::text(
+                                lash_core::MessageRole::System,
+                                "one more step before finishing",
+                            )],
+                            events: Vec::new(),
+                        })
                     })
                 })),
                 presentation_steps: vec![],

@@ -13,7 +13,9 @@ pub(crate) struct RegisteredHook<T> {
 
 pub(crate) type RegisteredExclusiveHook<T> = RegisteredHook<T>;
 
-fn push_registered_hook<T>(
+/// Registers a routed definition (a tool provider) under its per-plugin
+/// ordinal: providers dispatch by tool authority, not by callback order.
+fn push_ordinal_hook<T>(
     hooks: &mut Vec<RegisteredHook<T>>,
     owner: &PluginRevision,
     slot: CallbackSlot,
@@ -32,27 +34,64 @@ fn push_registered_hook<T>(
     });
 }
 
-fn push_prioritized_registered_hook<T>(
+/// The identity of `owner`'s callback named `key` in `slot`.
+fn keyed_identity(
+    owner: &PluginRevision,
+    slot: CallbackSlot,
+    key: HookKey,
+) -> PluginCallbackIdentity {
+    PluginCallbackIdentity {
+        owner: owner.clone(),
+        key: format!("{}:{key}", slot.key_prefix()),
+    }
+}
+
+fn refuse_duplicate_key<'a>(
+    mut existing: impl Iterator<Item = &'a PluginCallbackIdentity>,
+    identity: &PluginCallbackIdentity,
+) -> Result<(), PluginError> {
+    if existing.any(|registered| registered == identity) {
+        return Err(PluginError::Registration(format!(
+            "duplicate hook key `{}` for plugin `{}`",
+            identity.key, identity.owner.plugin
+        )));
+    }
+    Ok(())
+}
+
+fn push_keyed_hook<T>(
+    hooks: &mut Vec<RegisteredHook<T>>,
+    owner: &PluginRevision,
+    slot: CallbackSlot,
+    key: HookKey,
+    hook: T,
+) -> Result<(), PluginError> {
+    let identity = keyed_identity(owner, slot, key);
+    refuse_duplicate_key(
+        hooks.iter().map(|registered| &registered.identity),
+        &identity,
+    )?;
+    hooks.push(RegisteredHook { identity, hook });
+    Ok(())
+}
+
+/// Registers a priority-ordered context hook under the key its trait's
+/// `id()` declares.
+fn push_prioritized_keyed_hook<T>(
     hooks: &mut Vec<(i32, RegisteredHook<T>)>,
     owner: &PluginRevision,
     slot: CallbackSlot,
+    id: &'static str,
     priority: i32,
     hook: T,
-) {
-    let ordinal = hooks
-        .iter()
-        .filter(|(_, registered)| registered.identity.owner.plugin == owner.plugin)
-        .count();
-    hooks.push((
-        priority,
-        RegisteredHook {
-            identity: PluginCallbackIdentity {
-                owner: owner.clone(),
-                key: format!("{}:{ordinal}", slot.key_prefix()),
-            },
-            hook,
-        },
-    ));
+) -> Result<(), PluginError> {
+    let identity = keyed_identity(owner, slot, HookKey::new(id)?);
+    refuse_duplicate_key(
+        hooks.iter().map(|(_, registered)| &registered.identity),
+        &identity,
+    )?;
+    hooks.push((priority, RegisteredHook { identity, hook }));
+    Ok(())
 }
 
 fn register_singleton_hook<H>(
@@ -88,13 +127,18 @@ pub(crate) struct PluginContributions {
     pub(crate) triggers: Vec<crate::TriggerEvent>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
     pub(crate) before_turn_hooks: Vec<RegisteredHook<BeforeTurnHook>>,
-    pub(crate) before_tool_call_hooks: Vec<RegisteredHook<BeforeToolCallHook>>,
-    pub(crate) after_tool_call_hooks: Vec<RegisteredHook<AfterToolCallHook>>,
+    pub(crate) tool_args_transforms: Vec<RegisteredHook<ToolArgsTransformHook>>,
+    pub(crate) tool_args_checks: Vec<RegisteredHook<ToolArgsCheckHook>>,
+    pub(crate) tool_result_transforms: Vec<RegisteredHook<ToolResultTransformHook>>,
+    pub(crate) tool_result_checks: Vec<RegisteredHook<ToolResultCheckHook>>,
     pub(crate) after_turn_hooks: Vec<RegisteredHook<AfterTurnHook>>,
     pub(crate) checkpoint_hooks: Vec<RegisteredHook<CheckpointHook>>,
     pub(crate) assistant_stream_hooks: Vec<RegisteredHook<AssistantStreamHook>>,
     pub(crate) assistant_response_hooks: Vec<RegisteredHook<AssistantResponseHook>>,
     pub(crate) assistant_stream_finished_hooks: Vec<RegisteredHook<AssistantStreamFinishedHook>>,
+    /// Each response callback that reads a stream-finished state, with the
+    /// one same-plugin finished callback it names.
+    pub(crate) assistant_stream_state_pairs: Vec<(PluginCallbackIdentity, PluginCallbackIdentity)>,
     /// Presentation steps compose in registration order (FIG-3420); no
     /// exclusive `model_observation` ownership exists anymore.
     pub(crate) presentation_steps: Vec<RegisteredHook<ToolPresentationStep>>,
@@ -143,8 +187,20 @@ pub struct ToolCatalogRegistrations<'a> {
 }
 
 impl ToolCatalogRegistrations<'_> {
-    pub fn contribute(self, contributor: ToolCatalogContributor) {
-        self.reg.add_tool_catalog_contributor(contributor);
+    /// Catalog contributions only remove members; the union of every
+    /// contributor's removals applies, so their order does not matter.
+    pub fn contribute(
+        self,
+        key: HookKey,
+        contributor: ToolCatalogContributor,
+    ) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.tool_catalog_contributors,
+            &self.reg.owner,
+            CallbackSlot::ToolCatalog,
+            key,
+            contributor,
+        )
     }
 }
 
@@ -152,17 +208,38 @@ pub struct TurnRegistrations<'a> {
     reg: &'a mut PluginRegistrar,
 }
 
+/// Turn observers run sequentially in recorded registration order. Each
+/// returns declared contributions the turn applies at its owned boundary;
+/// an observer has no veto over the turn it observes.
 impl TurnRegistrations<'_> {
-    pub fn before(self, hook: BeforeTurnHook) {
-        self.reg.add_before_turn_hook(hook);
+    pub fn before(self, key: HookKey, hook: BeforeTurnHook) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.before_turn_hooks,
+            &self.reg.owner,
+            CallbackSlot::BeforeTurn,
+            key,
+            hook,
+        )
     }
 
-    pub fn after(self, hook: AfterTurnHook) {
-        self.reg.add_after_turn_hook(hook);
+    pub fn after(self, key: HookKey, hook: AfterTurnHook) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.after_turn_hooks,
+            &self.reg.owner,
+            CallbackSlot::AfterTurn,
+            key,
+            hook,
+        )
     }
 
-    pub fn checkpoint(self, hook: CheckpointHook) {
-        self.reg.add_checkpoint_hook(hook);
+    pub fn checkpoint(self, key: HookKey, hook: CheckpointHook) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.checkpoint_hooks,
+            &self.reg.owner,
+            CallbackSlot::Checkpoint,
+            key,
+            hook,
+        )
     }
 }
 
@@ -170,13 +247,64 @@ pub struct ToolCallRegistrations<'a> {
     reg: &'a mut PluginRegistrar,
 }
 
+/// The four tool hook phases (ADR 0128). Transforms chain once in recorded
+/// registration order; checks all inspect one immutable value and reduce by
+/// strength, then plugin id, then callback key.
 impl ToolCallRegistrations<'_> {
-    pub fn before(self, hook: BeforeToolCallHook) {
-        self.reg.add_before_tool_call_hook(hook);
+    /// Rewrites a call's arguments before they are validated and the
+    /// provider prepares the call. Return the value even when unchanged.
+    pub fn transform_args(
+        self,
+        key: HookKey,
+        hook: ToolArgsTransformHook,
+    ) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.tool_args_transforms,
+            &self.reg.owner,
+            CallbackSlot::ToolArgsTransform,
+            key,
+            hook,
+        )
     }
 
-    pub fn after(self, hook: AfterToolCallHook) {
-        self.reg.add_after_tool_call_hook(hook);
+    /// Decides over the final prepared call: allow it, serve a cached
+    /// success, deny or cancel it, or stop the Run.
+    pub fn check_args(self, key: HookKey, hook: ToolArgsCheckHook) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.tool_args_checks,
+            &self.reg.owner,
+            CallbackSlot::ToolArgsCheck,
+            key,
+            hook,
+        )
+    }
+
+    /// Rewrites a completed result before the after-checks inspect it. This
+    /// is where a result is normalized or recovered.
+    pub fn transform_result(
+        self,
+        key: HookKey,
+        hook: ToolResultTransformHook,
+    ) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.tool_result_transforms,
+            &self.reg.owner,
+            CallbackSlot::ToolResultTransform,
+            key,
+            hook,
+        )
+    }
+
+    /// Decides over the final result: allow it, deny or cancel the call, or
+    /// stop the Run. A check never replaces the result.
+    pub fn check_result(self, key: HookKey, hook: ToolResultCheckHook) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.tool_result_checks,
+            &self.reg.owner,
+            CallbackSlot::ToolResultCheck,
+            key,
+            hook,
+        )
     }
 }
 
@@ -185,21 +313,68 @@ pub struct OutputRegistrations<'a> {
 }
 
 impl OutputRegistrations<'_> {
-    pub fn stream(self, hook: AssistantStreamHook) {
-        self.reg.add_assistant_stream_hook(hook);
+    /// Chunk transforms chain in recorded registration order; any hook that
+    /// asks to stop the stream stops it.
+    pub fn stream(self, key: HookKey, hook: AssistantStreamHook) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.assistant_stream_hooks,
+            &self.reg.owner,
+            CallbackSlot::AssistantStream,
+            key,
+            hook,
+        )
     }
 
-    /// The hook must be idempotent: see [`AssistantResponseHook`] for the at-least-once
-    /// contract it runs under.
-    pub fn response(self, hook: AssistantResponseHook) {
-        self.reg.add_assistant_response_hook(hook);
+    /// Response transforms chain in recorded registration order. The hook
+    /// must be idempotent: see [`AssistantResponseHook`] for the
+    /// at-least-once contract it runs under.
+    ///
+    /// `stream_state_from` names the one stream-finished callback of this
+    /// plugin whose state this callback receives; registration fails when
+    /// this plugin registers no finished callback under that key.
+    pub fn response(
+        self,
+        key: HookKey,
+        stream_state_from: Option<HookKey>,
+        hook: AssistantResponseHook,
+    ) -> Result<(), PluginError> {
+        let identity = keyed_identity(&self.reg.owner, CallbackSlot::AssistantResponse, key);
+        push_keyed_hook(
+            &mut self.reg.contributions.assistant_response_hooks,
+            &self.reg.owner,
+            CallbackSlot::AssistantResponse,
+            key,
+            hook,
+        )?;
+        if let Some(finished) = stream_state_from {
+            self.reg.contributions.assistant_stream_state_pairs.push((
+                identity,
+                keyed_identity(
+                    &self.reg.owner,
+                    CallbackSlot::AssistantStreamFinished,
+                    finished,
+                ),
+            ));
+        }
+        Ok(())
     }
 
-    /// Pairs with the response hook at the same registration ordinal within
-    /// this plugin. Its state is recorded under that response callback's key
-    /// and owning revision, and is discarded when no paired response exists.
-    pub fn stream_finished(self, hook: AssistantStreamFinishedHook) {
-        self.reg.add_assistant_stream_finished_hook(hook);
+    /// Runs once a provider stream finishes, including after a reset,
+    /// cancellation or provider error. Its state reaches the response
+    /// callbacks that name this key as their `stream_state_from`, recorded
+    /// under each receiving callback's identity.
+    pub fn stream_finished(
+        self,
+        key: HookKey,
+        hook: AssistantStreamFinishedHook,
+    ) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.assistant_stream_finished_hooks,
+            &self.reg.owner,
+            CallbackSlot::AssistantStreamFinished,
+            key,
+            hook,
+        )
     }
 
     pub fn assistant_prose_projector(
@@ -221,8 +396,18 @@ impl ToolResultRegistrations<'_> {
 
     /// Appends one composable presentation step; steps run in registration
     /// order inside the journaled `PresentToolResult` boundary (FIG-3420).
-    pub fn presentation_step(self, step: ToolPresentationStep) {
-        self.reg.add_presentation_step(step);
+    pub fn presentation_step(
+        self,
+        key: HookKey,
+        step: ToolPresentationStep,
+    ) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.presentation_steps,
+            &self.reg.owner,
+            CallbackSlot::PresentationStep,
+            key,
+            step,
+        )
     }
 }
 
@@ -231,13 +416,17 @@ pub struct SessionRegistrations<'a> {
 }
 
 impl SessionRegistrations<'_> {
-    pub fn on_event(self, hook: PluginLifecycleEventHook) {
-        push_registered_hook(
+    /// A best-effort, read-only lifecycle observer. Observers receive each
+    /// event in recorded registration order; their failures are reported and
+    /// never undo what they observed.
+    pub fn on_event(self, key: HookKey, hook: PluginLifecycleEventHook) -> Result<(), PluginError> {
+        push_keyed_hook(
             &mut self.reg.contributions.runtime_event_hooks,
             &self.reg.owner,
             CallbackSlot::RuntimeEvent,
+            key,
             hook,
-        );
+        )
     }
 }
 
@@ -426,39 +615,56 @@ pub struct ContextRegistrations<'a> {
     reg: &'a mut PluginRegistrar,
 }
 
+/// Context hooks are keyed by their trait's `id()`. Higher priority runs
+/// first; equal priorities keep recorded registration order.
 impl ContextRegistrations<'_> {
-    /// Higher priority runs first.
-    pub fn prepare_turn(self, priority: i32, transform: Arc<dyn TurnContextTransform>) {
-        push_prioritized_registered_hook(
+    /// Transforms chain, each receiving the previous one's context.
+    pub fn prepare_turn(
+        self,
+        priority: i32,
+        transform: Arc<dyn TurnContextTransform>,
+    ) -> Result<(), PluginError> {
+        push_prioritized_keyed_hook(
             &mut self.reg.contributions.turn_context_transforms,
             &self.reg.owner,
             CallbackSlot::TurnContextTransform,
+            transform.id(),
             priority,
             transform,
-        );
+        )
     }
 
-    /// Higher priority runs first.
-    pub fn compact(self, priority: i32, compactor: Arc<dyn ContextCompactor>) {
-        push_prioritized_registered_hook(
+    /// The first compactor that returns a nonempty compaction decides.
+    pub fn compact(
+        self,
+        priority: i32,
+        compactor: Arc<dyn ContextCompactor>,
+    ) -> Result<(), PluginError> {
+        push_prioritized_keyed_hook(
             &mut self.reg.contributions.context_compactors,
             &self.reg.owner,
             CallbackSlot::ContextCompactor,
+            compactor.id(),
             priority,
             compactor,
-        );
+        )
     }
 
-    /// Higher priority runs first; the first hook that opens a frame is the
-    /// last one called for that turn.
-    pub fn pressure(self, priority: i32, hook: Arc<dyn ContextPressureHook>) {
-        push_prioritized_registered_hook(
+    /// Record contributions accumulate; the first hook that opens a frame is
+    /// the last one called for that turn.
+    pub fn pressure(
+        self,
+        priority: i32,
+        hook: Arc<dyn ContextPressureHook>,
+    ) -> Result<(), PluginError> {
+        push_prioritized_keyed_hook(
             &mut self.reg.contributions.context_pressure_hooks,
             &self.reg.owner,
             CallbackSlot::ContextPressure,
+            hook.id(),
             priority,
             hook,
-        );
+        )
     }
 }
 
@@ -570,7 +776,7 @@ impl PluginRegistrar {
                 )));
             }
         }
-        push_registered_hook(
+        push_ordinal_hook(
             &mut self.contributions.tool_providers,
             &self.owner,
             CallbackSlot::ToolProvider,
@@ -595,87 +801,6 @@ impl PluginRegistrar {
         Ok(())
     }
 
-    fn add_tool_catalog_contributor(&mut self, contributor: ToolCatalogContributor) {
-        push_registered_hook(
-            &mut self.contributions.tool_catalog_contributors,
-            &self.owner,
-            CallbackSlot::ToolCatalog,
-            contributor,
-        );
-    }
-
-    fn add_before_turn_hook(&mut self, hook: BeforeTurnHook) {
-        push_registered_hook(
-            &mut self.contributions.before_turn_hooks,
-            &self.owner,
-            CallbackSlot::BeforeTurn,
-            hook,
-        );
-    }
-
-    fn add_before_tool_call_hook(&mut self, hook: BeforeToolCallHook) {
-        push_registered_hook(
-            &mut self.contributions.before_tool_call_hooks,
-            &self.owner,
-            CallbackSlot::BeforeToolCall,
-            hook,
-        );
-    }
-
-    fn add_after_tool_call_hook(&mut self, hook: AfterToolCallHook) {
-        push_registered_hook(
-            &mut self.contributions.after_tool_call_hooks,
-            &self.owner,
-            CallbackSlot::AfterToolCall,
-            hook,
-        );
-    }
-
-    fn add_after_turn_hook(&mut self, hook: AfterTurnHook) {
-        push_registered_hook(
-            &mut self.contributions.after_turn_hooks,
-            &self.owner,
-            CallbackSlot::AfterTurn,
-            hook,
-        );
-    }
-
-    fn add_checkpoint_hook(&mut self, hook: CheckpointHook) {
-        push_registered_hook(
-            &mut self.contributions.checkpoint_hooks,
-            &self.owner,
-            CallbackSlot::Checkpoint,
-            hook,
-        );
-    }
-
-    fn add_assistant_stream_hook(&mut self, hook: AssistantStreamHook) {
-        push_registered_hook(
-            &mut self.contributions.assistant_stream_hooks,
-            &self.owner,
-            CallbackSlot::AssistantStream,
-            hook,
-        );
-    }
-
-    fn add_assistant_response_hook(&mut self, hook: AssistantResponseHook) {
-        push_registered_hook(
-            &mut self.contributions.assistant_response_hooks,
-            &self.owner,
-            CallbackSlot::AssistantResponse,
-            hook,
-        );
-    }
-
-    fn add_assistant_stream_finished_hook(&mut self, hook: AssistantStreamFinishedHook) {
-        push_registered_hook(
-            &mut self.contributions.assistant_stream_finished_hooks,
-            &self.owner,
-            CallbackSlot::AssistantStreamFinished,
-            hook,
-        );
-    }
-
     fn add_assistant_prose_projector(
         &mut self,
         provider: Arc<dyn AssistantProseProjectorPlugin>,
@@ -687,15 +812,6 @@ impl PluginRegistrar {
             CallbackSlot::AssistantProseProjector,
             provider,
         )
-    }
-
-    fn add_presentation_step(&mut self, step: ToolPresentationStep) {
-        push_registered_hook(
-            &mut self.contributions.presentation_steps,
-            &self.owner,
-            CallbackSlot::PresentationStep,
-            step,
-        );
     }
 
     fn add_presentation_presenter(
@@ -787,5 +903,27 @@ impl PluginRegistrar {
             CallbackSlot::ProtocolDriver,
             provider,
         )
+    }
+
+    /// Refuses a response callback of this plugin that names a
+    /// stream-finished key this plugin never registered.
+    pub(crate) fn validate_stream_state_pairs(&self) -> Result<(), PluginError> {
+        for (response, finished) in &self.contributions.assistant_stream_state_pairs {
+            if response.owner != self.owner {
+                continue;
+            }
+            let registered = self
+                .contributions
+                .assistant_stream_finished_hooks
+                .iter()
+                .any(|hook| &hook.identity == finished);
+            if !registered {
+                return Err(PluginError::Registration(format!(
+                    "response callback `{}` of plugin `{}` reads stream state from `{}`, which the plugin does not register",
+                    response.key, response.owner.plugin, finished.key
+                )));
+            }
+        }
+        Ok(())
     }
 }

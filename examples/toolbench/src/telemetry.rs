@@ -90,16 +90,20 @@ impl Telemetry {
         let telemetry = Arc::clone(self);
         Arc::new(lash::plugins::StaticPluginFactory::new(
             lash::plugins::PluginDeclaration::initial("toolbench_telemetry"),
-            lash::plugins::PluginSpec::new().with_assistant_response(Arc::new(move |ctx| {
-                let telemetry = Arc::clone(&telemetry);
-                Box::pin(async move {
-                    telemetry.record_submits(&ctx.response.parts);
-                    Ok(lash::plugins::AssistantResponseTransform {
-                        response: ctx.response,
-                        events: Vec::new(),
+            lash::plugins::PluginSpec::new().with_assistant_response(
+                lash::hook_key!("submit-telemetry"),
+                None,
+                Arc::new(move |ctx| {
+                    let telemetry = Arc::clone(&telemetry);
+                    Box::pin(async move {
+                        telemetry.record_submits(&ctx.response.parts);
+                        Ok(lash::plugins::AssistantResponseTransform {
+                            response: ctx.response,
+                            events: Vec::new(),
+                        })
                     })
-                })
-            })),
+                }),
+            ),
         ))
     }
     #[expect(

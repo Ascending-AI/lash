@@ -61,23 +61,30 @@ pub(super) fn register_rlm_protocol_plugin(
             dialect.worker_service(),
         ),
     ))?;
-    reg.tool_catalog().contribute(Arc::new(move |ctx| {
-        crate::tool_catalog::validate_discovery(
-            &ctx.tools,
-            discovery.as_ref(),
-            discovery_dialect.as_ref(),
-        )?;
-        crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialect)
-    }));
-    reg.tool_calls().before(Arc::new(|ctx| {
-        Box::pin(async move { normalize_projected_tool_args(ctx) })
-    }));
+    reg.tool_catalog().contribute(
+        lash_core::hook_key!("rlm-catalog"),
+        Arc::new(move |ctx| {
+            crate::tool_catalog::validate_discovery(
+                &ctx.tools,
+                discovery.as_ref(),
+                discovery_dialect.as_ref(),
+            )?;
+            crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialect)
+        }),
+    )?;
+    reg.tool_calls().transform_args(
+        lash_core::hook_key!("projected-args"),
+        Arc::new(|input| Box::pin(async move { normalize_projected_tool_args(input) })),
+    )?;
 
     let warn_session = protocol_session.clone();
-    reg.turn().checkpoint(Arc::new(move |ctx| {
-        let session = warn_session.clone();
-        Box::pin(async move { session.soft_warn_directives(ctx) })
-    }));
+    reg.turn().checkpoint(
+        lash_core::hook_key!("soft-warnings"),
+        Arc::new(move |ctx| {
+            let session = warn_session.clone();
+            Box::pin(async move { session.soft_warn_contributions(ctx) })
+        }),
+    )?;
 
     stream_mask::register_stream_mask(reg, dialect)?;
     Ok(())

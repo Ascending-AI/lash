@@ -176,8 +176,14 @@ async fn presentation_step_failure_feeds_fallback_to_next_step() {
     factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
         lash_core_execution::plugin::PluginDeclaration::initial("fallback-chain"),
         crate::plugin::PluginSpec::new()
-            .with_presentation_step(failing)
-            .with_presentation_step(replacing),
+            .with_presentation_step(
+                lash_core_execution::hook_key!("presentation-step-1"),
+                failing,
+            )
+            .with_presentation_step(
+                lash_core_execution::hook_key!("presentation-step-2"),
+                replacing,
+            ),
     )));
     let live_return = Arc::new(Mutex::new(None));
     let make_attempt = |crash: bool| -> lash_restate_test::HandlerAttempt {

@@ -22,7 +22,7 @@ async fn present_with(
     let mut factories = lash_core::testing::test_code_protocol_factories();
     let mut spec = lash_core::plugin::PluginSpec::new();
     for step in steps {
-        spec = spec.with_presentation_step(step);
+        spec = spec.with_presentation_step(lash_core::hook_key!("presentation-step-1"), step);
     }
     factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("retention-law"),

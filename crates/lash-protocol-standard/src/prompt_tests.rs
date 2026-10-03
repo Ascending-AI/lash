@@ -377,7 +377,7 @@ async fn prompt_runtime(
                     .lock()
                     .expect("observations")
                     .push((ctx.plugin_config.revision, recorded.prompt));
-                Ok(Vec::new())
+                Ok(Default::default())
             })
         })
     };
@@ -395,7 +395,7 @@ async fn prompt_runtime(
                     .lock()
                     .expect("observations")
                     .push((ctx.plugin_config.revision, recorded.prompt));
-                Ok(Vec::new())
+                Ok(Default::default())
             })
         })
     };
@@ -417,8 +417,8 @@ async fn prompt_runtime(
             Arc::new(lash_core::plugin::StaticPluginFactory::new(
                 lash_core::plugin::PluginDeclaration::initial("observe-standard-prompt"),
                 lash_core::facade_support::PluginSpec::new()
-                    .with_before_turn(observe)
-                    .with_after_turn(after),
+                    .with_before_turn(lash_core::hook_key!("before-turn-1"), observe)
+                    .with_after_turn(lash_core::hook_key!("after-turn-2"), after),
             )),
         ])
         .build(),

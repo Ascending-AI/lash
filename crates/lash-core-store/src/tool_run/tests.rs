@@ -97,7 +97,7 @@ fn cause(error_type: &str) -> HookCause {
 
 fn allow_all() -> Option<CheckRecord<AfterCheckVerdict>> {
     Some(CheckRecord::reduce(vec![AttributedVerdict {
-        callback: callback("policy", "after_tool_call:0"),
+        callback: callback("policy", "tool_result_check:first"),
         verdict: AfterCheckVerdict::Allow,
     }]))
 }
@@ -238,7 +238,7 @@ fn the_singleton_route_is_four_records_and_its_codec_is_pinned() {
             "call_id": id.as_str(),
             "rank": 1,
             "decision": {"decision": "final", "source": {"source": "attempt", "attempt": 1}, "declares": false},
-            "after": [{"callback": {"owner": {"plugin": "policy", "behavior_revision": 1}, "key": "after_tool_call:0"}, "verdict": {"verdict": "allow"}}],
+            "after": [{"callback": {"owner": {"plugin": "policy", "behavior_revision": 1}, "key": "tool_result_check:first"}, "verdict": {"verdict": "allow"}}],
         })
     );
     assert_eq!(
@@ -395,7 +395,7 @@ fn one_invalid_member_admits_no_member() {
 
     let mut cached = call("b");
     cached.checks = CheckRecord::reduce(vec![AttributedVerdict {
-        callback: callback("cache", "before_tool_call:0"),
+        callback: callback("cache", "tool_args_check:first"),
         verdict: BeforeCheckVerdict::Cached {
             result: run_material(MaterialRole::Presentation),
         },
@@ -446,33 +446,37 @@ fn checks_reduce_by_strength_then_plugin_then_key_in_every_order() {
     let replies = vec![
         before(
             "a-cache",
-            "before_tool_call:0",
+            "tool_args_check:first",
             BeforeCheckVerdict::Cached {
                 result: run_material(MaterialRole::AttemptOutput),
             },
         ),
         before(
             "b-policy",
-            "before_tool_call:1",
+            "tool_args_check:second",
             BeforeCheckVerdict::Deny {
                 cause: cause("deny-1"),
             },
         ),
         before(
             "b-policy",
-            "before_tool_call:0",
+            "tool_args_check:first",
             BeforeCheckVerdict::Cancel {
                 cause: cause("cancel"),
             },
         ),
         before(
             "z-guard",
-            "before_tool_call:0",
+            "tool_args_check:first",
             BeforeCheckVerdict::AbortRun {
                 cause: cause("abort"),
             },
         ),
-        before("a-allow", "before_tool_call:0", BeforeCheckVerdict::Allow),
+        before(
+            "a-allow",
+            "tool_args_check:first",
+            BeforeCheckVerdict::Allow,
+        ),
     ];
     let expected = CheckRecord::reduce(replies.clone());
     let order: Vec<_> = expected
@@ -488,11 +492,11 @@ fn checks_reduce_by_strength_then_plugin_then_key_in_every_order() {
     assert_eq!(
         order,
         vec![
-            ("z-guard", "before_tool_call:0"),
-            ("b-policy", "before_tool_call:0"),
-            ("b-policy", "before_tool_call:1"),
-            ("a-cache", "before_tool_call:0"),
-            ("a-allow", "before_tool_call:0"),
+            ("z-guard", "tool_args_check:first"),
+            ("b-policy", "tool_args_check:first"),
+            ("b-policy", "tool_args_check:second"),
+            ("a-cache", "tool_args_check:first"),
+            ("a-allow", "tool_args_check:first"),
         ]
     );
     assert_eq!(expected.selection(), BeforeSelection::AbortRun);
@@ -557,7 +561,7 @@ fn an_after_check_cannot_replace_a_result() {
     );
     let occurrence = HookOccurrence {
         call_id: ToolCallId::fixture("a"),
-        callback: callback("policy", "after_tool_call:0"),
+        callback: callback("policy", "tool_result_check:first"),
         phase: ToolHookPhase::ResultCheck,
         occurrence: ToolHookOccurrence::DeferredCompletion {
             attempt: attempt(1),
@@ -863,7 +867,7 @@ fn check_decisions_follow_their_records_and_abort_run_stops_admission() {
     let mut cached = call("b");
     cached.checks = CheckRecord::reduce(vec![before(
         "cache",
-        "before_tool_call:0",
+        "tool_args_check:first",
         BeforeCheckVerdict::Cached {
             result: run_material(MaterialRole::AttemptOutput),
         },
@@ -907,13 +911,13 @@ fn check_decisions_follow_their_records_and_abort_run_stops_admission() {
     log.push(done(&a, 1)).unwrap();
     let abort = Some(CheckRecord::reduce(vec![
         AttributedVerdict {
-            callback: callback("policy", "after_tool_call:0"),
+            callback: callback("policy", "tool_result_check:first"),
             verdict: AfterCheckVerdict::Deny {
                 cause: cause("deny"),
             },
         },
         AttributedVerdict {
-            callback: callback("guard", "after_tool_call:0"),
+            callback: callback("guard", "tool_result_check:first"),
             verdict: AfterCheckVerdict::AbortRun {
                 cause: cause("abort"),
             },
@@ -1341,7 +1345,7 @@ fn receipts_name_the_logical_call_and_permits_come_from_records() {
 }
 
 #[test]
-fn only_sequential_turn_and_after_tool_callbacks_publish_state() {
+fn only_sequential_turn_and_tool_result_check_callbacks_publish_state() {
     let commands: Vec<_> = CallbackSlot::ALL
         .iter()
         .filter(|slot| slot.state_authority() == StateAuthority::Commands)
@@ -1349,7 +1353,12 @@ fn only_sequential_turn_and_after_tool_callbacks_publish_state() {
         .collect();
     assert_eq!(
         commands,
-        vec!["before_turn", "after_tool_call", "after_turn", "checkpoint"]
+        vec![
+            "before_turn",
+            "tool_result_check",
+            "after_turn",
+            "checkpoint"
+        ]
     );
     let mut prefixes: Vec<_> = CallbackSlot::ALL
         .iter()
@@ -1399,7 +1408,7 @@ fn only_sequential_turn_and_after_tool_callbacks_publish_state() {
         Err(StateCommandRefusal::DecisionOnly)
     );
     assert_eq!(
-        batch.check(&callback("state", "before_tool_call:0"), limits),
+        batch.check(&callback("state", "tool_args_check:first"), limits),
         Err(StateCommandRefusal::DecisionOnly)
     );
     assert_eq!(

@@ -75,9 +75,9 @@ impl HoldPoint {
 }
 
 /// The plugin factory the law's opener carries: a presentation step and an
-/// after-tool hook, each parking the named call at its own hold point. The
-/// hook holds only the resolved outcome — the parked attempt's own pending
-/// outcome goes through untouched.
+/// after-check, each parking the named call at its own hold point. The check
+/// runs on the resolved outcome only: a parked attempt's pending outcome is
+/// not a final result and reaches no result hook.
 fn gated_factory(
     presentation: Arc<HoldPoint>,
     after_tool: Arc<HoldPoint>,
@@ -94,23 +94,22 @@ fn gated_factory(
                 Ok::<_, crate::PluginError>(previous)
             })
         });
-    let hook: crate::plugin::AfterToolCallHook =
-        Arc::new(move |context: crate::plugin::ToolResultHookContext| {
+    let check: crate::plugin::ToolResultCheckHook =
+        Arc::new(move |input: crate::plugin::ToolResultCheckInput| {
             let gate = Arc::clone(&after_tool);
-            let held = super::leaf_label(&context.call_id) == gate.call_id
-                && context.result.as_done_output().is_some();
+            let held = super::leaf_label(input.prepared.call_id()) == gate.call_id;
             Box::pin(async move {
                 if held {
                     gate.hold().await;
                 }
-                Ok(Vec::new())
+                Ok(crate::plugin::AfterToolContributions::default())
             })
         });
     Arc::new(crate::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("law-deferred-commit"),
         crate::plugin::PluginSpec::new()
-            .with_presentation_step(step)
-            .with_after_tool_call(hook),
+            .with_presentation_step(crate::hook_key!("hold"), step)
+            .with_tool_result_check(crate::hook_key!("hold"), check),
     ))
 }
 

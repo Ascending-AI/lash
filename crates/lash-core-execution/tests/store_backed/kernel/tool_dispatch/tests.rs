@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
 mod attachment_normalization;
-mod directives;
+mod composition_laws;
 mod host_effect_ledger;
 mod protocol_version_refusal;
 mod retry_effect_controllers;
@@ -832,18 +832,18 @@ async fn projection_policy_dispatch_context<'h>(
 ) -> ToolDispatchContext<'h> {
     let provider: Arc<dyn ToolProvider> = Arc::new(ProjectionPolicyTools);
     let hook_captured = Arc::clone(&captured);
-    let hook: crate::plugin::BeforeToolCallHook = Arc::new(move |ctx| {
+    let hook: crate::plugin::ToolArgsTransformHook = Arc::new(move |input| {
         let hook_captured = Arc::clone(&hook_captured);
         Box::pin(async move {
-            *hook_captured.lock_recover() = Some(ctx.argument_projection.clone());
-            Ok(Vec::new())
+            *hook_captured.lock_recover() = Some(input.context.argument_projection.clone());
+            Ok(input.current)
         })
     });
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
         lash_core_execution::plugin::PluginDeclaration::initial("projection_policy_tools"),
         crate::PluginSpec::new()
             .with_tool_provider(Arc::clone(&provider))
-            .with_before_tool_call(hook),
+            .with_tool_args_transform(lash_core_execution::hook_key!("capture"), hook),
     ))])
     .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
@@ -1152,22 +1152,20 @@ async fn retry_dispatch_context_with_after_observations<'h>(
         observed_attempts,
         retry_after_ms: Some(0),
     });
-    let hook: crate::plugin::AfterToolCallHook = Arc::new(move |ctx| {
+    let hook: crate::plugin::ToolResultCheckHook = Arc::new(move |input| {
         let observed_retries = Arc::clone(&observed_retries);
         Box::pin(async move {
-            if let Some(output) = ctx.result.as_done_output()
-                && let ToolCallOutcome::Failure(failure) = &output.outcome
-            {
+            if let ToolCallOutcome::Failure(failure) = &input.final_result.outcome {
                 observed_retries.lock_recover().push(failure.retry.clone());
             }
-            Ok(Vec::new())
+            Ok(crate::plugin::AfterToolContributions::default())
         })
     });
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
         lash_core_execution::plugin::PluginDeclaration::initial("retry_probe_tools"),
         crate::PluginSpec::new()
             .with_tool_provider(provider)
-            .with_after_tool_call(hook),
+            .with_tool_result_check(lash_core_execution::hook_key!("observe-retry"), hook),
     ))])
     .build_session(PluginSessionRequest::creation("root", Default::default()))
     .expect("plugin session");
@@ -1205,14 +1203,14 @@ async fn pending_dispatch_context<'h>(
     });
     let mut spec = crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider));
     if let Some(after_calls) = after_calls {
-        let hook: crate::plugin::AfterToolCallHook = Arc::new(move |_ctx| {
+        let hook: crate::plugin::ToolResultCheckHook = Arc::new(move |_input| {
             let after_calls = Arc::clone(&after_calls);
             Box::pin(async move {
                 after_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(Vec::new())
+                Ok(crate::plugin::AfterToolContributions::default())
             })
         });
-        spec = spec.with_after_tool_call(hook);
+        spec = spec.with_tool_result_check(lash_core_execution::hook_key!("count"), hook);
     }
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
         lash_core_execution::plugin::PluginDeclaration::initial("pending_probe_tools"),

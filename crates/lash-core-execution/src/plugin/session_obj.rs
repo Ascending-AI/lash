@@ -3,8 +3,9 @@ use crate::plugin::{PluginSessionMaterializationRequest, PluginSessionRequest};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use futures_util::stream::{FuturesUnordered, StreamExt};
 use lash_sansio::sync::{MutexExt, RwLockExt};
+
+use lash_core_store::tool_run::{AttributedVerdict, CheckRecord};
 
 use super::*;
 
@@ -21,7 +22,7 @@ async fn collect_owned_async<C, O, H, F>(
 ) -> Result<Vec<PluginOwned<O>>, PluginError>
 where
     C: Clone,
-    F: Fn(&H, C) -> PluginFuture<Vec<O>>,
+    F: Fn(&H, C) -> PluginFuture<O>,
 {
     let mut out = Vec::new();
     for registered in hooks {
@@ -33,14 +34,22 @@ where
         if let Some(probe) = phase_probe {
             probe.end_named(&phase_name);
         }
-        for value in result? {
-            out.push(PluginOwned {
-                plugin_id: registered.identity.owner.plugin.clone(),
-                value,
-            });
-        }
+        out.push(PluginOwned {
+            plugin_id: registered.identity.owner.plugin.clone(),
+            value: result?,
+        });
     }
     Ok(out)
+}
+
+/// The call failure an unusable recorded admission becomes at a tool hook
+/// seam: no hook runs under an admission the session cannot honor.
+fn failed_admission(error: &PluginError) -> crate::ToolFailure {
+    crate::ToolFailure::runtime(
+        crate::ToolFailureClass::Unavailable,
+        "plugin_admission_refused",
+        error.to_string(),
+    )
 }
 
 fn plugin_hook_phase_name(hook_kind: &str, plugin_id: &str) -> String {
@@ -260,7 +269,7 @@ impl PluginDispatchContext<'_> {
     pub async fn before_turn(
         &self,
         ctx: TurnHookContext,
-    ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
+    ) -> Result<Vec<PluginOwned<TurnContributions>>, PluginError> {
         self.session.validate_recorded_admission()?;
         collect_owned_async(
             &self.session.capabilities().contributions.before_turn_hooks,
@@ -275,7 +284,7 @@ impl PluginDispatchContext<'_> {
     pub async fn after_turn(
         &self,
         ctx: TurnResultHookContext,
-    ) -> Result<Vec<PluginOwned<AfterTurnPluginDirective>>, PluginError> {
+    ) -> Result<Vec<PluginOwned<AfterTurnContributions>>, PluginError> {
         self.session.validate_recorded_admission()?;
         collect_owned_async(
             &self.session.capabilities().contributions.after_turn_hooks,
@@ -287,57 +296,45 @@ impl PluginDispatchContext<'_> {
         .await
     }
 
+    /// Deliver `event` to every lifecycle observer, sequentially in recorded
+    /// registration order. Every observer runs; their failures aggregate as
+    /// typed causes in that order.
     pub async fn emit_runtime_event(&self, event: PluginLifecycleEvent) -> Result<(), PluginError> {
         self.session.validate_recorded_admission()?;
         let hook_kind = lifecycle_event_hook_kind(&event);
-        let mut pending = FuturesUnordered::new();
-        for (ordinal, registered) in self
+        let mut causes = Vec::new();
+        for registered in &self
             .session
             .capabilities()
             .contributions
             .runtime_event_hooks
-            .iter()
-            .enumerate()
         {
-            let hook = Arc::clone(&registered.hook);
-            let identity = registered.identity.clone();
             let phase_name =
                 plugin_hook_phase_name(hook_kind, registered.identity.owner.plugin.as_str());
-            let event = event.clone();
-            let phase_probe = self.phase_probe.cloned();
-            pending.push(async move {
-                if let Some(probe) = phase_probe.as_ref() {
-                    probe.begin_named(&phase_name);
-                }
-                let result = hook(event).await;
-                if let Some(probe) = phase_probe.as_ref() {
-                    probe.end_named(&phase_name);
-                }
-                (ordinal, identity, result)
-            });
-        }
-        let mut failures = Vec::new();
-        while let Some((ordinal, identity, result)) = pending.next().await {
+            if let Some(probe) = self.phase_probe {
+                probe.begin_named(&phase_name);
+            }
+            let result = (registered.hook)(event.clone()).await;
+            if let Some(probe) = self.phase_probe {
+                probe.end_named(&phase_name);
+            }
             if let Err(error) = result {
-                failures.push((ordinal, identity, error));
+                let identity = registered.identity.clone();
+                let origin = PluginFailureOrigin {
+                    plugin_id: identity.owner.plugin,
+                    behavior_revision: identity.owner.behavior_revision.into(),
+                    operation: identity.key,
+                };
+                let mut failure = PluginOperationFailure::from(error);
+                failure.origin.get_or_insert_with(|| origin.clone());
+                causes.push(PluginHookFailure { origin, failure });
             }
         }
-        if failures.is_empty() {
-            return Ok(());
+        if causes.is_empty() {
+            Ok(())
+        } else {
+            Err(PluginError::HookFailures { causes })
         }
-        failures.sort_by_key(|(ordinal, _, _)| *ordinal);
-        let mut causes = Vec::with_capacity(failures.len());
-        for (_, identity, error) in failures {
-            let origin = PluginFailureOrigin {
-                plugin_id: identity.owner.plugin,
-                behavior_revision: identity.owner.behavior_revision.into(),
-                operation: identity.key,
-            };
-            let mut failure = PluginOperationFailure::from(error);
-            failure.origin.get_or_insert_with(|| origin.clone());
-            causes.push(PluginHookFailure { origin, failure });
-        }
-        Err(PluginError::HookFailures { causes })
     }
 }
 
@@ -754,117 +751,175 @@ impl PluginSession {
         Ok(None)
     }
 
-    pub async fn before_tool_call(
-        &self,
-        mut ctx: ToolCallHookContext,
-    ) -> Result<Vec<PluginOwned<BeforeToolCallPluginDirective>>, PluginError> {
-        self.validate_recorded_admission()?;
-        let mut out = Vec::new();
-        for (index, registered) in self
+    pub(crate) fn has_tool_result_hooks(&self) -> bool {
+        !self
             .capabilities()
             .contributions
-            .before_tool_call_hooks
-            .iter()
-            .enumerate()
-        {
-            let directives = (registered.hook)(ctx.clone()).await?;
-            for directive in directives {
-                let replacement_args = directive.replacement_args().cloned();
-                out.push(PluginOwned {
-                    plugin_id: registered.identity.owner.plugin.clone(),
-                    value: directive,
-                });
-                if let Some(replacement_args) = replacement_args {
-                    ctx.args = replacement_args;
-                    for earlier in
-                        &self.capabilities().contributions.before_tool_call_hooks[..index]
-                    {
-                        let repeated = (earlier.hook)(ctx.clone()).await?;
-                        for directive in repeated {
-                            if directive.replacement_args().is_some() {
-                                return Err(PluginError::BeforeToolCallReplacementConflict {
-                                    replacing_plugin_id: registered.identity.owner.plugin.clone(),
-                                    repeated_plugin_id: earlier.identity.owner.plugin.clone(),
-                                });
-                            }
-                            let is_terminal_restriction =
-                                directive.terminal_strength().is_some_and(|strength| {
-                                    strength >= PluginTerminalStrength::DeniedShortCircuit
-                                });
-                            if is_terminal_restriction {
-                                out.push(PluginOwned {
-                                    plugin_id: earlier.identity.owner.plugin.clone(),
-                                    value: directive,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(out)
+            .tool_result_transforms
+            .is_empty()
+            || !self
+                .capabilities()
+                .contributions
+                .tool_result_checks
+                .is_empty()
     }
 
-    pub async fn after_tool_call(
+    /// Chain every argument transform once, in recorded registration order.
+    /// A transform's failure ends the chain: there is no valid value to
+    /// continue from.
+    pub(crate) async fn transform_tool_args(
         &self,
-        mut ctx: ToolResultHookContext,
-    ) -> Result<Vec<PluginOwned<AfterToolCallPluginDirective>>, PluginError> {
-        self.validate_recorded_admission()?;
-        let mut out = Vec::new();
-        let mut effective_replacement: Option<ToolOutcome> = None;
-        for (index, registered) in self
-            .capabilities()
-            .contributions
-            .after_tool_call_hooks
-            .iter()
-            .enumerate()
-        {
-            let directives = (registered.hook)(ctx.clone()).await?;
-            for directive in directives {
-                let replacement = directive.successful_replacement();
-                out.push(PluginOwned {
-                    plugin_id: registered.identity.owner.plugin.clone(),
-                    value: directive,
-                });
-                if let Some(replacement) = replacement {
-                    ctx.result = replacement.clone();
-                    for earlier in &self.capabilities().contributions.after_tool_call_hooks[..index]
-                    {
-                        let repeated = (earlier.hook)(ctx.clone()).await?;
-                        for directive in repeated {
-                            if directive.successful_replacement().is_some() {
-                                return Err(PluginError::AfterToolCallReplacementConflict {
-                                    replacing_plugin_id: registered.identity.owner.plugin.clone(),
-                                    repeated_plugin_id: earlier.identity.owner.plugin.clone(),
-                                });
-                            }
-                            let is_terminal_restriction =
-                                directive.terminal_strength().is_some_and(|strength| {
-                                    strength >= PluginTerminalStrength::DeniedShortCircuit
-                                });
-                            if is_terminal_restriction {
-                                out.push(PluginOwned {
-                                    plugin_id: earlier.identity.owner.plugin.clone(),
-                                    value: directive,
-                                });
-                            }
-                        }
-                    }
-                    if let Some(effective_replacement) = &effective_replacement {
-                        ctx.result = effective_replacement.clone();
-                    } else {
-                        effective_replacement = Some(replacement);
-                    }
-                }
-            }
+        context: &ToolHookContext,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, Box<crate::ToolFailure>> {
+        self.validate_recorded_admission()
+            .map_err(|error| Box::new(failed_admission(&error)))?;
+        let original = Arc::new(args);
+        let mut current = (*original).clone();
+        for registered in &self.capabilities().contributions.tool_args_transforms {
+            current = (registered.hook)(ToolArgsTransformInput {
+                context: context.clone(),
+                original: Arc::clone(&original),
+                current,
+            })
+            .await
+            .map_err(|error| {
+                Box::new(failed_transform(
+                    ToolHookPhase::ArgsTransform,
+                    &registered.identity,
+                    &error,
+                ))
+            })?;
         }
-        Ok(out)
+        Ok(current)
+    }
+
+    /// Ask every before-check, sequentially, about the one prepared call and
+    /// reduce their replies. A check that fails denies; it never allows.
+    pub(crate) async fn check_tool_args(
+        &self,
+        context: &ToolHookContext,
+        original_args: &Arc<serde_json::Value>,
+        prepared: &PreparedCallReadView,
+    ) -> Result<CheckRecord<BeforeToolDecision>, Box<crate::ToolFailure>> {
+        self.validate_recorded_admission()
+            .map_err(|error| Box::new(failed_admission(&error)))?;
+        let mut replies =
+            Vec::with_capacity(self.capabilities().contributions.tool_args_checks.len());
+        for registered in &self.capabilities().contributions.tool_args_checks {
+            let verdict = (registered.hook)(ToolArgsCheckInput {
+                context: context.clone(),
+                original_args: Arc::clone(original_args),
+                prepared: prepared.clone(),
+            })
+            .await
+            .unwrap_or_else(|error| {
+                BeforeToolDecision::Deny(failed_check(
+                    ToolHookPhase::ArgsCheck,
+                    &registered.identity,
+                    &error,
+                ))
+            });
+            replies.push(AttributedVerdict {
+                callback: registered.identity.clone(),
+                verdict,
+            });
+        }
+        Ok(CheckRecord::reduce(replies))
+    }
+
+    /// Chain every result transform once, in recorded registration order,
+    /// over the immutable original and the preceding candidate.
+    pub(crate) async fn transform_tool_result(
+        &self,
+        context: &ToolHookContext,
+        occurrence: ToolHookOccurrence,
+        prepared: &PreparedCallReadView,
+        original: &Arc<ToolResultCandidate>,
+    ) -> Result<ToolResultCandidate, Box<crate::ToolFailure>> {
+        self.validate_recorded_admission()
+            .map_err(|error| Box::new(failed_admission(&error)))?;
+        let mut current = (**original).clone();
+        for registered in &self.capabilities().contributions.tool_result_transforms {
+            current = (registered.hook)(ToolResultTransformInput {
+                context: context.clone(),
+                occurrence,
+                prepared: prepared.clone(),
+                original: Arc::clone(original),
+                current,
+            })
+            .await
+            .map_err(|error| {
+                Box::new(failed_transform(
+                    ToolHookPhase::ResultTransform,
+                    &registered.identity,
+                    &error,
+                ))
+            })?;
+        }
+        Ok(current)
+    }
+
+    /// Ask every after-check, sequentially, about the one final candidate
+    /// and reduce their verdicts. A check that fails denies.
+    pub(crate) async fn check_tool_result(
+        &self,
+        context: &ToolHookContext,
+        occurrence: ToolHookOccurrence,
+        prepared: &PreparedCallReadView,
+        original: &Arc<ToolResultCandidate>,
+        final_result: &Arc<ToolResultCandidate>,
+    ) -> Result<ResultChecks, Box<crate::ToolFailure>> {
+        self.validate_recorded_admission()
+            .map_err(|error| Box::new(failed_admission(&error)))?;
+        let mut replies =
+            Vec::with_capacity(self.capabilities().contributions.tool_result_checks.len());
+        let mut contributions = Vec::new();
+        for registered in &self.capabilities().contributions.tool_result_checks {
+            let reply = (registered.hook)(ToolResultCheckInput {
+                context: context.clone(),
+                occurrence,
+                prepared: prepared.clone(),
+                original: Arc::clone(original),
+                final_result: Arc::clone(final_result),
+            })
+            .await;
+            let verdict = match reply {
+                Ok(AfterToolContributions {
+                    verdict,
+                    messages,
+                    events,
+                }) => {
+                    if !messages.is_empty() || !events.is_empty() {
+                        contributions.push(AttributedContributions {
+                            plugin_id: registered.identity.owner.plugin.clone(),
+                            messages,
+                            events,
+                        });
+                    }
+                    verdict
+                }
+                Err(error) => AfterToolDecision::Deny(failed_check(
+                    ToolHookPhase::ResultCheck,
+                    &registered.identity,
+                    &error,
+                )),
+            };
+            replies.push(AttributedVerdict {
+                callback: registered.identity.clone(),
+                verdict,
+            });
+        }
+        Ok(ResultChecks {
+            record: CheckRecord::reduce(replies),
+            contributions,
+        })
     }
 
     pub async fn at_checkpoint(
         &self,
         ctx: CheckpointHookContext,
-    ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
+    ) -> Result<Vec<PluginOwned<TurnContributions>>, PluginError> {
         self.validate_recorded_admission()?;
         collect_owned_async(
             &self.capabilities().contributions.checkpoint_hooks,
@@ -966,8 +1021,8 @@ impl PluginSession {
         Ok(transforms)
     }
 
-    /// Runs every stream-finished hook. Its per-plugin registration ordinal
-    /// selects the response callback that receives the recorded state.
+    /// Runs every stream-finished hook. Its state is recorded for each
+    /// response callback that names it as its `stream_state_from`.
     pub async fn finish_assistant_stream(
         &self,
         session_id: &SessionId,
@@ -975,12 +1030,10 @@ impl PluginSession {
     ) -> Result<Vec<crate::runtime::AssistantStreamHookState>, PluginError> {
         self.validate_recorded_admission()?;
         let mut states = Vec::new();
-        for (index, registered) in self
+        for registered in &self
             .capabilities()
             .contributions
             .assistant_stream_finished_hooks
-            .iter()
-            .enumerate()
         {
             let state = (registered.hook)(AssistantStreamFinishedContext {
                 session_id: session_id.clone(),
@@ -988,24 +1041,19 @@ impl PluginSession {
                 reason,
             })
             .await?;
-            let ordinal = self
+            let Some(state) = state else {
+                continue;
+            };
+            for (response, _) in self
                 .capabilities()
                 .contributions
-                .assistant_stream_finished_hooks[..index]
+                .assistant_stream_state_pairs
                 .iter()
-                .filter(|previous| previous.identity.owner == registered.identity.owner)
-                .count();
-            let response = self
-                .capabilities()
-                .contributions
-                .assistant_response_hooks
-                .iter()
-                .filter(|response| response.identity.owner == registered.identity.owner)
-                .nth(ordinal);
-            if let (Some(state), Some(response)) = (state, response) {
+                .filter(|(_, finished)| finished == &registered.identity)
+            {
                 states.push(crate::runtime::AssistantStreamHookState {
-                    callback: response.identity.clone(),
-                    state,
+                    callback: response.clone(),
+                    state: state.clone(),
                 });
             }
         }
@@ -1484,7 +1532,8 @@ mod attachment_notice_order_tests {
         let host = crate::testing::test_plugin_host(vec![Arc::new(
             super::super::StaticPluginFactory::new(
                 crate::plugin::PluginDeclaration::initial("notice-order-step"),
-                super::super::PluginSpec::new().with_presentation_step(step),
+                super::super::PluginSpec::new()
+                    .with_presentation_step(crate::hook_key!("presentation-step-1"), step),
             ),
         )]);
         let session = host

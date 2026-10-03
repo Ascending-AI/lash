@@ -127,14 +127,17 @@ impl crate::plugin::SessionPlugin for RecordingStep {
     fn register(&self, reg: &mut crate::plugin::PluginRegistrar) -> Result<(), crate::PluginError> {
         let runs = Arc::clone(&self.runs);
         let seen_ids = Arc::clone(&self.seen_ids);
-        reg.tool_results().presentation_step(Arc::new(move |input| {
-            runs.fetch_add(1, Ordering::SeqCst);
-            seen_ids.lock_recover().push(input.context.tool_id.clone());
-            let mut next = input.previous;
-            next.parts
-                .push(crate::ModelToolReturnPart::text("[recorded]"));
-            Box::pin(async move { Ok(next) })
-        }));
+        reg.tool_results().presentation_step(
+            crate::hook_key!("tool-results-presentation-step-1"),
+            Arc::new(move |input| {
+                runs.fetch_add(1, Ordering::SeqCst);
+                seen_ids.lock_recover().push(input.context.tool_id.clone());
+                let mut next = input.previous;
+                next.parts
+                    .push(crate::ModelToolReturnPart::text("[recorded]"));
+                Box::pin(async move { Ok(next) })
+            }),
+        )?;
         Ok(())
     }
 }

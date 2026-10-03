@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use lash_core::plugin::{
-    CheckpointHookContext, PluginDirective, PluginError, ProtocolSessionContext,
-    ProtocolSessionPlugin, TurnPluginDirective,
+    CheckpointHookContext, PluginError, ProtocolSessionContext, ProtocolSessionPlugin,
+    TurnContributions,
 };
 use lash_core::{CheckpointKind, ProtocolTurnOptions, SessionError};
 use lash_rlm_types::RlmSessionConfig;
@@ -75,12 +75,12 @@ impl RlmProtocolSession {
     /// emits the same keyed status — the usage it reads is the session's
     /// committed prompt usage, which is constant within a turn — so a
     /// reopened or resumed session warns exactly as the one it replaces.
-    pub(crate) fn soft_warn_directives(
+    pub(crate) fn soft_warn_contributions(
         &self,
         ctx: CheckpointHookContext,
-    ) -> Result<Vec<TurnPluginDirective>, PluginError> {
+    ) -> Result<TurnContributions, PluginError> {
         if ctx.checkpoint != CheckpointKind::AfterWork {
-            return Ok(Vec::new());
+            return Ok(TurnContributions::default());
         }
         // The threshold the running run was admitted under; a session that
         // has recorded no RLM namespace yet runs under the behaviour its
@@ -97,7 +97,7 @@ impl RlmProtocolSession {
         let threshold =
             effective_budget_tokens(configured, ctx.state.policy().context_window_tokens());
         let Some(threshold) = threshold else {
-            return Ok(Vec::new());
+            return Ok(TurnContributions::default());
         };
         // The model's budget suffix uses the prior completed prompt. The
         // checkpoint view's token_usage is already the current turn's usage.
@@ -107,18 +107,18 @@ impl RlmProtocolSession {
             .map(|usage| usage.total().max(0) as usize)
             .unwrap_or(0);
         if used == 0 || used < threshold {
-            return Ok(Vec::new());
+            return Ok(TurnContributions::default());
         }
-        Ok(vec![
-            PluginDirective::emit_runtime_events(vec![lash_core::PluginRuntimeEvent::Status {
+        Ok(TurnContributions {
+            messages: Vec::new(),
+            events: vec![lash_core::PluginRuntimeEvent::Status {
                 key: BUDGET_WARNING_STATUS.to_string(),
                 label: "context budget".to_string(),
                 detail: Some(format!(
                     "{used} tokens used; warn at {threshold}; choose frame switch path"
                 )),
-            }])
-            .into(),
-        ])
+            }],
+        })
     }
 }
 
@@ -452,7 +452,7 @@ mod tests {
             ..lash_core::SessionSnapshot::new(lash_core::SessionId::from("session"), policy)
         };
         let directives = session
-            .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
+            .soft_warn_contributions(lash_core::plugin::CheckpointHookContext {
                 session_id: SessionId::from("root"),
                 checkpoint: lash_core::CheckpointKind::AfterWork,
                 state: lash_core::SessionReadView::from_snapshot(&state),
@@ -461,8 +461,8 @@ mod tests {
                 session_graph: Arc::new(NoopPromptManager),
                 plugin_config: Default::default(),
             })
-            .expect("warning directives");
-        assert!(directives.is_empty());
+            .expect("warning contributions");
+        assert!(directives.events.is_empty() && directives.messages.is_empty());
     }
 
     #[test]
@@ -499,7 +499,7 @@ mod tests {
         };
 
         let directives = session
-            .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
+            .soft_warn_contributions(lash_core::plugin::CheckpointHookContext {
                 session_id: SessionId::from("root"),
                 checkpoint: lash_core::CheckpointKind::AfterWork,
                 state: lash_core::SessionReadView::from_snapshot(&state),
@@ -508,15 +508,13 @@ mod tests {
                 session_graph: Arc::new(NoopPromptManager),
                 plugin_config: Default::default(),
             })
-            .expect("warning directives");
+            .expect("warning contributions");
 
-        assert_eq!(directives.len(), 1);
-        let lash_core::plugin::TurnPluginDirective::Ambient(
-            lash_core::plugin::PluginDirective::EmitRuntimeEvents { events },
-        ) = &directives[0]
-        else {
-            panic!("budget warning must be a runtime event");
-        };
+        assert!(
+            directives.messages.is_empty(),
+            "budget warning must be a runtime event"
+        );
+        let events = &directives.events;
         let lash_core::PluginRuntimeEvent::Status { detail, .. } = &events[0] else {
             panic!("budget warning should use a typed status runtime event");
         };
@@ -565,16 +563,12 @@ mod tests {
         }
     }
 
-    fn statuses(directives: &[TurnPluginDirective]) -> Vec<lash_core::PluginRuntimeEvent> {
-        directives
-            .iter()
-            .flat_map(|directive| match directive {
-                TurnPluginDirective::Ambient(PluginDirective::EmitRuntimeEvents { events }) => {
-                    events.clone()
-                }
-                other => panic!("the budget warning emits runtime events only: {other:?}"),
-            })
-            .collect()
+    fn statuses(contributions: &TurnContributions) -> Vec<lash_core::PluginRuntimeEvent> {
+        assert!(
+            contributions.messages.is_empty(),
+            "the budget warning emits runtime events only"
+        );
+        contributions.events.clone()
     }
 
     /// The soft warning is a pure function of recorded state (FIG-4398):
@@ -622,8 +616,8 @@ mod tests {
         let warned = |session: &RlmProtocolSession, used: i64| {
             statuses(
                 &session
-                    .soft_warn_directives(after_work(used, recorded.clone()))
-                    .expect("warning directives"),
+                    .soft_warn_contributions(after_work(used, recorded.clone()))
+                    .expect("warning contributions"),
             )
         };
         let expected = vec![lash_core::PluginRuntimeEvent::Status {
