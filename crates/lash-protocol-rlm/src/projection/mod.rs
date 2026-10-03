@@ -1,5 +1,6 @@
 mod bindings;
 mod context;
+pub(crate) mod transcript;
 mod transport;
 
 pub use bindings::{RlmProjectedBindings, rlm_session_projection_extension};

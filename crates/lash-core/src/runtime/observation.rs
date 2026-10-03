@@ -254,7 +254,13 @@ fn export_observation_state(runtime: &LashRuntime) -> (crate::SessionReadView, V
     // An observer reads the session's record, never a run's execution
     // view: that view outlives its run on resident state, and a replay
     // re-installs it (FIG-4529).
-    let read_view = crate::SessionReadView::recorded_from_runtime_state(&runtime.state);
+    let read_view = crate::SessionReadView::recorded_from_runtime_state(&runtime.state)
+        .with_transcript_options(
+            runtime
+                .plugin_session()
+                .map(|plugins| plugins.transcript_options())
+                .unwrap_or_default(),
+        );
     (read_view, authority_fingerprint(&runtime.state))
 }
 

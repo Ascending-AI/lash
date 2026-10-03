@@ -141,6 +141,16 @@ impl AdministrationSource {
 }
 
 impl LashCore {
+    pub(crate) fn transcript_options(&self) -> crate::transcript::TranscriptProjectionOptions {
+        self.protocol_factory
+            .iter()
+            .chain(self.plugin_factories.iter())
+            .filter_map(|factory| factory.transcript_projector())
+            .fold(Default::default(), |options, projector| {
+                options.with_projector(projector)
+            })
+    }
+
     /// The core's session work as a host-held handle carries it.
     pub(crate) async fn held_work(&self) -> Arc<ResolvedQueuedWork> {
         Arc::clone(&self.substrate_slot.ports().await.queued)

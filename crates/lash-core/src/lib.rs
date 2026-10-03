@@ -888,3 +888,5 @@ pub use lash_core_execution::{EffectAttempt, RecordedEffectExecution};
 
 #[cfg(test)]
 mod attachments_tests;
+
+pub use lash_core_store::transcript;

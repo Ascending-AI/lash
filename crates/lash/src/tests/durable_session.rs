@@ -1629,3 +1629,73 @@ async fn reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict() -> 
     assert!(conflict.is_terminal() && !conflict.is_retryable());
     Ok(())
 }
+
+#[tokio::test]
+async fn transcript_totally_projects_really_committed_nodes_in_source_order() -> Result<()> {
+    let double = restate_double(0x1530).await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("transcript-totality")
+        .created()
+        .await
+        .open()
+        .await?;
+    for input in ["first question", "second question"] {
+        session.send(TurnInput::text(input)).output().await?;
+    }
+    let durable = core.session("transcript-totality").durable().await?;
+    let projection = durable.transcript().await?;
+    let page = durable
+        .history(
+            crate::persistence::HistoryAnchor::Head,
+            crate::persistence::HistoryBudget {
+                max_nodes: std::num::NonZeroU32::MIN.saturating_add(127),
+                max_bytes: std::num::NonZeroU64::MIN.saturating_add(32 * 1024 * 1024 - 1),
+            },
+        )
+        .await?;
+    assert!(page.next.is_none());
+    assert_eq!(projection.rows().len(), page.nodes.len());
+    assert!(
+        projection
+            .rows()
+            .windows(2)
+            .all(|rows| rows[0].ordinal() < rows[1].ordinal())
+    );
+    for (row, node) in projection.rows().iter().zip(page.nodes.iter().rev()) {
+        assert_eq!(row.record().timestamp, node.record.timestamp);
+        assert_eq!(
+            serde_json::to_value(row.row_id()).unwrap(),
+            serde_json::to_value(&node.record.node_id).unwrap()
+        );
+    }
+    let users = projection
+        .visible()
+        .filter(|row| row.kind == crate::transcript::TranscriptRowKind::User)
+        .map(|row| row.content.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(users, ["first question", "second question"]);
+    let replies = projection
+        .visible()
+        .filter(|row| row.provenance.is_turn_reply)
+        .collect::<Vec<_>>();
+    assert_eq!(replies.len(), 2);
+    assert!(
+        replies
+            .iter()
+            .all(|row| row.kind == crate::transcript::TranscriptRowKind::AssistantReply)
+    );
+    assert_ne!(replies[0].provenance.turn_id, replies[1].provenance.turn_id);
+    assert_eq!(
+        projection.visible().count()
+            + projection
+                .rows()
+                .iter()
+                .filter(|row| row.record().suppressed.is_some())
+                .count(),
+        page.nodes.len()
+    );
+    Ok(())
+}

@@ -500,3 +500,14 @@ mod retired_identity_tests {
         .expect("current shape decodes");
     }
 }
+
+/// Internal cross-crate display rendering; not an integrator classification API.
+pub trait PartCoreSupport {
+    fn render(&self) -> String;
+}
+#[doc(hidden)]
+impl PartCoreSupport for crate::Part {
+    fn render(&self) -> String {
+        crate::Part::render(self)
+    }
+}

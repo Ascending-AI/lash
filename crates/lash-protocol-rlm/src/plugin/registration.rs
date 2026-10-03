@@ -30,6 +30,9 @@ pub(super) fn register_rlm_protocol_plugin(
         Arc::clone(&runtime_state),
     ));
     reg.protocol().session(protocol_session.clone())?;
+    reg.output().transcript_projector(Arc::new(
+        crate::projection::transcript::RlmTranscriptProjector,
+    ));
     reg.execution().code_executor(code_executor)?;
     reg.output()
         .assistant_prose_projector(Arc::new(RlmAssistantProseProjector {

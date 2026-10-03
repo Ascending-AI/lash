@@ -772,7 +772,7 @@ pub mod plugins {
         AssistantProseProjectorPlugin, AssistantStreamFinishedHook, CompactionSystemPrompt,
         DecidedContextPressure, PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture,
         ResolvedToolSurface, ToolCatalogContributor, ToolPresentationArtifacts,
-        ToolPresentationInput, ToolPresentationStep,
+        ToolPresentationInput, ToolPresentationStep, TranscriptRowProjectorPlugin,
     };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
@@ -1777,3 +1777,8 @@ pub use crate::core::ForkRequest;
 /// What a pin or a fork names, what a session retains, and a retained point
 /// (FIG-4731).
 pub use lash_core::{RetainedRevision, Retention, Target};
+
+/// Canonical committed chat rows and protocol-neutral display contracts.
+pub mod transcript {
+    pub use lash_core::transcript::*;
+}

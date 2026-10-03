@@ -151,6 +151,8 @@ pub(crate) struct PluginContributions {
     pub(crate) protocol_session: Option<RegisteredExclusiveHook<Arc<dyn ProtocolSessionPlugin>>>,
     pub(crate) protocol_driver: Option<RegisteredExclusiveHook<Arc<dyn ProtocolDriverPlugin>>>,
     pub(crate) code_executor: Option<RegisteredExclusiveHook<Arc<dyn CodeExecutorPlugin>>>,
+    pub(crate) transcript_row_projectors:
+        Vec<RegisteredHook<Arc<dyn TranscriptRowProjectorPlugin>>>,
     pub(crate) assistant_prose_projector:
         Option<RegisteredExclusiveHook<Arc<dyn AssistantProseProjectorPlugin>>>,
 }
@@ -375,6 +377,15 @@ impl OutputRegistrations<'_> {
             key,
             hook,
         )
+    }
+
+    pub fn transcript_projector(self, projector: Arc<dyn TranscriptRowProjectorPlugin>) {
+        push_registered_hook(
+            &mut self.reg.contributions.transcript_row_projectors,
+            &self.reg.owner,
+            "transcript_projector",
+            projector,
+        );
     }
 
     pub fn assistant_prose_projector(

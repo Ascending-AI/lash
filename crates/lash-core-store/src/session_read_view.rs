@@ -7,50 +7,75 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug)]
-pub struct SessionReadView(Arc<SessionReadState>);
+pub struct SessionReadView(
+    Arc<SessionReadState>,
+    crate::transcript::TranscriptProjectionOptions,
+);
 impl SessionReadView {
+    pub fn with_transcript_options(
+        mut self,
+        options: crate::transcript::TranscriptProjectionOptions,
+    ) -> Self {
+        self.1 = options;
+        self
+    }
+    pub fn transcript(&self) -> crate::transcript::TranscriptProjection {
+        crate::transcript::TranscriptProjection::from_read_state(self, &self.1)
+    }
+    pub fn transcript_options(&self) -> &crate::transcript::TranscriptProjectionOptions {
+        &self.1
+    }
     fn from_graph_message_sequence_meta(
         meta: SessionReadMeta,
         base_graph: Arc<crate::SessionGraph>,
         messages: crate::MessageSequence,
         active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
     ) -> Self {
-        Self(Arc::new(SessionReadState {
-            meta,
-            graph: SessionReadGraph::Derived {
-                cache: OnceLock::new(),
-                base_graph,
-            },
-            read_model: crate::session_graph::SessionReadModel {
-                active_events,
-                messages: messages.shared(),
-                prompt_render_cache: Arc::new(crate::BaseRenderCache::new()),
-            },
-            chronological_projection: OnceLock::new(),
-        }))
+        Self(
+            Arc::new(SessionReadState {
+                meta,
+                graph: SessionReadGraph::Derived {
+                    cache: OnceLock::new(),
+                    base_graph,
+                },
+                read_model: crate::session_graph::SessionReadModel {
+                    active_events,
+                    messages: messages.shared(),
+                    prompt_render_cache: Arc::new(crate::BaseRenderCache::new()),
+                },
+                chronological_projection: OnceLock::new(),
+            }),
+            Default::default(),
+        )
     }
 
     /// Builds a `SessionReadView` from snapshot data for store, effect-host, and protocol
     /// implementors while materializing, executing, or persisting a session turn.
     pub fn from_snapshot(snapshot: &SessionSnapshot) -> Self {
         let read_model = snapshot.read_model();
-        Self(Arc::new(SessionReadState {
-            meta: SessionReadMeta::from_snapshot_ref(snapshot),
-            graph: SessionReadGraph::Owned(snapshot.session_graph.clone()),
-            read_model,
-            chronological_projection: OnceLock::new(),
-        }))
+        Self(
+            Arc::new(SessionReadState {
+                meta: SessionReadMeta::from_snapshot_ref(snapshot),
+                graph: SessionReadGraph::Owned(snapshot.session_graph.clone()),
+                read_model,
+                chronological_projection: OnceLock::new(),
+            }),
+            Default::default(),
+        )
     }
 
     /// Builds a `SessionReadView` from persisted state data for store and durable-substrate
     /// implementors while validating and applying durable session transitions.
     pub fn from_persisted_state(state: &RuntimeSessionState) -> Self {
-        Self(Arc::new(SessionReadState {
-            meta: SessionReadMeta::from_persisted_ref(state),
-            graph: SessionReadGraph::Owned(state.session_graph.clone()),
-            read_model: state.read_model(),
-            chronological_projection: OnceLock::new(),
-        }))
+        Self(
+            Arc::new(SessionReadState {
+                meta: SessionReadMeta::from_persisted_ref(state),
+                graph: SessionReadGraph::Owned(state.session_graph.clone()),
+                read_model: state.read_model(),
+                chronological_projection: OnceLock::new(),
+            }),
+            Default::default(),
+        )
     }
 
     /// [`Self::from_persisted_state`] carrying the session's durable
@@ -61,12 +86,15 @@ impl SessionReadView {
     ) -> Self {
         let mut meta = SessionReadMeta::from_persisted_ref(state);
         meta.durable_relation = Some(relation);
-        Self(Arc::new(SessionReadState {
-            meta,
-            graph: SessionReadGraph::Owned(state.session_graph.clone()),
-            read_model: state.read_model(),
-            chronological_projection: OnceLock::new(),
-        }))
+        Self(
+            Arc::new(SessionReadState {
+                meta,
+                graph: SessionReadGraph::Owned(state.session_graph.clone()),
+                read_model: state.read_model(),
+                chronological_projection: OnceLock::new(),
+            }),
+            Default::default(),
+        )
     }
 
     pub fn from_runtime_state(
@@ -74,14 +102,17 @@ impl SessionReadView {
         policy: SessionPolicy,
         protocol_turn_options: crate::ProtocolTurnOptions,
     ) -> Self {
-        Self(Arc::new(SessionReadState {
-            meta: SessionReadMeta::from_persisted_ref(state)
-                .with_policy(policy)
-                .with_protocol_turn_options(protocol_turn_options),
-            graph: SessionReadGraph::Owned(state.session_graph.clone()),
-            read_model: state.read_model(),
-            chronological_projection: OnceLock::new(),
-        }))
+        Self(
+            Arc::new(SessionReadState {
+                meta: SessionReadMeta::from_persisted_ref(state)
+                    .with_policy(policy)
+                    .with_protocol_turn_options(protocol_turn_options),
+                graph: SessionReadGraph::Owned(state.session_graph.clone()),
+                read_model: state.read_model(),
+                chronological_projection: OnceLock::new(),
+            }),
+            Default::default(),
+        )
     }
 
     /// The session as its record states it, for an observer outside a turn:
@@ -97,12 +128,15 @@ impl SessionReadView {
             meta.protocol_turn_options = view.sticky.plugin_config.protocol_turn_options();
             meta.plugin_config = view.sticky.plugin_config.clone();
         }
-        Self(Arc::new(SessionReadState {
-            meta,
-            graph: SessionReadGraph::Owned(state.session_graph.clone()),
-            read_model: state.read_model(),
-            chronological_projection: OnceLock::new(),
-        }))
+        Self(
+            Arc::new(SessionReadState {
+                meta,
+                graph: SessionReadGraph::Owned(state.session_graph.clone()),
+                read_model: state.read_model(),
+                chronological_projection: OnceLock::new(),
+            }),
+            Default::default(),
+        )
     }
 
     pub fn derived_from_persisted_state(

@@ -91,7 +91,7 @@ pub use protocol::{
     ExecutionStateCapture, HydratedExecutionState, InvalidExecutionLeafName, LeafChange,
     PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
     ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView, SystemPromptContext,
-    SystemPromptPurpose,
+    SystemPromptPurpose, TranscriptRowProjectorPlugin,
 };
 pub use registrar::{
     ContextRegistrations, ExecutionRegistrations, OutputRegistrations,

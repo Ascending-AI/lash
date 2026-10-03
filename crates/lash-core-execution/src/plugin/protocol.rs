@@ -389,3 +389,5 @@ pub trait ProtocolDriverPlugin: Send + Sync {
         Ok(None)
     }
 }
+
+pub use lash_core_store::transcript::TranscriptRowProjectorPlugin;

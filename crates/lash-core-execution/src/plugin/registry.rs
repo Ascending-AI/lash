@@ -748,6 +748,12 @@ pub trait SessionPlugin: Send + Sync {
 /// ```
 #[async_trait::async_trait]
 pub trait PluginFactory: Send + Sync {
+    /// Pure display extension. Available to durable readers without plugin
+    /// materialization, state restoration, effects or a session writer.
+    fn transcript_projector(&self) -> Option<Arc<dyn super::TranscriptRowProjectorPlugin>> {
+        None
+    }
+
     fn id(&self) -> &'static str;
 
     /// What this plugin declares about itself (FIG-4732): its behaviour

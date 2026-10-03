@@ -602,6 +602,15 @@ impl PluginSession {
             .map(|entry| Arc::clone(&entry.hook))
     }
 
+    pub fn transcript_options(&self) -> lash_core_store::transcript::TranscriptProjectionOptions {
+        self.contributions
+            .transcript_row_projectors
+            .iter()
+            .fold(Default::default(), |options, entry| {
+                options.with_projector(Arc::clone(&entry.hook))
+            })
+    }
+
     pub fn assistant_prose_projector(&self) -> Option<Arc<dyn AssistantProseProjectorPlugin>> {
         self.capabilities()
             .contributions

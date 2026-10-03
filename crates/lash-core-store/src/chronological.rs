@@ -40,6 +40,7 @@ pub struct BorrowedChronologicalMessage<'a> {
     pub role: MessageRole,
     pub parts: &'a [Part],
     pub origin: Option<&'a MessageOrigin>,
+    pub reply_marker: Option<&'a crate::TurnReply>,
 }
 
 impl<'a> BorrowedChronologicalMessage<'a> {
@@ -49,6 +50,7 @@ impl<'a> BorrowedChronologicalMessage<'a> {
             role: message.role,
             parts: message.parts.as_slice(),
             origin: message.origin.as_ref(),
+            reply_marker: message.reply_marker.as_ref(),
         }
     }
 
@@ -58,6 +60,7 @@ impl<'a> BorrowedChronologicalMessage<'a> {
             role: record.role,
             parts: record.parts.as_slice(),
             origin: record.origin.as_ref(),
+            reply_marker: record.reply_marker.as_ref(),
         }
     }
 
@@ -77,7 +80,7 @@ impl<'a> BorrowedChronologicalMessage<'a> {
             role: self.role,
             parts: std::sync::Arc::new(self.parts.to_vec()),
             origin: self.origin.cloned(),
-            reply_marker: None,
+            reply_marker: self.reply_marker.cloned(),
         }
     }
 }
@@ -210,6 +213,26 @@ fn visit_transcript<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chronological_projection_preserves_the_committed_reply_marker() {
+        use lash_sansio::core_support::TurnReplyCoreSupport;
+        let mut reply = text_message("reply", MessageRole::Assistant, "answer");
+        reply.reply_marker = Some(crate::TurnReply::mint(
+            crate::TurnId::parse("turn").unwrap(),
+            reply.parts[0].id().to_owned(),
+        ));
+        let expected = reply.reply_marker.clone();
+        let events = vec![SessionHistoryRecord::Conversation(
+            ConversationRecord::from_message(reply),
+        )];
+        let projection =
+            ChronologicalProjection::from_turn_view(&events, &MessageSequence::default());
+        let ChronologicalPayload::Message(reply) = &projection.entries()[0].payload else {
+            panic!("reply must remain a conversation record");
+        };
+        assert_eq!(reply.reply_marker, expected);
+    }
     use crate::session_model::ConversationRecord;
     use crate::shared_parts;
 

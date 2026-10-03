@@ -83,6 +83,7 @@ enum DurableAcquisition {
 /// non-creating acquisition rule and the observation contract.
 #[derive(Clone)]
 pub struct DurableSession {
+    transcript_options: crate::transcript::TranscriptProjectionOptions,
     session_id: SessionId,
     ops: DurableSessionOps,
     acquisition: DurableAcquisition,
@@ -105,6 +106,45 @@ pub struct DurableSession {
 }
 
 impl DurableSession {
+    pub(crate) fn with_transcript_options(
+        mut self,
+        options: crate::transcript::TranscriptProjectionOptions,
+    ) -> Self {
+        self.transcript_options = options;
+        self
+    }
+
+    /// Project all retained committed history, paging across frame boundaries.
+    /// This read takes no live-session writer and restores no plugins.
+    pub async fn transcript(&self) -> Result<crate::transcript::TranscriptProjection> {
+        let Some(store) = self.store_if_present().await? else {
+            return Ok(Default::default());
+        };
+        let mut anchor = lash_core::store::HistoryAnchor::Head;
+        let mut records = Vec::new();
+        loop {
+            let page = store
+                .load_ancestors(
+                    anchor,
+                    lash_core::store::HistoryBudget {
+                        max_nodes: std::num::NonZeroU32::MIN.saturating_add(127),
+                        max_bytes: std::num::NonZeroU64::MIN.saturating_add(32 * 1024 * 1024 - 1),
+                    },
+                )
+                .await?;
+            records.extend(page.nodes.into_iter().map(|node| node.record));
+            match page.next {
+                Some(cursor) => anchor = lash_core::store::HistoryAnchor::Cursor(cursor),
+                None => break,
+            }
+        }
+        records.reverse();
+        Ok(crate::transcript::TranscriptProjection::from_records(
+            records.iter(),
+            &self.transcript_options,
+        ))
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "a catalog-opened Durable Session takes each deployment port it reads through"
@@ -120,6 +160,7 @@ impl DurableSession {
         trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
     ) -> Self {
         Self {
+            transcript_options: Default::default(),
             ops: DurableSessionOps::new(
                 session_id.clone(),
                 ingress,
@@ -156,6 +197,7 @@ impl DurableSession {
         trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
     ) -> Self {
         Self {
+            transcript_options: Default::default(),
             ops: DurableSessionOps::new(
                 session_id.clone(),
                 ingress,
@@ -448,6 +490,9 @@ impl DurableSession {
         };
         lash_core::store::load_session_read_view(store)
             .await
+            .map(|view| {
+                view.map(|view| view.with_transcript_options(self.transcript_options.clone()))
+            })
             .map_err(EmbedError::Store)
     }
 

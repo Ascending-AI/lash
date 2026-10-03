@@ -314,6 +314,14 @@ impl RlmProtocolPluginFactory {
 }
 
 impl PluginFactory for RlmProtocolPluginFactory {
+    fn transcript_projector(
+        &self,
+    ) -> Option<Arc<dyn lash_core::plugin::TranscriptRowProjectorPlugin>> {
+        Some(Arc::new(
+            crate::projection::transcript::RlmTranscriptProjector,
+        ))
+    }
+
     fn id(&self) -> &'static str {
         RLM_PROTOCOL_PLUGIN_ID
     }
