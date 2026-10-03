@@ -1124,6 +1124,27 @@ fn rlm_factory(backend: &lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPl
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         backend,
     )
+    .with_worker_service(untimed_fixture_workers())
+}
+
+/// The dialect's worker service with its run deadlines off the clock. A
+/// fixture's guest is bounded by the instruction and memory budgets its
+/// factory sets, which count the same work the same way under any load;
+/// the standard compute and cumulative-CPU deadlines measure the host
+/// instead, and a loaded full suite spent them on a law about retention
+/// (FIG-4751). Laws about worker deadlines set their own.
+#[cfg(feature = "rlm")]
+fn untimed_fixture_workers() -> crate::rlm::WorkerService {
+    /// Longer than any run the instruction budget admits.
+    const OFF_THE_CLOCK: std::time::Duration = std::time::Duration::from_secs(365 * 24 * 60 * 60);
+    let mut config =
+        lash_protocol_rlm::Dialect::worker_service(&lash_protocol_rlm::TypescriptDialect)
+            .config()
+            .clone();
+    config.deadlines.compute = OFF_THE_CLOCK;
+    config.deadlines.serialization = OFF_THE_CLOCK;
+    config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
+    crate::rlm::WorkerService::new(config)
 }
 
 /// A [`LashCoreBuilder`] pre-seeded with the default RLM factory.

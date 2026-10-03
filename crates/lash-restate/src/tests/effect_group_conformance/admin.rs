@@ -82,13 +82,9 @@ impl HarnessAdmin {
     /// nothing more until an operator resumes it.
     pub(in crate::tests) async fn workflow_paused(&self, service: &str, key: &str) -> bool {
         match self {
-            Self::InProcess { server } => {
-                let target = format!("{service}/{key}/run");
-                server
-                    .invocations()
-                    .iter()
-                    .any(|view| view.target == target && view.status == "paused")
-            }
+            Self::InProcess { server } => server
+                .find_invocation(service, key, "run", "paused")
+                .is_some(),
             Self::Live { admin_url } => {
                 crate::RestateAdminClient::new(RestateConnection::new(admin_url.clone()))
                     .workflow_invocation_status(service, key, "run")

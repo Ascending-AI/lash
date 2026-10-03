@@ -27,8 +27,6 @@ use super::*;
 
 const PROBE_TOOL: &str = "ownership_probe";
 const SWITCH_TOOL: &str = "ownership_switch";
-/// How long one shift may take before the law fails it.
-const SHIFT_BOUND: std::time::Duration = std::time::Duration::from_secs(45);
 
 /// What one probe attempt saw.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -341,17 +339,16 @@ async fn work_with(
 ) -> ShiftOutcome {
     let _evidence = ProbeEvidence(tools);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    // A shift that diverged from its journal never ends: the tier retries it
-    // until it rests. Bound the wait so the divergence fails the law.
-    tokio::time::timeout(
-        SHIFT_BOUND,
-        runner.run_turn(
+    // The wait is the shift's own end, however long a loaded host takes to
+    // reach it (FIG-4751). A shift that diverged from its journal fails
+    // every retry until its engine pauses it, and the tier's runner fails
+    // the law on that pause.
+    runner
+        .run_turn(
             driver(parts, &format!("{request}-driver")),
             shift_attempt(parts, tools, request, Some(tx)),
-        ),
-    )
-    .await
-    .unwrap_or_else(|_| panic!("the `{request}` shift ends: probes {:?}", tools.captures()));
+        )
+        .await;
     rx.recv().await.expect("the tier ran the shift")
 }
 
@@ -663,16 +660,13 @@ pub async fn every_driver_turn_is_owned_by_its_run(
     let tools = OwnershipTools::new(Arc::clone(&registry), parts.session_id.clone());
     let run = TurnId::from("owned-recovered-run");
     parts.enqueue("switch, then die", Some(run.as_str())).await;
-    tokio::time::timeout(
-        SHIFT_BOUND,
-        runner.run_turn_until_crash(
+    runner
+        .run_turn_until_crash(
             driver(&parts, "owned-recovered-crashed-driver"),
             shift_attempt(&parts, &tools, "owned-recovered-crashed", None),
             crash.clone(),
-        ),
-    )
-    .await
-    .unwrap_or_else(|_| panic!("{case}: the crashing shift reaches its crash"));
+        )
+        .await;
     assert!(
         crash.has_fired(),
         "{case}: the shift died inside the follow-on"

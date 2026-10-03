@@ -741,7 +741,7 @@ impl LiveTurnRunner {
                         crash.fired().await;
                     }
                 }, if crash.is_some() && !crash_fired => crash_fired = true,
-                _ = poll.tick(), if until_paused || crash_fired => {
+                _ = poll.tick() => {
                     if crash_fired && !execution_live(&key) {
                         self.open.lock().await.insert(scope, OpenInvocation { key: key.clone(), call });
                         crashed = true;
@@ -750,15 +750,22 @@ impl LiveTurnRunner {
                     // A paused invocation runs nothing more until an operator
                     // resumes it; the law is done with it. A run whose step
                     // failed its attempt inside the engine never returned to
-                    // report an abort, so the pause alone ends the wait.
-                    if until_paused
-                        && self.admin.workflow_paused("ConformanceTurnProbe", &key).await
-                    {
+                    // report an abort, so the pause alone ends the wait. A
+                    // turn that must end instead fails the law here: its
+                    // engine spent every retry on it (a turn diverged from its
+                    // journal), and nothing will run it again (FIG-4751).
+                    if self.admin.workflow_paused("ConformanceTurnProbe", &key).await {
                         pending_turns()
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .remove(&key);
                         call.abort();
+                        assert!(
+                            until_paused,
+                            "the live conformance turn `{key}` paused before it ended; \
+                             the engine holds:{}",
+                            self.admin.open_invocations_report()
+                        );
                         break;
                     }
                 }
