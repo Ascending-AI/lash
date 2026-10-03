@@ -30,26 +30,41 @@
 //! The bounded stream a body emits is part of its attempt's capture (X) and
 //! is emitted when the Run presents the call (V): no tool-child settlement
 //! carries it.
+//!
+//! A final's declared process start (K5, FIG-4884) is protected work of the
+//! same drain: admitted in its `declare` record, registered under its key
+//! (`start:launch`) and discharged (`start:discharge`) before its
+//! presentation settles the declarations.
 
 use std::collections::BTreeMap;
 
 use lash_sansio::ToolCallId;
 
+use lash_sansio::ToolIntentKind;
+
 use super::singleton_run::{
     BeforeCheckReply, SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
-    SingletonPreparedRequest, SingletonRunError, SingletonTerminal, SingletonToolCall,
-    SingletonToolHandlers,
+    SingletonPreparedRequest, SingletonRunError, SingletonStart, SingletonTerminal,
+    SingletonToolCall, SingletonToolHandlers,
 };
 use crate::runtime::effect::{AttemptStreamRecorder, ScopedEffectController};
+use crate::runtime::process::{
+    DeclaredStartObligation, DeclaredStartObligationRefusal, DeclaredStartPhase,
+    StartCancelDecision,
+};
 use crate::store::plugin_writers::PluginRevision;
 use crate::tool_run::{
     AdmissionRefusal, AdmittedCall, AfterCheckVerdict, AttemptOrdinal, AttemptResult,
     AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CallDecision, CheckRecord,
-    MaterialEntry, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef, MaterialRefusal,
-    MaterialRole, OutcomeShape, ResultSource, RoundAdmission, RunEvent, RunEventRefusal,
-    RunJournalEntry, RunLedger, RunRecord, RuntimeCallPolicy, SegmentOrdinal,
+    ExternalCancelPolicy, MaterialEntry, MaterialLocation, MaterialOwner, MaterialPayload,
+    MaterialRef, MaterialRefusal, MaterialRole, OutcomeShape, ResultSource, RoundAdmission,
+    RunEvent, RunEventRefusal, RunJournalEntry, RunLedger, RunRecord, RuntimeCallPolicy,
+    SegmentOrdinal,
 };
-use crate::{AwaitEventKey, EffectOpener, RuntimeEffectControllerError};
+use crate::{
+    AwaitEventKey, ConsumerHold, EffectOpener, ProcessId, ProcessStartRegistration,
+    RuntimeEffectControllerError, ScopeId,
+};
 
 /// The canonical material the served records of one Run own.
 struct Materials {
@@ -202,6 +217,7 @@ fn before_verdict(
                 output,
                 intents: Vec::new(),
                 stream: crate::runtime::effect::AttemptStream::default(),
+                start: None,
             };
             let (result, entry) = mint(owner, MaterialRole::AttemptOutput, encode(&capture)?)?;
             minted.push(entry);
@@ -319,7 +335,10 @@ impl<'a> RunCoordinator<'a> {
                     request: request_ref,
                     declaration: call.declaration.clone(),
                     binding: call.binding.clone(),
-                    policy: RuntimeCallPolicy::default(),
+                    policy: RuntimeCallPolicy {
+                        cancel: call.cancel,
+                        ..RuntimeCallPolicy::default()
+                    },
                     checks: CheckRecord::reduce(checks),
                 }],
                 operands: vec![0],
@@ -415,7 +434,7 @@ impl<'a> RunCoordinator<'a> {
                     let decision = match after.winner().map(|reply| &reply.verdict) {
                         None | Some(AfterCheckVerdict::Allow) => CallDecision::Final {
                             source,
-                            declares: !capture.intents().is_empty(),
+                            declares: capture.declares(),
                         },
                         Some(AfterCheckVerdict::Deny { .. }) => CallDecision::Denied,
                         Some(AfterCheckVerdict::Cancel { .. }) => CallDecision::Cancelled,
@@ -519,14 +538,28 @@ impl<'a> RunCoordinator<'a> {
         // A final's declarations are issued only after its decision is
         // durable and every lower committed final is seated, and settle
         // before its presentation.
+        // Its declared start is admitted with them and drains before they
+        // settle.
         let mut settle = Vec::new();
+        let mut launched = None;
         if *declares {
             if !journal.ledger.drain_frontier_open(rank) {
                 return Err(RunEventRefusal::DrainFrontier { call_id }.into());
             }
-            let issued = journal.record(vec![RunEvent::DeclarationsIssued {
+            let obligation = match capture.start() {
+                Some(start) => Some(recorded_obligation(journal, &call_id, start)?),
+                None => None,
+            };
+            let mut issue = vec![RunEvent::DeclarationsIssued {
                 call_id: call_id.clone(),
-            }]);
+            }];
+            if let Some(obligation) = &obligation {
+                issue.push(RunEvent::StartAdmitted {
+                    call_id: call_id.clone(),
+                    start_key: obligation.start_key().clone(),
+                });
+            }
+            let issued = journal.record(issue);
             journal
                 .append(
                     record_name(&call_id, "declare"),
@@ -538,6 +571,9 @@ impl<'a> RunCoordinator<'a> {
                     }),
                 )
                 .await?;
+            if let Some(obligation) = &obligation {
+                launched = Some(drain_start(journal, &call_id, obligation, handlers).await?);
+            }
             settle.push(RunEvent::DeclarationsSettled {
                 call_id: call_id.clone(),
             });
@@ -551,7 +587,7 @@ impl<'a> RunCoordinator<'a> {
         let declares = *declares;
         let step_call = call_id.clone();
         let present = Box::pin(async move {
-            if declares {
+            if declares && !final_capture.intents().is_empty() {
                 handlers
                     .realize_declarations(&step_call, final_capture.intents())
                     .await?;
@@ -599,8 +635,128 @@ impl<'a> RunCoordinator<'a> {
             source: source.clone(),
             capture,
             presentation,
+            launched,
         })
     }
+}
+
+/// The hold key of a call's declared start: the call's own id, so a call
+/// holds at most one process.
+fn start_hold_key(call_id: &ToolCallId) -> String {
+    format!("{call_id}:start")
+}
+
+/// Bind a body's declared start to the Run: the Run's environment, when lash
+/// executes the process, and a consumer hold, owned by the Run's opener, that
+/// carries the call's recorded cancel policy.
+fn bind_start(
+    call: &SingletonToolCall,
+    policy: &RuntimeCallPolicy,
+    mut registration: ProcessStartRegistration,
+) -> Result<DeclaredStartObligation, DeclaredStartObligationRefusal> {
+    registration.env_ref = if registration.input.is_externally_owned() {
+        None
+    } else {
+        call.environment.clone()
+    };
+    registration.consumer_hold = Some(ConsumerHold {
+        key: start_hold_key(&call.call_id),
+        owner: ScopeId::Opener(call.owner.clone()),
+        cancels: policy.cancel == ExternalCancelPolicy::CancelExternalWork,
+    });
+    DeclaredStartObligation::new(call.call_id.clone(), registration)
+}
+
+/// The obligation a recorded attempt owns, checked against the key and call
+/// the capture names.
+fn recorded_obligation(
+    journal: &RunJournal<'_>,
+    call_id: &ToolCallId,
+    start: &SingletonStart,
+) -> Result<DeclaredStartObligation, SingletonRunError> {
+    let obligation: DeclaredStartObligation = journal.materials.decode(&start.obligation)?;
+    if obligation.start_key() != &start.start_key || &obligation.call_id != call_id {
+        return Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::EffectReplayDivergence,
+            format!(
+                "call {call_id}'s recorded start obligation does not name start {}",
+                start.start_key
+            ),
+        )
+        .into());
+    }
+    Ok(obligation)
+}
+
+/// K5 inside the protected drain: register the admitted start under its key,
+/// then discharge it. The Run's cancellation is read once, inside the
+/// discharge step, and the recorded cancel policy decides what it does to
+/// the launched process.
+async fn drain_start(
+    journal: &mut RunJournal<'_>,
+    call_id: &ToolCallId,
+    obligation: &DeclaredStartObligation,
+    handlers: &dyn SingletonToolHandlers,
+) -> Result<ProcessId, SingletonRunError> {
+    let start_key = obligation.start_key().clone();
+    let launch_record = journal.record(Vec::new());
+    let (step_call, key) = (call_id.clone(), start_key.clone());
+    let launch = Box::pin(async move {
+        let process_id = handlers.launch_start(obligation).await?;
+        Ok(RunJournalEntry {
+            record: RunRecord {
+                events: vec![RunEvent::StartLaunched {
+                    call_id: step_call,
+                    start_key: key,
+                    process_id,
+                }],
+                ..launch_record
+            },
+            materials: Vec::new(),
+        })
+    });
+    let launched = journal
+        .append(record_name(call_id, "start:launch"), launch)
+        .await?;
+    let Some(RunEvent::StartLaunched { process_id, .. }) = launched.events.first() else {
+        return Err(RunEventRefusal::StartOrder {
+            call_id: call_id.clone(),
+            start_key,
+        }
+        .into());
+    };
+    let process_id = process_id.clone();
+
+    let discharge_record = journal.record(Vec::new());
+    let (step_call, launched_id) = (call_id.clone(), process_id.clone());
+    let discharge = Box::pin(async move {
+        let cancel = handlers.run_cancel_requested()
+            && matches!(
+                obligation.on_cancel(DeclaredStartPhase::Launched),
+                StartCancelDecision::RecoverAndDischarge {
+                    cancel_process: true,
+                    ..
+                }
+            );
+        handlers
+            .discharge_start(obligation, &launched_id, cancel)
+            .await?;
+        Ok(RunJournalEntry {
+            record: RunRecord {
+                events: vec![RunEvent::StartDischarged {
+                    call_id: step_call,
+                    start_key,
+                    cancelled: cancel,
+                }],
+                ..discharge_record
+            },
+            materials: Vec::new(),
+        })
+    });
+    journal
+        .append(record_name(call_id, "start:discharge"), discharge)
+        .await?;
+    Ok(process_id)
 }
 
 fn boundary(call_id: &ToolCallId) -> SingletonRunError {
@@ -644,6 +800,8 @@ async fn attempt(
     let owner = journal.materials.owner.clone();
     let declaration = &member.declaration;
     let step = Box::pin(async move {
+        // The obligation material a declared start owns in this record.
+        let mut started = Vec::new();
         let recorder = AttemptStreamRecorder::start();
         let outcome = handlers
             .execute(SingletonAttempt {
@@ -661,14 +819,41 @@ async fn attempt(
                     Err(refusal) => Ok(SingletonCapture::Refused { refusal }),
                 }
             }
-            SingletonBodyOutcome::Done { output, intents } => {
-                match declaration.admits(OutcomeShape::Done { intents: &intents }) {
-                    Ok(()) => Ok(SingletonCapture::Done {
-                        output,
-                        intents,
-                        stream,
-                    }),
+            SingletonBodyOutcome::Done {
+                output,
+                intents,
+                start,
+            } => {
+                // A declared start is a StartProcess intent of the result.
+                let mut declared = intents.clone();
+                if start.is_some() && !declared.contains(&ToolIntentKind::StartProcess) {
+                    declared.push(ToolIntentKind::StartProcess);
+                }
+                match declaration.admits(OutcomeShape::Done { intents: &declared }) {
                     Err(refusal) => Ok(SingletonCapture::Refused { refusal }),
+                    Ok(()) => match start.map(|start| bind_start(call, &member.policy, *start)) {
+                        None => Ok(SingletonCapture::Done {
+                            output,
+                            intents,
+                            stream,
+                            start: None,
+                        }),
+                        Some(Err(refusal)) => Ok(SingletonCapture::StartRefused { refusal }),
+                        Some(Ok(obligation)) => {
+                            let (reference, entry) =
+                                mint(&owner, MaterialRole::AttemptOutput, encode(&obligation)?)?;
+                            started.push(entry);
+                            Ok(SingletonCapture::Done {
+                                output,
+                                intents,
+                                stream,
+                                start: Some(Box::new(SingletonStart {
+                                    start_key: obligation.start_key().clone(),
+                                    obligation: reference,
+                                })),
+                            })
+                        }
+                    },
                 }
             }
             SingletonBodyOutcome::Failed { output } => {
@@ -688,7 +873,8 @@ async fn attempt(
                         retryable: false,
                     }
                 };
-                (result, vec![entry])
+                started.insert(0, entry);
+                (result, started)
             }
         };
         Ok(RunJournalEntry {

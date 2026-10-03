@@ -16,6 +16,11 @@
 //! declaration issued before every lower final rank is seated, presentation
 //! before its declarations settle, admission after an AbortRun or Closing,
 //! and settlement while protected work remains.
+//!
+//! A final's declared start (K5, FIG-4884) drains inside its declarations:
+//! it is admitted with them, launched under its key, and discharged — its
+//! recorded cancel policy followed and its consumer hold released — before
+//! they settle. A start key names one start of the Run.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -27,8 +32,10 @@ use serde::{Deserialize, Serialize};
 use super::admission::{RecordedRetryPolicy, RoundAdmission};
 use super::material::{MaterialEntry, MaterialRef};
 use super::tool_hooks::{AfterCheckVerdict, BeforeSelection, CheckRecord};
+use crate::ProcessId;
 use crate::await_event_identity::AwaitEventKey;
 use crate::effect_opener::EffectOpener;
+use crate::process_identity::StartKey;
 
 /// The ordinal of an attempt of one logical call, from 1. A crash
 /// redelivery keeps it; only a reported retry advances it.
@@ -177,6 +184,26 @@ pub enum RunEvent {
     DeclarationsSettled {
         call_id: ToolCallId,
     },
+    /// K5: a final's declared start is admitted with its declarations. From
+    /// here it starts under `start_key` whatever becomes of the Run.
+    StartAdmitted {
+        call_id: ToolCallId,
+        start_key: StartKey,
+    },
+    /// The start's process is registered under its key.
+    StartLaunched {
+        call_id: ToolCallId,
+        start_key: StartKey,
+        process_id: ProcessId,
+    },
+    /// The start's recorded cancel policy is followed and its consumer hold
+    /// released. `cancelled` when a cancellation of the Run made that policy
+    /// cancel the process.
+    StartDischarged {
+        call_id: ToolCallId,
+        start_key: StartKey,
+        cancelled: bool,
+    },
     /// V: the call's model-facing presentation.
     Presented {
         call_id: ToolCallId,
@@ -261,6 +288,18 @@ pub enum RunEventRefusal {
     DrainFrontier { call_id: ToolCallId },
     #[error("call {call_id} is out of order at its boundary")]
     BoundaryOrder { call_id: ToolCallId },
+    #[error("start key {start_key} already names a start of this Run")]
+    StartReused { start_key: StartKey },
+    #[error("call {call_id}'s start {start_key} is out of order")]
+    StartOrder {
+        call_id: ToolCallId,
+        start_key: StartKey,
+    },
+    #[error("call {call_id}'s declarations cannot settle while start {start_key} is owed")]
+    StartOwed {
+        call_id: ToolCallId,
+        start_key: StartKey,
+    },
     #[error("the lifecycle cannot move from {from:?} to {to:?}")]
     Lifecycle {
         from: RunLifecycle,
@@ -268,6 +307,14 @@ pub enum RunEventRefusal {
     },
     #[error("the Run cannot settle while call {call_id} owes protected work")]
     UnsettledWork { call_id: ToolCallId },
+}
+
+/// How far a call's declared start has drained.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum StartProgress {
+    Admitted,
+    Launched,
+    Discharged,
 }
 
 #[derive(Clone, Debug)]
@@ -279,6 +326,8 @@ struct CallState {
     attempts: BTreeMap<AttemptOrdinal, AttemptResult>,
     decision: Option<(u64, CallDecision)>,
     declarations_issued: bool,
+    /// The declared start, admitted with the declarations.
+    start: Option<(StartKey, StartProgress)>,
     seated: bool,
     presented: bool,
     consumed: bool,
@@ -346,6 +395,22 @@ impl RunLedger {
             Some((lower, CallDecision::Final { .. })) if *lower < rank => other.seated,
             _ => true,
         })
+    }
+
+    /// The admitted starts not yet discharged, in call order: each is owed
+    /// its launch under its key, or its discharge, by whichever segment owns
+    /// the Run next.
+    #[must_use]
+    pub fn owed_starts(&self) -> Vec<StartKey> {
+        self.calls
+            .values()
+            .filter_map(|call| match &call.start {
+                Some((key, progress)) if *progress != StartProgress::Discharged => {
+                    Some(key.clone())
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// Apply `record`, appended by `active`, all of it or none of it.
@@ -436,9 +501,34 @@ impl RunLedger {
                 if !call.declarations_issued || call.seated {
                     return Err(boundary(call_id));
                 }
+                if let Some((start_key, progress)) = &call.start
+                    && *progress != StartProgress::Discharged
+                {
+                    return Err(RunEventRefusal::StartOwed {
+                        call_id: call_id.clone(),
+                        start_key: start_key.clone(),
+                    });
+                }
                 call.seated = true;
                 Ok(())
             }
+            RunEvent::StartAdmitted { call_id, start_key } => self.admit_start(call_id, start_key),
+            RunEvent::StartLaunched {
+                call_id, start_key, ..
+            } => self.advance_start(
+                call_id,
+                start_key,
+                &StartProgress::Admitted,
+                StartProgress::Launched,
+            ),
+            RunEvent::StartDischarged {
+                call_id, start_key, ..
+            } => self.advance_start(
+                call_id,
+                start_key,
+                &StartProgress::Launched,
+                StartProgress::Discharged,
+            ),
             RunEvent::Presented { call_id, .. } => {
                 let call = self.call(call_id)?;
                 let final_unseated =
@@ -493,6 +583,7 @@ impl RunLedger {
                     attempts: BTreeMap::new(),
                     decision: None,
                     declarations_issued: false,
+                    start: None,
                     seated: false,
                     presented: false,
                     consumed: false,
@@ -592,6 +683,59 @@ impl RunLedger {
         }
         self.call(call_id)?.declarations_issued = true;
         Ok(())
+    }
+
+    /// Admit a final's declared start: only inside its issued, unsettled
+    /// declarations, one start per call, and never under a key another
+    /// start of the Run holds.
+    fn admit_start(
+        &mut self,
+        call_id: &ToolCallId,
+        start_key: &StartKey,
+    ) -> Result<(), RunEventRefusal> {
+        let reused = self.calls.values().any(|call| {
+            call.start
+                .as_ref()
+                .is_some_and(|(admitted, _)| admitted == start_key)
+        });
+        if reused {
+            return Err(RunEventRefusal::StartReused {
+                start_key: start_key.clone(),
+            });
+        }
+        let call = self.call(call_id)?;
+        let declaring = matches!(
+            call.decision,
+            Some((_, CallDecision::Final { declares: true, .. }))
+        );
+        if !declaring || !call.declarations_issued || call.seated || call.start.is_some() {
+            return Err(RunEventRefusal::StartOrder {
+                call_id: call_id.clone(),
+                start_key: start_key.clone(),
+            });
+        }
+        call.start = Some((start_key.clone(), StartProgress::Admitted));
+        Ok(())
+    }
+
+    fn advance_start(
+        &mut self,
+        call_id: &ToolCallId,
+        start_key: &StartKey,
+        from: &StartProgress,
+        to: StartProgress,
+    ) -> Result<(), RunEventRefusal> {
+        let call = self.call(call_id)?;
+        match &mut call.start {
+            Some((admitted, progress)) if admitted == start_key && progress == from => {
+                *progress = to;
+                Ok(())
+            }
+            _ => Err(RunEventRefusal::StartOrder {
+                call_id: call_id.clone(),
+                start_key: start_key.clone(),
+            }),
+        }
     }
 
     fn move_lifecycle(&mut self, to: RunLifecycle) -> Result<(), RunEventRefusal> {

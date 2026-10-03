@@ -17,14 +17,15 @@ use lash_core::plugin::{BehaviorRevision, PluginRevision};
 use lash_core::runtime::AttemptStream;
 use lash_core::store::plugin_writers::PluginCallbackIdentity;
 use lash_core::tool_dispatch::{
-    BeforeCheckReply, SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
-    SingletonPreparedRequest, SingletonRunError, SingletonRunOutcome, SingletonTerminal,
-    SingletonToolCall, SingletonToolHandlers, run_singleton_tool,
+    BeforeCheckReply, DeclaredStartObligation, SingletonAttempt, SingletonBodyOutcome,
+    SingletonCapture, SingletonDrift, SingletonPreparedRequest, SingletonRunError,
+    SingletonRunOutcome, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
+    run_singleton_tool,
 };
 use lash_core::tool_run::{
     AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict,
-    CallDecision, DeclarationRefusal, PresentationBinding, ResultSource, RunEvent, RunEventRefusal,
-    RunRecord, SegmentOrdinal, ToolDeclaration,
+    CallDecision, DeclarationRefusal, ExternalCancelPolicy, PresentationBinding, ResultSource,
+    RunEvent, RunEventRefusal, RunRecord, SegmentOrdinal, ToolDeclaration,
 };
 use lash_core::{AdmittedScope, EffectOpener, ToolCallId};
 use lash_restate_test::protocol::MessageType;
@@ -64,6 +65,8 @@ fn call(label: &str) -> SingletonToolCall {
         declaration: ToolDeclaration::default(),
         binding: binding(1),
         available: vec![revision(1)],
+        cancel: ExternalCancelPolicy::Ignore,
+        environment: None,
     }
 }
 
@@ -120,6 +123,7 @@ impl Probe {
         SingletonBodyOutcome::Done {
             output: OUTPUT.to_owned(),
             intents: Vec::new(),
+            start: None,
         }
     }
 
@@ -201,7 +205,9 @@ impl SingletonToolHandlers for Probe {
         self.presentations.fetch_add(1, Ordering::SeqCst);
         let declared = match capture {
             SingletonCapture::Done { intents, .. } => intents.len(),
-            SingletonCapture::Failed { .. } | SingletonCapture::Refused { .. } => 0,
+            SingletonCapture::Failed { .. }
+            | SingletonCapture::Refused { .. }
+            | SingletonCapture::StartRefused { .. } => 0,
         };
         assert_eq!(
             self.realized.lock().unwrap().len(),
@@ -215,6 +221,22 @@ impl SingletonToolHandlers for Probe {
     }
 
     fn emit_stream(&self, _call_id: &ToolCallId, _stream: &AttemptStream) {}
+
+    async fn launch_start(
+        &self,
+        _obligation: &DeclaredStartObligation,
+    ) -> Result<lash_core::ProcessId, String> {
+        Err("these laws declare no start".to_owned())
+    }
+
+    async fn discharge_start(
+        &self,
+        _obligation: &DeclaredStartObligation,
+        _process_id: &lash_core::ProcessId,
+        _cancel: bool,
+    ) -> Result<(), String> {
+        Err("these laws declare no start".to_owned())
+    }
 }
 
 type Returned = Arc<Mutex<Vec<Result<SingletonRunOutcome, SingletonRunError>>>>;
@@ -325,6 +347,9 @@ fn events(records: &[RunRecord]) -> Vec<Vec<&'static str>> {
                     RunEvent::Decided { .. } => "decided",
                     RunEvent::DeclarationsIssued { .. } => "declarations_issued",
                     RunEvent::DeclarationsSettled { .. } => "declarations_settled",
+                    RunEvent::StartAdmitted { .. } => "start_admitted",
+                    RunEvent::StartLaunched { .. } => "start_launched",
+                    RunEvent::StartDischarged { .. } => "start_discharged",
                     RunEvent::Presented { .. } => "presented",
                     RunEvent::Consumed { .. } => "consumed",
                     RunEvent::Incorporated { .. } => "incorporated",
@@ -408,8 +433,10 @@ async fn a_done_singleton_is_four_records_and_reruns_only_unrecorded_work_at_eve
                     output: OUTPUT.to_owned(),
                     intents: Vec::new(),
                     stream: AttemptStream::default(),
+                    start: None,
                 },
                 presentation: PRESENTATION.to_owned(),
+                launched: None,
             }
         );
         assert_eq!(
@@ -449,6 +476,7 @@ async fn final_and_cancel_choose_one_terminal_around_the_durable_decision() {
     let declaring = SingletonBodyOutcome::Done {
         output: OUTPUT.to_owned(),
         intents: vec![ToolIntentKind::EmitTrigger],
+        start: None,
     };
     let mut call = call("cancel-once");
     call.declaration = ToolDeclaration::default().with_intents([ToolIntentKind::EmitTrigger]);
@@ -544,6 +572,7 @@ async fn a_final_settles_its_declarations_before_presentation_at_every_cut() {
             SingletonBodyOutcome::Done {
                 output: OUTPUT.to_owned(),
                 intents: vec![ToolIntentKind::EmitTrigger],
+                start: None,
             },
             CancelAt::Never,
         );
@@ -717,6 +746,7 @@ async fn an_undeclared_outcome_is_refused_before_anything_it_declared_is_realize
             SingletonBodyOutcome::Done {
                 output: OUTPUT.to_owned(),
                 intents: vec![ToolIntentKind::StartProcess],
+                start: None,
             },
             DeclarationRefusal::UndeclaredIntent {
                 kind: ToolIntentKind::StartProcess,
@@ -747,6 +777,7 @@ async fn an_undeclared_outcome_is_refused_before_anything_it_declared_is_realize
                 },
                 capture: SingletonCapture::Refused { refusal: expected },
                 presentation: PRESENTATION.to_owned(),
+                launched: None,
             }
         );
         assert!(

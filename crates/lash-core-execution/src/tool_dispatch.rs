@@ -12,6 +12,7 @@ mod retry;
 mod run_coordinator;
 mod singleton_run;
 
+pub use crate::runtime::process::{DeclaredStartObligation, DeclaredStartObligationRefusal};
 pub use admission::{ToolRoundRefusal, admission_failure, admit_tool_round};
 pub use context::{
     REBIND_FIELDS, RebindField, RebindSource, TOOL_CHILD_REBIND_VERSION, ToolDispatchContext,
@@ -25,8 +26,8 @@ pub use pending_resolver::{
 pub use run_coordinator::{DecidedCall, RunCoordinator};
 pub use singleton_run::{
     BeforeCheckReply, SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
-    SingletonPreparedRequest, SingletonRunError, SingletonRunOutcome, SingletonTerminal,
-    SingletonToolCall, SingletonToolHandlers, run_singleton_tool,
+    SingletonPreparedRequest, SingletonRunError, SingletonRunOutcome, SingletonStart,
+    SingletonTerminal, SingletonToolCall, SingletonToolHandlers, run_singleton_tool,
 };
 
 pub(crate) use atomic_attempt::AtomicToolAttempt;

@@ -27,6 +27,22 @@
 //! singleton admits no retry policy. A Deferred attempt hands its call to the
 //! source seal (FIG-4883) after its record.
 //!
+//! A final may declare one process start (K5, FIG-4884). Its attempt record
+//! owns the start's obligation: the body's registration, bound by the Run to
+//! the Run's environment when lash executes the process and to a consumer
+//! hold that carries the call's recorded cancel policy, under the body's
+//! stable start key. The start drains inside the final's declarations: it is
+//! admitted in the record that issues them (`declare`), registered under its
+//! key (`start:launch`), and discharged (`start:discharge`) — the Run's
+//! cancellation read once, the recorded policy followed and the hold
+//! released — before the presentation settles them. A cancellation before
+//! the decision is durable withholds the final, so its start is never
+//! admitted and never launches. One after it cannot forbid the start: a lost
+//! launch launches again under the same key, which the registrar answers
+//! with the process it registered first, and the discharge then cancels that
+//! process when the recorded policy says so. No task outlives the drain, and
+//! the start holds the process only until its launch is durable.
+//!
 //! [`RuntimeEffectController::record_run_record`]: crate::RuntimeEffectController::record_run_record
 
 use std::sync::Arc;
@@ -35,13 +51,17 @@ use lash_sansio::{ToolCallId, ToolIntentKind};
 use serde::{Deserialize, Serialize};
 
 use crate::runtime::effect::{AttemptStream, AttemptStreamRecorder, ScopedEffectController};
+use crate::runtime::process::{DeclaredStartObligation, DeclaredStartObligationRefusal};
 use crate::store::plugin_writers::PluginRevision;
 use crate::tool_run::{
     AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict,
-    CallDecision, DeclarationRefusal, HookCause, ResultSource, RunEventRefusal, RunRecord,
-    SegmentOrdinal, ToolDeclaration,
+    CallDecision, DeclarationRefusal, ExternalCancelPolicy, HookCause, MaterialRef, ResultSource,
+    RunEventRefusal, RunRecord, SegmentOrdinal, ToolDeclaration,
 };
-use crate::{AwaitEventKey, EffectOpener, RuntimeEffectControllerError};
+use crate::{
+    AwaitEventKey, EffectOpener, ProcessExecutionEnvRef, ProcessId, ProcessStartRegistration,
+    RuntimeEffectControllerError, StartKey,
+};
 
 use super::run_coordinator::{DecidedCall, RunCoordinator};
 
@@ -66,6 +86,14 @@ pub struct SingletonToolCall {
     /// The plugin revisions this build executes. A recorded admission bound to
     /// any other refuses, typed, before its body.
     pub available: Vec<PluginRevision>,
+    /// The cancel policy admission records: what a cancellation of the Run
+    /// after a declared start's admission does to the process it launched.
+    /// The recorded policy governs every replay.
+    pub cancel: ExternalCancelPolicy,
+    /// The execution environment the Run owns. A declared start lash executes
+    /// is bound to it when its attempt is recorded; a Run without one admits
+    /// no such start.
+    pub environment: Option<ProcessExecutionEnvRef>,
 }
 
 /// The prepared request admission records (A): the request as issued and the
@@ -95,6 +123,9 @@ pub enum SingletonCapture {
         intents: Vec<ToolIntentKind>,
         #[serde(default, skip_serializing_if = "AttemptStream::is_empty")]
         stream: AttemptStream,
+        /// The process start the result declares.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<Box<SingletonStart>>,
     },
     /// A failure the body reported.
     Failed {
@@ -105,6 +136,21 @@ pub enum SingletonCapture {
     /// An outcome the admitted declaration does not admit, refused before
     /// anything it declared was realized.
     Refused { refusal: DeclarationRefusal },
+    /// A declared start that cannot be an obligation — keyless, or a start
+    /// lash executes in a Run that owns no environment — refused before it
+    /// was admitted.
+    StartRefused {
+        refusal: DeclaredStartObligationRefusal,
+    },
+}
+
+/// A declared start as its attempt recorded it: the start's stable key and
+/// the canonical material of its obligation, which the attempt record owns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SingletonStart {
+    pub start_key: StartKey,
+    pub obligation: MaterialRef,
 }
 
 impl SingletonCapture {
@@ -113,7 +159,7 @@ impl SingletonCapture {
     pub fn output(&self) -> Option<&str> {
         match self {
             Self::Done { output, .. } | Self::Failed { output, .. } => Some(output),
-            Self::Refused { .. } => None,
+            Self::Refused { .. } | Self::StartRefused { .. } => None,
         }
     }
 
@@ -122,24 +168,42 @@ impl SingletonCapture {
     pub fn stream(&self) -> Option<&AttemptStream> {
         match self {
             Self::Done { stream, .. } | Self::Failed { stream, .. } => Some(stream),
-            Self::Refused { .. } => None,
+            Self::Refused { .. } | Self::StartRefused { .. } => None,
         }
     }
 
     pub(super) fn intents(&self) -> &[ToolIntentKind] {
         match self {
             Self::Done { intents, .. } => intents,
-            Self::Failed { .. } | Self::Refused { .. } => &[],
+            Self::Failed { .. } | Self::Refused { .. } | Self::StartRefused { .. } => &[],
         }
+    }
+
+    /// The process start the result declares.
+    #[must_use]
+    pub fn start(&self) -> Option<&SingletonStart> {
+        match self {
+            Self::Done { start, .. } => start.as_deref(),
+            Self::Failed { .. } | Self::Refused { .. } | Self::StartRefused { .. } => None,
+        }
+    }
+
+    /// Whether a final of this capture owes declarations: intents to realize
+    /// or a start to drain.
+    pub(super) fn declares(&self) -> bool {
+        !self.intents().is_empty() || self.start().is_some()
     }
 }
 
 /// What one attempt's body returned.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum SingletonBodyOutcome {
     Done {
         output: String,
         intents: Vec<ToolIntentKind>,
+        /// One process start the result declares, under its stable start
+        /// key. The Run binds its environment and consumer hold.
+        start: Option<Box<ProcessStartRegistration>>,
     },
     Failed {
         output: String,
@@ -224,6 +288,24 @@ pub trait SingletonToolHandlers: Send + Sync {
     /// its declarations settled and before its presentation (V). A replay
     /// that serves the presentation emits nothing again.
     fn emit_stream(&self, call_id: &ToolCallId, stream: &AttemptStream);
+
+    /// Register a final's declared start under its key (K5): the
+    /// registration fixes its binding, lifetime, environment and consumer
+    /// hold, and arms its delivery. A crash before the launch record is
+    /// durable launches again under the same key, so the registrar must
+    /// answer the process it registered first.
+    async fn launch_start(&self, obligation: &DeclaredStartObligation)
+    -> Result<ProcessId, String>;
+
+    /// Discharge a launched start: cancel `process_id` when `cancel`, then
+    /// release the obligation's consumer hold. A crash before the discharge
+    /// record is durable repeats both, so both must be idempotent.
+    async fn discharge_start(
+        &self,
+        obligation: &DeclaredStartObligation,
+        process_id: &ProcessId,
+        cancel: bool,
+    ) -> Result<(), String>;
 }
 
 /// How a call ended.
@@ -235,6 +317,8 @@ pub enum SingletonTerminal {
         source: ResultSource,
         capture: SingletonCapture,
         presentation: String,
+        /// The process the final's declared start launched.
+        launched: Option<ProcessId>,
     },
     /// A check or the Run's cancellation withheld the result: the decision is
     /// denied, cancelled or aborted, and the recorded check names the cause.

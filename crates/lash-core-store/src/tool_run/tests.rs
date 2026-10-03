@@ -8,6 +8,7 @@ use super::*;
 use crate::artifact_referrer::{ArtifactName, ArtifactStoreId};
 use crate::await_event_identity::{AwaitEventKey, AwaitEventWaitIdentity};
 use crate::effect_opener::EffectOpener;
+use crate::process_identity::StartKey;
 use crate::store::plugin_writers::{PluginCallbackIdentity, PluginRevision};
 use crate::{ExecutionScope, ProcessId};
 
@@ -854,6 +855,118 @@ fn protected_drain_is_transitive_across_intent_free_ranks() {
             call_id: ids[1].clone()
         }),
         "incorporation follows presentation"
+    );
+}
+
+/// L08 in the fold: a declared start is admitted only inside its final's
+/// issued declarations — never for a cancelled call — under a key no other
+/// start of the Run holds; it is launched, then discharged, once each, and
+/// the declarations cannot settle while it is owed.
+#[test]
+fn a_declared_start_drains_inside_its_declarations_under_one_key() {
+    let ids: Vec<_> = ["start", "cancelled", "reuse"]
+        .map(ToolCallId::fixture)
+        .to_vec();
+    let key = StartKey::for_host("fig4884-start");
+    let admitted = |call_id: &ToolCallId, start_key: &StartKey| RunEvent::StartAdmitted {
+        call_id: call_id.clone(),
+        start_key: start_key.clone(),
+    };
+    let launched = RunEvent::StartLaunched {
+        call_id: ids[0].clone(),
+        start_key: key.clone(),
+        process_id: ProcessId::fixture("fig4884-process"),
+    };
+    let discharged = RunEvent::StartDischarged {
+        call_id: ids[0].clone(),
+        start_key: key.clone(),
+        cancelled: true,
+    };
+    let order = |call_id: &ToolCallId| RunEventRefusal::StartOrder {
+        call_id: call_id.clone(),
+        start_key: key.clone(),
+    };
+    let mut log = Log::new();
+    log.push(RunEvent::Admitted {
+        round: round(vec![call("start"), call("cancelled"), call("reuse")]),
+    })
+    .unwrap();
+    for id in &ids {
+        log.push(done(id, 1)).unwrap();
+    }
+    // The Run's cancellation of the undecided call.
+    log.push(RunEvent::Decided {
+        call_id: ids[1].clone(),
+        rank: 1,
+        decision: CallDecision::Cancelled,
+        after: None,
+    })
+    .unwrap();
+    assert_eq!(
+        log.push(admitted(&ids[1], &key)),
+        Err(order(&ids[1])),
+        "a cancel before admission forbids the start"
+    );
+    log.push(decided(&ids[0], 2, final_of(1, true))).unwrap();
+    assert_eq!(
+        log.push(admitted(&ids[0], &key)),
+        Err(order(&ids[0])),
+        "admission follows the issued declarations"
+    );
+    log.push(RunEvent::DeclarationsIssued {
+        call_id: ids[0].clone(),
+    })
+    .unwrap();
+    assert_eq!(log.push(launched.clone()), Err(order(&ids[0])));
+    log.push(admitted(&ids[0], &key)).unwrap();
+    assert_eq!(log.ledger.owed_starts(), vec![key.clone()]);
+    assert_eq!(log.push(discharged.clone()), Err(order(&ids[0])));
+    assert_eq!(
+        log.push(RunEvent::DeclarationsSettled {
+            call_id: ids[0].clone()
+        }),
+        Err(RunEventRefusal::StartOwed {
+            call_id: ids[0].clone(),
+            start_key: key.clone(),
+        })
+    );
+    log.push(launched.clone()).unwrap();
+    assert_eq!(log.push(launched), Err(order(&ids[0])), "one launch");
+    assert_eq!(log.ledger.owed_starts(), vec![key.clone()]);
+    log.push(discharged.clone()).unwrap();
+    assert_eq!(log.push(discharged), Err(order(&ids[0])), "one discharge");
+    assert!(log.ledger.owed_starts().is_empty());
+    log.push(RunEvent::DeclarationsSettled {
+        call_id: ids[0].clone(),
+    })
+    .unwrap();
+
+    log.push(decided(&ids[2], 3, final_of(1, true))).unwrap();
+    log.push(RunEvent::DeclarationsIssued {
+        call_id: ids[2].clone(),
+    })
+    .unwrap();
+    assert_eq!(
+        log.push(admitted(&ids[2], &key)),
+        Err(RunEventRefusal::StartReused {
+            start_key: key.clone()
+        }),
+        "a start key names one start of the Run"
+    );
+
+    let event = RunEvent::StartLaunched {
+        call_id: ids[0].clone(),
+        start_key: key.clone(),
+        process_id: ProcessId::fixture("fig4884-process"),
+    };
+    assert_eq!(
+        serde_json::to_value(&event).unwrap(),
+        json!({
+            "event": "start_launched",
+            "call_id": ids[0],
+            "start_key": key,
+            "process_id": ProcessId::fixture("fig4884-process"),
+        })
     );
 }
 

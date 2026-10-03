@@ -28,14 +28,14 @@ use lash_core::runtime::{
 };
 use lash_core::store::plugin_writers::PluginCallbackIdentity;
 use lash_core::tool_dispatch::{
-    BeforeCheckReply, DecidedCall, RunCoordinator, SingletonAttempt, SingletonBodyOutcome,
-    SingletonCapture, SingletonPreparedRequest, SingletonRunError, SingletonTerminal,
-    SingletonToolCall, SingletonToolHandlers,
+    BeforeCheckReply, DecidedCall, DeclaredStartObligation, RunCoordinator, SingletonAttempt,
+    SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest, SingletonRunError,
+    SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
 };
 use lash_core::tool_run::{
     AdmittedBinding, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict, CallDecision,
-    PresentationBinding, RunEvent, RunEventOrdinal, RunJournalEntry, RunLifecycle, RunRecord,
-    SegmentOrdinal, ToolDeclaration,
+    ExternalCancelPolicy, PresentationBinding, RunEvent, RunEventOrdinal, RunJournalEntry,
+    RunLifecycle, RunRecord, SegmentOrdinal, ToolDeclaration,
 };
 use lash_core::{AdmittedScope, AwaitEventKey, EffectOpener, ScopedEffectController, ToolCallId};
 use lash_restate_test::protocol::MessageType;
@@ -94,6 +94,8 @@ fn call(label: &str, kind: &Kind) -> SingletonToolCall {
         declaration,
         binding: binding(),
         available: vec![revision()],
+        cancel: ExternalCancelPolicy::Ignore,
+        environment: None,
     }
 }
 
@@ -214,10 +216,12 @@ impl SingletonToolHandlers for Probe {
             Kind::Declares(intents) => SingletonBodyOutcome::Done {
                 output: output_of(call_id),
                 intents: intents.clone(),
+                start: None,
             },
             Kind::IntentFree => SingletonBodyOutcome::Done {
                 output: output_of(call_id),
                 intents: Vec::new(),
+                start: None,
             },
             Kind::Deferred => SingletonBodyOutcome::Deferred {
                 source: AwaitEventKey {
@@ -311,6 +315,22 @@ impl SingletonToolHandlers for Probe {
             .lock()
             .unwrap()
             .push((call_id.clone(), stream.clone()));
+    }
+
+    async fn launch_start(
+        &self,
+        _obligation: &DeclaredStartObligation,
+    ) -> Result<lash_core::ProcessId, String> {
+        Err("these laws declare no start".to_owned())
+    }
+
+    async fn discharge_start(
+        &self,
+        _obligation: &DeclaredStartObligation,
+        _process_id: &lash_core::ProcessId,
+        _cancel: bool,
+    ) -> Result<(), String> {
+        Err("these laws declare no start".to_owned())
     }
 }
 

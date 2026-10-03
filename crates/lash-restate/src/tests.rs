@@ -258,6 +258,7 @@ pub(super) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
 }
 
 mod compat_on_the_double;
+mod declared_start_run_drain_on_the_double;
 mod determinism;
 mod effect_group_child_cancel;
 mod effect_group_committed_recovery;
