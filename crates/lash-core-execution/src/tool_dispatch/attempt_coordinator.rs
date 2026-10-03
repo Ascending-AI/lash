@@ -818,7 +818,7 @@ async fn commit_group_child_boundary(
 }
 
 /// Seals an armed deferred descriptor at the dispatch's final-commit fence.
-/// Its resolver and deadline remain owned by this immutable final until the
+/// Its resolver remains owned by this immutable final until the
 /// Run incorporates it and takes responsibility for the logical result.
 pub(crate) async fn commit_deferred_group_child(
     context: &ToolDispatchContext<'_>,

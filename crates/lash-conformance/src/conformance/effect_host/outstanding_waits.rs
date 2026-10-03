@@ -73,22 +73,14 @@ pub(crate) async fn effect_host_lists_registered_unresolved_waits(
     let waiter_key_a = key_a.clone();
     let waiter_a = crate::task::spawn(async move {
         owner_a
-            .await_await_event(
-                &waiter_key_a,
-                tokio_util::sync::CancellationToken::new(),
-                None,
-            )
+            .await_await_event(&waiter_key_a, tokio_util::sync::CancellationToken::new())
             .await
     });
     let owner_b = Arc::clone(&owner);
     let waiter_key_b = key_b.clone();
     let waiter_b = crate::task::spawn(async move {
         owner_b
-            .await_await_event(
-                &waiter_key_b,
-                tokio_util::sync::CancellationToken::new(),
-                None,
-            )
+            .await_await_event(&waiter_key_b, tokio_util::sync::CancellationToken::new())
             .await
     });
 
@@ -200,7 +192,6 @@ pub(crate) async fn effect_host_lists_registered_unresolved_waits(
             .await_await_event(
                 &waiter_revoked_key,
                 tokio_util::sync::CancellationToken::new(),
-                None,
             )
             .await
     });

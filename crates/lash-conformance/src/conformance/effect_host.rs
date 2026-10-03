@@ -312,7 +312,7 @@ where
     effect_host_await_event_key_is_stable(make()).await;
     effect_host_await_event_accepts_early_resolution(make()).await;
     effect_host_await_event_duplicate_resolution_is_terminal(make()).await;
-    effect_host_await_event_cancel_and_timeout_are_terminal(make()).await;
+    effect_host_await_event_cancel_is_terminal(make()).await;
     effect_host_await_event_revokes_session_scope(make()).await;
     effect_host_await_event_retires_non_session_scopes(make()).await;
     effect_host_await_event_reinstate_lifts_process_scope_fence(make()).await;
@@ -1124,7 +1124,7 @@ async fn effect_host_await_event_accepts_early_resolution(host: Arc<dyn EffectHo
         ResolveOutcome::Accepted
     );
     let awaited = host
-        .await_await_event(&key, tokio_util::sync::CancellationToken::new(), None)
+        .await_await_event(&key, tokio_util::sync::CancellationToken::new())
         .await
         .expect("await early-resolved event");
     assert_eq!(awaited, resolution);
@@ -1167,7 +1167,7 @@ async fn effect_host_await_event_duplicate_resolution_is_terminal(host: Arc<dyn 
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn effect_host_await_event_cancel_and_timeout_are_terminal(host: Arc<dyn EffectHost>) {
+async fn effect_host_await_event_cancel_is_terminal(host: Arc<dyn EffectHost>) {
     let cancel_scope = durable_turn_scope("await-event-session-cancel", "turn-cancel");
     let cancel_key = host
         .await_event_key(
@@ -1179,7 +1179,7 @@ async fn effect_host_await_event_cancel_and_timeout_are_terminal(host: Arc<dyn E
     let cancel = tokio_util::sync::CancellationToken::new();
     cancel.cancel();
     let cancelled = host
-        .await_await_event(&cancel_key, cancel, None)
+        .await_await_event(&cancel_key, cancel)
         .await
         .expect("cancelled await-event");
     assert_eq!(cancelled, Resolution::Cancelled);
@@ -1191,24 +1191,6 @@ async fn effect_host_await_event_cancel_and_timeout_are_terminal(host: Arc<dyn E
             terminal: Resolution::Cancelled
         }
     );
-
-    let timeout_scope = durable_turn_scope("await-event-session-timeout", "turn-timeout");
-    let timeout_key = host
-        .await_event_key(
-            &timeout_scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-timeout")),
-        )
-        .await
-        .expect("timeout await-event key");
-    let timed_out = host
-        .await_await_event(
-            &timeout_key,
-            tokio_util::sync::CancellationToken::new(),
-            Some(std::time::Instant::now()),
-        )
-        .await
-        .expect("timed-out await-event");
-    assert_eq!(timed_out, Resolution::Timeout);
 }
 
 #[expect(
@@ -1236,7 +1218,7 @@ async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>
         ResolveOutcome::UnknownOrRevoked
     );
     let err = host
-        .await_await_event(&key, tokio_util::sync::CancellationToken::new(), None)
+        .await_await_event(&key, tokio_util::sync::CancellationToken::new())
         .await
         .expect_err("revoked key must not await");
     assert_eq!(err.code.as_str(), "await_event_unknown_or_revoked");
@@ -1570,11 +1552,7 @@ async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn Effect
         .expect_err("retired key must not peek");
     assert_eq!(err.code.as_str(), "await_event_unknown_or_revoked");
     let err = host
-        .await_await_event(
-            &retired_key,
-            tokio_util::sync::CancellationToken::new(),
-            None,
-        )
+        .await_await_event(&retired_key, tokio_util::sync::CancellationToken::new())
         .await
         .expect_err("retired key must not await");
     assert_eq!(err.code.as_str(), "await_event_unknown_or_revoked");
@@ -1645,11 +1623,7 @@ async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
     let waiter_key = key.clone();
     let waiter = crate::task::spawn(async move {
         waiter_host
-            .await_await_event(
-                &waiter_key,
-                tokio_util::sync::CancellationToken::new(),
-                None,
-            )
+            .await_await_event(&waiter_key, tokio_util::sync::CancellationToken::new())
             .await
     });
     // The spawned waiter registers its wait asynchronously; cancel repeatedly
@@ -1703,7 +1677,7 @@ async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
         ResolveOutcome::Accepted
     );
     assert_eq!(
-        host.await_await_event(&later_key, tokio_util::sync::CancellationToken::new(), None)
+        host.await_await_event(&later_key, tokio_util::sync::CancellationToken::new())
             .await
             .expect("post-cancel wait resolves"),
         Resolution::Ok(serde_json::json!("still-works"))
@@ -1732,7 +1706,7 @@ async fn effect_host_await_event_rejects_tampered_keys(host: Arc<dyn EffectHost>
         ResolveOutcome::UnknownOrRevoked
     );
     let err = host
-        .await_await_event(&key, tokio_util::sync::CancellationToken::new(), None)
+        .await_await_event(&key, tokio_util::sync::CancellationToken::new())
         .await
         .expect_err("tampered key must not await");
     assert_eq!(err.code.as_str(), "await_event_unknown_or_revoked");

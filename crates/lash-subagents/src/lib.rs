@@ -59,7 +59,6 @@ pub struct SubagentsPluginFactory {
     registry: Arc<CapabilityRegistry>,
     final_answer_format: RlmFinalAnswerFormat,
     lifetime: lash_core::LifetimePolicy,
-    timeout: Option<std::time::Duration>,
 }
 
 impl SubagentsPluginFactory {
@@ -77,16 +76,7 @@ impl SubagentsPluginFactory {
             registry,
             final_answer_format: RlmFinalAnswerFormat::RawFinalValue,
             lifetime: Arc::new(lifetime),
-            timeout: None,
         }
-    }
-
-    /// Bounds how long a `spawn_agent` call waits for its child. A spawn
-    /// that times out answers a timeout error, and the runtime cancels the
-    /// child. There is no bound by default.
-    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.timeout = Some(timeout);
-        self
     }
 
     pub fn with_session_spec(mut self, spec: SessionSpec) -> Self {
@@ -147,7 +137,6 @@ impl PluginFactory for SubagentsPluginFactory {
                 lifetime: Arc::clone(&self.lifetime),
                 parent_subagent: ctx.subagent.clone(),
                 include_submit_error: ctx.subagent.is_some(),
-                timeout: self.timeout,
             }
             .into_provider(),
         );

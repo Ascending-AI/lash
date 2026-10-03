@@ -334,7 +334,7 @@ mod restate_tests {
         let pending_cancellation = cancellation.clone();
         let pending_wait = tokio::spawn(async move {
             pending_host
-                .await_await_event(&pending_key, pending_cancellation, None)
+                .await_await_event(&pending_key, pending_cancellation)
                 .await
         });
 
@@ -373,7 +373,7 @@ mod restate_tests {
 
         let reawaited = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            wait_host.await_await_event(&wait_key, CancellationToken::new(), None),
+            wait_host.await_await_event(&wait_key, CancellationToken::new()),
         )
         .await
         .expect("durably terminal await-event must not remain dangling")

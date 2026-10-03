@@ -1169,7 +1169,7 @@ impl RuntimeExecutionContext<'_> {
             };
         let resolver = pending.pending.resolved_by.clone();
         let completion_key = pending.key.clone();
-        let armed_deadline = self
+        let armed_completion = self
             .dispatch
             .effect_controller
             .execute_effect(
@@ -1177,23 +1177,18 @@ impl RuntimeExecutionContext<'_> {
                     invocation,
                     crate::RuntimeEffectCommand::ArmToolCompletion {
                         key: pending.key.clone(),
-                        timeout_ms: pending
-                            .pending
-                            .deadline
-                            .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64),
                     },
                 ),
                 crate::RuntimeEffectLocalExecutor::await_event_under(
                     &self.turn_cancel_wait(cancellation),
-                    None,
                     Arc::clone(&self.dispatch.clock),
                 ),
             )
             .await?;
-        let crate::RuntimeEffectOutcome::ArmToolCompletion { deadline_ms } = armed_deadline else {
+        let crate::RuntimeEffectOutcome::ArmToolCompletion {} = armed_completion else {
             return Err(crate::RuntimeEffectControllerError::wrong_outcome(
                 crate::RuntimeEffectKind::ArmToolCompletion,
-                armed_deadline.kind(),
+                armed_completion.kind(),
             ));
         };
         let outcome = if let Some(resolution) = resolved {
@@ -1204,7 +1199,6 @@ impl RuntimeExecutionContext<'_> {
                     &format!("{call_key}:completion"),
                     vec![crate::ToolCompletionWait {
                         key: pending.key.clone(),
-                        deadline_ms,
                     }],
                     None,
                     false,

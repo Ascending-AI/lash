@@ -316,13 +316,6 @@ pub(crate) fn restate_process_terminal_output(
                 err.message,
             )),
         )),
-        Resolution::Timeout => Ok(ProcessAwaitOutput::from_tool_output(
-            lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
-                lash_core::ToolFailureClass::Execution,
-                "process_await_timeout",
-                format!("awaiting process `{process_id}` timed out"),
-            )),
-        )),
         Resolution::Cancelled => Ok(ProcessAwaitOutput::from_tool_output(
             lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
                 lash_core::ToolFailureClass::Execution,

@@ -138,7 +138,7 @@ pub async fn public_signal_intent_wakes_parked_process(
     let wait_host = Arc::clone(&effect_host);
     let wait = crate::task::spawn(async move {
         wait_host
-            .await_await_event(&wake_key, tokio_util::sync::CancellationToken::new(), None)
+            .await_await_event(&wake_key, tokio_util::sync::CancellationToken::new())
             .await
     });
     tokio::task::yield_now().await;

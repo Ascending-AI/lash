@@ -7,7 +7,7 @@
 //!
 //! One responsibility: every Lash await-event key is turned into an exact
 //! Restate address here, and the two services that own that address live here
-//! too — `LashDurableWaitWorkflow` owns the promise and its deadline timer,
+//! too — `LashDurableWaitWorkflow` owns the promise,
 //! `LashDurableWaitRegistry` owns the session-to-wait index that cancellation,
 //! revocation, and session deletion resolve through.
 //!
@@ -24,7 +24,6 @@
 //! classification, and workflow address locally.
 
 use lash_sansio::SessionId;
-use std::time::Duration;
 
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome, RuntimeError,
@@ -140,28 +139,6 @@ pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
     )
 }
 pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
-/// Current wire version of a deadline carried by a durable-wait request.
-///
-/// Version 1 was the unversioned `timeout_ms` field. Version 2 carries the
-/// absolute deadline first journaled by the invoking handler. The request
-/// decoder rejects the version-1 field instead of silently granting a fresh
-/// relative timeout after a worker replacement.
-///
-/// version_guard(
-///     roots(
-///         path = "crates/lash-restate/src/durable_wait/messages.rs",
-///         RestateDurableWaitAwaitRequest,
-///     ),
-///     roots(
-///         path = "crates/lash-restate/src/durable_wait/source_seal.rs",
-///         RestateSourceArmRequest, RestateSourceArmReply, RestateSourceSubscribeRequest,
-///         RestateSourceSubscribeReply, RestateSourceSealRequest, RestateSourceSealReply,
-///         RestateSourceSealWrite,
-///     ),
-/// )
-/// version_surface = "drain"
-/// format_manifest = "engine:restate.durable_wait_request"
-pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 /// The stored format every value the durable-wait index keeps under its
 /// `wait-index/v2/` keys stamps into its object-state envelope (FIG-3814):
 /// metadata, indexed wait, marker, and membership rows alike. It is also
@@ -172,7 +149,14 @@ pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 ///
 /// version_guard(
 ///     roots(RestateDurableWaitIndexMetadata, IndexedWait),
-///     roots(path = "crates/lash-restate/src/durable_wait/source_seal.rs", IndexedSource),
+///     roots(path = "crates/lash-restate/src/durable_wait/messages.rs", RestateDurableWaitAwaitRequest),
+///     roots(path = "crates/lash-core-store/src/tool_run/source_seal.rs", SourceSeal),
+///     roots(
+///         path = "crates/lash-restate/src/durable_wait/source_seal.rs",
+///         IndexedSource, RestateSourceArmRequest, RestateSourceArmReply,
+///         RestateSourceSubscribeRequest, RestateSourceSubscribeReply,
+///         RestateSourceSealRequest, RestateSourceSealReply, RestateSourceSealWrite,
+///     ),
 ///     roots(path = "crates/lash-restate/src/ingress.rs", RestateInvocationId),
 ///     items(
 ///         DURABLE_WAIT_REGISTRY_FORMATS, DURABLE_WAIT_INDEX_METADATA_KEY,
@@ -414,24 +398,8 @@ fn wake_ended_waits(
     });
     metadata.awakeables.len() != before
 }
-pub(crate) fn restate_durable_wait_request(
-    key: &AwaitEventKey,
-    deadline: Option<std::time::Instant>,
-    clock: &dyn lash_core::Clock,
-) -> RestateDurableWaitAwaitRequest {
-    let deadline = deadline.map(|deadline| {
-        let remaining_ms =
-            u64::try_from(deadline.saturating_duration_since(clock.now()).as_millis())
-                .unwrap_or(u64::MAX);
-        RestateDurableWaitDeadline {
-            version: DURABLE_WAIT_REQUEST_VERSION,
-            unix_epoch_ms: clock.timestamp_ms().saturating_add(remaining_ms),
-        }
-    });
-    RestateDurableWaitAwaitRequest {
-        key: key.clone(),
-        deadline,
-    }
+pub(crate) fn restate_durable_wait_request(key: &AwaitEventKey) -> RestateDurableWaitAwaitRequest {
+    RestateDurableWaitAwaitRequest { key: key.clone() }
 }
 /// How one wait raced against durable turn cancellation ended.
 ///
@@ -542,7 +510,7 @@ where
 pub trait LashDurableWaitWorkflow {
     #[shared]
     async fn await_resolution(
-        call: Call<RestateDurableWaitAwaitInput>,
+        call: Call<RestateDurableWaitAwaitRequest>,
     ) -> HandlerResult<Reply<Resolution>>;
 
     #[shared]
@@ -579,20 +547,9 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
     async fn await_resolution(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        call: Call<RestateDurableWaitAwaitInput>,
+        call: Call<RestateDurableWaitAwaitRequest>,
     ) -> HandlerResult<Reply<Resolution>> {
-        let (wire, input) = call.open()?;
-        let request = match input {
-            RestateDurableWaitAwaitInput::Current(request) => request,
-            RestateDurableWaitAwaitInput::Predecessor { .. } => {
-                return Err(
-                    incompatible_durable_wait_request("predecessor field `timeout_ms`").into(),
-                );
-            }
-        };
-        if let Some(deadline) = request.deadline {
-            deadline.validate()?;
-        }
+        let (wire, request) = call.open()?;
         let address = verify_durable_wait_workflow_key(ctx.key(), &request.key)?;
         let index_key = durable_wait_index_object_key(&address);
         let replay_key = request.key.key_id.clone();
@@ -616,35 +573,9 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
             RestateDurableWaitRegistration::Registered => {}
         }
 
-        let resolution =
+        let resolution: Resolution =
             if let Some(payload) = ctx.peek_promise::<String>(DURABLE_WAIT_PROMISE_KEY).await? {
                 serde_json::from_str(&payload).map_err(TerminalError::from_error)?
-            } else if let Some(deadline) = request.deadline {
-                let promise = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY);
-                let remaining = deadline.remaining(crate::system_clock().timestamp_ms())?;
-                // The workflow input is the stable absolute deadline. Restate's
-                // SleepCommand deliberately excludes its calculated wake time from
-                // replay comparison, so deriving only the remaining delay here
-                // preserves the original budget without another compared payload.
-                let timer = restate_sdk::context::ContextTimers::sleep(&ctx, remaining);
-                restate_sdk::select! {
-                    payload = promise => {
-                        let payload = payload?;
-                        serde_json::from_str(&payload).map_err(TerminalError::from_error)?
-                    },
-                    _ = timer => {
-                        let payload = serde_json::to_string(&Resolution::Timeout)
-                            .map_err(TerminalError::from_error)?;
-                        ctx.resolve_promise(DURABLE_WAIT_PROMISE_KEY, payload);
-                        Resolution::Timeout
-                    },
-                    on_cancel => {
-                        // Cancellation retires this physical read. The logical
-                        // event belongs to its resolver and may still be awaited
-                        // by a successor on the same workflow key.
-                        return Ok(Reply::at(wire, Resolution::Cancelled));
-                    }
-                }
             } else {
                 let payload = restate_sdk::select! {
                     payload = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY) => payload?,
@@ -1284,7 +1215,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             ctx.clear(&durable_wait_index_state_key(&address));
             return Ok(Reply::at(wire, ()));
         }
-        // A wait that ended inside its own workflow, on its deadline or its
+        // A wait that ended inside its own workflow, on its
         // invocation's cancel, reaches the index only here. A turn-control
         // gate settles its entries through `resolve`.
         if !request.key.wait.is_turn_control()

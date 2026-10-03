@@ -105,193 +105,111 @@ async fn fig3460_scope_index_calls_carry_their_replay_key_header() {
 }
 
 #[tokio::test]
-async fn fig1128_deadline_wire_typed_refusal_and_no_deadline_shape() {
+async fn a_durable_wait_request_has_only_a_key_and_refuses_runtime_deadlines() {
     let key = restate_await_event_key(
-        &durable_turn_scope("fig1128-wire-session", "fig1128-wire-turn"),
-        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("fig1128-wire")),
+        &durable_turn_scope("key-only-session", "key-only-turn"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("key-only")),
     )
-    .expect("derive durable-wait key");
-    let no_deadline = crate::durable_wait::restate_durable_wait_request(
-        &key,
-        None,
-        &lash_core::facade_support::SystemClock,
-    );
+    .expect("derive durable wait key");
+    let request = crate::durable_wait::restate_durable_wait_request(&key);
     assert_eq!(
-        serde_json::to_value(crate::durable_wait::RestateDurableWaitAwaitInput::from(
-            no_deadline,
-        ))
-        .expect("serialize no-deadline workflow input"),
-        serde_json::json!({ "key": key }),
-        "the v2 cutover must not move the shipped no-deadline wire shape"
+        serde_json::to_value(&request).unwrap(),
+        serde_json::json!({"key": key})
     );
-
-    let predecessor = serde_json::json!({
-        "key": key.clone(),
-        "timeout_ms": 30_000,
-    });
-    let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitWorkflowImpl::default().serve())
-        .build();
-    let refused = invoke_endpoint(
-        &endpoint,
-        "LashDurableWaitWorkflow",
-        "await_resolution",
-        &RestateDurableWaitAddress::for_key(&key).workflow_key,
-        &predecessor,
-    )
-    .await
-    .expect("invoke predecessor request against the deployed handler");
-    let error = restate_output_failure_message(&refused)
-        .expect("the predecessor request must return a terminal handler refusal");
-    assert!(
-        error.contains("predecessor field `timeout_ms` is incompatible with version 2")
-            && error.contains("drain deadline-bearing waits before opening this deployment"),
-        "the v1 refusal must be typed and name the drain requirement: {error}"
-    );
-    assert!(
-        !error.contains("unknown field") && !error.contains("failed to deserialize"),
-        "the v1 refusal must come from the durable-wait compatibility boundary, not generic serde: {error}"
-    );
-
-    let incompatible = crate::durable_wait::RestateDurableWaitDeadline {
-        version: 1,
-        unix_epoch_ms: 1_800_000_030_000,
-    };
-    let error = incompatible
-        .remaining(1_800_000_000_000)
-        .expect_err("a stamped predecessor deadline must be refused");
-    assert!(
-        error.to_string().contains("version 1 is incompatible"),
-        "the stamped-version refusal must identify the incompatibility: {error}"
-    );
+    for field in ["deadline", "timeout_ms", "deadline_ms"] {
+        let mut input = serde_json::json!({"key": key});
+        input[field] = serde_json::json!(30_000);
+        assert!(
+            serde_json::from_value::<RestateDurableWaitAwaitRequest>(input).is_err(),
+            "the removed {field} cannot survive a wait request"
+        );
+    }
 }
 
 #[tokio::test]
-pub(super) async fn fig1128_await_event_resolver_journals_deadline_at_production_entry_point() {
+pub(super) async fn an_await_event_resolver_replays_without_capturing_a_deadline() {
     let context = Arc::new(ReplayableRecordingContext::default());
     let key = test_restate_await_event_key(
-        &durable_turn_scope("fig1128-resolver-session", "fig1128-resolver-turn"),
-        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("fig1128-resolver")),
+        &durable_turn_scope("key-only-resolver-session", "key-only-resolver-turn"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+            "key-only-resolver",
+        )),
     )
-    .expect("derive resolver wait key");
-    let resolution = Resolution::Ok(serde_json::json!({ "resolver": "stable" }));
+    .expect("derive resolver key");
+    let resolution = Resolution::Ok(serde_json::json!({"resolver":"stable"}));
     context
         .events
         .resolve_durable_event(RestateDurableWaitResolveRequest {
             key: key.clone(),
             resolution: resolution.clone(),
         });
-    let journal_name = format!("lash:durable-wait-deadline:v2:{}", key.key_id);
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-
-    let recorded = controller
-        .await_await_event(
-            &key,
-            tokio_util::sync::CancellationToken::new(),
-            Some(std::time::Instant::now() + Duration::from_secs(60)),
-        )
-        .await
-        .expect("record resolver deadline");
-    assert_eq!(recorded, resolution);
-
+    assert_eq!(
+        controller
+            .await_await_event(&key, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap(),
+        resolution
+    );
     context.replaying.store(true, Ordering::SeqCst);
-    let replayed = controller
-        .await_await_event(
-            &key,
-            tokio_util::sync::CancellationToken::new(),
-            Some(std::time::Instant::now() + Duration::from_secs(120)),
-        )
-        .await
-        .expect("replay resolver deadline from journal");
-    assert_eq!(replayed, resolution);
     assert_eq!(
-        context.runs.lock_recover().as_slice(),
-        [journal_name.as_str(), journal_name.as_str()],
-        "both resolver attempts must cross the production deadline journal seam"
+        controller
+            .await_await_event(&key, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap(),
+        resolution
     );
-    assert_eq!(
-        context.records.lock_recover().len(),
-        1,
-        "redrive must reuse the first absolute deadline instead of recording a second payload"
+    assert!(
+        context.runs.lock_recover().is_empty(),
+        "no runtime deadline journal step"
     );
+    assert!(context.records.lock_recover().is_empty());
 }
 
 #[tokio::test]
-pub(super) async fn fig1128_deadline_wait_redrive_reuses_the_first_payload() {
-    const FIRST_WALL_MS: u64 = 1_800_000_000_000;
-    let clock = Arc::new(Fig1128DeadlineClock::new(FIRST_WALL_MS, 100));
+pub(super) async fn a_pending_wait_reuses_its_key_only_payload_on_redrive() {
     let endpoint = Endpoint::builder()
-        .bind(
-            Fig1128DeadlineRedriveImpl {
-                clock: Arc::clone(&clock),
-            }
-            .serve(),
-        )
+        .bind(Fig1128WaitRedriveImpl.serve())
         .build();
-    let workflow_key = "fig1128-deadline-redrive";
-    let input = Fig1128DeadlineRedriveInput;
-    let expected_replay_key = runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1128-deadline")
-        .effect_replay_key()
-        .to_owned();
-
+    let workflow_key = "fig1128-key-only-redrive";
+    let input = Fig1128WaitRedriveInput;
     let first = invoke_endpoint_with_named_call_responses(
         &endpoint,
-        "Fig1128DeadlineRedrive",
+        "Fig1128WaitRedrive",
         "run",
         workflow_key,
         &input,
         Vec::new(),
     )
     .await
-    .expect("the first deadline-bearing wait must park");
-    let first_calls = restate_call_frames(&first).expect("decode the first wait call");
-    let [first_wait] = first_calls.as_slice() else {
-        panic!("the first attempt must emit exactly one durable-wait call");
+    .unwrap();
+    let calls = restate_call_frames(&first).unwrap();
+    let [wait] = calls.as_slice() else {
+        panic!("exactly one pending wait call");
     };
-    assert_eq!(first_wait.handler, "await_resolution");
-    assert_eq!(
-        first_wait.headers,
-        vec![(LASH_REPLAY_KEY_HEADER.to_string(), expected_replay_key)],
-        "the journaled CallCommand must carry the wait identity as its replay key"
-    );
-
-    // A replacement process starts later and spends a different amount of
-    // monotonic time building the same logical wait. The captured command is
-    // the first process's journal fact; emitting a freshly derived relative
-    // timeout against it is the FIG-1128 RT0016 failure.
-    clock.begin_attempt(FIRST_WALL_MS + 10_000, 200);
-    let terminal = Resolution::Ok(serde_json::json!({ "redrive": "stable" }));
-    let terminal_json = serde_json::to_value(&terminal).expect("serialize terminal resolution");
-    let replay = if restate_command_frame_types(&first).contains(&RESTATE_RUN_COMMAND_MESSAGE_TYPE)
-    {
-        encode_captured_run_and_call_replay(
-            workflow_key,
-            &input,
-            &first,
-            &[("await_resolution".to_string(), terminal_json)],
-        )
-        .expect("encode the journaled deadline and wait call")
-    } else {
-        // Mutation-control compatibility: a call site bypassing the deadline
-        // journal has no RunCommand, only its clock-derived call payload.
-        // Replaying that exact command fails this test with differing absolute
-        // deadline values.
-        encode_call_replay(
-            workflow_key,
-            &input,
-            &[(first_wait.clone(), Some(terminal_json))],
-            None,
-        )
-        .expect("encode the pre-fix wait journal")
-    };
-    let redriven = invoke_endpoint_body(&endpoint, "Fig1128DeadlineRedrive", "run", replay)
+    assert_eq!(wait.handler, "await_resolution");
+    let body = super::endpoint_protocol::restate_call_parameters(&first)
+        .unwrap()
+        .remove(0)
+        .1;
+    let key = test_restate_await_event_key(
+        &ExecutionScope::runtime_operation("fig1128-deadline-redrive"),
+        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("fig1128-deadline")),
+    )
+    .unwrap();
+    assert_eq!(body, serde_json::json!({"key": key}));
+    let terminal = Resolution::Ok(serde_json::json!({"redrive":"stable"}));
+    let replay = encode_call_replay(
+        workflow_key,
+        &input,
+        &[(wait.clone(), Some(serde_json::to_value(&terminal).unwrap()))],
+        None,
+    )
+    .unwrap();
+    let redriven = invoke_endpoint_body(&endpoint, "Fig1128WaitRedrive", "run", replay)
         .await
-        .expect("redrive the deadline-bearing wait");
-    assert!(
-        restate_error_message(&redriven).is_none(),
-        "deadline redrive must reuse its first payload instead of raising RT0016: {:?}",
-        restate_error_message(&redriven)
-    );
+        .unwrap();
+    assert!(restate_error_message(&redriven).is_none());
     assert_eq!(restate_output_json::<Resolution>(&redriven), Some(terminal));
 }
 
@@ -2478,7 +2396,7 @@ async fn accepted_turn_input_shift_replays_the_journaled_admission() {
 }
 
 #[tokio::test]
-async fn wait_variants_preserve_key_deadline_and_cancel_journal_geometry() {
+async fn wait_variants_preserve_key_and_cancel_journal_geometry() {
     let scope = durable_turn_scope("session", "turn");
     let process = ProcessId::fixture("wait-matrix-process");
     let variants = [
@@ -2500,7 +2418,7 @@ async fn wait_variants_preserve_key_deadline_and_cancel_journal_geometry() {
             "signal ordinals and wait variants do not alias"
         );
         for observe in [false, true] {
-            for has_deadline in [false, true] {
+            {
                 let context = Arc::new(ReplayableRecordingContext::default());
                 let controller = RestateRuntimeEffectController::new_for_test(context.clone());
                 let resolution = Resolution::Ok(serde_json::json!({"variant":key.key_id}));
@@ -2514,10 +2432,6 @@ async fn wait_variants_preserve_key_deadline_and_cancel_journal_geometry() {
                 let replay_key = invocation.effect_replay_key().to_owned();
                 for replaying in [false, true] {
                     context.replaying.store(replaying, Ordering::SeqCst);
-                    let deadline = has_deadline.then(|| {
-                        std::time::Instant::now()
-                            + Duration::from_secs(if replaying { 120 } else { 60 })
-                    });
                     let outcome = controller
                         .execute_effect(
                             RuntimeEffectEnvelope::new(
@@ -2526,7 +2440,6 @@ async fn wait_variants_preserve_key_deadline_and_cancel_journal_geometry() {
                             ),
                             RuntimeEffectLocalExecutor::await_event(
                                 tokio_util::sync::CancellationToken::new(),
-                                deadline,
                             )
                             .with_turn_cancel_observation(observe)
                             .with_turn_cancel_scope(scope.clone()),
@@ -2543,18 +2456,13 @@ async fn wait_variants_preserve_key_deadline_and_cancel_journal_geometry() {
                 assert_eq!(
                     serde_json::to_value(&requests[1]).expect("serialize replay"),
                     first,
-                    "redrive preserves key and original absolute deadline"
+                    "redrive preserves the original key-only request"
                 );
                 assert_eq!(requests[0].key, key);
-                assert_eq!(requests[0].deadline.is_some(), has_deadline);
-                assert_eq!(
-                    context.records.lock_recover().len(),
-                    usize::from(has_deadline)
-                );
-                assert_eq!(
-                    context.runs.lock_recover().len(),
-                    if has_deadline { 2 } else { 0 },
-                    "no-deadline waits journal no extra run"
+                assert!(context.records.lock_recover().is_empty());
+                assert!(
+                    context.runs.lock_recover().is_empty(),
+                    "a wait journals no runtime timeout"
                 );
                 assert_eq!(
                     context.events.turn_cancel_gate.registrations_created(),

@@ -53,6 +53,9 @@ pub enum OutcomeShape<'a> {
 )]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DeclarationRefusal {
+    /// A deferring body returned a key other than the source its Run armed.
+    #[error("a Deferred attempt returned a source its Run did not arm")]
+    UnarmedSource,
     #[error("intent kind `{}` is declared twice", kind.as_str())]
     DuplicateIntent { kind: ToolIntentKind },
     #[error("declared intents are not in vocabulary order")]

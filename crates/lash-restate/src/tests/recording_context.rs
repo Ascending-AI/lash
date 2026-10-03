@@ -51,7 +51,6 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
                     },
                 )
                 .expect("tool completion key"),
-                timeout_ms: Some(1000),
             },
             "arm_tool_completion",
         ),
@@ -65,7 +64,6 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
                         },
                     )
                     .expect("tool completion key"),
-                    deadline_ms: Some(1000),
                 }],
                 dispatch: None,
                 transferable: true,
@@ -428,26 +426,6 @@ impl RecordingContext {
             .entry(process_id.to_string())
             .or_insert_with(|| Arc::new(tokio::sync::Notify::new()))
             .clone()
-    }
-
-    pub(super) fn reset_invocation_state_for_replay_preserving_durable_event(
-        &self,
-        workflow_key: &str,
-    ) {
-        // Restate replays invocation-local awakeables in journal order. This
-        // in-memory context must discard the prior pass's turn-control and
-        // process-terminal resolutions while retaining external input.
-        let preserved = self
-            .durable_events
-            .lock_recover()
-            .get(workflow_key)
-            .cloned()
-            .expect("durable event to preserve during replay");
-        let mut events = self.durable_events.lock_recover();
-        events.clear();
-        events.insert(workflow_key.to_string(), preserved);
-        drop(events);
-        self.awaited_events.lock_recover().clear();
     }
 
     pub(super) fn resolve_durable_event(
@@ -906,34 +884,14 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                     context.settle_session_wait(&request.key);
                     return Ok(resolution);
                 }
-                if let Some(deadline) = request.deadline {
-                    let timeout = deadline.remaining(lash_core::ClockWallTime::timestamp_ms(
-                        &lash_core::facade_support::SystemClock,
-                    ))?;
-                    tokio::select! {
-                        _ = notify.notified() => {}
-                        _ = cancellation.cancelled() => {
-                            context.resolve_durable_event(RestateDurableWaitResolveRequest {
-                                key: request.key.clone(),
-                                resolution: Resolution::Cancelled,
-                            });
-                        }
-                        _ = tokio::time::sleep(timeout) => {
-                            context.resolve_durable_event(RestateDurableWaitResolveRequest {
-                                key: request.key.clone(),
-                                resolution: Resolution::Timeout,
-                            });
-                        }
-                    }
-                } else {
-                    tokio::select! {
-                        _ = notify.notified() => {}
-                        _ = cancellation.cancelled() => {
-                            context.resolve_durable_event(RestateDurableWaitResolveRequest {
-                                key: request.key.clone(),
-                                resolution: Resolution::Cancelled,
-                            });
-                        }
+
+                tokio::select! {
+                    _ = notify.notified() => {}
+                    _ = cancellation.cancelled() => {
+                        context.resolve_durable_event(RestateDurableWaitResolveRequest {
+                            key: request.key.clone(),
+                            resolution: Resolution::Cancelled,
+                        });
                     }
                 }
             }

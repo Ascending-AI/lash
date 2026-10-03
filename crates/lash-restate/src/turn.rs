@@ -72,10 +72,7 @@ impl TurnAttach for RestateTurnAttach {
             &self.ingress,
             &service,
             WaitObserver::TurnTerminal,
-            &RestateDurableWaitAwaitRequest {
-                key,
-                deadline: None,
-            },
+            &RestateDurableWaitAwaitRequest { key },
         )
         .await
         .map_err(|err| {

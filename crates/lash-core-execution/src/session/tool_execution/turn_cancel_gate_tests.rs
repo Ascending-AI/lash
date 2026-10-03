@@ -37,7 +37,7 @@ impl crate::RuntimeEffectController for AwaitShapeRecorder {
             &envelope.command,
             crate::RuntimeEffectCommand::ArmToolCompletion { .. }
         ) {
-            return Ok(crate::RuntimeEffectOutcome::ArmToolCompletion { deadline_ms: None });
+            return Ok(crate::RuntimeEffectOutcome::ArmToolCompletion {});
         }
         if !matches!(
             &envelope.command,

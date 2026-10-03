@@ -993,7 +993,6 @@ where
                 })?;
             let await_request = crate::durable_wait::RestateDurableWaitAwaitRequest {
                 key: await_key.clone(),
-                deadline: None,
             };
             trace_park("process");
             // A wait the Run's successor segment may take over also takes
@@ -1179,7 +1178,6 @@ where
                             namespace,
                             crate::durable_wait::RestateDurableWaitAwaitRequest {
                                 key: after_key.clone(),
-                                deadline: None,
                             },
                             after_key.key_id.clone(),
                             tokio_util::sync::CancellationToken::new(),
@@ -1251,11 +1249,9 @@ fn process_await_output_from_resolution(
             RuntimeErrorCode::EngineProcessAwait,
             error.message,
         )),
-        lash_core::Resolution::Timeout | lash_core::Resolution::Cancelled => {
-            Err(RuntimeEffectControllerError::new(
-                RuntimeErrorCode::EngineProcessAwait,
-                "a process-await wait ended without the terminal it waits on",
-            ))
-        }
+        lash_core::Resolution::Cancelled => Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineProcessAwait,
+            "a process-await wait ended without the terminal it waits on",
+        )),
     }
 }

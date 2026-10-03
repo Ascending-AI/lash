@@ -187,9 +187,8 @@ where
         &self,
         key: &AwaitEventKey,
         cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
+        self.inner.await_await_event(key, cancel).await
     }
 
     async fn revoke_await_events_for_session(
@@ -311,6 +310,26 @@ where
 
     fn start_run_retry(&self, backoff_ms: u64) -> lash_core::tool_dispatch::RunRetryTimer<'_> {
         self.inner.start_run_retry(backoff_ms)
+    }
+
+    async fn arm_run_source(
+        &self,
+        descriptor: lash_core::tool_run::SourceDescriptor,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.inner.arm_run_source(descriptor).await
+    }
+    async fn cancel_run_source(
+        &self,
+        descriptor: lash_core::tool_run::SourceDescriptor,
+    ) -> Result<lash_core::tool_run::SourceSeal, RuntimeEffectControllerError> {
+        self.inner.cancel_run_source(descriptor).await
+    }
+    async fn await_run_sources(
+        &self,
+        subscriptions: Vec<lash_core::tool_run::SourceSubscription>,
+        cancel: lash_core::TurnCancelWait,
+    ) -> Result<(usize, lash_core::tool_run::SourceSeal), RuntimeEffectControllerError> {
+        self.inner.await_run_sources(subscriptions, cancel).await
     }
 
     async fn record_run_record(

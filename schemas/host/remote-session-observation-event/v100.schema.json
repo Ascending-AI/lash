@@ -1832,6 +1832,20 @@
       "oneOf": [
         {
           "additionalProperties": false,
+          "description": "A deferring body returned a key other than the source its Run armed.",
+          "properties": {
+            "refusal": {
+              "const": "unarmed_source",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "kind": {
               "$ref": "#/$defs/ToolIntentKind"
@@ -10607,6 +10621,23 @@
       "description": "Typed cause retained when a controller-owned runtime effect must abort\nthrough the generic runtime error boundary.\n\nAttachment retention and worker causes keep their source's retry class.\nOther causes are terminal except for an unavailable recorded model.",
       "oneOf": [
         {
+          "description": "A source's authority or lifecycle refused an arm, subscription or seal.",
+          "properties": {
+            "kind": {
+              "const": "source_refused",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/SourceRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Recorded material could not be read. This cause grants no body retry.",
           "properties": {
             "kind": {
@@ -11292,6 +11323,51 @@
         }
       ]
     },
+    "SealRefusal": {
+      "description": "Why a seal write was refused before it could seal anything.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "wrong_authority",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "result_not_owned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A seal is read by another segment, so its result must already be\nretained, with the source's lease, before the seal publishes it.",
+          "properties": {
+            "refusal": {
+              "const": "unretained_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "SequenceFault": {
       "description": "A message that arrived out of order, or an exchange whose accounting does\nnot add up.",
       "enum": [
@@ -11377,6 +11453,85 @@
           "required": [
             "owner",
             "enqueue_seq"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SourceRefusal": {
+      "description": "Why the index refused a source request; nothing was written.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The source's scope was retired: no source of it is armed, subscribed\nor sealed again.",
+          "properties": {
+            "refusal": {
+              "const": "retired",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "No Run armed this source, or its Run retired it.",
+          "properties": {
+            "refusal": {
+              "const": "not_armed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The source is armed with another descriptor.",
+          "properties": {
+            "refusal": {
+              "const": "descriptor_mismatch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A subscription named a Run other than the source's owner.",
+          "properties": {
+            "refusal": {
+              "const": "wrong_owner",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The pinned descriptor refused the write.",
+          "properties": {
+            "refusal": {
+              "const": "seal",
+              "type": "string"
+            },
+            "seal": {
+              "$ref": "#/$defs/SealRefusal"
+            }
+          },
+          "required": [
+            "refusal",
+            "seal"
           ],
           "type": "object"
         }

@@ -1,4 +1,4 @@
-//! Deferred dispatches arm durable deadlines and wait through removable observers.
+//! Deferred dispatches arm completion keys and wait through removable observers.
 
 use super::*;
 use crate::durable_wait::{RestateDurableWaitAwakeableRequest, RestateDurableWaitRegistration};
@@ -8,8 +8,6 @@ pub(super) async fn arm<'ctx, C>(
     context: &C,
     namespace: &crate::RestateNamespace,
     key: lash_core::AwaitEventKey,
-    deadline_ms: Option<u64>,
-    now_ms: u64,
 ) -> Result<(), TerminalError>
 where
     C: ContextClient<'ctx>,
@@ -24,15 +22,6 @@ where
         .into_body();
     if matches!(registered, RestateDurableWaitRegistration::Revoked) {
         return Err(revoked());
-    }
-    if let Some(deadline_ms) = deadline_ms {
-        registry
-            .resolve(RestateDurableWaitResolveRequest {
-                key,
-                resolution: Resolution::Timeout,
-            })
-            .send_after(Duration::from_millis(deadline_ms.saturating_sub(now_ms)))
-            .await?;
     }
     Ok(())
 }
@@ -191,7 +180,7 @@ where
             }
         }
     };
-    // A handover retires only these observers. The original keys and native delayed sends remain armed.
+    // A handover retires only these observers. The original keys remain armed.
     for entry in &observers {
         let address = RestateDurableWaitAddress::for_key(&entry.key);
         namespace

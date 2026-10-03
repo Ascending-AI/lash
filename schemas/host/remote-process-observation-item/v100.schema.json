@@ -1732,11 +1732,6 @@
           "type": "string"
         },
         {
-          "const": "timeout",
-          "description": "The wait reached its deadline.",
-          "type": "string"
-        },
-        {
           "const": "cancelled",
           "description": "The wait itself was cancelled.",
           "type": "string"

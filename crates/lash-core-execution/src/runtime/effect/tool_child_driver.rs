@@ -609,7 +609,6 @@ impl super::group_executors::GroupExecutors for ToolChildHost {
             RuntimeEffectCommand::AwaitEvent { .. } => Some(
                 RuntimeEffectLocalExecutor::await_event_with_clock(
                     CancellationToken::new(),
-                    None,
                     self.clock.lock_recover().clone(),
                 )
                 .with_turn_cancel_observation(false),
@@ -1434,26 +1433,22 @@ async fn shift(
             })?;
             let invocation = journaled_await_invocation(dispatch, parent, &request.call.call_id);
             let clock = Arc::clone(&dispatch.clock);
-            let deadline = dispatch
+            let armed_completion = dispatch
                 .effect_controller
                 .execute_effect(
                     RuntimeEffectEnvelope::new(
                         invocation,
                         RuntimeEffectCommand::ArmToolCompletion {
                             key: pending.key.clone(),
-                            timeout_ms: pending
-                                .pending
-                                .deadline
-                                .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64),
                         },
                     ),
-                    RuntimeEffectLocalExecutor::await_event_under(&turn_cancel_wait, None, clock),
+                    RuntimeEffectLocalExecutor::await_event_under(&turn_cancel_wait, clock),
                 )
                 .await?;
-            let RuntimeEffectOutcome::ArmToolCompletion { deadline_ms } = deadline else {
+            let RuntimeEffectOutcome::ArmToolCompletion {} = armed_completion else {
                 return Err(RuntimeEffectControllerError::wrong_outcome(
                     crate::RuntimeEffectKind::ArmToolCompletion,
-                    deadline.kind(),
+                    armed_completion.kind(),
                 ));
             };
             let capture = crate::runtime::ToolAttemptCapture {
@@ -1468,7 +1463,6 @@ async fn shift(
                 request: Box::new(request.clone()),
                 pending,
                 armed,
-                deadline_ms,
                 stream: recorder
                     .map(AttemptStreamRecorder::finish)
                     .unwrap_or_default(),

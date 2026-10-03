@@ -231,7 +231,7 @@ async fn after_step_during_a_parked_await_event_keeps_waiting_for_the_event() {
                         runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig635-await-event"),
                         RuntimeEffectCommand::AwaitEvent { key: awaited_key },
                     ),
-                    RuntimeEffectLocalExecutor::await_event(cancellation, None)
+                    RuntimeEffectLocalExecutor::await_event(cancellation)
                         .with_turn_cancel_scope(durable_turn_scope(SESSION, TURN)),
                 )
                 .await
@@ -297,7 +297,7 @@ async fn restate_await_rejects_cancel_scope_for_a_different_physical_turn() {
     )
     .execute_effect(
         RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::AwaitEvent { key }),
-        RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new(), None)
+        RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new())
             .with_turn_cancel_scope(admitted_scope),
     )
     .await

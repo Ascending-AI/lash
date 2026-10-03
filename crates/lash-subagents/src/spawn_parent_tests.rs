@@ -57,7 +57,6 @@ fn provider(source: crate::ChildPluginSource) -> RlmSubagentToolsProvider {
         parent_subagent: None,
         include_submit_error: false,
         lifetime: Arc::new(lash_core::lifetime::starter),
-        timeout: None,
     }
 }
 

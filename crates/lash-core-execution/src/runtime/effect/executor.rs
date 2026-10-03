@@ -2,7 +2,6 @@ use crate::ClockWallTime;
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Instant;
 
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -91,7 +90,7 @@ use super::envelope::{
 /// their engine-native cancellation and timer primitives.
 pub struct RuntimeAwaitEventOptions {
     pub cancellation: CancellationToken,
-    pub deadline: Option<Instant>,
+
     pub clock: Arc<dyn crate::Clock>,
     /// Selects the durable turn-cancel race shape. Restate-backed callers must
     /// keep this stable for a wait's lifetime; see
@@ -298,7 +297,7 @@ enum LocalTarget {
     },
     ExternalWaitOptions {
         controls: WaitControls,
-        deadline: Option<Instant>,
+
         clock: Arc<dyn crate::Clock>,
     },
     Process(ProcessLocalExecution),
@@ -533,17 +532,15 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Builds the native durable-wait path for effect-host implementors using the system clock and
-    /// the supplied optional deadline.
-    pub fn await_event(cancellation: CancellationToken, deadline: Option<Instant>) -> Self {
-        Self::await_event_with_clock(cancellation, deadline, Arc::new(crate::SystemClock))
+    /// Builds the native durable-wait path using the system clock for observation.
+    pub fn await_event(cancellation: CancellationToken) -> Self {
+        Self::await_event_with_clock(cancellation, Arc::new(crate::SystemClock))
     }
 
-    /// Builds the native durable-wait path with an injected clock for effect-host and conformance
-    /// implementors testing deterministic deadline behavior.
+    /// Builds the native durable-wait path with an injected observation clock.
     pub fn await_event_with_clock(
         cancellation: CancellationToken,
-        deadline: Option<Instant>,
+
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
@@ -554,7 +551,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     turn_cancel_scope: None,
                     transferable: false,
                 },
-                deadline,
+
                 clock,
             }),
             replay_trace: None,
@@ -579,15 +576,11 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
 
     /// Builds the native durable-wait path from the complete turn-cancel trio,
     /// so an in-workspace wait cannot be journaled with a half-stamped one.
-    pub fn await_event_under(
-        wait: &TurnCancelWait,
-        deadline: Option<Instant>,
-        clock: Arc<dyn crate::Clock>,
-    ) -> Self {
+    pub fn await_event_under(wait: &TurnCancelWait, clock: Arc<dyn crate::Clock>) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ExternalWaitOptions {
                 controls: wait.controls(),
-                deadline,
+
                 clock,
             }),
             replay_trace: None,

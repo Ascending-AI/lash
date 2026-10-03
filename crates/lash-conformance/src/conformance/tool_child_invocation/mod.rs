@@ -178,6 +178,16 @@ pub type ToolChildProcessesFactory = Arc<
         + Sync,
 >;
 
+/// An authenticated external write to the tier's immutable source seal.
+pub type SourceSealWrite = Arc<
+    dyn Fn(
+            crate::tool_run::SourceDescriptor,
+            crate::tool_run::SourceSeal,
+        ) -> std::pin::Pin<Box<dyn Future<Output = crate::tool_run::SealOutcome> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// What a tier supplies: a world factory over one substrate, a process
 /// registry factory and the runner its opener-side steps run in. Every host
 /// journals, so a deferrable child is always recorded under durable
@@ -194,6 +204,10 @@ pub struct ToolChildLawFixture {
     /// a law that records an opener fact, crashes the opener and replays it
     /// hands those steps to the tier's turn runner.
     pub turn_runner: Arc<dyn crate::ConformanceTurnRunner>,
+    /// Canonical source results retained on this tier's artifact substrate.
+    pub source_materials: Arc<dyn crate::store::ToolMaterialStore>,
+    /// An authenticated external seal write, through this tier's source service.
+    pub seal_source: SourceSealWrite,
 }
 
 /// A tier's operator over one group child's invocation (ADR 0099 §5, §8),

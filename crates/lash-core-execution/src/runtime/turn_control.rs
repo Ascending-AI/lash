@@ -213,7 +213,7 @@ pub(crate) async fn await_terminal_from_resolver(
     address.validate()?;
     let key = terminal_key(resolver, address).await?;
     let resolution = resolver
-        .await_await_event(&key, CancellationToken::new(), None)
+        .await_await_event(&key, CancellationToken::new())
         .await?;
     decode_terminal(address, resolution)
 }
@@ -662,7 +662,7 @@ impl TurnWorkDriver {
         let resolver: &dyn AwaitEventResolver = self.effect_host.as_ref();
         let key = terminal_key(resolver, address).await?;
         let resolution = resolver
-            .await_await_event(&key, CancellationToken::new(), None)
+            .await_await_event(&key, CancellationToken::new())
             .await?;
         decode_terminal(address, resolution)
     }
@@ -1327,7 +1327,7 @@ impl ActiveTurnControl {
                 // the turn's gate itself `Cancelled`. The watch ends only by
                 // being dropped.
                 resolver
-                    .await_await_event(&key, CancellationToken::new(), None)
+                    .await_await_event(&key, CancellationToken::new())
                     .await
             })
             .await

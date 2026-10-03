@@ -74,7 +74,7 @@ impl GroupExecutors for LayeredWaitChildren {
                 Some(RuntimeEffectLocalExecutor::sleep(CancellationToken::new()))
             }
             RuntimeEffectCommand::AwaitEvent { .. } => Some(
-                RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None),
+                RuntimeEffectLocalExecutor::await_event(CancellationToken::new()),
             ),
             _ => None,
         }

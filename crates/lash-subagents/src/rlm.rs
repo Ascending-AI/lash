@@ -4,7 +4,6 @@
 //! Prompt prose is tuned for schema-first results and binding subagent output.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use lash_core::{
@@ -33,9 +32,6 @@ pub(crate) struct RlmSubagentToolsProvider {
     pub(crate) lifetime: lash_core::LifetimePolicy,
     pub(crate) parent_subagent: Option<SubagentSessionContext>,
     pub(crate) include_submit_error: bool,
-    /// How long a spawn waits for its child. A spawn that times out is an
-    /// error result, and the runtime cancels the child.
-    pub(crate) timeout: Option<Duration>,
 }
 
 impl RlmSubagentToolsProvider {
@@ -216,10 +212,7 @@ impl RlmSubagentToolsProvider {
             lash_core::StartProcessIntent { owner, declaration },
         )
         .map_err(|err| format!("spawn_agent could not declare its child: {err}"))?;
-        let mut pending = lash_core::PendingCompletion::new();
-        if let Some(timeout) = self.timeout {
-            pending = pending.with_deadline(timeout);
-        }
+        let pending = lash_core::PendingCompletion::new();
         Ok(lash_core::ToolAttemptOutcome::pending(
             pending.resolved_by_declared_start(start),
         ))

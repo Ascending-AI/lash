@@ -5,6 +5,15 @@ use crate::engine::{Admitted, ShiftAbort};
 use crate::runtime::LashRuntime;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 
+pub(super) enum TransitionBasis<'a> {
+    Admitted,
+    Resume(
+        &'a crate::store::SessionHeadRef,
+        &'a crate::store::ShiftFence,
+    ),
+    FollowOn(&'a crate::store::PendingFollowOn),
+}
+
 impl LashRuntime {
     /// Record the complete transition, or resume the native view the run
     /// already published at its admission's recorded advanced head.
@@ -14,7 +23,7 @@ impl LashRuntime {
         admitted: &Admitted,
         base: &crate::store::SessionHeadRef,
         target: &crate::store::plugin_writers::PluginAdmission,
-        resume: Option<(&crate::store::SessionHeadRef, &crate::store::ShiftFence)>,
+        basis: TransitionBasis<'_>,
     ) -> Result<crate::plugin::PluginTransitionRecord, ShiftAbort> {
         let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
         let request = crate::plugin::PluginTransitionRequest {
@@ -23,7 +32,7 @@ impl LashRuntime {
             base: crate::plugin::PluginTransitionBase::Session { head: base.clone() },
             target: target.clone(),
         };
-        self.record_transition_request(controller, admitted, request, resume)
+        self.record_transition_request(controller, admitted, request, basis)
             .await
     }
 
@@ -44,7 +53,7 @@ impl LashRuntime {
                 },
                 target: Default::default(),
             },
-            None,
+            TransitionBasis::Admitted,
         )
         .await
     }
@@ -54,7 +63,7 @@ impl LashRuntime {
         controller: &ScopedEffectController<'_>,
         admitted: &Admitted,
         request: crate::plugin::PluginTransitionRequest,
-        resume: Option<(&crate::store::SessionHeadRef, &crate::store::ShiftFence)>,
+        basis: TransitionBasis<'_>,
     ) -> Result<crate::plugin::PluginTransitionRecord, ShiftAbort> {
         let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
         let runner = PluginTransitionRunner {
@@ -63,7 +72,14 @@ impl LashRuntime {
             initial: self.state.clone(),
             raw_plugins: self.services.plugins.export_state(),
             commit_budget: self.host.core.durability.commit_budget,
-            resume: resume.map(|(head, fence)| (head.clone(), fence.clone())),
+            resume: match basis {
+                TransitionBasis::Resume(head, fence) => Some((head.clone(), fence.clone())),
+                _ => None,
+            },
+            follow_on: match basis {
+                TransitionBasis::FollowOn(owed) => Some(owed.clone()),
+                _ => None,
+            },
         };
         let outcome = controller
             .execute_effect(
@@ -181,6 +197,7 @@ struct PluginTransitionRunner {
     raw_plugins: crate::PluginState,
     commit_budget: crate::CommitBudget,
     resume: Option<(crate::store::SessionHeadRef, crate::store::ShiftFence)>,
+    follow_on: Option<crate::store::PendingFollowOn>,
 }
 
 impl PluginTransitionRunner {
@@ -320,6 +337,9 @@ impl RuntimeEffectLocalRunner for PluginTransitionRunner {
                 ));
             }
         };
+        if let Some(owed) = self.follow_on {
+            state.pending_follow_on = Some(Box::new(owed));
+        }
         let native = state
             .plugin_admission_snapshot()
             .map(|bytes| crate::plugin::PluginNativeView::decode(&bytes))

@@ -57,6 +57,7 @@ use crate::durable_wait::{
     restate_await_event_key_for_authority, restate_await_event_key_is_valid_for_authority,
     restate_unknown_or_revoked,
 };
+use crate::durable_wait::{RestateDurableWaitAwaitRequest, restate_durable_wait_request};
 use crate::effect_group::{
     EffectGroupCloseOutcome, EffectGroupCloseRequest, EffectGroupCloseResponse,
     EffectGroupDispatchRequest, EffectGroupNotice, EffectGroupNotification, EffectGroupOpenRequest,
@@ -64,7 +65,7 @@ use crate::effect_group::{
 };
 use crate::ingress::RestateAuthorityId;
 use crate::process::RestateProcessCancelRequest;
-use context::journaled_restate_durable_wait_request;
+
 pub(crate) use live_frontier::LiveFrontier;
 
 pub use context::{
@@ -657,24 +658,13 @@ where
         &self,
         key: &AwaitEventKey,
         cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
         if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
             return Err(restate_unknown_or_revoked());
         }
         self.require_active_session(key.scope.session_id()).await?;
         let replay_key = key.key_id.clone();
-        let request = journaled_restate_durable_wait_request(
-            &self.context,
-            key,
-            deadline,
-            crate::system_clock(),
-        )
-        .await
-        .map_err(|err| {
-            crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
-                .into_runtime_error()
-        })?;
+        let request = restate_durable_wait_request(key);
         self.context
             .await_event(&self.namespace, request, replay_key, cancel)
             .await
@@ -1148,6 +1138,89 @@ where
         })
     }
 
+    async fn arm_run_source(
+        &self,
+        descriptor: lash_core::tool_run::SourceDescriptor,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        if !restate_await_event_key_is_valid_for_authority(&self.authority_id, &descriptor.source) {
+            return Err(restate_unknown_or_revoked().into());
+        }
+        self.context
+            .arm_run_source(&self.namespace, descriptor)
+            .await
+            .map_err(|error| {
+                crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
+            })
+    }
+
+    async fn cancel_run_source(
+        &self,
+        descriptor: lash_core::tool_run::SourceDescriptor,
+    ) -> Result<lash_core::tool_run::SourceSeal, RuntimeEffectControllerError> {
+        if !restate_await_event_key_is_valid_for_authority(&self.authority_id, &descriptor.source) {
+            return Err(restate_unknown_or_revoked().into());
+        }
+        self.context
+            .cancel_run_source(&self.namespace, descriptor)
+            .await
+            .map_err(|error| {
+                crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
+            })
+    }
+
+    async fn await_run_sources(
+        &self,
+        subscriptions: Vec<lash_core::tool_run::SourceSubscription>,
+        cancel: lash_core::TurnCancelWait,
+    ) -> Result<(usize, lash_core::tool_run::SourceSeal), RuntimeEffectControllerError> {
+        if subscriptions.iter().any(|subscription| {
+            !restate_await_event_key_is_valid_for_authority(
+                &self.authority_id,
+                &subscription.source,
+            )
+        }) {
+            return Err(restate_unknown_or_revoked().into());
+        }
+        let turn_cancel = cancel
+            .observed_scope()
+            .map(|scope| {
+                restate_await_event_key_for_authority(
+                    &self.authority_id,
+                    scope,
+                    AwaitEventWaitIdentity::TurnCancelGate,
+                )
+                .map(|key| RestateDurableWaitAwaitRequest { key })
+            })
+            .transpose()
+            .map_err(RuntimeEffectControllerError::from)?;
+        let outcome = self
+            .context
+            .await_run_sources(
+                &self.namespace,
+                subscriptions,
+                turn_cancel,
+                Some(self.build_generation.clone()),
+                self.options.process_cancel,
+            )
+            .await
+            .map_err(|error| {
+                crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
+            })?;
+        match outcome {
+            RestateTurnCancelRaceOutcome::Completed(result) => Ok(result),
+            RestateTurnCancelRaceOutcome::TurnCancelled
+            | RestateTurnCancelRaceOutcome::ProcessCancelled => {
+                Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+                    "the Run source wait was cancelled",
+                ))
+            }
+            RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
+                Err(restate_unknown_or_revoked().into())
+            }
+        }
+    }
+
     async fn record_run_record(
         &self,
         name: String,
@@ -1399,8 +1472,8 @@ where
                 let transferable = local_executor.wait_transferable();
                 let RuntimeAwaitEventOptions {
                     cancellation: _,
-                    deadline,
-                    clock,
+
+                    clock: _,
                     observe_turn_cancel,
                     turn_cancel_scope,
                 } = local_executor.into_await_event_options()?;
@@ -1415,14 +1488,7 @@ where
                         wait_kind: "await_event".to_string(),
                     }
                 });
-                let request = journaled_restate_durable_wait_request(
-                    &self.context,
-                    &key,
-                    deadline,
-                    clock.as_ref(),
-                )
-                .await
-                .map_err(|err| self.wait_step_failure(err, engine_fault))?;
+                let request = restate_durable_wait_request(&key);
                 let replay_key = invocation.effect_replay_key().to_string();
                 // A process segment's signal wait also races the drain's
                 // hand-over (FIG-3799); every other wait keeps its shape.
@@ -1519,11 +1585,8 @@ where
                     )),
                 }
             }
-            RestateEffectExecution::ArmToolCompletion {
-                key, timeout_ms, ..
-            } => {
-                self.arm_tool_completion(key, timeout_ms, local_executor)
-                    .await
+            RestateEffectExecution::ArmToolCompletion { key, .. } => {
+                self.arm_tool_completion(key, local_executor).await
             }
             RestateEffectExecution::AwaitToolCompletions {
                 invocation,

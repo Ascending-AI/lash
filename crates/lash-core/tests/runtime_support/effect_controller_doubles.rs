@@ -422,7 +422,6 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
         inner: &dyn lash_core::AwaitEventResolver,
         key: &AwaitEventKey,
         cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
         if matches!(key.wait, AwaitEventWaitIdentity::TurnCancelGate)
             && let CancelWatchBehavior::AlwaysError {
@@ -463,7 +462,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                 "cancel resolver briefly unavailable",
             ));
         }
-        inner.await_await_event(key, cancel, deadline).await
+        inner.await_await_event(key, cancel).await
     }
 
     async fn execute_effect(

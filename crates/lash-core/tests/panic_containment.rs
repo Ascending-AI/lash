@@ -112,12 +112,8 @@ impl AwaitEventResolver for RecordingEffectController<'_> {
         &self,
         key: &lash_core::AwaitEventKey,
         cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
     ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.inner
-            .controller()
-            .await_await_event(key, cancel, deadline)
-            .await
+        self.inner.controller().await_await_event(key, cancel).await
     }
 
     async fn revoke_await_events_for_session(

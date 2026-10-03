@@ -80,18 +80,18 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         turn_cancel_scope,
                         ..
                     },
-                deadline,
+
                 clock,
             }) => Ok(RuntimeAwaitEventOptions {
                 cancellation,
-                deadline,
+
                 clock,
                 observe_turn_cancel,
                 turn_cancel_scope,
             }),
             _ => Ok(RuntimeAwaitEventOptions {
                 cancellation: CancellationToken::new(),
-                deadline: None,
+
                 clock: Arc::new(crate::SystemClock),
                 observe_turn_cancel: false,
                 turn_cancel_scope: None,

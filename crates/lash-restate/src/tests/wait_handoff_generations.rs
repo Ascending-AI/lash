@@ -182,10 +182,7 @@ impl Roll {
         key: &AwaitEventKey,
     ) -> tokio::task::JoinHandle<Result<Resolution, String>> {
         let ingress = self.ingress.clone();
-        let request = RestateDurableWaitAwaitRequest {
-            key: key.clone(),
-            deadline: None,
-        };
+        let request = RestateDurableWaitAwaitRequest { key: key.clone() };
         let workflow_key = crate::RestateDurableWaitAddress::for_key(key).workflow_key;
         tokio::spawn(async move {
             ingress

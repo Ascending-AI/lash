@@ -349,7 +349,7 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
         let waiter_key = key.clone();
         waiters.push(lash_core::task::spawn(async move {
             waiter_host
-                .await_await_event(&waiter_key, CancellationToken::new(), None)
+                .await_await_event(&waiter_key, CancellationToken::new())
                 .await
         }));
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -455,7 +455,7 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
     );
     let wait = resumed
         .effect_host()
-        .await_await_event(&source_key, CancellationToken::new(), None)
+        .await_await_event(&source_key, CancellationToken::new())
         .await?;
     assert!(matches!(wait, lash_core::Resolution::Cancelled));
     receiving_backend

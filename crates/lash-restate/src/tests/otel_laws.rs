@@ -656,7 +656,7 @@ async fn a_replay_only_wait_resolution_emits_once_from_its_sql_receipt() {
                 invocation,
                 RuntimeEffectCommand::AwaitEvent { key: key.clone() },
             ),
-            RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None)
+            RuntimeEffectLocalExecutor::await_event(CancellationToken::new())
                 .with_turn_cancel_scope(scope.clone()),
         )
         .await
@@ -689,7 +689,7 @@ async fn a_replay_only_wait_resolution_emits_once_from_its_sql_receipt() {
                     invocation,
                     RuntimeEffectCommand::AwaitEvent { key: key.clone() },
                 ),
-                RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None)
+                RuntimeEffectLocalExecutor::await_event(CancellationToken::new())
                     .with_turn_cancel_scope(scope.clone()),
             )
             .await
@@ -790,15 +790,12 @@ async fn deferred_completion_wait_receipts_survive_handler_replay() {
                     RuntimeEffectEnvelope::new(
                         invocation,
                         RuntimeEffectCommand::AwaitToolCompletions {
-                            waits: vec![lash_core::ToolCompletionWait {
-                                key,
-                                deadline_ms: None,
-                            }],
+                            waits: vec![lash_core::ToolCompletionWait { key }],
                             dispatch: None,
                             transferable: true,
                         },
                     ),
-                    RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None),
+                    RuntimeEffectLocalExecutor::await_event(CancellationToken::new()),
                 )
                 .await
                 .unwrap();

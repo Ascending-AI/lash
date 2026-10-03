@@ -282,9 +282,8 @@ impl crate::AwaitEventResolver for IntentReplayController {
         &self,
         key: &crate::AwaitEventKey,
         cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
     ) -> Result<crate::Resolution, crate::RuntimeError> {
-        self.native.await_await_event(key, cancel, deadline).await
+        self.native.await_await_event(key, cancel).await
     }
 
     async fn revoke_await_events_for_session(

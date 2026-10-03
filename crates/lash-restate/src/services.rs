@@ -540,6 +540,10 @@ lash_clients! {
     /// Calls to one `LashDurableWaitIndex` object.
     DurableWaitRegistryCalls, durable_wait_registry: DurableWaitRegistry object,
     pinned to crate::durable_wait::LashDurableWaitRegistryClient {
+        arm_source(crate::durable_wait::RestateSourceArmRequest) -> crate::durable_wait::RestateSourceArmReply;
+        seal_source(crate::durable_wait::RestateSourceSealRequest) -> crate::durable_wait::RestateSourceSealReply;
+        subscribe_source(crate::durable_wait::RestateSourceSubscribeRequest) -> crate::durable_wait::RestateSourceSubscribeReply;
+        unsubscribe_source(crate::durable_wait::RestateSourceSubscribeRequest) -> ();
         is_revoked() -> bool;
         peek_turn_gate(crate::durable_wait::RestateDurableWaitIndexRequest)
             -> crate::durable_wait::RestateTurnGatePeek;
@@ -573,7 +577,7 @@ lash_clients! {
     /// Calls to one `LashDurableWaitWorkflow`.
     DurableWaitWorkflowCalls, durable_wait_workflow: DurableWaitWorkflow workflow,
     pinned to crate::durable_wait::LashDurableWaitWorkflowClient {
-        await_resolution(crate::durable_wait::RestateDurableWaitAwaitInput)
+        await_resolution(crate::durable_wait::RestateDurableWaitAwaitRequest)
             -> lash_core::Resolution;
         peek() -> Option<lash_core::Resolution>;
         resolve(crate::durable_wait::RestateDurableWaitResolveRequest)

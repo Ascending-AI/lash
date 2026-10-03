@@ -17,7 +17,6 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use lash_sansio::sync::MutexExt;
 use tokio_util::sync::CancellationToken;
@@ -97,13 +96,9 @@ impl IssuanceSpy {
         self.inner.peek_await_event(key).await
     }
 
-    async fn wait(
-        &self,
-        key: &AwaitEventKey,
-        deadline: Option<Instant>,
-    ) -> Result<Resolution, RuntimeError> {
+    async fn wait(&self, key: &AwaitEventKey) -> Result<Resolution, RuntimeError> {
         self.inner
-            .await_await_event(key, CancellationToken::new(), deadline)
+            .await_await_event(key, CancellationToken::new())
             .await
     }
 }
@@ -178,7 +173,7 @@ async fn assert_foreign_registry_refuses(
         "{cell}: foreign peek must refuse by name"
     );
     let waited = foreign
-        .wait(issued_key, Some(Instant::now()))
+        .wait(issued_key)
         .await
         .expect_err("foreign wait refuses a foreign-minted key");
     assert_eq!(

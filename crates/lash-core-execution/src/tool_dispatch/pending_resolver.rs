@@ -363,7 +363,7 @@ enum CancelDischarge {
 
 /// Discharges a parked call's cancel obligation once its wait has ended.
 ///
-/// A wait that ended cancelled or timed out, on a process the runtime owns
+/// A wait that ended cancelled, on a process the runtime owns
 /// and under [`CancelHint::CancelExternalWork`](crate::CancelHint), cancels
 /// that process with one replay-keyed command. A terminal that won the race
 /// settles the call normally and issues nothing; a cancel of a child that has
@@ -374,10 +374,8 @@ async fn discharge_cancel_obligation(
     armed: &ArmedResolver,
     resolution: &crate::Resolution,
 ) -> Result<CancelDischarge, crate::RuntimeEffectControllerError> {
-    if !matches!(
-        resolution,
-        crate::Resolution::Cancelled | crate::Resolution::Timeout
-    ) || pending.on_cancel != crate::CancelHint::CancelExternalWork
+    if !matches!(resolution, crate::Resolution::Cancelled)
+        || pending.on_cancel != crate::CancelHint::CancelExternalWork
     {
         return Ok(CancelDischarge::Met);
     }

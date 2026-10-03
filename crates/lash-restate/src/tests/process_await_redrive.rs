@@ -732,11 +732,8 @@ impl Fig1631AwaitEventGate for Fig1631AwaitEventGateImpl {
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1631-await-gate"),
                     RuntimeEffectCommand::AwaitEvent { key },
                 ),
-                RuntimeEffectLocalExecutor::await_event(
-                    tokio_util::sync::CancellationToken::new(),
-                    None,
-                )
-                .with_turn_cancel_scope(scope),
+                RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new())
+                    .with_turn_cancel_scope(scope),
             )
             .await;
         Ok(Json(match outcome {

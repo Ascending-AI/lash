@@ -191,7 +191,6 @@ impl ExternalCompletionError {
 pub enum Resolution {
     Ok(serde_json::Value),
     Err(ExternalCompletionError),
-    Timeout,
     Cancelled,
 }
 

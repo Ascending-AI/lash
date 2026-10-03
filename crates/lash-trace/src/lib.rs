@@ -1454,8 +1454,6 @@ pub enum TraceDurableWaitResolution {
     Ok,
     /// The awaited event delivered a host-domain error value.
     Error,
-    /// The wait reached its deadline.
-    Timeout,
     /// The wait itself was cancelled.
     Cancelled,
     /// A parked process command completed.
@@ -1476,7 +1474,6 @@ impl TraceDurableWaitResolution {
             Self::Failed => true,
             Self::Ok
             | Self::Error
-            | Self::Timeout
             | Self::Cancelled
             | Self::Resolved
             | Self::TurnCancelled

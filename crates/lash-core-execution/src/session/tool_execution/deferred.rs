@@ -34,7 +34,6 @@ impl RuntimeExecutionContext<'_> {
                 ),
                 crate::RuntimeEffectLocalExecutor::await_event_under(
                     &wait,
-                    None,
                     Arc::clone(&self.dispatch.clock),
                 ),
             )

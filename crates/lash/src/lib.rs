@@ -1409,6 +1409,8 @@ pub mod runtime {
     };
     pub use lash_core::shift::relay::RelayPolicy;
     pub use lash_core::tool_dispatch::ToolAttemptLineage;
+    /// The cancellation policy pinned in a Run-owned source descriptor.
+    pub use lash_core::tool_run::ExternalCancelPolicy;
     pub use lash_core::triggers::TriggerDeliveryAdmission;
 
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
@@ -1494,6 +1496,8 @@ pub mod runtime {
     /// supported host surface.
     #[doc(hidden)]
     pub use lash_core::tool_run::run_event;
+    /// Run-owned source descriptors, immutable seals and typed source refusals.
+    pub use lash_core::tool_run::source_seal;
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
     /// wall-clock default; tests open a backend on their own to make expiry

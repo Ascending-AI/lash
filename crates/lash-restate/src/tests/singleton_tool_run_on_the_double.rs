@@ -1455,8 +1455,14 @@ async fn an_undeclared_outcome_is_refused_before_anything_it_declared_is_realize
             deferred(&ToolCallId::fixture("undeclared-deferral")),
             DeclarationRefusal::UndeclaredDeferral,
         ),
+        (
+            "unarmed-source",
+            deferred(&ToolCallId::fixture("unarmed-source")),
+            DeclarationRefusal::UnarmedSource,
+        ),
     ] {
-        let call = call(label);
+        let mut call = call(label);
+        call.declaration.may_defer = label == "unarmed-source";
         let probe = Probe::new(body, CancelAt::Never);
         let driven = drive(
             0x4877,

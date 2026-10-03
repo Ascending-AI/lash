@@ -110,7 +110,6 @@ struct DeferredLookup {
     executed: Arc<AtomicUsize>,
     key: Arc<std::sync::Mutex<Option<lash_core::AwaitEventKey>>>,
     dispatched: Arc<tokio::sync::Notify>,
-    deadline: Option<std::time::Duration>,
 }
 
 fn deferred_definition() -> lash_core::ToolDefinition {
@@ -137,11 +136,7 @@ impl ToolProvider for DeferredLookup {
         }
         *self.key.lock_recover() = Some(call.context.completion_key().expect("a durable key"));
         self.dispatched.notify_one();
-        let mut pending = lash_core::PendingCompletion::new();
-        if let Some(deadline) = self.deadline {
-            pending = pending.with_deadline(deadline);
-        }
-        lash_core::ToolOutcome::pending(pending).into()
+        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new()).into()
     }
 }
 
@@ -154,7 +149,7 @@ async fn a_deferred_tools_run_hands_over_before_its_external_result() -> Result<
 enum DeferredCase {
     Resolve,
     Mixed,
-    Deadline,
+    HeldPending,
     Cancel,
     DispatchBefore,
     DispatchAfter,
@@ -167,8 +162,8 @@ async fn a_mixed_deferred_round_folds_results_in_source_order() -> Result<()> {
     deferred_round_law(DeferredCase::Mixed).await
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_deferred_deadline_keeps_its_absolute_time_after_handover() -> Result<()> {
-    deferred_round_law(DeferredCase::Deadline).await
+async fn a_deferred_source_stays_pending_across_elapsed_time_and_handover() -> Result<()> {
+    deferred_round_law(DeferredCase::HeldPending).await
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancellation_reaches_a_deferred_round_after_handover() -> Result<()> {
@@ -274,8 +269,6 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
             executed: Arc::clone(&executed),
             key: Arc::clone(&key),
             dispatched: Arc::clone(&dispatched),
-            deadline: matches!(case, DeferredCase::Deadline)
-                .then(|| std::time::Duration::from_secs(3600)),
         }))
         .build(crate::testing::runtime_lease_owner())?;
     let handle = core
@@ -307,7 +300,7 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
             .key_ending("run-run"),
         );
     }
-    if matches!(case, DeferredCase::Deadline) {
+    if matches!(case, DeferredCase::HeldPending) {
         double.server().advance(std::time::Duration::from_secs(900));
     }
     let next = BuildGeneration::for_test("deferred-run-next");
@@ -363,14 +356,25 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
     );
     let completion = key.lock_recover().clone().expect("the original key");
     parked_deferred_run(double.server(), "follow-on:run-run:agent-frame:1#0").await;
+    if matches!(case, DeferredCase::HeldPending) {
+        double
+            .server()
+            .advance(std::time::Duration::from_secs(2701));
+        double.server().settle().await;
+        assert_eq!(
+            model.requests.lock_recover().len(),
+            1,
+            "elapsed time cannot close the pending call"
+        );
+        assert_eq!(
+            executed.load(Ordering::SeqCst),
+            1,
+            "elapsed time cannot reroute or redeliver settled X"
+        );
+    }
     match case {
         DeferredCase::Cancel => {
             handle.cancel().origin("deferred-round-law").await?;
-        }
-        DeferredCase::Deadline => {
-            double
-                .server()
-                .advance(std::time::Duration::from_secs(2701));
         }
         _ => {
             core.completions()
@@ -436,12 +440,6 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
                     .map(|(id, _)| id.as_str())
                     .collect::<Vec<_>>(),
                 ["lookup-0", "lookup-1", "lookup-2"]
-            );
-        }
-        if matches!(case, DeferredCase::Deadline) {
-            assert!(
-                results[0].1.contains("pending tool completion timed out"),
-                "the timeout is the normal tool result: {results:?}"
             );
         }
     }
@@ -1230,6 +1228,23 @@ async fn parked_deferred_run(
     let deadline = tokio::time::Instant::now() + WEDGE;
     let mut seen = None;
     loop {
+        if let Some(view) = server.invocations().into_iter().find(|view| {
+            view.target.contains(lash_restate_test::TURN_DRIVER_SERVICE)
+                && view.target.ends_with(&target)
+                && view.status == "completed"
+        }) {
+            let records: Vec<_> = server
+                .journal(&view.id)
+                .unwrap()
+                .iter()
+                .filter_map(|entry| entry.run_completion())
+                .map(|result| result.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
+                .collect();
+            panic!(
+                "the deferred Run ended before its real result: {:?}; records={records:#?}",
+                server.outcome(&view.id)
+            );
+        }
         let view = server.invocations().into_iter().find(|view| {
             view.target.contains(lash_restate_test::TURN_DRIVER_SERVICE)
                 && view.target.ends_with(&target)

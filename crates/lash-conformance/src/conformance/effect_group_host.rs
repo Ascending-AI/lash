@@ -722,7 +722,7 @@ pub async fn a_proxied_controller_serves_all_three_group_methods<F: Fn() -> Host
                 key: root_key.clone(),
             },
         ),
-        RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None),
+        RuntimeEffectLocalExecutor::await_event(CancellationToken::new()),
         requests,
     );
     let scenario = async {
@@ -2298,7 +2298,7 @@ pub async fn retired_scope_refuses_every_effect_wait_group_and_resolver_admissio
     );
     assert!(host.peek_await_event(&key).await.is_err());
     assert!(
-        host.await_await_event(&key, CancellationToken::new(), None)
+        host.await_await_event(&key, CancellationToken::new())
             .await
             .is_err()
     );

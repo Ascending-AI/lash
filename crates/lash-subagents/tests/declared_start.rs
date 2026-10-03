@@ -100,9 +100,7 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
 
 /// The subagent plugin: one `default` capability, children living until the
 /// scope that started them ends.
-fn subagents(
-    timeout: Option<std::time::Duration>,
-) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+fn subagents() -> Arc<dyn lash_core::facade_support::PluginFactory> {
     let registry = lash_subagents::CapabilityRegistry::new().with(Arc::new(
         lash_subagents::StaticCapability::new(
             "default",
@@ -113,10 +111,7 @@ fn subagents(
         Arc::new(registry),
         lash_core::lifetime::starter,
     );
-    Arc::new(match timeout {
-        Some(timeout) => factory.with_timeout(timeout),
-        None => factory,
-    })
+    Arc::new(factory)
 }
 
 /// The RLM protocol plugin the `Promise.all` width's cells run under.
@@ -163,9 +158,7 @@ async fn tier(
         seed,
         lash_restate_test::ServerConfig {
             always_replay,
-            // A pending deadline is an absolute wall-clock instant the
-            // engine's durable wait measures against the system clock, so
-            // virtual time starts at wall time.
+            // Keep recorded process timestamps on the store's wall clock.
             start_time_ms: u64::try_from(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)

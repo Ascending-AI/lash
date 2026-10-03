@@ -415,6 +415,15 @@ impl<'a> RunCoordinator<'a> {
                         ..
                     },
                 ] => {
+                    self.waiting.insert(
+                        call.call_id.clone(),
+                        Waiting {
+                            call: call.clone(),
+                            member: member.clone(),
+                            handlers: Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                            attempt: ordinal,
+                        },
+                    );
                     decision = Some((
                         call.call_id.clone(),
                         DecidedCall::Deferred {
@@ -543,9 +552,22 @@ impl<'a> RunCoordinator<'a> {
         self.journal.scoped.admit_journal_write()?;
         let owner = self.journal.materials.owner.clone();
         let name = record_name(&call.call_id, &format!("attempt:{ordinal}"));
+        let completion_key = self
+            .sources
+            .get(&call.call_id)
+            .map(|source| source.source.clone());
         let (call, member, request) = (call.clone(), member.clone(), request.clone());
         let step = Box::pin(async move {
-            capture_attempt(owner, &call, &member, &request, handlers.as_ref(), ordinal).await
+            capture_attempt(
+                owner,
+                &call,
+                &member,
+                &request,
+                handlers.as_ref(),
+                ordinal,
+                completion_key.as_ref(),
+            )
+            .await
         });
         let controller = self.journal.scoped.controller();
         let attempt = controller.start_run_attempt(name, step);

@@ -13,7 +13,7 @@ use lash_core::engine::UpgradePolicy;
 
 use crate::compat::RESTATE_WIRE_VERSION;
 use crate::controller::{EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION};
-use crate::durable_wait::{DURABLE_WAIT_REGISTRY_FORMAT_VERSION, DURABLE_WAIT_REQUEST_VERSION};
+use crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION;
 use crate::effect_group::{
     EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
     EFFECT_GROUP_STATE_FORMAT_VERSION,
@@ -60,14 +60,6 @@ pub struct EngineDurableFormat {
 /// The engine's durable-format rows, in the order the facade's format
 /// table reports them.
 static DURABLE_FORMATS: &[EngineDurableFormat] = &[
-    EngineDurableFormat {
-        id: "restate.durable_wait_request",
-        name: "Restate durable-wait request",
-        version: DURABLE_WAIT_REQUEST_VERSION as u32,
-        constant: "DURABLE_WAIT_REQUEST_VERSION",
-        upgrade_policy: UpgradePolicy::Drain,
-        unwalkable_reason: UNWALKABLE_REASON,
-    },
     EngineDurableFormat {
         id: "restate.durable_wait_registry_format",
         name: "Restate durable-wait registry format",

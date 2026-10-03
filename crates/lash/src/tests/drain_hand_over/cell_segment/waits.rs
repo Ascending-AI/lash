@@ -419,7 +419,6 @@ async fn event_wait(
                     scope,
                 )
                 .transferable(true),
-                None,
                 Arc::new(lash_core::facade_support::SystemClock),
             ),
         )

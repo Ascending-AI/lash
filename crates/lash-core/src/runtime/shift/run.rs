@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 
+use super::plugin_transition::TransitionBasis;
 use super::{ExecutedRun, ShiftSinks, shift_abort};
 use crate::engine::{Admitted, RunOutcome, ShiftAbort, shift_run_scope};
 use crate::runtime::LashRuntime;
@@ -151,7 +152,9 @@ impl LashRuntime {
                         admitted,
                         &admission.base,
                         &admission.plugins,
-                        resume.map(|head| (head, fence)),
+                        resume.map_or(TransitionBasis::Admitted, |head| {
+                            TransitionBasis::Resume(head, fence)
+                        }),
                     )
                     .await?;
                 if matches!(
@@ -551,8 +554,16 @@ impl LashRuntime {
             self.record_turn_park_after_abort(&error, &run, None).await;
             return Err(shift_abort(Some(&run), error));
         }
+        let (crate::store::FollowOnRecovery::Run(owed)
+        | crate::store::FollowOnRecovery::Exhausted(owed)) = &recovery;
         let transition = self
-            .record_plugin_transition(run_controller, admitted, &base, &plugins, None)
+            .record_plugin_transition(
+                run_controller,
+                admitted,
+                &base,
+                &plugins,
+                TransitionBasis::FollowOn(owed),
+            )
             .await?;
         if let Err(error) = self
             .publish_plugin_transition(transition, fence, None)

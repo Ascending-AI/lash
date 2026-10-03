@@ -28,11 +28,8 @@ pub(super) async fn execute_await_event_forwards_the_invocation_replay_key() {
     let outcome = controller
         .execute_effect(
             RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::AwaitEvent { key }),
-            RuntimeEffectLocalExecutor::await_event(
-                tokio_util::sync::CancellationToken::new(),
-                None,
-            )
-            .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
+            RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new())
+                .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
         )
         .await
         .expect("pre-resolved await-event effect");
@@ -76,7 +73,7 @@ pub(super) async fn execute_await_event_rejects_foreign_authority_before_context
                 runtime_invocation(RuntimeEffectKind::AwaitEvent, "foreign-authority-await"),
                 RuntimeEffectCommand::AwaitEvent { key },
             ),
-            RuntimeEffectLocalExecutor::await_event(cancellation, None),
+            RuntimeEffectLocalExecutor::await_event(cancellation),
         )
         .await
         .expect_err("foreign authority must refuse before handler context work");
@@ -303,7 +300,7 @@ pub(super) async fn restate_suspended_await_event_is_woken_by_the_durable_turn_c
                 runtime_invocation(RuntimeEffectKind::AwaitEvent, "suspended-await-event"),
                 RuntimeEffectCommand::AwaitEvent { key: awaited_key },
             ),
-            RuntimeEffectLocalExecutor::await_event(task_cancellation, None)
+            RuntimeEffectLocalExecutor::await_event(task_cancellation)
                 .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
         )
         .await
@@ -376,7 +373,7 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
                 runtime_invocation(RuntimeEffectKind::AwaitEvent, "cancel-wait"),
                 RuntimeEffectCommand::AwaitEvent { key: task_key },
             ),
-            RuntimeEffectLocalExecutor::await_event(task_cancellation, None)
+            RuntimeEffectLocalExecutor::await_event(task_cancellation)
                 .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
         )
         .await
@@ -428,36 +425,6 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
             .expect("late resolve"),
         ResolveOutcome::AlreadyResolved {
             terminal: Resolution::Cancelled,
-        }
-    );
-}
-
-#[tokio::test]
-pub(super) async fn restate_deadline_durably_terminalizes_timeout() {
-    let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new_for_test(context.clone());
-    let key = test_restate_await_event_key(
-        &ExecutionScope::runtime_operation("deadline-operation"),
-        AwaitEventWaitIdentity::Custom {
-            key: "deadline".to_string(),
-        },
-    )
-    .expect("deadline key");
-    let resolution = host
-        .await_await_event(
-            &key,
-            tokio_util::sync::CancellationToken::new(),
-            Some(std::time::Instant::now() + Duration::from_millis(10)),
-        )
-        .await
-        .expect("deadline wait");
-    assert_eq!(resolution, Resolution::Timeout);
-    assert_eq!(
-        host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("late")))
-            .await
-            .expect("late deadline resolve"),
-        ResolveOutcome::AlreadyResolved {
-            terminal: Resolution::Timeout,
         }
     );
 }
@@ -527,7 +494,7 @@ pub(super) async fn restate_effect_host_cancellation_records_and_returns_the_dur
         cancel.cancel();
 
         let resolution = host
-            .await_await_event(&key, cancel, None)
+            .await_await_event(&key, cancel)
             .await
             .expect("settle cancelled wait through ingress");
 
@@ -817,7 +784,6 @@ pub(super) async fn a_process_parked_on_a_signal_is_cancelled_by_its_durable_rac
             ),
             RuntimeEffectLocalExecutor::await_event_under(
                 &lash_core::TurnCancelWait::unobserved(task_stop),
-                None,
                 Arc::new(lash_core::facade_support::SystemClock),
             ),
         )

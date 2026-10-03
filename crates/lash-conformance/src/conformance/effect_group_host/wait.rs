@@ -118,7 +118,7 @@ pub async fn losing_wait_isolation_with_registration_witness<F, W>(
         .open_effect_group(staged(
             losing_group,
             vec![
-                RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None),
+                RuntimeEffectLocalExecutor::await_event(CancellationToken::new()),
                 RuntimeEffectLocalExecutor::sleep(CancellationToken::new()),
             ],
         ))
@@ -201,7 +201,6 @@ pub async fn losing_wait_isolation_with_registration_witness<F, W>(
             companion_group,
             vec![RuntimeEffectLocalExecutor::await_event(
                 CancellationToken::new(),
-                None,
             )],
         ))
         .await
@@ -387,7 +386,6 @@ pub async fn a_wait_cancelled_before_it_parks_is_still_released<F: Fn() -> Host>
             group,
             vec![RuntimeEffectLocalExecutor::await_event(
                 CancellationToken::new(),
-                None,
             )],
         ))
         .await

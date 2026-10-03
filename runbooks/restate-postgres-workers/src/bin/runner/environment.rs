@@ -72,7 +72,7 @@ pub(super) async fn run_cold_process_await_event_vectors(
         );
         anyhow::ensure!(
             observer
-                .await_await_event(&key, tokio_util::sync::CancellationToken::new(), None,)
+                .await_await_event(&key, tokio_util::sync::CancellationToken::new())
                 .await
                 .with_context(|| format!("observe killed-helper {identity} key"))?
                 == terminal,

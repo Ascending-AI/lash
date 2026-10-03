@@ -135,6 +135,7 @@ async fn record_resuming(
                     raw_plugins: Default::default(),
                     commit_budget: crate::testing::runtime_helpers::test_commit_budget(),
                     resume,
+                    follow_on: None,
                 }),
                 None,
             ),

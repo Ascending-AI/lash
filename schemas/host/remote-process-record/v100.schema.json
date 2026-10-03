@@ -205,6 +205,20 @@
       "oneOf": [
         {
           "additionalProperties": false,
+          "description": "A deferring body returned a key other than the source its Run armed.",
+          "properties": {
+            "refusal": {
+              "const": "unarmed_source",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "kind": {
               "$ref": "#/$defs/ToolIntentKind"

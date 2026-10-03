@@ -37,7 +37,7 @@ use lash_core::tool_run::{
     ExternalCancelPolicy, PresentationBinding, RunEvent, RunEventOrdinal, RunJournalEntry,
     RunLifecycle, RunRecord, SegmentOrdinal, ToolDeclaration,
 };
-use lash_core::{AdmittedScope, AwaitEventKey, EffectOpener, ScopedEffectController, ToolCallId};
+use lash_core::{AdmittedScope, EffectOpener, ScopedEffectController, ToolCallId};
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use lash_sansio::{SessionStreamEvent, ToolIntentKind};
@@ -123,6 +123,9 @@ enum Seen {
 /// The callbacks of every call of one Run, with a count of every execution.
 struct Probe {
     kinds: BTreeMap<ToolCallId, Kind>,
+    materials: Option<Arc<dyn lash_core::store::ToolMaterialStore>>,
+    sources: Mutex<BTreeMap<ToolCallId, lash_core::AwaitEventKey>>,
+    complete_sources: bool,
     /// Stream events each body observes into its attempt's stream.
     streams: BTreeMap<ToolCallId, Vec<SessionStreamEvent>>,
     cancel: AtomicBool,
@@ -165,6 +168,9 @@ impl Probe {
                 .iter()
                 .map(|(call, kind)| (call.call_id.clone(), kind.clone()))
                 .collect(),
+            materials: None,
+            sources: Mutex::new(BTreeMap::new()),
+            complete_sources: false,
             streams: BTreeMap::new(),
             cancel: AtomicBool::new(false),
             parallel: None,
@@ -219,6 +225,10 @@ impl Probe {
 
 #[async_trait::async_trait]
 impl SingletonToolHandlers for Probe {
+    fn tool_material_store(&self) -> Option<&dyn lash_core::store::ToolMaterialStore> {
+        self.materials.as_deref()
+    }
+
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
         Ok(serde_json::json!({ "sealed": call.arguments }))
     }
@@ -338,14 +348,17 @@ impl SingletonToolHandlers for Probe {
                 intents: Vec::new(),
                 start: None,
             },
-            Kind::Deferred => SingletonBodyOutcome::Deferred {
-                source: AwaitEventKey {
-                    scope: lash_core::ExecutionScope::turn("session", "turn"),
-                    wait: lash_core::AwaitEventWaitIdentity::tool_completion(call_id.clone()),
-                    key_id: format!("fig4880-{call_id}"),
-                    signature: "fig4880".to_owned(),
-                },
-            },
+            Kind::Deferred => {
+                let source = attempt
+                    .completion_key
+                    .expect("admission armed the source")
+                    .clone();
+                self.sources
+                    .lock()
+                    .unwrap()
+                    .insert(call_id.clone(), source.clone());
+                SingletonBodyOutcome::Deferred { source }
+            }
         })
     }
 
@@ -463,6 +476,7 @@ impl SingletonToolHandlers for Probe {
 enum Step {
     Decide(usize),
     Concurrent,
+    AwaitDeferred,
     /// Request the Run's cancellation.
     Cancel,
     Drain,
@@ -607,6 +621,92 @@ async fn drive(
             }
         })
     });
+    let complete_sources = if probe.complete_sources {
+        let engine = backend.clone();
+        let probe = Arc::clone(&probe);
+        Some(tokio::spawn(async move {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+            loop {
+                let subscribed = engine
+                    .server()
+                    .invocations()
+                    .iter()
+                    .any(|view| view.target.ends_with("/subscribe_source"));
+                if subscribed {
+                    break;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "Run never subscribed"
+                );
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            engine.server().advance(Duration::from_secs(3601));
+            engine.server().settle().await;
+            assert!(
+                probe.presentations.lock().unwrap().is_empty(),
+                "elapsed time produces no result"
+            );
+            let sources = probe.sources.lock().unwrap().clone();
+            for (call_id, source) in sources.iter().rev() {
+                use lash_core::tool_run::{
+                    MaterialBundle, MaterialHolder, MaterialOwner, MaterialPayload, MaterialRole,
+                    SealWriter, SourceSeal,
+                };
+                let capture = SingletonCapture::Done {
+                    output: output_of(call_id),
+                    commands: Vec::new(),
+                    intents: Vec::new(),
+                    stream: Default::default(),
+                    start: None,
+                };
+                let bundle = MaterialBundle::of([MaterialPayload::new(
+                    MaterialOwner::Source {
+                        source: source.clone(),
+                    },
+                    MaterialRole::AttemptOutput,
+                    Some(revision()),
+                    serde_json::to_string(&capture).unwrap(),
+                )])
+                .unwrap()
+                .unwrap();
+                let retained = probe
+                    .materials
+                    .as_ref()
+                    .unwrap()
+                    .retain_material(
+                        &MaterialHolder::Source {
+                            source: source.clone(),
+                        },
+                        &bundle,
+                    )
+                    .await
+                    .unwrap();
+                let reply: crate::Reply<crate::durable_wait::RestateSourceSealReply> = engine
+                    .ingress()
+                    .call_object_json(
+                        "LashDurableWaitIndex",
+                        "session",
+                        "seal_source",
+                        &crate::Call::new(crate::durable_wait::RestateSourceSealRequest {
+                            source: source.clone(),
+                            writer: SealWriter::External,
+                            seal: SourceSeal::Resolved {
+                                result: Box::new(retained.references[0].clone()),
+                            },
+                        }),
+                    )
+                    .await
+                    .unwrap();
+                assert!(matches!(
+                    reply.into_body(),
+                    crate::durable_wait::RestateSourceSealReply::Outcome { .. }
+                ));
+            }
+        }))
+    } else {
+        None
+    };
     let finished: Arc<Mutex<Vec<Finished>>> = Arc::new(Mutex::new(Vec::new()));
     let terminals = Arc::new(Mutex::new(BTreeMap::new()));
     let timer_cancel = if probe.cancel_at_timer {
@@ -703,6 +803,7 @@ async fn drive(
                                     }
                                 }
                             }),
+                        Step::AwaitDeferred => run.await_deferred().await,
                         Step::Cancel => {
                             probe.cancel.store(true, Ordering::SeqCst);
                             Ok(())
@@ -739,6 +840,9 @@ async fn drive(
     }
     if let Some(cancel) = timer_cancel {
         cancel.await.unwrap();
+    }
+    if let Some(complete) = complete_sources {
+        complete.await.unwrap();
     }
     Driven {
         backend,
@@ -2009,4 +2113,61 @@ async fn l02_l16_proposal_and_ack_loss_recover_receipts_before_capture() {
             "crash delivery never advances the reported-retry ordinal"
         );
     }
+}
+
+/// L02/L07/L22: the deferred X is not a terminal. A crash after the real
+/// decision is durable reuses X and its source, with no duplicate body or V.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_deferred_run_waits_for_retained_results_and_replays_its_protected_final() {
+    let calls = Arc::new(vec![
+        (call("source-a", &Kind::Deferred), Kind::Deferred),
+        (call("source-b", &Kind::Deferred), Kind::Deferred),
+    ]);
+    let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
+    let mut probe = Probe::new(&calls);
+    probe.materials = Some(stores.process_env_store());
+    probe.complete_sources = true;
+    let probe = Arc::new(probe);
+    let driven = drive(
+        0x4740_0001,
+        vec![CrashPoint::BeforeRunResult {
+            name: Some(name(&calls[1].0.call_id, "present")),
+        }],
+        Arc::clone(&calls),
+        Arc::new(vec![Step::Concurrent, Step::AwaitDeferred, Step::Drain]),
+        Arc::clone(&probe),
+    )
+    .await;
+    let records = driven.records();
+    for (call, _) in calls.iter() {
+        assert_eq!(probe.executions_of(&call.call_id), 1, "durable X is reused");
+        let events: Vec<_> = records.iter().flat_map(|record| &record.events).collect();
+        assert_eq!(events.iter().filter(|e| matches!(e, RunEvent::Decided { call_id, decision: CallDecision::Final { source: lash_core::tool_run::ResultSource::DeferredCompletion { .. }, .. }, .. } if *call_id == call.call_id)).count(), 1);
+        assert_eq!(
+            events
+                .iter()
+                .filter(
+                    |e| matches!(e, RunEvent::Presented { call_id, .. } if *call_id == call.call_id)
+                )
+                .count(),
+            1
+        );
+        assert!(matches!(
+            &driven.terminals.lock().unwrap()[&call.call_id],
+            SingletonTerminal::Final {
+                source: lash_core::tool_run::ResultSource::DeferredCompletion { .. },
+                ..
+            }
+        ));
+    }
+    assert_eq!(
+        probe
+            .presentations
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|id| **id == calls[0].0.call_id)
+            .count(),
+        1
+    );
 }

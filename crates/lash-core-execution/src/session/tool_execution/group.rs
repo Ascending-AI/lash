@@ -764,7 +764,6 @@ impl RuntimeExecutionContext<'_> {
                                 .iter()
                                 .map(|(_, completion)| crate::ToolCompletionWait {
                                     key: completion.pending.key.clone(),
-                                    deadline_ms: completion.deadline_ms,
                                 })
                                 .collect(),
                             (!handle.is_exhausted()).then(|| crate::ToolDispatchCursor {

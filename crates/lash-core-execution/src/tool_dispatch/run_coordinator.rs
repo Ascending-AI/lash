@@ -38,6 +38,7 @@
 
 use std::collections::BTreeMap;
 
+mod deferred;
 mod parallel;
 
 use lash_sansio::ToolCallId;
@@ -115,9 +116,11 @@ impl Materials {
     }
 
     fn read(&self, reference: &MaterialRef) -> Result<&str, RuntimeEffectControllerError> {
-        reference.verify(&self.owner, &reference.digest)?;
         match self.entries.get(reference) {
-            Some(Some(payload)) => Ok(&payload.text),
+            Some(Some(payload)) => {
+                payload.verify(reference, &reference.owner, &self.available)?;
+                Ok(&payload.text)
+            }
             Some(None) => Err(MaterialRefusal::Retired {
                 reference: Box::new(reference.clone()),
             }
@@ -457,6 +460,7 @@ async fn decision_entry(
         address,
         aborted,
     } = slot;
+    let protected_source = matches!(&checked, Some((ResultSource::DeferredCompletion { .. }, _)));
     let success = matches!(
         &checked,
         Some((
@@ -468,12 +472,14 @@ async fn decision_entry(
     let selection = member.selection();
     let decide = async {
         let (decision, after) = match (selection, checked) {
-            _ if aborted => (CallDecision::Cancelled, None),
+            _ if aborted && !protected_source => (CallDecision::Cancelled, None),
             (BeforeSelection::Deny, _) => (CallDecision::Denied, None),
             (BeforeSelection::Cancel, _) => (CallDecision::Cancelled, None),
             (BeforeSelection::AbortRun, _) => (CallDecision::Aborted, None),
             (_, None) => return Err("a result candidate has no capture".to_owned()),
-            (_, Some(_)) if handlers.run_cancel_requested() => (CallDecision::Cancelled, None),
+            (_, Some(_)) if !protected_source && handlers.run_cancel_requested() => {
+                (CallDecision::Cancelled, None)
+            }
             (_, Some((source, capture))) => {
                 if let SingletonCapture::Done { commands, .. } = &capture
                     && !commands.is_empty()
@@ -481,18 +487,29 @@ async fn decision_entry(
                     let plugins = handlers
                         .plugin_session()
                         .ok_or("state commands require a plugin session")?;
-                    let attempt = match &source {
-                        ResultSource::Attempt { attempt } => *attempt,
-                        _ => AttemptOrdinal::FIRST,
+                    let origin = match &source {
+                        ResultSource::DeferredCompletion { attempt, .. } => {
+                            crate::tool_run::StateCommandOrigin::DeferredFinalization {
+                                call_id: call.call_id.clone(),
+                                attempt: *attempt,
+                            }
+                        }
+                        ResultSource::Attempt { attempt } => {
+                            crate::tool_run::StateCommandOrigin::ToolAttempt {
+                                call_id: call.call_id.clone(),
+                                attempt: *attempt,
+                            }
+                        }
+                        _ => crate::tool_run::StateCommandOrigin::ToolAttempt {
+                            call_id: call.call_id.clone(),
+                            attempt: AttemptOrdinal::FIRST,
+                        },
                     };
                     crate::plugin::propose(
                         &plugins,
                         crate::plugin::Proposal::for_tool(
                             member.binding.executable.owner.clone(),
-                            crate::tool_run::StateCommandOrigin::ToolAttempt {
-                                call_id: call.call_id.clone(),
-                                attempt,
-                            },
+                            origin,
                             commands.clone().into(),
                         ),
                     )
@@ -582,6 +599,13 @@ struct Owed<'a> {
     capture: Option<SingletonCapture>,
 }
 
+struct Waiting<'a> {
+    call: SingletonToolCall,
+    member: AdmittedCall,
+    handlers: Handlers<'a>,
+    attempt: AttemptOrdinal,
+}
+
 /// The calls of one logical Run, recorded in its opener journal.
 pub struct RunCoordinator<'a> {
     journal: RunJournal<'a>,
@@ -592,6 +616,8 @@ pub struct RunCoordinator<'a> {
     cut: Option<crate::tool_run::Cut>,
     faulted: bool,
     active_frame: bool,
+    sources: BTreeMap<ToolCallId, crate::tool_run::SourceDescriptor>,
+    waiting: BTreeMap<ToolCallId, Waiting<'a>>,
 }
 
 impl<'a> RunCoordinator<'a> {
@@ -625,6 +651,8 @@ impl<'a> RunCoordinator<'a> {
             cut: None,
             faulted: false,
             active_frame: false,
+            sources: BTreeMap::new(),
+            waiting: BTreeMap::new(),
         }
     }
 
@@ -670,7 +698,16 @@ impl<'a> RunCoordinator<'a> {
         // The result candidate the decision checks, and where it came from.
         let candidate = match member.selection() {
             BeforeSelection::Execute => {
-                match attempt(journal, call, &member, &request, handlers).await? {
+                match attempt(
+                    journal,
+                    call,
+                    &member,
+                    &request,
+                    handlers,
+                    self.sources.get(&call.call_id).map(|source| &source.source),
+                )
+                .await?
+                {
                     AttemptCaptured::Captured(capture) => {
                         let recorded = match &capture {
                             SingletonCapture::Isolated { binding } => Some(binding.as_ref()),
@@ -690,6 +727,15 @@ impl<'a> RunCoordinator<'a> {
                         ))
                     }
                     AttemptCaptured::Deferred(source) => {
+                        self.waiting.insert(
+                            call.call_id.clone(),
+                            Waiting {
+                                call: call.clone(),
+                                member,
+                                handlers: Handlers::Borrowed(handlers),
+                                attempt: AttemptOrdinal::FIRST,
+                            },
+                        );
                         return Ok(DecidedCall::Deferred { source });
                     }
                 }
@@ -834,12 +880,40 @@ impl<'a> RunCoordinator<'a> {
                     member.tool_name == tool_name && request.isolation.is_some()
                 })
             })?;
+        for (call, (member, _)) in calls.iter().zip(&admitted) {
+            if member.declaration.may_defer && member.selection() == BeforeSelection::Execute {
+                let key = journal
+                    .scoped
+                    .controller()
+                    .await_event_key(
+                        call.owner.admitted_scope().scope(),
+                        crate::AwaitEventWaitIdentity::tool_completion(call.call_id.clone()),
+                    )
+                    .await
+                    .map_err(RuntimeEffectControllerError::from)?;
+                let descriptor = crate::tool_run::SourceDescriptor {
+                    source: key,
+                    call_id: call.call_id.clone(),
+                    owner: call.owner.clone(),
+                    resolver: member.binding.executable.owner.clone(),
+                    authority: crate::tool_run::SourceAuthority::ExternalCompletion,
+                    cancel: member.policy.cancel,
+                };
+                journal.scoped.admit_journal_write()?;
+                journal
+                    .scoped
+                    .controller()
+                    .arm_run_source(descriptor.clone())
+                    .await?;
+                self.sources.insert(call.call_id.clone(), descriptor);
+            }
+        }
         Ok(admitted)
     }
 
     async fn decide_candidate(
         &mut self,
-        call: &'a SingletonToolCall,
+        call: &SingletonToolCall,
         handlers: Handlers<'a>,
         member: &AdmittedCall,
         candidate: Option<(ResultSource, SingletonCapture)>,
@@ -1309,6 +1383,7 @@ async fn attempt(
     member: &AdmittedCall,
     request: &SingletonPreparedRequest,
     handlers: &dyn SingletonToolHandlers,
+    completion_key: Option<&AwaitEventKey>,
 ) -> Result<AttemptCaptured, SingletonRunError> {
     let record = journal.record(Vec::new());
     let owner = journal.materials.owner.clone();
@@ -1320,6 +1395,7 @@ async fn attempt(
             request,
             handlers,
             AttemptOrdinal::FIRST,
+            completion_key,
         )
         .await?;
         let result = captured.result;
@@ -1364,6 +1440,7 @@ async fn capture_attempt(
     request: &SingletonPreparedRequest,
     handlers: &dyn SingletonToolHandlers,
     ordinal: AttemptOrdinal,
+    completion_key: Option<&AwaitEventKey>,
 ) -> Result<crate::tool_run::RunAttemptEntry, String> {
     let declaration = &member.declaration;
     // The obligation material a declared start owns in this record.
@@ -1379,6 +1456,7 @@ async fn capture_attempt(
                     attempt: ordinal,
                     request,
                     stream: &recorder,
+                    completion_key,
                 })
                 .await?,
         )
@@ -1395,7 +1473,10 @@ async fn capture_attempt(
         }),
         Some(SingletonBodyOutcome::Deferred { source }) => {
             match declaration.admits(OutcomeShape::Deferred) {
-                Ok(()) => Err(source),
+                Ok(()) if completion_key == Some(&source) => Err(source),
+                Ok(()) => Ok(SingletonCapture::Refused {
+                    refusal: DeclarationRefusal::UnarmedSource,
+                }),
                 Err(refusal) => Ok(SingletonCapture::Refused { refusal }),
             }
         }

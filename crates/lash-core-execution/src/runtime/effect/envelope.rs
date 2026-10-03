@@ -421,7 +421,6 @@ pub enum SleepSpec {
 #[serde(deny_unknown_fields)]
 pub struct ToolCompletionWait {
     pub key: crate::AwaitEventKey,
-    pub deadline_ms: Option<u64>,
 }
 
 /// The next dispatch settlement competing with deferred logical completions.
@@ -500,10 +499,9 @@ pub enum RuntimeEffectCommand {
     ToolInvocation {
         request: Box<super::tool_child::ToolChildRequest>,
     },
-    /// Freeze a deferred dispatch's absolute deadline and durably arm it.
+    /// Durably arm a deferred dispatch's completion key.
     ArmToolCompletion {
         key: crate::AwaitEventKey,
-        timeout_ms: Option<u64>,
     },
     /// The Run waits on its settled dispatch's original completion key.
     AwaitToolCompletions {
@@ -1401,13 +1399,11 @@ pub enum RuntimeEffectOutcome {
         settlement: Box<ToolSettlement>,
     },
     /// The dispatch is settled. Its original completion key stays open and
-    /// the Run owns the armed resolver, deadline and eventual presentation.
+    /// the Run owns the armed resolver and eventual presentation.
     ToolInvocationDeferred {
         completion: Box<crate::tool_dispatch::DeferredToolCompletion>,
     },
-    ArmToolCompletion {
-        deadline_ms: Option<u64>,
-    },
+    ArmToolCompletion {},
     AwaitToolCompletions {
         event: ToolCompletionEvent,
     },

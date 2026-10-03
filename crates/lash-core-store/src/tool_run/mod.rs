@@ -56,8 +56,8 @@ pub use run_event::{
     RunTraceFacts, SegmentOrdinal,
 };
 pub use source_seal::{
-    SealOutcome, SealRefusal, SealWriter, SourceAuthority, SourceDescriptor, SourceSeal,
-    SourceSubscription,
+    SealOutcome, SealRefusal, SealWriter, SourceAuthority, SourceDescriptor, SourceRefusal,
+    SourceSeal, SourceSubscription,
 };
 pub use state_command::{
     ApplyReducer, CallbackSlot, FrontierRefusal, FrontierStep, NamespaceFrontierRefusal,

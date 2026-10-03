@@ -62,10 +62,7 @@ fn probe_wait_request() -> Result<RestateDurableWaitAwaitRequest, TerminalError>
         },
     )
     .map_err(TerminalError::from_error)?;
-    Ok(RestateDurableWaitAwaitRequest {
-        key,
-        deadline: None,
-    })
+    Ok(RestateDurableWaitAwaitRequest { key })
 }
 
 impl P16RaceProbe for P16RaceProbeImpl {

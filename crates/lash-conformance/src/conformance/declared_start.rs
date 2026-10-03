@@ -43,9 +43,9 @@ fn child_reply(index: usize) -> String {
     format!("declared-start child {index} literal")
 }
 
-/// The subagent plugin factory, under the pending deadline the law sets.
+/// The subagent plugin factory each law installs.
 pub type SubagentPlugin =
-    Arc<dyn Fn(Option<Duration>) -> Arc<dyn crate::facade_support::PluginFactory> + Send + Sync>;
+    Arc<dyn Fn() -> Arc<dyn crate::facade_support::PluginFactory> + Send + Sync>;
 
 /// What a registering tier hands every declared-start law.
 #[derive(Clone)]
@@ -749,7 +749,6 @@ struct World {
 struct Shape {
     children: usize,
     producer: Producer,
-    timeout: Option<Duration>,
     barrier: Option<usize>,
 }
 
@@ -758,7 +757,6 @@ impl Shape {
         Self {
             children: 1,
             producer: Producer::Native { siblings: 0 },
-            timeout: None,
             barrier: None,
         }
     }
@@ -767,7 +765,6 @@ impl Shape {
         Self {
             children: 0,
             producer: Producer::Probe(probe),
-            timeout: None,
             barrier: None,
         }
     }
@@ -835,7 +832,7 @@ impl World {
         let worker_facts = Arc::new(FactsFactory::new(WORKER_FACTS_DEFAULT));
         let factories = protocol
             .into_iter()
-            .chain([(tier.subagents)(shape.timeout)])
+            .chain([(tier.subagents)()])
             .chain(tools)
             .collect::<Vec<_>>();
         // The worker installs the same plugin set as the parent's core, one
@@ -1463,38 +1460,6 @@ pub async fn declared_start_child_runs_under_recorded_facts_on_a_worker_with_oth
     );
 }
 
-/// A deadline resolves the call as a timeout error and cancels the child.
-pub async fn declared_start_timeout_cancels_the_child(tier: DeclaredStartTier) {
-    let world = World::new(
-        &tier,
-        "timeout",
-        Shape {
-            timeout: Some(Duration::from_millis(500)),
-            ..Shape::one_child()
-        },
-    )
-    .await;
-    // The child never answers on its own.
-    world.script.child_gate.0.send_replace(false);
-    let turn = finished(&world, world.run().await);
-    world.release_children();
-    let spawns = spawn_records(&turn);
-    assert_eq!(spawns.len(), 1);
-    let crate::ToolCallOutcome::Failure(failure) = &spawns[0].output.outcome else {
-        panic!("a timed-out spawn is a failure: {:?}", spawns[0].output);
-    };
-    assert_eq!(failure.class, crate::ToolFailureClass::Timeout);
-    assert_eq!(failure.message, "subagent timed out after 500ms");
-    let child = world.only_child().await;
-    let child = world.terminal(&child.id).await;
-    assert_eq!(
-        child.status(),
-        crate::ProcessStatus::Cancelled,
-        "the timed-out child is cancelled: {child:#?}"
-    );
-    assert!(child.cancel_request.is_some(), "the cancel was requested");
-}
-
 /// Where [`declared_start_cancel_at_each_point`] cancels the parent turn.
 #[derive(Clone, Copy, Debug)]
 enum CancelPoint {
@@ -1872,7 +1837,6 @@ pub async fn batch_of_spawns_overlaps(tier: DeclaredStartTier) {
             Shape {
                 children: width,
                 producer,
-                timeout: None,
                 barrier: Some(width),
             },
         )
@@ -1930,7 +1894,6 @@ fn mid_flight_shape() -> Shape {
     Shape {
         children: MID_FLIGHT_WIDTH,
         producer: Producer::Native { siblings: 2 },
-        timeout: None,
         barrier: None,
     }
 }
@@ -2195,7 +2158,6 @@ pub async fn declared_start_rejects_foreign_or_reused_serialized_identity_before
             Shape {
                 children: 0,
                 producer: Producer::ReusedIdentity,
-                timeout: None,
                 barrier: None,
             },
             "declared-start-probe-1",

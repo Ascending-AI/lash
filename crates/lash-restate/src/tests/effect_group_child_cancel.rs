@@ -554,10 +554,7 @@ async fn an_event_wait_child_cancelled_before_it_parks_ends_cancelled() {
                 ),
                 RuntimeEffectCommand::AwaitEvent { key },
             ),
-            RuntimeEffectLocalExecutor::await_event(
-                tokio_util::sync::CancellationToken::new(),
-                None,
-            ),
+            RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new()),
         )
         .await
         .expect_err("the cancelled child's wait never resolves");

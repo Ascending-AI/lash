@@ -311,7 +311,8 @@ pub(super) fn is_lash_service(service: &str) -> bool {
 
 fn is_call_envelope(value: &serde_json::Value) -> bool {
     value.as_object().is_some_and(|object| {
-        object.len() == 2
+        object.len() == 3
+            && object.get("line").is_some_and(serde_json::Value::is_u64)
             && object.get("wire").is_some_and(serde_json::Value::is_object)
             && object.contains_key("body")
     })

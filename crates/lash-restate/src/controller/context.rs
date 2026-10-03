@@ -7,9 +7,6 @@
 //! wakes synchronously and then returns `Pending`.
 
 /// version_surface = "coexist"
-/// version_guard(items(LASH_DURABLE_WAIT_DEADLINE_PREFIX_VERSION, journaled_restate_durable_wait_request))
-const LASH_DURABLE_WAIT_DEADLINE_PREFIX_VERSION: &str = "lash:durable-wait-deadline:v2:";
-
 use lash_sansio::SessionId;
 use std::future::Future;
 use std::pin::Pin;
@@ -34,14 +31,13 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::compat::Reply;
 use crate::durable_wait::{
-    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline,
-    RestateDurableWaitEffectRequest, RestateDurableWaitGroupChildMembershipRequest,
-    RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest,
-    RestateDurableWaitResolveRefusal, RestateDurableWaitResolveRequest,
-    RestateDurableWaitResolveResponse, RestateTurnCancelGate, RestateTurnCancelRaceOutcome,
-    RestateTurnCancelWake, RestateTurnGatePeek, durable_wait_index_object_key,
-    register_turn_cancel_gate, restate_await_event_key_for_authority, restate_durable_wait_request,
-    retire_turn_cancel_gate,
+    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitEffectRequest,
+    RestateDurableWaitGroupChildMembershipRequest, RestateDurableWaitGroupRequest,
+    RestateDurableWaitIndexRequest, RestateDurableWaitResolveRefusal,
+    RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse, RestateTurnCancelGate,
+    RestateTurnCancelRaceOutcome, RestateTurnCancelWake, RestateTurnGatePeek,
+    durable_wait_index_object_key, register_turn_cancel_gate,
+    restate_await_event_key_for_authority, retire_turn_cancel_gate,
 };
 use crate::effect_group::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse,
@@ -66,6 +62,8 @@ mod gate_race;
 mod tool_completion;
 #[macro_use]
 mod segment_wait;
+#[macro_use]
+mod source_wait;
 mod wake;
 pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
 pub use child_cancel::GroupChildCancelArm;
@@ -387,12 +385,12 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
         ))
     }
 
+    run_source_defaults!('ctx);
+
     fn arm_tool_completion<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
         _key: lash_core::AwaitEventKey,
-        _deadline_ms: Option<u64>,
-        _now_ms: u64,
     ) -> crate::JournaledFuture<'run, ()>
     where
         'ctx: 'run,
@@ -783,38 +781,6 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     }
 }
 
-/// Freeze a deadline-bearing durable wait in the invoking handler's journal.
-///
-/// A process replacement reconstructs Lash's monotonic `Instant` deadline and
-/// can observe a different wall clock or setup delay. Restate compares nested
-/// call payloads structurally, so the absolute deadline must become a journal
-/// fact before the `LashDurableWaitWorkflow/await_resolution` call is emitted.
-/// No-deadline waits retain their deployed command shape and emit no extra run.
-pub(crate) async fn journaled_restate_durable_wait_request<'ctx, C>(
-    context: &C,
-    key: &lash_core::AwaitEventKey,
-    deadline: Option<std::time::Instant>,
-    clock: &dyn lash_core::Clock,
-) -> Result<RestateDurableWaitAwaitRequest, TerminalError>
-where
-    C: RestateControllerContext<'ctx> + ?Sized,
-{
-    let proposed = restate_durable_wait_request(key, deadline, clock);
-    let Some(proposed_deadline) = proposed.deadline else {
-        return Ok(proposed);
-    };
-    let Json(deadline): Json<RestateDurableWaitDeadline> = context
-        .run_json_send(
-            format!("{LASH_DURABLE_WAIT_DEADLINE_PREFIX_VERSION}{}", key.key_id),
-            None,
-            async move { proposed_deadline },
-        )
-        .await?;
-    Ok(RestateDurableWaitAwaitRequest {
-        key: key.clone(),
-        deadline: Some(deadline),
-    })
-}
 macro_rules! impl_process_cancel_peek {
     (promises, $ctx:expr) => {
         Box::pin(async move {
@@ -1308,11 +1274,13 @@ macro_rules! impl_restate_controller_context {
                     })
                 }
 
+                run_source_methods!($context, $promises, 'ctx);
+
                 fn arm_tool_completion<'run>(
                     &'run self, namespace: &'run crate::RestateNamespace,
-                    key: lash_core::AwaitEventKey, deadline_ms: Option<u64>, now_ms: u64,
+                    key: lash_core::AwaitEventKey,
                 ) -> crate::JournaledFuture<'run, ()> where 'ctx: 'run {
-                    Box::pin(tool_completion::arm(self, namespace, key, deadline_ms, now_ms))
+                    Box::pin(tool_completion::arm(self, namespace, key))
                 }
 
                 fn await_tool_completions<'run>(

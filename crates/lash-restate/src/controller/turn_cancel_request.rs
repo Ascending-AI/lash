@@ -72,10 +72,7 @@ fn restate_turn_cancel_gate_request(
         scope,
         AwaitEventWaitIdentity::TurnCancelGate,
     )?;
-    Ok(RestateDurableWaitAwaitRequest {
-        key,
-        deadline: None,
-    })
+    Ok(RestateDurableWaitAwaitRequest { key })
 }
 
 pub(crate) fn restate_timer_turn_cancel_wait_request(

@@ -523,7 +523,6 @@ pub struct DeferredToolCompletion {
     pub request: Box<crate::runtime::ToolChildRequest>,
     pub pending: Box<PendingToolDispatchOutcome>,
     pub armed: super::ArmedResolver,
-    pub deadline_ms: Option<u64>,
     pub stream: crate::runtime::effect::AttemptStream,
 }
 

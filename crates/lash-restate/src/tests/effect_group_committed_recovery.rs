@@ -36,6 +36,7 @@ pub(super) enum HarnessStoreTier {
 /// What keeps a file or PostgreSQL tier's substrate alive for the
 /// harness's lifetime.
 pub(super) struct HarnessTierResources {
+    pub(super) source_materials: Option<Arc<dyn lash_core::store::ToolMaterialStore>>,
     _directory: tempfile::TempDir,
     _database: Option<lash_postgres_store::testing::IsolatedDatabase>,
 }
@@ -67,6 +68,7 @@ impl HarnessStoreTier {
                     Some(HarnessTierResources {
                         _directory: directory,
                         _database: None,
+                        source_materials: None,
                     }),
                 )
             }
@@ -90,6 +92,7 @@ impl HarnessStoreTier {
                     Some(HarnessTierResources {
                         _directory: directory,
                         _database: Some(database),
+                        source_materials: Some(Arc::new(storage.tool_material_store())),
                     }),
                 )
             }

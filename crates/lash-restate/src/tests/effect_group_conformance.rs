@@ -296,7 +296,7 @@ impl GroupExecutors for AwaitEventChildren {
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
         matches!(envelope.command, RuntimeEffectCommand::AwaitEvent { .. })
-            .then(|| RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None))
+            .then(|| RuntimeEffectLocalExecutor::await_event(CancellationToken::new()))
     }
 }
 
@@ -715,6 +715,49 @@ impl LiveConformanceHarness {
                 move || {
                     let stores = Arc::clone(&stores);
                     Box::pin(async move { stores })
+                }
+            }),
+            source_materials: self
+                .sqlite
+                .as_ref()
+                .map(|stores| {
+                    stores.process_env_store() as Arc<dyn lash_core::store::ToolMaterialStore>
+                })
+                .or_else(|| {
+                    self._tier
+                        .as_ref()
+                        .and_then(|tier| tier.source_materials.clone())
+                })
+                .expect("source material substrate"),
+            seal_source: Arc::new({
+                let ingress = RestateIngressClient::new(self.connection.clone());
+                move |descriptor: lash_core::tool_run::SourceDescriptor, seal| {
+                    let ingress = ingress.clone();
+                    Box::pin(async move {
+                        let address = RestateDurableWaitAddress::for_key(&descriptor.source);
+                        let reply: crate::Reply<crate::durable_wait::RestateSourceSealReply> =
+                            ingress
+                                .call_object_json(
+                                    "LashDurableWaitIndex",
+                                    &address.index_key(),
+                                    "seal_source",
+                                    &crate::Call::new(
+                                        crate::durable_wait::RestateSourceSealRequest {
+                                            source: descriptor.source,
+                                            writer: lash_core::tool_run::SealWriter::External,
+                                            seal,
+                                        },
+                                    ),
+                                )
+                                .await
+                                .expect("external source write");
+                        match reply.into_body() {
+                            crate::durable_wait::RestateSourceSealReply::Outcome { outcome } => {
+                                outcome
+                            }
+                            reply => panic!("external source refused: {reply:?}"),
+                        }
+                    })
                 }
             }),
             turn_runner: self.turn_runner(),
@@ -1539,7 +1582,6 @@ impl LiveConformanceHarness {
                 "await_resolution",
                 &RestateDurableWaitAwaitRequest {
                     key: foreign_key.clone(),
-                    deadline: None,
                 },
             )
             .await
@@ -1610,10 +1652,7 @@ impl LiveConformanceHarness {
                     "LashDurableWaitWorkflow",
                     &foreign_address.workflow_key,
                     "await_resolution",
-                    &RestateDurableWaitAwaitRequest {
-                        key: foreign_key,
-                        deadline: None
-                    },
+                    &RestateDurableWaitAwaitRequest { key: foreign_key },
                 )
                 .await
                 .expect("the released unrelated wait finishes"),
@@ -1662,7 +1701,7 @@ impl LiveConformanceHarness {
         let waiter_key = key.clone();
         let waiter = lash_core::task::spawn(async move {
             waiter_host
-                .await_await_event(&waiter_key, CancellationToken::new(), None)
+                .await_await_event(&waiter_key, CancellationToken::new())
                 .await
         });
         let registration = tokio::time::timeout(Duration::from_secs(30), registered)
@@ -1707,10 +1746,7 @@ impl LiveConformanceHarness {
                     "LashDurableWaitWorkflow",
                     &workflow_key,
                     "await_resolution",
-                    &RestateDurableWaitAwaitRequest {
-                        key: retired_key,
-                        deadline: None,
-                    },
+                    &RestateDurableWaitAwaitRequest { key: retired_key },
                 )
                 .await
         });

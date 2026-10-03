@@ -178,6 +178,8 @@ mod tests {
             );
         }
     }
+    // D02 changes the source arm, subscription and decision command stream.
+    // The immediate predecessor remains addressable by its drain lane.
     #[tokio::test]
     async fn l21_a_predecessor_run_journal_parks_before_decode_and_keeps_its_lane() {
         use lash_core::engine::BuildGeneration;

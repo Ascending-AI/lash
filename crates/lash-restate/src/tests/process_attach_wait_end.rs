@@ -250,7 +250,7 @@ async fn a_cancel_decided_key_ends_its_attach_and_terminal_read() {
 async fn an_attach_on_an_ended_wait_ends_at_once() {
     let world = World::new(0x4757_0004).await;
     let key = world.key(custom("attach-wait-ended-first")).await;
-    world.resolve(&key, Resolution::Timeout).await;
+    world.resolve(&key, Resolution::Cancelled).await;
     world.send_attach(&key).await;
     world.assert_observers_ended(&key).await;
 }
@@ -300,20 +300,14 @@ async fn a_terminal_resolves_a_live_wait_and_drops_the_watch() {
 }
 
 /// A segment retires a read by invocation id, while its successor retains
-/// the same logical event key and the original absolute deadline.
+/// the same logical event key.
 #[tokio::test]
 async fn retiring_a_physical_read_preserves_the_event_for_its_successor() {
-    for timed in [false, true] {
-        let world = World::new(0x4862_1000 + u64::from(timed)).await;
+    {
+        let world = World::new(0x4862_1000).await;
         let key = world.key(custom("shared-event-retirement")).await;
         let address = RestateDurableWaitAddress::for_key(&key);
-        let request = RestateDurableWaitAwaitRequest {
-            key: key.clone(),
-            deadline: timed.then(|| crate::RestateDurableWaitDeadline {
-                version: crate::DURABLE_WAIT_REQUEST_VERSION,
-                unix_epoch_ms: crate::system_clock().timestamp_ms() + 3_600_000,
-            }),
-        };
+        let request = RestateDurableWaitAwaitRequest { key: key.clone() };
         let target = format!(
             "LashDurableWaitWorkflow/{}/await_resolution",
             address.workflow_key

@@ -289,11 +289,8 @@ impl AwaitEventResolver for RestateEffectHost {
         &self,
         key: &AwaitEventKey,
         cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.controller
-            .await_await_event(key, cancel, deadline)
-            .await
+        self.controller.await_await_event(key, cancel).await
     }
 
     async fn revoke_await_events_for_session(
@@ -656,18 +653,10 @@ impl AwaitEventResolver for RestateEffectHostController {
         &self,
         key: &AwaitEventKey,
         cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
         let ingress = &self.await_event_ingress;
         self.ensure_key_access(key).await?;
-        await_restate_await_event_via_ingress(
-            ingress,
-            key,
-            cancel,
-            deadline,
-            IngressAwait::of_key(key),
-        )
-        .await
+        await_restate_await_event_via_ingress(ingress, key, cancel, IngressAwait::of_key(key)).await
     }
 
     async fn revoke_await_events_for_session(
@@ -1610,16 +1599,12 @@ impl RuntimeEffectController for RestateEffectHostController {
                 ));
             }
             let ingress = &self.await_event_ingress;
-            let RuntimeAwaitEventOptions {
-                cancellation,
-                deadline,
-                ..
-            } = local_executor.into_await_event_options()?;
+            let RuntimeAwaitEventOptions { cancellation, .. } =
+                local_executor.into_await_event_options()?;
             let resolution = await_restate_await_event_via_ingress(
                 ingress,
                 key,
                 cancellation,
-                deadline,
                 IngressAwait::Effect(&effect_replay_key),
             )
             .await

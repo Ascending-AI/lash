@@ -1431,7 +1431,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 ),
                 crate::RuntimeEffectLocalExecutor::await_event_under(
                     &self.turn_cancel_wait(cancellation),
-                    None,
                     std::sync::Arc::clone(&self.dispatch.clock),
                 ),
             )
@@ -1445,11 +1444,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 err.code.namespaced(),
                 crate::TurnFailureCause::Outcome,
                 err.message,
-            )
-            .into_journaled()),
-            crate::Resolution::Timeout => Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::ProcessSignalWaitTimeout,
-                "process signal wait timed out",
             )
             .into_journaled()),
             crate::Resolution::Cancelled => Err(crate::RuntimeEffectControllerError::new(

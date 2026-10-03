@@ -44,7 +44,6 @@ pub(crate) enum RestateEffectExecution {
     ArmToolCompletion {
         invocation: RuntimeEffectInvocation,
         key: AwaitEventKey,
-        timeout_ms: Option<u64>,
     },
     AwaitToolCompletions {
         invocation: RuntimeEffectInvocation,
@@ -169,13 +168,9 @@ pub(crate) fn restate_effect_execution(
             refuse_unhonored_group_membership(group.as_deref(), "restate await event")?;
             RestateEffectExecution::AwaitEvent { invocation, key }
         }
-        RuntimeEffectCommand::ArmToolCompletion { key, timeout_ms } => {
+        RuntimeEffectCommand::ArmToolCompletion { key } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate tool completion arm")?;
-            RestateEffectExecution::ArmToolCompletion {
-                invocation,
-                key,
-                timeout_ms,
-            }
+            RestateEffectExecution::ArmToolCompletion { invocation, key }
         }
         RuntimeEffectCommand::AwaitToolCompletions {
             waits,

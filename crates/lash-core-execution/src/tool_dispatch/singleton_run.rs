@@ -286,6 +286,8 @@ pub struct SingletonAttempt<'a> {
     pub attempt: AttemptOrdinal,
     pub request: &'a SingletonPreparedRequest,
     pub stream: &'a Arc<AttemptStreamRecorder>,
+    /// The source armed by the Run before this attempt executes.
+    pub completion_key: Option<&'a AwaitEventKey>,
 }
 
 /// A before-check's reply, before admission records it. A cached success is
@@ -306,6 +308,11 @@ pub enum BeforeCheckReply {
 pub trait SingletonToolHandlers: Send + Sync {
     /// The session whose read-only snapshots and declared commands this Run uses.
     fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
+        None
+    }
+
+    /// Retained result material, read under the source's existing lease.
+    fn tool_material_store(&self) -> Option<&dyn crate::store::ToolMaterialStore> {
         None
     }
 
@@ -425,6 +432,9 @@ pub enum SingletonDrift {
 pub enum SingletonRunError {
     #[error(transparent)]
     Cut(#[from] super::run_coordinator::RunCutRefusal),
+    /// A source seal named material whose retention or authority refused the read.
+    #[error(transparent)]
+    Material(#[from] crate::tool_run::MaterialRetentionError),
     #[error("isolated start refused: {0}")]
     Isolation(#[from] super::IsolatedStartRefusal),
     /// Admission refused the call, or a recorded admission no longer binds an

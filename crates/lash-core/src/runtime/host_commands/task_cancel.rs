@@ -190,7 +190,7 @@ impl PluginTaskCancelSignal {
         let watched = self
             .host
             .await_event_resolver()
-            .await_await_event(&self.key, CancellationToken::new(), None)
+            .await_await_event(&self.key, CancellationToken::new())
             .await;
         match watched {
             Ok(crate::Resolution::Cancelled) => stop.cancel(),

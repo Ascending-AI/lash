@@ -26,11 +26,7 @@ pub(super) async fn drive_durable_wait_index_scenarios(
     let wait_key = cancel_key.clone();
     let cancelled_wait = tokio::spawn(async move {
         wait_host
-            .await_await_event(
-                &wait_key,
-                tokio_util::sync::CancellationToken::new(),
-                Some(Instant::now() + Duration::from_secs(90)),
-            )
+            .await_await_event(&wait_key, tokio_util::sync::CancellationToken::new())
             .await
     });
     let deadline = Instant::now() + Duration::from_secs(90);
@@ -79,11 +75,7 @@ pub(super) async fn drive_durable_wait_index_scenarios(
         "re-registered durable wait resolve was not accepted: {reregister_resolve:?}"
     );
     let reregistered = host
-        .await_await_event(
-            &reregister_key,
-            tokio_util::sync::CancellationToken::new(),
-            Some(Instant::now() + Duration::from_secs(90)),
-        )
+        .await_await_event(&reregister_key, tokio_util::sync::CancellationToken::new())
         .await
         .context("await re-registered controller wait")?;
     anyhow::ensure!(

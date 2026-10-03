@@ -22,7 +22,8 @@ impl RuntimeErrorCause {
             | Self::PluginExecution { .. }
             | Self::PluginStatePublicationFenced { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
-            Self::MaterialRefused { .. }
+            Self::SourceRefused { .. }
+            | Self::MaterialRefused { .. }
             | Self::ProviderFailure { .. }
             | Self::IngressReservedSourceKey { .. }
             | Self::Compat { .. }

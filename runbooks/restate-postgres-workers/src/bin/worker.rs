@@ -1021,11 +1021,7 @@ async fn direct_await_durable_wait(
         state.restate_ingress_url,
         state.restate_authority_id,
     )
-    .await_await_event(
-        &request.key,
-        tokio_util::sync::CancellationToken::new(),
-        None,
-    )
+    .await_await_event(&request.key, tokio_util::sync::CancellationToken::new())
     .await
     .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Ok(AxumJson(DirectDurableWaitAwaitResponse {

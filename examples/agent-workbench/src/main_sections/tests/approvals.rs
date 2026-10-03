@@ -537,17 +537,6 @@ try {
             assert_eq!(value["cause"]["source"], "tool");
             assert_eq!(value["cause"]["retry"]["type"], "never");
         }
-        lash::Resolution::Timeout => {
-            let value = value
-                .as_ref()
-                .expect("the program handles every tool outcome");
-            assert_eq!(value["ok"], false);
-            assert_eq!(value["error"], "pending tool completion timed out");
-            assert_eq!(value["cause"]["class"], "timeout");
-            assert_eq!(value["cause"]["code"], "tool_completion_timeout");
-            assert_eq!(value["cause"]["source"], "runtime");
-            assert_eq!(value["cause"]["retry"]["type"], "never");
-        }
         lash::Resolution::Cancelled => {
             // ADR 0096 + the FIG-3271 cancellation contract: a cancelled call
             // is an uncatchable host terminal, not a rejection the guest's
@@ -647,17 +636,6 @@ fn async_completion_failure_crosses_session_reopen_and_redrive() {
         Box::pin(async_completion_reopen_and_redrive(
             approvals::denial_resolution(),
             "failure",
-        ))
-        .await;
-    });
-}
-
-#[test]
-fn async_completion_timeout_crosses_session_reopen_and_redrive() {
-    run_async_test_on_stack_budget("async-completion-timeout", || async {
-        Box::pin(async_completion_reopen_and_redrive(
-            lash::Resolution::Timeout,
-            "timeout",
         ))
         .await;
     });

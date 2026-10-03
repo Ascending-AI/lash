@@ -10,13 +10,13 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use crate::durable_wait::source_seal::RestateSourceRefusal;
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateSourceArmReply, RestateSourceArmRequest,
     RestateSourceSealReply, RestateSourceSealRequest, RestateSourceSubscribeReply,
     RestateSourceSubscribeRequest,
 };
 use lash_core::EffectOpener;
+use lash_core::tool_run::SourceRefusal;
 use lash_core::tool_run::{
     ExternalCancelPolicy, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef,
     MaterialRole, SealOutcome, SealRefusal, SealWriter, SegmentOrdinal, SourceAuthority,
@@ -224,7 +224,7 @@ fn already(seal: SourceSeal) -> RestateSourceSealReply {
     }
 }
 
-fn refused(refusal: RestateSourceRefusal) -> RestateSourceSealReply {
+fn refused(refusal: SourceRefusal) -> RestateSourceSealReply {
     RestateSourceSealReply::Refused { refusal }
 }
 
@@ -409,20 +409,20 @@ async fn retirement_seals_or_waits_for_open_sources_and_later_writes_refuse() {
     assert_eq!(
         world.arm(&world.source("after-retirement")).await,
         RestateSourceArmReply::Refused {
-            refusal: RestateSourceRefusal::Retired
+            refusal: SourceRefusal::Retired
         }
     );
     assert_eq!(
         world.subscribe(&source, 1, "late").await,
         RestateSourceSubscribeReply::Refused {
-            refusal: RestateSourceRefusal::Retired
+            refusal: SourceRefusal::Retired
         }
     );
     assert_eq!(
         world
             .seal(&source, SealWriter::External, resolved(&source, "late"))
             .await,
-        refused(RestateSourceRefusal::Retired)
+        refused(SourceRefusal::Retired)
     );
 
     let world = World::new(0x4883_0005).await;
@@ -445,7 +445,7 @@ async fn retirement_seals_or_waits_for_open_sources_and_later_writes_refuse() {
         world
             .seal(&open, SealWriter::External, resolved(&open, "late"))
             .await,
-        refused(RestateSourceRefusal::NotArmed)
+        refused(SourceRefusal::NotArmed)
     );
 
     let world = World::new(0x4883_0006).await;
@@ -480,7 +480,7 @@ async fn only_the_pinned_authority_and_owner_reach_a_source() {
                 result.clone()
             )
             .await,
-        refused(RestateSourceRefusal::NotArmed),
+        refused(SourceRefusal::NotArmed),
         "a source nobody armed takes no seal"
     );
     world.arm(&source).await;
@@ -492,7 +492,7 @@ async fn only_the_pinned_authority_and_owner_reach_a_source() {
             })
             .await,
         RestateSourceArmReply::Refused {
-            refusal: RestateSourceRefusal::DescriptorMismatch
+            refusal: SourceRefusal::DescriptorMismatch
         }
     );
     let other_owner = EffectOpener::turn(world.session.clone(), TurnId::fixture("run-2"));
@@ -504,7 +504,7 @@ async fn only_the_pinned_authority_and_owner_reach_a_source() {
             )
             .await,
         RestateSourceSubscribeReply::Refused {
-            refusal: RestateSourceRefusal::WrongOwner
+            refusal: SourceRefusal::WrongOwner
         }
     );
     for (writer, seal, refusal) in [
@@ -549,7 +549,7 @@ async fn only_the_pinned_authority_and_owner_reach_a_source() {
     ] {
         assert_eq!(
             world.seal(&source, writer, seal).await,
-            refused(RestateSourceRefusal::Seal { seal: refusal })
+            refused(SourceRefusal::Seal { seal: refusal })
         );
     }
     assert_eq!(

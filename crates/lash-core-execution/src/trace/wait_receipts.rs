@@ -90,7 +90,6 @@ impl WaitBoundary {
                 crate::ToolCompletionEvent::Resolved { resolution, .. } => match resolution {
                     crate::Resolution::Ok(_) => TraceDurableWaitResolution::Ok,
                     crate::Resolution::Err(_) => TraceDurableWaitResolution::Error,
-                    crate::Resolution::Timeout => TraceDurableWaitResolution::Timeout,
                     crate::Resolution::Cancelled => TraceDurableWaitResolution::Cancelled,
                 },
                 crate::ToolCompletionEvent::DispatchReady => TraceDurableWaitResolution::Resolved,
@@ -99,7 +98,6 @@ impl WaitBoundary {
             RuntimeEffectOutcome::AwaitEvent { resolution } => match resolution {
                 crate::Resolution::Ok(_) => TraceDurableWaitResolution::Ok,
                 crate::Resolution::Err(_) => TraceDurableWaitResolution::Error,
-                crate::Resolution::Timeout => TraceDurableWaitResolution::Timeout,
                 crate::Resolution::Cancelled => TraceDurableWaitResolution::Cancelled,
             },
             RuntimeEffectOutcome::Sleep

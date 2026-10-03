@@ -203,8 +203,20 @@ recorded admission (tool name, arguments, owner, or a recorded plugin revision
 this build no longer executes) refuses typed before any body; the recorded
 declaration governs, never the live catalog. The route is an expansion
 interface: production rounds keep their route until FIG-4894, FIG-1863 and
-FIG-4895 move them, so no handler lane moves with it. Reported retries are
-FIG-4879's schedule, and a Deferred attempt hands its call to FIG-4883's seal.
+FIG-4895 move them. Reported retries are FIG-4879's schedule.
+
+**Deferred completion (K4, FIG-4740).** The Run arms a source under the
+logical opener before starting a body admitted to defer. Its Deferred X
+retains the matching source key and leaves the call open without D, rank or
+V. `await_deferred` subscribes at the Run, reads a Resolved seal's canonical
+retained result under the source lease, and accepts its decision before
+`drain` presents it. Cancellation seals the source first and accepts the
+actual winner; a Resolved winner remains protected through after-checks and
+presentation. A handover preserves the open source. Runtime per-call
+deadlines, timeout results and timer races are absent; body-owned transport
+failures, Run cancellation and Run limits retain their own semantics.
+These calls use the new journal logic generation; production round
+activation remains with the integration tickets named above.
 
 **Protected drain (K3, FIG-4880).** `lash_core::tool_dispatch::RunCoordinator`
 runs several calls in one logical Run, each admitted as a singleton round.
@@ -310,7 +322,7 @@ name — moves that handler's lane in the same commit:
 | `LashSession` `shift`, including the operation input kind | pinned | `LASH_SESSION_SHIFT_VERSION` |
 | `LashProcessWorkflow` segments and declared starts | pinned | `RESTATE_PROCESS_JOURNAL_VERSION`, `PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION`, and `EFFECT_JOURNAL_VERSION` for the effects it records |
 | `EffectGroupDispatch` | generation only | `EFFECT_GROUP_DISPATCH_JOURNAL_VERSION`; no new structure, removed by FIG-4900 |
-| `LashDurableWaitWorkflow` source seal requests | shared | `DURABLE_WAIT_REQUEST_VERSION` |
+| `LashDurableWaitWorkflow` source seals | shared | `DURABLE_WAIT_REGISTRY_FORMAT_VERSION` covers indexed source state; key-only wait requests carry no deadline version |
 | Step order or names with unchanged bytes | all pinned | `JOURNAL_LOGIC_EPOCH` |
 
 Shared object state keeps its stamped coexistence rules and has no lane.

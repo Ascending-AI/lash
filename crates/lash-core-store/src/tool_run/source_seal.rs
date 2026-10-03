@@ -80,7 +80,9 @@ pub enum SealOutcome {
 }
 
 /// Why a seal write was refused before it could seal anything.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error, schemars::JsonSchema,
+)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SealRefusal {
     #[error("the writer has no authority over this source")]
@@ -91,6 +93,44 @@ pub enum SealRefusal {
     /// retained, with the source's lease, before the seal publishes it.
     #[error("the resolved result is not retained material")]
     UnretainedResult,
+}
+
+/// Why the index refused a source request; nothing was written.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error, schemars::JsonSchema,
+)]
+#[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceRefusal {
+    /// The source's scope was retired: no source of it is armed, subscribed
+    /// or sealed again.
+    #[error("the source's scope is retired")]
+    Retired,
+    /// No Run armed this source, or its Run retired it.
+    #[error("the source is not armed")]
+    NotArmed,
+    /// The source is armed with another descriptor.
+    #[error("the source is armed with another descriptor")]
+    DescriptorMismatch,
+    /// A subscription named a Run other than the source's owner.
+    #[error("the subscription names a Run that does not own the source")]
+    WrongOwner,
+    /// The pinned descriptor refused the write.
+    #[error(transparent)]
+    Seal { seal: SealRefusal },
+}
+
+impl From<SourceRefusal> for crate::runtime_error::RuntimeEffectControllerError {
+    fn from(refusal: SourceRefusal) -> Self {
+        let mut error = Self::new(
+            crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked,
+            refusal.to_string(),
+        );
+        error.cause = Some(crate::RuntimeErrorCause::SourceRefused {
+            refusal: Box::new(refusal),
+        });
+        error.journaled = true;
+        error
+    }
 }
 
 impl SourceDescriptor {

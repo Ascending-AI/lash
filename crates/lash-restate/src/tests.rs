@@ -1420,71 +1420,20 @@ impl Fig793LlmGateRedrive for Fig793LlmGateRedriveImpl {
 struct Fig1126PendingToolRedriveInput;
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
-struct Fig1128DeadlineRedriveInput;
-
-#[derive(Debug)]
-struct Fig1128DeadlineClock {
-    anchor: std::time::Instant,
-    wall_ms: AtomicU64,
-    monotonic_gap_ms: AtomicU64,
-    monotonic_reads: AtomicUsize,
-}
-
-impl Fig1128DeadlineClock {
-    fn new(wall_ms: u64, monotonic_gap_ms: u64) -> Self {
-        Self {
-            anchor: std::time::Instant::now(),
-            wall_ms: AtomicU64::new(wall_ms),
-            monotonic_gap_ms: AtomicU64::new(monotonic_gap_ms),
-            monotonic_reads: AtomicUsize::new(0),
-        }
-    }
-
-    fn begin_attempt(&self, wall_ms: u64, monotonic_gap_ms: u64) {
-        self.wall_ms.store(wall_ms, Ordering::SeqCst);
-        self.monotonic_gap_ms
-            .store(monotonic_gap_ms, Ordering::SeqCst);
-        self.monotonic_reads.store(0, Ordering::SeqCst);
-    }
-}
-
-#[async_trait::async_trait]
-impl Clock for Fig1128DeadlineClock {
-    fn now(&self) -> std::time::Instant {
-        let read = self.monotonic_reads.fetch_add(1, Ordering::SeqCst);
-        self.anchor
-            + Duration::from_millis(if read == 0 {
-                0
-            } else {
-                self.monotonic_gap_ms.load(Ordering::SeqCst)
-            })
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::from(
-            std::time::UNIX_EPOCH + Duration::from_millis(self.wall_ms.load(Ordering::SeqCst)),
-        )
-    }
-
-    async fn sleep(&self, _duration: Duration) {}
-
-    async fn sleep_until(&self, _deadline: std::time::Instant) {}
-}
+struct Fig1128WaitRedriveInput;
 
 #[restate_sdk::workflow]
-trait Fig1128DeadlineRedrive {
-    async fn run(input: Json<Fig1128DeadlineRedriveInput>) -> HandlerResult<Json<Resolution>>;
+trait Fig1128WaitRedrive {
+    async fn run(input: Json<Fig1128WaitRedriveInput>) -> HandlerResult<Json<Resolution>>;
 }
 
-struct Fig1128DeadlineRedriveImpl {
-    clock: Arc<Fig1128DeadlineClock>,
-}
+struct Fig1128WaitRedriveImpl;
 
-impl Fig1128DeadlineRedrive for Fig1128DeadlineRedriveImpl {
+impl Fig1128WaitRedrive for Fig1128WaitRedriveImpl {
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
-        Json(_input): Json<Fig1128DeadlineRedriveInput>,
+        Json(_input): Json<Fig1128WaitRedriveInput>,
     ) -> HandlerResult<Json<Resolution>> {
         let key = test_restate_await_event_key(
             &ExecutionScope::runtime_operation("fig1128-deadline-redrive"),
@@ -1493,7 +1442,6 @@ impl Fig1128DeadlineRedrive for Fig1128DeadlineRedriveImpl {
             )),
         )
         .map_err(TerminalError::from_error)?;
-        let deadline = self.clock.now() + Duration::from_secs(60);
         let controller = RestateRuntimeEffectController::new_for_test(ctx);
         let outcome = controller
             .execute_effect(
@@ -1501,12 +1449,8 @@ impl Fig1128DeadlineRedrive for Fig1128DeadlineRedriveImpl {
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1128-deadline"),
                     RuntimeEffectCommand::AwaitEvent { key },
                 ),
-                RuntimeEffectLocalExecutor::await_event_with_clock(
-                    tokio_util::sync::CancellationToken::new(),
-                    Some(deadline),
-                    self.clock.clone(),
-                )
-                .with_turn_cancel_observation(false),
+                RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new())
+                    .with_turn_cancel_observation(false),
             )
             .await
             .map_err(TerminalError::from_error)?;
@@ -1547,11 +1491,8 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1126-revoked-await"),
                     RuntimeEffectCommand::AwaitEvent { key },
                 ),
-                RuntimeEffectLocalExecutor::await_event(
-                    tokio_util::sync::CancellationToken::new(),
-                    None,
-                )
-                .with_turn_cancel_scope(scope),
+                RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new())
+                    .with_turn_cancel_scope(scope),
             )
             .await
             .map_err(TerminalError::from_error)?;
@@ -1789,11 +1730,8 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
                     ),
                     RuntimeEffectCommand::AwaitEvent { key: *key },
                 ),
-                RuntimeEffectLocalExecutor::await_event(
-                    tokio_util::sync::CancellationToken::new(),
-                    None,
-                )
-                .with_turn_cancel_scope(scope),
+                RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new())
+                    .with_turn_cancel_scope(scope),
             )
             .await
             .map_err(TerminalError::from_error)?;

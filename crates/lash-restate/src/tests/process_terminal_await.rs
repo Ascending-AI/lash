@@ -80,10 +80,7 @@ impl TerminalAwaitProbe for TerminalAwaitProbeImpl {
                     .context()
                     .await_event(
                         &crate::services::DEFAULT_NAMESPACE,
-                        crate::durable_wait::RestateDurableWaitAwaitRequest {
-                            key: key.clone(),
-                            deadline: None,
-                        },
+                        crate::durable_wait::RestateDurableWaitAwaitRequest { key: key.clone() },
                         key.key_id.clone(),
                         tokio_util::sync::CancellationToken::new(),
                     )

@@ -46,11 +46,10 @@ impl lash_core::AwaitEventResolver for DefaultBindingHost {
         &self,
         key: &lash_core::AwaitEventKey,
         cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
     ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
         self.0
             .await_event_resolver()
-            .await_await_event(key, cancel, deadline)
+            .await_await_event(key, cancel)
             .await
     }
 }

@@ -33,7 +33,6 @@
 
 use crate::SessionId;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use lash_sansio::sync::MutexExt;
 use tokio_util::sync::CancellationToken;
@@ -220,11 +219,10 @@ impl AwaitEventResolver for AttemptAtomicitySentinel<'_> {
         &self,
         key: &AwaitEventKey,
         cancel: CancellationToken,
-        deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
         self.ledger
             .record(format!("await_await_event:{}", key.key_id));
-        self.inner.await_await_event(key, cancel, deadline).await
+        self.inner.await_await_event(key, cancel).await
     }
 
     async fn revoke_await_events_for_session(
@@ -308,6 +306,29 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
         self.ledger.record(format!("run_retry:{backoff_ms}"));
         self.inner.start_run_retry(backoff_ms)
+    }
+
+    async fn arm_run_source(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.ledger.record("arm_run_source".to_owned());
+        self.inner.arm_run_source(descriptor).await
+    }
+    async fn cancel_run_source(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<crate::tool_run::SourceSeal, RuntimeEffectControllerError> {
+        self.ledger.record("cancel_run_source".to_owned());
+        self.inner.cancel_run_source(descriptor).await
+    }
+    async fn await_run_sources(
+        &self,
+        subscriptions: Vec<crate::tool_run::SourceSubscription>,
+        cancel: crate::TurnCancelWait,
+    ) -> Result<(usize, crate::tool_run::SourceSeal), RuntimeEffectControllerError> {
+        self.ledger.record("await_run_sources".to_owned());
+        self.inner.await_run_sources(subscriptions, cancel).await
     }
 
     async fn record_run_record(

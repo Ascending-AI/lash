@@ -3,7 +3,6 @@ use crate::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome,
     RuntimeError, SessionId,
 };
-use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 /// Result of preparing an externally routable tool completion key.
@@ -93,7 +92,6 @@ pub trait AwaitEventResolver: Send + Sync {
         &self,
         _key: &AwaitEventKey,
         _cancel: CancellationToken,
-        _deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
         Err(RuntimeError::new(
             crate::RuntimeErrorCode::AwaitEventUnsupported,

@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     std::io::stdout().flush().context("flush key to parent")?;
 
     let _ = host
-        .await_await_event(&key, tokio_util::sync::CancellationToken::new(), None)
+        .await_await_event(&key, tokio_util::sync::CancellationToken::new())
         .await;
     Ok(())
 }

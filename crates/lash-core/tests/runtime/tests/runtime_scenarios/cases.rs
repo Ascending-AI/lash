@@ -497,11 +497,8 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         .expect("run opted-in provider intent turn");
     let wake_result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        mint.controller().await_await_event(
-            &wake_key,
-            tokio_util::sync::CancellationToken::new(),
-            None,
-        ),
+        mint.controller()
+            .await_await_event(&wake_key, tokio_util::sync::CancellationToken::new()),
     )
     .await;
     drop(mint);

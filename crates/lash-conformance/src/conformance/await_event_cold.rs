@@ -122,10 +122,7 @@ where
             .controller()
             .execute_effect(
                 owner_envelope,
-                RuntimeEffectLocalExecutor::await_event(
-                    tokio_util::sync::CancellationToken::new(),
-                    None,
-                ),
+                RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new()),
             )
             .await
     });
@@ -156,10 +153,7 @@ where
             .controller()
             .execute_effect(
                 envelope.clone(),
-                RuntimeEffectLocalExecutor::await_event(
-                    tokio_util::sync::CancellationToken::new(),
-                    None,
-                ),
+                RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new()),
             )
             .await
             .unwrap_or_else(|error| panic!("host {role} redrives parked owner: {error}"));
@@ -223,7 +217,7 @@ where
         );
         assert_eq!(
             host_c
-                .await_await_event(&key, tokio_util::sync::CancellationToken::new(), None,)
+                .await_await_event(&key, tokio_util::sync::CancellationToken::new())
                 .await
                 .expect("host C observes"),
             terminal.clone()
@@ -360,7 +354,7 @@ where
             .expect_err("tampered peek must fail");
         assert_eq!(peek_error.code.as_str(), "await_event_unknown_or_revoked");
         let await_error = host
-            .await_await_event(&tampered, tokio_util::sync::CancellationToken::new(), None)
+            .await_await_event(&tampered, tokio_util::sync::CancellationToken::new())
             .await
             .expect_err("tampered await must fail");
         assert_eq!(await_error.code.as_str(), "await_event_unknown_or_revoked");
@@ -518,11 +512,7 @@ where
     let waiter_key = ordinary.clone();
     let waiter = crate::task::spawn(async move {
         waiter_host
-            .await_await_event(
-                &waiter_key,
-                tokio_util::sync::CancellationToken::new(),
-                None,
-            )
+            .await_await_event(&waiter_key, tokio_util::sync::CancellationToken::new())
             .await
     });
     let sweeper = make();

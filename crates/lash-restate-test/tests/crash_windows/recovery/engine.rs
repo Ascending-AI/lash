@@ -491,7 +491,7 @@ async fn await_resolution(
         engine
             .lash_backend()
             .effect_host()
-            .await_await_event(key, Default::default(), None),
+            .await_await_event(key, Default::default()),
     )
     .await
     .expect("durable wake resolves")

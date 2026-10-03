@@ -314,7 +314,6 @@ impl AwaitEventResolver for Integrator {
         &self,
         _key: &AwaitEventKey,
         _cancel: CancellationToken,
-        _deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
         unreachable!("external signature witness")
     }

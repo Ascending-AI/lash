@@ -57,7 +57,7 @@ mod tests {
                 .await
                 .expect_err("default resolver must refuse reads"),
             resolver
-                .await_await_event(&key, tokio_util::sync::CancellationToken::new(), None)
+                .await_await_event(&key, tokio_util::sync::CancellationToken::new())
                 .await
                 .expect_err("default resolver must refuse waits"),
             resolver

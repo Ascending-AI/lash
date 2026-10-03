@@ -408,7 +408,7 @@ impl ActiveTurnControl {
             // the turn's gate itself `Cancelled`. The watch ends by being
             // dropped when the body ends.
             resolver
-                .await_await_event(&key, CancellationToken::new(), None)
+                .await_await_event(&key, CancellationToken::new())
                 .await
         });
         let body = body(stop.clone());

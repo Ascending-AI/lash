@@ -484,7 +484,7 @@ async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, Registrati
     let waiter_tool_key = tool_key.clone();
     let tool_wait = crate::task::spawn(async move {
         tool_host
-            .await_await_event(&waiter_tool_key, CancellationToken::new(), None)
+            .await_await_event(&waiter_tool_key, CancellationToken::new())
             .await
     });
     registration_barrier(Arc::clone(&host), address_a.session_id.clone(), tool_key).await;

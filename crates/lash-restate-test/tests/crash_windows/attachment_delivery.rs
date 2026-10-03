@@ -863,7 +863,7 @@ async fn delivery_law(storage: Storage, live: bool) {
             let resolution = harness
                 .backend()
                 .effect_host()
-                .await_await_event(&key, Default::default(), None)
+                .await_await_event(&key, Default::default())
                 .await
                 .unwrap();
             assert_eq!(

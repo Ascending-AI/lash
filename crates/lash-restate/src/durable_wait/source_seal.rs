@@ -21,7 +21,7 @@
 
 use lash_core::AwaitEventKey;
 use lash_core::tool_run::{
-    SealOutcome, SealRefusal, SealWriter, SegmentOrdinal, SourceDescriptor, SourceSeal,
+    SealOutcome, SealWriter, SegmentOrdinal, SourceDescriptor, SourceRefusal, SourceSeal,
     SourceSubscription,
 };
 use restate_sdk::context::{
@@ -101,28 +101,6 @@ pub struct RestateSourceSealWrite {
     pub seal: SourceSeal,
 }
 
-/// Why the index refused a source request; nothing was written.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
-#[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
-pub enum RestateSourceRefusal {
-    /// The source's scope was retired: no source of it is armed, subscribed
-    /// or sealed again.
-    #[error("the source's scope is retired")]
-    Retired,
-    /// No Run armed this source, or its Run retired it.
-    #[error("the source is not armed")]
-    NotArmed,
-    /// The source is armed with another descriptor.
-    #[error("the source is armed with another descriptor")]
-    DescriptorMismatch,
-    /// A subscription named a Run other than the source's owner.
-    #[error("the subscription names a Run that does not own the source")]
-    WrongOwner,
-    /// The pinned descriptor refused the write.
-    #[error(transparent)]
-    Seal { seal: SealRefusal },
-}
-
 /// What `arm_source` answers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
@@ -133,7 +111,7 @@ pub enum RestateSourceArmReply {
         seal: Option<SourceSeal>,
     },
     Refused {
-        refusal: RestateSourceRefusal,
+        refusal: SourceRefusal,
     },
 }
 
@@ -149,7 +127,7 @@ pub enum RestateSourceSubscribeReply {
         seal: SourceSeal,
     },
     Refused {
-        refusal: RestateSourceRefusal,
+        refusal: SourceRefusal,
     },
 }
 
@@ -158,7 +136,7 @@ pub enum RestateSourceSubscribeReply {
 #[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RestateSourceSealReply {
     Outcome { outcome: SealOutcome },
-    Refused { refusal: RestateSourceRefusal },
+    Refused { refusal: SourceRefusal },
 }
 
 pub(super) fn source_state_key(address: &RestateDurableWaitAddress) -> String {
@@ -190,11 +168,11 @@ pub(super) async fn arm_source(
         .await?
         .revoked
     {
-        return refused(RestateSourceRefusal::Retired);
+        return refused(SourceRefusal::Retired);
     }
     if let Some(armed) = load_source(&ctx, &address).await? {
         if armed.descriptor != request.descriptor {
-            return refused(RestateSourceRefusal::DescriptorMismatch);
+            return refused(SourceRefusal::DescriptorMismatch);
         }
         return Ok(Reply::at(
             wire,
@@ -232,13 +210,13 @@ pub(super) async fn subscribe_source(
         .await?
         .revoked
     {
-        return refused(RestateSourceRefusal::Retired);
+        return refused(SourceRefusal::Retired);
     }
     let Some(mut armed) = load_source(&ctx, &address).await? else {
-        return refused(RestateSourceRefusal::NotArmed);
+        return refused(SourceRefusal::NotArmed);
     };
     if armed.descriptor.owner != request.subscription.owner {
-        return refused(RestateSourceRefusal::WrongOwner);
+        return refused(SourceRefusal::WrongOwner);
     }
     if let Some(seal) = armed.seal {
         return Ok(Reply::at(
@@ -295,19 +273,19 @@ pub(super) async fn seal_source(
         .await?
         .revoked
     {
-        return refused(RestateSourceRefusal::Retired);
+        return refused(SourceRefusal::Retired);
     }
     let Some(armed) = load_source(&ctx, &address).await? else {
-        return refused(RestateSourceRefusal::NotArmed);
+        return refused(SourceRefusal::NotArmed);
     };
     if armed.descriptor.source != request.source {
-        return refused(RestateSourceRefusal::DescriptorMismatch);
+        return refused(SourceRefusal::DescriptorMismatch);
     }
     let outcome = match armed
         .descriptor
         .seal(armed.seal.as_ref(), &request.writer, request.seal)
     {
-        Err(seal) => return refused(RestateSourceRefusal::Seal { seal }),
+        Err(seal) => return refused(SourceRefusal::Seal { seal }),
         Ok(outcome @ SealOutcome::AlreadySealed { .. }) => outcome,
         Ok(SealOutcome::Sealed { seal }) => {
             seal_and_wake(

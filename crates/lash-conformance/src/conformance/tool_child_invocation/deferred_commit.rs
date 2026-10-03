@@ -1,256 +1,342 @@
-//! The deferred-commit law: a parked tool child's §4 point is its completion
-//! resolution (ADR 0099 §4, §5; FIG-3609).
-//!
-//! A deferred leaf parks on its completion key; the resolution is its
-//! terminal. Its final record commits there, after the after-tool hook
-//! folds the resolved result and before the presentation boundary runs.
-//! Two gates pin the child either side of that point, and a `Cancel` close
-//! lands while the child is held:
-//!
-//! * **Held in presentation** — past the commit. The close decides nothing
-//!   for the committed child: presentation finishes, and on a durable tier
-//!   the reopen serves rank 0 as the child's success, not a cancellation.
-//! * **Held in the after-tool hook** — resolved, not yet committed. The
-//!   close's cancel decision takes the §4 point first: the close's token
-//!   stops the held child, or its commit is refused with
-//!   `RuntimeEffectGroupChildCancelDecided`. Either way no presentation runs
-//!   beneath the decision, and on a durable tier rank 0 is the cancelled
-//!   terminal the close decided.
-
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-use pretty_assertions::assert_eq;
-
+//! L03/L07: the Run consumes the real source seal. Resolution protects
+//! finalization even when cancellation arrives inside a hook or presentation.
 use super::*;
+use crate::tool_dispatch::{
+    BeforeCheckReply, RunCoordinator, SingletonAttempt, SingletonBodyOutcome, SingletonCapture,
+    SingletonPreparedRequest, SingletonToolCall, SingletonToolHandlers,
+};
+use crate::tool_run::{
+    AdmittedBinding, AfterCheckVerdict, AttributedVerdict, CallDecision, ExternalCancelPolicy,
+    MaterialBundle, MaterialHolder, MaterialOwner, MaterialPayload, MaterialRole,
+    PresentationBinding, RunEvent, SealOutcome, SegmentOrdinal, SourceAuthority, SourceDescriptor,
+    SourceSeal, ToolDeclaration,
+};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-/// One hold point a law parks a child at: `entered` rises when the child
-/// reaches it, the child waits for `released`, and `passed` counts the
-/// times it went through.
-struct HoldPoint {
-    call_id: String,
-    entered: tokio::sync::watch::Sender<bool>,
-    released: tokio::sync::watch::Sender<bool>,
-    passed: AtomicUsize,
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Hold {
+    AfterCheck,
+    Presentation,
+    None,
 }
 
-impl HoldPoint {
-    fn new(call_id: &str) -> Arc<Self> {
-        Arc::new(Self {
-            call_id: call_id.to_string(),
-            entered: tokio::sync::watch::channel(false).0,
-            released: tokio::sync::watch::channel(false).0,
-            passed: AtomicUsize::new(0),
-        })
-    }
-
+struct Probe {
+    materials: Arc<dyn crate::store::ToolMaterialStore>,
+    cancel: AtomicBool,
+    executions: AtomicUsize,
+    checks: AtomicUsize,
+    presentations: AtomicUsize,
+    source: tokio::sync::watch::Sender<Option<crate::AwaitEventKey>>,
+    proceed: tokio::sync::watch::Sender<bool>,
+    entered: tokio::sync::watch::Sender<bool>,
+    released: tokio::sync::watch::Sender<bool>,
+    held: Hold,
+}
+impl Probe {
     async fn hold(&self) {
         self.entered.send_replace(true);
         let mut released = self.released.subscribe();
-        let _ = released.wait_for(|released| *released).await;
-        self.passed.fetch_add(1, Ordering::SeqCst);
-    }
-
-    async fn await_entered(&self, what: &str) {
-        let mut entered = self.entered.subscribe();
-        tokio::time::timeout(SETTLE_BUDGET, entered.wait_for(|entered| *entered))
+        released
+            .wait_for(|value| *value)
             .await
-            .unwrap_or_else(|_| panic!("the child never reached {what}"))
-            .unwrap_or_else(|_| panic!("the {what} gate closed"));
+            .unwrap_or_else(|error| panic!("the held final must be released: {error}"));
     }
-
-    fn release(&self) {
-        self.released.send_replace(true);
+}
+#[async_trait::async_trait]
+impl SingletonToolHandlers for Probe {
+    fn tool_material_store(&self) -> Option<&dyn crate::store::ToolMaterialStore> {
+        Some(&*self.materials)
     }
-
-    async fn await_passed(&self, what: &str) {
-        let deadline = std::time::Instant::now() + SETTLE_BUDGET;
-        while self.passed.load(Ordering::SeqCst) == 0 {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the child never went through {what}"
-            );
-            tokio::time::sleep(POLL).await;
+    fn run_cancel_requested(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+    async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
+        Ok(call.arguments.clone())
+    }
+    async fn before_checks(
+        &self,
+        _: &SingletonToolCall,
+        _: &SingletonPreparedRequest,
+    ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
+        Vec::new()
+    }
+    async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String> {
+        self.executions.fetch_add(1, Ordering::SeqCst);
+        let source = attempt
+            .completion_key
+            .unwrap_or_else(|| panic!("the Run must arm its source before the body"))
+            .clone();
+        self.source.send_replace(Some(source.clone()));
+        Ok(SingletonBodyOutcome::Deferred { source })
+    }
+    async fn after_checks(
+        &self,
+        _: &crate::ToolCallId,
+        _: &SingletonCapture,
+    ) -> Vec<AttributedVerdict<AfterCheckVerdict>> {
+        self.checks.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.held, Hold::AfterCheck) {
+            self.hold().await;
         }
+        Vec::new()
+    }
+    async fn realize_declarations(
+        &self,
+        _: &crate::ToolCallId,
+        _: &[crate::ToolIntentKind],
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn emit_stream(&self, _: &crate::ToolCallId, _: &crate::runtime::AttemptStream) {}
+    async fn launch_start(
+        &self,
+        _: &crate::tool_dispatch::DeclaredStartObligation,
+    ) -> Result<crate::ProcessId, String> {
+        Err("no start declared".to_owned())
+    }
+    async fn discharge_start(
+        &self,
+        _: &crate::tool_dispatch::DeclaredStartObligation,
+        _: &crate::ProcessId,
+        _: bool,
+    ) -> Result<(), String> {
+        Err("no start declared".to_owned())
+    }
+    async fn present(&self, _: &crate::ToolCallId, _: &SingletonCapture) -> Result<String, String> {
+        self.presentations.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.held, Hold::Presentation) {
+            self.hold().await;
+        }
+        Ok("real external result".to_owned())
     }
 }
 
-/// The plugin factory the law's opener carries: a presentation step and an
-/// after-check, each parking the named call at its own hold point. The check
-/// runs on the resolved outcome only: a parked attempt's pending outcome is
-/// not a final result and reaches no result hook.
-fn gated_factory(
-    presentation: Arc<HoldPoint>,
-    after_tool: Arc<HoldPoint>,
-) -> Arc<dyn crate::plugin::PluginFactory> {
-    let step: crate::plugin::ToolPresentationStep =
-        Arc::new(move |input: crate::plugin::ToolPresentationInput| {
-            let gate = Arc::clone(&presentation);
-            let held = super::leaf_label(&input.context.call_id) == gate.call_id;
-            let previous = input.previous;
-            Box::pin(async move {
-                if held {
-                    gate.hold().await;
-                }
-                Ok::<_, crate::PluginError>(previous)
-            })
-        });
-    let check: crate::plugin::ToolResultCheckHook =
-        Arc::new(move |input: crate::plugin::ToolResultCheckInput| {
-            let gate = Arc::clone(&after_tool);
-            let held = super::leaf_label(input.prepared.call_id()) == gate.call_id;
-            Box::pin(async move {
-                if held {
-                    gate.hold().await;
-                }
-                Ok(crate::plugin::AfterToolContributions::default())
-            })
-        });
-    Arc::new(crate::plugin::StaticPluginFactory::new(
-        lash_core::plugin::PluginDeclaration::initial("law-deferred-commit"),
-        crate::plugin::PluginSpec::new()
-            .with_presentation_step(crate::hook_key!("hold"), step)
-            .with_tool_result_check(crate::hook_key!("hold"), check),
-    ))
-}
-
-/// Which side of the §4 point the law holds the child on when it closes.
-#[derive(Clone, Copy, Debug)]
-enum HeldAt {
-    /// After the commit, inside presentation.
-    Presentation,
-    /// Before the commit, inside the after-tool hook.
-    AfterToolHook,
-}
-
-/// W6/W17 at the deferred boundary: a `Cancel` close between a deferred
-/// child's resolution and its presentation leaves the committed child
-/// protected, and a cancel decided before the commit still wins.
+/// Both resolve-first orderings drain exactly one final through the Run.
 pub async fn a_deferred_childs_commit_point_is_its_resolution(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    for held_at in [HeldAt::Presentation, HeldAt::AfterToolHook] {
-        deferred_close_while_held(fixture, &format!("{prefix}-{held_at:?}"), held_at).await;
+    for held in [Hold::AfterCheck, Hold::Presentation] {
+        deferred_run(fixture, &format!("{prefix}-{held:?}"), false, held).await;
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn deferred_close_while_held(fixture: &ToolChildLawFixture, prefix: &str, held_at: HeldAt) {
-    let session_id = crate::SessionId::fixture(format!("{prefix}-deferred-commit"));
-    let turn_id = crate::TurnId::fixture(format!("{prefix}-deferred-commit-turn"));
-    let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id);
-    let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
-        .expect("a turn scope derives an opener");
-    let group_key = format!("{prefix}-deferred-commit-group");
-    let call_id = format!("{group_key}-call-0");
-
-    let world = (fixture.make_world)(ToolChildWorldSpec {
-        lease_ttl_ms: LIVE_LEASE_MS,
-    })
-    .await;
-    let host = world.host;
-    let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
-    let presentation = HoldPoint::new(&call_id);
-    let after_tool = HoldPoint::new(&call_id);
-    let _guard = register_opener_with_extras(
-        &host,
-        &scope,
-        Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
-        Arc::clone(&scenario.registry),
-        Arc::clone(&scenario.process_env_store),
-        opener,
-        tokio_util::sync::CancellationToken::new(),
-        OpenerExtras {
-            plugin_factories: vec![gated_factory(
-                Arc::clone(&presentation),
-                Arc::clone(&after_tool),
-            )],
-            attachment_store: None,
-            clock: None,
-        },
+pub(super) async fn deferred_run(
+    fixture: &ToolChildLawFixture,
+    prefix: &str,
+    cancel_first: bool,
+    held: Hold,
+) {
+    let scope = crate::ExecutionScope::turn(
+        crate::SessionId::fixture(format!("{prefix}-source")),
+        crate::TurnId::fixture("run"),
     );
-    // Only the gate the law holds at stays shut; the other is open.
-    match held_at {
-        HeldAt::Presentation => after_tool.release(),
-        HeldAt::AfterToolHook => presentation.release(),
-    }
-    let scoped = host
-        .scoped(crate::admit(scope.clone()))
-        .expect("the group scope binds");
-    let group = || async {
-        single_leaf_group(
-            &scope,
-            &session_id,
-            &group_key,
-            &scenario.env_ref,
-            LEAF_DEFERRED,
-            ToolChildCompletionRouting::Durable,
-            recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
-        )
+    let owner = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
+        .unwrap_or_else(|error| panic!("the source law owns a turn: {error}"));
+    let revision =
+        crate::plugin::PluginRevision::new("source-law", crate::plugin::BehaviorRevision::ONE);
+    let callback = crate::store::plugin_writers::PluginCallbackIdentity {
+        owner: revision.clone(),
+        key: "tool:source".to_owned(),
     };
-    let handle = scoped
-        .controller()
-        .open_effect_group(group().await)
-        .await
-        .expect("the group opens under the live opener");
-
-    // The child parks, and its completion resolves.
-    let key = scenario.observation.parked_key(&call_id).await;
-    await_key_registered(&host, &session_id, &key).await;
-    resolve_when_registered(
-        &host,
-        key,
-        crate::Resolution::Ok(serde_json::json!({ "leaf": "deferred" })),
-    )
-    .await;
-
-    // Held on one side of the §4 point, the caller closes under `Cancel`.
-    let gate = match held_at {
-        HeldAt::Presentation => &presentation,
-        HeldAt::AfterToolHook => &after_tool,
-    };
-    gate.await_entered(&format!("{held_at:?}")).await;
-    scoped
-        .controller()
-        .close_effect_group(handle, crate::LoserPolicy::Cancel)
-        .await
-        .expect("the caller closes under Cancel");
-    gate.release();
-
-    match held_at {
-        HeldAt::Presentation => {
-            // The committed child finished its presentation under the close.
-            presentation.await_passed("presentation").await;
+    let call = Arc::new(SingletonToolCall {
+        owner: owner.clone(),
+        segment: SegmentOrdinal(0),
+        call_id: crate::ToolCallId::fixture(prefix),
+        tool_name: "source".to_owned(),
+        arguments: serde_json::Value::Null,
+        declaration: ToolDeclaration::deferring(),
+        binding: AdmittedBinding {
+            executable: callback.clone(),
+            preparation: callback,
+            presentation: PresentationBinding {
+                presenter: None,
+                steps: Vec::new(),
+            },
+        },
+        available: vec![revision.clone()],
+        cancel: ExternalCancelPolicy::Ignore,
+        environment: None,
+    });
+    let probe = Arc::new(Probe {
+        materials: Arc::clone(&fixture.source_materials),
+        cancel: AtomicBool::new(false),
+        executions: AtomicUsize::new(0),
+        checks: AtomicUsize::new(0),
+        presentations: AtomicUsize::new(0),
+        source: tokio::sync::watch::channel(None).0,
+        proceed: tokio::sync::watch::channel(false).0,
+        entered: tokio::sync::watch::channel(false).0,
+        released: tokio::sync::watch::channel(false).0,
+        held,
+    });
+    let records = Arc::new(std::sync::Mutex::new(None));
+    let attempt: crate::ConformanceTurnAttempt = Arc::new({
+        let call = Arc::clone(&call);
+        let probe = Arc::clone(&probe);
+        let records = Arc::clone(&records);
+        move |scoped| {
+            let call = Arc::clone(&call);
+            let probe = Arc::clone(&probe);
+            let records = Arc::clone(&records);
+            Box::pin(async move {
+                let mut run = RunCoordinator::open(
+                    &scoped,
+                    call.owner.clone(),
+                    call.segment,
+                    call.available.clone(),
+                );
+                assert!(matches!(
+                    run.decide(&call, &*probe)
+                        .await
+                        .unwrap_or_else(|error| panic!("the Run must record Deferred X: {error}")),
+                    crate::tool_dispatch::DecidedCall::Deferred { .. }
+                ));
+                assert!(
+                    run.records()
+                        .iter()
+                        .flat_map(|r| &r.events)
+                        .all(|e| !matches!(
+                            e,
+                            RunEvent::Decided { .. } | RunEvent::Presented { .. }
+                        ))
+                );
+                let mut proceed = probe.proceed.subscribe();
+                proceed.wait_for(|p| *p).await.unwrap_or_else(|error| {
+                    panic!("the source writer must release the Run: {error}")
+                });
+                run.await_deferred()
+                    .await
+                    .unwrap_or_else(|error| panic!("the Run must accept its source seal: {error}"));
+                run.drain()
+                    .await
+                    .unwrap_or_else(|error| panic!("the accepted final must drain: {error}"));
+                *records.lock_recover() = Some(run.into_records());
+                crate::ConformanceTurnEnd::Settled
+            })
+        }
+    });
+    let write = async {
+        let mut source = probe.source.subscribe();
+        let source = source
+            .wait_for(Option::is_some)
+            .await
+            .unwrap_or_else(|error| panic!("the body must publish its source: {error}"))
+            .clone()
+            .unwrap_or_else(|| panic!("the published source must exist"));
+        let descriptor = SourceDescriptor {
+            source: source.clone(),
+            call_id: call.call_id.clone(),
+            owner,
+            resolver: revision,
+            authority: SourceAuthority::ExternalCompletion,
+            cancel: call.cancel,
+        };
+        let capture = SingletonCapture::Done {
+            output: "real external result".to_owned(),
+            commands: Vec::new(),
+            intents: Vec::new(),
+            stream: Default::default(),
+            start: None,
+        };
+        let bundle = MaterialBundle::of(vec![MaterialPayload::new(
+            MaterialOwner::Source {
+                source: source.clone(),
+            },
+            MaterialRole::AttemptOutput,
+            None,
+            serde_json::to_string(&capture)
+                .unwrap_or_else(|error| panic!("the final capture must encode: {error}")),
+        )])
+        .unwrap_or_else(|error| panic!("the source result bundle must validate: {error}"))
+        .unwrap_or_else(|| panic!("the source result bundle must contain its result"));
+        let retained = fixture
+            .source_materials
+            .retain_material(&MaterialHolder::Source { source }, &bundle)
+            .await
+            .unwrap_or_else(|error| panic!("the source result must be retained: {error}"));
+        let seal = SourceSeal::Resolved {
+            result: Box::new(retained.references[0].clone()),
+        };
+        if cancel_first {
+            probe.cancel.store(true, Ordering::SeqCst);
+            probe.proceed.send_replace(true);
+            let runner_done = async {
+                while records.lock_recover().is_none() {
+                    tokio::time::sleep(POLL).await;
+                }
+            };
+            tokio::time::timeout(SETTLE_BUDGET, runner_done)
+                .await
+                .unwrap_or_else(|error| panic!("the cancelled Run must finish: {error}"));
+            for _ in 0..2 {
+                assert_eq!(
+                    (fixture.seal_source)(descriptor.clone(), seal.clone()).await,
+                    SealOutcome::AlreadySealed {
+                        seal: SourceSeal::Cancelled
+                    },
+                    "late writes never revive the cancelled call"
+                );
+            }
+        } else {
             assert_eq!(
-                presentation.passed.load(Ordering::SeqCst),
-                1,
-                "the committed child's presentation ran once"
+                (fixture.seal_source)(descriptor, seal.clone()).await,
+                SealOutcome::Sealed { seal }
             );
-            // Presentation precedes the child's seat. Keep the lent opener
-            // registered through that seat, including handler replay: the
-            // committed final seats as the child's success, not as the
-            // cancellation the close asked for.
-            await_committed_seat(&scoped, &group_key).await;
+            probe.proceed.send_replace(true);
+            let mut entered = probe.entered.subscribe();
+            entered.wait_for(|e| *e).await.unwrap_or_else(|error| {
+                panic!("the resolved final must reach its protected phase: {error}")
+            });
+            probe.cancel.store(true, Ordering::SeqCst);
+            probe.released.send_replace(true);
         }
-        HeldAt::AfterToolHook => {
-            // The cancel decision took the §4 point first. Whether the
-            // close's token stops the held child or its commit is refused
-            // with `RuntimeEffectGroupChildCancelDecided`, nothing is
-            // presented beneath the decision: given time to run,
-            // presentation stays untouched.
-            tokio::time::sleep(ABSENCE_BUDGET).await;
-            assert!(
-                !*presentation.entered.borrow(),
-                "a child whose commit lost to the cancel decision presented nothing"
-            );
-        }
-    }
+    };
+    tokio::time::timeout(SETTLE_BUDGET, async {
+        tokio::join!(
+            fixture.turn_runner.run_turn(crate::admit(scope), attempt),
+            write
+        );
+    })
+    .await
+    .unwrap_or_else(|error| panic!("the source law must settle: {error}"));
+    let records = records
+        .lock_recover()
+        .clone()
+        .unwrap_or_else(|| panic!("the Run must publish its records"));
+    let decisions: Vec<_> = records
+        .iter()
+        .flat_map(|r| &r.events)
+        .filter_map(|e| match e {
+            RunEvent::Decided { rank, decision, .. } => Some((*rank, decision)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(decisions.len(), 1, "one real terminal takes one rank");
+    assert_eq!(decisions[0].0, 1);
     assert_eq!(
-        scenario.observation.executions_of("law_deferred").len(),
-        1,
-        "the deferred body ran once"
+        matches!(decisions[0].1, CallDecision::Cancelled),
+        cancel_first
+    );
+    assert_eq!(
+        matches!(decisions[0].1, CallDecision::Final { .. }),
+        !cancel_first
+    );
+    assert_eq!(probe.executions.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        probe.checks.load(Ordering::SeqCst),
+        usize::from(!cancel_first)
+    );
+    assert_eq!(
+        probe.presentations.load(Ordering::SeqCst),
+        usize::from(!cancel_first)
+    );
+    assert_eq!(
+        records
+            .iter()
+            .flat_map(|r| &r.events)
+            .filter(|e| matches!(e, RunEvent::Presented { .. }))
+            .count(),
+        1
     );
 }

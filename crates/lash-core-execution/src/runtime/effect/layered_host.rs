@@ -22,7 +22,6 @@
 //! lends, and one layer observes the same seam on every tier.
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use tokio_util::sync::CancellationToken;
 
@@ -151,9 +150,8 @@ pub trait EffectLayer: Send + Sync + 'static {
         inner: &dyn AwaitEventResolver,
         key: &AwaitEventKey,
         cancel: CancellationToken,
-        deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        inner.await_await_event(key, cancel, deadline).await
+        inner.await_await_event(key, cancel).await
     }
 }
 
@@ -313,10 +311,9 @@ impl AwaitEventResolver for LayeredEffectHost {
         &self,
         key: &AwaitEventKey,
         cancel: CancellationToken,
-        deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
         self.layer
-            .await_await_event(self.inner.await_event_resolver(), key, cancel, deadline)
+            .await_await_event(self.inner.await_event_resolver(), key, cancel)
             .await
     }
 
@@ -594,10 +591,9 @@ impl AwaitEventResolver for LayeredController<'_> {
         &self,
         key: &AwaitEventKey,
         cancel: CancellationToken,
-        deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
         self.layer
-            .await_await_event(self.inner.as_ref(), key, cancel, deadline)
+            .await_await_event(self.inner.as_ref(), key, cancel)
             .await
     }
 
@@ -724,6 +720,29 @@ impl RuntimeEffectController for LayeredController<'_> {
 
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
         self.inner.as_ref().start_run_retry(backoff_ms)
+    }
+
+    async fn arm_run_source(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.inner.as_ref().arm_run_source(descriptor).await
+    }
+    async fn cancel_run_source(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<crate::tool_run::SourceSeal, RuntimeEffectControllerError> {
+        self.inner.as_ref().cancel_run_source(descriptor).await
+    }
+    async fn await_run_sources(
+        &self,
+        subscriptions: Vec<crate::tool_run::SourceSubscription>,
+        cancel: crate::TurnCancelWait,
+    ) -> Result<(usize, crate::tool_run::SourceSeal), RuntimeEffectControllerError> {
+        self.inner
+            .as_ref()
+            .await_run_sources(subscriptions, cancel)
+            .await
     }
 
     async fn record_run_record(

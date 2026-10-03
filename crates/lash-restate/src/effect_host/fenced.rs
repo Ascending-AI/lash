@@ -82,11 +82,8 @@ impl AwaitEventResolver for FencedRestateController {
         &self,
         key: &AwaitEventKey,
         cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.controller
-            .await_await_event(key, cancel, deadline)
-            .await
+        self.controller.await_await_event(key, cancel).await
     }
 
     async fn revoke_await_events_for_session(

@@ -737,7 +737,6 @@ pub async fn durable_wait(kind: StorageKind, live: bool) {
                         ),
                         lash_core::RuntimeEffectLocalExecutor::await_event(
                             lash_core::CancellationToken::new(),
-                            None,
                         ),
                     )
                     .await

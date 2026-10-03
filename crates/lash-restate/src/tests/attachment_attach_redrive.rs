@@ -764,7 +764,6 @@ async fn store_fault_law(live: bool, fault: Fault, backend: Backend) {
                 "await_resolution",
                 &crate::Call::new(crate::RestateDurableWaitAwaitRequest {
                     key: request.body.key.clone(),
-                    deadline: None,
                 }),
             ),
         )

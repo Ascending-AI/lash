@@ -112,7 +112,7 @@ fn tier(
             )
             .with_process_lifecycle(true),
         )],
-        subagents: Arc::new(|timeout| {
+        subagents: Arc::new(|| {
             let factory = lash_subagents::SubagentsPluginFactory::new(
                 Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
                     lash_subagents::StaticCapability::new(
@@ -122,10 +122,7 @@ fn tier(
                 ))),
                 lash_core::lifetime::starter,
             );
-            Arc::new(match timeout {
-                Some(timeout) => factory.with_timeout(timeout),
-                None => factory,
-            })
+            Arc::new(factory)
         }),
         delivery: Arc::clone(backend.process_work().port()),
     }

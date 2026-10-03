@@ -20,7 +20,7 @@ impl RestateEffectHostController {
         // a stop (FIG-3672 P9).
         match pair
             .await_stop_retrying(|key| async move {
-                self.await_await_event(&key, tokio_util::sync::CancellationToken::new(), None)
+                self.await_await_event(&key, tokio_util::sync::CancellationToken::new())
                     .await
             })
             .await?

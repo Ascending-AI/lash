@@ -512,6 +512,43 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         ))
     }
 
+    /// Arm a call's source before its attempt receives the completion key.
+    async fn arm_run_source(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let _ = descriptor;
+        Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineControlUnsupported,
+            "this controller cannot arm a Run source",
+        ))
+    }
+
+    /// Read the immutable seal selected by short segment subscriptions.
+    async fn await_run_sources(
+        &self,
+        subscriptions: Vec<crate::tool_run::SourceSubscription>,
+        cancel: TurnCancelWait,
+    ) -> Result<(usize, crate::tool_run::SourceSeal), RuntimeEffectControllerError> {
+        let _ = (subscriptions, cancel);
+        Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineControlUnsupported,
+            "this controller cannot await Run sources",
+        ))
+    }
+
+    /// Cancel at the source authority and return its actual winning seal.
+    async fn cancel_run_source(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<crate::tool_run::SourceSeal, RuntimeEffectControllerError> {
+        let _ = descriptor;
+        Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineControlUnsupported,
+            "this controller cannot cancel a Run source",
+        ))
+    }
+
     /// Register one independently completing attempt now, in command order.
     /// Replay must register the recorded prefix before awaiting an older X.
     fn start_run_attempt(
