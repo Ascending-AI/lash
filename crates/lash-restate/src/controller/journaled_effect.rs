@@ -42,55 +42,10 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
-    /// Give up before an effect runs when its envelope alone cannot be
-    /// journaled, or `None` when the effect may proceed.
-    ///
-    /// A poison substitute still has to carry the envelope replay validation
-    /// matches on, so an envelope that cannot be journaled leaves no journalable
-    /// record at all - substituting the outcome would propose an over-budget
-    /// entry the substrate rejects, reviving the redrive loop silently. The
-    /// verdict is a pure function of the reconstructed envelope and the
-    /// configured budget, and the budget can change between attempts, so the
-    /// give-up still occupies its journal slot with the fixed-size poison entry:
-    /// the slot exists whatever budget is in force at replay, and the replayed
-    /// entry reproduces this same typed failure. Callers that run their effect
-    /// outside the run closure MUST consult this before running it - otherwise a
-    /// give-up would discard a completed effect that was never journaled, and
-    /// the next redrive would execute it again.
-    pub(super) async fn journaled_effect_give_up<'run>(
-        &'run self,
-        metadata: &RuntimeEffectInvocation,
-        envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
-        live: Option<super::LiveFrontier>,
-    ) -> Option<Result<RecordedRuntimeEffect, RestateEffectError>>
-    where
-        'ctx: 'run,
-    {
-        let effect_name = restate_effect_name(metadata);
-        let budget = unjournalable_envelope_give_up(
-            &effect_name,
-            self.options.journaled_effect_byte_budget,
-            envelope,
-        )?;
-        Some(
-            self.journal_effect_entry(
-                effect_name,
-                envelope,
-                Box::pin(async move {
-                    if let Some(live) = &live {
-                        return live.reached().await;
-                    }
-                    gave_up_over_budget_entry(budget)
-                }),
-            )
-            .await,
-        )
-    }
-
     /// The pre-flight gate for an effect that runs outside the run closure.
     ///
-    /// [`Self::journaled_effect_give_up`] is enough for `record_effect`, whose
-    /// effect runs inside the run closure: a replay never invokes that closure,
+    /// The in-step give-up of [`Self::record_effect`] is enough for an effect
+    /// that runs inside the run closure: a replay never invokes that closure,
     /// so a replayed give-up cannot execute anything. An eagerly-executed effect
     /// has no such protection - it would run before its journal slot is ever
     /// consulted - and the give-up verdict depends on the configured budget, so
@@ -202,14 +157,23 @@ where
         Ok(journaled)
     }
 
+    /// Occupy this effect's journal slot with its recorded outcome, or with
+    /// the fixed-size poison entry when its envelope alone cannot be
+    /// journaled.
+    ///
+    /// A poison substitute still has to carry the envelope replay validation
+    /// matches on, so an envelope that cannot be journaled leaves no journalable
+    /// record at all - substituting the outcome would propose an over-budget
+    /// entry the substrate rejects, reviving the redrive loop silently. The
+    /// verdict is a pure function of the reconstructed envelope and the
+    /// configured budget, and the budget can change between attempts, so the
+    /// give-up occupies the effect's own step: the slot is the same step
+    /// whatever budget is in force at replay, and the replayed entry
+    /// reproduces this same typed failure.
     pub(super) async fn record_effect<'run>(
         &'run self,
         metadata: &RuntimeEffectInvocation,
         envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
-        // A served-only effect's live-frontier signal (FIG-3719): its budget
-        // give-up entry is the frontier as much as its effect is, so a
-        // give-up that would be journaled live refuses with the drift.
-        live: Option<super::LiveFrontier>,
         // Keep the full journaled-effect executor behind one allocation. The
         // Restate SDK stores this future in its ctx.run state machine, so
         // accepting it inline here makes every composed turn carry the whole
@@ -219,20 +183,22 @@ where
     where
         'ctx: 'run,
     {
-        if let Some(give_up) = self
-            .journaled_effect_give_up(metadata, envelope, live)
-            .await
-        {
-            return give_up;
-        }
         let effect_name = restate_effect_name(metadata);
         let payload_budget = self.options.journaled_effect_byte_budget;
+        let gave_up = unjournalable_envelope_give_up(&effect_name, payload_budget, envelope);
         let poisoned_effect_name = effect_name.clone();
         self.journal_effect_entry(
             effect_name,
             envelope,
             Box::pin(async move {
-                journalable_recorded_effect(&poisoned_effect_name, payload_budget, future.await)
+                match gave_up {
+                    Some(budget) => gave_up_over_budget_entry(budget),
+                    None => journalable_recorded_effect(
+                        &poisoned_effect_name,
+                        payload_budget,
+                        future.await,
+                    ),
+                }
             }),
         )
         .await
@@ -325,6 +291,14 @@ where
     /// recorded outcome (ADR 0105 §1, FIG-3683): the future answers `Err` for
     /// a fault, and the attempt ends retryably without journaling anything, so
     /// the engine runs the step again.
+    ///
+    /// An envelope that cannot be journaled gives up in this same step, as in
+    /// [`Self::record_effect`], so the slot is one `run_json_or_retry_send`
+    /// whatever budget is in force: a replay under a larger budget reads the
+    /// recorded give-up through the step that wrote it. A served-only
+    /// effect's give-up is the live frontier as much as its effect is
+    /// (FIG-3719), so a give-up that would be journaled live refuses with the
+    /// drift.
     pub(super) async fn record_effect_or_retry<'run, F>(
         &'run self,
         metadata: &RuntimeEffectInvocation,
@@ -336,30 +310,28 @@ where
         'ctx: 'run,
         F: Future<Output = Result<RecordedRuntimeEffect, String>> + Send + 'run,
     {
-        if let Some(give_up) = self
-            .journaled_effect_give_up(metadata, envelope, live)
-            .await
-        {
-            return give_up;
-        }
         let effect_name = restate_effect_name(metadata);
         let payload_budget = self.options.journaled_effect_byte_budget;
+        let gave_up = unjournalable_envelope_give_up(&effect_name, payload_budget, envelope);
         let poisoned_effect_name = effect_name.clone();
         let build_generation = self.sentinel_stamp();
         let first = build_generation.is_some();
         let Json(entry) = self
             .context
             .run_json_or_retry_send(effect_name.clone(), async move {
-                future.await.map(|recorded| {
-                    self.payloads.encode(JournaledEntry {
-                        build_generation,
-                        record: journalable_recorded_effect(
-                            &poisoned_effect_name,
-                            payload_budget,
-                            recorded,
-                        ),
-                    })
-                })
+                let record = match (gave_up, &live) {
+                    (Some(_), Some(live)) => live.reached().await,
+                    (Some(budget), None) => gave_up_over_budget_entry(budget),
+                    (None, _) => journalable_recorded_effect(
+                        &poisoned_effect_name,
+                        payload_budget,
+                        future.await?,
+                    ),
+                };
+                Ok(self.payloads.encode(JournaledEntry {
+                    build_generation,
+                    record,
+                }))
             })
             .await
             .map_err(|source| RestateEffectError::Terminal {
@@ -399,7 +371,6 @@ where
                 self.record_effect(
                     &invocation,
                     &recorded_envelope,
-                    None,
                     Box::pin(async move {
                         RecordedRuntimeEffect {
                             envelope: journaled_envelope,
