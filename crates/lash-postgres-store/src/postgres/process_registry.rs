@@ -1029,7 +1029,13 @@ impl lash_core_execution::ProcessToolIntents for PostgresProcessRegistry {
         &self,
         submission: lash_core_execution::ToolIntentSubmissionRecord,
     ) -> Result<lash_core_execution::ToolIntentSubmissionAdmission, PluginError> {
-        tool_intent_submission::admit(&self.pool, &self.fence, submission).await
+        tool_intent_submission::admit(
+            &self.pool,
+            &self.fence,
+            submission,
+            self.clock.timestamp_ms(),
+        )
+        .await
     }
 
     async fn complete_tool_intent_submission(

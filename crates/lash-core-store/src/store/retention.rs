@@ -24,6 +24,10 @@ pub struct RetentionReport {
     /// once their owner is durably deleted and no outstanding delivery names
     /// it (FIG-4108).
     pub removed_trigger_mutation_receipt_count: usize,
+    /// Host tool-intent submission ledger rows removed before the host
+    /// horizon once their owner session is durably deleted; the owner keeps a
+    /// fence that refuses every later submission (FIG-1509).
+    pub removed_tool_intent_submission_count: usize,
     /// Deleted-owner manifest rows no surviving graph prefix needs.
     pub removed_attachment_root_count: usize,
     /// Session-free runtime-operation scopes retired by this sweep: their
@@ -38,6 +42,7 @@ impl super::MaintenanceReport for RetentionReport {
         self.removed_receipt_count
             + self.removed_session_terminal_count
             + self.removed_trigger_mutation_receipt_count
+            + self.removed_tool_intent_submission_count
             + self.removed_attachment_root_count
             + self.retired_effect_scope_count
     }

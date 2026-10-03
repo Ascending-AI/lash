@@ -236,6 +236,10 @@ pub enum ToolIntentSubmissionAdmission {
     Admitted,
     /// Another caller or an earlier crash installed the returned first submission.
     Existing(Box<ToolIntentSubmissionRecord>),
+    /// The identity's owner session was durably deleted and the retained-evidence
+    /// lever reclaimed its ledger (FIG-1509). The owner's fence outlives its
+    /// rows, so nothing may claim or realize an identity of that owner again.
+    Reclaimed,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

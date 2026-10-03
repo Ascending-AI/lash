@@ -992,6 +992,28 @@ macro_rules! process_trigger_retention_tests {
     };
 }
 
+/// Register the host tool-intent submission ledger's retention law
+/// (FIG-1509). The fixture yields a guard and a constructor of a fresh
+/// backend with a way to reopen it.
+#[macro_export]
+macro_rules! tool_intent_retention_tests {
+    ($fixture:block) => {
+        $crate::tool_intent_retention_tests!(@catalogue $fixture; [
+            (tool_intent_submissions_reclaim_only_after_owner_death, "tool-intent-reclaim"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, make) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(make).await;
+            }
+        )*
+    };
+}
+
 /// Register the trigger-occurrence tombstone retention and forget laws. The
 /// fixture yields a guard and a constructor from a clock to a trigger store.
 #[macro_export]

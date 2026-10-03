@@ -146,6 +146,14 @@ pub enum ToolIntentIngressRefusal {
     /// been reclaimed, so the redelivery emits nothing again and has no
     /// recorded outcome to answer.
     TriggerOccurrenceReclaimed,
+    /// Refuses a submission whose owner session was durably deleted and
+    /// whose submission ledger the host's retained-evidence lever reclaimed
+    /// (FIG-1509).
+    ///
+    /// The reclaimed rows were the only record of what their identities
+    /// realized, so the owner keeps a fence and nothing under it is claimed
+    /// or realized again.
+    SubmissionOwnerReclaimed,
 }
 
 /// Admission result for one host-submitted intent.
@@ -475,6 +483,7 @@ impl ToolIntentIngress {
                 "recorded_outcome_outside_intent_protocol"
             }
             ToolIntentIngressRefusal::TriggerOccurrenceReclaimed => "trigger_occurrence_reclaimed",
+            ToolIntentIngressRefusal::SubmissionOwnerReclaimed => "submission_owner_reclaimed",
         }
     }
 
@@ -682,6 +691,10 @@ impl ToolIntentIngress {
     /// [`ToolIntentIngressRefusal::DuplicateIdentity`], the vocabulary every
     /// shape's store fence uses, except a start's, whose key answers the
     /// process it first minted whatever the declaration (ADR 0107).
+    ///
+    /// An owner whose ledger the retained-evidence lever reclaimed answers
+    /// [`ToolIntentIngressRefusal::SubmissionOwnerReclaimed`] here, before
+    /// anything realizes (FIG-1509).
     async fn admit_submission(
         &self,
         identity: &lash_core::ToolIntentIdentity,
@@ -706,8 +719,14 @@ impl ToolIntentIngress {
             .admit_tool_intent_submission(submitted.clone())
             .await
             .map_err(|error| RealizationFailure::Command(kind, error))?;
-        let lash_core::ToolIntentSubmissionAdmission::Existing(existing) = admission else {
-            return Ok(None);
+        let existing = match admission {
+            lash_core::ToolIntentSubmissionAdmission::Admitted => return Ok(None),
+            lash_core::ToolIntentSubmissionAdmission::Existing(existing) => existing,
+            lash_core::ToolIntentSubmissionAdmission::Reclaimed => {
+                return Err(RealizationFailure::Refused(
+                    ToolIntentIngressRefusal::SubmissionOwnerReclaimed,
+                ));
+            }
         };
         if existing.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V3 {
             return Err(RealizationFailure::Refused(
@@ -767,6 +786,10 @@ impl ToolIntentIngress {
             lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
                 existing.outcome.is_some()
             }
+            // The owner was deleted and its ledger reclaimed while this
+            // submission realized: its fence already refuses every redelivery,
+            // so there is no row left to retain the outcome in.
+            lash_core::ToolIntentSubmissionAdmission::Reclaimed => return Ok(()),
         };
         if !recorded {
             let receipt = registry

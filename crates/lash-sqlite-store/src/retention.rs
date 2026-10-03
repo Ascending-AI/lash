@@ -75,6 +75,7 @@ pub(crate) async fn reclaim(
                         removed_receipt_count,
                         removed_session_terminal_count,
                         removed_trigger_mutation_receipt_count: 0,
+                        removed_tool_intent_submission_count: 0,
                         removed_attachment_root_count: 0,
                         retired_effect_scope_count: 0,
                     })
@@ -98,7 +99,96 @@ pub(crate) async fn reclaim(
                     ))
                 })?;
     }
+    if let Some(process_registry) = store.process_registry.as_ref() {
+        report.removed_tool_intent_submission_count =
+            reclaim_tool_intent_submissions(store, process_registry, cutoff)
+                .await
+                .map_err(|error| {
+                    Box::new(lash_core_execution::MaintenanceFailure::failed(
+                        error,
+                        report.clone(),
+                    ))
+                })?;
+    }
     Ok(report)
+}
+
+/// The process registry's half of the sweep (FIG-1509): the host
+/// tool-intent submission ledger is retained evidence of its owner session.
+/// Like the trigger arm, the owner-death proof crosses databases at the Rust
+/// boundary: candidates come from the registry, and only owners the durable
+/// core reports deleted are fenced. A deletion is permanent, so the proof
+/// still holds when the registry's own transaction fences each owner and
+/// deletes its rows older than the bound.
+async fn reclaim_tool_intent_submissions(
+    store: &SqliteStore,
+    process_registry: &DatabaseTarget,
+    cutoff: i64,
+) -> Result<usize, StoreError> {
+    if !process_registry.exists() {
+        return Ok(0);
+    }
+    let conn =
+        SqliteConnection::open_with_policy(process_registry, store.options.connection_policy)
+            .await
+            .map_err(sqlite_async_error)?;
+    conn.install(
+        SqliteDatabase::ProcessRegistry,
+        lash_core_execution::FleetFormat::writable(),
+        |tx| {
+            crate::compat::fence(
+                tx,
+                SqliteDatabase::ProcessRegistry,
+                lash_core_execution::FleetFormat::writable(),
+            )
+        },
+    )
+    .await
+    .map_err(sqlite_error)?;
+    let candidates = conn
+        .call(move |conn| {
+            let mut stmt = conn.prepare_cached(
+                crate::turn_ingress::tool_intent_sql()
+                    .sqlite
+                    .select_reclaim_candidate_sessions
+                    .sql(),
+            )?;
+            let rows = stmt.query_map(params![cutoff], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+        .await
+        .map_err(sqlite_error)?;
+    let mut deleted_owner_ids = Vec::new();
+    for owner_id in candidates {
+        let session_id =
+            SessionId::parse(&owner_id).map_err(|error| StoreError::StorageFailure {
+                backend: SQLITE_BACKEND,
+                message: format!(
+                    "tool-intent submission names a malformed session owner `{owner_id}`: {error}"
+                ),
+            })?;
+        if store.lookup_session(&session_id).await? == lash_core_execution::SessionLookup::Deleted {
+            deleted_owner_ids.push(owner_id);
+        }
+    }
+    let deleted_owner_ids_json =
+        serde_json::to_string(&deleted_owner_ids).map_err(|error| StoreError::StorageFailure {
+            backend: SQLITE_BACKEND,
+            message: format!("encode deleted tool-intent owner ids: {error}"),
+        })?;
+    // Owners fenced by an earlier sweep may still hold rows that were inside
+    // its bound, so the delete runs even when no owner is newly proved dead.
+    conn.write(move |tx| {
+        let sql = crate::turn_ingress::tool_intent_sql();
+        crate::conn::cached_execute(
+            tx,
+            sql.sqlite.fence_retired_owners.sql(),
+            params![deleted_owner_ids_json],
+        )?;
+        crate::conn::cached_execute(tx, sql.shared.reclaim_retired.sql(), params![cutoff])
+    })
+    .await
+    .map_err(sqlite_error)
 }
 
 /// The trigger database's half of the sweep (FIG-4108): mutation receipts are

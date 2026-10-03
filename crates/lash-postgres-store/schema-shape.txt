@@ -526,7 +526,11 @@ table lash_tool_call_receipts
   column requested_at_ms bigint not-null
   column session_id text not-null
   primary-key (request_key)
+table lash_tool_intent_retired_owners
+  column owner text not-null
+  primary-key (owner)
 table lash_tool_intent_submissions
+  column admitted_at_ms bigint not-null
   column execution_scope_id text not-null
   column intent_index bigint not-null
   column kind text not-null

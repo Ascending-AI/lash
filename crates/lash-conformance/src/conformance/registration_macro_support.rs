@@ -73,6 +73,7 @@ pub use super::tool_call_identity::*;
 pub use super::tool_child_drift::*;
 pub use super::tool_child_invocation::*;
 pub use super::tool_child_turn_cancel::*;
+pub use super::tool_intent_retention::*;
 pub use super::tool_intent_runtime::*;
 pub use super::trigger_store::*;
 pub use super::turn_config::*;

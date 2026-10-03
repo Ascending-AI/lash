@@ -96,11 +96,35 @@ pub(crate) async fn reclaim(
         .await
         .map_err(store_sqlx_error)?
         .rows_affected() as usize;
+        // The host tool-intent submission ledger is evidence of its owner
+        // session under the same lever (FIG-1509): fence each durably
+        // deleted owner with a row past the bound, then delete every fenced
+        // owner's rows past it. Submissions hold this sweep's lock shared, so
+        // none claims an identity between the fence and the delete.
+        let tool_intents = crate::turn_ingress::turn_ingress_sql();
+        sqlx::query(
+            tool_intents
+                .tool_intents_postgres
+                .fence_retired_owners
+                .sql(),
+        )
+        .bind(cutoff)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let removed_tool_intent_submission_count =
+            sqlx::query(tool_intents.tool_intents.reclaim_retired.sql())
+                .bind(cutoff)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?
+                .rows_affected() as usize;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::store::RetentionReport {
             removed_receipt_count,
             removed_session_terminal_count,
             removed_trigger_mutation_receipt_count,
+            removed_tool_intent_submission_count,
             removed_attachment_root_count: 0,
             // Effect scopes are the engine's to retire; this catalog holds
             // no effect journal.

@@ -797,6 +797,14 @@ pub trait ProcessLifecycle: Send + Sync {
 
 /// Durable tool-intent submission admission and settlement.
 ///
+/// The submission ledger is the host ingress's first-outcome replay fence.
+/// Each row belongs to the session that owns its identity. The
+/// retained-evidence lever
+/// ([`DeploymentStore::reclaim_retained_evidence`](crate::DeploymentStore::reclaim_retained_evidence))
+/// reclaims it only once that session is durably deleted and the row was
+/// admitted before the host's bound, and fences the owner in the same
+/// transaction (FIG-1509, ADR 0067).
+///
 /// Every method is an **integrator class 3: store implementor** seam.
 #[async_trait::async_trait]
 pub trait ProcessToolIntents: Send + Sync {
@@ -804,7 +812,12 @@ pub trait ProcessToolIntents: Send + Sync {
     ///
     /// This is an **integrator class 3: store implementor** seam. The returned
     /// existing row must be the authoritative first writer across processes
-    /// and facade handles.
+    /// and facade handles. The store stamps the row's admission time, which
+    /// the retained-evidence bound is compared against. An owner the lever
+    /// fenced claims no new row: an identity without one answers
+    /// [`ToolIntentSubmissionAdmission::Reclaimed`](crate::ToolIntentSubmissionAdmission::Reclaimed),
+    /// and the fence and the claim serialize, so a reclaimed identity is
+    /// never admitted again.
     async fn admit_tool_intent_submission(
         &self,
         submission: crate::ToolIntentSubmissionRecord,

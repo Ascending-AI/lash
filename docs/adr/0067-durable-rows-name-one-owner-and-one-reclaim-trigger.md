@@ -121,6 +121,15 @@ failure rolls the transaction back. Receipts whose owner cannot be established
 from their retained record remain protected; an irreversible hashed receipt key
 is not evidence for assigning an owner.
 
+#### Host tool-intent ledger
+
+A host tool-intent submission row is the first-outcome replay fence of one
+intent identity, owned by the session that owns the identity. The
+retained-evidence lever under ADR 0023 reclaims it once that session is
+durably deleted and the row was admitted before the host's bound. The same
+transaction fences the owner permanently, so no reclaimed identity is
+admitted or realized again (FIG-1509).
+
 #### Process-event ownership
 
 | Row or payload | Owner | Reclaim trigger |

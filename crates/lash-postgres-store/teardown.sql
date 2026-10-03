@@ -1,4 +1,3 @@
-DROP TABLE IF EXISTS lash_wait_receipts;
 -- lash-postgres-store teardown, component version 141.
 --
 -- Generated artifact. These bytes are exactly the DDL a host applies to drop
@@ -119,7 +118,11 @@ DROP TABLE IF EXISTS lash_process_segment_handovers CASCADE;
 
 DROP TABLE IF EXISTS lash_parent_end_plans CASCADE;
 
+DROP TABLE IF EXISTS lash_tool_call_receipts CASCADE;
+
 DROP TABLE IF EXISTS lash_tool_intent_submissions CASCADE;
+
+DROP TABLE IF EXISTS lash_tool_intent_retired_owners CASCADE;
 
 DROP TABLE IF EXISTS lash_trigger_subscription_change_clock CASCADE;
 
@@ -148,3 +151,5 @@ DROP TABLE IF EXISTS lash_release_stamp CASCADE;
 DROP TABLE IF EXISTS lash_catalog_identity CASCADE;
 
 DROP TABLE IF EXISTS lash_worker_recovery CASCADE;
+
+DROP TABLE IF EXISTS lash_wait_receipts CASCADE;

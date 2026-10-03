@@ -85,6 +85,12 @@ lash_store_sql::statements! {
         /// so there is nothing to derive the key from.
         lock_xact_evidence_retention = "SELECT pg_advisory_xact_lock(715423, 0)";
 
+        /// The evidence-retention key, shared: a tool-intent submission holds
+        /// it while it checks its owner's fence and claims its identity, so
+        /// it either commits before a sweep reclaims the owner or reads the
+        /// fence that sweep installed (FIG-1509).
+        lock_xact_evidence_retention_shared = "SELECT pg_advisory_xact_lock_shared(715423, 0)";
+
         /// Try the session-scoped **exclusive** advisory lock in class `?1`
         /// keyed on text `?2`, answering whether this connection took it.
         ///

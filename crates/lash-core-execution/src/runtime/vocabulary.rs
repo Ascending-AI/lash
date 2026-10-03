@@ -528,6 +528,11 @@ pub trait DeploymentStore:
     /// delivery still names it. A resent mutation whose receipt was reclaimed
     /// re-evaluates against current state rather than replaying.
     ///
+    /// The host tool-intent submission ledger is evidence under it too
+    /// (FIG-1509): a row admitted before the bound is reclaimed once its owner
+    /// session is durably deleted, and that owner is fenced in the same
+    /// transaction, so a resubmission is refused rather than realized again.
+    ///
     /// SQL stores reclaim their retained storage evidence here. Effect scopes,
     /// journal entries, groups and promises belong to Restate, so this sweep
     /// does not retire engine scopes or decide whether an invocation is live.

@@ -2,52 +2,71 @@ use lash_core_execution::{
     PluginError, ToolIntentExecutionOutcome, ToolIntentSubmissionAdmission,
     ToolIntentSubmissionRecord,
 };
-use rusqlite::params;
+use rusqlite::{OptionalExtension as _, params};
 
 use super::{SqliteProcessRegistry, process_decode_error, process_sqlite_error, tx_outcome};
 
+/// Claim the submission's identity, answering its first writer. A fenced
+/// owner (FIG-1509) claims nothing new: its reclaimed identities answer
+/// [`ToolIntentSubmissionAdmission::Reclaimed`], while a row the lever has not
+/// reached yet still answers as the first writer. The process registry has one
+/// writer, so the fence the lever installs and this check serialize.
 pub(super) async fn admit(
     registry: &SqliteProcessRegistry,
     submission: ToolIntentSubmissionRecord,
 ) -> Result<ToolIntentSubmissionAdmission, PluginError> {
+    let admitted_at_ms = registry.clock.timestamp_ms();
     registry
         .conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
-                let replay_key = submission.identity.replay_key.clone();
-                let inserted = tx
-                    .execute(
-                        crate::turn_ingress::tool_intent_sql()
-                            .sqlite
-                            .insert_new
-                            .sql(),
-                        params![
-                            replay_key,
-                            submission.identity.owner.to_string(),
-                            submission.identity.execution_scope_id.as_str(),
-                            submission.identity.tool_call_id.as_str(),
-                            i64::from(submission.identity.intent_index),
-                            submission.kind.as_str(),
-                            submission.payload_hash,
-                            serde_json::to_string(&submission).map_err(process_decode_error)?,
-                        ],
+                let sql = crate::turn_ingress::tool_intent_sql();
+                let owner = submission.identity.owner.to_string();
+                let retired: bool = tx
+                    .query_row(
+                        sql.shared.select_owner_retired.sql(),
+                        params![owner],
+                        |row| row.get(0),
                     )
                     .map_err(process_sqlite_error)?;
-                if inserted == 1 {
-                    return Ok(ToolIntentSubmissionAdmission::Admitted);
+                if !retired {
+                    let inserted = tx
+                        .execute(
+                            sql.sqlite.insert_new.sql(),
+                            params![
+                                submission.identity.replay_key,
+                                owner,
+                                submission.identity.execution_scope_id.as_str(),
+                                submission.identity.tool_call_id.as_str(),
+                                i64::from(submission.identity.intent_index),
+                                submission.kind.as_str(),
+                                submission.payload_hash,
+                                serde_json::to_string(&submission).map_err(process_decode_error)?,
+                                crate::clamp_epoch_ms(admitted_at_ms),
+                            ],
+                        )
+                        .map_err(process_sqlite_error)?;
+                    if inserted == 1 {
+                        return Ok(ToolIntentSubmissionAdmission::Admitted);
+                    }
                 }
                 let encoded = tx
                     .query_row(
-                        crate::turn_ingress::tool_intent_sql()
-                            .shared
-                            .select_by_replay_key
-                            .sql(),
+                        sql.shared.select_by_replay_key.sql(),
                         params![submission.identity.replay_key],
                         |row| row.get::<_, String>(0),
                     )
+                    .optional()
                     .map_err(process_sqlite_error)?;
-                let existing = serde_json::from_str(&encoded).map_err(process_decode_error)?;
-                Ok(ToolIntentSubmissionAdmission::Existing(Box::new(existing)))
+                match encoded {
+                    Some(encoded) => {
+                        let existing =
+                            serde_json::from_str(&encoded).map_err(process_decode_error)?;
+                        Ok(ToolIntentSubmissionAdmission::Existing(Box::new(existing)))
+                    }
+                    None if retired => Ok(ToolIntentSubmissionAdmission::Reclaimed),
+                    None => Err(process_sqlite_error(rusqlite::Error::QueryReturnedNoRows)),
+                }
             })()))
         })
         .await

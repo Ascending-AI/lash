@@ -242,9 +242,9 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &process,
         "INSERT INTO tool_intent_submissions (
              replay_key, owner, execution_scope_id, tool_call_id,
-             intent_index, kind, payload_hash, submission_json
+             intent_index, kind, payload_hash, submission_json, admitted_at_ms
          ) VALUES ('bad-tool-kind', 'session:session', 'scope', 'call', 0,
-                   'restart_process', 'hash', '{}')",
+                   'restart_process', 'hash', '{}', 0)",
         "ck_tool_intent_submissions_kind",
     );
 

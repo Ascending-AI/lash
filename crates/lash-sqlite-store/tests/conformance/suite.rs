@@ -350,6 +350,8 @@ mod session_delete_blob_reclaim;
 mod session_ingress;
 #[path = "store_maintenance.rs"]
 mod store_maintenance;
+#[path = "tool_intent_retention.rs"]
+mod tool_intent_retention;
 #[path = "trigger_occurrence_retention.rs"]
 mod trigger_occurrence_retention;
 

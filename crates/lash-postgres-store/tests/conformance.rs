@@ -1729,6 +1729,34 @@ lash_conformance::process_trigger_retention_tests!({
     })
 });
 
+lash_conformance::tool_intent_retention_tests!({
+    let Some((database_fixture, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres tool-intent retention conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    (database_fixture, move || {
+        let storage = Arc::clone(&storage);
+        async move {
+            reset(storage.pool()).await;
+            let handles =
+                |storage: &PostgresStorage| lash_conformance::ToolIntentRetentionHandles {
+                    registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
+                    sessions: Arc::new(storage.store())
+                        as Arc<dyn lash_core_execution::DeploymentStore>,
+                };
+            let open = handles(&storage);
+            let reopen: lash_conformance::ToolIntentRetentionReopen = Arc::new(move || {
+                let storage = Arc::clone(&storage);
+                Box::pin(async move { handles(&storage) })
+            });
+            lash_conformance::ToolIntentRetentionFixture { open, reopen }
+        }
+    })
+});
+
 lash_conformance::trigger_occurrence_tombstone_retention_tests!({
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(

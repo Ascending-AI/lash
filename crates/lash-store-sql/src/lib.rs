@@ -140,6 +140,7 @@ pub const TABLES: &[&str] = &[
     turn_ingress::queued_batches::TABLE,
     turn_ingress::retired_scopes::TABLE,
     turn_ingress::tool_intent_submissions::TABLE,
+    turn_ingress::tool_intent_submissions::RETIRED_OWNERS_TABLE,
     tool_receipts::TABLE,
     wait_receipts::TABLE,
     turn_ingress::turn_park_clock::TABLE,

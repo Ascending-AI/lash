@@ -1023,10 +1023,18 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
     kind TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
     submission_json TEXT NOT NULL,
+    admitted_at_ms BIGINT NOT NULL,
     CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger', 'publish_definition', 'get_definition', 'register_trigger'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
     ON lash_tool_intent_submissions(owner, execution_scope_id, intent_index);
+
+-- The owners whose submission ledger the retained-evidence lever reclaimed
+-- (FIG-1509): each is a durably deleted session, and the fence refuses every
+-- later submission under it so a reclaimed identity cannot realize again.
+CREATE TABLE IF NOT EXISTS lash_tool_intent_retired_owners (
+    owner TEXT PRIMARY KEY
+);
 
 CREATE TABLE IF NOT EXISTS lash_trigger_subscription_change_clock (
     singleton BOOLEAN PRIMARY KEY
