@@ -9,7 +9,7 @@ impl LashRuntime {
     /// Adopt the head a run's admission admitted it on and pin its recorded
     /// turn index for the prepare phase (FIG-3682).
     ///
-    /// The recorded inspection alone decides which head the resident session
+    /// The admission's head verdict decides which head the resident session
     /// is rebuilt from: a `Ready` verdict rebuilds it from the admission's
     /// base, whatever the live head is now; an `Advanced` one from the head
     /// the run's own commits published (FIG-4201); an `Overtaken` verdict

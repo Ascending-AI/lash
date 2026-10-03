@@ -257,7 +257,6 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::SealShiftAdmission { .. }
         | RuntimeEffectCommand::TransitionPlugins { .. }
         | RuntimeEffectCommand::AdmitRun { .. }
-        | RuntimeEffectCommand::InspectAdmittedHead { .. }
         | RuntimeEffectCommand::ObserveDrainMark { .. }
         | RuntimeEffectCommand::PluginCallbacks { .. }
         | RuntimeEffectCommand::RecoverFollowOn { .. }

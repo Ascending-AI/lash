@@ -121,29 +121,10 @@ impl LashRuntime {
         )
         .await?;
         let admission = match answer {
-            Ok(RunAdmissionAnswer::Admitted { admission }) => {
-                let live = ResidentHead {
-                    revision: self.state.head_revision,
-                    leaf: self.state.session_graph.leaf_node_id.clone(),
-                    checkpoint: self.state.checkpoint_ref.clone(),
-                };
-                let verdict = execute_head_inspection(
-                    run_controller,
-                    admitted,
-                    head,
-                    lash_core_execution::core_internal::owned_runner_executor(
-                        Box::new(InspectAdmittedHeadRunner {
-                            store: store.clone(),
-                            run: ran_execution.clone(),
-                            head: head.clone(),
-                            base: admission.base.clone(),
-                            live,
-                        }),
-                        None,
-                    ),
-                )
-                .await?
-                .map_err(abort)?;
+            Ok(RunAdmissionAnswer::Admitted {
+                admission,
+                head_verdict: verdict,
+            }) => {
                 crate::runtime::turn_loop::generation_fence::admit(
                     self,
                     admission.generation.as_ref(),
@@ -661,10 +642,10 @@ impl LashRuntime {
         if let Some(session) = self.session.as_ref() {
             session.plugins().adopt_plugin_admission(plugins.clone());
         }
-        // The verdict is the one `shift-head` recorded, honoured at every
+        // The verdict is the one `shift-admit` recorded, honoured at every
         // position (FIG-4058). Its live check, a head that moved from the
         // admission's base with no commit of this run behind it, is the
-        // inspection's body, which runs only when `shift-head` is this
+        // inspection's body, which runs only when `shift-admit` is this
         // attempt's live frontier. A replay is served the recorded verdict:
         // whatever the first attempt did after it is already journaled, so a
         // head that moved since is met by the turn's fenced commit as a typed
@@ -779,38 +760,6 @@ async fn execute_run_admission(
         )
         .await
         .and_then(crate::RuntimeEffectOutcome::into_run_admission)
-        .map_err(crate::RuntimeEffectControllerError::into_runtime_error))
-}
-
-/// The run's recorded head inspection, `shift-head:{run}`, whose first
-/// execution runs `runner`: the recorded verdict on the head the run's
-/// admission admitted it on.
-async fn execute_head_inspection(
-    run_controller: &ScopedEffectController<'_>,
-    admitted: &Admitted,
-    head: &AdmittedHead,
-    runner: crate::RuntimeEffectLocalExecutor<'_>,
-) -> Result<Result<AdmittedHeadVerdict, RuntimeError>, ShiftAbort> {
-    let invocation = run_step_invocation(run_controller, admitted, "shift-head")?;
-    Ok(run_controller
-        .execute_effect(
-            crate::RuntimeEffectEnvelope::new(
-                invocation,
-                crate::RuntimeEffectCommand::InspectAdmittedHead {
-                    run: admitted.run().clone(),
-                    head: head.clone(),
-                },
-            ),
-            runner,
-        )
-        .await
-        .and_then(|outcome| match outcome {
-            crate::RuntimeEffectOutcome::InspectAdmittedHead { verdict } => Ok(verdict),
-            other => Err(crate::RuntimeEffectControllerError::wrong_outcome(
-                crate::RuntimeEffectKind::InspectAdmittedHead,
-                other.kind(),
-            )),
-        })
         .map_err(crate::RuntimeEffectControllerError::into_runtime_error))
 }
 
@@ -1023,7 +972,7 @@ impl HeadlessRun {
 /// Run a sealed input- or queued-headed run whose shift holds no current
 /// head of its session (FIG-4346).
 ///
-/// The run still issues its recorded admission and head inspection, in the
+/// The run still issues its recorded admission and plugin transition, in the
 /// order and under the envelopes a run with a head issues them, so a
 /// replay follows the journal an earlier attempt of the run recorded, and
 /// nothing the shift read outside those steps decides what it journals
@@ -1035,7 +984,7 @@ impl HeadlessRun {
 ///   held nothing more, so every replay answers the same.
 /// - A step that recorded a refusal to admit cedes the run, as it does with
 ///   a head.
-/// - A recorded admission and head inspection mean an earlier attempt ran
+/// - A recorded admission and plugin transition mean an earlier attempt ran
 ///   the run's turn after them, and that turn cannot replay without the
 ///   session's head ([`HeadlessRun::past_its_steps`]).
 pub(super) async fn execute_headless_run(
@@ -1049,24 +998,47 @@ pub(super) async fn execute_headless_run(
         lash_core_execution::core_internal::owned_runner_executor(
             Box::new(HeadlessRunStepRunner {
                 session: admitted.session().clone(),
-                step: HeadlessStep::Run {
-                    run: run.clone(),
-                    head: head.clone(),
-                },
+                step: HeadlessStep::Run { head: head.clone() },
                 headless: headless.clone(),
             }),
             None,
         )
     };
-    match execute_run_admission(run_controller, admitted, head, runner()).await? {
-        Ok(RunAdmissionAnswer::Admitted { .. }) => {}
+    let admission = match execute_run_admission(run_controller, admitted, head, runner()).await? {
+        Ok(RunAdmissionAnswer::Admitted { admission, .. }) => admission,
         Ok(RunAdmissionAnswer::Refused { .. }) => return Ok(RunOutcome::Ceded { run }),
         Err(error) => return Err(shift_abort(Some(&run), error)),
-    }
-    if let Err(error) = execute_head_inspection(run_controller, admitted, head, runner()).await? {
-        return Err(shift_abort(Some(&run), error));
-    }
-    Err(headless.past_its_steps(admitted, "its admission and head inspection"))
+    };
+    let invocation = run_step_invocation(run_controller, admitted, "plugin-transition")?;
+    let request = crate::plugin::PluginTransitionRequest {
+        id: crate::plugin::PluginTransitionId(invocation.address().clone()),
+        owner: crate::RuntimeOwner::Session(admitted.session().clone()),
+        base: crate::plugin::PluginTransitionBase::Session {
+            head: admission.base,
+        },
+        target: admission.plugins,
+    };
+    let id = request.id.clone();
+    run_controller
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::TransitionPlugins {
+                    request: Box::new(request),
+                },
+            ),
+            lash_core_execution::core_internal::owned_runner_executor(
+                Box::new(HeadlessRunStepRunner {
+                    session: admitted.session().clone(),
+                    step: HeadlessStep::Transition { id },
+                    headless: headless.clone(),
+                }),
+                None,
+            ),
+        )
+        .await
+        .map_err(|error| shift_abort(Some(&run), error.into_runtime_error()))?;
+    Err(headless.past_its_steps(admitted, "its admission and plugin transition"))
 }
 
 /// Run a sealed command run whose shift holds no current head of its
@@ -1217,7 +1189,11 @@ pub(super) async fn execute_headless_follow_on_run(
 /// The steps a headless run issues.
 enum HeadlessStep {
     /// An input- or queued-headed run's admission and head inspection.
-    Run { run: TurnId, head: AdmittedHead },
+    Run { head: AdmittedHead },
+    /// The next recorded step after an input- or queued-headed admission.
+    Transition {
+        id: crate::plugin::PluginTransitionId,
+    },
     /// A command run's read of the session's command lane.
     CommandRun,
     /// A follow-on recovery run's decision.
@@ -1253,12 +1229,12 @@ impl RuntimeEffectLocalRunner for HeadlessRunStepRunner {
                 crate::RuntimeEffectCommand::AdmitRun { head },
             ) => head == bound,
             (
-                HeadlessStep::Run {
-                    run: bound_run,
-                    head: bound_head,
-                },
-                crate::RuntimeEffectCommand::InspectAdmittedHead { run, head },
-            ) => run == bound_run && head == bound_head,
+                HeadlessStep::Transition { id },
+                crate::RuntimeEffectCommand::TransitionPlugins { request },
+            ) => {
+                request.id == *id
+                    && request.owner == crate::RuntimeOwner::Session(self.session.clone())
+            }
             (
                 HeadlessStep::CommandRun,
                 crate::RuntimeEffectCommand::ReadSessionCommandRun { session },
@@ -1319,125 +1295,6 @@ struct AdmittedTurn<'a> {
     run: &'a TurnId,
 }
 
-/// The resident head an attempt refreshed before its run's inspection.
-struct ResidentHead {
-    revision: u64,
-    leaf: Option<crate::NodeId>,
-    checkpoint: Option<crate::store::BlobRef>,
-}
-
-/// The body of a run's `shift-head` step: the shift's one live head check.
-///
-/// It runs only when the step is not recorded yet, so at the attempt's live
-/// frontier before any turn effect, and decides from the resident head this
-/// attempt refreshed. A head that moved from the admission's base with no
-/// final commit of the run behind it is decided by its components
-/// (FIG-4200): a higher revision that a fenced commit published is the
-/// run's own, `Advanced`, and the run continues from it (FIG-4201); a
-/// higher revision a lane-less write published is another writer
-/// overtaking the head, `Overtaken`, and the run ends typed; a lower
-/// revision, or the same revision with another leaf or checkpoint, is an
-/// inconsistent head, `Diverged`, and the run parks before it executes a
-/// head it was not admitted on. A replay serves the recorded verdict and
-/// never runs it.
-///
-/// A fenced commit that lands while the run is unfinished is the run's
-/// own: the store refuses a fence an admission superseded, and every
-/// admission sealed while the run is unfinished resumes it.
-struct InspectAdmittedHeadRunner {
-    store: crate::store::SessionStore,
-    run: TurnId,
-    head: AdmittedHead,
-    /// The head the run's admission recorded.
-    base: crate::store::SessionHeadRef,
-    live: ResidentHead,
-}
-
-impl InspectAdmittedHeadRunner {
-    /// Whether the live head is the admission's base.
-    fn head_is_base(&self) -> bool {
-        self.live.revision == self.base.revision
-            && self.live.leaf == self.base.leaf
-            && self.live.checkpoint == self.base.checkpoint
-    }
-
-    /// The verdict on a head that moved from the base with no final commit
-    /// of the run behind it. `published_by_shift` is whether a fenced commit
-    /// published the live head.
-    fn moved_head_verdict(&self, published_by_shift: bool) -> AdmittedHeadVerdict {
-        let live_revision = self.live.revision;
-        if live_revision <= self.base.revision {
-            return AdmittedHeadVerdict::Diverged { live_revision };
-        }
-        if published_by_shift {
-            return AdmittedHeadVerdict::Advanced {
-                head: crate::store::SessionHeadRef {
-                    generation: self.base.generation,
-                    revision: live_revision,
-                    leaf: self.live.leaf.clone(),
-                    checkpoint: self.live.checkpoint.clone(),
-                },
-            };
-        }
-        AdmittedHeadVerdict::Overtaken { live_revision }
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
-    async fn execute(
-        self: Box<Self>,
-        envelope: crate::RuntimeEffectEnvelope,
-        _effect_attempt: Option<crate::EffectAttempt>,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        let crate::RuntimeEffectCommand::InspectAdmittedHead { run, head } = &envelope.command
-        else {
-            return Err(crate::RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "admitted head inspector received another command",
-            ));
-        };
-        if *run != self.run || *head != self.head {
-            return Err(crate::RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "admitted head inspector was bound to another run or head",
-            ));
-        }
-        let store_fault = |error| {
-            crate::RuntimeEffectControllerError::from(
-                crate::runtime::runtime_error_from_store_commit(error),
-            )
-            .retryable_uncommitted_derivation()
-        };
-        let verdict = if self.head_is_base()
-            || self
-                .store
-                .committed_turn_exists(&self.run)
-                .await
-                .map_err(store_fault)?
-        {
-            AdmittedHeadVerdict::Ready
-        } else {
-            // Whether a fenced commit published the live head the attempt
-            // refreshed: read from the head's own row, and only when it is
-            // still that head.
-            let meta = self
-                .store
-                .load_session_head_meta()
-                .await
-                .map_err(store_fault)?;
-            let published_by_shift = meta.is_some_and(|head| {
-                head.published_by_shift
-                    && head.head_revision == self.live.revision
-                    && head.leaf_node_id == self.live.leaf
-                    && head.checkpoint_ref == self.live.checkpoint
-            });
-            self.moved_head_verdict(published_by_shift)
-        };
-        Ok(crate::RuntimeEffectOutcome::InspectAdmittedHead { verdict })
-    }
-}
-
 /// Trace attribution for the admission decisions the runner makes.
 struct AdmissionTrace {
     tracing: crate::trace::TraceRuntime,
@@ -1450,7 +1307,9 @@ struct AdmissionTrace {
 /// the journal records (an admission or a refusal) or a race the step
 /// retries.
 enum RunAdmissionProbe {
-    /// The journaled `AdmitRun` outcome.
+    /// An admitted run whose head the recorded body still has to inspect.
+    Admitted(Box<crate::store::RunAdmission>),
+    /// The journaled refusal.
     Answer(RunAdmissionAnswer),
     /// The admission took nothing yet the head row is still in the store:
     /// composition and read raced, so the step defers to a later admission
@@ -1543,6 +1402,13 @@ impl RuntimeEffectLocalRunner for AdmitRunRunner {
             fault.message = format!("run admission failed: {}", fault.message);
             fault.retryable_uncommitted_derivation()
         })? {
+            RunAdmissionProbe::Admitted(admission) => {
+                let head_verdict = self.inspect_admitted_head(&admission.base).await?;
+                RunAdmissionAnswer::Admitted {
+                    admission,
+                    head_verdict,
+                }
+            }
             RunAdmissionProbe::Answer(answer) => answer,
             // The admission missed the head yet the head row is still there:
             // the two raced, so the step defers to a later admission rather
@@ -1561,6 +1427,60 @@ impl RuntimeEffectLocalRunner for AdmitRunRunner {
 }
 
 impl AdmitRunRunner {
+    /// Inspect the retained admission's base inside the admission's recorded body.
+    async fn inspect_admitted_head(
+        &self,
+        base: &crate::store::SessionHeadRef,
+    ) -> Result<AdmittedHeadVerdict, crate::RuntimeEffectControllerError> {
+        let live = &self.base;
+        if live.revision == base.revision
+            && live.leaf == base.leaf
+            && live.checkpoint == base.checkpoint
+        {
+            return Ok(AdmittedHeadVerdict::Ready);
+        }
+        if self
+            .store
+            .committed_turn_exists(&self.run)
+            .await
+            .map_err(|error| {
+                super::admission::store_fault("admitted head inspection failed", error)
+            })?
+        {
+            return Ok(AdmittedHeadVerdict::Ready);
+        }
+        if live.revision <= base.revision {
+            return Ok(AdmittedHeadVerdict::Diverged {
+                live_revision: live.revision,
+            });
+        }
+        let published_by_shift = self
+            .store
+            .load_session_head_meta()
+            .await
+            .map_err(|error| {
+                super::admission::store_fault("admitted head inspection failed", error)
+            })?
+            .is_some_and(|head| {
+                head.published_by_shift
+                    && head.head_revision == live.revision
+                    && head.leaf_node_id == live.leaf
+                    && head.checkpoint_ref == live.checkpoint
+            });
+        Ok(if published_by_shift {
+            AdmittedHeadVerdict::Advanced {
+                head: crate::store::SessionHeadRef {
+                    generation: base.generation,
+                    ..live.clone()
+                },
+            }
+        } else {
+            AdmittedHeadVerdict::Overtaken {
+                live_revision: live.revision,
+            }
+        })
+    }
+
     /// The shift's fenced activation gate: the session's turn-cancellation
     /// binding is recorded on first use and checked on every later run, so
     /// a reopened host with a different physical authority is refused before
@@ -1628,7 +1548,7 @@ impl AdmitRunRunner {
     /// cancelled, or pruned, and the run cedes; still present means the
     /// admission raced, so the step asks to run again rather than record a
     /// refusal. Nothing here ever drops, withdraws, or re-admits a row.
-    async fn admit(self) -> Result<RunAdmissionProbe, crate::StoreError> {
+    async fn admit(&self) -> Result<RunAdmissionProbe, crate::StoreError> {
         // The admission is the adoption point (FIG-4747): this build's
         // composition, and each plugin's writer chosen from the fleet record
         // as it stands now. The store records the first admission's choice
@@ -1679,9 +1599,7 @@ impl AdmitRunRunner {
                     &causes,
                 )
             });
-            return Ok(RunAdmissionProbe::Answer(RunAdmissionAnswer::Admitted {
-                admission: Box::new(admission),
-            }));
+            return Ok(RunAdmissionProbe::Admitted(Box::new(admission)));
         }
         let present = match &self.head {
             AdmittedHead::Input(head) => self

@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashTurn",
   "service": "LashTurn",
-  "generation": "5ce8cac5b0d1",
+  "generation": "76790e7f2fff",
   "handlers": {
     "close": [
       [
@@ -16,7 +16,6 @@
         "RunCommand lash:shift-run-start:ingress:ti:#:1#0",
         "RunCommand lash:shift-seal:ingress:ti:#:1#0",
         "RunCommand lash:shift-admit:replay-corpus-turn",
-        "RunCommand lash:shift-head:replay-corpus-turn",
         "RunCommand lash:plugin-transition:replay-corpus-turn",
         "RunCommand lash:turn-config:replay-corpus-turn",
         "RunCommand lash:trace:turn:replay-corpus-turn:started",

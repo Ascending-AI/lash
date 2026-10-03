@@ -1720,7 +1720,6 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::SealShiftAdmission
                 | RuntimeEffectKind::AdmitRun
                 | RuntimeEffectKind::TransitionPlugins
-                | RuntimeEffectKind::InspectAdmittedHead
                 | RuntimeEffectKind::ObserveDrainMark
                 | RuntimeEffectKind::RecoverFollowOn
                 | RuntimeEffectKind::ResolveTurnConfig

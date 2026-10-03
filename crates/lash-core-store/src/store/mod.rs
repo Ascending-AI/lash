@@ -181,12 +181,13 @@ pub use realization::commit_runtime_state_verified;
 pub use recovery_leader::*;
 pub use retention::{RetentionBound, RetentionReport};
 pub use run::{
-    AdmitRunRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
-    InMemoryRunLedger, PreparedRunAdmission, RunAdmission, RunAdmissionAnswer, RunAdmissionRefusal,
-    RunCommittedOutcome, RunEndOutcome, RunExecutor, RunStore, RunTerminal, RunTerminalCause,
-    RunTerminalKind, RunTerminalWrite, RunTerminalWriteDecision, RunTurns, StoredRunTerminal,
-    TurnCommitId, UnfinishedRun, admit_run_with_trace, decide_run_terminal_write,
-    refused_execution_owns_run, run_binding_conflict,
+    AdmitRunRequest, AdmittedHead, AdmittedHeadVerdict, CheckpointAdmission,
+    CheckpointAdmissionRequest, InMemoryRunLedger, PreparedRunAdmission, RunAdmission,
+    RunAdmissionAnswer, RunAdmissionRefusal, RunCommittedOutcome, RunEndOutcome, RunExecutor,
+    RunStore, RunTerminal, RunTerminalCause, RunTerminalKind, RunTerminalWrite,
+    RunTerminalWriteDecision, RunTurns, StoredRunTerminal, TurnCommitId, UnfinishedRun,
+    admit_run_with_trace, decide_run_terminal_write, refused_execution_owns_run,
+    run_binding_conflict,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, FrameTransition, InterruptedTurnClosure,

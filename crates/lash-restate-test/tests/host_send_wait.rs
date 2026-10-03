@@ -1102,7 +1102,7 @@ async fn live_restate_host_killed_after_its_session_was_deleted_replays_its_jour
 
 /// FIG-4346 against a live `restate-server`: the engine's run run dies
 /// after it journaled its admission (`shift-admit`) and before its head
-/// inspection (`shift-head`), the session's storage delete commits while it
+/// plugin transition, the session's storage delete commits while it
 /// is down, and the server's retry replays the run into the deployment that
 /// comes back. The host still holds the session, so the shift runs on its
 /// resident runtime, whose head refresh before the admission meets the
@@ -1143,10 +1143,10 @@ async fn live_restate_run_killed_after_its_session_was_deleted_ends_typed() {
         .expect("open the session");
     let run = lash_core::TurnId::from("deleted-replay-run");
     let turn_key = lash_restate::turn_workflow_key(&session_id, &run);
-    // The run dies with its admission journaled and its head inspection not.
+    // The run dies with its admission journaled and its plugin transition not.
     backend.crash_on(
         CrashRule::new(CrashPoint::BeforeRun {
-            name: format!("lash:shift-head:{run}"),
+            name: format!("lash:plugin-transition:{run}"),
         })
         .service(backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE))
         .key(turn_key.clone()),
@@ -1243,11 +1243,11 @@ async fn live_restate_run_killed_after_its_session_was_deleted_ends_typed() {
         "shift-run-start:",
         "shift-seal:",
         "shift-admit:",
-        "shift-head:",
+        "plugin-transition:",
     ] {
         assert!(
             journal.iter().any(|entry| entry.contains(step)),
-            "the replay issued the recorded steps and the head inspection after them, \
+            "the replay issued the recorded steps and the merged head verdict, \
              missing `{step}`: {journal:?}"
         );
     }

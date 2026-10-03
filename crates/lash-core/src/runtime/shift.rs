@@ -11,10 +11,10 @@
 //! head that admission ran on (FIG-3682).
 //!
 //! The run's admission body repairs orphaned inputs before it binds the admitted
-//! head. A separate `InspectAdmittedHead` step records whether that head is
-//! ready, overtaken, or divergent. A redrive reads both outcomes from its journal
+//! head and records whether that head is ready, advanced, overtaken, or
+//! divergent in the admission outcome. A redrive reads that outcome from its journal
 //! and issues no second repair. The inspection's body is the shift's one live
-//! head check, and it runs only when that step is the attempt's live
+//! head check, and it runs only when the admission is the attempt's live
 //! frontier; a redrive honours the recorded verdict at every position
 //! (FIG-4058), and the turn's fenced commit meets a head that moved since as
 //! a typed refusal. The check cannot select new work or change the admission's
@@ -547,7 +547,7 @@ pub async fn admit_shift_retired(
 /// answers what it answered then: a superseded or lost admission is the
 /// refused run it was. A run it recorded sealed goes on headless, through
 /// the recorded steps an earlier attempt may have journaled after the seal:
-/// an input- or queued-headed run's admission and head inspection, a
+/// an input- or queued-headed run's admission and plugin transition, a
 /// command run's reads of its command lane (FIG-4346), and a follow-on
 /// recovery run's decision (FIG-4361). `controller` serves the run's
 /// [`shift_run_scope`](crate::engine::shift_run_scope).

@@ -49,6 +49,7 @@ pub(super) async fn execute_shift(
                     local_runs.fetch_add(1, Ordering::SeqCst);
                     Ok(RuntimeEffectOutcome::AdmitRun {
                         answer: lash_core::store::RunAdmissionAnswer::Admitted {
+                            head_verdict: lash_core::store::AdmittedHeadVerdict::Ready,
                             admission: Box::new(lash_core::store::RunAdmission {
                                 head: lash_core::store::AdmittedHead::Input(
                                     lash_core::InputId::from("in_7"),
@@ -85,7 +86,7 @@ pub(super) async fn execute_shift(
         .into_run_admission()
         .expect("the shift effect returns an admission")
     {
-        lash_core::store::RunAdmissionAnswer::Admitted { admission } => *admission,
+        lash_core::store::RunAdmissionAnswer::Admitted { admission, .. } => *admission,
         refused => panic!("the shift effect admits its head: {refused:?}"),
     }
 }

@@ -294,6 +294,53 @@ async fn an_empty_commit_finishes_the_shift_without_another_admission() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_admission_records_its_head_verdict_without_another_step() {
+    let backend = lash_restate_test::backend(0x4848_0003, ServerConfig::default())
+        .await
+        .expect("build the Restate test backend");
+    let barrier = Arc::new(Barrier::default());
+    let core = core(&backend, &barrier);
+    let session = created_session(&core, "admitted-head")
+        .await
+        .open()
+        .await
+        .expect("open the session");
+    let handle = session
+        .send(lash::TurnInput::text("answer once"))
+        .id("admitted-head-run")
+        .await
+        .expect("accept the input");
+    wait_until("the model call starts", || {
+        barrier.calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    let runs = journaled_steps(&backend, TURN_DRIVER_SERVICE);
+    assert_eq!(runs.len(), 1, "one journal owns the run: {runs:?}");
+    assert!(
+        !runs[0]
+            .1
+            .iter()
+            .any(|name| name.starts_with("lash:shift-head:")),
+        "the admission records its head verdict: {runs:?}",
+    );
+    assert_eq!(
+        runs[0]
+            .1
+            .iter()
+            .filter(|name| name.starts_with("lash:shift-admit:"))
+            .count(),
+        1,
+        "one step binds and validates the run: {runs:?}",
+    );
+    barrier.release.notify_one();
+    assert_eq!(
+        handle.outcome().await.expect("the answer").status(),
+        lash::TurnStatus::Answered,
+    );
+    backend.settle_session_shift(&session.session_id()).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inputs_on_both_sides_of_an_empty_commit_keep_their_shift() {
     let backend = lash_restate_test::backend(0x4848_0002, ServerConfig::default())
         .await

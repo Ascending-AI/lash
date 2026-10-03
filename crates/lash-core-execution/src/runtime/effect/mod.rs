@@ -48,10 +48,11 @@ mod shift_outcome;
 pub use lash_core_effect::await_event_identity;
 mod validation;
 
+pub use crate::store::AdmittedHeadVerdict;
 pub use envelope::tool_cancel_work_replay_suffix;
 pub use envelope::{
-    AdmittedHeadVerdict, AssistantResponseHookEvents, CheckpointAdmittedSet, CompactionBase,
-    LlmRequestSpec, ProcessCommand, ProcessEffectOutcome, ProcessListSelection,
+    AssistantResponseHookEvents, CheckpointAdmittedSet, CompactionBase, LlmRequestSpec,
+    ProcessCommand, ProcessEffectOutcome, ProcessListSelection,
     RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
     ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch,

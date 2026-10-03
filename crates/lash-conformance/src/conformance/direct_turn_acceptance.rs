@@ -908,7 +908,7 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
     assert!(
         matches!(
             journal.controller.journaled_shift(),
-            Some(crate::store::RunAdmissionAnswer::Admitted { admission })
+            Some(crate::store::RunAdmissionAnswer::Admitted { admission, .. })
                 if admission.input_ids().len() == 3
         ),
         "the journaled shift carries all three rows"
@@ -1020,7 +1020,7 @@ pub async fn uncommitted_redrive_executes_journaled_set_not_live_admission(
         .crash_before_commit(&store, provider.clone(), &turn_id, "the accepted words")
         .await;
     let journaled = match journal.controller.journaled_shift() {
-        Some(crate::store::RunAdmissionAnswer::Admitted { admission }) => admission,
+        Some(crate::store::RunAdmissionAnswer::Admitted { admission, .. }) => admission,
         other => panic!("the first execution admitted its accepted row: {other:?}"),
     };
     let late = enqueue_next_turn(&store, "admitted after the crash").await;

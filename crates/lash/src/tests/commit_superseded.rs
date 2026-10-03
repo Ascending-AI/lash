@@ -390,7 +390,7 @@ async fn a_refused_run_crashed_before_its_outcome_converges_on_one_terminal() ->
 /// Shift FIG-4058's crash cells: the session's first turn commits, the head
 /// moves under the second turn's model call and `fixture` arms its fault,
 /// and the engine retries the second run's execution past its recorded
-/// `shift-head` verdict. The replay honours the recorded `Ready`, retraces
+/// `shift-admit` head verdict. The replay honours the recorded `Ready`, retraces
 /// the journal to the superseded commit and ends the run with that
 /// refusal: the send answers it, the run's one terminal is the refusal, it
 /// is never parked, and the session's next send completes under a new run.
@@ -489,7 +489,7 @@ async fn a_redriven_run_past_shift_head_ends_with_its_refusal(fixture: Fixture) 
 }
 
 /// FIG-4058: a live fault the engine retries after the run's journal has
-/// run past `shift-head`. The head moved under the turn and its commit
+/// run past `shift-admit`. The head moved under the turn and its commit
 /// meets a live store fault, so the retry replays a journal that already
 /// holds the turn's model call. Its recorded `Ready` is honoured rather
 /// than turned into `Diverged` by the moved head, which parked the run at

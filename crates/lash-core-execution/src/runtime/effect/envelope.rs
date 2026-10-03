@@ -584,12 +584,6 @@ pub enum RuntimeEffectCommand {
     AdmitRun {
         head: crate::store::AdmittedHead,
     },
-    /// Inspect the admitted run's head before executing its turn. The body
-    /// reads live store state once; replay uses its recorded verdict.
-    InspectAdmittedHead {
-        run: crate::TurnId,
-        head: crate::store::AdmittedHead,
-    },
     /// Read, at a quiet point of a turn, whether `generation` — the build
     /// the turn's invocation runs on — is draining (FIG-4739). The body
     /// reads the store's drain marks once; replay uses its recorded answer.
@@ -793,7 +787,6 @@ impl RuntimeEffectCommand {
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::AdmitRun { .. } => RuntimeEffectKind::AdmitRun,
-            Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
@@ -1304,33 +1297,6 @@ pub type RuntimeDirectLlmOutcome = (
     Option<crate::LlmCallRecord>,
 );
 
-/// The first execution's decision about the head a run admitted, by how
-/// the live head stands against the admission's base when no final commit
-/// of the run is behind it (FIG-3824, FIG-4200, FIG-4201). The head is
-/// bound to the run alone (FIG-3927), so no other shift can have answered
-/// it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AdmittedHeadVerdict {
-    /// The head is the admission's base, or the run's final commit moved
-    /// it: shift the run from the base.
-    Ready,
-    /// The run's own commits moved the head past the admission's base, to
-    /// `head`: a context-pressure frame or another commit the run made
-    /// before its final one, which a fresh journal no longer records. The
-    /// bound turn owns the head, so the run continues from `head`, its own
-    /// frame, and never meets it as another writer's (FIG-4201).
-    Advanced { head: crate::store::SessionHeadRef },
-    /// Another writer committed past the admission's base, to a higher
-    /// revision: ordinary head overtaking. The run can never commit on the
-    /// base it was admitted on, so it ends typed `StoreCommitSuperseded`.
-    Overtaken { live_revision: u64 },
-    /// The live head is inconsistent with the admission's base: a lower
-    /// revision, or the same revision with another leaf or checkpoint. The
-    /// run parks for an operator.
-    Diverged { live_revision: u64 },
-}
-
 /// The base an administrative compaction records before its summarizer
 /// runs (FIG-4133): the durable head it summarizes and the frame it opens its
 /// frame from. The compaction commits under the fence of the command run
@@ -1488,9 +1454,6 @@ pub enum RuntimeEffectOutcome {
     /// the same rows (FIG-3927).
     AdmitRun {
         answer: crate::store::RunAdmissionAnswer,
-    },
-    InspectAdmittedHead {
-        verdict: AdmittedHeadVerdict,
     },
     /// Whether the build was draining when the turn read its mark.
     ObserveDrainMark {
@@ -1950,7 +1913,6 @@ impl RuntimeEffectOutcome {
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::AdmitRun { .. } => RuntimeEffectKind::AdmitRun,
-            Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,

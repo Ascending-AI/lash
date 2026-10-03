@@ -53,6 +53,7 @@ fn transition() -> RuntimeEffectEnvelope {
 
 #[derive(Clone)]
 struct Predecessor {
+    step: String,
     entry: serde_json::Value,
     bodies: Arc<AtomicUsize>,
     passes: Arc<AtomicUsize>,
@@ -67,12 +68,13 @@ impl Predecessor {
         _request: Json<serde_json::Value>,
     ) -> HandlerResult<Json<bool>> {
         let entry = self.entry.clone();
+        let step = self.step.clone();
         let bodies = Arc::clone(&self.bodies);
         ctx.run(move || async move {
             bodies.fetch_add(1, Ordering::SeqCst);
             Ok(Json(entry))
         })
-        .name(format!("lash:{STEP}"))
+        .name(format!("lash:{step}"))
         .await?;
         if self.passes.fetch_add(1, Ordering::SeqCst) == 0 {
             std::future::pending::<()>().await;
@@ -114,8 +116,8 @@ impl Predecessor {
     }
 }
 
-#[derive(Default)]
 struct TransitionShifts {
+    envelope: RuntimeEffectEnvelope,
     bodies: Arc<AtomicUsize>,
 }
 
@@ -140,7 +142,7 @@ impl SessionShifts for TransitionShifts {
         let bodies = Arc::clone(&self.bodies);
         let result = controller
             .execute_effect(
-                transition(),
+                self.envelope.clone(),
                 RuntimeEffectLocalExecutor::testing(move |_| async move {
                     bodies.fetch_add(1, Ordering::SeqCst);
                     Err(RuntimeEffectControllerError::new(
@@ -205,9 +207,71 @@ async fn the_empty_queue_stop_rule_keeps_predecessor_journals_on_their_drain_lan
     predecessor_journal_keeps_its_lane(predecessor_epoch, PredecessorShape::TaggedTransition).await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_merged_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane() {
+    let predecessor_epoch = if cfg!(feature = "synthetic-next") {
+        8
+    } else {
+        7
+    };
+    predecessor_journal_keeps_its_lane(predecessor_epoch, PredecessorShape::AdmittedHead).await;
+}
+
+fn admission_envelope() -> RuntimeEffectEnvelope {
+    RuntimeEffectEnvelope::new(
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(
+                lash_core::ExecutionScope::turn(SESSION, RUN),
+                format!("shift-admit:{RUN}"),
+            )
+            .unwrap(),
+            RuntimeAttribution::for_session(SESSION),
+            "admission",
+        ),
+        RuntimeEffectCommand::AdmitRun {
+            head: lash_core::store::AdmittedHead::Batch("commands".into()),
+        },
+    )
+}
+
+fn predecessor_admission_outcome() -> serde_json::Value {
+    let mut outcome = serde_json::to_value(lash_core::RuntimeEffectOutcome::AdmitRun {
+        answer: lash_core::store::RunAdmissionAnswer::Admitted {
+            admission: Box::new(lash_core::store::RunAdmission {
+                head: lash_core::store::AdmittedHead::Batch("commands".into()),
+                inputs: None,
+                queued: None,
+                base: lash_core::store::SessionHeadRef {
+                    generation: 0,
+                    revision: 0,
+                    leaf: None,
+                    checkpoint: None,
+                },
+                turn_index: 1,
+                generation: None,
+                executor: lash_core::store::RunExecutor::Run,
+                plugins: Default::default(),
+                trace: None,
+                recorded_by_this_call: false,
+            }),
+            head_verdict: lash_core::store::AdmittedHeadVerdict::Ready,
+        },
+    })
+    .unwrap();
+    outcome["answer"]
+        .as_object_mut()
+        .unwrap()
+        .remove("head_verdict");
+    let refused = serde_json::from_value::<lash_core::RuntimeEffectOutcome>(outcome.clone())
+        .expect_err("the predecessor admitted rows without a head verdict");
+    assert!(refused.to_string().contains("head_verdict"), "{refused}");
+    outcome
+}
+
 enum PredecessorShape {
     UntaggedTransition,
     TaggedTransition,
+    AdmittedHead,
 }
 
 async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: PredecessorShape) {
@@ -222,8 +286,12 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
         recorded, executing,
         "changed handler logic needs a new lane"
     );
+    let envelope = match shape {
+        PredecessorShape::AdmittedHead => admission_envelope(),
+        _ => transition(),
+    };
     let mut old_envelope: serde_json::Value =
-        serde_json::from_str(transition().canonical_form().unwrap().json()).unwrap();
+        serde_json::from_str(envelope.canonical_form().unwrap().json()).unwrap();
     if matches!(shape, PredecessorShape::UntaggedTransition) {
         let base = &mut old_envelope["command"]["request"]["base"];
         *base = base["head"].take();
@@ -237,21 +305,26 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
     let mut hasher = Blake3DomainHasher::new("lash-runtime-effect-envelope/v3");
     hasher.update(old_json.as_bytes());
     let old_hash = hasher.finalize_hex();
+    let outcome = match shape {
+        PredecessorShape::AdmittedHead => predecessor_admission_outcome(),
+        _ => serde_json::json!({
+            "type": "transition_plugins",
+            "record": {
+                "request": old_envelope["command"]["request"],
+                "source": "blake3:predecessor-state",
+                "namespaces": {},
+                "config": { "Ok": {} },
+                "publication": null,
+            },
+        }),
+    };
     let predecessor = Predecessor {
+        step: envelope.invocation.effect_replay_key().to_string(),
         entry: serde_json::json!({
             "build_generation": recorded,
             "effect_journal_version": crate::restate::EFFECT_JOURNAL_VERSION,
             "envelope": { "json": old_json, "hash": old_hash },
-            "outcome": { "Ok": {
-                "type": "transition_plugins",
-                "record": {
-                    "request": old_envelope["command"]["request"],
-                    "source": "blake3:predecessor-state",
-                    "namespaces": {},
-                    "config": { "Ok": {} },
-                    "publication": null,
-                },
-            } },
+            "outcome": { "Ok": outcome },
         }),
         bodies: Arc::default(),
         passes: Arc::default(),
@@ -309,7 +382,10 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
         )
         .stamped(executing.clone()),
     );
-    let shifts = Arc::new(TransitionShifts::default());
+    let shifts = Arc::new(TransitionShifts {
+        envelope,
+        bodies: Arc::default(),
+    });
     let _installation = engine
         .session_work_engine()
         .install_session_shifts(shifts.clone());

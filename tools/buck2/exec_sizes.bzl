@@ -840,6 +840,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash:lash__unit_test__fv_d17a2b8a": {"cpu_count": 4, "memory_kb": 3932160},
     "//crates/lash:lash__unit_test__fv_dc7f6027": {"cpu_count": 4, "memory_kb": 3932160},
     "//crates/lash:lash__unit_test__fv_de4f0733": {"cpu_count": 4, "memory_kb": 3932160},
+    "//crates/lash:lash__unit_test__fv_f554e6b8": {"cpu_count": 4, "memory_kb": 3932160},
     "//crates/lash:lash__unit_test__fv_ffa14dec": {"cpu_count": 4, "memory_kb": 3932160},
     "//crates/lash:lash__unit_test__fv_ffd53ed5": {"cpu_count": 4, "memory_kb": 3932160},
     "//crates/lash:llm_profiles__test": {"cpu_count": 2, "memory_kb": 786432},

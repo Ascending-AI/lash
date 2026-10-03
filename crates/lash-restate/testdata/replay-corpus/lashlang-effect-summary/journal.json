@@ -1,6 +1,6 @@
 {
   "scenario": "lashlang-effect-summary",
-  "generation": "5ce8cac5b0d1",
+  "generation": "76790e7f2fff",
   "journal": [
     {
       "name": "lash:plugin-transition",
@@ -133,6 +133,44 @@
       }
     },
     {
+      "name": "lash:p_00000000000070008000000000000001:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:request",
+      "body": {
+        "effect": {
+          "Ok": {
+            "effect_journal_version": 16,
+            "envelope": {
+              "hash": "2e608e0a825980498d6677b488c107d2b27b5c8534cc6fc025ae92e89531ada0",
+              "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"p_00000000000070008000000000000001:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:request\"},\"effect_id\":\"p_00000000000070008000000000000001:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:request\"},\"command\":{\"type\":\"language_runtime_value\",\"operation\":\"retain-tool-request\"}}"
+            },
+            "outcome": {
+              "Ok": {
+                "type": "language_runtime_value",
+                "value": {
+                  "context": {},
+                  "owner": {
+                    "kind": "process",
+                    "process_id": "p_00000000000070008000000000000001"
+                  },
+                  "payload": {
+                    "args": {
+                      "line": "summary"
+                    },
+                    "call_id": "tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e",
+                    "provider_call_id": null,
+                    "tool_name": "recovery_count"
+                  },
+                  "payload_digest": "unadmitted-tool-request:v1:blake3:f600a028b7d3ad3d8532de79408872cb32a2a1fdf5d4d548f97a33727cc4f844",
+                  "request_key": "p_00000000000070008000000000000001:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e",
+                  "requested_at_ms": 1791043542487,
+                  "scope": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "lash:lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:attempt:1",
       "body": {
         "effect": {
@@ -235,6 +273,26 @@
                   "version": 3
                 },
                 "type": "present_tool_result"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "lash:p_00000000000070008000000000000001:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:completion",
+      "body": {
+        "effect": {
+          "Ok": {
+            "effect_journal_version": 16,
+            "envelope": {
+              "hash": "225393bdf5d0b80854a205b9184287b03f89932145c1243089d4992b7ea6f56c",
+              "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"p_00000000000070008000000000000001:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:completion\"},\"effect_id\":\"p_00000000000070008000000000000001:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:completion\"},\"command\":{\"type\":\"language_runtime_value\",\"operation\":\"retain-tool-completion\"}}"
+            },
+            "outcome": {
+              "Ok": {
+                "type": "language_runtime_value",
+                "value": null
               }
             }
           }

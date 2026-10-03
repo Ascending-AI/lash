@@ -39,8 +39,8 @@
 //!
 //! The kernel owns what a shift admits and how a run executes; these handlers
 //! only give each step its journal. The run's admission step repairs orphaned
-//! inputs and records its admission. Its `InspectAdmittedHead` step records the
-//! store-backed decision about the admitted head, and a follow-on recovery
+//! inputs and records its admission together with the store-backed decision
+//! about the admitted head, and a follow-on recovery
 //! run's `RecoverFollowOn` step records its recovery decision. On replay the
 //! steps return their recorded outcomes: the inspection's live check runs only when its
 //! step is the attempt's live frontier, and a replay honours its recorded

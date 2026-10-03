@@ -106,7 +106,7 @@ Replay reconstructs the admitted state rather than selecting from the live
 head. A base the store cannot retain refuses `TurnBaseNotRetained` and parks.
 An unfinished run keeps ownership of its admitted head until terminal evidence.
 
-`InspectAdmittedHead` records one of these verdicts:
+`AdmitRun` also records the head inspection in that outcome:
 
 - `Ready` reconstructs the admission's base, including when the run already
   has a committed turn.

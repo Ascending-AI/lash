@@ -863,12 +863,42 @@ impl RunTurns {
     }
 }
 
+/// The first execution's decision about the head a run admitted, by how
+/// the live head stands against the admission's base when no final commit
+/// of the run is behind it (FIG-3824, FIG-4200, FIG-4201). The head is
+/// bound to the run alone (FIG-3927), so no other shift can have answered
+/// it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdmittedHeadVerdict {
+    /// The head is the admission's base, or the run's final commit moved
+    /// it: shift the run from the base.
+    Ready,
+    /// The run's own commits moved the head past the admission's base, to
+    /// `head`: a context-pressure frame or another commit the run made
+    /// before its final one, which a fresh journal no longer records. The
+    /// bound turn owns the head, so the run continues from `head`, its own
+    /// frame, and never meets it as another writer's (FIG-4201).
+    Advanced { head: SessionHeadRef },
+    /// Another writer committed past the admission's base, to a higher
+    /// revision: ordinary head overtaking. The run can never commit on the
+    /// base it was admitted on, so it ends typed `StoreCommitSuperseded`.
+    Overtaken { live_revision: u64 },
+    /// The live head is inconsistent with the admission's base: a lower
+    /// revision, or the same revision with another leaf or checkpoint. The
+    /// run parks for an operator.
+    Diverged { live_revision: u64 },
+}
+
 /// The recorded outcome of a run's `AdmitRun` step.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum RunAdmissionAnswer {
     /// The admission reached its head: shift it.
-    Admitted { admission: Box<RunAdmission> },
+    Admitted {
+        admission: Box<RunAdmission>,
+        head_verdict: AdmittedHeadVerdict,
+    },
     /// The head cannot be executed by this run, which cedes.
     Refused { refusal: RunAdmissionRefusal },
 }

@@ -78,7 +78,6 @@ pub enum RuntimeEffectKind {
     /// never re-reads pending rows.
     AdmitRun,
     /// The recorded decision about an admitted run's head.
-    InspectAdmittedHead,
     /// A turn's recorded read, at a quiet point, of whether the build its
     /// invocation runs on is draining (FIG-4739): the fact its segment
     /// boundary is decided from, so a replay ends the turn where its first
@@ -160,7 +159,6 @@ impl RuntimeEffectKind {
             Self::ExecCode => "exec_code",
             Self::AcceptTurnInput => "accept_turn_input",
             Self::AdmitRun => "admit_run",
-            Self::InspectAdmittedHead => "inspect_admitted_head",
             Self::ObserveDrainMark => "observe_drain_mark",
             Self::PluginCallbacks => "plugin_callbacks",
             Self::RecoverFollowOn => "recover_follow_on",

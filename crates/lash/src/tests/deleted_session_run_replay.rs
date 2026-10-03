@@ -13,7 +13,7 @@
 //! Three runs meet the deletion:
 //!
 //! - **input**: an input-headed run that journaled its admission
-//!   (`shift-admit`) and died before its head inspection (`shift-head`);
+//!   (`shift-admit`) and died before its plugin transition;
 //! - **command**: a command run that journaled its first read of the
 //!   session's command lane (`session-command-run:0`), applied the command
 //!   off the journal, and died before its next read;
@@ -62,7 +62,7 @@ enum Storage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Work {
     /// An input-headed run: its first attempt journals its admission
-    /// (`shift-admit`) and dies before its head inspection (`shift-head`).
+    /// (`shift-admit`) and dies before its plugin transition.
     Input,
     /// A command run applying a queued session command: its first attempt
     /// journals its first read of the command lane (`session-command-run:0`),
@@ -433,11 +433,11 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
     let (crash, run_names, steps) = match work {
         Work::Input => (
             lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRun {
-                name: format!("lash:shift-head:{run}"),
+                name: format!("lash:plugin-transition:{run}"),
             })
             .key(lash_restate::turn_workflow_key(&session_id, &run)),
             run.to_string(),
-            vec!["shift-admit:", "shift-head:"],
+            vec!["shift-admit:", "plugin-transition:"],
         ),
         Work::Command => (
             lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRun {
