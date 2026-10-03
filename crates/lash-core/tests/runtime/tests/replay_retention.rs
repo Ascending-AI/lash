@@ -76,7 +76,7 @@ async fn retained_committed_views_keep_their_commit_and_share_the_frame() {
     let views = events
         .iter()
         .filter_map(|event| match &event.payload {
-            SessionObservationEventPayload::Committed { read_view } => Some(read_view),
+            SessionObservationEventPayload::Committed { read_view, .. } => Some(read_view),
             _ => None,
         })
         .collect::<Vec<_>>();

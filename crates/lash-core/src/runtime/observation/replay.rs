@@ -289,6 +289,7 @@ pub enum SessionObservationEventPayload {
     TurnActivity(crate::TurnActivity),
     Committed {
         read_view: crate::SessionReadView,
+        rows: Vec<crate::transcript::TranscriptRowRecord>,
     },
     ResidentChanged {
         read_view: crate::SessionReadView,

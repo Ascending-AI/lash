@@ -10,20 +10,22 @@ impl From<lash_core::MessageRole> for RemoteMessageRole {
         }
     }
 }
-
 impl From<lash_core::PartKind> for RemotePartKind {
     fn from(value: lash_core::PartKind) -> Self {
-        match value {
-            lash_core::PartKind::Text => Self::Text,
-            lash_core::PartKind::Attachment => Self::Attachment,
-            lash_core::PartKind::Code => Self::Code,
-            lash_core::PartKind::Output => Self::Output,
-            lash_core::PartKind::Error => Self::Error,
-            lash_core::PartKind::Prose => Self::Prose,
-            lash_core::PartKind::ToolCall => Self::ToolCall,
-            lash_core::PartKind::ToolResult => Self::ToolResult,
-            lash_core::PartKind::Reasoning => Self::Reasoning,
-        }
+        lash_sansio::core_support::fold_part_kind(
+            value,
+            [
+                Self::Text,
+                Self::Attachment,
+                Self::Code,
+                Self::Output,
+                Self::Error,
+                Self::Prose,
+                Self::ToolCall,
+                Self::ToolResult,
+                Self::Reasoning,
+            ],
+        )
     }
 }
 

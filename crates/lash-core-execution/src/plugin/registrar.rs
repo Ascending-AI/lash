@@ -383,7 +383,7 @@ impl OutputRegistrations<'_> {
         push_registered_hook(
             &mut self.reg.contributions.transcript_row_projectors,
             &self.reg.owner,
-            "transcript_projector",
+            CallbackSlot::TranscriptProjector,
             projector,
         );
     }

@@ -20,9 +20,12 @@ pub(super) fn event_bytes(
     if let Some(turn_id) = &event.turn_id {
         counter.write_all(turn_id.as_bytes()).map_err(byte_error)?;
     }
+    if let SessionObservationEventPayload::Committed { rows, .. } = &event.payload {
+        counter.count(rows)?;
+    }
     match &event.payload {
         SessionObservationEventPayload::TurnActivity(activity) => counter.count(activity)?,
-        SessionObservationEventPayload::Committed { read_view }
+        SessionObservationEventPayload::Committed { read_view, .. }
         | SessionObservationEventPayload::ResidentChanged { read_view } => {
             counter.count(&(
                 read_view.session_id(),

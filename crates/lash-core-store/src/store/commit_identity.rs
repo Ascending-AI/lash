@@ -519,17 +519,10 @@ fn push_attachment_source(
 }
 
 fn push_part_kind(identity: &mut crate::stable_identity::IdentityEncoder, kind: crate::PartKind) {
-    identity.tag(match kind {
-        crate::PartKind::Text => 0,
-        crate::PartKind::Attachment => 1,
-        crate::PartKind::Code => 2,
-        crate::PartKind::Output => 3,
-        crate::PartKind::Error => 4,
-        crate::PartKind::Prose => 5,
-        crate::PartKind::ToolCall => 6,
-        crate::PartKind::ToolResult => 7,
-        crate::PartKind::Reasoning => 8,
-    });
+    identity.tag(lash_sansio::core_support::fold_part_kind(
+        kind,
+        [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    ));
 }
 
 fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crate::Part) {

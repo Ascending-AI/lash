@@ -511,3 +511,30 @@ impl PartCoreSupport for crate::Part {
         crate::Part::render(self)
     }
 }
+
+/// Fold the non-exhaustive host classification inside its owning crate.
+#[doc(hidden)]
+pub fn fold_part_kind<T>(kind: crate::PartKind, variants: [T; 9]) -> T {
+    let [
+        text,
+        attachment,
+        code,
+        output,
+        error,
+        prose,
+        tool_call,
+        tool_result,
+        reasoning,
+    ] = variants;
+    match kind {
+        crate::PartKind::Text => text,
+        crate::PartKind::Attachment => attachment,
+        crate::PartKind::Code => code,
+        crate::PartKind::Output => output,
+        crate::PartKind::Error => error,
+        crate::PartKind::Prose => prose,
+        crate::PartKind::ToolCall => tool_call,
+        crate::PartKind::ToolResult => tool_result,
+        crate::PartKind::Reasoning => reasoning,
+    }
+}

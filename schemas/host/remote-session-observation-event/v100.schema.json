@@ -9989,6 +9989,127 @@
       ],
       "type": "string"
     },
+    "RowContent": {
+      "description": "Protocol-neutral display content. Reasoning and attachments can accompany a\nreply in its one node-backed row; they do not create extra identities.",
+      "properties": {
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/AttachmentRef"
+          },
+          "type": "array"
+        },
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoning": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "success": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/RowTool"
+          },
+          "type": "array"
+        },
+        "tools_omitted": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "text",
+        "reasoning",
+        "attachments",
+        "tools",
+        "tools_omitted"
+      ],
+      "type": "object"
+    },
+    "RowId": {
+      "description": "Opaque row identity. Equality and wire transport do not expose its spelling.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "RowProvenance": {
+      "properties": {
+        "input_id": {
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "is_turn_reply": {
+          "type": "boolean"
+        },
+        "plugin_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_id": {
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "is_turn_reply"
+      ],
+      "type": "object"
+    },
+    "RowTool": {
+      "description": "Display-only tool facts carried by committed nodes, without execution state.",
+      "properties": {
+        "operation": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "status"
+      ],
+      "type": "object"
+    },
     "RunDefinitionRefusal": {
       "additionalProperties": false,
       "description": "Why a registered definition refused to shape a run: deterministic, so it\nis recorded as the run's failure. `refusal` is the definition's own\nrefusal type, serialized, and `message` its display text.",
@@ -11529,6 +11650,17 @@
           "type": "object"
         }
       ]
+    },
+    "SuppressionReason": {
+      "enum": [
+        "non_transcript_node_kind",
+        "protocol_internal",
+        "superseded_by_committed_reply",
+        "no_committed_reply",
+        "empty_content",
+        "unrecognized_protocol_event"
+      ],
+      "type": "string"
     },
     "ToolAdmissionRefusal": {
       "description": "Why admission refused a call before any member of its round started.\n\nOne refused member admits no member: every call of the round answers\nthis refusal, the refused member with its own cause and every sibling\nnaming it.",
@@ -14060,6 +14192,56 @@
         }
       ]
     },
+    "TranscriptRowKind": {
+      "enum": [
+        "user",
+        "assistant_reply",
+        "reasoning",
+        "tool_call",
+        "code_block",
+        "attachment",
+        "event"
+      ],
+      "type": "string"
+    },
+    "TranscriptRowRecord": {
+      "description": "Transportable display data. It has no snapshot ordinal or resume position.",
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/RowContent"
+        },
+        "kind": {
+          "$ref": "#/$defs/TranscriptRowKind"
+        },
+        "provenance": {
+          "$ref": "#/$defs/RowProvenance"
+        },
+        "row_id": {
+          "$ref": "#/$defs/RowId"
+        },
+        "suppressed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SuppressionReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "row_id",
+        "kind",
+        "provenance",
+        "content",
+        "timestamp"
+      ],
+      "type": "object"
+    },
     "TransportSequence": {
       "description": "The transport sequence: each direction numbers its messages from zero,\none apart, so a dropped, duplicated or reordered message is refused.",
       "format": "uint64",
@@ -14476,13 +14658,20 @@
     },
     {
       "properties": {
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/TranscriptRowRecord"
+          },
+          "type": "array"
+        },
         "type": {
           "const": "committed",
           "type": "string"
         }
       },
       "required": [
-        "type"
+        "type",
+        "rows"
       ],
       "type": "object"
     },

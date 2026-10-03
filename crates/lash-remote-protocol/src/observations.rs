@@ -132,7 +132,9 @@ pub enum RemoteSessionObservationEventPayload {
     TurnActivity {
         activity: Box<RemoteTurnActivity>,
     },
-    Committed,
+    Committed {
+        rows: Vec<lash_core_store::transcript::TranscriptRowRecord>,
+    },
     ResidentChanged,
     AgentFrameSwitched {
         frame_id: String,

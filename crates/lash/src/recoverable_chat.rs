@@ -210,7 +210,8 @@ impl Stream for RecoverableChatSubscription {
                     if !self.applied.insert(id.clone()) {
                         continue;
                     }
-                    if let SessionObservationEventPayload::Committed { read_view } = &event.payload
+                    if let SessionObservationEventPayload::Committed { read_view, .. } =
+                        &event.payload
                     {
                         self.applied.clear();
                         self.applied.insert(id.clone());

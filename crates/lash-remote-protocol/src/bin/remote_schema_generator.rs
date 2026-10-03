@@ -205,7 +205,7 @@ mod tests {
                     },
                 }),
             },
-            Payload::Committed,
+            Payload::Committed { rows: Vec::new() },
             Payload::ResidentChanged,
             Payload::AgentFrameSwitched {
                 frame_id: "frame".to_string(),

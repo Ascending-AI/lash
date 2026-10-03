@@ -1699,3 +1699,81 @@ async fn transcript_totally_projects_really_committed_nodes_in_source_order() ->
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn committed_row_deltas_transport_each_new_node_once() -> Result<()> {
+    let double = restate_double(0x1531).await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("transcript-deltas")
+        .created()
+        .await
+        .open()
+        .await?;
+    let mut seen = session
+        .read_view()
+        .transcript()
+        .into_records()
+        .into_iter()
+        .map(|row| row.row_id)
+        .collect::<std::collections::HashSet<_>>();
+    for input in ["first delta question", "second delta question"] {
+        let cursor = session.observe().current_observation().cursor;
+        session.send(TurnInput::text(input)).output().await?;
+        let crate::observe::SessionResume::Replayed { events } =
+            session.observe().resume_from_cursor(&cursor)?
+        else {
+            panic!("the fresh observation cursor must replay");
+        };
+        let mut carried = Vec::new();
+        for event in events {
+            let crate::observe::SessionObservationEventPayload::Committed { rows, .. } =
+                &event.payload
+            else {
+                continue;
+            };
+            let remote = crate::remote::observations::RemoteSessionObservationEvent::from_core(
+                1,
+                event.clone(),
+            )?;
+            let crate::remote::observations::RemoteSessionObservationEventPayload::Committed {
+                rows: transported,
+            } = remote.event
+            else {
+                panic!("commit lost its typed rows");
+            };
+            assert_eq!(&transported, rows);
+            for row in rows {
+                assert!(
+                    seen.insert(row.row_id.clone()),
+                    "a commit repeated an earlier node"
+                );
+                assert!(serde_json::to_value(row)?.get("ordinal").is_none());
+                carried.push(row.clone());
+            }
+        }
+        let canonical = session.read_view().transcript().into_records();
+        assert_eq!(
+            seen.len(),
+            canonical.len(),
+            "every committed node must be carried, including named suppressions"
+        );
+        assert!(
+            carried
+                .iter()
+                .any(|row| row.kind == crate::transcript::TranscriptRowKind::User
+                    && row.content.text == input)
+        );
+        for row in carried {
+            assert_eq!(
+                canonical
+                    .iter()
+                    .find(|candidate| candidate.row_id == row.row_id),
+                Some(&row)
+            );
+        }
+    }
+    Ok(())
+}

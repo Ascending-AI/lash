@@ -247,6 +247,20 @@ impl ReferenceTransport {
     }
 
     fn fold_event(&mut self, event: &RemoteSessionObservationEvent) {
+        if let RemoteSessionObservationEventPayload::Committed { rows } = &event.event {
+            for record in rows
+                .iter()
+                .filter(|record| record.suppressed.is_none() && record.provenance.is_turn_reply)
+            {
+                let Some(turn_id) = &record.provenance.turn_id else {
+                    continue;
+                };
+                let row = self.outputs.entry(turn_id.clone()).or_default();
+                row.settled_text = Some(record.content.text.clone());
+                row.provisional_prose.clear();
+            }
+            return;
+        }
         let Some(turn_id) = event.turn_id.clone() else {
             return;
         };

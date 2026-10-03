@@ -435,8 +435,22 @@ impl RuntimeHandle {
             authority_fingerprint,
         );
         let payload = if previous.revision < revision {
+            let previous_rows = previous
+                .read_view
+                .transcript()
+                .into_records()
+                .into_iter()
+                .map(|row| row.row_id)
+                .collect::<std::collections::HashSet<_>>();
+            let rows = read_view
+                .transcript()
+                .into_records()
+                .into_iter()
+                .filter(|row| !previous_rows.contains(&row.row_id))
+                .collect();
             Some(SessionObservationEventPayload::Committed {
                 read_view: read_view.clone(),
+                rows,
             })
         } else if force_resident || previous.authority_fingerprint != next.authority_fingerprint {
             Some(SessionObservationEventPayload::ResidentChanged {

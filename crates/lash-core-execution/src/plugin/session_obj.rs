@@ -603,7 +603,8 @@ impl PluginSession {
     }
 
     pub fn transcript_options(&self) -> lash_core_store::transcript::TranscriptProjectionOptions {
-        self.contributions
+        self.capabilities()
+            .contributions
             .transcript_row_projectors
             .iter()
             .fold(Default::default(), |options, entry| {

@@ -137,10 +137,8 @@ impl RemoteSessionObservationEvent {
                     activity: Box::new(RemoteTurnActivity::from_core(sequence, activity.clone())?),
                 }
             }
-            // The committed read view is a local handle; only the commit
-            // signal itself crosses the wire.
-            lash_core::SessionObservationEventPayload::Committed { read_view: _ } => {
-                RemoteSessionObservationEventPayload::Committed
+            lash_core::SessionObservationEventPayload::Committed { rows, .. } => {
+                RemoteSessionObservationEventPayload::Committed { rows: rows.clone() }
             }
             // Resident replacements are also signal-only; the authoritative
             // read view remains a local handle and must be refetched by the peer.

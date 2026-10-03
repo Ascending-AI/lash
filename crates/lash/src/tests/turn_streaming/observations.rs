@@ -1382,7 +1382,7 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
         })
         .expect("durable transition emitted Committed");
     assert_eq!(committed.revision(), lash_core::SessionRevision::new(1));
-    let lash_core::SessionObservationEventPayload::Committed { read_view } = &committed.payload
+    let lash_core::SessionObservationEventPayload::Committed { read_view, .. } = &committed.payload
     else {
         unreachable!()
     };

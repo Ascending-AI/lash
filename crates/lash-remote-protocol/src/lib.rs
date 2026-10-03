@@ -316,7 +316,11 @@ pub use usage_activity::*;
 /// version_guard(
 ///     shapes(
 ///         path = "crates/lash-remote-protocol/src/*.rs",
-///         cover(RemoteLlmRequest, RemoteProcessInput, RemoteTurnEvent, RemoteTurnReport),
+///         cover(RemoteLlmRequest, RemoteProcessInput, RemoteTurnEvent, RemoteTurnReport, RemoteSessionObservationEvent),
+///     ),
+///     shapes(
+///         path = "crates/lash-core-store/src/transcript/mod.rs",
+///         cover(TranscriptRowRecord),
 ///     ),
 /// )
 /// version_surface = "coexist"

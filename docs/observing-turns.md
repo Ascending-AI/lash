@@ -12,6 +12,27 @@ checkpointed state. A cancelled tool batch can itself be checkpointed, so the
 marker decides the cut. The marker is live-only: like every other turn
 activity, it is absent from durable history.
 
+## Placing committed rows
+
+A live activity is provisional. `Committed { rows, .. }` supplies the new
+canonical records for that commit, including named suppressions; it never
+repeats the earlier transcript. The remote event transports the same `rows`
+and omits the local read view. Replace the preview for each record's typed
+turn provenance, then style its neutral content. Read `durable.transcript()`
+for a complete retained transcript after reconnecting across a replay gap.
+
+```rust,ignore
+if let lash::observe::SessionObservationEventPayload::Committed { rows, .. } = &event.payload {
+    for row in rows.iter().filter(|row| row.suppressed.is_none()) {
+        place_row(row); // the host's presentation adapter
+    }
+}
+```
+
+`row_id` supports equality and transport. A snapshot's `RowOrdinal` supports
+ordering only: it is absent from the row record and cannot be persisted or
+used as a cursor.
+
 ## A stopped turn's tail: the live stream is the contract
 
 Lash keeps no durable record of what a stopped turn streamed after its last
