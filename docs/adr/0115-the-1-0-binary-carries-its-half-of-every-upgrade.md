@@ -256,7 +256,12 @@ records `[1,1]`; any other format refuses `PluginWriterUnprovisioned`.
 
 Only finalize moves a recorded range, in the transaction that moves `F`: each
 registered plugin's range rises to its native format and keeps its floor, so
-history stays readable through the plugin's migrate steps. A finalize that
+history stays readable through the plugin's migrate steps. A recorded range
+never contracts after finalize: a `[1,2]` range stays `[1,2]` rather than
+contracting to `[2,2]` once the older format's writers drain, an accepted
+simplification of the design's post-drain contraction (FIG-4858). An
+admission already recorded under an older format may still write it; every
+new admission selects the maximum common version (§2.6). A finalize that
 would change a range while `F` already is the build's epoch refuses
 `PluginRangesNeedEpochMove` and changes nothing. SQLite's sealed intent
 carries the moved ranges, so the open that completes a crashed finalize needs
