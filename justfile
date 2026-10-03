@@ -920,3 +920,7 @@ loadtest-chart-check:
   python3 "{{repo}}/scripts/test_loadtest_upgrade.py"
   python3 "{{repo}}/scripts/test_loadtest_manifest.py"
   python3 "{{repo}}/scripts/test_loadtest_repro.py"
+
+# Deterministic DOM/API/SQL transcript acceptance (Surfaces A-E).
+workbench-transcript-projection-e2e:
+  uv run --script "{{repo}}/scripts/workbench-transcript-projection-e2e.py"

@@ -556,32 +556,26 @@ mod tests {
         );
 
         let read_view = turn.result.state.read_view();
+        let transcript = read_view.transcript();
         assert_eq!(
-            read_view.messages().len(),
+            transcript
+                .visible()
+                .filter(|row| row.kind == lash_core::transcript::TranscriptRowKind::User)
+                .count(),
             1,
-            "a final-value turn settles exactly one user transcript message"
+            "one admitted input produces one canonical user row"
         );
-        let extraction_decisions = read_view
-            .active_events()
-            .iter()
-            .filter_map(|event| match event {
-                lash_core::SessionHistoryRecord::Protocol(event) => {
-                    match lash_protocol_rlm::decode_rlm_protocol_event(event) {
-                        Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                            if diagnostic.phase == "llm_extraction" =>
-                        {
-                            diagnostic
-                                .payload
-                                .get("decision")
-                                .and_then(serde_json::Value::as_str)
-                                .map(str::to_string)
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        assert_eq!(
+            transcript
+                .visible()
+                .filter(|row| row.provenance.is_turn_reply)
+                .map(|row| row.content.text.as_str())
+                .collect::<Vec<_>>(),
+            ["settled"],
+            "the final value has exactly one committed marked reply"
+        );
+        let extraction_decisions =
+            lash_protocol_rlm::recorded_extraction_decisions(read_view.active_events());
         assert_eq!(extraction_decisions, vec!["execute_typescript"]);
         assert_eq!(
             extraction_decisions

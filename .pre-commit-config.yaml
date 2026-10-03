@@ -63,6 +63,13 @@ repos:
         files: '\.rs$'
         pass_filenames: false
 
+      - id: transcript-projection-boundary
+        name: transcript projection boundary
+        language: system
+        entry: python3 scripts/check_transcript_projection.py
+        files: '^(crates/.*\.rs|examples/|scripts/(check_transcript_projection\.py|transcript-projection-sites\.toml))'
+        pass_filenames: false
+
       # Mirrors CI Lint "Check substrate boundary" — includes the
       # shift-determinism ratchet (FIG-3672), whose allowlist can only shrink.
       - id: substrate-boundary

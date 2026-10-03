@@ -5,8 +5,8 @@ pub use failure::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
 };
 pub use message::{
-    BaseRenderCache, InvalidPartCombination, Message, MessageRole, MessageSequence, Part,
-    PartAttachment, PartKind, RenderedPrompt, append_rendered_prompt,
+    BaseRenderCache, InternalPartKind, InvalidPartCombination, Message, MessageRole,
+    MessageSequence, Part, PartAttachment, PartKind, RenderedPrompt, append_rendered_prompt,
     messages_are_prompt_resume_safe, render_prompt, render_transcript_prompt, shared_parts,
 };
 

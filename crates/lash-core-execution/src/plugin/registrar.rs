@@ -379,13 +379,18 @@ impl OutputRegistrations<'_> {
         )
     }
 
-    pub fn transcript_projector(self, projector: Arc<dyn TranscriptRowProjectorPlugin>) {
-        push_registered_hook(
+    pub fn transcript_projector(
+        self,
+        key: HookKey,
+        projector: Arc<dyn TranscriptRowProjectorPlugin>,
+    ) -> Result<(), PluginError> {
+        push_keyed_hook(
             &mut self.reg.contributions.transcript_row_projectors,
             &self.reg.owner,
             CallbackSlot::TranscriptProjector,
+            key,
             projector,
-        );
+        )
     }
 
     pub fn assistant_prose_projector(

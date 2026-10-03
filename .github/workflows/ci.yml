@@ -476,6 +476,7 @@ jobs:
       - name: Test repository scripts
         run: |
           bash scripts/ci/run-gate-commands.sh --jobs 4 --discover <<'GATES'
+          python3 scripts/check_transcript_projection.py
           python3 scripts/check_worker_wire_schema.py
           bash scripts/check-loadtest-chart.sh
           python3 scripts/check_feature_coverage.py check
@@ -1351,6 +1352,9 @@ jobs:
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh
 
+      - name: Check transcript projection boundary
+        run: python3 scripts/check_transcript_projection.py
+
       - name: Check law tick lanes
         run: python3 scripts/check_law_tick_lanes.py
 
@@ -2218,7 +2222,7 @@ jobs:
       RUN_FUNCTIONAL_E2E: >-
         ${{ (github.event_name == 'workflow_dispatch' && matrix.name != 'agent-workbench')
         || (github.event_name == 'pull_request'
-        && (matrix.name == 'agent-service' || matrix.name == 'agent-workbench')) }}
+        && (matrix.name == 'agent-service' || matrix.name == 'agent-workbench' || matrix.name == 'agent-workbench-transcript')) }}
 
     strategy:
       fail-fast: false
@@ -2239,6 +2243,14 @@ jobs:
             browser: false
             buck2: true
             restate: true
+            runner: ubuntu-24.04
+          - name: agent-workbench-transcript
+            recipe: workbench-transcript-projection-e2e
+            node: false
+            artifact: transcript-projection
+            browser: true
+            buck2: true
+            restate: false
             runner: ubuntu-24.04
           - name: workflow-graph-roundtrip
             recipe: workflow-graph-integration-verify

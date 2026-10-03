@@ -1,5 +1,5 @@
 //! The canonical rendering of retained committed nodes. Live observations are
-//! provisional; only these rows are placed committed history.
+//! provisional; only these rows describe committed history.
 
 use crate::{
     InputId, Message, MessageOrigin, MessageRole, NodeId, PartKind, ProtocolEvent,
@@ -126,20 +126,20 @@ impl TranscriptRow {
 /// The answer of a protocol's pure row projection. Core owns identities,
 /// timestamps and reply provenance; extensions only supply display content.
 #[derive(Clone, Debug)]
-pub enum TranscriptDisposition {
+pub enum TranscriptProjectionOutcome {
     Render {
         kind: TranscriptRowKind,
-        content: RowContent,
+        content: Box<RowContent>,
     },
     Suppress(SuppressionReason),
 }
 
 /// Render-side protocol extension, usable without restoring a live session.
 pub trait TranscriptRowProjectorPlugin: Send + Sync {
-    fn project_message(&self, _message: &Message) -> Option<TranscriptDisposition> {
+    fn project_message(&self, _message: &Message) -> Option<TranscriptProjectionOutcome> {
         None
     }
-    fn project_event(&self, event: &ProtocolEvent) -> Option<TranscriptDisposition>;
+    fn project_event(&self, event: &ProtocolEvent) -> Option<TranscriptProjectionOutcome>;
 }
 
 #[derive(Clone, Default)]
@@ -170,10 +170,7 @@ impl TranscriptProjection {
         options: &TranscriptProjectionOptions,
     ) -> Self {
         use crate::session_graph::facade_ops::SessionGraphFacadeOps;
-        Self::from_records(
-            view.session_graph().active_path_nodes().into_iter(),
-            options,
-        )
+        Self::from_records(view.session_graph().active_path_nodes(), options)
     }
     /// Fold retained committed records in source order, across frame boundaries.
     pub fn from_records<'a>(
@@ -188,7 +185,9 @@ impl TranscriptProjection {
                 let mut provenance = RowProvenance::default();
                 let disposition = match &node.payload {
                     SessionNodePayload::FrameOpen { .. } | SessionNodePayload::Plugin { .. } => {
-                        TranscriptDisposition::Suppress(SuppressionReason::NonTranscriptNodeKind)
+                        TranscriptProjectionOutcome::Suppress(
+                            SuppressionReason::NonTranscriptNodeKind,
+                        )
                     }
                     SessionNodePayload::Event {
                         event: SessionHistoryRecord::Protocol(event),
@@ -199,7 +198,7 @@ impl TranscriptProjection {
                             .projectors
                             .iter()
                             .find_map(|p| p.project_event(event))
-                            .unwrap_or(TranscriptDisposition::Suppress(
+                            .unwrap_or(TranscriptProjectionOutcome::Suppress(
                                 SuppressionReason::UnrecognizedProtocolEvent,
                             ))
                     }
@@ -241,9 +240,18 @@ impl TranscriptProjection {
                         }
                     }
                 };
+                let disposition = match disposition {
+                    TranscriptProjectionOutcome::Render {
+                        kind: TranscriptRowKind::AssistantReply,
+                        ..
+                    } if !provenance.is_turn_reply => {
+                        TranscriptProjectionOutcome::Suppress(SuppressionReason::NoCommittedReply)
+                    }
+                    disposition => disposition,
+                };
                 let (kind, content, suppressed) = match disposition {
-                    TranscriptDisposition::Render { kind, content } => (kind, content, None),
-                    TranscriptDisposition::Suppress(reason) => (
+                    TranscriptProjectionOutcome::Render { kind, content } => (kind, *content, None),
+                    TranscriptProjectionOutcome::Suppress(reason) => (
                         TranscriptRowKind::Event,
                         RowContent::default(),
                         Some(reason),
@@ -286,9 +294,9 @@ impl TranscriptProjection {
     }
 }
 
-fn project_message(message: &Message) -> TranscriptDisposition {
+fn project_message(message: &Message) -> TranscriptProjectionOutcome {
     if message.is_transient() || message.role == MessageRole::System {
-        return TranscriptDisposition::Suppress(SuppressionReason::ProtocolInternal);
+        return TranscriptProjectionOutcome::Suppress(SuppressionReason::ProtocolInternal);
     }
     let mut content = RowContent::default();
     let mut text = Vec::new();
@@ -325,7 +333,30 @@ fn project_message(message: &Message) -> TranscriptDisposition {
     {
         TranscriptRowKind::ToolCall
     } else {
-        return TranscriptDisposition::Suppress(SuppressionReason::NoCommittedReply);
+        return TranscriptProjectionOutcome::Suppress(SuppressionReason::NoCommittedReply);
     };
-    TranscriptDisposition::Render { kind, content }
+    TranscriptProjectionOutcome::Render {
+        kind,
+        content: Box::new(content),
+    }
 }
+
+// New variants must acquire a projection or an explicit suppression before
+// the vocabulary can grow. These matches compile in the enum's owning crate.
+const _: fn(TranscriptRowKind) = |kind| match kind {
+    TranscriptRowKind::User
+    | TranscriptRowKind::AssistantReply
+    | TranscriptRowKind::Reasoning
+    | TranscriptRowKind::ToolCall
+    | TranscriptRowKind::CodeBlock
+    | TranscriptRowKind::Attachment
+    | TranscriptRowKind::Event => (),
+};
+const _: fn(SuppressionReason) = |reason| match reason {
+    SuppressionReason::NonTranscriptNodeKind
+    | SuppressionReason::ProtocolInternal
+    | SuppressionReason::SupersededByCommittedReply
+    | SuppressionReason::NoCommittedReply
+    | SuppressionReason::EmptyContent
+    | SuppressionReason::UnrecognizedProtocolEvent => (),
+};

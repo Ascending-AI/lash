@@ -19,27 +19,9 @@ assert.ok(
   triggerIdentities,
   "LASH_WORKBENCH_TRIGGER_IDENTITIES must come from the Rust projection gate",
 );
-const stopReceipt = {
-  accepted: true,
-  cancellations: [{
-    terminal: {
-      status: "committed",
-      outcome: {
-        stopped: {
-          cancelled: {
-            evidence: {
-              request_id: "workbench-stop-browser-projection",
-              origin: "user",
-              reason: "workbench Stop control",
-              mode: "after_step",
-              honoured_after_step: 0,
-            },
-          },
-        },
-      },
-    },
-  }],
-};
+const stopTerminal = JSON.parse(process.env.LASH_WORKBENCH_STOP_TERMINAL ?? "null");
+assert.ok(stopTerminal, "Stop terminal must come from the Rust projection gate");
+const stopReceipt = { accepted: true, cancellations: [{ terminal: stopTerminal }] };
 const multiAttachmentMessage = JSON.parse(
   process.env.LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE ?? "null",
 );
@@ -3832,7 +3814,6 @@ test("execution scorecard renders typed retry decisions and policy evidence", ()
     "typed-retries #3 failed · retry declined · retry cause retry_after_exceeds_cap",
   ].join("\n"));
 });
-
 
 
 test("canonical reply adoption removes only the matching typed preview", () => {

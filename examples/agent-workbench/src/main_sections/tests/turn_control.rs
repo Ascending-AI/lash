@@ -278,11 +278,21 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     ))
     .await
     .expect("load state snapshot");
-    assert!(snapshot.messages.iter().any(|message| {
-        message.id == format!("fixture-user:{}", &TurnId::from("running-turn"))
-            && message.role == "user"
-            && message.text == "restored active prompt"
-    }));
+    assert_eq!(
+        snapshot
+            .messages
+            .iter()
+            .filter(|message| {
+                matches!(
+                    &message.provenance,
+                    Some(ChatMessageProvenance::TurnInput { turn_id: owner }) if owner == turn_id
+                ) && message.role == "user"
+                    && message.text == "restored active prompt"
+            })
+            .count(),
+        1,
+        "typed turn provenance must restore exactly one UI-owned prompt row"
+    );
     assert_eq!(snapshot.pending_turn_inputs.len(), 3);
     assert_eq!(
         snapshot.pending_turn_inputs[0].input.input_id,
@@ -558,11 +568,12 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
             "dangling-turn".to_string(),
             "turn route cleared · terminal outcome unknown".to_string(),
         )],
-        "the timeline renders the disclosure from the same transcript it renders every other row from"
+        "the timeline receives the typed host disclosure alongside canonical rows"
     );
     assert!(
-        ui::INDEX_HTML.contains("if (row.type === \"note\" && !renderedMessages.has(row.id))"),
-        "the timeline must render a projected note row"
+        ui::INDEX_HTML.contains("for (const terminal of state.unknown_turn_terminals || [])")
+            && ui::INDEX_HTML.contains("renderNote(terminal.note)"),
+        "the timeline must render the disclosed host note"
     );
 
     let traces = lash::tracing::parse_jsonl_records::<Value>(

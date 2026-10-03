@@ -137,11 +137,6 @@ pub use lash_lashlang_runtime::{
 pub use lash_lashlang_runtime::{
     LashlangProcessAdmissionRefusal, LashlangRuntimeError, ToolBindingError,
 };
-/// The typed read of a recorded RLM protocol event: a host decodes the
-/// [`ProtocolEvent`](crate::persistence::ProtocolEvent) envelope a session's
-/// history stores into the variant it commits, instead of walking the
-/// payload's serialized keys.
-pub use lash_protocol_rlm::decode_rlm_protocol_event;
 /// Identifies the RLM protocol's durable output by its typed message origin.
 pub use lash_protocol_rlm::is_rlm_protocol_output;
 pub use lash_protocol_rlm::{
@@ -180,7 +175,7 @@ pub use lash_protocol_rlm::{
 /// runtime configuration; durable session seeds use [`RlmSeed`].
 pub use lash_protocol_rlm::{RlmProjectedBindings, RlmSeed, rlm_session_projection_extension};
 pub use lash_render::{RenderParams, RenderParamsPatch};
-/// The committed RLM event variants [`decode_rlm_protocol_event`] returns and
+/// The committed RLM event variants the protocol owns and
 /// the record types their fields name.
 pub use lash_rlm_types::{
     CellOutcome, HistoryCellOutcome, RlmAssistantContent, RlmDiagnosticEvent, RlmExecutedCall,
@@ -281,3 +276,5 @@ pub use lash_vm_client::{
     RunInput, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence,
     VmContractComponent, VmLimits, VmOwner, VmStateKind, WorkerDeploymentFault, WorkerLimit,
 };
+
+pub use lash_protocol_rlm::recorded_extraction_decisions;

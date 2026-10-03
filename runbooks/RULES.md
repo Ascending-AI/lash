@@ -350,33 +350,21 @@ the failure is upstream of anything you would judge — Abort/RCA, don't score t
 UI and backend must agree; a rendered board the board endpoint contradicts, or an inbox
 card that disagrees with the inbox API, is a contract violation → Abort/RCA.
 
-## Three-layer cross-check (workbench scenarios)
+## Transcript projection gate (workbench scenarios)
 
-Self-consistency inside one layer is not evidence. For every scenario step that changes the
-conversation, reconcile all three layers before scoring it:
+The deterministic transcript gate reconciles graph nodes, canonical rows,
+`/api/state`, and quiescent rendered DOM pairwise. It covers the former
+Surfaces A–E, including reasoning, successful and failed code, nested tool
+summaries, terminal values, retry retraction, attachments, and reload.
+`scripts/check_transcript_projection.py` inventories both raw-history reads and
+turn-output selectors; `scripts/transcript_projection_harness.mjs` executes the
+registered production renderer blocks. A new renderer needs an explicit
+registry disposition and harness coverage.
 
-1. **Rendered DOM** — the rows a user actually sees, counted per role.
-2. **Durable state** — the session graph's committed messages plus the app's own projection
-   surfaces (`/api/state`, the product-event log).
-3. **Logs** — the workbench trace, counted as executions (one completed turn per submitted
-   send or wake).
-
-Reconcile them **pairwise**, as counts and identities, not as a vibe: the same step must
-produce the same number of user rows, assistant rows, committed messages, projected
-messages, and turn executions across all three. **Any pairwise mismatch is a FAIL**, even
-when each layer is internally consistent — a duplicated render over a single durable
-message and a doubled durable commit under a single execution are both projection defects,
-and only the cross-check separates them. When they disagree, record which layers agreed and
-which did not; that split is the diagnosis, so never normalize it away.
-
-One tool-level split is deliberate and must be scored as agreement, not an Abort: when a
-leaf provider returns successfully but a declared `shell.write` or `processes.cancel`
-command is refused during journal-first realization, the immutable `ToolAttempt` frame and
-its per-attempt trace row retain the provider's pre-realization value. The recorded typed
-intent outcome and the projected turn/API/DOM tool result carry the refusal. Require the
-same call identity, the exact typed refusal code/message, and one attempt plus one intent
-outcome; any different split, duplicate, missing row, or disagreement among the projected
-turn/API/DOM surfaces remains a contract violation → Abort/RCA.
+The judged layer keeps real-provider Phases 0–4. It judges whether replies fit
+the request and whether the product remains understandable. Counts, identities,
+suppression, and projection parity belong to the scripted gate. A disagreement
+found during a judged run remains an Abort/RCA; never normalize it away.
 
 ## When to STOP (Abort triggers)
 

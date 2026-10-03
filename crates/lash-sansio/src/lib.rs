@@ -164,13 +164,13 @@ pub use session::{
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, BoundaryReason, ConversationRecord, ErrorEnvelope,
-    FailureCode, HostNamespace, InvalidNamespace, MaxToolCalls, Message, MessageRole,
-    MessageSequence, Namespace, NoProgressBudget, Part, PartAttachment, PartKind, ProtocolEvent,
-    RenderedPrompt, SessionAppendNode, SessionHistoryRecord, SessionStreamEvent, StreamMessageKind,
-    TokenUsage, TokenUsageOverflow, ToolCallLimitExceeded, ToolCallLimitScope, TurnBudget,
-    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnFailureCode,
-    TurnFailureKind, TurnFinish, TurnOutcome, TurnStop, messages_are_prompt_resume_safe,
-    same_history_record, shared_parts,
+    FailureCode, HostNamespace, InternalPartKind, InvalidNamespace, MaxToolCalls, Message,
+    MessageRole, MessageSequence, Namespace, NoProgressBudget, Part, PartAttachment, PartKind,
+    ProtocolEvent, RenderedPrompt, SessionAppendNode, SessionHistoryRecord, SessionStreamEvent,
+    StreamMessageKind, TokenUsage, TokenUsageOverflow, ToolCallLimitExceeded, ToolCallLimitScope,
+    TurnBudget, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence,
+    TurnFailureCode, TurnFailureKind, TurnFinish, TurnOutcome, TurnStop,
+    messages_are_prompt_resume_safe, same_history_record, shared_parts,
 };
 pub use standard_batch::BatchResultRow;
 pub use tool_call_id::{

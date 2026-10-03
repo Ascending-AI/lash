@@ -2981,9 +2981,15 @@ class WorkflowRegistrationTests(unittest.TestCase):
         self.assertNotIn("pull_request", consumer["if"])
         self.assertEqual(["process-operations"],
                          [leg["name"] for leg in consumer["strategy"]["matrix"]["include"]])
-        self.assertEqual({"agent-service", "agent-workbench", "workflow-graph-roundtrip",
+        self.assertEqual({"agent-service", "agent-workbench", "agent-workbench-transcript", "workflow-graph-roundtrip",
                           "slack-clone-full-host"},
                          {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
+        transcript = next(leg for leg in other["strategy"]["matrix"]["include"]
+                          if leg["name"] == "agent-workbench-transcript")
+        self.assertEqual("workbench-transcript-projection-e2e", transcript["recipe"])
+        self.assertTrue(transcript["browser"])
+        self.assertTrue(transcript["buck2"])
+        self.assertFalse(transcript["restate"])
         self.assertFalse(any("worker binaries" in step.get("name", "") for step in other["steps"]))
         self.assertTrue(any(step.get("name") == "Download worker binaries" for step in consumer["steps"]))
 

@@ -1,12 +1,12 @@
 use lash_core::transcript::{
-    RowContent, RowTool, SuppressionReason, TranscriptDisposition, TranscriptRowKind,
+    RowContent, RowTool, SuppressionReason, TranscriptProjectionOutcome, TranscriptRowKind,
     TranscriptRowProjectorPlugin,
 };
 use lash_rlm_types::RlmProtocolEvent;
 
 pub(crate) struct RlmTranscriptProjector;
 impl TranscriptRowProjectorPlugin for RlmTranscriptProjector {
-    fn project_message(&self, message: &lash_core::Message) -> Option<TranscriptDisposition> {
+    fn project_message(&self, message: &lash_core::Message) -> Option<TranscriptProjectionOutcome> {
         if !super::context::is_rlm_protocol_output(message.origin.as_ref()) {
             return None;
         }
@@ -18,18 +18,21 @@ impl TranscriptRowProjectorPlugin for RlmTranscriptProjector {
             .filter(|text| !text.trim().is_empty())
             .collect::<Vec<_>>();
         Some(if reasoning.is_empty() {
-            TranscriptDisposition::Suppress(SuppressionReason::SupersededByCommittedReply)
+            TranscriptProjectionOutcome::Suppress(SuppressionReason::SupersededByCommittedReply)
         } else {
-            TranscriptDisposition::Render {
+            TranscriptProjectionOutcome::Render {
                 kind: TranscriptRowKind::Reasoning,
-                content: RowContent {
+                content: Box::new(RowContent {
                     reasoning,
                     ..Default::default()
-                },
+                }),
             }
         })
     }
-    fn project_event(&self, event: &lash_core::ProtocolEvent) -> Option<TranscriptDisposition> {
+    fn project_event(
+        &self,
+        event: &lash_core::ProtocolEvent,
+    ) -> Option<TranscriptProjectionOutcome> {
         if event.plugin_id != crate::plugin::RLM_PROTOCOL_PLUGIN_ID {
             return None;
         }
@@ -37,12 +40,12 @@ impl TranscriptRowProjectorPlugin for RlmTranscriptProjector {
             Some(RlmProtocolEvent::RlmAssistantContent(content))
                 if !content.reasoning.trim().is_empty() =>
             {
-                TranscriptDisposition::Render {
+                TranscriptProjectionOutcome::Render {
                     kind: TranscriptRowKind::Reasoning,
-                    content: RowContent {
+                    content: Box::new(RowContent {
                         reasoning: vec![content.reasoning],
                         ..Default::default()
-                    },
+                    }),
                 }
             }
             Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) if !step.code.trim().is_empty() => {
@@ -84,9 +87,9 @@ impl TranscriptRowProjectorPlugin for RlmTranscriptProjector {
                         .into(),
                     })
                     .collect();
-                TranscriptDisposition::Render {
+                TranscriptProjectionOutcome::Render {
                     kind: TranscriptRowKind::CodeBlock,
-                    content: RowContent {
+                    content: Box::new(RowContent {
                         language: Some("typescript".into()),
                         code: Some(step.code),
                         output: Some(output),
@@ -96,7 +99,7 @@ impl TranscriptRowProjectorPlugin for RlmTranscriptProjector {
                         tools,
                         tools_omitted: step.calls_omitted,
                         ..Default::default()
-                    },
+                    }),
                 }
             }
             Some(
@@ -105,8 +108,10 @@ impl TranscriptRowProjectorPlugin for RlmTranscriptProjector {
                 | RlmProtocolEvent::RlmGlobalsPatch(_)
                 | RlmProtocolEvent::RlmSeed(_)
                 | RlmProtocolEvent::RlmDiagnostic(_),
-            ) => TranscriptDisposition::Suppress(SuppressionReason::ProtocolInternal),
-            None => TranscriptDisposition::Suppress(SuppressionReason::UnrecognizedProtocolEvent),
+            ) => TranscriptProjectionOutcome::Suppress(SuppressionReason::ProtocolInternal),
+            None => {
+                TranscriptProjectionOutcome::Suppress(SuppressionReason::UnrecognizedProtocolEvent)
+            }
         })
     }
 }

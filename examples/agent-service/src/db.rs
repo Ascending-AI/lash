@@ -30,10 +30,6 @@ pub(crate) struct ChatMessage {
 
 #[cfg(test)]
 impl ChatMessage {
-    pub(crate) fn kind(&self) -> &'static str {
-        self.body.kind()
-    }
-
     pub(crate) fn role(&self) -> &str {
         self.body.role()
     }

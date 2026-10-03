@@ -59,7 +59,9 @@ fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
         .transcript
         .iter()
         .filter_map(|row| {
-            chat_message_from_row(row).map(|message| (message.role.clone(), message.text.clone()))
+            chat_message_from_row(row)
+                .expect("project canonical row")
+                .map(|message| (message.role.clone(), message.text.clone()))
         })
         .collect()
 }

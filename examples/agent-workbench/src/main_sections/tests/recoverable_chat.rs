@@ -642,6 +642,146 @@ fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
     });
 }
 
+async fn durable_browser_projection_fixture()
+-> (ChatMessage, Vec<lash::transcript::TranscriptRowRecord>) {
+    // RLM's printed-image projection can commit more than one stored image
+    // part on a single message. Feed that production projection to the browser
+    // gate so its numbered-alt branch is covered from the real wire shape.
+    let double = crate::tests::test_double_backend(0).await;
+    let state = recoverable_chat_test_state(&double, 4).await;
+    let session = crate::created_session(&state.core, state.current_session_id())
+        .await
+        .open()
+        .await
+        .expect("open multi-attachment browser session");
+    let mut committed =
+        lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "two printed images")
+            .with_id("rlm-printed-images");
+    let printed_images = ["sha256:rlm-printed-image-a", "sha256:rlm-printed-image-b"]
+        .into_iter()
+        .map(|id| lash::attachments::AttachmentRef {
+            id: lash::attachments::AttachmentId::parse(id).expect("valid attachment id"),
+            media_type: lash::attachments::MediaType::parse("image/png").expect("PNG media type"),
+            byte_len: 68,
+            type_metadata: None,
+            label: None,
+        })
+        .collect::<Vec<_>>();
+    for attachment in &printed_images {
+        committed.parts.push(injected_attachment_part(
+            lash::direct::AttachmentSource::stored(attachment.clone()),
+        ));
+    }
+    session
+        .admin()
+        .state()
+        .append_messages(vec![committed])
+        .await
+        .expect("commit RLM printed-image shape");
+    let mut persisted = session
+        .admin()
+        .state()
+        .persist_current()
+        .await
+        .expect("persist multi-attachment state before durable tool fixture");
+    persisted
+        .session_graph
+        .append_protocol_event(lash::rlm::rlm_protocol_event(
+            lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(lash::rlm::RlmTrajectoryEntry {
+                id: "durable-tool-trajectory".to_string(),
+                protocol_iteration: 1,
+                code: "durable.tool_projection()".to_string(),
+                output_archive: Some(Box::new(lash::attachments::RetainedOutput {
+                    reference: lash::attachments::AttachmentRef {
+                        id: "sha256:durable-print-archive"
+                            .parse()
+                            .expect("attachment id"),
+                        media_type: "application/json".parse().expect("media type"),
+                        byte_len: 90_000,
+                        type_metadata: None,
+                        label: None,
+                    },
+                    witness: "durable projection".to_string(),
+                })),
+                calls: vec![
+                    lash::persistence::ExecutedCallRecord {
+                        operation: "durable.success".to_string(),
+                        outcome: lash::persistence::ExecutedCallOutcome::Ok,
+                    },
+                    lash::persistence::ExecutedCallRecord {
+                        operation: "durable.failure".to_string(),
+                        outcome: lash::persistence::ExecutedCallOutcome::Err,
+                    },
+                ],
+                calls_omitted: 3,
+                images: printed_images,
+                ..lash::rlm::RlmTrajectoryEntry::default()
+            }),
+        ));
+    session
+        .admin()
+        .state()
+        .set_persisted(persisted)
+        .await
+        .expect("install durable tool trajectory fixture");
+    session
+        .admin()
+        .state()
+        .persist_current()
+        .await
+        .expect("commit durable tool trajectory fixture");
+    let committed_message = session
+        .read_view()
+        .transcript()
+        .visible()
+        .filter_map(|row| chat_message_from_row(row).expect("project canonical row"))
+        .find(|message| !message.attachments.is_empty())
+        .expect("project committed printed images");
+    session
+        .close()
+        .await
+        .expect("close multi-attachment session");
+    let Json(durable_tool_state) = app_state(State(state.clone()), Query(SessionQuery::default()))
+        .await
+        .expect("reload and project committed durable tool trajectory");
+    assert!(durable_tool_state.transcript.iter().any(|row| row.kind
+        == lash::transcript::TranscriptRowKind::CodeBlock
+        && row.content.output.as_deref() == Some("durable projection")));
+
+    (committed_message, durable_tool_state.transcript)
+}
+
+#[tokio::test]
+async fn canonical_rows_survive_every_registered_production_renderer() {
+    let (_, rows) = durable_browser_projection_fixture().await;
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/transcript_projection.mjs");
+    let node = std::env::var_os("LASH_WORKBENCH_TEST_NODE").unwrap_or_else(|| "node".into());
+    let output = std::process::Command::new(node)
+        .arg("--test")
+        .arg(script)
+        .env(
+            "LASH_TRANSCRIPT_SERVICE_ASSET",
+            include_str!("../../../../agent-service/src/ui.rs"),
+        )
+        .env(
+            "LASH_TRANSCRIPT_SLACK_ASSET",
+            include_str!("../../../../slack-clone/assets/index.html"),
+        )
+        .env(
+            "LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT",
+            serde_json::to_string(&rows).expect("serialize committed canonical rows"),
+        )
+        .output()
+        .expect("Node.js is required for the registered transcript renderer law");
+    assert!(
+        output.status.success(),
+        "registered transcript renderer law failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
 #[tokio::test]
 async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors() {
     let script =
@@ -792,109 +932,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     });
     let evidence_scenarios = Box::pin(provider_execution_evidence_scenarios()).await;
 
-    // RLM's printed-image projection can commit more than one stored image
-    // part on a single message. Feed that production projection to the browser
-    // gate so its numbered-alt branch is covered from the real wire shape.
-    let double = crate::tests::test_double_backend(0).await;
-    let state = recoverable_chat_test_state(&double, 4).await;
-    let session = crate::created_session(&state.core, state.current_session_id())
-        .await
-        .open()
-        .await
-        .expect("open multi-attachment browser session");
-    let mut committed =
-        lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "two printed images")
-            .with_id("rlm-printed-images");
-    let printed_images = ["sha256:rlm-printed-image-a", "sha256:rlm-printed-image-b"]
-        .into_iter()
-        .map(|id| lash::attachments::AttachmentRef {
-            id: lash::attachments::AttachmentId::parse(id).expect("valid attachment id"),
-            media_type: lash::attachments::MediaType::parse("image/png").expect("PNG media type"),
-            byte_len: 68,
-            type_metadata: None,
-            label: None,
-        })
-        .collect::<Vec<_>>();
-    for attachment in &printed_images {
-        committed.parts.push(injected_attachment_part(
-            lash::direct::AttachmentSource::stored(attachment.clone()),
-        ));
-    }
-    session
-        .admin()
-        .state()
-        .append_messages(vec![committed])
-        .await
-        .expect("commit RLM printed-image shape");
-    let mut persisted = session
-        .admin()
-        .state()
-        .persist_current()
-        .await
-        .expect("persist multi-attachment state before durable tool fixture");
-    persisted
-        .session_graph
-        .append_protocol_event(lash::rlm::rlm_protocol_event(
-            lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(lash::rlm::RlmTrajectoryEntry {
-                id: "durable-tool-trajectory".to_string(),
-                protocol_iteration: 1,
-                code: "durable.tool_projection()".to_string(),
-                output_archive: Some(Box::new(lash::attachments::RetainedOutput {
-                    reference: lash::attachments::AttachmentRef {
-                        id: "sha256:durable-print-archive"
-                            .parse()
-                            .expect("attachment id"),
-                        media_type: "application/json".parse().expect("media type"),
-                        byte_len: 90_000,
-                        type_metadata: None,
-                        label: None,
-                    },
-                    witness: "durable projection".to_string(),
-                })),
-                calls: vec![
-                    lash::persistence::ExecutedCallRecord {
-                        operation: "durable.success".to_string(),
-                        outcome: lash::persistence::ExecutedCallOutcome::Ok,
-                    },
-                    lash::persistence::ExecutedCallRecord {
-                        operation: "durable.failure".to_string(),
-                        outcome: lash::persistence::ExecutedCallOutcome::Err,
-                    },
-                ],
-                calls_omitted: 3,
-                images: printed_images,
-                ..lash::rlm::RlmTrajectoryEntry::default()
-            }),
-        ));
-    session
-        .admin()
-        .state()
-        .set_persisted(persisted)
-        .await
-        .expect("install durable tool trajectory fixture");
-    session
-        .admin()
-        .state()
-        .persist_current()
-        .await
-        .expect("commit durable tool trajectory fixture");
-    let committed_message = session
-        .read_view()
-        .transcript()
-        .visible()
-        .filter_map(chat_message_from_row)
-        .find(|message| !message.attachments.is_empty())
-        .expect("project committed printed images");
-    session
-        .close()
-        .await
-        .expect("close multi-attachment session");
-    let Json(durable_tool_state) = app_state(State(state.clone()), Query(SessionQuery::default()))
-        .await
-        .expect("reload and project committed durable tool trajectory");
-    assert!(durable_tool_state.transcript.iter().any(|row| row.kind
-        == lash::transcript::TranscriptRowKind::CodeBlock
-        && row.content.output.as_deref() == Some("durable projection")));
+    let (committed_message, durable_tool_transcript) = durable_browser_projection_fixture().await;
 
     let node = std::env::var_os("LASH_WORKBENCH_TEST_NODE").unwrap_or_else(|| "node".into());
     let output = std::process::Command::new(node)
@@ -909,10 +947,27 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
             serde_json::to_string(&committed_message)
                 .expect("serialize committed multi-attachment message"),
         )
+        .env(
+            "LASH_WORKBENCH_STOP_TERMINAL",
+            serde_json::to_string(&lash::TurnTerminal::Committed {
+                stop: Some(lash::TurnStop::Cancelled {
+                    evidence: lash::TurnCancellationEvidence {
+                        request_id: "workbench-stop-browser-projection".into(),
+                        origin: Some("user".into()),
+                        reason: Some("workbench Stop control".into()),
+                        undelivered: Default::default(),
+                        mode: lash::TurnCancelMode::AfterStep,
+                        honoured_after_step: Some(0),
+                    },
+                }),
+                session_revision: Some(1),
+            })
+            .expect("serialize the typed Stop terminal"),
+        )
         .env("LASH_WORKBENCH_TURN_EVENTS", turn_events.to_string())
         .env(
             "LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT",
-            serde_json::to_string(&durable_tool_state.transcript)
+            serde_json::to_string(&durable_tool_transcript)
                 .expect("serialize Rust-produced durable tool transcript"),
         )
         .env(
@@ -991,7 +1046,7 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
 fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
     let registry = SessionEventRegistry::new(4);
     let session_id = SessionId::from("reconciled-session");
-    let committed_id = format!("fixture-user:{}", &TurnId::from("reconciled-turn"));
+    let committed_id = format!("fixture-user:{}", TurnId::from("reconciled-turn"));
     registry.publish_identified(
         &session_id,
         "provisional-message",
@@ -1093,7 +1148,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
     assert!(matches!(
         &reconciled.events[0].item,
         StreamItem::Message { message }
-            if message.id == format!("fixture-user:{}", &TurnId::from("reconciled-turn"))
+            if message.id == format!("fixture-user:{}", TurnId::from("reconciled-turn"))
     ));
     let StreamItem::ModelCallRecorded { record } = &reconciled.events[1].item else {
         panic!("reconciliation must retain the model-call record");
@@ -1301,7 +1356,7 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
     );
 
     let ui_row = (
-        format!("fixture-user:{}", &TurnId::from(turn_id)),
+        format!("fixture-user:{}", TurnId::from(turn_id)),
         "one send".to_string(),
     );
     let canonical = state
@@ -1546,7 +1601,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
             )
             .with_id(format!(
                 "fixture-assistant:{}",
-                &TurnId::from(first_turn_id,)
+                TurnId::from(first_turn_id,)
             )),
         ])
         .await
@@ -1751,7 +1806,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     assert_eq!(
         user_row_attachments(&optimistic),
         vec![(
-            format!("fixture-user:{}", &TurnId::from(turn_id)),
+            format!("fixture-user:{}", TurnId::from(turn_id)),
             vec![expected_attachment.clone()],
         )],
         "the live UI-owned row carries the uploaded attachment reference once"
@@ -1792,7 +1847,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     assert_eq!(
         user_row_attachments(&running),
         vec![(
-            format!("fixture-user:{}", &TurnId::from(turn_id)),
+            format!("fixture-user:{}", TurnId::from(turn_id)),
             vec![expected_attachment.clone()],
         )],
         "the committed copy stays suppressed while the attached UI row survives"
@@ -1807,7 +1862,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     assert_eq!(
         user_row_attachments(&settled),
         vec![(
-            format!("fixture-user:{}", &TurnId::from(turn_id)),
+            format!("fixture-user:{}", TurnId::from(turn_id)),
             vec![expected_attachment],
         )],
         "the UI-owned attachment row remains session-scoped after settlement"
@@ -1964,7 +2019,7 @@ pub(crate) fn user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
 pub(crate) fn transcript_message(
     row: &lash::transcript::TranscriptRowRecord,
 ) -> Option<ChatMessage> {
-    chat_message_from_row(row)
+    chat_message_from_row(row).expect("project canonical row")
 }
 
 pub(crate) fn transcript_user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {

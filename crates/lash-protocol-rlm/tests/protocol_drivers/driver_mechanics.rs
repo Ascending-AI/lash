@@ -885,7 +885,7 @@ fn host_failure_without_cancellation_evidence_retries_without_fabricating_cancel
                 return true;
             };
             !matches!(
-                lash_protocol_rlm::decode_rlm_protocol_event(event),
+                recorded_rlm_event(event),
                 Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic))
                     if diagnostic.phase == "stop_without_cancellation_evidence"
             )
@@ -934,7 +934,7 @@ fn degraded_projection_bindings_are_announced_on_the_existing_diagnostic_path() 
         let lash_core::SessionHistoryRecord::Protocol(event) = record else {
             return None;
         };
-        match lash_protocol_rlm::decode_rlm_protocol_event(event) {
+        match recorded_rlm_event(event) {
             Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic))
                 if diagnostic.phase == "projection_rehydration" =>
             {
@@ -1467,7 +1467,7 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
         .iter()
         .filter(|record| match record {
             lash_core::SessionHistoryRecord::Protocol(event) => matches!(
-                lash_protocol_rlm::decode_rlm_protocol_event(event),
+                recorded_rlm_event(event),
                 Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
                     if diagnostic.phase == "llm_extraction"
             ),
@@ -1671,7 +1671,7 @@ fn a_malformed_fence_is_answered_by_naming_the_rule() {
             .iter()
             .filter_map(|record| match record {
                 lash_core::SessionHistoryRecord::Protocol(event) => {
-                    match lash_protocol_rlm::decode_rlm_protocol_event(event) {
+                    match recorded_rlm_event(event) {
                         Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
                             if diagnostic.phase == "llm_extraction" =>
                         {
@@ -1722,18 +1722,16 @@ fn identical_replies_are_fingerprinted_and_run_to_the_hosts_budget() {
         .events()
         .iter()
         .filter_map(|record| match record {
-            lash_core::SessionHistoryRecord::Protocol(event) => {
-                match lash_protocol_rlm::decode_rlm_protocol_event(event) {
-                    Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                        if diagnostic.phase == "llm_extraction" =>
-                    {
-                        diagnostic.payload["reply_fingerprint"]
-                            .as_str()
-                            .map(str::to_string)
-                    }
-                    _ => None,
+            lash_core::SessionHistoryRecord::Protocol(event) => match recorded_rlm_event(event) {
+                Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
+                    if diagnostic.phase == "llm_extraction" =>
+                {
+                    diagnostic.payload["reply_fingerprint"]
+                        .as_str()
+                        .map(str::to_string)
                 }
-            }
+                _ => None,
+            },
             _ => None,
         })
         .collect();
@@ -1747,7 +1745,7 @@ fn identical_replies_are_fingerprinted_and_run_to_the_hosts_budget() {
             record,
             lash_core::SessionHistoryRecord::Protocol(event)
                 if matches!(
-                    lash_protocol_rlm::decode_rlm_protocol_event(event),
+                    recorded_rlm_event(event),
                     Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
                         if diagnostic.phase == "repeated_reply"
                 )

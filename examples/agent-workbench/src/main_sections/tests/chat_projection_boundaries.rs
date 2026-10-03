@@ -17,7 +17,7 @@ fn ui_input_replacement_uses_turn_provenance_with_unrelated_ids() {
             turn_id: lash::TurnId::fixture("input-turn"),
         }),
     };
-    let messages = displayed_messages(&[row], &[owned]);
+    let messages = displayed_messages(&[row], &[owned]).expect("display canonical rows");
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].id, "unrelated-ui-token");
     assert_eq!(messages[0].text, "UI input");

@@ -1,0 +1,16 @@
+error[E0624]: associated function `mint` is private
+ --> tests/ui/transcript_reply_marker_is_not_host_mintable.rs:3:24
+  |
+3 |     let _ = TurnReply::mint("host-turn".into(), "host-part".into());
+  |                        ^^^^ private associated function
+  |
+ ::: $WORKSPACE/crates/lash-sansio/src/session_model/message.rs
+  |
+  |     pub(crate) fn mint(turn_id: TurnId, part_id: String) -> Self {
+  |     ------------------------------------------------------------ private associated function defined here
+  |
+  = help: items from traits can only be used if the trait is in scope
+help: trait `TurnReplyCoreSupport` which provides `mint` is implemented but not in scope; perhaps you want to import it
+  |
+1 + use lash_sansio::core_support::TurnReplyCoreSupport;
+  |

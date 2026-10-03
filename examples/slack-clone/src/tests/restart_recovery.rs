@@ -202,7 +202,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
             app_mention.event_id.clone(),
             StageKind::Accepted,
             Stage::ReplyPending {
-                reply: ledger::reply_fixture("Recovered answer."),
+                reply: Box::new(ledger::reply_fixture("Recovered answer.")),
             },
         )
         .await
@@ -277,7 +277,7 @@ async fn a_crash_between_posting_and_recording_does_not_produce_a_second_reply()
             app_mention.event_id.clone(),
             StageKind::Replied,
             Stage::ReplyPending {
-                reply: ledger::reply_fixture("Posted once."),
+                reply: Box::new(ledger::reply_fixture("Posted once.")),
             },
         )
         .await
@@ -1050,7 +1050,7 @@ async fn webhook_retry_answers_after_the_root_outlives_the_initial_wait_without_
                 .get(reply.event_id.clone())
                 .await
                 .expect("read waiting reply")
-                .and_then(|record| record.stage.detail());
+                .and_then(|record| record.stage.detail().expect("encode stage detail"));
             if detail.as_deref() == Some("thread_root_not_processed") {
                 break;
             }

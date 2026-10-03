@@ -181,6 +181,9 @@ run_rust_source_guards() {
   step "Restate handler panic boundary"
   python3 scripts/check-restate-handler-panics.py
 
+  step "Canonical transcript projection boundary"
+  python3 scripts/check_transcript_projection.py
+
   step "Core/UI boundary guard"
   bash scripts/check-core-ui-boundary.sh
 

@@ -1,3 +1,4 @@
+use crate::support::recorded_rlm_event;
 use lash_core::plugin::PluginSessionRequest;
 use std::sync::{Arc, Mutex};
 
@@ -248,7 +249,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                 .iter()
                 .filter_map(|event| match event {
                     lash_core::SessionHistoryRecord::Protocol(event) => {
-                        lash_protocol_rlm::decode_rlm_protocol_event(event)
+                        recorded_rlm_event(event)
                     }
                     _ => None,
                 })

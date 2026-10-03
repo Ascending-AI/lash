@@ -62,7 +62,7 @@ pub enum LiveEvent {
         author_name: String,
         is_bot: bool,
         text: String,
-        transcript: Option<lash::transcript::TranscriptRowRecord>,
+        transcript: Option<Box<lash::transcript::TranscriptRowRecord>>,
         thread_ts: Option<String>,
         reply_broadcast: bool,
     },
@@ -258,7 +258,7 @@ impl PlatformState {
             author_name,
             is_bot,
             text: stored.text.clone(),
-            transcript: stored.transcript()?,
+            transcript: stored.transcript()?.map(Box::new),
             thread_ts: stored.thread_ts.map(|ts| ts.to_string()),
             reply_broadcast: stored.reply_broadcast,
         });

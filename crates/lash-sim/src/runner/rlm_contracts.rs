@@ -918,7 +918,13 @@ fn rlm_contract_llm_extraction_diagnostics(machine: &lash_core::TurnMachine) -> 
         .iter()
         .filter_map(|event| match event {
             lash_core::SessionHistoryRecord::Protocol(event) => {
-                match lash_protocol_rlm::decode_rlm_protocol_event(event) {
+                match event
+                    .decode::<lash_rlm_types::RlmProtocolEvent>(
+                        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    )
+                    .ok()
+                    .flatten()
+                {
                     Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
                         if diagnostic.phase == "llm_extraction" =>
                     {
@@ -938,7 +944,13 @@ fn rlm_contract_trajectory(machine: &lash_core::TurnMachine) -> Vec<Value> {
         .iter()
         .filter_map(|event| match event {
             lash_core::SessionHistoryRecord::Protocol(event) => {
-                match lash_protocol_rlm::decode_rlm_protocol_event(event) {
+                match event
+                    .decode::<lash_rlm_types::RlmProtocolEvent>(
+                        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    )
+                    .ok()
+                    .flatten()
+                {
                     Some(RlmProtocolEvent::RlmTrajectoryEntry(entry)) => {
                         serde_json::to_value(entry).ok()
                     }

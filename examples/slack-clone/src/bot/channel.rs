@@ -401,13 +401,12 @@ impl ChannelBot {
                     StageKind::ReplyPending => self.settle_reply_debt(&record).await,
                     _ => {
                         let remaining = deadline.saturating_sub(started.elapsed());
-                        let root_wait_budget = if record
-                            .stage
-                            .detail()
-                            .as_deref()
-                            .and_then(DeferralReason::parse)
-                            == Some(DeferralReason::ThreadRootNotAvailable)
-                        {
+                        let root_wait_budget = if matches!(
+                            &record.stage,
+                            Stage::Accepted {
+                                deferral: Some(DeferralReason::ThreadRootNotAvailable)
+                            }
+                        ) {
                             Duration::ZERO
                         } else {
                             self.thread_root_wait_budget().min(remaining)
@@ -964,7 +963,7 @@ impl ChannelBot {
                 record.event_id.clone(),
                 record.stage.kind(),
                 Stage::ReplyPending {
-                    reply: reply.clone(),
+                    reply: Box::new(reply.clone()),
                 },
             )
             .await?

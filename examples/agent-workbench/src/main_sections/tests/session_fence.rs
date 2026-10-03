@@ -650,7 +650,8 @@ fn a_persisted_prompt_for_an_absent_turn_is_dropped_rather_than_restored() {
         json!({
             "turns": [["s1", "live-turn"]],
             "prompts": [
-                { "session_id": "s1", "turn_id": "retired-turn", "prompt": "orphan" }
+                { "session_id": "s1", "turn_id": "retired-turn", "prompt": "orphan",
+                  "row_id": "orphan-ui-input", "at": "2026-10-03T00:00:00Z" }
             ],
         }),
     );

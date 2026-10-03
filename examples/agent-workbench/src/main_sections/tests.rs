@@ -423,6 +423,9 @@ fn turn_routing_state_survives_web_process_reconstruction() {
         Some("actual restored prompt".into()),
         None,
     );
+    let original_prompt = turns
+        .prompt_for(&session_id, &TurnId::from("durable-stop-turn"))
+        .expect("claimed UI prompt");
     drop(sessions);
     drop(turns);
     let recovered_ids = WorkbenchSessions::persistent(session_path).expect("recover ids");
@@ -439,6 +442,8 @@ fn turn_routing_state_survives_web_process_reconstruction() {
         .expect("restored prompt");
     assert_eq!(recovered_prompt.text, "actual restored prompt");
     assert_eq!(recovered_prompt.attachment_id, None);
+    assert_eq!(recovered_prompt.row_id, original_prompt.row_id);
+    assert_eq!(recovered_prompt.at, original_prompt.at);
 }
 
 #[cfg(test)]

@@ -32,7 +32,6 @@ pub(crate) async fn app_state(
     let StateProjectionReads {
         read_view,
         durable,
-        has_durable_head: _,
         cursor,
         pending_turn_inputs,
         queued_work,
@@ -48,11 +47,12 @@ pub(crate) async fn app_state(
         .await
         .map_err(AppError::internal)?
         .into_records();
-    let committed_message_ids = transcript
-        .iter()
-        .filter_map(chat_message_from_row)
-        .map(|message| message.id)
-        .collect::<BTreeSet<_>>();
+    let mut committed_message_ids = BTreeSet::new();
+    for row in &transcript {
+        if let Some(message) = chat_message_from_row(row).map_err(AppError::internal)? {
+            committed_message_ids.insert(message.id);
+        }
+    }
     let committed_input_turn_ids = transcript
         .iter()
         .filter(|row| row.kind == lash::transcript::TranscriptRowKind::User)
@@ -65,8 +65,18 @@ pub(crate) async fn app_state(
         &active_turn_ids,
     );
     let product_events = state.event_tx.snapshot(&session_id);
-    let product_messages = product_chat_messages(&state, &session_id);
-    let messages = displayed_messages(&transcript, &product_messages);
+    let mut product_messages = product_chat_messages(&state, &session_id);
+    if let Some(active) = &active_turn
+        && let Some(input) = ui_input_message_from_active_turn(active)
+        && !product_messages.iter().any(|message| matches!(
+            &message.provenance,
+            Some(ChatMessageProvenance::TurnInput { turn_id }) if turn_id == active.address.turn_id
+        ))
+    {
+        product_messages.push(input);
+    }
+    let messages =
+        displayed_messages(&transcript, &product_messages).map_err(AppError::internal)?;
     let unknown_turn_terminals = state.unknown_turn_terminals.for_session(&session_id);
     let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
     let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
@@ -219,16 +229,15 @@ pub(crate) async fn commit_and_start_user_turn(
     request: restate::UserTurnRequest,
     chat_attachments: Vec<ChatAttachment>,
 ) -> Result<tokio::task::JoinHandle<restate::TurnSettlement>, AppError> {
-    state.push_message_with_id_and_attachments_and_provenance_for_session(
-        &request.session_id,
-        uuid::Uuid::new_v4().to_string(),
-        "user",
-        request.text.clone(),
-        chat_attachments,
-        Some(ChatMessageProvenance::TurnInput {
-            turn_id: request.turn_id.clone(),
-        }),
-    );
+    let active = state
+        .active_turns
+        .for_session(&request.session_id)
+        .filter(|active| active.address.turn_id == request.turn_id)
+        .ok_or_else(|| AppError::conflict("the UI input no longer owns its turn claim"))?;
+    let mut input = ui_input_message_from_active_turn(&active)
+        .ok_or_else(|| AppError::conflict("the UI input claim has no prompt row"))?;
+    input.attachments = chat_attachments;
+    state.push_prepared_message_for_session(&request.session_id, input);
     state.trace_for_session(
         &request.session_id,
         "api.turn.admission_committed",

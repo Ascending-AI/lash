@@ -203,7 +203,7 @@ pub enum Stage {
         deferral: Option<DeferralReason>,
     },
     ReplyPending {
-        reply: lash::transcript::TranscriptRowRecord,
+        reply: Box<lash::transcript::TranscriptRowRecord>,
     },
     Folded {
         reason: Option<FoldReason>,
@@ -240,16 +240,14 @@ impl Stage {
     pub fn as_str(&self) -> &'static str {
         self.kind().as_str()
     }
-    pub fn detail(&self) -> Option<String> {
-        match self {
+    pub fn detail(&self) -> Result<Option<String>> {
+        Ok(match self {
             Self::Accepted { deferral } => deferral.map(|reason| reason.as_str().to_owned()),
-            Self::ReplyPending { reply } => {
-                Some(serde_json::to_string(reply).expect("transcript rows serialize"))
-            }
+            Self::ReplyPending { reply } => Some(serde_json::to_string(reply)?),
             Self::Folded { reason } => reason.map(|reason| reason.as_str().to_owned()),
             Self::Ignored { reason } => Some(reason.as_str().to_owned()),
             Self::Replied { .. } | Self::ProviderError(_) => None,
-        }
+        })
     }
     pub fn reply_ts(&self) -> Option<&str> {
         match self {
@@ -706,7 +704,7 @@ impl EventLedger {
                 "UPDATE handled_events SET stage = ?3, reply_ts = ?4, detail = ?5,
                  provider_kind = ?6, provider_code = ?7, provider_message = ?8, provider_retryable = ?9,
                  updated_at = ?10 WHERE event_id = ?1 AND stage = ?2",
-                params![event_id, from.as_str(), to.as_str(), to.reply_ts(), to.detail(),
+                params![event_id, from.as_str(), to.as_str(), to.reply_ts(), to.detail()?,
                     failure.map(|failure| failure.kind.code()), failure.and_then(|failure| failure.code.as_deref()),
                     failure.map(|failure| failure.message.as_str()), failure.map(|failure| i64::from(failure.retryable)), now_seconds()],
             )?;
@@ -798,7 +796,7 @@ fn decode_stage(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stage> {
                 .transpose()?,
         },
         StageKind::ReplyPending => Stage::ReplyPending {
-            reply: serde_json::from_str::<lash::transcript::TranscriptRowRecord>(
+            reply: serde_json::from_str::<Box<lash::transcript::TranscriptRowRecord>>(
                 &detail.ok_or_else(|| corrupt("missing reply debt"))?,
             )
             .map_err(|error| corrupt(format!("invalid committed reply debt: {error}")))?,
@@ -987,7 +985,10 @@ mod tests {
             .expect("get")
             .expect("row");
         assert!(
-            row.stage.detail().is_none(),
+            row.stage
+                .detail()
+                .expect("serialize stage detail")
+                .is_none(),
             "folded event retained a stale deferral"
         );
     }
@@ -1064,7 +1065,7 @@ mod tests {
                     "Ev1".to_string(),
                     StageKind::Accepted,
                     Stage::ReplyPending {
-                        reply: reply_fixture("stale text")
+                        reply: Box::new(reply_fixture("stale text"))
                     }
                 )
                 .await
@@ -1078,7 +1079,7 @@ mod tests {
         assert_eq!(record.stage.kind(), StageKind::Replied);
         assert_eq!(record.stage.reply_ts(), Some("1.2"));
         assert_eq!(
-            record.stage.detail(),
+            record.stage.detail().expect("serialize stage detail"),
             None,
             "the stale detail must not have landed"
         );
@@ -1093,7 +1094,7 @@ mod tests {
                 "Ev1".to_string(),
                 StageKind::Accepted,
                 Stage::ReplyPending {
-                    reply: reply_fixture("owed reply"),
+                    reply: Box::new(reply_fixture("owed reply")),
                 },
             )
             .await
@@ -1114,7 +1115,7 @@ mod tests {
             .expect("get")
             .expect("row");
         assert_eq!(
-            record.stage.detail(),
+            record.stage.detail().expect("serialize stage detail"),
             None,
             "settled reply debt must be cleared"
         );
@@ -1141,7 +1142,7 @@ mod tests {
                 "Ev3".to_string(),
                 StageKind::Accepted,
                 Stage::ReplyPending {
-                    reply: reply_fixture("owed"),
+                    reply: Box::new(reply_fixture("owed")),
                 },
             )
             .await

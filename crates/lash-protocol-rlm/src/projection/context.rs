@@ -28,7 +28,9 @@ pub fn rlm_protocol_event(event: RlmProtocolEvent) -> lash_core::ProtocolEvent {
         .expect("RLM protocol events serialize")
 }
 
-pub fn decode_rlm_protocol_event(event: &lash_core::ProtocolEvent) -> Option<RlmProtocolEvent> {
+pub(crate) fn decode_rlm_protocol_event(
+    event: &lash_core::ProtocolEvent,
+) -> Option<RlmProtocolEvent> {
     event
         .decode(crate::plugin::RLM_PROTOCOL_PLUGIN_ID)
         .ok()

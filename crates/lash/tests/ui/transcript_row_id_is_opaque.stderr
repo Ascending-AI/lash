@@ -1,0 +1,5 @@
+error[E0599]: no method named `strip_prefix` found for reference `&RowId` in the current scope
+ --> tests/ui/transcript_row_id_is_opaque.rs:3:26
+  |
+3 |     let _ = row.row_id().strip_prefix("host-owned:");
+  |                          ^^^^^^^^^^^^ method not found in `&RowId`

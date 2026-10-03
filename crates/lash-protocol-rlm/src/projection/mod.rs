@@ -5,8 +5,7 @@ mod transport;
 
 pub use bindings::{RlmProjectedBindings, rlm_session_projection_extension};
 pub use context::{
-    RlmHistoryProjection, decode_rlm_protocol_event, is_rlm_protocol_output,
-    rlm_history_projection, rlm_protocol_event,
+    RlmHistoryProjection, is_rlm_protocol_output, rlm_history_projection, rlm_protocol_event,
 };
 pub use transport::{RlmSeed, rlm_seed_initial_nodes};
 
@@ -23,3 +22,8 @@ pub(crate) use transport::{
 
 #[cfg(test)]
 pub(crate) use context::prune_reserved_projected_bindings;
+
+pub(crate) use context::decode_rlm_protocol_event;
+
+mod diagnostics;
+pub use diagnostics::recorded_extraction_decisions;

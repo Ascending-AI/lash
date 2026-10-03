@@ -510,13 +510,12 @@ impl<'de> serde::Deserialize<'de> for Part {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PartKind {
     Text,
     Attachment,
-    Code,
-    Output,
-    Error,
+    Internal(InternalPartKind),
     Prose,
     ToolCall,
     ToolResult,
@@ -529,6 +528,70 @@ pub enum PartKind {
     /// into the flat chat prompt. Provider adapters decide whether and how
     /// to re-emit them through their native channel.
     Reasoning,
+}
+
+/// An opaque discriminator for protocol-owned committed parts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InternalPartKind(InternalPartDiscriminator);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InternalPartDiscriminator {
+    Code,
+    Output,
+    Error,
+}
+
+#[allow(non_upper_case_globals)]
+impl PartKind {
+    pub(crate) const Code: Self = Self::Internal(InternalPartKind(InternalPartDiscriminator::Code));
+    pub(crate) const Output: Self =
+        Self::Internal(InternalPartKind(InternalPartDiscriminator::Output));
+    pub(crate) const Error: Self =
+        Self::Internal(InternalPartKind(InternalPartDiscriminator::Error));
+}
+impl serde::Serialize for PartKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(match *self {
+            Self::Text => "Text",
+            Self::Attachment => "Attachment",
+            Self::Code => "Code",
+            Self::Output => "Output",
+            Self::Error => "Error",
+            Self::Prose => "Prose",
+            Self::ToolCall => "ToolCall",
+            Self::ToolResult => "ToolResult",
+            Self::Reasoning => "Reasoning",
+        })
+    }
+}
+impl<'de> serde::Deserialize<'de> for PartKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = <String as serde::Deserialize>::deserialize(deserializer)?;
+        match name.as_str() {
+            "Text" => Ok(Self::Text),
+            "Attachment" => Ok(Self::Attachment),
+            "Code" => Ok(Self::Code),
+            "Output" => Ok(Self::Output),
+            "Error" => Ok(Self::Error),
+            "Prose" => Ok(Self::Prose),
+            "ToolCall" => Ok(Self::ToolCall),
+            "ToolResult" => Ok(Self::ToolResult),
+            "Reasoning" => Ok(Self::Reasoning),
+            unknown => Err(serde::de::Error::unknown_variant(
+                unknown,
+                &[
+                    "Text",
+                    "Attachment",
+                    "Code",
+                    "Output",
+                    "Error",
+                    "Prose",
+                    "ToolCall",
+                    "ToolResult",
+                    "Reasoning",
+                ],
+            )),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

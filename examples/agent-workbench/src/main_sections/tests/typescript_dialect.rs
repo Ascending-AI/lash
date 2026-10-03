@@ -666,13 +666,12 @@ async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
     let blocks = projected
         .transcript
         .iter()
-        .filter_map(|row| {
-            (row.kind == lash::transcript::TranscriptRowKind::CodeBlock).then(|| {
-                (
-                    row.content.language.clone().unwrap(),
-                    row.content.success.unwrap(),
-                )
-            })
+        .filter(|row| row.kind == lash::transcript::TranscriptRowKind::CodeBlock)
+        .map(|row| {
+            (
+                row.content.language.clone().unwrap(),
+                row.content.success.unwrap(),
+            )
         })
         .collect::<Vec<_>>();
     assert!(

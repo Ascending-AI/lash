@@ -792,8 +792,8 @@ impl SessionEventRegistry {
                 | StreamItem::ModelCallRecorded { .. }
                 | StreamItem::Done { .. } => None,
             })
+            .filter(|turn_id| committed_input_turn_ids.contains(*turn_id))
             .cloned()
-            .filter(|turn_id| committed_input_turn_ids.contains(turn_id))
             .collect::<BTreeSet<_>>();
         let committed_status_before = history.committed_user_turn_ids.len();
         history

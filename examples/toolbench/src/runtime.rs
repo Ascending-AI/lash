@@ -300,7 +300,7 @@ async fn run_turn(
         .output_into(telemetry.as_ref())
         .await
         .context("run toolbench turn")?;
-    let decisions = rlm_extraction_decisions(session.read_view().active_events());
+    let decisions = lash::rlm::recorded_extraction_decisions(session.read_view().active_events());
     Ok((
         lash::TurnOutput {
             result,
@@ -308,40 +308,6 @@ async fn run_turn(
         },
         decisions,
     ))
-}
-
-/// The extraction decisions a turn's committed RLM diagnostics recorded, in
-/// order. The event envelope and its variant decode typed; the diagnostic's
-/// per-phase payload is declared shape, deserialized rather than key-walked.
-fn rlm_extraction_decisions(records: &[lash::persistence::SessionHistoryRecord]) -> Vec<String> {
-    records
-        .iter()
-        .filter_map(|record| {
-            let lash::persistence::SessionHistoryRecord::Protocol(event) = record else {
-                return None;
-            };
-            let Some(lash::rlm::RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
-                lash::rlm::decode_rlm_protocol_event(event)
-            else {
-                return None;
-            };
-            if !matches!(
-                diagnostic.phase.as_str(),
-                "llm_extraction" | "native_extraction"
-            ) {
-                return None;
-            }
-            serde_json::from_value::<ExtractionDecision>(diagnostic.payload)
-                .ok()
-                .map(|payload| payload.decision)
-        })
-        .collect()
-}
-
-/// The one field toolbench reads from an extraction diagnostic's payload.
-#[derive(serde::Deserialize)]
-struct ExtractionDecision {
-    decision: String,
 }
 
 /// A run's engine: lash-restate's engine over a fresh SQLite memory store

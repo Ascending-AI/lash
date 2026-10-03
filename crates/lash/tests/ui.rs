@@ -48,6 +48,13 @@ mod rlm_facade_boundary_types_are_public;
 fn facade_compile_time_contracts() {
     let t = trybuild::TestCases::new();
 
+    t.compile_fail("tests/ui/transcript_part_kind_is_not_matchable.rs");
+    t.compile_fail("tests/ui/transcript_reply_marker_is_not_host_mintable.rs");
+    t.compile_fail("tests/ui/transcript_row_id_is_opaque.rs");
+    if cfg!(feature = "rlm") {
+        t.compile_fail("tests/ui/rlm_protocol_event_decode_is_not_public.rs");
+    }
+    t.compile_fail("tests/ui/transcript_row_ordinal_is_not_persistable.rs");
     register_facade_contracts(&t);
     t.compile_fail("tests/ui/execution_capture_cannot_have_leaves_without_a_root.rs");
     register_store_seam_contracts(&t);

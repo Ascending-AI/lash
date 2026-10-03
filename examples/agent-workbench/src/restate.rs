@@ -1067,7 +1067,7 @@ pub(crate) async fn record_turn_output_for_profile(
             }),
         }),
     );
-    crate::republish_committed_ingress_messages(state, session);
+    crate::republish_committed_ingress_messages(state, session).map_err(AppError::internal)?;
     for record in output.llm_calls.iter().cloned() {
         let call_id = record.call_id.0.clone();
         let remote_record: lash::remote::llm::RemoteLlmCallRecord = record.into();

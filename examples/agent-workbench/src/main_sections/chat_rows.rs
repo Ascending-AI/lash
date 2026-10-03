@@ -2,6 +2,28 @@ use super::*;
 use lash::SessionId;
 use lash::transcript::{TranscriptRowKind, TranscriptRowRecord};
 
+pub(crate) fn ui_input_message_from_active_turn(active: &ActiveTurn) -> Option<ChatMessage> {
+    if active.kind != WorkbenchTurnKind::User {
+        return None;
+    }
+    let prompt = active.prompt.as_ref()?;
+    Some(ChatMessage {
+        id: prompt.row_id.clone(),
+        role: "user".into(),
+        text: prompt.text.clone(),
+        at: prompt.at.clone(),
+        attachments: prompt
+            .attachment_id
+            .iter()
+            .cloned()
+            .map(ChatAttachment::from_id)
+            .collect(),
+        provenance: Some(ChatMessageProvenance::TurnInput {
+            turn_id: active.address.turn_id.clone(),
+        }),
+    })
+}
+
 pub(crate) fn product_chat_messages(state: &AppState, session_id: &SessionId) -> Vec<ChatMessage> {
     state
         .event_tx
@@ -16,22 +38,21 @@ pub(crate) fn product_chat_messages(state: &AppState, session_id: &SessionId) ->
 }
 
 /// Style a canonical row without inspecting committed messages or protocol data.
-pub(crate) fn chat_message_from_row(row: &TranscriptRowRecord) -> Option<ChatMessage> {
+/// Its opaque ID is transported verbatim as the node identity's JSON string.
+pub(crate) fn chat_message_from_row(
+    row: &TranscriptRowRecord,
+) -> Result<Option<ChatMessage>, serde_json::Error> {
     if row.suppressed.is_some() {
-        return None;
+        return Ok(None);
     }
     let role = match row.kind {
         TranscriptRowKind::User => "user",
         TranscriptRowKind::AssistantReply => "assistant",
         TranscriptRowKind::Event | TranscriptRowKind::ToolCall => "event",
-        _ => return None,
+        _ => return Ok(None),
     };
-    Some(ChatMessage {
-        id: serde_json::to_value(&row.row_id)
-            .expect("row id serializes")
-            .as_str()
-            .expect("row id is a wire token")
-            .to_owned(),
+    Ok(Some(ChatMessage {
+        id: serde_json::from_value(serde_json::to_value(&row.row_id)?)?,
         role: role.into(),
         text: row.content.text.clone(),
         at: row.timestamp.clone(),
@@ -52,23 +73,27 @@ pub(crate) fn chat_message_from_row(row: &TranscriptRowRecord) -> Option<ChatMes
                 }
             }
         }),
-    })
+    }))
 }
 
 /// The UI owns its input copy and correlates only on the row's typed provenance.
 pub(crate) fn displayed_messages(
     rows: &[TranscriptRowRecord],
     product: &[ChatMessage],
-) -> Vec<ChatMessage> {
+) -> Result<Vec<ChatMessage>, serde_json::Error> {
     let mut covered = BTreeSet::new();
-    let mut messages = rows.iter().filter_map(|row| {
-        let canonical = chat_message_from_row(row)?;
+    let mut messages = Vec::new();
+    for row in rows {
+        let Some(canonical) = chat_message_from_row(row)? else {
+            continue;
+        };
         if row.kind == TranscriptRowKind::User && let Some(turn_id) = &row.provenance.turn_id
             && covered.insert(turn_id.clone()) && let Some(owned) = product.iter().find(|message| matches!(&message.provenance, Some(ChatMessageProvenance::TurnInput { turn_id: owner }) if owner == turn_id)) {
-            return Some(owned.clone());
+            messages.push(owned.clone());
+            continue;
         }
-        Some(canonical)
-    }).collect::<Vec<_>>();
+        messages.push(canonical);
+    }
     for message in product {
         if message.role == "event" {
             messages.push(message.clone());
@@ -79,10 +104,13 @@ pub(crate) fn displayed_messages(
             messages.push(message.clone());
         }
     }
-    messages
+    Ok(messages)
 }
 
-pub(crate) fn republish_committed_ingress_messages(state: &AppState, session: &lash::LashSession) {
+pub(crate) fn republish_committed_ingress_messages(
+    state: &AppState,
+    session: &lash::LashSession,
+) -> Result<(), serde_json::Error> {
     let session_id = session.session_id();
     let product = product_chat_messages(state, &session_id);
     let mut covered = BTreeSet::new();
@@ -92,7 +120,7 @@ pub(crate) fn republish_committed_ingress_messages(state: &AppState, session: &l
         }
         if let Some(turn_id) = &row.provenance.turn_id && covered.insert(turn_id.clone())
             && product.iter().any(|message| matches!(&message.provenance, Some(ChatMessageProvenance::TurnInput { turn_id: owner }) if owner == turn_id)) { continue; }
-        if let Some(message) = chat_message_from_row(row) {
+        if let Some(message) = chat_message_from_row(row)? {
             state.publish_for_session_identified(
                 &session_id,
                 format!("message:{}", message.id),
@@ -100,4 +128,5 @@ pub(crate) fn republish_committed_ingress_messages(state: &AppState, session: &l
             );
         }
     }
+    Ok(())
 }

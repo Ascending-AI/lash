@@ -160,4 +160,5 @@ The generated region below is checked against the live filenames and headings.
 | 0126 | [Session config changes are typed owner commands](0126-session-config-changes-are-typed-owner-commands.md) |
 | 0127 | [Usage is result data; hosts meter spend](0127-usage-is-result-data-hosts-meter-spend.md) |
 | 0128 | [Tool hooks compose as transforms, then checks](0128-tool-hooks-compose-as-transforms-then-checks.md) |
+| 0129 | [The transcript row stream is the only chat projection](0129-the-transcript-row-stream-is-the-only-chat-projection.md) |
 <!-- adr-index:end -->

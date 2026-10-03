@@ -74,7 +74,7 @@ enum DurableAcquisition {
     Catalog,
     /// An open or just-created session's store; the open or the creation
     /// already proved existence.
-    Bound(lash_core::store::SessionStore),
+    Bound(Arc<lash_core::store::SessionStore>),
 }
 
 /// Store-backed access to one session's durable queue and settled reads.
@@ -203,7 +203,7 @@ impl DurableSession {
                 ingress,
                 Arc::clone(&live_replay_store),
             ),
-            acquisition: DurableAcquisition::Bound(store),
+            acquisition: DurableAcquisition::Bound(Arc::new(store)),
             catalog,
             store: Arc::new(OnceCell::new()),
             session_id,
@@ -252,7 +252,7 @@ impl DurableSession {
 
     async fn acquire(&self) -> Result<lash_core::store::SessionStore> {
         if let DurableAcquisition::Bound(store) = &self.acquisition {
-            return Ok(store.clone());
+            return Ok(store.as_ref().clone());
         }
         crate::session::resolve_existing_session(&self.catalog, &self.session_id).await
     }

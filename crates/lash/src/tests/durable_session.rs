@@ -1777,3 +1777,99 @@ async fn committed_row_deltas_transport_each_new_node_once() -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn transcript_totally_projects_a_really_committed_rlm_trajectory() -> Result<()> {
+    let double = restate_double(0x1532).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("transcript-corpus")
+        .complete(move |_| {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                Ok(lash_core::LlmResponse {
+                    parts: vec![
+                        lash_core::LlmOutputPart::Reasoning {
+                            text: "committed corpus reasoning".into(),
+                            replay: None,
+                        },
+                        lash_core::LlmOutputPart::Text {
+                            text: if call == 0 {
+                                "<typescript>print(\"committed corpus output\");</typescript>"
+                            } else {
+                                "<typescript>finish(\"committed corpus reply\");</typescript>"
+                            }
+                            .into(),
+                            response_meta: None,
+                        },
+                    ],
+                    ..Default::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("transcript-rlm-corpus")
+        .created()
+        .await
+        .open()
+        .await?;
+    session
+        .send(TurnInput::text("committed corpus input"))
+        .output()
+        .await?;
+    let durable = session.durable();
+    let projection = durable.transcript().await?;
+    let page = durable
+        .history(
+            crate::persistence::HistoryAnchor::Head,
+            crate::persistence::HistoryBudget {
+                max_nodes: std::num::NonZeroU32::MIN.saturating_add(127),
+                max_bytes: std::num::NonZeroU64::MIN.saturating_add(32 * 1024 * 1024 - 1),
+            },
+        )
+        .await?;
+    assert!(page.next.is_none());
+    assert_eq!(projection.rows().len(), page.nodes.len());
+    for (row, node) in projection.rows().iter().zip(page.nodes.iter().rev()) {
+        assert_eq!(
+            serde_json::to_value(row.row_id())?,
+            serde_json::to_value(&node.record.node_id)?
+        );
+        assert_eq!(row.record().timestamp, node.record.timestamp);
+    }
+    assert_eq!(
+        projection
+            .visible()
+            .filter(|row| row.provenance.is_turn_reply)
+            .map(|row| row.content.text.as_str())
+            .collect::<Vec<_>>(),
+        ["committed corpus reply"]
+    );
+    assert!(
+        projection
+            .visible()
+            .any(|row| row.content.reasoning == ["committed corpus reasoning"])
+    );
+    assert!(projection.visible().any(|row| row.content.code.as_deref()
+        == Some("print(\"committed corpus output\");")
+        && row.content.output.as_deref() == Some("committed corpus output")));
+    assert!(
+        projection
+            .rows()
+            .iter()
+            .any(|row| row.record().suppressed.is_some())
+    );
+    assert!(
+        projection
+            .rows()
+            .windows(2)
+            .all(|rows| rows[0].ordinal() < rows[1].ordinal())
+    );
+    Ok(())
+}

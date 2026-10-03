@@ -28,9 +28,8 @@ async fn settled_assistant_rows(
     let reasoning_rows = snapshot
         .transcript
         .iter()
-        .filter_map(|row| {
-            (!row.content.reasoning.is_empty()).then(|| row.content.reasoning.join("\n"))
-        })
+        .filter(|row| !row.content.reasoning.is_empty())
+        .map(|row| row.content.reasoning.join("\n"))
         .collect::<Vec<_>>();
     (assistant_texts, reasoning_rows)
 }

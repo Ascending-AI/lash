@@ -122,8 +122,21 @@ impl ActiveTurnClaim {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ActiveTurnPrompt {
+    pub(crate) row_id: String,
+    pub(crate) at: String,
     pub(crate) text: String,
     pub(crate) attachment_id: Option<String>,
+}
+
+impl ActiveTurnPrompt {
+    fn new(text: String, attachment_id: Option<String>) -> Self {
+        Self {
+            row_id: uuid::Uuid::new_v4().to_string(),
+            at: Utc::now().to_rfc3339(),
+            text,
+            attachment_id,
+        }
+    }
 }
 
 /// Cleans up a user turn's active-turn claim unless its `send()` is accepted.
@@ -180,14 +193,9 @@ impl Drop for ActiveTurnSubmissionGuard {
     }
 }
 
-/// The on-disk shape, unchanged apart from the additive `kinds` array.
-///
-/// `turns` and `prompts` keep their exact form, so a file written before the
-/// kind existed still loads; entries it does not name fall back to
-/// [`WorkbenchTurnKind::legacy_from_turn_id`]. The reader tolerates the states
-/// the old two-array shape could represent and the new ledger cannot: a prompt
-/// or kind naming a turn that is absent from `turns` is dropped, and a second
-/// turn for a session that already has one is dropped, rather than panicking.
+/// Host routing and the UI-owned input row's identity and timestamp.
+/// A prompt or kind naming an absent turn is dropped, as is a second turn
+/// for a session that already has a claim.
 #[derive(Deserialize)]
 pub(crate) struct PersistedActiveTurns {
     pub(crate) turns: BTreeSet<(SessionId, TurnId)>,
@@ -208,6 +216,8 @@ pub(crate) struct PersistedActiveTurnsRef<'a> {
 pub(crate) struct PersistedActiveTurnPrompt {
     pub(crate) session_id: SessionId,
     pub(crate) turn_id: TurnId,
+    pub(crate) row_id: String,
+    pub(crate) at: String,
     pub(crate) prompt: String,
     #[serde(default)]
     pub(crate) attachment_id: Option<String>,
@@ -217,6 +227,8 @@ pub(crate) struct PersistedActiveTurnPrompt {
 pub(crate) struct PersistedActiveTurnPromptRef<'a> {
     pub(crate) session_id: &'a SessionId,
     pub(crate) turn_id: &'a TurnId,
+    pub(crate) row_id: &'a str,
+    pub(crate) at: &'a str,
     pub(crate) prompt: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) attachment_id: Option<&'a str>,
@@ -297,10 +309,7 @@ impl ActiveTurns {
             ActiveTurnSlot {
                 turn_id: turn_id.into(),
                 kind,
-                prompt: prompt.map(|text| ActiveTurnPrompt {
-                    text,
-                    attachment_id,
-                }),
+                prompt: prompt.map(|text| ActiveTurnPrompt::new(text, attachment_id)),
             },
         );
         self.persist_snapshot(&ledger.turns);
@@ -342,10 +351,7 @@ impl ActiveTurns {
             ActiveTurnSlot {
                 turn_id: turn_id.clone(),
                 kind,
-                prompt: prompt.map(|text| ActiveTurnPrompt {
-                    text,
-                    attachment_id,
-                }),
+                prompt: prompt.map(|text| ActiveTurnPrompt::new(text, attachment_id)),
             },
         );
         self.persist_snapshot(&ledger.turns);
@@ -504,6 +510,8 @@ impl ActiveTurns {
                     .map(|prompt| PersistedActiveTurnPromptRef {
                         session_id,
                         turn_id: &slot.turn_id,
+                        row_id: &prompt.row_id,
+                        at: &prompt.at,
                         prompt: &prompt.text,
                         attachment_id: prompt.attachment_id.as_deref(),
                     })
@@ -551,6 +559,8 @@ fn restore_ledger_turns(persisted: PersistedActiveTurns) -> BTreeMap<SessionId, 
             (
                 (prompt.session_id, prompt.turn_id),
                 ActiveTurnPrompt {
+                    row_id: prompt.row_id,
+                    at: prompt.at,
                     text: prompt.prompt,
                     attachment_id: prompt.attachment_id,
                 },

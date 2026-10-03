@@ -6,7 +6,6 @@ pub(crate) struct StateProjectionReads {
     /// The durable handle the projection read through, kept for the caller's
     /// history paging.
     pub(crate) durable: lash::DurableSession,
-    pub(crate) has_durable_head: bool,
     pub(crate) cursor: SessionCursor,
     pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInputRead>,
     pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
@@ -115,45 +114,43 @@ pub(crate) async fn read_state_projection(
     // deleted id reads as an empty session, the shape this projection has
     // always handed the page for a session with nothing committed.
     let session_present = durable.exists().await.map_err(AppError::internal)?;
-    let (read_view, has_durable_head, revision) =
-        match durable.read().await.map_err(AppError::internal)? {
-            Some(view) => {
-                // The revision the snapshot's cursor names is the head's: the
-                // head revision once a checkpoint exists, the turn index before
-                // the first one — the same projection `observation_revision`
-                // makes of a loaded runtime state, read here off the retained
-                // revision record.
-                let head = durable
-                    .revisions()
-                    .await
-                    .map_err(AppError::internal)?
-                    .into_iter()
-                    .find(|revision| revision.head);
-                let revision = head.map_or(view.turn_index() as u64, |head| {
-                    if head.checkpoint_ref.is_some() {
-                        head.head_revision
-                    } else {
-                        view.turn_index() as u64
-                    }
-                });
-                (view, true, revision)
-            }
-            None => {
-                // A session with no durable head yet, or one the catalog does not
-                // hold: the same empty state `open_session_for_observation`
-                // falls back to, so a page that polls before the first commit
-                // sees what an observer would.
-                let request = state_store_request(state, session_id);
-                let mut persisted =
-                    lash::persistence::RuntimeSessionState::new(request.config.session_policy());
-                persisted.session_id = session_id.clone();
-                (
-                    lash::persistence::SessionReadView::from_persisted_state(&persisted),
-                    false,
-                    0,
-                )
-            }
-        };
+    let (read_view, revision) = match durable.read().await.map_err(AppError::internal)? {
+        Some(view) => {
+            // The revision the snapshot's cursor names is the head's: the
+            // head revision once a checkpoint exists, the turn index before
+            // the first one — the same projection `observation_revision`
+            // makes of a loaded runtime state, read here off the retained
+            // revision record.
+            let head = durable
+                .revisions()
+                .await
+                .map_err(AppError::internal)?
+                .into_iter()
+                .find(|revision| revision.head);
+            let revision = head.map_or(view.turn_index() as u64, |head| {
+                if head.checkpoint_ref.is_some() {
+                    head.head_revision
+                } else {
+                    view.turn_index() as u64
+                }
+            });
+            (view, revision)
+        }
+        None => {
+            // A session with no durable head yet, or one the catalog does not
+            // hold: the same empty state `open_session_for_observation`
+            // falls back to, so a page that polls before the first commit
+            // sees what an observer would.
+            let request = state_store_request(state, session_id);
+            let mut persisted =
+                lash::persistence::RuntimeSessionState::new(request.config.session_policy());
+            persisted.session_id = session_id.clone();
+            (
+                lash::persistence::SessionReadView::from_persisted_state(&persisted),
+                0,
+            )
+        }
+    };
     // The cursor handed back with this snapshot has to name the replay
     // incarnation that will actually serve the attach. A synthesized
     // `workbench-durable` token names none, so every attach was fenced into
@@ -207,7 +204,6 @@ pub(crate) async fn read_state_projection(
     Ok(StateProjectionReads {
         read_view,
         durable,
-        has_durable_head,
         cursor,
         pending_turn_inputs,
         queued_work,

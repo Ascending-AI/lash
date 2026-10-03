@@ -26,6 +26,13 @@ pub(crate) use lash_sansio::{
     CheckpointKind, Message, MessageRole, Part, PartKind, SessionStreamEvent,
 };
 
+pub(crate) fn recorded_rlm_event(event: &lash_core::ProtocolEvent) -> Option<RlmProtocolEvent> {
+    event
+        .decode(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
+        .ok()
+        .flatten()
+}
+
 pub(crate) fn test_config() -> TurnMachineConfig {
     test_config_with_termination(RlmTermination::default())
 }
@@ -177,12 +184,10 @@ pub(crate) fn machine_trajectory(machine: &TurnMachine) -> Vec<RlmTrajectoryEntr
         .events()
         .iter()
         .filter_map(|event| match event {
-            lash_core::SessionHistoryRecord::Protocol(event) => {
-                match lash_protocol_rlm::decode_rlm_protocol_event(event) {
-                    Some(RlmProtocolEvent::RlmTrajectoryEntry(entry)) => Some(entry),
-                    _ => None,
-                }
-            }
+            lash_core::SessionHistoryRecord::Protocol(event) => match recorded_rlm_event(event) {
+                Some(RlmProtocolEvent::RlmTrajectoryEntry(entry)) => Some(entry),
+                _ => None,
+            },
             _ => None,
         })
         .collect()
@@ -197,14 +202,12 @@ pub(crate) fn single_llm_extraction_payload(machine: &TurnMachine) -> serde_json
         .events()
         .iter()
         .filter_map(|event| match event {
-            lash_core::SessionHistoryRecord::Protocol(event) => {
-                match lash_protocol_rlm::decode_rlm_protocol_event(event) {
-                    Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) => {
-                        (diagnostic.phase == "llm_extraction").then_some(diagnostic.payload)
-                    }
-                    _ => None,
+            lash_core::SessionHistoryRecord::Protocol(event) => match recorded_rlm_event(event) {
+                Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) => {
+                    (diagnostic.phase == "llm_extraction").then_some(diagnostic.payload)
                 }
-            }
+                _ => None,
+            },
             _ => None,
         })
         .collect();
@@ -293,7 +296,7 @@ pub(crate) fn assistant_reasoning_texts(machine: &TurnMachine) -> Vec<String> {
         let lash_core::SessionHistoryRecord::Protocol(event) = event else {
             return None;
         };
-        match lash_protocol_rlm::decode_rlm_protocol_event(event) {
+        match recorded_rlm_event(event) {
             Some(RlmProtocolEvent::RlmAssistantContent(content))
                 if !content.reasoning.is_empty() =>
             {
@@ -321,7 +324,7 @@ pub(crate) fn assistant_visible_texts(machine: &TurnMachine) -> Vec<String> {
         let lash_core::SessionHistoryRecord::Protocol(event) = event else {
             return None;
         };
-        match lash_protocol_rlm::decode_rlm_protocol_event(event) {
+        match recorded_rlm_event(event) {
             Some(RlmProtocolEvent::RlmAssistantContent(content)) if !content.prose.is_empty() => {
                 Some(content.prose)
             }

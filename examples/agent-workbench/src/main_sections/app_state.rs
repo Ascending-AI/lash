@@ -620,6 +620,14 @@ impl AppState {
             attachments,
             provenance,
         };
+        self.push_prepared_message_for_session(session_id, message)
+    }
+
+    pub(crate) fn push_prepared_message_for_session(
+        &self,
+        session_id: &SessionId,
+        message: ChatMessage,
+    ) -> ChatMessage {
         let inserted = self.event_tx.publish_identified(
             session_id,
             format!("message:{}", message.id),

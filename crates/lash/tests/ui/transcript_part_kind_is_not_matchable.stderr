@@ -1,0 +1,32 @@
+error[E0624]: associated constant `Code` is private
+ --> tests/ui/transcript_part_kind_is_not_matchable.rs:4:59
+  |
+4 |         PartKind::Text | PartKind::Attachment | PartKind::Code | PartKind::Output
+  |                                                           ^^^^ private associated constant
+  |
+ ::: $WORKSPACE/crates/lash-sansio/src/session_model/message.rs
+  |
+  |     pub(crate) const Code: Self = Self::Internal(InternalPartKind(InternalPartDiscriminator::Code));
+  |     --------------------------- private associated constant defined here
+
+error[E0624]: associated constant `Output` is private
+ --> tests/ui/transcript_part_kind_is_not_matchable.rs:4:76
+  |
+4 |         PartKind::Text | PartKind::Attachment | PartKind::Code | PartKind::Output
+  |                                                                            ^^^^^^ private associated constant
+  |
+ ::: $WORKSPACE/crates/lash-sansio/src/session_model/message.rs
+  |
+  |     pub(crate) const Output: Self =
+  |     ----------------------------- private associated constant defined here
+
+error[E0624]: associated constant `Error` is private
+ --> tests/ui/transcript_part_kind_is_not_matchable.rs:5:21
+  |
+5 |         | PartKind::Error | PartKind::Prose | PartKind::ToolCall | PartKind::ToolResult
+  |                     ^^^^^ private associated constant
+  |
+ ::: $WORKSPACE/crates/lash-sansio/src/session_model/message.rs
+  |
+  |     pub(crate) const Error: Self =
+  |     ---------------------------- private associated constant defined here

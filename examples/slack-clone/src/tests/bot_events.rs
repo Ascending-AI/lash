@@ -701,7 +701,11 @@ async fn a_permanently_missing_root_fails_loudly_then_root_arrival_and_retry_rec
     assert_eq!(failed_record.stage.kind(), StageKind::Accepted);
     assert!(!failed_record.stage.is_terminal());
     assert_eq!(
-        failed_record.stage.detail().as_deref(),
+        failed_record
+            .stage
+            .detail()
+            .expect("encode stage detail")
+            .as_deref(),
         Some("thread_root_not_available")
     );
     let replies = platform.thread_messages(&channel, root).await;

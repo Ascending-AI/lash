@@ -165,7 +165,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
     let canonical = projected
         .transcript
         .iter()
-        .filter_map(chat_message_from_row)
+        .filter_map(|row| chat_message_from_row(row).expect("project canonical row"))
         .collect::<Vec<_>>();
     assert_eq!(
         canonical

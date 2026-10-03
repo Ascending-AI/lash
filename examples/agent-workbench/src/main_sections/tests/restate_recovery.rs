@@ -1798,7 +1798,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     let committed = snapshot
         .transcript
         .iter()
-        .filter_map(chat_message_from_row)
+        .filter_map(|row| chat_message_from_row(row).expect("project canonical row"))
         .map(|message| message.text)
         .collect::<Vec<_>>();
     assert!(
