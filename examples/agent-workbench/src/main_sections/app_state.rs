@@ -492,7 +492,7 @@ impl AppState {
     }
 
     /// Whether Restate still reports the run's `LashTurn` invocation (the one
-    /// lash's engine runs it in, keyed by the session and the run) as running.
+    /// lash's engine runs it in, keyed by its recorded shift admission) as running.
     pub(crate) async fn lash_turn_is_active(
         &self,
         address: &lash::TurnAddress,
@@ -502,7 +502,15 @@ impl AppState {
                 self.restate_admin_url.clone(),
                 self.restate_http.clone(),
             ));
-        let key = lash::restate::turn_workflow_key(&address.session_id, &address.turn_id);
+        let Some(key) = lash::restate::recorded_turn_invocation_key(
+            self.core.backend().session_store_factory().as_ref(),
+            &address.session_id,
+            &address.turn_id,
+        )
+        .await?
+        else {
+            return Ok(false);
+        };
         Ok(admin
             .workflow_invocation_status("LashTurn", &key, "run")
             .await?

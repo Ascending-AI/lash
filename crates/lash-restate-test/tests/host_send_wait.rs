@@ -1142,14 +1142,13 @@ async fn live_restate_run_killed_after_its_session_was_deleted_ends_typed() {
         .await
         .expect("open the session");
     let run = lash_core::TurnId::from("deleted-replay-run");
-    let turn_key = lash_restate::turn_workflow_key(&session_id, &run);
+    let crashed_target = Arc::new(std::sync::Mutex::new(None));
     // The run dies with its admission journaled and its plugin transition not.
     backend.crash_on(
         CrashRule::new(CrashPoint::BeforeRun {
             name: format!("lash:plugin-transition:{run}"),
         })
-        .service(backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE))
-        .key(turn_key.clone()),
+        .service(backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE)),
     );
     // The storage delete commits while the dead run is down: the listener
     // runs as the deployment dies, and the delete is the store's alone.
@@ -1157,8 +1156,10 @@ async fn live_restate_run_killed_after_its_session_was_deleted_ends_typed() {
     let factory = backend.lash_backend().session_store_factory();
     assert!(backend.on_crash(CrashCount::new().listener_with({
         let deleted = Arc::clone(&deleted);
+        let crashed_target = Arc::clone(&crashed_target);
         let session_id = session_id.clone();
-        move |_target: &str| {
+        move |target: &str| {
+            *crashed_target.lock().expect("crash target") = Some(target.to_owned());
             let factory = Arc::clone(&factory);
             let session_id = session_id.clone();
             let delete = std::thread::spawn(move || {
@@ -1203,10 +1204,11 @@ async fn live_restate_run_killed_after_its_session_was_deleted_ends_typed() {
         .await
         .expect("the killed deployment serves again");
 
-    let target = format!(
-        "{}/{turn_key}/run",
-        backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE)
-    );
+    let target = crashed_target
+        .lock()
+        .expect("crash target")
+        .clone()
+        .expect("the target that actually crashed");
     let ended = tokio::time::timeout(Duration::from_secs(180), async {
         loop {
             if let Some(executed) = live_host(&backend, &target).await {
@@ -2011,15 +2013,14 @@ async fn live_restate_follow_on_run_killed_after_its_session_was_deleted_ends_ty
         .expect("open the session");
     let run = lash_core::TurnId::from("deleted-replay-run");
     let recovery = lash_core::TurnId::fixture(format!("follow-on:{run}:agent-frame:1#0"));
-    let turn_key = lash_restate::turn_workflow_key(&session_id, &recovery);
+    let crashed_target = Arc::new(std::sync::Mutex::new(None));
     // The recovery run's execution dies with its seal journaled and its recovery
     // decision not.
     backend.crash_on(
         CrashRule::new(CrashPoint::BeforeRun {
             name: format!("lash:shift-follow-on:{recovery}"),
         })
-        .service(backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE))
-        .key(turn_key.clone()),
+        .service(backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE)),
     );
     // The storage delete commits while the dead run is down: the listener
     // runs as the deployment dies, and the delete is the store's alone.
@@ -2027,8 +2028,10 @@ async fn live_restate_follow_on_run_killed_after_its_session_was_deleted_ends_ty
     let factory = backend.lash_backend().session_store_factory();
     assert!(backend.on_crash(CrashCount::new().listener_with({
         let deleted = Arc::clone(&deleted);
+        let crashed_target = Arc::clone(&crashed_target);
         let session_id = session_id.clone();
-        move |_target: &str| {
+        move |target: &str| {
+            *crashed_target.lock().expect("crash target") = Some(target.to_owned());
             let factory = Arc::clone(&factory);
             let session_id = session_id.clone();
             let delete = std::thread::spawn(move || {
@@ -2075,10 +2078,11 @@ async fn live_restate_follow_on_run_killed_after_its_session_was_deleted_ends_ty
         .await
         .expect("the killed deployment serves again");
 
-    let target = format!(
-        "{}/{turn_key}/run",
-        backend.service_name(lash_restate_test::TURN_DRIVER_SERVICE)
-    );
+    let target = crashed_target
+        .lock()
+        .expect("crash target")
+        .clone()
+        .expect("the target that actually crashed");
     let ended = tokio::time::timeout(Duration::from_secs(180), async {
         loop {
             if let Some(executed) = live_host(&backend, &target).await {

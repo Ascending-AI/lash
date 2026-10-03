@@ -130,18 +130,10 @@ impl Fixture {
 
     /// Every `LashTurn` run of `turn` the double saw.
     fn turn_runs(&self, turn: &str) -> Vec<lash_restate_test::InvocationView> {
-        let key = lash_restate::turn_workflow_key(
+        self.double.server().turn_invocations(
             &lash_core::SessionId::from(SESSION),
             &lash_core::TurnId::fixture(turn),
-        );
-        self.double
-            .server()
-            .invocations()
-            .into_iter()
-            .filter(|view| {
-                view.target.starts_with("LashTurn") && view.target.ends_with(&format!("/{key}/run"))
-            })
-            .collect()
+        )
     }
 }
 
@@ -304,16 +296,12 @@ async fn a_refused_run_crashed_before_its_outcome_converges_on_one_terminal() ->
     )
     .await
     .expect("the first turn settles")?;
-    // The run's only state write is its recorded outcome.
     fixture.double.server().crash_on(
-        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeFrame {
-            ty: lash_restate_test::protocol::MessageType::SetStateCommand,
+        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeStateWrite {
+            key: "outcome".to_owned(),
+            value_contains: Some(format!("\"run\":\"{TURN}\"")),
         })
         .service(lash_restate_test::TURN_DRIVER_SERVICE)
-        .key(lash_restate::turn_workflow_key(
-            &lash_core::SessionId::from(SESSION),
-            &lash_core::TurnId::from(TURN),
-        ))
         .within_attempts(1),
     );
 

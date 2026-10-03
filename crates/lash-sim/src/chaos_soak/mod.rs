@@ -1046,15 +1046,11 @@ mod tests {
         driver.send_held(&child, run, true).await.expect("held run");
         let invocation = driver
             .world
-            .invocations()
+            .run_invocations(&child, &lash_core::TurnId::from(run))
             .await
+            .expect("recorded run invocation")
             .into_iter()
-            .find(|view| {
-                view.target
-                    .starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
-                    && view.target.contains(run)
-                    && view.status != "completed"
-            })
+            .find(|view| view.status != "completed")
             .expect("running run invocation");
         driver
             .world
@@ -1094,15 +1090,14 @@ mod tests {
             driver.send_held(&id, run, true).await.expect("held run");
             sessions.push(id.clone());
             if session < 2 {
-                let invocations = driver.world.invocations().await;
+                let invocations = driver
+                    .world
+                    .run_invocations(&id, &lash_core::TurnId::from(run))
+                    .await
+                    .expect("recorded run invocation");
                 let invocation = invocations
                     .iter()
-                    .find(|view| {
-                        view.target
-                            .starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
-                            && view.target.contains(run)
-                            && view.status != "completed"
-                    })
+                    .find(|view| view.status != "completed")
                     .unwrap_or_else(|| panic!("running run invocation: {invocations:?}"));
                 driver
                     .world

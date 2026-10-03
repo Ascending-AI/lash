@@ -449,12 +449,11 @@ pub async fn a_run_recorded_under_one_executor_is_never_admitted_by_another(
     let executing = f.spawn_session_shift(&runner);
     within("the run's execution asks its model", f.asked.notified()).await;
     let sealed = f.epoch().await;
-    assert_eq!(
-        f.unfinished()
-            .await
-            .map(|unfinished| (unfinished.run, unfinished.executor)),
-        Some((f.turn_id.clone(), RunExecutor::Run)),
-        "the run is recorded under the engine's own execution"
+    let unfinished = f.unfinished().await.expect("the run is admitted");
+    assert_eq!(unfinished.run, f.turn_id);
+    assert!(
+        matches!(unfinished.executor, RunExecutor::Run { .. }),
+        "the run records its engine invocation"
     );
 
     // The acceptor wakes while the run executes under its recorded executor.
@@ -528,6 +527,19 @@ pub async fn a_run_recorded_under_one_executor_is_never_admitted_by_another(
     assert!(
         matches!(&adopted, crate::TurnOutcome::Finished(_)),
         "{adopted:?}"
+    );
+    let intent = f.parts.request("relay-ask");
+    assert_eq!(
+        f.parts
+            .store
+            .run_executor(&f.parts.session_id, &f.turn_id)
+            .await
+            .expect("terminal run executor"),
+        Some(RunExecutor::run(&crate::store::AdmissionId::new(format!(
+            "{}#0",
+            intent.request.as_str()
+        )))),
+        "the committed head retains the invocation that admitted this run"
     );
     f.assert_executed_once_to_its_end().await;
     assert_eq!(
@@ -642,7 +654,10 @@ pub async fn admit_run_refuses_another_engine_held_executor(
         scope: crate::ExecutionScope::session_operation("root", "shift-admission:a-drain"),
     };
     for (law, recorded) in [
-        ("recorded-run", RunExecutor::Run),
+        (
+            "recorded-run",
+            RunExecutor::run(&crate::store::AdmissionId::new("fixture#0")),
+        ),
         ("recorded-process", process("the acceptor")),
     ] {
         let parts = ShiftParts::new(prefix, law, &host, &stores, 1).await;
@@ -662,11 +677,21 @@ pub async fn admit_run_refuses_another_engine_held_executor(
             .expect("the first admission records the run")
             .expect("the first admission reaches its head");
         assert_eq!(admission.executor, recorded, "{law}");
+        assert_eq!(
+            parts
+                .store
+                .run_executor(&parts.session_id, &run)
+                .await
+                .expect("recorded executor"),
+            Some(recorded.clone()),
+            "{law}: run lookup names its recorded admission"
+        );
 
         // Another engine-held executor, under the session's current fence.
         let later = seal_shift_fence_for_test(&parts.store, &parts.session_id, "later").await;
         for other in [
-            RunExecutor::Run,
+            RunExecutor::run(&crate::store::AdmissionId::new("fixture#0")),
+            RunExecutor::run(&crate::store::AdmissionId::new("other-intent#0")),
             process("the acceptor"),
             process("another process"),
         ] {
@@ -704,6 +729,15 @@ pub async fn admit_run_refuses_another_engine_held_executor(
         assert_eq!(
             resumed.executor, recorded,
             "{law}: the record never changes"
+        );
+        assert_eq!(
+            parts
+                .store
+                .run_executor(&parts.session_id, &run)
+                .await
+                .expect("executor after a later seal"),
+            Some(recorded.clone()),
+            "{law}: a later session epoch cannot retarget the invocation"
         );
         assert_eq!(
             parts
@@ -1093,7 +1127,7 @@ pub async fn a_parent_turn_acceptors_run_is_closed_to_a_later_drive(
             &lash_core::store::RunStartNonce::new("a-later-shift"),
             Some(&lash_core::store::RunHold {
                 run: f.turn_id.clone(),
-                executor: RunExecutor::Run,
+                executor: RunExecutor::run(&crate::store::AdmissionId::new("fixture#0")),
             }),
         )
         .await
@@ -1111,7 +1145,10 @@ pub async fn a_parent_turn_acceptors_run_is_closed_to_a_later_drive(
         &f.turn_id,
         unfinished.head.clone(),
     );
-    assert_eq!(request.executor, RunExecutor::Run);
+    assert_eq!(
+        request.executor,
+        RunExecutor::run(&crate::store::AdmissionId::new("fixture#0"))
+    );
     match f.gate.inner.admit_run(&request).await {
         Err(crate::StoreError::RunHeldByAnotherExecutor {
             recorded,
@@ -1119,7 +1156,10 @@ pub async fn a_parent_turn_acceptors_run_is_closed_to_a_later_drive(
             ..
         }) => {
             assert_eq!(*recorded, acceptor);
-            assert_eq!(*admitting, RunExecutor::Run);
+            assert_eq!(
+                *admitting,
+                RunExecutor::run(&crate::store::AdmissionId::new("fixture#0"))
+            );
         }
         answer => panic!("the store refuses the later shift's admission: {answer:?}"),
     }

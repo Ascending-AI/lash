@@ -12,18 +12,17 @@ use super::*;
 
 /// The `LashTurn` `run` invocations the engine holds for `run`, in any
 /// status: the run's executions, never its `outcome` reads or its `close`.
-async fn run_executions(driver: &driver::Driver, run: &str) -> Vec<String> {
+async fn run_executions(
+    driver: &driver::Driver,
+    session: &lash_core::SessionId,
+    run: &str,
+) -> Vec<String> {
     driver
         .world
-        .invocations()
+        .run_invocations(session, &lash_core::TurnId::fixture(run))
         .await
+        .expect("recorded run invocations")
         .into_iter()
-        .filter(|view| {
-            view.target
-                .starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
-                && view.target.contains(run)
-                && view.target.ends_with("/run")
-        })
         .map(|view| view.id)
         .collect()
 }
@@ -86,21 +85,21 @@ async fn missing_started_run_is_settled_without_new_ingress() {
         driver.wait_reached(run).await,
         "the run admitted its input and started its model call"
     );
-    let runs = run_executions(&driver, run).await;
-    let [run] = runs.as_slice() else {
+    let runs = run_executions(&driver, &session, run).await;
+    let [invocation] = runs.as_slice() else {
         panic!("one execution of the started run: {runs:?}");
     };
     driver
         .world
-        .kill_invocation(run)
+        .kill_invocation(invocation)
         .await
         .expect("kill the run's execution");
     // The shift consumes the killed run as released and stops on the run
     // it admits again; only then is the run's record purged.
     driver.world.quiesce().await;
-    purge(&driver, run).await;
+    purge(&driver, invocation).await;
     assert!(
-        run_executions(&driver, run).await.is_empty(),
+        run_executions(&driver, &session, run).await.is_empty(),
         "the engine holds no execution of the run on any lane"
     );
     assert!(
@@ -132,7 +131,7 @@ async fn missing_started_run_is_settled_without_new_ingress() {
         "the run's input is settled with it: {pending:?}"
     );
     assert!(
-        run_executions(&driver, run).await.is_empty(),
+        run_executions(&driver, &session, run).await.is_empty(),
         "recovery never ran the run again under a fresh journal"
     );
     let mut report = EpochReport {
@@ -196,7 +195,7 @@ async fn missing_unstarted_run_executes_once_from_its_ingress() {
         .world
         .backend()
         .session_store_factory()
-        .bind_run_inputs(&session, &lash_core::TurnId::from(run), &[input])
+        .bind_run_inputs(&session, &lash_core::TurnId::fixture(run), &[input])
         .await
         .expect("open the run's record before any execution admits it");
 
@@ -204,7 +203,7 @@ async fn missing_unstarted_run_executes_once_from_its_ingress() {
         driver.tick().await.expect("recovery tick");
     }
     assert!(
-        run_executions(&driver, run).await.is_empty(),
+        run_executions(&driver, &session, run).await.is_empty(),
         "the held shift never started the run"
     );
     assert!(
@@ -230,7 +229,7 @@ async fn missing_unstarted_run_executes_once_from_its_ingress() {
         "the unstarted run ran and committed: {terminal:?}"
     );
     assert_eq!(
-        run_executions(&driver, run).await.len(),
+        run_executions(&driver, &session, run).await.len(),
         1,
         "the run ran exactly once"
     );

@@ -187,8 +187,8 @@ pub use serve::{RestateEndpointLimits, serve_endpoint};
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use session_shifts::{
     LASH_SESSION_SHIFT_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRunCloseRequest,
-    RestateRunRequest, RestateSessionShiftRequest, RestateSessionShiftsSlot, RestateSessionWork,
-    SendShiftError, turn_workflow_key,
+    RestateRunOutcome, RestateRunRequest, RestateSessionShiftRequest, RestateSessionShiftsSlot,
+    RestateSessionWork, SendShiftError, recorded_turn_invocation_key, turn_invocation_key,
 };
 pub use turn::RestateTurnAttach;
 pub use turn_handler::{

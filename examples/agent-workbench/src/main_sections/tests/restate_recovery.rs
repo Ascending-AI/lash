@@ -1920,7 +1920,23 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
     // browser's send would reach it.
     std::fs::write(data_dir.join(RECOVERY_E2E_START_TURN), turn_id.as_str())
         .expect("ask the first owner to send the recovery E2E turn");
+    let run_store: Arc<dyn lash::persistence::DeploymentStore> = match backend {
+        "sqlite" => lash::sqlite::SqliteStoreSet::open(data_dir.join("lash-sessions"))
+            .await
+            .expect("recovery SQLite store")
+            .session_store_factory(),
+        "postgres" => Arc::new(
+            lash::postgres::PostgresStorage::connect(
+                &std::env::var("AGENT_WORKBENCH_E2E_DATABASE_URL").expect("recovery database URL"),
+            )
+            .await
+            .expect("recovery Postgres store")
+            .session_store_factory(),
+        ),
+        other => panic!("unsupported recovery backend {other}"),
+    };
     let invocation_id = lash_turn_invocation_at(
+        run_store.as_ref(),
         &admin_url,
         &lash::TurnAddress::new(&session_id, &turn_id),
         hang,

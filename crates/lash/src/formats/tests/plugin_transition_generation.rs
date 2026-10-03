@@ -125,13 +125,48 @@ struct TransitionShifts {
 impl SessionShifts for TransitionShifts {
     async fn admit(
         &self,
-        _controller: lash_core::ScopedEffectController<'_>,
-        _request: &ShiftRequest,
-        _generation: &BuildGeneration,
-        _ordinal: u32,
+        controller: lash_core::ScopedEffectController<'_>,
+        request: &ShiftRequest,
+        generation: &BuildGeneration,
+        ordinal: u32,
         _draining: Option<&BuildGeneration>,
     ) -> Result<lash_core::engine::AdmitVerdict, ShiftAbort> {
-        unreachable!("the witness sends the recorded run directly")
+        let bodies = Arc::clone(&self.bodies);
+        let envelope = RuntimeEffectEnvelope::new(
+            RuntimeEffectInvocation::new(
+                EffectAddress::new(
+                    controller.execution_scope().clone(),
+                    lash_core::engine::shift_admission_replay_key(&request.request, ordinal),
+                )
+                .expect("current admission address"),
+                RuntimeAttribution::for_session(request.session.clone()),
+                format!("shift-admission-{ordinal}"),
+            ),
+            RuntimeEffectCommand::AdmitShift {
+                request: Box::new(lash_core::engine::AdmitRequest {
+                    session: request.session.clone(),
+                    request: request.request.clone(),
+                    build_generation: generation.clone(),
+                }),
+            },
+        );
+        let result = controller
+            .execute_effect(
+                envelope,
+                RuntimeEffectLocalExecutor::testing(move |_| async move {
+                    bodies.fetch_add(1, Ordering::SeqCst);
+                    Err(RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::PluginSessionManager,
+                        "predecessor work must never execute",
+                    ))
+                }),
+            )
+            .await;
+        Err(ShiftAbort::Retry(
+            result
+                .expect_err("the old journal must be refused")
+                .into_runtime_error(),
+        ))
     }
 
     async fn execute_run(
@@ -218,6 +253,16 @@ async fn the_merged_admission_refuses_a_predecessor_before_decoding_and_keeps_it
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn immutable_turn_intents_refuse_predecessor_journals_before_decoding_and_keep_their_lane() {
+    let predecessor_epoch = if cfg!(feature = "synthetic-next") {
+        14
+    } else {
+        13
+    };
+    predecessor_journal_keeps_its_lane(predecessor_epoch, PredecessorShape::RunInvocation).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_environment_prelude_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane() {
     predecessor_journal_keeps_its_lane(
         crate::restate::JOURNAL_LOGIC_EPOCH - 1,
@@ -258,7 +303,9 @@ fn predecessor_admission_outcome() -> serde_json::Value {
                 },
                 turn_index: 1,
                 generation: None,
-                executor: lash_core::store::RunExecutor::Run,
+                executor: lash_core::store::RunExecutor::run(&lash_core::store::AdmissionId::new(
+                    "fixture#0",
+                )),
                 plugins: Default::default(),
                 trace: None,
                 cancel_intent: None,
@@ -282,6 +329,7 @@ enum PredecessorShape {
     UntaggedTransition,
     TaggedTransition,
     AdmittedHead,
+    RunInvocation,
     EnvironmentPrelude,
 }
 
@@ -298,7 +346,7 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
         "changed handler logic needs a new lane"
     );
     let envelope = match shape {
-        PredecessorShape::AdmittedHead => admission_envelope(),
+        PredecessorShape::AdmittedHead | PredecessorShape::RunInvocation => admission_envelope(),
         PredecessorShape::EnvironmentPrelude => RuntimeEffectEnvelope::new(
             RuntimeEffectInvocation::new(
                 EffectAddress::new(lash_core::ExecutionScope::turn(SESSION, RUN), "prelude")
@@ -339,6 +387,16 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
             assert!(refusal.to_string().contains("prelude"), "{refusal}");
             outcome
         }
+        PredecessorShape::RunInvocation => {
+            let mut outcome = predecessor_admission_outcome();
+            outcome["answer"]["head_verdict"] =
+                serde_json::to_value(lash_core::store::AdmittedHeadVerdict::Ready).unwrap();
+            outcome["answer"]["admission"]["executor"] = serde_json::json!({"run": "run"});
+            let error = serde_json::from_value::<lash_core::RuntimeEffectOutcome>(outcome.clone())
+                .expect_err("the old run-derived executor contains no invocation identity");
+            assert!(error.to_string().contains("admission"), "{error}");
+            outcome
+        }
         _ => serde_json::json!({
             "type": "transition_plugins",
             "record": {
@@ -376,21 +434,11 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
     let connection =
         lash_restate::RestateConnection::with_transport(server.ingress_url(), server.transport());
     let ingress = lash_restate::RestateIngressClient::new(connection.clone());
-    let request = lash_restate::RestateRunRequest {
-        sender_generation: Some(recorded.clone()),
-        admitted: admission_body::admitted(
-            SESSION.into(),
-            RUN.into(),
-            ShiftRequestId::new("shift"),
-            AdmissionId::new("shift:0"),
-            0,
-            recorded.clone(),
-            AdmittedWork::Queued {
-                head: "commands".into(),
-            },
-        ),
-    };
-    let key = lash_restate::turn_workflow_key(&SESSION.into(), &RUN.into());
+    let request = serde_json::json!({
+        "sender_generation": recorded,
+        "admitted": predecessor_admission_outcome()["answer"]["admission"],
+    });
+    let key = "22:predecessor-transitionrun".to_owned();
     ingress
         .send_workflow_json("LashTurn", &key, "run", &lash_restate::Call::new(&request))
         .await
@@ -470,7 +518,10 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
     );
     let lane = format!("LashTurn_g{recorded}");
     let _: bool = ingress
-        .call_workflow_json(&lane, "drain", "run", &lash_restate::Call::new(&request))
+        .call_workflow_json(&lane, "22:predecessor-transitionrun", "run", &lash_restate::Call::new(serde_json::json!({
+            "sender_generation": recorded,
+            "admitted": admission_body::admitted(SESSION.into(), RUN.into(), ShiftRequestId::new("shift"), AdmissionId::new("shift#0"), 0, recorded.clone(), AdmittedWork::Queued { head: "head".into() }),
+        })))
         .await
         .unwrap();
     assert_eq!(

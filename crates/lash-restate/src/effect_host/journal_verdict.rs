@@ -104,12 +104,19 @@ async fn turn_journal_settled(
     {
         return Ok(false);
     }
+    let Some(key) = crate::session_shifts::recorded_turn_invocation_key(
+        authority.stores.session_store_factory().as_ref(),
+        session_id,
+        run,
+    )
+    .await
+    .map_err(|error| journal_read_error("the recorded executor", error))?
+    else {
+        return Ok(true);
+    };
     let runs = authority
         .admin
-        .run_executions(
-            namespace,
-            &[crate::session_shifts::turn_workflow_key(session_id, run)],
-        )
+        .run_executions(namespace, &[key])
         .await
         .map_err(|error| journal_read_error("run executes", error))?;
     Ok(!runs.iter().any(|executed| executed.status.is_open()))

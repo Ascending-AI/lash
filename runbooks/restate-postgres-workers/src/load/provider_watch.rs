@@ -48,7 +48,15 @@ impl LoadProviderProbe<'_> {
         let Some(run) = &self.run else {
             return Ok(None);
         };
-        let key = lash::restate::turn_workflow_key(&self.receipt.session_id, run);
+        let Some(key) = lash::restate::recorded_turn_invocation_key(
+            self.store.as_ref(),
+            &self.receipt.session_id,
+            run,
+        )
+        .await?
+        else {
+            return Ok(None);
+        };
         let literal = |value: &str| format!("'{}'", value.replace('\'', "''"));
         #[derive(serde::Deserialize)]
         struct Invocation {
@@ -81,9 +89,9 @@ impl LoadProviderProbe<'_> {
                 .admin
                 .query_json::<RunStart>(&format!(
                     "SELECT appended_at FROM sys_journal WHERE id = {} \
-                     AND name = {} ORDER BY index LIMIT 1",
+                     AND name LIKE {} ORDER BY index LIMIT 1",
                     literal(&invocation.id),
-                    literal(&format!("lash:shift-admit:{run}")),
+                    literal("lash:shift-admission:%"),
                 ))
                 .await;
             match starts {

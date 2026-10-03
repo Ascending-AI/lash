@@ -381,7 +381,9 @@ pub async fn inconsistent_divergence_still_parks(
             turn_index: state.turn_index as u64 + 1,
             generation: None,
             admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance-law"),
-            executor: lash_core::store::RunExecutor::Run,
+            executor: lash_core::store::RunExecutor::run(&lash_core::store::AdmissionId::new(
+                "fixture#0",
+            )),
             plugins: Default::default(),
             turn_cancellation: None,
             trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),

@@ -850,6 +850,23 @@ impl State {
             command_index,
             run_name,
             run_index,
+            state_key: (frame.ty == MessageType::SetStateCommand)
+                .then(|| {
+                    frame
+                        .decode::<crate::protocol::generated::SetStateCommandMessage>()
+                        .ok()
+                })
+                .flatten()
+                .and_then(|write| String::from_utf8(write.key.to_vec()).ok()),
+            state_value: (frame.ty == MessageType::SetStateCommand)
+                .then(|| {
+                    frame
+                        .decode::<crate::protocol::generated::SetStateCommandMessage>()
+                        .ok()
+                })
+                .flatten()
+                .and_then(|write| write.value)
+                .and_then(|value| String::from_utf8(value.content.to_vec()).ok()),
             attempt: invocation.attempts,
         }
     }

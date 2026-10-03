@@ -982,6 +982,34 @@ impl RestateTestServer {
             .unwrap_or_default()
     }
 
+    /// Invocations whose own recorded admission selected this logical run.
+    pub fn turn_invocations(
+        &self,
+        session: &lash_core::SessionId,
+        run: &lash_core::TurnId,
+    ) -> Vec<InvocationView> {
+        self.invocations()
+            .into_iter()
+            .filter(|view| {
+                let Some((service, rest)) = view.target.split_once('/') else {
+                    return false;
+                };
+                let Some(key) = rest.strip_suffix("/run") else {
+                    return false;
+                };
+                if !service.contains("LashTurn") {
+                    return false;
+                }
+                self.object_state(service, key)
+                    .get("admission")
+                    .and_then(|bytes| {
+                        serde_json::from_slice::<lash_core::engine::Admitted>(bytes).ok()
+                    })
+                    .is_some_and(|admitted| admitted.session() == session && admitted.run() == run)
+            })
+            .collect()
+    }
+
     /// Replace the whole state the object or workflow `key` of `service`
     /// holds, as the admin API's state modification does.
     pub fn set_object_state(

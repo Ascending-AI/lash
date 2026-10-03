@@ -329,10 +329,14 @@ impl Turn {
             .server()
             .hold(
                 TURN_DRIVER_SERVICE,
-                &lash_restate::turn_workflow_key(
+                &lash_restate::recorded_turn_invocation_key(
+                    self.backend.lash_backend().session_store_factory().as_ref(),
                     &lash_core::SessionId::from(SESSION),
                     &lash::TurnId::from(RUN),
-                ),
+                )
+                .await
+                .expect("recorded executor")
+                .expect("turn invocation"),
             )
             .await
     }

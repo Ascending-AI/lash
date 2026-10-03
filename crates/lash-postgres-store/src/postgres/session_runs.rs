@@ -11,9 +11,9 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentObligation, IntentSettle, ObligationKey, ObligationState,
-    ParkCancelCause, ParkEventKind, RunAdmission, RunEndOutcome, RunStore, RunTerminal,
-    RunTerminalCause, RunTerminalWriteDecision, RunTurns, UnfinishedRun, close_admission,
-    decide_run_terminal_write, refused_execution_owns_run, run_binding_conflict,
+    ParkCancelCause, ParkEventKind, RunAdmission, RunEndOutcome, RunExecutor, RunStore,
+    RunTerminal, RunTerminalCause, RunTerminalWriteDecision, RunTurns, UnfinishedRun,
+    close_admission, decide_run_terminal_write, refused_execution_owns_run, run_binding_conflict,
     stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
@@ -1154,6 +1154,28 @@ pub(crate) async fn delete_session_runs_conn(
 
 #[async_trait::async_trait]
 impl RunStore for PostgresStore {
+    async fn run_executor(
+        &self,
+        session_id: &SessionId,
+        run: &TurnId,
+    ) -> Result<Option<RunExecutor>, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let stored = sqlx::query_as::<_, (Option<String>, Option<String>, bool)>(
+            session_runs_sql().runs.select_hold.sql(),
+        )
+        .bind(session_id.as_str())
+        .bind(run.as_str())
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
+        stored
+            .map(|(sealed, admission, _)| {
+                RunExecutor::from_stored(admission.as_deref(), sealed.as_deref())
+            })
+            .transpose()
+            .map(Option::flatten)
+    }
+
     async fn unfinished_run(
         &self,
         session_id: &SessionId,

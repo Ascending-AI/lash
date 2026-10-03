@@ -192,9 +192,12 @@ pub fn decide_run_hold(
     stored_epoch: u64,
     held: Option<&HeldRun>,
     unfinished: Option<&super::UnfinishedRun>,
+    follow_on: Option<&super::PendingFollowOn>,
 ) -> Option<ShiftEpochSeal> {
     if let Some(unfinished) = unfinished
         && unfinished.executor.excludes(&hold.executor)
+        && !follow_on
+            .is_some_and(|owed| owed.hands_off_root(&unfinished.executor, &unfinished.run, hold))
     {
         return Some(ShiftEpochSeal::HeldByAnotherExecutor {
             run: unfinished.run.clone(),

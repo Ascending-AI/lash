@@ -23,8 +23,7 @@ async fn sleep_with_clock_crash(
             server.crash_on(
                 lash_restate_test::CrashRule::new(point)
                     .service(lash_restate_test::TURN_DRIVER_SERVICE)
-                    .handler("run")
-                    .key_ending("run-run"),
+                    .handler("run"),
             );
         }
     })
@@ -49,7 +48,14 @@ async fn sleep_with_clock_crash(
                 .iter()
                 .filter(|entry| entry.ty.is_command())
                 .count();
-            if let Some(rule) = crash.rule(commands) {
+            let old_key = lash_restate::recorded_turn_invocation_key(
+                roll.core.store_factory.as_ref(),
+                &roll.session,
+                &lash_core::TurnId::fixture("run-run"),
+            )
+            .await?
+            .expect("the parked run records its invocation");
+            if let Some(rule) = crash.rule(commands, Some(&old_key)) {
                 roll.server().crash_on(rule);
             }
         }

@@ -433,6 +433,14 @@ impl RunTerminal {
 /// bindings of accepted inputs to the runs that execute them.
 #[async_trait::async_trait]
 pub trait RunStore: Send + Sync {
+    /// The executor recorded for this run, including after it ended.
+    /// Reads the retained admission or seal without consulting the session head.
+    async fn run_executor(
+        &self,
+        session_id: &SessionId,
+        run: &TurnId,
+    ) -> Result<Option<RunExecutor>, StoreError>;
+
     /// The session's one admitted run without terminal evidence, and the
     /// head its admission recorded, if there is one. Admission resumes it
     /// before anything else (FIG-3927).
@@ -729,9 +737,9 @@ impl RunAdmission {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "run", rename_all = "snake_case")]
 pub enum RunExecutor {
-    /// The engine's own execution of the run, keyed by the run's session and id
-    /// (Restate's `LashTurn/{session}:{run}`).
-    Run,
+    /// The invocation of an immutable shift request and its ordinal.
+    /// Recovery reads this identity from the recorded admission or seal.
+    Run { admission: super::AdmissionId },
     /// An acceptor: the execution `scope` accepted a child session's turn
     /// and executes it inline, with every run admitted ahead of it, and holds
     /// no engine execution of the run (FIG-4814). An engine holds the acceptor's
@@ -746,6 +754,14 @@ pub enum RunExecutor {
 }
 
 impl RunExecutor {
+    /// The engine invocation of this recorded admission.
+    #[must_use]
+    pub fn run(admission: &super::AdmissionId) -> Self {
+        Self::Run {
+            admission: admission.clone(),
+        }
+    }
+
     /// Whether an engine holds a run for this executor: the run's own execution,
     /// or the execution of the acceptor that executes the run inline. The engine
     /// redrives such a run itself. Any other inline shift is a session
@@ -753,7 +769,7 @@ impl RunExecutor {
     #[must_use]
     pub fn is_engine_held(&self) -> bool {
         match self {
-            Self::Run | Self::Acceptor { .. } => true,
+            Self::Run { .. } | Self::Acceptor { .. } => true,
             Self::Inline { .. } => false,
         }
     }

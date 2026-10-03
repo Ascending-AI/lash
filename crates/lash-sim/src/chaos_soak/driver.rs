@@ -1310,21 +1310,19 @@ impl Driver {
     /// the engine is running but the execution of a held run, which stays in its
     /// model call until the run is cancelled or its session deleted.
     fn works(&self) -> Result<bool, String> {
-        let held = |target: &str| {
-            target.starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
-                && self
-                    .ledger
-                    .held
-                    .iter()
-                    .any(|held| target.ends_with(&format!("{}{}/run", held.session, held.run)))
-        };
-        Ok(self
-            .world
-            .double()?
-            .server()
-            .working()
+        let server = self.world.double()?.server();
+        let held: Vec<String> = self
+            .ledger
+            .held
             .iter()
-            .any(|view| !held(&view.target)))
+            .flat_map(|held| {
+                server
+                    .turn_invocations(&held.session, &lash_core::TurnId::fixture(&held.run))
+                    .into_iter()
+                    .map(|view| view.id)
+            })
+            .collect();
+        Ok(server.working().iter().any(|view| !held.contains(&view.id)))
     }
 
     /// Every session the host asked to delete that is still closing: its

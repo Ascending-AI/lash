@@ -50,6 +50,7 @@ struct Ledger {
     consumed: Vec<String>,
     /// How many times any run run started, redrives included.
     run_executions: usize,
+    refused_terminals: Vec<String>,
 }
 
 /// A gate admission `ordinal` of one request waits at, after it read the
@@ -258,7 +259,7 @@ impl ScriptedShifts {
                 }),
                 request.request.clone(),
                 lash_core::engine::AdmissionId::new(format!(
-                    "{}:{ordinal}",
+                    "{}#{ordinal}",
                     request.request.as_str()
                 )),
                 0,
@@ -327,6 +328,17 @@ impl SessionShifts for ScriptedShifts {
         lash_core::engine::RunEnd::owing_nothing(
             async {
                 let run = admitted.run().clone();
+                // The ledger retains terminal evidence as the real store does.
+                // A new invocation adopts that end before entering the body.
+                if self
+                    .ledger(admitted.session())
+                    .refused_terminals
+                    .contains(&run.to_string())
+                {
+                    return Err(ShiftAbort::Refused(runtime_error(format!(
+                        "run {run} is refused"
+                    ))));
+                }
                 let hold = self.run_hold.lock().unwrap().clone();
                 if let Some(hold) = hold {
                     hold.reached.notify_one();
@@ -339,6 +351,7 @@ impl SessionShifts for ScriptedShifts {
                     ledger.run_executions += 1;
                     match script {
                         Some(RunScript::Refuse) => {
+                            ledger.refused_terminals.push(run.to_string());
                             return Err(ShiftAbort::Refused(runtime_error(format!(
                                 "run {run} is refused"
                             ))));
@@ -583,10 +596,11 @@ async fn a_scheduled_shift_runs_every_open_item_in_arrival_order() {
     assert_eq!(
         turns,
         [
-            "LashTurn/11:shift-ordera/run",
-            "LashTurn/11:shift-orderb/run"
+            "LashTurn/11:shift-orderr1#0/run",
+            "LashTurn/11:shift-orderr1#1/run",
+            "LashTurn/11:shift-orderr1#2/run"
         ],
-        "one LashTurn workflow per admitted run"
+        "one invocation per immutable admission, including the idle stop"
     );
 }
 
@@ -1180,18 +1194,11 @@ async fn a_shift_that_failed_inside_a_legs_first_run_hands_off_at_that_runs_boun
     );
 }
 
-/// A failed attempt inside a shift's first admission is seen at its first
-/// run's boundary (FIG-4556). The first admission of the shift fails more
-/// than half the shift handler's budget of attempts before it records
-/// anything, and so does the admission after the first run: fewer failed
-/// attempts under either than the budget, more under both. The leg's start is
-/// the shift's first command, stored before its first admission runs, so the
-/// attempt that outlived that admission's failures did not start the leg: the
-/// shift hands off at the first run's boundary and the next admission's
-/// failures are counted by a new invocation. No invocation pauses, and the
-/// first leg ran the first run alone.
+/// Admission failures spend only their immutable intent's retry budget.
+/// Two admissions each fail beyond half the budget, while their parent shift
+/// stays on its fresh leg and no invocation pauses.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_shift_that_failed_inside_its_first_admission_hands_off_at_its_first_runs_boundary() {
+async fn admission_failures_spend_only_their_intents_retry_budget() {
     let budget = usize::try_from(lash_restate::TURN_HANDLER_MAX_ATTEMPTS).unwrap();
     // Under one admission, inside one retry loop; under two, past it.
     let faults = budget / 2 + 1;
@@ -1218,12 +1225,13 @@ async fn a_shift_that_failed_inside_its_first_admission_hands_off_at_its_first_r
     let first = attach(&backend, &session, "first-admission").await;
     assert_eq!(
         committed_runs(&first),
-        ["item-0"],
-        "the leg whose first admission outlived failed attempts ran its first run alone"
+        items,
+        "admission failures are isolated in child invocations"
     );
-    assert!(
-        matches!(first.stop, ShiftStop::HandedOff { .. }),
-        "and handed off at its boundary: {first:?}"
+    assert_eq!(
+        first.stop,
+        ShiftStop::Idle,
+        "the fresh parent leg stays live"
     );
     assert_eq!(scripted.ledger(&session).consumed, items);
     settle(&backend).await;
@@ -1232,11 +1240,16 @@ async fn a_shift_that_failed_inside_its_first_admission_hands_off_at_its_first_r
         assert_eq!(
             scripted.admission_faults_left(item),
             0,
-            "every failed admission of {item} cost the shift an attempt"
+            "every failed admission of {item} cost its intent an attempt"
         );
     }
-    let attempts: Vec<_> = session_shifts(&backend)
-        .iter()
+    let attempts: Vec<_> = backend
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|view| {
+            view.target.starts_with(TURN_DRIVER_SERVICE) && view.target.ends_with("/run")
+        })
         .map(|view| view.attempts)
         .collect();
     assert_eq!(
@@ -1471,25 +1484,29 @@ async fn a_call_on_a_wire_this_build_does_not_read_is_refused_before_any_journal
         "{refusal}"
     );
     let turn = ingress
-        .call_workflow_json::<_, Reply<RunOutcome>>(
+        .call_workflow_json::<_, Reply<lash_restate::RestateRunOutcome>>(
             TURN_DRIVER_SERVICE,
-            &format!("{}:{}a", session.as_str().len(), session.as_str()),
+            &lash_restate::turn_invocation_key(
+                &ShiftRequest {
+                    session: session.clone(),
+                    request: request("newer-wire"),
+                    intended_lane: None,
+                },
+                0,
+            ),
             "run",
             &Call::stating(
                 newer,
                 RestateRunRequest {
                     sender_generation: Some(lash_core::engine::BuildGeneration::for_test("any")),
-                    admitted: admission_body::admitted(
-                        session.clone(),
-                        TurnId::from("a"),
-                        request("newer-wire"),
-                        lash_core::engine::AdmissionId::new("newer-wire"),
-                        0,
-                        lash_core::engine::BuildGeneration::for_test("any"),
-                        lash_core::engine::AdmittedWork::Queued {
-                            head: lash_core::BatchId::from("scripted-batch"),
-                        },
-                    ),
+                    request: lash_core::engine::ShiftRequest {
+                        session: session.clone(),
+                        request: request("newer-wire"),
+                        intended_lane: None,
+                    },
+                    ordinal: 0,
+                    rules: Default::default(),
+                    draining: None,
                 },
             ),
         )
@@ -1553,11 +1570,15 @@ async fn a_run_whose_turn_already_ended_is_readmitted_without_a_second_execution
         "the run ran once"
     );
     assert_eq!(scripted.ledger(&session).open, ["a"], "nothing consumed it");
-    assert_eq!(turn_invocations(&backend, "run"), 1, "one LashTurn run");
+    assert_eq!(
+        turn_invocations(&backend, "run"),
+        4,
+        "two intents each retain their execution and stop admission"
+    );
     assert_eq!(
         turn_invocations(&backend, "outcome"),
         2,
-        "each shift read the run's recorded end, the second after a 409"
+        "each intent reads the recorded terminal it adopted"
     );
 }
 
@@ -1603,7 +1624,11 @@ async fn a_released_run_admitted_again_after_a_handoff_stops_the_shift() {
         1,
         "the run ran once"
     );
-    assert_eq!(turn_invocations(&backend, "run"), 1, "one LashTurn run");
+    assert_eq!(
+        turn_invocations(&backend, "run"),
+        2,
+        "the successor intent records its stop without executing the run"
+    );
 }
 
 /// HIGH-1 (b): a queued run that cedes stops the shift. Admission would
@@ -1660,7 +1685,11 @@ async fn a_shift_whose_seal_another_shift_superseded_stops_cleanly() {
     settle(&backend).await;
     no_shift_failed(&backend);
     assert_eq!(scripted.ledger(&session).run_executions, 1);
-    assert_eq!(turn_invocations(&backend, "run"), 1, "one LashTurn");
+    assert_eq!(
+        turn_invocations(&backend, "run"),
+        2,
+        "the next intent records its idle stop"
+    );
 }
 
 /// A shift scheduled before any core installed its `SessionShifts` runs once one
@@ -1721,14 +1750,9 @@ async fn a_retryable_refusal_of_a_run_execution_redelivers_instead_of_releasing(
         scripted.ledger(&session).run_executions >= 2,
         "the refused attempt was redelivered"
     );
-    let runs: Vec<_> = backend
+    let runs = backend
         .server()
-        .invocations()
-        .into_iter()
-        .filter(|view| {
-            view.target.starts_with(TURN_DRIVER_SERVICE) && view.target.ends_with("/run")
-        })
-        .collect();
+        .turn_invocations(&session, &TurnId::from("a"));
     assert_eq!(runs.len(), 1, "one LashTurn run invocation");
     assert!(
         runs[0].attempts >= 2,
@@ -1845,7 +1869,7 @@ enum ContinuationCut {
 impl ContinuationCut {
     const ALL: [Self; 3] = [Self::BeforeSend, Self::AfterSend, Self::LastRunSettlement];
 
-    fn rule(self, session: &SessionId) -> CrashRule {
+    fn rule(self, session: &SessionId, replay: bool) -> CrashRule {
         match self {
             Self::BeforeSend => CrashRule::new(CrashPoint::BeforeFrame {
                 ty: MessageType::OneWayCallCommand,
@@ -1864,10 +1888,18 @@ impl ContinuationCut {
             })
             .service(TURN_DRIVER_SERVICE)
             .handler("run")
-            .key(lash_restate::turn_workflow_key(
-                session,
-                &TurnId::from("item-63"),
-            )),
+            .key({
+                let mut request = ShiftRequest {
+                    session: session.clone(),
+                    request: request("bounded-crash"),
+                    intended_lane: None,
+                };
+                let runs = leg_runs(replay);
+                for _ in 0..63 / runs {
+                    request.request = lash_core::engine::shift_continuation_request(&request);
+                }
+                lash_restate::turn_invocation_key(&request, (63 % runs) as u32)
+            }),
         }
     }
 }
@@ -1956,7 +1988,7 @@ async fn shift_continuation_crash_redrives_one_successor() {
                 .session_work()
                 .install_session_shifts(Arc::clone(&scripted) as Arc<dyn SessionShifts>);
             let session = SessionId::from("shift-continuation-crash");
-            backend.server().crash_on(cut.rule(&session));
+            backend.server().crash_on(cut.rule(&session, replay));
             let (initial, successor) =
                 schedule_continuation_case(&backend.lash_backend(), &scripted, &session);
             let first = tokio::time::timeout(
@@ -1999,7 +2031,11 @@ async fn shift_continuation_crash_redrives_one_successor() {
                 continuation_case_legs(replay),
                 "one invocation per leg, none sent twice: {cut:?}, replay={replay}"
             );
-            assert_eq!(turn_invocations(&backend, "run"), 65);
+            assert_eq!(
+                turn_invocations(&backend, "run"),
+                66,
+                "65 selected runs and the final idle admission"
+            );
             no_shift_failed(&backend);
             drop(installed);
         }
@@ -2053,7 +2089,7 @@ async fn live_restate_shift_continuation_crash_redrives_one_successor() {
             })
         };
         let session = SessionId::fixture(tag);
-        backend.crash_on(cut.rule(&session));
+        backend.crash_on(cut.rule(&session, replay));
         let (initial, successor) =
             schedule_continuation_case(&backend.lash_backend(), &scripted, &session);
         let first = tokio::time::timeout(
@@ -2096,10 +2132,9 @@ async fn live_restate_shift_continuation_crash_redrives_one_successor() {
             .iter()
             .filter(|invocation| {
                 invocation.target.starts_with(&format!(
-                    "{TURN_DRIVER_SERVICE}/{}",
-                    lash_restate::turn_workflow_key(&session, &TurnId::from("r"))
-                        .strip_suffix('r')
-                        .expect("a turn key ends with its run")
+                    "{TURN_DRIVER_SERVICE}/{}:{}",
+                    session.as_str().len(),
+                    session.as_str()
                 )) && invocation.target.ends_with("/run")
             })
             .collect();

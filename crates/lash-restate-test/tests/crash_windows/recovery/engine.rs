@@ -739,17 +739,29 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
         .await
         .expect("old shift reattaches");
     assert_eq!(old_shift, first_shift);
-    let reply: Reply<Option<lash_core::engine::RunOutcome>> = live(&engine)
+    let reply: Reply<Option<lash_restate::RestateRunOutcome>> = live(&engine)
         .ingress()
         .call_workflow_json(
             "LashTurn",
-            &turn_workflow_key(&session_id, &first_run),
+            &lash_restate::recorded_turn_invocation_key(
+                live(&engine)
+                    .lash_backend()
+                    .session_store_factory()
+                    .as_ref(),
+                &session_id,
+                &first_run,
+            )
+            .await
+            .expect("recorded executor")
+            .expect("turn invocation"),
             "outcome",
             &Call::new(()),
         )
         .await
         .expect("fresh turn handler reads its recorded state");
-    assert_eq!(reply.body, Some(first_shift.ran[0].clone()));
+    assert!(
+        matches!(reply.body, Some(lash_restate::RestateRunOutcome::Ran { outcome: ref recorded, .. }) if recorded == &first_shift.ran[0])
+    );
     let session = core
         .session(lash_core::SessionId::fixture(session_id.as_str()))
         .open()

@@ -17,7 +17,7 @@ use lash_restate_test::{
     ServerConfig,
 };
 
-use crate::session_shifts::{RestateRunRequest, RestateSessionShiftRequest, turn_workflow_key};
+use crate::session_shifts::{RestateRunRequest, RestateSessionShiftRequest, turn_invocation_key};
 use lash_core::SessionShifts;
 use lash_core::engine::{
     AdmitVerdict, RunOutcome, ShiftAbort, ShiftOutcome, ShiftRequest, ShiftRequestId, ShiftStop,
@@ -32,7 +32,7 @@ pub(super) fn stable_session() -> crate::services::ServiceRoute {
     crate::services::DEFAULT_NAMESPACE.stable(LashService::SessionShifts)
 }
 
-fn session_lane(build: &'static str) -> crate::services::ServiceRoute {
+pub(super) fn session_lane(build: &'static str) -> crate::services::ServiceRoute {
     crate::services::DEFAULT_NAMESPACE.generation(LashService::SessionShifts, generation(build))
 }
 
@@ -163,7 +163,7 @@ impl RollShifts {
                 TurnId::fixture(item),
                 request.request.clone(),
                 lash_core::engine::AdmissionId::new(format!(
-                    "{}:{ordinal}",
+                    "{}#{ordinal}",
                     request.request.as_str()
                 )),
                 0,
@@ -513,6 +513,25 @@ impl SessionRoll {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn distinct_shift_intents_never_alias_their_turn_invocations() {
+    let roll = SessionRoll::start(0x4848_1de1).await;
+    let session = SessionId::from("immutable-turn-intent");
+    for request in ["intent-a", "intent-b"] {
+        roll.shifts.accept(&session, "same-selected-run");
+        roll.send(&session, request, &generation("N"), &stable_session())
+            .await;
+        roll.attach(&session, request, &generation("N"), &stable_session())
+            .await;
+    }
+    assert_eq!(
+        roll.shifts.runs_of("same-selected-run"),
+        2,
+        "different shift intents must execute different invocation journals even when selection names the same run"
+    );
+    assert!(roll.shifts.ledger(&session).open.is_empty());
+}
+
 /// The commands an invocation journaled past its input, by `(type, name)`.
 fn journaled_commands(
     roll: &SessionRoll,
@@ -656,7 +675,11 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
         roll.deployment_n.as_str(),
         "only build N serves its own generation lane"
     );
-    assert_eq!(roll.shifts.stamp("r-resume"), Some(gn.clone()));
+    assert_eq!(
+        roll.shifts.stamp("r-resume"),
+        Some(gn1.clone()),
+        "the stable turn invocation owns selection on the newest build"
+    );
 
     // The same request id sent to both lanes is admitted once across them:
     // whichever admission runs first consumes the item; the other idles, or
@@ -689,7 +712,10 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
         1,
         "the run ran once: one LashTurn key names it"
     );
-    let turn_key = turn_workflow_key(&session_both, &TurnId::from("b1"));
+    let turn_key = turn_invocation_key(
+        &SessionRoll::shift_body(&session_both, "r-both", None).request,
+        0,
+    );
     assert_eq!(
         roll.invocations_of(&format!("LashTurn/{turn_key}/run"))
             .len(),
@@ -697,18 +723,13 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
         "one LashTurn run across the two admissions"
     );
 
-    // A crash inside the resume's first admission: N dies after the
-    // admission body ran but before its result was journaled; the replay
-    // re-runs the body — the journal still records one admission, and the
-    // item is consumed once.
+    // The session dies after its turn completed, before storing the boundary.
+    // Its replay attaches to the same immutable intent and hands off once.
     let session_crash = SessionId::from("l9-crash");
     roll.shifts.accept(&session_crash, "c1");
     roll.server.crash_on(
         CrashRule::new(CrashPoint::BeforeRunResult {
-            name: Some(format!(
-                "lash:{}",
-                shift_admission_replay_key(&ShiftRequestId::new("r-crash"), 0)
-            )),
+            name: Some("lash.shift.boundary".to_owned()),
         })
         .service(session_lane("N").name().into_owned())
         .handler("shift")
@@ -759,7 +780,7 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
     );
     assert_eq!(
         crashed[0].attempts, 2,
-        "the crash forced one replay of the unjournaled admission"
+        "the crash forced one replay of the session boundary"
     );
     assert_eq!(crashed[1].attempts, 1, "the continuation ran once");
     assert_eq!(
@@ -777,8 +798,8 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
     );
     assert_eq!(
         roll.shifts.admission_runs("r-crash", 0),
-        2,
-        "the unjournaled admission body re-ran on the replay"
+        1,
+        "the session replay reused the invocation's recorded admission"
     );
     assert_eq!(
         roll.shifts.ledger(&session_crash).consumed,
@@ -817,7 +838,10 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
     // A `LashTurn` run on a generation lane whose sender names another
     // generation — or none — is refused the same way.
     for (run, sender) in [("never-new", Some(gn1.clone())), ("never-none", None)] {
-        let key = turn_workflow_key(&session_red, &TurnId::from(run));
+        let key = turn_invocation_key(
+            &SessionRoll::shift_body(&session_red, &format!("r-turn-misroute-{run}"), None).request,
+            0,
+        );
         let target = format!("{}/{key}/run", turn_lane("N").name());
         roll.ingress
             .send_lash_workflow(
@@ -826,17 +850,14 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
                 "run",
                 &RestateRunRequest {
                     sender_generation: sender,
-                    admitted: admission_body::admitted(
-                        session_red.clone(),
-                        TurnId::from(run),
-                        ShiftRequestId::new(format!("r-turn-misroute-{run}")),
-                        lash_core::engine::AdmissionId::new("misroute"),
-                        0,
-                        gn.clone(),
-                        lash_core::engine::AdmittedWork::Queued {
-                            head: lash_core::BatchId::from("scripted-batch"),
-                        },
-                    ),
+                    request: lash_core::engine::ShiftRequest {
+                        session: session_red.clone(),
+                        request: ShiftRequestId::new(format!("r-turn-misroute-{run}")),
+                        intended_lane: None,
+                    },
+                    ordinal: 0,
+                    rules: Default::default(),
+                    draining: None,
                 },
             )
             .await

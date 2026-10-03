@@ -9,33 +9,18 @@
 //! Two lash services split one shift across handlers, each on its own
 //! journal:
 //!
-//! - **`LashSession/{session}`** is a virtual object keyed by the session.
-//!   Its exclusive `shift` handler records the leg's start, then loops the
-//!   kernel's recorded admission (`AdmitShift`, ordinal 0, 1, ..) on a
-//!   controller scoped to
-//!   [`shift_admission_scope`], and for every admitted run calls that
-//!   run's `LashTurn` and awaits it. It returns once admission answers
-//!   anything but an admitted run, or hands the rest of the shift to a
-//!   continuation at a run boundary: at its run bound, and at the first
-//!   boundary an attempt that replayed reaches, so the retry budget Restate
-//!   counts per invocation covers one stretch of runs and never the whole
-//!   backlog (FIG-4506). A shift whose build is draining hands over
-//!   sooner: every admission after the run it started on reads its build's
-//!   drain mark, and a marked build admits no further run and sends the
-//!   rest to the stable name, the newest build's (FIG-4639, ADR 0106 §1).
-//!   The object's key serializes the
-//!   engine's shifts of the session (O1); an in-process `SessionShifts` beside it is
-//!   serialized by the SQL session execution lease until S8.
-//! - **`LashTurn/{session}:{run}`** is a workflow, one per logical run. Its
-//!   `run` handler seals the admission and executes the run's turns on a
-//!   controller scoped to [`shift_run_scope`], under the retry contract of a
-//!   turn handler ([`turn_handler_options`](crate::turn_handler_options)): a
-//!   parked run fails its attempt retryably and pauses after the budget, so
-//!   its journal is kept for a restored build. A run that ended owes its
-//!   scope close: `run` sends it to the same key's shared `close` handler,
-//!   which records the kernel's `CloseRunScope` step on a journal of its
-//!   own, and returns. `LashSession` admits the next run beside the close
-//!   rather than after it (FIG-4035).
+//! - **`LashSession/{session}`** serializes shift legs. Its exclusive `shift`
+//!   handler records the leg start, calls one `LashTurn` per immutable request
+//!   and ordinal, and applies the kernel's stop rules to the recorded reply.
+//!   It hands off at its run bound or the first live boundary after replay,
+//!   so each invocation has its own retry budget (FIG-4506).
+//! - **`LashTurn/{session}:{request}#{ordinal}`** owns admission and execution.
+//!   Its first recorded effect selects work on [`shift_admission_scope`],
+//!   then it retains that selection and runs on [`shift_run_scope`]. A parked
+//!   execution keeps this journal for its recorded build. A finished run sends
+//!   its owed scope close to the same key's shared `close` handler, whose own
+//!   journal records `CloseRunScope` beside the session's next admission.
+//!   Operation runs have their own invocation and root journal.
 //!
 //! The kernel owns what a shift admits and how a run executes; these handlers
 //! only give each step its journal. The run's admission step repairs orphaned
@@ -70,8 +55,8 @@
 //!
 //! **Wire (ADR 0115 §3.1).** Both handlers take a versioned
 //! [`Call`](crate::Call) and answer a [`Reply`](crate::Reply). A request
-//! carries no journal stamp: a shift pinned to one build sends its admitted
-//! run to the stable `LashTurn`, which the newest build serves, so the
+//! carries no journal stamp: a shift pinned to one build sends its immutable
+//! intent to the stable `LashTurn`, which the newest build serves, so the
 //! request crosses builds and its stamp cannot act as a drain gate. The
 //! journal the call starts is the serving build's, and the generation
 //! sentinel below guards its replay. [`LASH_SESSION_SHIFT_VERSION`] stays an
@@ -84,12 +69,11 @@
 //! typed rather than by an accident of decoding.
 //!
 //! **Drain generation (ADR 0106 §1, FIG-3795).** Each handler's first
-//! journaled command is the generation sentinel, a step named
-//! `lash.build.generation` that records the executing build's drain
-//! generation `G`. A replay that reads back another `G` (the code behind a
+//! recorded effect carries the folded generation sentinel and the executing
+//! build's drain generation `G`. A replay that reads back another `G` (the code behind a
 //! pinned deployment changed) parks its attempt, typed with the recorded `G`,
-//! before any other command. A `LashTurn` request carries the `G` of the shift
-//! that admitted the run (`sender_generation`), so a run the latest build
+//! before decoding the recorded outcome. A `LashTurn` request carries the `G` of the shift
+//! that dispatched the intent (`sender_generation`), so a run the latest build
 //! cannot run can be routed back to its writer's generation. The step's name
 //! and output are frozen. `G` is the engine's: the facade derives it from the
 //! build's drain formats and hands it in through
@@ -105,8 +89,8 @@ use lash_core::engine::{
 };
 use lash_core::{SessionId, SessionShifts, SessionWorkEngine};
 use restate_sdk::context::{
-    ContextReadState, ContextSideEffects, ObjectContext, RunFuture, SharedWorkflowContext,
-    WorkflowContext,
+    CallFuture, ContextReadState, ContextSideEffects, ContextWriteState, ObjectContext, RunFuture,
+    SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
@@ -173,7 +157,7 @@ use continuation::{continuation_generation, drain_answered, session_shift_contin
 /// stops at a task instead of applying it.
 ///
 /// version_guard(
-///     shapes(cover(RestateSessionShiftRequest, RestateRunRequest)),
+///     shapes(path = "crates/lash-restate/src/session_shifts/intent.rs", cover(RestateSessionShiftRequest, RestateRunRequest, RestateRunOutcome)),
 ///     shapes(
 ///         path = "crates/lash-core-execution/src/engine/admission.rs",
 ///         path = "crates/lash-core-execution/src/engine/shift.rs",
@@ -184,7 +168,7 @@ use continuation::{continuation_generation, drain_answered, session_shift_contin
 ///         ),
 ///     ),
 ///     items(
-///         SHIFT_HANDLER, TURN_OUTCOME_STATE, turn_workflow_key, shift_session_journal,
+///         SHIFT_HANDLER, TURN_OUTCOME_STATE, TURN_ADMISSION_STATE, turn_invocation_key, shift_session_journal,
 ///         execute_run_journal,
 ///     ),
 ///     items(path = "crates/lash-restate/src/sentinel.rs", GENERATION_SENTINEL),
@@ -222,13 +206,11 @@ const TURN_OUTCOME_STATE: &str = "outcome";
 
 /// The stored format of the run outcome `LashTurn` records under its
 /// `outcome` state, in the stamped `{format, body}` envelope (ADR 0115
-/// §3.4). Bump it when [`RunOutcome`]'s stored shape changes, and register
-/// the previous format's lift in `lash_core::store::RECORD_UPCASTERS`. The
-/// outcome is history: a finished workflow's state is never rewritten, so
-/// every lift from its floor is permanent (FIG-3802).
+/// §3.4). Stored shapes change in place during the version freeze. Handler
+/// command changes move the journal logic epoch and retain the old drain lane.
 ///
 /// version_guard(
-///     roots(path = "crates/lash-core-execution/src/engine/shift.rs", RunOutcome),
+///     roots(path = "crates/lash-restate/src/session_shifts/intent.rs", RestateRunOutcome),
 ///     roots(path = "crates/lash-core-execution/src/engine/admission.rs", SealVerdict),
 ///     roots(path = "crates/lash-core-store/src/store/shift_fence.rs", AdmissionId, ShiftFence),
 ///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", ErrorEnvelope),
@@ -258,86 +240,13 @@ pub(crate) const TURN_OUTCOME_FORMATS: StoredValueFormats = StoredValueFormats {
     surface: lash_core::surface_format!(LASH_TURN_OUTCOME_FORMAT_VERSION),
 };
 
-/// The request `LashSession/{session}/shift` runs: one shift of the session.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RestateSessionShiftRequest {
-    pub request: ShiftRequest,
-    /// What the leg that handed this shift off remembers of its own runs
-    /// ([`ShiftLoop::handed_off`]): the stop rules this leg starts from, so a
-    /// run that leg ran is not run again here. Only a leg's own continuation
-    /// send carries it; a host's send and a waiter's attach never do.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub handed_off: Option<ShiftLoop>,
-}
-
-/// The request `LashTurn/{session}:{run}/run` runs: one admitted run.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RestateRunRequest {
-    /// The drain generation of the build whose shift admitted the run: the
-    /// generation a run the latest build refuses is routed back to
-    /// (ADR 0106 §1). Unstamped, it is `None`.
-    #[serde(default)]
-    pub sender_generation: Option<BuildGeneration>,
-    /// The recorded admission the run executes under. The run executes on the head
-    /// its recorded admission named, and a replay reads that admission back;
-    /// adopting that head still reads live store state (FIG-3824).
-    pub admitted: Admitted,
-}
-
-/// The request `LashTurn/{session}:{run}/close` runs: the scope close the
-/// key's `run` owed once its run's terminal evidence was durable
-/// (FIG-4035).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RestateRunCloseRequest {
-    /// The drain generation of the build whose run owed the close: a close
-    /// sent on a generation lane names that lane's generation.
-    #[serde(default)]
-    pub sender_generation: Option<BuildGeneration>,
-    /// The logical run whose scope closes: the key's own run, or, for a
-    /// follow-on recovery, the run that owed the follow-on.
-    pub run: lash_core::TurnId,
-}
-
-/// The `LashTurn` workflow key of `run` in `session`: one workflow per
-/// logical run, so a replay of the session's shift re-calls the same run.
-///
-/// The key is `{len}:{session}{run}`, where `len` is the session id's length
-/// in bytes, so it parses back to exactly one `(session, run)` whatever
-/// either id contains ([`parse_turn_workflow_key`]): reconciliation maps a
-/// paused `LashTurn` invocation to its run by its key alone. A host finds
-/// the invocation running one of its runs by this key.
-pub fn turn_workflow_key(session: &SessionId, run: &lash_core::TurnId) -> String {
-    format!(
-        "{}:{}{}",
-        session.as_str().len(),
-        session.as_str(),
-        run.as_str()
-    )
-}
-
-/// The `(session, run)` a [`turn_workflow_key`] names, or `None` for a key
-/// no build of this generation wrote.
-pub(crate) fn parse_turn_workflow_key(key: &str) -> Option<(SessionId, lash_core::TurnId)> {
-    let (len, rest) = key.split_once(':')?;
-    if len.is_empty()
-        || !len.bytes().all(|byte| byte.is_ascii_digit())
-        || (len.len() > 1 && len.starts_with('0'))
-    {
-        return None;
-    }
-    let len = len.parse::<usize>().ok()?;
-    if !rest.is_char_boundary(len) {
-        return None;
-    }
-    let (session, run) = rest.split_at(len);
-    if session.is_empty() || run.is_empty() {
-        return None;
-    }
-    Some((
-        SessionId::parse(session).ok()?,
-        lash_core::TurnId::parse(run).ok()?,
-    ))
-}
+mod intent;
+use intent::TURN_ADMISSION_STATE;
+pub use intent::{
+    RestateRunCloseRequest, RestateRunOutcome, RestateRunRequest, RestateSessionShiftRequest,
+    recorded_turn_invocation_key, turn_invocation_key,
+};
+pub(crate) use intent::{admission_invocation_key, parse_turn_invocation_key};
 
 // ---------------------------------------------------------------------------
 // The `SessionShifts` slot
@@ -596,10 +505,10 @@ impl RestateSessionWork {
     /// failed with one.
     async fn released_run_refusal(
         &self,
-        session: &SessionId,
-        run: &lash_core::TurnId,
+        request: &ShiftRequest,
+        ordinal: u32,
     ) -> Option<lash_core::RuntimeError> {
-        let key = turn_workflow_key(session, run);
+        let key = turn_invocation_key(request, ordinal);
         match self
             .ingress
             .attach_workflow_run(&self.namespace.stable(LashService::TurnDriver).name(), &key)
@@ -616,9 +525,10 @@ impl RestateSessionWork {
         let session = &request.session;
         let error = match self.attach_drive_request(request).await {
             Ok(outcome) => {
-                for ran in &outcome.ran {
-                    if let lash_core::engine::RunOutcome::Released { run } = ran
-                        && let Some(refusal) = self.released_run_refusal(session, run).await
+                for (ordinal, ran) in outcome.ran.iter().enumerate() {
+                    if let lash_core::engine::RunOutcome::Released { .. } = ran
+                        && let Some(refusal) =
+                            self.released_run_refusal(request, ordinal as u32).await
                     {
                         return Err(classify_refusal(refusal));
                     }
@@ -817,18 +727,21 @@ pub trait LashSession {
     async fn shift(call: Call<RestateSessionShiftRequest>) -> HandlerResult<Reply<ShiftOutcome>>;
 }
 
-/// One admitted run, keyed [`turn_workflow_key`]. A workflow key runs
-/// once: a shift that admits a run whose `run` already started attaches to
-/// its recorded [`outcome`](LashTurn::outcome) instead.
+/// One immutable shift intent, keyed by [`turn_invocation_key`]. Its workflow
+/// selects work once; repeated dispatches attach to that recorded selection.
 #[restate_sdk::workflow]
 pub trait LashTurn {
-    async fn run(call: Call<RestateRunRequest>) -> HandlerResult<Reply<RunOutcome>>;
+    async fn run(call: Call<serde_json::Value>) -> HandlerResult<Reply<RestateRunOutcome>>;
 
     /// The outcome `run` recorded, once it ended: what it returned, or
     /// [`RunOutcome::Released`] for a run that ended terminally without a
     /// lash outcome. `None` while `run` has not ended.
     #[shared]
-    async fn outcome(call: Call<()>) -> HandlerResult<Reply<Option<RunOutcome>>>;
+    async fn outcome(call: Call<()>) -> HandlerResult<Reply<Option<RestateRunOutcome>>>;
+
+    /// The selected admission, retained by the invocation for control and recovery.
+    #[shared]
+    async fn admission(call: Call<()>) -> HandlerResult<Reply<Option<Admitted>>>;
 
     /// The run's scope close, which `run` sends here once the run's
     /// terminal evidence is durable (FIG-4035): shared, and on a journal of
@@ -980,9 +893,12 @@ impl LashTurn for LashTurnImpl {
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
-        call: Call<RestateRunRequest>,
-    ) -> HandlerResult<Reply<RunOutcome>> {
-        let (wire, input) = call.open()?;
+        call: Call<serde_json::Value>,
+    ) -> HandlerResult<Reply<RestateRunOutcome>> {
+        let (wire, raw) = call.open()?;
+        let input =
+            intent::decode_run_intent(&self.route.name(), self.build_generation.clone(), raw)
+                .await?;
         let writer = TURN_OUTCOME_FORMATS.writer(self.fleet.fleet_format());
         execute_run_journal(
             &self.slot,
@@ -1001,7 +917,7 @@ impl LashTurn for LashTurnImpl {
         &self,
         ctx: SharedWorkflowContext<'_>,
         call: Call<()>,
-    ) -> HandlerResult<Reply<Option<RunOutcome>>> {
+    ) -> HandlerResult<Reply<Option<RestateRunOutcome>>> {
         let (wire, ()) = call.open()?;
         let recorded = ctx
             .get::<Vec<u8>>(TURN_OUTCOME_STATE)
@@ -1017,6 +933,20 @@ impl LashTurn for LashTurnImpl {
         Ok(Reply::at(wire, recorded))
     }
 
+    async fn admission(
+        &self,
+        ctx: SharedWorkflowContext<'_>,
+        call: Call<()>,
+    ) -> HandlerResult<Reply<Option<Admitted>>> {
+        let (wire, ()) = call.open()?;
+        Ok(Reply::at(
+            wire,
+            ctx.get::<Json<Admitted>>(TURN_ADMISSION_STATE)
+                .await?
+                .map(|Json(admitted)| admitted),
+        ))
+    }
+
     async fn close(
         &self,
         ctx: SharedWorkflowContext<'_>,
@@ -1029,19 +959,17 @@ impl LashTurn for LashTurnImpl {
             &self.build_generation,
             &self.route,
             ctx,
-            input.sender_generation.as_ref(),
-            &input.run,
+            &input,
         )
         .await
         .map(|()| Reply::at(wire, ()))
     }
 }
 
-/// What `LashSession/{session}/shift` journals: the leg start, then
-/// admission `n` on the shift-admission scope, then, for an admitted run,
-/// the call to its `LashTurn`, the run boundary, then
-/// admission `n + 1`, until admission answers anything but an admitted run
-/// or a boundary hands the shift off. `handed_off` is what the leg before
+/// What `LashSession/{session}/shift` journals: the leg start, then a call
+/// to each immutable intent's `LashTurn`, followed by its recorded answer,
+/// until an invocation stops or a boundary hands the shift off. `handed_off`
+/// is what the leg before
 /// this one remembers, when this leg is a continuation.
 async fn shift_session_journal(
     slot: &RestateSessionShiftsSlot,
@@ -1113,7 +1041,6 @@ async fn shift_admissions(
     request: ShiftRequest,
     mut rules: ShiftLoop,
 ) -> Result<ShiftOutcome, HandlerError> {
-    let admission_scope = shift_admission_scope(&request.session, &request.request);
     let mut ran = Vec::new();
     // `rules` are the kernel's stop rules, the same ones the in-process shift
     // keeps. Every outcome they read comes from a journaled call result or
@@ -1146,78 +1073,77 @@ async fn shift_admissions(
     // where the attempt ends, so a replaying attempt opens its own.
     let _hold = shifts.hold_shift(&request.session);
     loop {
-        let scoped = controller
-            .scoped_effect_controller(admission_scope.clone())
-            .map_err(refused_scope)?;
-        let draining = drain_answered(route, &request.request, ordinal).then_some(generation);
-        let verdict = shifts
-            .admit(scoped, &request, generation, ordinal, draining)
-            .await
-            .map_err(abort_failure)?;
-        // The leg's stop, and what it hands the rest of the shift to when it
-        // ends at a boundary: the route its continuation is sent under and
-        // the continuation's request id.
-        let (next, stop) = match verdict {
-            AdmitVerdict::Admit(admitted) => {
-                // A run this shift already ran, or whose execution it saw
-                // released, is never called a second time: its `LashTurn`
-                // key has run once.
-                if let Err(stop) = rules.before(&admitted) {
-                    return Ok(ShiftOutcome { ran, stop });
-                }
-                let run = admitted.run().clone();
-                let work = admitted.work().clone();
-                let key = turn_workflow_key(admitted.session(), &run);
-                // A newly admitted run is new work: its `LashTurn` goes to
-                // the stable lane, which Restate hands to the newest build
-                // (FIG-3795), and its outcome reads back under the same route.
-                let outcome = match crate::services::routed_workflow::<_, _, RunOutcome>(
-                    controller.context(),
-                    &route.namespace().stable(LashService::TurnDriver),
-                    key.clone(),
-                    "run",
-                    RestateRunRequest {
-                        sender_generation: Some(generation.clone()),
-                        admitted,
-                    },
-                )
-                .call()
-                .await
-                {
-                    Ok(reply) => reply.into_body(),
-                    // The call ended without a lash outcome: an earlier shift
-                    // already ran this key (409), the run was refused
-                    // terminally, or an operator's verb killed it. The shift
-                    // attaches to what the run recorded; a run that recorded
-                    // nothing is released. Either way the run is consumed,
-                    // never a failure of the whole shift: the next admission
-                    // reads what the store decided about it (ADR 0104 O4).
-                    Err(error) => {
-                        let recorded =
-                            crate::services::routed_workflow::<_, (), Option<RunOutcome>>(
-                                controller.context(),
-                                &route.namespace().stable(LashService::TurnDriver),
-                                key,
-                                "outcome",
-                                (),
-                            )
-                            .call()
-                            .await
-                            .map_err(HandlerError::from)?;
-                        match recorded.into_body() {
-                            Some(outcome) => outcome,
-                            None => {
-                                tracing::warn!(
-                                    session_id = request.session.as_str(),
-                                    run = run.as_str(),
-                                    error = %error,
-                                    "session shift consumed a released run execution"
-                                );
-                                RunOutcome::Released { run: run.clone() }
-                            }
-                        }
+        let key = turn_invocation_key(&request, ordinal);
+        let turn_route = route.namespace().stable(LashService::TurnDriver);
+        let call = crate::services::routed_workflow::<_, _, RestateRunOutcome>(
+            controller.context(),
+            &turn_route,
+            key.clone(),
+            "run",
+            RestateRunRequest {
+                sender_generation: Some(generation.clone()),
+                request: request.clone(),
+                ordinal,
+                rules: rules.clone(),
+                draining: drain_answered(route, &request.request, ordinal)
+                    .then(|| generation.clone()),
+            },
+        )
+        .call();
+        let invocation = call.invocation_handle().await?;
+        let dispatched = call.await;
+        let dispatched = match dispatched {
+            Err(error) if error.code() == 409 => {
+                invocation.attach::<Reply<RestateRunOutcome>>().await
+            }
+            result => result,
+        };
+        let answer = match dispatched {
+            Ok(reply) => reply.into_body(),
+            Err(error) => {
+                let recorded =
+                    crate::services::routed_workflow::<_, (), Option<RestateRunOutcome>>(
+                        controller.context(),
+                        &turn_route,
+                        key.clone(),
+                        "outcome",
+                        (),
+                    )
+                    .call()
+                    .await?
+                    .into_body();
+                match recorded {
+                    Some(answer) => answer,
+                    None => {
+                        let admitted = crate::services::routed_workflow::<_, (), Option<Admitted>>(
+                            controller.context(),
+                            &turn_route,
+                            key,
+                            "admission",
+                            (),
+                        )
+                        .call()
+                        .await?
+                        .into_body();
+                        let Some(admitted) = admitted else {
+                            return Err(error.into());
+                        };
+                        tracing::warn!(run = admitted.run().as_str(), error = %error, "session shift consumed a released turn invocation");
+                        let outcome = RunOutcome::Released {
+                            run: admitted.run().clone(),
+                        };
+                        RestateRunOutcome::Ran { admitted, outcome }
                     }
-                };
+                }
+            }
+        };
+        let (next, stop) = match answer {
+            RestateRunOutcome::Ran { admitted, outcome } => {
+                // The invocation already checked the same immutable stop rules before execution.
+                rules.before(&admitted).map_err(|stop| {
+                    misaddressed(format!("turn invocation bypassed shift stop {stop:?}"))
+                })?;
+                let work = admitted.work().clone();
                 let stop = rules.after(&work, &outcome);
                 let yielded_run = outcome.run().clone();
                 ran.push(outcome);
@@ -1266,7 +1192,9 @@ async fn shift_admissions(
             }
             // This build is draining (FIG-4639): the rest goes to the stable
             // name, the newest build's. A replay decodes the same verdict.
-            AdmitVerdict::Draining { generation } => (
+            RestateRunOutcome::Stopped {
+                stop: ShiftStop::Draining { generation },
+            } => (
                 Some((
                     route.namespace().stable(LashService::SessionShifts),
                     session_shift_continuation(
@@ -1276,12 +1204,7 @@ async fn shift_admissions(
                 )),
                 ShiftStop::Draining { generation },
             ),
-            AdmitVerdict::Idle => (None, ShiftStop::Idle),
-            AdmitVerdict::Parked(park) => (None, ShiftStop::Parked(park)),
-            AdmitVerdict::SubstrateLost { run } => (None, ShiftStop::SubstrateLost { run }),
-            AdmitVerdict::RunTerminal { run, kind, commit } => {
-                (None, ShiftStop::RunTerminal { run, kind, commit })
-            }
+            RestateRunOutcome::Stopped { stop } => (None, stop),
         };
         let Some((next_route, continuation)) = next else {
             return Ok(ShiftOutcome { ran, stop });
@@ -1318,8 +1241,8 @@ async fn shift_admissions(
     }
 }
 
-/// What `LashTurn/{session}:{run}/run` journals: the kernel's root run on
-/// the run's scope, which records its seal first.
+/// What `LashTurn/{session}:{request}#{ordinal}/run` journals: the kernel's root run on
+/// the selected run's scope, after its admission was recorded.
 async fn execute_run_journal(
     slot: &RestateSessionShiftsSlot,
     authority_id: &RestateAuthorityId,
@@ -1328,16 +1251,19 @@ async fn execute_run_journal(
     ctx: WorkflowContext<'_>,
     writer: StoredValueWriter,
     request: RestateRunRequest,
-) -> Result<RunOutcome, HandlerError> {
+) -> Result<RestateRunOutcome, HandlerError> {
     let RestateRunRequest {
         sender_generation,
-        admitted,
+        request,
+        ordinal,
+        mut rules,
+        draining,
     } = request;
     let sender_generation = sender_generation.as_ref();
-    let expected = turn_workflow_key(admitted.session(), admitted.run());
+    let expected = turn_invocation_key(&request, ordinal);
     if ctx.key() != expected {
         return Err(misaddressed(format!(
-            "LashTurn/{} was asked to run run `{expected}`",
+            "LashTurn/{} was asked to execute `{expected}`",
             ctx.key()
         )));
     }
@@ -1356,16 +1282,15 @@ async fn execute_run_journal(
             route,
             &format!(
                 "run `{}` of session `{}` was sent by {sender}",
-                admitted.run(),
-                admitted.session()
+                request.request.as_str(),
+                request.session
             ),
         ));
     }
     let handler = route.namespace().stable(LashService::TurnDriver).name();
     let shifts = slot.shifts_for(&handler)?;
-    // The generation sentinel rides the run's first recorded step, its start
-    // marker (FIG-3980): a journal of another build parks before it replays
-    // past it.
+    // The admission records the folded sentinel before selection is decoded.
+    // A predecessor journal parks before any selected run executes.
     let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));
     let controller = RestateRuntimeEffectController::with_options(
         ctx,
@@ -1375,13 +1300,64 @@ async fn execute_run_journal(
     )
     .in_namespace(route.namespace().clone())
     .with_folded_sentinel(Arc::clone(&sentinel));
+    let admission_controller = controller
+        .scoped_effect_controller(shift_admission_scope(&request.session, &request.request))
+        .map_err(refused_scope)?;
+    let verdict = sentinel
+        .guard(shifts.admit(
+            admission_controller,
+            &request,
+            generation,
+            ordinal,
+            draining.as_ref(),
+        ))
+        .await?
+        .map_err(abort_failure)?;
+    let admitted = match verdict {
+        AdmitVerdict::Admit(admitted) => admitted.run_by(generation.clone()),
+        verdict => {
+            let stop = match verdict {
+                AdmitVerdict::Idle => ShiftStop::Idle,
+                AdmitVerdict::Parked(park) => ShiftStop::Parked(park),
+                AdmitVerdict::SubstrateLost { run } => ShiftStop::SubstrateLost { run },
+                AdmitVerdict::RunTerminal { run, kind, commit } => {
+                    ShiftStop::RunTerminal { run, kind, commit }
+                }
+                AdmitVerdict::Draining { generation } => ShiftStop::Draining { generation },
+                AdmitVerdict::Admit(_) => {
+                    return Err(misaddressed(
+                        "unexpected admitted verdict in stop conversion".to_owned(),
+                    ));
+                }
+            };
+            let answer = RestateRunOutcome::Stopped { stop };
+            object_state::set_stamped(
+                controller.context(),
+                TURN_OUTCOME_STATE,
+                writer,
+                answer.clone(),
+            );
+            return Ok(answer);
+        }
+    };
+    if let Err(stop) = rules.before(&admitted) {
+        let answer = RestateRunOutcome::Stopped { stop };
+        object_state::set_stamped(
+            controller.context(),
+            TURN_OUTCOME_STATE,
+            writer,
+            answer.clone(),
+        );
+        return Ok(answer);
+    }
+    controller
+        .context()
+        .set(TURN_ADMISSION_STATE, Json(admitted.clone()));
     let scoped = controller
         .scoped_effect_controller(shift_run_scope(admitted.session(), admitted.run()))
         .map_err(refused_scope)?;
     let run = admitted.run().clone();
-    // This build executes the run, whichever build's shift admitted it: the
-    // stable lane hands a new run to the newest build (FIG-4742).
-    let admitted = admitted.run_by(generation.clone());
+    let selected = admitted.clone();
     let RunEnd { result, owed_close } =
         sentinel.guard(shifts.execute_run(scoped, admitted)).await?;
     let (ended, result) = match result {
@@ -1413,18 +1389,30 @@ async fn execute_run_journal(
             RestateRunCloseRequest {
                 sender_generation: Some(generation.clone()),
                 run: owed,
+                scope_run: selected.run().clone(),
             },
         )
         .send()
         .await?;
     }
-    // The key runs once; a later shift that admits this run reads this,
-    // stamped so a reader of another build dispatches on its format.
-    object_state::set_stamped(controller.context(), TURN_OUTCOME_STATE, writer, ended);
-    result
+    // The intent records its selected run and outcome once. Readers dispatch
+    // on the format stamp before decoding across builds.
+    object_state::set_stamped(
+        controller.context(),
+        TURN_OUTCOME_STATE,
+        writer,
+        RestateRunOutcome::Ran {
+            admitted: selected.clone(),
+            outcome: ended,
+        },
+    );
+    result.map(|outcome| RestateRunOutcome::Ran {
+        admitted: selected,
+        outcome,
+    })
 }
 
-/// What `LashTurn/{session}:{run}/close` journals: the kernel's recorded
+/// What `LashTurn/{session}:{request}#{ordinal}/close` journals: the kernel's recorded
 /// `CloseRunScope` step of `run` on the key's run scope, the scope the
 /// key's `run` would have recorded it under.
 async fn close_run_journal(
@@ -1433,10 +1421,14 @@ async fn close_run_journal(
     generation: &BuildGeneration,
     route: &crate::services::ServiceRoute,
     ctx: SharedWorkflowContext<'_>,
-    sender_generation: Option<&BuildGeneration>,
-    run: &lash_core::TurnId,
+    request: &RestateRunCloseRequest,
 ) -> Result<(), HandlerError> {
-    let Some((session, admitted_run)) = parse_turn_workflow_key(ctx.key()) else {
+    let RestateRunCloseRequest {
+        sender_generation,
+        run,
+        scope_run,
+    } = request;
+    let Some((session, _admission)) = parse_turn_invocation_key(ctx.key()) else {
         return Err(misaddressed(format!(
             "LashTurn/{} names no run to close `{run}` under",
             ctx.key()
@@ -1445,7 +1437,7 @@ async fn close_run_journal(
     // A close on a generation lane was sent by a run on that lane, which
     // names the lane's generation; anything else is a misroute.
     if let crate::services::Lane::Generation(lane) = route.lane()
-        && sender_generation != Some(lane)
+        && sender_generation.as_ref() != Some(lane)
     {
         return Err(misrouted(
             route,
@@ -1462,7 +1454,7 @@ async fn close_run_journal(
             .in_namespace(route.namespace().clone())
             .with_folded_sentinel(Arc::clone(&sentinel));
     let scoped = controller
-        .scoped_effect_controller(shift_run_scope(&session, &admitted_run))
+        .scoped_effect_controller(shift_run_scope(&session, scope_run))
         .map_err(refused_scope)?;
     sentinel
         .guard(shifts.close_run(scoped, &session, run))
@@ -1545,45 +1537,44 @@ mod tests {
         drop(in_flight);
     }
 
-    /// W5: the `LashTurn` key parses back to exactly the session and run
-    /// it was built from, whatever either id contains.
+    /// An invocation's address round-trips arbitrary request and session ids.
     #[test]
-    fn a_turn_workflow_key_round_trips_any_session_and_run() {
-        let cases = [
-            ("s", "r"),
-            ("a:b", "c"),
-            ("a", "b:c"),
-            ("12:ab", ":x:"),
-            ("sess\u{e9}:\u{1f600}", "run:agent-frame:2"),
-            ("0", "0"),
-            (":", ":"),
-        ];
-        for (session, run) in cases {
-            let session = SessionId::from(session);
-            let run = lash_core::TurnId::from(run);
-            let key = turn_workflow_key(&session, &run);
-            assert_eq!(
-                parse_turn_workflow_key(&key),
-                Some((session.clone(), run.clone())),
-                "{key}"
-            );
+    fn a_turn_invocation_key_round_trips_its_immutable_intent() {
+        for session in ["s", "a:b", "sessé:😀", ":"] {
+            for request in ["r", "b:c", "request#1", ":"] {
+                for ordinal in [0, 1, u32::MAX] {
+                    let request = ShiftRequest {
+                        session: SessionId::from(session),
+                        request: ShiftRequestId::new(request),
+                        intended_lane: None,
+                    };
+                    let key = turn_invocation_key(&request, ordinal);
+                    assert_eq!(
+                        parse_turn_invocation_key(&key),
+                        Some((
+                            request.session.clone(),
+                            lash_core::engine::AdmissionId::new(format!(
+                                "{}#{ordinal}",
+                                request.request.as_str()
+                            )),
+                        ))
+                    );
+                }
+            }
         }
-        assert_ne!(
-            turn_workflow_key(&SessionId::from("a:b"), &lash_core::TurnId::from("c")),
-            turn_workflow_key(&SessionId::from("a"), &lash_core::TurnId::from("b:c")),
-            "the pre-S7 `{{session}}:{{run}}` key was ambiguous here"
-        );
         for malformed in [
             "",
             "s:r",
             "3:ab",
-            "03:abcd",
+            "03:abcd#0",
             "2:ab",
             ":ab",
             "x2:abc",
-            "1:\u{e9}x",
+            "1:éx#0",
+            "1:sr#00",
+            "1:s#0",
         ] {
-            assert_eq!(parse_turn_workflow_key(malformed), None, "{malformed}");
+            assert_eq!(parse_turn_invocation_key(malformed), None, "{malformed}");
         }
     }
 

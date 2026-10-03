@@ -1498,7 +1498,7 @@ fn a_pending_cancel_probes_the_runs_lash_turn() {
 
 /// A cancel whose terminal is still pending keeps the turn's claim only while
 /// its run still runs, and the run executes in lash's `LashTurn` invocation,
-/// keyed by the session and the run. Asking about any other invocation
+/// keyed by its recorded admission. Asking about any other invocation
 /// answers "no such invocation" and drops a turn that is still running.
 async fn a_pending_cancel_probes_the_runs_lash_turn_inner() {
     let data_dir = std::env::temp_dir().join(format!(
@@ -1508,7 +1508,15 @@ async fn a_pending_cancel_probes_the_runs_lash_turn_inner() {
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let session_id = SessionId::fixture(format!("probe-session-{}", uuid::Uuid::new_v4()));
     let turn_id = TurnId::from("plainly-named-turn");
-    let key = lash::restate::turn_workflow_key(&session_id, &turn_id);
+    let admission = lash::persistence::AdmissionId::new("probe-intent#0");
+    let key = lash::restate::turn_invocation_key(
+        &lash::restate::ShiftRequest {
+            session: session_id.clone(),
+            request: lash::restate::ShiftRequestId::new("probe-intent"),
+            intended_lane: None,
+        },
+        0,
+    );
     let (admin_url, probed) = spawn_restate_admin_recording_probes(key.clone()).await;
     let double = crate::tests::test_double_backend(0).await;
     let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
@@ -1518,6 +1526,21 @@ async fn a_pending_cancel_probes_the_runs_lash_turn_inner() {
         .ensure_current_session()
         .await
         .expect("create the selected session");
+    let store = state.core.backend().session_store_factory();
+    let epoch = store.shift_epoch(&session_id).await.expect("session epoch");
+    store
+        .seal_shift_epoch(
+            &session_id,
+            &admission,
+            epoch.epoch,
+            &lash::persistence::RunStartNonce::new("probe-start"),
+            Some(&lash::persistence::RunHold {
+                run: turn_id.clone(),
+                executor: lash::persistence::RunExecutor::run(&admission),
+            }),
+        )
+        .await
+        .expect("record probe invocation");
     state.track_turn(&session_id, &turn_id);
 
     let (driver, acknowledge) = expiring_terminal_driver(&state);

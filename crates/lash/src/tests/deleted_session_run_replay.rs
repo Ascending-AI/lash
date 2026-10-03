@@ -424,34 +424,25 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
     let server = world.double.server();
     // The first attempt dies before the recorded step after the one the
     // replay must read back.
-    let (crash, run_names, steps) = match work {
+    let (crash, steps) = match work {
         Work::Input => (
             lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRun {
                 name: format!("lash:plugin-transition:{run}"),
-            })
-            .key(lash_restate::turn_workflow_key(&session_id, &run)),
-            run.to_string(),
+            }),
             vec!["shift-admit:", "plugin-transition:"],
         ),
         Work::Command => (
             lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRun {
                 name: "lash:session-command-run:1".to_owned(),
             }),
-            "shift-commands:".to_owned(),
             vec!["session-command-run:0", "session-command-run:1"],
         ),
-        // The command after the seal (the input is command 0, the start
-        // marker 1 and the seal 2) is stored and its result is not: the
-        // replay issues it again. Named by index, it is the same point
-        // whatever step the run journals after its seal.
         Work::FollowOn => {
             let recovery = follow_on_recovery_run(&run);
             (
-                lash_restate_test::CrashRule::new(
-                    lash_restate_test::CrashPoint::BeforeRunResultAt { index: 3 },
-                )
-                .key(lash_restate::turn_workflow_key(&session_id, &recovery)),
-                recovery.to_string(),
+                lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRunResult {
+                    name: Some(format!("lash:shift-follow-on:{recovery}")),
+                }),
                 vec!["shift-follow-on:"],
             )
         }
@@ -460,13 +451,16 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
     // The storage delete commits while the dead attempt's replay has not
     // started: the listener runs before the server starts it, and the delete
     // is the store's alone, so it needs nothing from the server.
+    let crashed_target = Arc::new(std::sync::Mutex::new(None));
     let deleted = Arc::new(std::sync::atomic::AtomicBool::new(false));
     assert!(
         server.on_crash(lash_restate_test::CrashCount::new().listener_with({
+            let crashed_target = Arc::clone(&crashed_target);
             let deleted = Arc::clone(&deleted);
             let deleter = world.deleter.clone();
             let session_id = session_id.clone();
-            move |_target: &str| {
+            move |target: &str| {
+                *crashed_target.lock().expect("crash target lock") = Some(target.to_owned());
                 let deleter = deleter.clone();
                 let session_id = session_id.clone();
                 let delete = std::thread::spawn(move || {
@@ -547,7 +541,9 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
     let executed = server
         .invocations()
         .into_iter()
-        .find(|view| view.target.starts_with("LashTurn/") && view.target.contains(&run_names))
+        .find(|view| {
+            Some(&view.target) == crashed_target.lock().expect("crash target lock").as_ref()
+        })
         .expect("the run's execution is an invocation");
     let names: Vec<_> = server
         .journal(&executed.id)
@@ -628,9 +624,10 @@ async fn a_follow_on_recovery_run_executes_its_recorded_decision(
 
     let server = world.double.server();
     let recovery_run = || {
-        server.invocations().into_iter().find(|view| {
-            view.target.starts_with("LashTurn/") && view.target.contains(recovery.as_str())
-        })
+        server
+            .turn_invocations(&session_id, &recovery)
+            .into_iter()
+            .next()
     };
     let settled = tokio::time::timeout(std::time::Duration::from_secs(90), async {
         loop {

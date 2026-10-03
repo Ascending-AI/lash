@@ -157,6 +157,8 @@ impl ShiftEpochStore for SqliteStore {
                                         .as_ref(),
                                     crate::session_runs::unfinished_run_conn(tx, &session_id)?
                                         .as_ref(),
+                                    super::turn_cancel::pending_follow_on_conn(tx, &session_id)?
+                                        .as_ref(),
                                 )
                             {
                                 return Ok(refused);

@@ -5,16 +5,13 @@
 //! build without a drain gate, and a build never registers over another
 //! build's endpoint.
 
+use lash_core::TurnId;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_sansio::TurnId;
-
 use lash_restate_test::{CrashPoint, CrashRule, RestateTestServer, ServerConfig};
 
-use super::session_shift_roll_on_the_double::{
-    BUILD_N_URI, SessionRoll, generation, stable_session,
-};
+use super::session_shift_roll_on_the_double::{BUILD_N_URI, SessionRoll, generation, session_lane};
 use super::test_restate_authority_id;
 use crate::compat::{
     COMPAT_KEY, Call, ObjectCompat, RELEASE_LINE, RESTATE_WIRE, Reply, VersionRange,
@@ -420,16 +417,11 @@ async fn pinned_older_shift_run_executes_on_the_newer_build() {
     let roll = SessionRoll::start(0x4048_0002).await;
     let session = lash_sansio::SessionId::from("compat-pinned");
     roll.shifts.accept(&session, "p1");
-    let gate = roll.shifts.gate("r-pinned", 0);
-    roll.send(&session, "r-pinned", &gn, &stable_session())
-        .await;
-    tokio::time::timeout(Duration::from_secs(60), gate.reached.notified())
-        .await
-        .expect("the shift reached its gated admission on build N");
     roll.register_next().await;
-    gate.release.notify_one();
+    roll.send(&session, "r-pinned", &gn, &session_lane("N"))
+        .await;
     let outcome = roll
-        .attach(&session, "r-pinned", &gn, &stable_session())
+        .attach(&session, "r-pinned", &gn, &session_lane("N"))
         .await;
     assert_eq!(
         outcome.ran.len(),
@@ -447,14 +439,17 @@ async fn pinned_older_shift_run_executes_on_the_newer_build() {
         !matches!(outcome.stop, ShiftStop::SubstrateLost { .. }),
         "{outcome:?}"
     );
-    let shift = roll.invocations_of(&format!("LashSession/{session}/shift"));
+    let shift = roll.invocations_of(&format!("{}/{session}/shift", session_lane("N").name()));
     assert_eq!(shift.len(), 1);
     assert_eq!(
         shift[0].pinned_deployment_id,
         roll.deployment_n.as_str(),
         "the shift stayed pinned to build N"
     );
-    let key = crate::session_shifts::turn_workflow_key(&session, &TurnId::from("p1"));
+    let key = crate::session_shifts::turn_invocation_key(
+        &SessionRoll::shift_body(&session, "r-pinned", Some(&gn)).request,
+        0,
+    );
     let turn = roll.invocations_of(&format!("LashTurn/{key}/run"));
     assert_eq!(turn.len(), 1, "the run ran once");
     assert_eq!(
@@ -474,15 +469,12 @@ async fn pinned_older_shift_run_executes_on_the_newer_build() {
     assert_eq!(recorded["format"], LASH_TURN_OUTCOME_FORMAT_VERSION);
     let read = roll
         .ingress
-        .call_lash_workflow::<_, Option<lash_core::engine::RunOutcome>>(
-            "LashTurn",
-            &key,
-            "outcome",
-            &(),
-        )
+        .call_lash_workflow::<_, Option<crate::RestateRunOutcome>>("LashTurn", &key, "outcome", &())
         .await
         .expect("read the recorded outcome");
-    assert_eq!(read.as_ref(), Some(&outcome.ran[0]));
+    assert!(
+        matches!(read, Some(crate::RestateRunOutcome::Ran { outcome: ref recorded, .. }) if recorded == &outcome.ran[0])
+    );
 
     // A request an older build stamped with its shift version is served by
     // the newer build: the stamp is never a gate.

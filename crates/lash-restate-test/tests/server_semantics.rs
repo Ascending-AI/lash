@@ -1165,9 +1165,13 @@ async fn a_new_build_serves_new_invocations_while_pinned_ones_finish_on_theirs()
     // A session-scoped job key is a turn-workflow key: the session length,
     // a colon, the session, then the job's ordinal.
     let job_key = |ordinal: u64| {
-        lash_restate::turn_workflow_key(
-            &lash_core::SessionId::from("upgrade-e2e"),
-            &lash_core::TurnId::fixture(format!("job-{ordinal}")),
+        lash_restate::turn_invocation_key(
+            &lash_core::engine::ShiftRequest {
+                session: lash_core::SessionId::from("upgrade-e2e"),
+                request: lash_core::engine::ShiftRequestId::new(format!("job--{ordinal}")),
+                intended_lane: None,
+            },
+            0,
         )
     };
     // Wait for its first attempt to be served by build N.

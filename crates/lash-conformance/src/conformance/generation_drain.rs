@@ -122,7 +122,9 @@ impl AdmittedRun {
                 turn_index: 1,
                 generation: None,
                 admitted_generation: stamp.clone(),
-                executor: crate::store::RunExecutor::Run,
+                executor: crate::store::RunExecutor::run(&crate::store::AdmissionId::new(
+                    "fixture#0",
+                )),
                 plugins: Default::default(),
                 turn_cancellation: None,
                 trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),

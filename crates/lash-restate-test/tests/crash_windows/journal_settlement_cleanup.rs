@@ -33,31 +33,89 @@ impl HeldShifts {
 impl SessionShifts for HeldShifts {
     async fn admit(
         &self,
-        _controller: lash_core::ScopedEffectController<'_>,
+        controller: lash_core::ScopedEffectController<'_>,
         request: &ShiftRequest,
         admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, ShiftAbort> {
-        if matches!(self.kind, JournalKind::AwaitedRun) {
-            return Ok(if ordinal == 0 {
-                AdmitVerdict::Admit(admission_body::admitted(
-                    self.session.clone(),
-                    "shiftless-run".into(),
-                    request.request.clone(),
-                    AdmissionId::new("awaited#0"),
-                    u64::from(ordinal),
-                    admitting_generation.clone(),
-                    lash_core::engine::AdmittedWork::Input {
-                        head: "awaited-input".into(),
-                    },
-                ))
-            } else {
-                AdmitVerdict::Idle
-            });
-        }
-        self.held().await;
-        Ok(AdmitVerdict::Idle)
+        let address = lash_core::EffectAddress::new(
+            controller.execution_scope().clone(),
+            lash_core::engine::shift_admission_replay_key(&request.request, ordinal),
+        )
+        .unwrap();
+        let envelope = lash_core::RuntimeEffectEnvelope::new(
+            lash_core::RuntimeEffectInvocation::new(
+                address,
+                lash_core::RuntimeAttribution::default(),
+                "settlement-admission",
+            ),
+            lash_core::RuntimeEffectCommand::AdmitShift {
+                request: Box::new(lash_core::engine::AdmitRequest {
+                    session: request.session.clone(),
+                    request: request.request.clone(),
+                    build_generation: admitting_generation.clone(),
+                }),
+            },
+        );
+        controller
+            .execute_effect(
+                envelope,
+                lash_core::RuntimeEffectLocalExecutor::testing(|_| async {
+                    let verdict = if matches!(
+                        self.kind,
+                        JournalKind::AwaitedRun | JournalKind::ShiftlessRun
+                    ) {
+                        if ordinal == 0 {
+                            let admission =
+                                AdmissionId::new(format!("{}#{ordinal}", request.request.as_str()));
+                            let stored =
+                                self.store.store().shift_epoch(&self.session).await.unwrap();
+                            let seal = self
+                                .store
+                                .store()
+                                .seal_shift_epoch(
+                                    &self.session,
+                                    &admission,
+                                    stored.epoch,
+                                    &lash_core::store::RunStartNonce::new(admission.as_str()),
+                                    Some(&lash_core::store::RunHold {
+                                        run: "shiftless-run".into(),
+                                        executor: lash_core::store::RunExecutor::run(&admission),
+                                    }),
+                                )
+                                .await
+                                .unwrap();
+                            assert!(
+                                matches!(seal, lash_core::store::ShiftEpochSeal::Sealed(_)),
+                                "the invocation records its root executor: {seal:?}"
+                            );
+                            AdmitVerdict::Admit(admission_body::admitted(
+                                self.session.clone(),
+                                "shiftless-run".into(),
+                                request.request.clone(),
+                                admission,
+                                stored.epoch,
+                                admitting_generation.clone(),
+                                lash_core::engine::AdmittedWork::Input {
+                                    head: "awaited-input".into(),
+                                },
+                            ))
+                        } else {
+                            AdmitVerdict::Idle
+                        }
+                    } else {
+                        self.held().await;
+                        AdmitVerdict::Idle
+                    };
+                    Ok(lash_core::RuntimeEffectOutcome::AdmitShift {
+                        verdict: Box::new(verdict),
+                    })
+                }),
+            )
+            .await
+            .and_then(lash_core::RuntimeEffectOutcome::into_admit_shift)
+            .map_err(|error| ShiftAbort::Retry(error.into_runtime_error()))
     }
 
     async fn execute_run(
@@ -195,21 +253,25 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
                     ingress(&harness)
                         .send_workflow_json(
                             "LashTurn",
-                            &lash_restate::turn_workflow_key(&session, &run),
+                            &lash_restate::turn_invocation_key(
+                                &ShiftRequest {
+                                    session: session.clone(),
+                                    request: ShiftRequestId::new("unawaited"),
+                                    intended_lane: None,
+                                },
+                                0,
+                            ),
                             "run",
                             &lash_restate::Call::new(lash_restate::RestateRunRequest {
                                 sender_generation: Some(generation.clone()),
-                                admitted: admission_body::admitted(
-                                    session.clone(),
-                                    run.clone(),
-                                    ShiftRequestId::new("unawaited"),
-                                    AdmissionId::new("unawaited#0"),
-                                    0,
-                                    generation,
-                                    lash_core::engine::AdmittedWork::Input {
-                                        head: lash_core::InputId::from("unawaited-input"),
-                                    },
-                                ),
+                                request: lash_core::engine::ShiftRequest {
+                                    session: session.clone(),
+                                    request: ShiftRequestId::new("unawaited"),
+                                    intended_lane: None,
+                                },
+                                ordinal: 0,
+                                rules: Default::default(),
+                                draining: None,
                             }),
                         )
                         .await

@@ -16,7 +16,7 @@ use super::*;
 use lash_core::SessionShifts;
 use lash_core::engine::{
     AdmitVerdict, RunOutcome, ShiftAbort, ShiftOutcome, ShiftRequest, ShiftRequestId, ShiftStop,
-    admission_body, shift_admission_replay_key,
+    shift_admission_replay_key,
 };
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{RestateTestServer, ServerConfig};
@@ -26,7 +26,7 @@ use restate_sdk::service::macro_support::ServiceBoxFuture;
 
 use crate::session_shifts::{
     LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl, RestateRunRequest,
-    RestateSessionShiftRequest, turn_workflow_key,
+    RestateSessionShiftRequest, turn_invocation_key,
 };
 
 const MAX_ATTEMPTS: u64 = 3;
@@ -177,7 +177,7 @@ where
         let installation = slot.install(Arc::clone(&shifts) as Arc<dyn SessionShifts>);
         let generation = lash_core::engine::BuildGeneration::for_test;
         let recorded = Arc::new(build(slot.clone(), generation("G_a")));
-        let swapped = Arc::new(build(slot, generation("G_b")));
+        let swapped = Arc::new(build(slot.clone(), generation("G_b")));
         let current = Arc::new(Mutex::new(Arc::clone(&recorded)));
         let definition = restate_sdk::service::macro_support::service_definition(
             Swappable {
@@ -193,8 +193,23 @@ where
                     .retry_policy_pause_on_max_attempts(),
             ),
         );
+        let endpoint = Endpoint::builder().bind(definition);
+        let endpoint = if handler == "shift" {
+            endpoint.bind(
+                LashTurnImpl::new(
+                    slot,
+                    test_restate_authority_id(),
+                    generation("G_a"),
+                    &crate::services::DEFAULT_NAMESPACE,
+                    crate::object_state::FleetView::default(),
+                )
+                .serve(),
+            )
+        } else {
+            endpoint
+        };
         server
-            .register(Endpoint::builder().bind(definition).build())
+            .register(endpoint.build())
             .await
             .expect("register the deployment");
         Self {
@@ -257,13 +272,16 @@ where
             .find(|view| view.target == target)
             .expect("the invocation");
         let journaled = self.commands(&invocation.id);
-        let expected: Vec<_> = std::iter::once((MessageType::InputCommand, None))
+        let mut expected: Vec<_> = std::iter::once((MessageType::InputCommand, None))
             .chain(
                 steps
                     .iter()
                     .map(|step| (MessageType::RunCommand, Some(step.clone()))),
             )
             .collect();
+        if target.starts_with("LashSession/") {
+            expected.push((MessageType::CallCommand, None));
+        }
         assert_eq!(
             journaled, expected,
             "the step that carries the generation is the first command; no sentinel step \
@@ -315,6 +333,18 @@ where
         // replays and the invocation completes.
         *self.current.lock_recover() = Arc::clone(&self.recorded);
         assert_eq!(self.server.resume(&invocation.id), Some(true), "resume");
+        if target.starts_with("LashSession/") {
+            let child = self
+                .server
+                .invocations()
+                .into_iter()
+                .find(|view| view.target.starts_with("LashTurn/") && view.target.ends_with("/run"))
+                .expect("held admission invocation");
+            assert!(
+                self.server.crash(&child.id),
+                "release the child's held attempt through replay"
+            );
+        }
         let view = self.wait_for(target, "completed").await;
         assert!(
             self.server
@@ -363,10 +393,7 @@ async fn a_session_shift_replayed_under_another_generation_parks_at_its_leg_star
         .expect("send the shift");
     swap.replays_parked_under_another_generation(
         &format!("LashSession/{session}/shift"),
-        &[
-            "lash.shift.leg".to_owned(),
-            format!("lash:{}", shift_admission_replay_key(&request, 0)),
-        ],
+        &["lash.shift.leg".to_owned()],
     )
     .await;
     let outcome: crate::Reply<ShiftOutcome> = swap
@@ -408,19 +435,12 @@ async fn a_run_execution_replayed_under_another_generation_parks_at_its_first_st
     })
     .await;
     let session = SessionId::from("folded");
-    let run = TurnId::from("run-folded");
-    let admitted = admission_body::admitted(
-        session.clone(),
-        run.clone(),
-        ShiftRequestId::new("r-folded"),
-        lash_core::engine::AdmissionId::new("r-folded:0"),
-        0,
-        lash_core::engine::BuildGeneration::for_test("G_a"),
-        lash_core::engine::AdmittedWork::Queued {
-            head: lash_core::BatchId::from("scripted-batch"),
-        },
-    );
-    let key = turn_workflow_key(&session, &run);
+    let request = ShiftRequest {
+        session: session.clone(),
+        request: ShiftRequestId::new("r-folded"),
+        intended_lane: None,
+    };
+    let key = turn_invocation_key(&request, 0);
     swap.ingress
         .send_lash_workflow(
             "LashTurn",
@@ -428,14 +448,20 @@ async fn a_run_execution_replayed_under_another_generation_parks_at_its_first_st
             "run",
             &RestateRunRequest {
                 sender_generation: Some(lash_core::engine::BuildGeneration::for_test("G_a")),
-                admitted,
+                request,
+                ordinal: 0,
+                rules: Default::default(),
+                draining: None,
             },
         )
         .await
         .expect("send the run run");
     swap.replays_parked_under_another_generation(
         &format!("LashTurn/{key}/run"),
-        &[format!("lash:first-step:{run}")],
+        &[format!(
+            "lash:{}",
+            shift_admission_replay_key(&ShiftRequestId::new("r-folded"), 0)
+        )],
     )
     .await;
 }

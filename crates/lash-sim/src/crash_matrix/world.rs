@@ -351,6 +351,35 @@ impl CrashWorld {
         self.engine.invocations().await
     }
 
+    /// The root invocations recorded by this Run's retained admission or seal.
+    pub async fn run_invocations(
+        &self,
+        session: &lash_core::SessionId,
+        run: &lash_core::TurnId,
+    ) -> Result<Vec<EngineInvocation>, String> {
+        let Some(key) = lash_restate::recorded_turn_invocation_key(
+            self.backend.session_store_factory().as_ref(),
+            session,
+            run,
+        )
+        .await
+        .map_err(|error| format!("read recorded run executor: {error}"))?
+        else {
+            return Ok(Vec::new());
+        };
+        let suffix = format!("/{key}/run");
+        Ok(self
+            .invocations()
+            .await
+            .into_iter()
+            .filter(|view| {
+                view.target
+                    .starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
+                    && view.target.ends_with(&suffix)
+            })
+            .collect())
+    }
+
     /// Kill `id` as an operator does, and wait until it can run nothing more.
     pub async fn kill_invocation(&self, id: &str) -> Result<(), String> {
         self.engine.kill_and_await(id).await

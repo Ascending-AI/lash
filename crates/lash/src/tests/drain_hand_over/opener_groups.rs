@@ -98,7 +98,7 @@ async fn held_loser_survives(
     assert!(double.server().on_crash(crashes.listener()));
     if matches!(boundary, Boundary::JournalBudget | Boundary::BetweenCells)
         && let Some(Disruption::Engine(crash)) = disruption
-        && let Some(rule) = crash.rule(0)
+        && let Some(rule) = crash.rule(0, None)
     {
         double.server().crash_on(rule);
     }
@@ -262,8 +262,15 @@ async fn held_loser_survives(
             .iter()
             .filter(|entry| entry.ty.is_command())
             .count();
+        let old_key = lash_restate::recorded_turn_invocation_key(
+            roll.core.store_factory.as_ref(),
+            &roll.session,
+            &lash_core::TurnId::fixture("run-run"),
+        )
+        .await?
+        .expect("the parked run records its invocation");
         if let Some(Disruption::Engine(crash)) = disruption
-            && let Some(rule) = crash.rule(commands)
+            && let Some(rule) = crash.rule(commands, Some(&old_key))
         {
             roll.server().crash_on(rule);
         }

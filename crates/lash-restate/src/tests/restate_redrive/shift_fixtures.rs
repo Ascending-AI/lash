@@ -70,7 +70,9 @@ pub(super) async fn execute_shift(
                                 generation: Some(lash_core::ExecutableGeneration::new(format!(
                                     "blake3:live-{live_generation}"
                                 ))),
-                                executor: lash_core::store::RunExecutor::Run,
+                                executor: lash_core::store::RunExecutor::run(
+                                    &lash_core::store::AdmissionId::new("fixture#0"),
+                                ),
                                 plugins: lash_core::store::plugin_writers::PluginAdmission::default(
                                 ),
                                 trace: None,

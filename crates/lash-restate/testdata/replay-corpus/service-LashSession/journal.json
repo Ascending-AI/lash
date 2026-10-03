@@ -1,13 +1,12 @@
 {
   "scenario": "service-LashSession",
   "service": "LashSession",
-  "generation": "1dd189c15f4e",
+  "generation": "f9a51172660c",
   "handlers": {
     "shift": [
       [
         "InputCommand",
         "RunCommand lash.shift.leg",
-        "RunCommand lash:shift-admission:ingress:ti:#:1#0",
         "CallCommand LashTurn/run",
         "OutputCommand"
       ]

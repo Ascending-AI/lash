@@ -472,21 +472,12 @@ impl Fixture {
     }
     /// Run the engine until the session's shift is paused.
     async fn await_paused_shift(&self) {
-        let admin = self.harness.admin_client();
         for _ in 0..2000 {
             if let Some(server) = self.harness.server_double() {
                 server.settle().await;
                 server.fire_next_timer();
             }
-            if !admin
-                .paused_session_shifts(
-                    &crate::services::DEFAULT_NAMESPACE,
-                    self.shifts.session.as_str(),
-                )
-                .await
-                .expect("paused shifts")
-                .is_empty()
-            {
+            if self.paused_shifts().await > 0 {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -495,15 +486,22 @@ impl Fixture {
     }
     /// The session's paused shifts now.
     async fn paused_shifts(&self) -> usize {
+        let key = crate::turn_invocation_key(
+            &ShiftRequest {
+                session: self.shifts.session.clone(),
+                request: ShiftRequestId::new("initial"),
+                intended_lane: None,
+            },
+            0,
+        );
         self.harness
             .admin_client()
-            .paused_session_shifts(
-                &crate::services::DEFAULT_NAMESPACE,
-                self.shifts.session.as_str(),
-            )
+            .run_executions(&crate::services::DEFAULT_NAMESPACE, &[key])
             .await
-            .expect("paused shifts")
-            .len()
+            .expect("intent executions")
+            .into_iter()
+            .filter(|status| status.status == crate::RestateInvocationLifecycle::Paused)
+            .count()
     }
     /// One park-reconcile pass over the whole listing.
     async fn park_pass(&self) -> ParkReconcileReport {
@@ -753,15 +751,7 @@ async fn a_paused_admission_is_parked_and_only_its_redrive_resumes_it() {
         "a second pass writes nothing"
     );
     assert_eq!(
-        f.harness
-            .admin_client()
-            .paused_session_shifts(
-                &crate::services::DEFAULT_NAMESPACE,
-                f.shifts.session.as_str()
-            )
-            .await
-            .expect("paused shifts")
-            .len(),
+        f.paused_shifts().await,
         1,
         "recovery never resumes the paused shift"
     );
@@ -1957,7 +1947,7 @@ impl SessionShifts for StartedRunShifts {
     }
     async fn execute_run(
         &self,
-        _: lash_core::ScopedEffectController<'_>,
+        controller: lash_core::ScopedEffectController<'_>,
         admitted: Admitted,
     ) -> lash_core::engine::RunEnd {
         lash_core::engine::RunEnd::owing_nothing(
@@ -1969,17 +1959,52 @@ impl SessionShifts for StartedRunShifts {
                     "started-run",
                 )
                 .await;
-                lash_core::testing::store_fixtures::admit_run_for_test(
-                    self.store.store(),
+                let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
                     &fence,
                     admitted.run(),
                     AdmittedHead::Input(self.input.clone()),
-                )
-                .await
-                .expect("admit the run")
-                .expect("the run's admission reaches its head");
-                self.effects.fetch_add(1, Ordering::SeqCst);
-                std::future::pending::<Result<RunOutcome, ShiftAbort>>().await
+                );
+                request.executor = RunExecutor::run(admitted.admission());
+                self.store
+                    .store()
+                    .admit_run(&request)
+                    .await
+                    .expect("admit the run")
+                    .expect("the run's admission reaches its head");
+                let address =
+                    EffectAddress::new(controller.execution_scope().clone(), "started-effect")
+                        .expect("effect address");
+                let envelope = RuntimeEffectEnvelope::new(
+                    RuntimeEffectInvocation::new(
+                        address,
+                        RuntimeAttribution::for_session(self.session.clone()),
+                        "started-effect",
+                    ),
+                    RuntimeEffectCommand::AdmitShift {
+                        request: Box::new(AdmitRequest {
+                            session: self.session.clone(),
+                            request: ShiftRequestId::new("started-effect"),
+                            build_generation: admitted.admitted_generation().clone(),
+                        }),
+                    },
+                );
+                controller
+                    .execute_effect(
+                        envelope,
+                        RuntimeEffectLocalExecutor::testing(|_| async {
+                            self.effects.fetch_add(1, Ordering::SeqCst);
+                            std::future::pending::<
+                                Result<
+                                    RuntimeEffectOutcome,
+                                    lash_core::RuntimeEffectControllerError,
+                                >,
+                            >()
+                            .await
+                        }),
+                    )
+                    .await
+                    .map_err(|error| ShiftAbort::Retry(error.into_runtime_error()))?;
+                unreachable!("the started effect stays blocked")
             }
             .await,
         )
@@ -2089,7 +2114,10 @@ async fn missing_started_run(server: HarnessServer, admin_outage: bool) {
         .stable(crate::LashService::TurnDriver)
         .name()
         .into_owned();
-    let key = crate::session_shifts::turn_workflow_key(&session, &run);
+    let key = crate::session_shifts::recorded_turn_invocation_key(factory.as_ref(), &session, &run)
+        .await
+        .expect("recorded executor")
+        .expect("the run owns an invocation");
     let killed = harness.harness_admin().kill_workflow_run(&turn, &key).await;
     let attach = attach_whole_shift(&work, &session, ShiftRequestId::new("initial"));
     tokio::pin!(attach);
@@ -2393,7 +2421,14 @@ async fn process_run(server: HarnessServer, which: ProcessRun) {
         .await
         .expect("admit the process's run")
         .expect("the run's admission reaches its head");
-    let key = crate::session_shifts::turn_workflow_key(&session, &target.run);
+    let key = crate::session_shifts::turn_invocation_key(
+        &lash_core::engine::ShiftRequest {
+            session: session.clone(),
+            request: ShiftRequestId::new("no-own-invocation"),
+            intended_lane: None,
+        },
+        0,
+    );
     assert!(
         harness
             .admin_client()

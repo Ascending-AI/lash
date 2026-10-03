@@ -317,15 +317,14 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
             .output()
             .await?;
         let server = double.server();
-        let turn_target = format!(
-            "LashTurn/{}:request-digestt{turn}/run",
-            "request-digest".len()
-        );
         let turn_run = server
-            .invocations()
+            .turn_invocations(
+                &lash_core::SessionId::from("request-digest"),
+                &lash_core::TurnId::fixture(format!("t{turn}")),
+            )
             .into_iter()
-            .find(|view| view.target == turn_target)
-            .expect("the turn's LashTurn run");
+            .next()
+            .expect("the turn's recorded invocation");
         let journal = server.journal(&turn_run.id).unwrap_or_default();
         turn_bytes.push(
             journal
@@ -344,8 +343,8 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
                     && first
                         .name
                         .as_deref()
-                        .is_some_and(|name| name.starts_with("lash:shift-run-start:"))),
-            "the run's start marker is its first command: {:?}",
+                        .is_some_and(|name| name.starts_with("lash:shift-admission:"))),
+            "the immutable intent admission is its first command: {:?}",
             commands.first()
         );
     }

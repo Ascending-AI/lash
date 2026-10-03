@@ -548,27 +548,37 @@ async fn a_run_replayed_after_its_session_was_deleted_replays_its_journal() -> R
     );
     let run = lash_core::TurnId::from("closed-replay-run");
     let server = fixture._double.server();
-    // The run's journal: its input, the generation sentinel, the start
-    // marker, then the seal. The first attempt dies before the seal.
+    // The run retains its selected admission, then records its start marker
+    // and seal. The first attempt dies before the seal.
     server.crash_on(
         lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeCommand {
-            index: 3,
+            index: 4,
         })
         .service(lash_restate_test::TURN_DRIVER_SERVICE)
-        .key(lash_restate::turn_workflow_key(&session_id, &run))
+        .key(lash_restate::turn_invocation_key(
+            &lash_core::engine::ShiftRequest {
+                session: session_id.clone(),
+                request: lash_core::engine::ShiftRequestId::new("closed-replay"),
+                intended_lane: None,
+            },
+            0,
+        ))
         .within_attempts(1),
     );
     // The close and the storage delete commit while the dead attempt's
     // replay has not started: the listener runs before the server starts it,
     // and both are the store's alone, so they need nothing from the server.
+    let crashed_target = Arc::new(std::sync::Mutex::new(None));
     let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let factory = Arc::clone(&fixture.core.store_factory);
     let clock = fixture._double.lash_backend().clock();
     assert!(
         server.on_crash(lash_restate_test::CrashCount::new().listener_with({
+            let crashed_target = Arc::clone(&crashed_target);
             let closed = Arc::clone(&closed);
             let session_id = session_id.clone();
-            move |_target: &str| {
+            move |target: &str| {
+                *crashed_target.lock().expect("crash target lock") = Some(target.to_owned());
                 let factory = Arc::clone(&factory);
                 let session_id = session_id.clone();
                 let at_ms = clock.timestamp_ms();
@@ -652,7 +662,9 @@ async fn a_run_replayed_after_its_session_was_deleted_replays_its_journal() -> R
     let executed = server
         .invocations()
         .into_iter()
-        .find(|view| view.target.starts_with("LashTurn/") && view.target.contains(run.as_str()))
+        .find(|view| {
+            Some(&view.target) == crashed_target.lock().expect("crash target lock").as_ref()
+        })
         .expect("the run's execution is an invocation");
     let journal = server.journal(&executed.id).expect("the run's journal");
     let names: Vec<_> = journal

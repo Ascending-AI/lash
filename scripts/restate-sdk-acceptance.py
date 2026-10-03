@@ -49,7 +49,7 @@ CASES = {
             "tests::tool_run_sdk_contract::hosts_and_lash_name_one_endpoint_through_the_reexport",
             "tests::guarded_surface_tests::every_guarded_surface_decodes_its_supported_range",
             "services::tests::a_route_reads_back_as_the_route_it_names",
-            "session_shifts::tests::a_turn_workflow_key_round_trips_any_session_and_run",
+            "session_shifts::tests::a_turn_invocation_key_round_trips_its_immutable_intent",
             "wire::tests::a_disjoint_call_is_refused_before_its_body_decodes",
             "wire::tests::call_accepts_exact_limits_and_refuses_each_overrun",
             "serve::tests::legal_input_at_the_message_budget_succeeds",

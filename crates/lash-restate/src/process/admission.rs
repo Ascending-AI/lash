@@ -126,6 +126,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// Deferred sources before X with Run-owned subscriptions and sealed decisions.
 /// Epoch 13 (FIG-4920) replays command and operation plugin transitions before
 /// their command-lane reads after session deletion.
+/// Epoch 14 (FIG-4848) keys each turn invocation by immutable shift intent
+/// and ordinal, and records selection in that invocation before execution.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -139,14 +141,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 13;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 14;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 14;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 15;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

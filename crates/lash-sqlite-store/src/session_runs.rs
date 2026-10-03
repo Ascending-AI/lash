@@ -11,9 +11,9 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentObligation, IntentSettle, ObligationKey, ObligationState,
-    ParkCancelCause, ParkEventKind, RunAdmission, RunEndOutcome, RunStore, RunTerminal,
-    RunTerminalCause, RunTerminalWriteDecision, RunTurns, UnfinishedRun, close_admission,
-    decide_run_terminal_write, refused_execution_owns_run, run_binding_conflict,
+    ParkCancelCause, ParkEventKind, RunAdmission, RunEndOutcome, RunExecutor, RunStore,
+    RunTerminal, RunTerminalCause, RunTerminalWriteDecision, RunTurns, UnfinishedRun,
+    close_admission, decide_run_terminal_write, refused_execution_owns_run, run_binding_conflict,
     stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
@@ -1188,6 +1188,38 @@ fn commit<T>(outcome: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Resul
 
 #[async_trait::async_trait]
 impl RunStore for crate::SqliteStore {
+    async fn run_executor(
+        &self,
+        session_id: &SessionId,
+        run: &TurnId,
+    ) -> Result<Option<RunExecutor>, StoreError> {
+        let session_id = session_id.to_string();
+        let run = run.to_string();
+        let stored = self
+            .conn
+            .call(move |conn| {
+                conn.query_row(
+                    session_runs_sql().runs.select_hold.sql(),
+                    params![session_id, run],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                        ))
+                    },
+                )
+                .optional()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        stored
+            .map(|(sealed, admission)| {
+                RunExecutor::from_stored(admission.as_deref(), sealed.as_deref())
+            })
+            .transpose()
+            .map(Option::flatten)
+    }
+
     async fn unfinished_run(
         &self,
         session_id: &SessionId,

@@ -85,6 +85,7 @@ pub(super) enum SurfaceMethod {
     /// [`RunStore::unfinished_run`](lash_core::store::RunStore::unfinished_run)
     /// of the case's session.
     UnfinishedRun,
+    RunExecutor,
     EnqueueLateTurnInput,
     ReadSessionStateVersion,
     AdmitSessionState,
@@ -247,6 +248,7 @@ impl SurfaceMethod {
             Self::AdmitQueuedRun => "surface:admit_queued_run",
             Self::AdmitListedQueuedHead => "surface:admit_listed_queued_head",
             Self::UnfinishedRun => "surface:unfinished_run",
+            Self::RunExecutor => "surface:run_executor",
             Self::EnqueueLateTurnInput => "surface:enqueue_late_turn_input",
             Self::ReadSessionStateVersion => "surface:read_session_state_version",
             Self::AdmitSessionState => "surface:admit_session_state",
@@ -538,14 +540,17 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             // One queued-headed run end to end (FIG-3927): no unfinished
             // run, then its admission and a replay of it, and its lost end.
             surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::RunExecutor),
             surface(SurfaceMethod::AdmitQueuedRun),
             surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::RunExecutor),
             surface(SurfaceMethod::AdmitQueuedRun),
             surface(SurfaceMethod::RunTerminal),
             surface(SurfaceMethod::EndLostRun),
             // The lost end wrote its run's evidence (FIG-3600 S7).
             surface(SurfaceMethod::RunTerminal),
             surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::RunExecutor),
             // An input's run binding: unbound, bound once, read back, and a
             // second binding to another run refused.
             surface(SurfaceMethod::RunBinding),
@@ -660,9 +665,11 @@ pub(super) fn refused_run_end_case() -> GeneratedCase {
             },
             surface(SurfaceMethod::AdmitQueuedRun),
             surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::RunExecutor),
             surface(SurfaceMethod::EndRefusedRun),
             surface(SurfaceMethod::RunTerminal),
             surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::RunExecutor),
             surface(SurfaceMethod::EndRefusedRun),
             surface(SurfaceMethod::EndLostRun),
             surface(SurfaceMethod::RunTerminal),
@@ -699,6 +706,7 @@ pub(super) fn run_admission_replay_case() -> GeneratedCase {
                 lease: LeaseSlot::Successor,
             }),
             surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::RunExecutor),
             surface(SurfaceMethod::CancelPendingTurnInputs),
             surface(SurfaceMethod::AdmitRunAfterHeadSettled),
         ],
@@ -794,6 +802,7 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             surface(SurfaceMethod::AdmitAtCheckpoint),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
             surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::RunExecutor),
             surface(SurfaceMethod::AdmitQueuedRun),
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
             surface(SurfaceMethod::LoadPendingFollowOn),
@@ -854,6 +863,7 @@ pub(super) fn session_close_ledger_case() -> GeneratedCase {
             // The close ended the drain run by the session's deletion.
             surface(SurfaceMethod::RunTerminal),
             surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::RunExecutor),
             surface(SurfaceMethod::LoadIntent { known: true }),
             surface(SurfaceMethod::ClaimIntentApplication { known: true }),
             surface(SurfaceMethod::AcknowledgeIntent { known: true }),
@@ -1089,6 +1099,16 @@ impl BackendRunner {
                         )
                     }
                 }
+            }
+            SurfaceMethod::RunExecutor => {
+                let executor = store
+                    .run_executor(&session_id, &surface_queued_run(&session_id))
+                    .await?;
+                format!(
+                    "executor={}",
+                    serde_json::to_string(&executor)
+                        .map_err(|error| StoreError::Backend(error.to_string()))?
+                )
             }
             SurfaceMethod::UnfinishedRun => match store.unfinished_run(&session_id).await? {
                 None => "unfinished=none".to_string(),

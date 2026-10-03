@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashTurn",
   "service": "LashTurn",
-  "generation": "1dd189c15f4e",
+  "generation": "f9a51172660c",
   "handlers": {
     "close": [
       [
@@ -13,6 +13,8 @@
     "run": [
       [
         "InputCommand",
+        "RunCommand lash:shift-admission:ingress:ti:#:1#0",
+        "SetStateCommand admission",
         "RunCommand lash:shift-run-start:ingress:ti:#:1#0",
         "RunCommand lash:shift-seal:ingress:ti:#:1#0",
         "RunCommand lash:shift-admit:replay-corpus-turn",

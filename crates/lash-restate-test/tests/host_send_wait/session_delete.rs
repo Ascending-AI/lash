@@ -693,22 +693,15 @@ completion_laws! {
 }
 
 async fn run_execution_completed(world: &World, run: &lash::TurnId) {
-    let target = format!(
-        "{}/{}/run",
-        world
-            .backend
-            .service_name(lash_restate_test::TURN_DRIVER_SERVICE),
-        lash_restate::turn_workflow_key(&SESSION.into(), run)
-    );
     wait_until(
         "the run's execution has completed beside its held close",
         || {
             world
                 .backend
                 .server()
-                .invocations()
+                .turn_invocations(&SESSION.into(), run)
                 .iter()
-                .any(|executed| executed.target == target && executed.status == "completed")
+                .any(|executed| executed.status == "completed")
         },
     )
     .await;

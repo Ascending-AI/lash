@@ -198,6 +198,9 @@ impl ShiftEpochStore for PostgresStore {
                 crate::session_runs::unfinished_run_conn(&mut tx, session_id)
                     .await?
                     .as_ref(),
+                super::turn_cancel::pending_follow_on_tx(&mut tx, session_id, false)
+                    .await?
+                    .as_ref(),
             ),
             None => None,
         };

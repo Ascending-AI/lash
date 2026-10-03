@@ -600,9 +600,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
         }
     };
     engine.crash_on(
-        lash_restate_test::CrashRule::new(crash)
-            .service(lash_restate_test::TURN_DRIVER_SERVICE)
-            .key(lash_restate::turn_workflow_key(&session_id, &run)),
+        lash_restate_test::CrashRule::new(crash).service(lash_restate_test::TURN_DRIVER_SERVICE),
     );
     let store = lash_core::runtime::live_session_view(&core.store_factory, &session_id)
         .await?
@@ -622,12 +620,15 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
     // The first core leaves as its run's first attempt dies: the listener
     // runs before the engine starts the replay.
     let first = Arc::new(std::sync::Mutex::new(Some(core)));
+    let crashed_target = Arc::new(std::sync::Mutex::new(None));
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let crashes = lash_restate_test::CrashCount::new();
     assert!(engine.on_crash(crashes.listener_with({
+        let crashed_target = Arc::clone(&crashed_target);
         let first = Arc::clone(&first);
         let dropped = Arc::clone(&dropped);
-        move |_target: &str| {
+        move |target: &str| {
+            *crashed_target.lock().expect("crash target lock") = Some(target.to_owned());
             let core = first
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -672,7 +673,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
 
     let run_execution = async || {
         engine.runs(&session_id).await.into_iter().find(|executed| {
-            executed.target.starts_with("LashTurn/") && executed.target.contains(run.as_str())
+            Some(&executed.target) == crashed_target.lock().expect("crash target lock").as_ref()
         })
     };
     if change == HookChange::CallbackUnavailable {

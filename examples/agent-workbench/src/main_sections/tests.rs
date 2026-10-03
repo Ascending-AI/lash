@@ -1555,6 +1555,7 @@ async fn lash_turn_invocation(
     timeout: Duration,
 ) -> lash::restate::RestateInvocationId {
     lash_turn_invocation_at(
+        state.core.backend().session_store_factory().as_ref(),
         &state.restate_admin_url,
         &lash::TurnAddress::new(&turn.session_id, &turn.turn_id),
         timeout,
@@ -1564,25 +1565,33 @@ async fn lash_turn_invocation(
 
 /// [`lash_turn_invocation`] for a caller holding only the admin URL.
 pub(super) async fn lash_turn_invocation_at(
+    stores: &dyn lash::persistence::RunStore,
     admin_url: &str,
     address: &lash::TurnAddress,
     timeout: Duration,
 ) -> lash::restate::RestateInvocationId {
     let admin =
         lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::new(admin_url));
-    let key = lash::restate::turn_workflow_key(&address.session_id, &address.turn_id);
+
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        if let Some(status) = admin
-            .workflow_invocation_status("LashTurn", &key, "run")
-            .await
-            .expect("query the LashTurn invocation")
+        if let Some(key) = lash::restate::recorded_turn_invocation_key(
+            stores,
+            &address.session_id,
+            &address.turn_id,
+        )
+        .await
+        .expect("recorded run invocation")
+            && let Some(status) = admin
+                .workflow_invocation_status("LashTurn", &key, "run")
+                .await
+                .expect("query the LashTurn invocation")
         {
             return lash::restate::RestateInvocationId::new(status.id);
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "the engine admitted no LashTurn for {key} within {timeout:?}"
+            "the engine admitted no LashTurn for {address:?} within {timeout:?}"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

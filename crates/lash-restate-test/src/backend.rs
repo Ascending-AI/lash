@@ -22,7 +22,7 @@ use lash_restate::restate_sdk;
 use lash_restate::{
     RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine, RestateIngressClient,
     RestateNamespace, RestateProcessServing, RestateProcessWorkerSlot, RestateRegistrationError,
-    RestateSessionWork, turn_workflow_key,
+    RestateSessionWork, turn_invocation_key,
 };
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
@@ -706,8 +706,8 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
             self.service_name(SESSION_SHIFT_SERVICE),
             session.as_str()
         );
-        // A `LashTurn` key is `{len}:{session}{run}`
-        // (`lash_restate::turn_workflow_key`).
+        // A `LashTurn` key is `{len}:{session}{request}#{ordinal}`
+        // (`lash_restate::turn_invocation_key`).
         let runs = format!(
             "{}/{}:{}",
             self.service_name(TURN_DRIVER_SERVICE),
@@ -1022,9 +1022,15 @@ impl ParkedJobs {
         // `LashTurn` key does: the engine's live-work read parses the owner
         // back out and leaves a suspended job's session ingress to it.
         let key = match admitted.scope().session_id() {
-            Some(session) => turn_workflow_key(
-                session,
-                &lash_core::TurnId::fixture(format!("job-{prefix}{ordinal}")),
+            Some(session) => turn_invocation_key(
+                &lash_core::engine::ShiftRequest {
+                    session: session.clone(),
+                    request: lash_core::engine::ShiftRequestId::new(format!(
+                        "job-{prefix}-{ordinal}"
+                    )),
+                    intended_lane: None,
+                },
+                0,
             ),
             None => format!("job-{prefix}{ordinal}"),
         };

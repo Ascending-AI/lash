@@ -321,7 +321,7 @@ pub fn admit_run_request_for_test(
         turn_index: 1,
         generation: None,
         admitted_generation: crate::build_generation::BuildGeneration::for_test("conformance"),
-        executor: crate::store::RunExecutor::Run,
+        executor: crate::store::RunExecutor::run(&crate::store::AdmissionId::new("fixture#0")),
         plugins: Default::default(),
         turn_cancellation: None,
         trace_scopes: std::sync::Arc::new(lash_trace::UntracedScopes),

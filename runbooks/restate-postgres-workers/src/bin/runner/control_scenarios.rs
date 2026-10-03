@@ -465,7 +465,7 @@ pub(super) async fn drive_suspended_sleep_cancel_scenario(
     };
     submit_workflow(ingress_url, &request).await?;
     let admin = RestateAdminClient::new(admin_url.to_string());
-    let turn_invocation = lash_turn_invocation(&admin, &request).await?;
+    let turn_invocation = lash_turn_invocation(storage, &admin, &request).await?;
     wait_for_invocation_suspended(&admin, &turn_invocation, Duration::from_secs(90)).await?;
     report_workflow_progress(&request.workflow_id, "durable-sleep-suspended");
 
@@ -531,7 +531,7 @@ pub(super) async fn drive_engine_restart_scenario(
     };
     submit_workflow(ingress_url, &sleeping).await?;
     let admin = RestateAdminClient::new(admin_url.to_string());
-    let sleeping_invocation_id = lash_turn_invocation(&admin, &sleeping).await?;
+    let sleeping_invocation_id = lash_turn_invocation(storage, &admin, &sleeping).await?;
     wait_for_cancel_gate_attempts(storage.pool(), &parked.workflow_id, 1).await?;
     wait_for_invocation_suspended(&admin, &sleeping_invocation_id, Duration::from_secs(90)).await?;
     record_harness_signal(storage.pool(), "engine-restart-ready").await?;
@@ -723,7 +723,7 @@ pub(super) async fn drive_break_glass_scenario(
     let workflow_invocation = submit_workflow(ingress_url, &break_glass).await?;
     wait_for_cancel_gate(storage.pool(), &break_glass.workflow_id).await?;
     let admin = RestateAdminClient::new(admin_url.to_string());
-    let invocation_id = lash_turn_invocation(&admin, &break_glass).await?;
+    let invocation_id = lash_turn_invocation(storage, &admin, &break_glass).await?;
     admin
         .kill_invocation(&invocation_id)
         .await
@@ -1064,22 +1064,29 @@ pub(super) async fn wait_for_invocation_terminal(
 /// The engine's `LashTurn` invocation running `request`'s turn: the run the
 /// worker sends under the workflow id.
 pub(super) async fn lash_turn_invocation(
+    storage: &PostgresStorage,
     admin: &RestateAdminClient,
     request: &TurnRequest,
 ) -> Result<RestateInvocationId> {
     let address = turn_address(request).await?;
-    let key = lash::restate::turn_workflow_key(&address.session_id, &address.turn_id);
+    let store = storage.session_store_factory();
     let deadline = Instant::now() + Duration::from_secs(90);
     loop {
-        if let Some(status) = admin
-            .workflow_invocation_status("LashTurn", &key, "run")
-            .await
-            .context("read the engine's LashTurn invocation")?
+        if let Some(key) = lash::restate::recorded_turn_invocation_key(
+            &store,
+            &address.session_id,
+            &address.turn_id,
+        )
+        .await?
+            && let Some(status) = admin
+                .workflow_invocation_status("LashTurn", &key, "run")
+                .await
+                .context("read the engine's LashTurn invocation")?
         {
             return Ok(RestateInvocationId::new(status.id));
         }
         if Instant::now() >= deadline {
-            anyhow::bail!("the engine admitted no LashTurn for `{key}` within 90s");
+            anyhow::bail!("the engine admitted no LashTurn for `{address:?}` within 90s");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

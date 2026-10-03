@@ -268,7 +268,14 @@ impl Harness {
             .no_proxy()
             .timeout(WAIT)
             .build()?;
-        let key = lash::restate::turn_workflow_key(session, run).replace('\'', "''");
+        let key = lash::restate::recorded_turn_invocation_key(
+            self.core.backend().session_store_factory().as_ref(),
+            session,
+            run,
+        )
+        .await?
+        .context("run has no recorded engine invocation")?
+        .replace('\'', "''");
         let invocations: Value = client.post(format!("{}/query", self.restate.admin_url))
             .header("accept", "application/json")
             .json(&json!({"query":format!("SELECT id FROM sys_invocation WHERE target_service_key = '{key}' AND target_handler_name = 'run'")}))

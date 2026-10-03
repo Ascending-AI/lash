@@ -53,8 +53,8 @@ store_error_samples! {
     RunHeldByAnotherExecutor { .. } => StoreError::RunHeldByAnotherExecutor {
         session_id: session(),
         run: turn(),
-        recorded: Box::new(crate::store::RunExecutor::Run),
-        admitting: Box::new(crate::store::RunExecutor::Run),
+        recorded: Box::new(crate::store::RunExecutor::run(&crate::store::AdmissionId::new("fixture#0"))),
+        admitting: Box::new(crate::store::RunExecutor::run(&crate::store::AdmissionId::new("fixture#0"))),
     },
     FollowOnPending { .. } => StoreError::FollowOnPending {
         session_id: session(),

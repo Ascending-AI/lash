@@ -335,8 +335,9 @@ impl AdmitShiftRunner {
     /// frame switch's commit ends no run), and its recovery's final commit
     /// ends that run. Then the session's unfinished run, which owns the
     /// session until it ends, resumed under its own id (FIG-3927). Both are
-    /// left to the run's recorded executor when it excludes this shift's
-    /// (FIG-4765). Then the
+    /// left to the run's recorded executor when it excludes this shift's,
+    /// except the committed follow-on hands a root invocation its named
+    /// recovery Run (FIG-4848). Then the
     /// command lane: open session commands apply before any turn-lane
     /// work (ADR 0101 §4). Then the turn lane in `enqueue_seq` order across
     /// both admission tables, with no kind priority (ADR 0101 §5): the head
@@ -355,15 +356,20 @@ impl AdmitShiftRunner {
             .await
             .map_err(|error| store_fault("pending follow-on read", error))?
         {
-            // The follow-on belongs to the unfinished run, and so does its
-            // recovery.
-            self.leave_to_recorded_executor(
-                store
-                    .unfinished_run()
-                    .await
-                    .map_err(|error| store_fault("unfinished run read", error))?
-                    .as_ref(),
-            )?;
+            let unfinished = store
+                .unfinished_run()
+                .await
+                .map_err(|error| store_fault("unfinished run read", error))?;
+            let successor = crate::store::RunHold {
+                run: owed.recovery_run(),
+                executor: self.executor.clone(),
+            };
+            if !unfinished
+                .as_ref()
+                .is_some_and(|held| owed.hands_off_root(&held.executor, &held.run, &successor))
+            {
+                self.leave_to_recorded_executor(unfinished.as_ref())?;
+            }
             return Ok(Some((
                 owed.recovery_run(),
                 AdmittedWork::FollowOn {

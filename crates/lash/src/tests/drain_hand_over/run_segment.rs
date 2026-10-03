@@ -271,10 +271,9 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
             dispatched: Arc::clone(&dispatched),
         }))
         .build(crate::testing::runtime_lease_owner())?;
+    let session_id = lash_core::SessionId::fixture(format!("deferred-run-{case:?}"));
     let handle = core
-        .session(lash_core::SessionId::fixture(format!(
-            "deferred-run-{case:?}"
-        )))
+        .session(session_id.clone())
         .created()
         .await
         .open()
@@ -285,10 +284,10 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
     tokio::time::timeout(WEDGE, dispatched.notified())
         .await
         .expect("the tool deferred");
-    let parked = parked_deferred_run(double.server(), "run-run").await;
+    let parked = parked_deferred_run(double.server(), &session_id, "run-run").await;
     if matches!(case, DeferredCase::TransferBefore) {
         assert!(double.server().crash(&parked.id));
-        parked_deferred_run(double.server(), "run-run").await;
+        parked_deferred_run(double.server(), &session_id, "run-run").await;
     }
     if matches!(case, DeferredCase::TransferAfter) {
         double.server().crash_on(
@@ -297,7 +296,15 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
             })
             .service(lash_restate_test::TURN_DRIVER_SERVICE)
             .handler("run")
-            .key_ending("run-run"),
+            .key(
+                lash_restate::recorded_turn_invocation_key(
+                    core.store_factory.as_ref(),
+                    &session_id,
+                    &lash_core::TurnId::fixture("run-run"),
+                )
+                .await?
+                .expect("the parked run records its invocation"),
+            ),
         );
     }
     if matches!(case, DeferredCase::HeldPending) {
@@ -355,7 +362,12 @@ async fn deferred_round_law(case: DeferredCase) -> Result<()> {
         "handover never redispatches the tool"
     );
     let completion = key.lock_recover().clone().expect("the original key");
-    parked_deferred_run(double.server(), "follow-on:run-run:agent-frame:1#0").await;
+    parked_deferred_run(
+        double.server(),
+        &session_id,
+        "follow-on:run-run:agent-frame:1#0",
+    )
+    .await;
     if matches!(case, DeferredCase::HeldPending) {
         double
             .server()
@@ -627,12 +639,12 @@ impl RunRoll {
         };
         let server = double.server();
         let continuation = server
-            .invocations()
+            .turn_invocations(
+                &self.session,
+                &lash_core::TurnId::fixture("follow-on:run-run:agent-frame:1#0"),
+            )
             .into_iter()
-            .find(|view| {
-                view.target
-                    .ends_with("follow-on:run-run:agent-frame:1#0/run")
-            })
+            .next()
             .expect("the continuation's run invocation");
         fn decision(value: &serde_json::Value) -> Option<&serde_json::Value> {
             match value {
@@ -669,14 +681,19 @@ impl RunRoll {
             "run-segment-plugins",
         )
         .await;
+        let run = lash_core::TurnId::from("run-run");
+        let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
+            &fence,
+            &run,
+            lash_core::store::AdmittedHead::Input(lash_core::InputId::from("recorded")),
+        );
+        request.executor = store
+            .store()
+            .run_executor(&self.session, &run)
+            .await?
+            .expect("the run retains its admitting invocation");
         let admitted = store
-            .admit_run(
-                &lash_core::testing::store_fixtures::admit_run_request_for_test(
-                    &fence,
-                    &lash_core::TurnId::from("run-run"),
-                    lash_core::store::AdmittedHead::Input(lash_core::InputId::from("recorded")),
-                ),
-            )
+            .admit_run(&request)
             .await?
             .expect("the run's admission is recorded");
         assert_eq!(
@@ -744,28 +761,23 @@ impl Crash {
     fn rule(self, session: &str) -> lash_restate_test::CrashRule {
         use lash_restate_test::protocol::MessageType;
         use lash_restate_test::{CrashPoint, CrashRule, TURN_DRIVER_SERVICE};
-        let run_execution = |point, key: &str| {
+        let run_execution = |point| {
             CrashRule::new(point)
                 .service(TURN_DRIVER_SERVICE)
                 .handler("run")
-                .key_ending(key)
         };
-        // The continuation's recovery run, at the recovery count its shift
-        // admission recorded.
+        let outcome = |run: &str| CrashPoint::BeforeStateWrite {
+            key: "outcome".to_owned(),
+            value_contains: Some(format!("\"run\":\"{run}\"")),
+        };
         let continuation = "follow-on:run-run:agent-frame:1#0";
         match self {
-            Self::OldRunBeforeItsDrainMarkIsRecorded => run_execution(
-                CrashPoint::BeforeRunResultEnding {
+            Self::OldRunBeforeItsDrainMarkIsRecorded => {
+                run_execution(CrashPoint::BeforeRunResultEnding {
                     suffix: "drain-mark:run-run:1".to_owned(),
-                },
-                "run-run",
-            ),
-            Self::OldRunAfterItsBoundaryCommit => run_execution(
-                CrashPoint::BeforeFrame {
-                    ty: MessageType::OutputCommand,
-                },
-                "run-run",
-            ),
+                })
+            }
+            Self::OldRunAfterItsBoundaryCommit => run_execution(outcome("run-run")),
             Self::OldDriveBeforeItHandsOver => CrashRule::new(CrashPoint::BeforeFrame {
                 ty: MessageType::OneWayCallCommand,
             })
@@ -773,14 +785,11 @@ impl Crash {
             .handler("shift")
             .key(session),
             Self::ContinuationBeforeItsFirstStep => {
-                run_execution(CrashPoint::BeforeRunResult { name: None }, continuation)
+                run_execution(CrashPoint::BeforeRunResultStarting {
+                    prefix: "lash:shift-run-start:".to_owned(),
+                })
             }
-            Self::ContinuationAfterItsCommit => run_execution(
-                CrashPoint::BeforeFrame {
-                    ty: MessageType::OutputCommand,
-                },
-                continuation,
-            ),
+            Self::ContinuationAfterItsCommit => run_execution(outcome(continuation)),
         }
     }
 }
@@ -1057,7 +1066,14 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(storage: Stor
         .expect("sys_invocation query");
     let runs: std::collections::BTreeSet<_> = runs
         .iter()
-        .filter_map(|row| row.target_service_key.clone())
+        .filter_map(|row| row.target_service_key.as_ref())
+        .filter(|key| {
+            double
+                .server()
+                .object_state("LashTurn", key)
+                .contains_key("admission")
+        })
+        .cloned()
         .collect();
     assert_eq!(
         runs.len(),
@@ -1222,17 +1238,17 @@ drain_hand_over_laws! {
 
 async fn parked_deferred_run(
     server: &lash_restate_test::RestateTestServer,
-    key: &str,
+    session: &lash_core::SessionId,
+    run: &str,
 ) -> lash_restate_test::InvocationView {
-    let target = format!("{key}/run");
     let deadline = tokio::time::Instant::now() + WEDGE;
     let mut seen = None;
     loop {
-        if let Some(view) = server.invocations().into_iter().find(|view| {
-            view.target.contains(lash_restate_test::TURN_DRIVER_SERVICE)
-                && view.target.ends_with(&target)
-                && view.status == "completed"
-        }) {
+        if let Some(view) = server
+            .turn_invocations(session, &lash_core::TurnId::fixture(run))
+            .into_iter()
+            .find(|view| view.status == "completed")
+        {
             let records: Vec<_> = server
                 .journal(&view.id)
                 .unwrap()
@@ -1245,12 +1261,10 @@ async fn parked_deferred_run(
                 server.outcome(&view.id)
             );
         }
-        let view = server.invocations().into_iter().find(|view| {
-            view.target.contains(lash_restate_test::TURN_DRIVER_SERVICE)
-                && view.target.ends_with(&target)
-                && view.status == "running"
-                && view.blocked_on_server == Some(true)
-        });
+        let view = server
+            .turn_invocations(session, &lash_core::TurnId::fixture(run))
+            .into_iter()
+            .find(|view| view.status == "running" && view.blocked_on_server == Some(true));
         if let Some(view) = view {
             if seen == Some(view.journal_len) {
                 return view;

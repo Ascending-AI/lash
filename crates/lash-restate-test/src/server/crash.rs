@@ -18,6 +18,8 @@ pub enum CrashPoint {
     /// Before the server stores the result of a `ctx.run` — the one named
     /// `name`, or any run when `None`.
     BeforeRunResult { name: Option<String> },
+    /// A named family of run results, independent of the invocation admission.
+    BeforeRunResultStarting { prefix: String },
     /// Before the server stores the result of the `ctx.run` whose command
     /// has this 0-based journal command index: the point for a run whose name
     /// differs from one execution to the next (it embeds a fresh id).
@@ -37,6 +39,11 @@ pub enum CrashPoint {
     BeforeCommand { index: usize },
     /// Before the server applies a frame of this type, or delivers a V7 run ACK.
     BeforeFrame { ty: MessageType },
+    /// Before the server applies the named workflow state write.
+    BeforeStateWrite {
+        key: String,
+        value_contains: Option<String>,
+    },
 }
 
 /// One scripted crash: a point, the handler it applies to, and how many
@@ -139,6 +146,13 @@ impl CrashRule {
             CrashPoint::BeforeRunResultAt { index } => {
                 site.ty == MessageType::ProposeRunCompletion && site.run_index == Some(*index)
             }
+            CrashPoint::BeforeRunResultStarting { prefix } => {
+                site.ty == MessageType::ProposeRunCompletion
+                    && site
+                        .run_name
+                        .as_ref()
+                        .is_some_and(|name| name.starts_with(prefix))
+            }
             CrashPoint::BeforeRunResultEnding { suffix } => {
                 site.ty == MessageType::ProposeRunCompletion
                     && site
@@ -160,6 +174,18 @@ impl CrashRule {
                 site.ty.is_command() && site.command_index == *index
             }
             CrashPoint::BeforeFrame { ty } => site.ty == *ty,
+            CrashPoint::BeforeStateWrite {
+                key,
+                value_contains,
+            } => {
+                site.ty == MessageType::SetStateCommand
+                    && site.state_key.as_deref() == Some(key.as_str())
+                    && value_contains.as_deref().is_none_or(|needle| {
+                        site.state_value
+                            .as_deref()
+                            .is_some_and(|value| value.contains(needle))
+                    })
+            }
         }
     }
 }
@@ -186,6 +212,10 @@ pub struct CrashSite {
     pub run_name: Option<String>,
     /// For a run proposal, the journal command index of the run it completes.
     pub run_index: Option<usize>,
+    /// The state entry addressed by a state write.
+    pub state_key: Option<String>,
+    /// The UTF-8 value of a state write, when it has one.
+    pub state_value: Option<String>,
     pub attempt: u32,
 }
 

@@ -141,6 +141,7 @@ macro_rules! runtime_store_operations {
                 [session] fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError>;
             }
             RunStore {
+                [session] fn run_executor(&self, session_id: &SessionId, run: &crate::TurnId) -> Result<Option<RunExecutor>, StoreError>;
                 [session] fn unfinished_run(&self, session_id: &SessionId) -> Result<Option<UnfinishedRun>, StoreError>;
                 [carried request] fn prepare_run_admission(&self, request: &AdmitRunRequest) -> Result<Option<PreparedRunAdmission>, StoreError>;
                 [carried prepared] fn commit_run_admission(&self, prepared: &PreparedRunAdmission, anchor: &lash_trace::TraceAnchor) -> Result<Option<RunAdmission>, StoreError>;

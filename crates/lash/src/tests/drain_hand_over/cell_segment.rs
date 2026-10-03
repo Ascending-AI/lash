@@ -286,12 +286,11 @@ finish({ answer, before });"#,
             .in_flight_turns
     }
 
-    /// The run invocation whose key ends with `key`, once it is parked on
+    /// The invocation selected for `key`, once it is parked on
     /// the cell's await: the process's terminal has `attaches` waits armed
     /// on it, and the run waits on the server with a journal that has
     /// stopped growing.
     async fn parked_run(&self, key: &str, attaches: usize) -> lash_restate_test::InvocationView {
-        let target = format!("{key}/run");
         let deadline = tokio::time::Instant::now() + WEDGE;
         let mut seen = None;
         loop {
@@ -300,12 +299,11 @@ finish({ answer, before });"#,
                 .iter()
                 .filter(|view| view.target.starts_with("LashProcessAttach/"))
                 .count();
-            let parked = invocations.into_iter().find(|view| {
-                view.target.ends_with(&target)
-                    && view.target.contains(lash_restate_test::TURN_DRIVER_SERVICE)
-                    && view.status == "running"
-                    && view.blocked_on_server == Some(true)
-            });
+            let parked = self
+                .server()
+                .turn_invocations(&self.session, &lash_core::TurnId::fixture(key))
+                .into_iter()
+                .find(|view| view.status == "running" && view.blocked_on_server == Some(true));
             if let Some(view) = parked.filter(|_| armed >= attaches) {
                 if seen == Some(view.journal_len) {
                     return view;
@@ -488,32 +486,36 @@ impl Crash {
     /// The crash the server plans for this point, if it is a planned one.
     /// `parked_commands` is the number of commands N's run journaled before
     /// it parked.
-    fn rule(self, parked_commands: usize) -> Option<lash_restate_test::CrashRule> {
-        use lash_restate_test::protocol::MessageType;
+    fn rule(
+        self,
+        parked_commands: usize,
+        old_key: Option<&str>,
+    ) -> Option<lash_restate_test::CrashRule> {
         use lash_restate_test::{CrashPoint, CrashRule, TURN_DRIVER_SERVICE};
-        let run_execution = |point, key: &str| {
+        let run_execution = |point| {
             CrashRule::new(point)
                 .service(TURN_DRIVER_SERVICE)
                 .handler("run")
-                .key_ending(key)
         };
-        let before_output = || CrashPoint::BeforeFrame {
-            ty: MessageType::OutputCommand,
+        let outcome = |run: &str| CrashPoint::BeforeStateWrite {
+            key: "outcome".to_owned(),
+            value_contains: Some(format!("\"run\":\"{run}\"")),
         };
         match self {
             Self::OldRunWhileParked | Self::ContinuationWhileParked => None,
-            Self::OldRunAfterTheWake => Some(run_execution(
-                CrashPoint::BeforeCommand {
+            Self::OldRunAfterTheWake => Some(
+                run_execution(CrashPoint::BeforeCommand {
                     index: parked_commands,
-                },
-                "run-run",
-            )),
-            Self::OldRunAfterItsBoundaryCommit => Some(run_execution(before_output(), "run-run")),
-            Self::ContinuationBeforeItsFirstStep => Some(run_execution(
-                CrashPoint::BeforeRunResult { name: None },
-                CONTINUATION,
-            )),
-            Self::ContinuationAfterItsCommit => Some(run_execution(before_output(), CONTINUATION)),
+                })
+                .key(old_key.expect("a wake crash records the predecessor invocation")),
+            ),
+            Self::OldRunAfterItsBoundaryCommit => Some(run_execution(outcome("run-run"))),
+            Self::ContinuationBeforeItsFirstStep => {
+                Some(run_execution(CrashPoint::BeforeRunResultStarting {
+                    prefix: "lash:shift-run-start:".to_owned(),
+                }))
+            }
+            Self::ContinuationAfterItsCommit => Some(run_execution(outcome(CONTINUATION))),
         }
     }
 }
@@ -546,7 +548,14 @@ async fn a_run_parked_inside_a_cell_hands_over_and_resumes_mid_cell(
                 .iter()
                 .filter(|entry| entry.ty.is_command())
                 .count();
-            if let Some(rule) = crash.rule(parked_commands) {
+            let old_key = lash_restate::recorded_turn_invocation_key(
+                roll.core.store_factory.as_ref(),
+                &roll.session,
+                &lash_core::TurnId::fixture("run-run"),
+            )
+            .await?
+            .expect("the parked run records its invocation");
+            if let Some(rule) = crash.rule(parked_commands, Some(&old_key)) {
                 roll.server().crash_on(rule);
             }
         }

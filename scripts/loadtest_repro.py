@@ -15,7 +15,7 @@ runtime diagnosis needs and the recipe would otherwise destroy, under
 An affected session is one whose operation a witness violation, a driver
 diagnosis or a failed fault names. The witness events map an operation's
 `run/actor/ordinal` subject to the session it was sent to. A `LashTurn` key is
-`{len}:{session}{root}` (`lash_restate::turn_workflow_key`), so a session's
+`{len}:{session}{request}#{ordinal}` (`lash_restate::turn_invocation_key`), so a session's
 turns are the keys that start with `{len}:{session}`.
 
 Restate is read through its admin SQL endpoint and the witness through psql,

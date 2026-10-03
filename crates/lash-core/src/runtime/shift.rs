@@ -373,7 +373,7 @@ pub async fn admit_shift(
         request,
         ordinal,
         draining,
-        crate::store::RunExecutor::Run,
+        crate::store::RunExecutor::run(&admission::admission_id(&request.request, ordinal)),
     ))
     .await
 }
@@ -402,7 +402,10 @@ pub async fn admit_shift_on_store(
         request,
         AdmissionAuthority {
             generation: admitting_generation,
-            executor: crate::store::RunExecutor::Run,
+            executor: crate::store::RunExecutor::run(&admission::admission_id(
+                &request.request,
+                ordinal,
+            )),
         },
         ordinal,
         draining,
@@ -530,7 +533,10 @@ pub async fn admit_shift_retired(
         request,
         AdmissionAuthority {
             generation: admitting_generation,
-            executor: crate::store::RunExecutor::Run,
+            executor: crate::store::RunExecutor::run(&admission::admission_id(
+                &request.request,
+                ordinal,
+            )),
         },
         ordinal,
         None,
@@ -565,7 +571,7 @@ pub async fn execute_admitted_run_retired(
         &scope,
         &admitted,
         None,
-        crate::store::RunExecutor::Run,
+        crate::store::RunExecutor::run(admitted.admission()),
     ))
     .await?;
     if let crate::engine::SealVerdict::Refused(refusal) = verdict {
@@ -1035,15 +1041,13 @@ impl LashRuntime {
         sinks: &ShiftSinks<'_>,
         close: RunClose<'_>,
     ) -> Result<ExecutedRun, ShiftAbort> {
+        let executor = crate::store::RunExecutor::run(admitted.admission());
         let mut attempt = EngineAttempt::enter(self);
-        let executed = Box::pin(attempt.runtime.execute_admitted_run_step(
-            controller,
-            admitted,
-            sinks,
-            None,
-            close,
-            crate::store::RunExecutor::Run,
-        ))
+        let executed = Box::pin(
+            attempt
+                .runtime
+                .execute_admitted_run_step(controller, admitted, sinks, None, close, executor),
+        )
         .await;
         attempt.returned = true;
         executed

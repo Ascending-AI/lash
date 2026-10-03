@@ -57,14 +57,27 @@ pub(super) async fn register_until_child(
 
 /// Kill every invocation of `run`'s `LashTurn` workflow and wait until the
 /// attempts it stopped have ended.
-async fn lose_run_invocation(world: &CrashWorld, run: &str) -> Result<(), String> {
+async fn lose_run_invocation(
+    world: &CrashWorld,
+    session: &SessionId,
+    run: &str,
+) -> Result<(), String> {
+    let key = lash_restate::recorded_turn_invocation_key(
+        world.backend().session_store_factory().as_ref(),
+        session,
+        &TurnId::fixture(run),
+    )
+    .await
+    .map_err(|error| format!("read recorded run: {error}"))?
+    .ok_or_else(|| format!("run `{run}` records no root invocation"))?;
+    let path = format!("/{key}/");
     let lost: Vec<String> = world
         .invocations()
         .await
         .into_iter()
         .filter(|view| {
-            view.target.starts_with(&format!("{TURN_DRIVER_SERVICE}/"))
-                && view.target.contains(run)
+            view.target.starts_with(TURN_DRIVER_SERVICE)
+                && view.target.contains(&path)
                 && view.status != "completed"
         })
         .map(|view| view.id)
@@ -145,12 +158,12 @@ async fn stage_scope_close_with_claim(
     world.restart().await?;
     let session = session_name(Seam::ScopeClose, seed);
     let run = "in-0";
-    let scope = ScopeId::turn(session.clone(), TurnId::from(run));
+    let scope = ScopeId::turn(session.clone(), TurnId::fixture(run));
     let child_count = 1 + world.draw(0..2) as usize;
     let mut expected = Expected {
         inputs: vec![AcceptedInput {
             session: session.clone(),
-            run: TurnId::from(run),
+            run: TurnId::fixture(run),
         }],
         closed_scopes: vec![scope.clone()],
         live_sessions: vec![session.clone()],
@@ -223,7 +236,7 @@ async fn stage_scope_close_with_claim(
             send(&world, &session, run).await?;
             match world.trip().wait(std::time::Duration::from_secs(20)).await {
                 Some(tripped) => {
-                    lose_run_invocation(&world, run).await?;
+                    lose_run_invocation(&world, &session, run).await?;
                     if claim_before_restart {
                         claim_scope_close_before_restart(&world, &session, run).await?;
                     } else {
@@ -339,7 +352,7 @@ pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Sta
         | CrashPoint::DuringEngineDelivery
         | CrashPoint::AfterDeliveryBeforeSettle => {
             let run = "host-scope";
-            let parent = ScopeId::turn(session.clone(), TurnId::from(run));
+            let parent = ScopeId::turn(session.clone(), TurnId::fixture(run));
             // The mid-delivery cut needs a child delivered before the one the
             // host dies on.
             let child_count = if point == CrashPoint::DuringEngineDelivery {

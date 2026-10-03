@@ -1096,6 +1096,22 @@ impl RestateAdminClient {
         .await
     }
 
+    /// Admission now runs in the intent's workflow. The caller parses each
+    /// key and checks the session before resuming it; LIKE may overmatch a
+    /// session containing SQL pattern characters.
+    pub(crate) async fn paused_session_admissions(
+        &self,
+        namespace: &crate::RestateNamespace,
+        session: &str,
+    ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
+        let runs = namespace.service_lanes_sql(crate::LashService::TurnDriver);
+        let prefix = sql_string_literal(&format!("{}:{session}%", session.len()));
+        self.query_json(&format!(
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND {runs} AND target_handler_name = 'run' AND target_service_key LIKE {prefix} ORDER BY id"
+        ))
+        .await
+    }
+
     pub(crate) async fn paused_work_page(
         &self,
         namespace: &crate::RestateNamespace,

@@ -17,6 +17,7 @@ struct RecoveryTransport {
     inner: Arc<dyn HttpTransport>,
     pages: Mutex<Vec<(String, usize, String)>>,
     hold: AtomicBool,
+    running_runs: bool,
     held: tokio::sync::Notify,
 }
 
@@ -54,6 +55,24 @@ impl HttpTransport for RecoveryTransport {
                 if kind == "process" && self.hold.swap(false, Ordering::SeqCst) {
                     self.held.notify_one();
                     std::future::pending::<()>().await;
+                }
+                if kind == "run" && self.running_runs {
+                    let rows: Vec<_> = keys.trim_end_matches(')').split(", ").map(|key| {
+                        let key = key.trim_matches('\'');
+                        serde_json::json!({
+                            "id": format!("running-{key}"), "target": format!("LashTurn/{key}/run"),
+                            "target_service_name": "LashTurn", "target_service_key": key,
+                            "target_handler_name": "run", "status": "running",
+                        })
+                    }).collect();
+                    return Ok(HttpResponse {
+                        status: 200,
+                        headers: vec![],
+                        body: HttpResponseBody::buffered(
+                            serde_json::to_vec(&serde_json::json!({"rows":rows}))
+                                .expect("running executions"),
+                        ),
+                    });
                 }
             }
         }
@@ -241,6 +260,21 @@ async fn seed(stores: &dyn StoreSet, start: usize, count: usize) {
             .bind_run_inputs(&session, &TurnId::from("run"), &[])
             .await
             .expect("run");
+        let admission = lash_core::store::AdmissionId::new(format!("fixture-{index}#0"));
+        let epoch = sessions.shift_epoch(&session).await.expect("fixture epoch");
+        sessions
+            .seal_shift_epoch(
+                &session,
+                &admission,
+                epoch.epoch,
+                &lash_core::store::RunStartNonce::new(format!("fixture-start-{index}")),
+                Some(&lash_core::store::RunHold {
+                    run: TurnId::from("run"),
+                    executor: lash_core::store::RunExecutor::run(&admission),
+                }),
+            )
+            .await
+            .expect("record the inspected execution");
     }
     stores
         .generation_drain()
@@ -282,8 +316,17 @@ fn shifts(
 }
 
 fn transport(inner: Arc<dyn HttpTransport>, hold: bool) -> Arc<RecoveryTransport> {
+    transport_with_runs(inner, hold, true)
+}
+
+fn transport_with_runs(
+    inner: Arc<dyn HttpTransport>,
+    hold: bool,
+    running_runs: bool,
+) -> Arc<RecoveryTransport> {
     Arc::new(RecoveryTransport {
         inner,
+        running_runs,
         pages: Mutex::new(vec![]),
         hold: AtomicBool::new(hold),
         held: tokio::sync::Notify::new(),
@@ -518,7 +561,7 @@ impl HttpTransport for FailedRunTransport {
             Some(
                 serde_json::to_value(crate::Reply::at(
                     crate::compat::RESTATE_WIRE_VERSION,
-                    None::<lash_core::engine::RunOutcome>,
+                    None::<crate::RestateRunOutcome>,
                 ))
                 .expect("outcome"),
             )
@@ -551,11 +594,12 @@ async fn a_timed_out_run_outcome_keeps_its_failure_and_advances_its_page() {
     );
     seed(stores.as_ref(), 0, 5).await;
     let server = lash_restate_test::RestateTestServer::new(Default::default()).expect("double");
-    let transport = transport(
+    let transport = transport_with_runs(
         Arc::new(FailedRunTransport {
             inner: server.transport(),
             hold_outcome: AtomicBool::new(true),
         }),
+        false,
         false,
     );
     let shifts = shifts(
@@ -578,10 +622,14 @@ async fn a_timed_out_run_outcome_keeps_its_failure_and_advances_its_page() {
         .reconcile_parks(&parks, page())
         .await
         .expect("first page");
-    let first_key = crate::session_shifts::turn_workflow_key(
+    let first_key = crate::session_shifts::recorded_turn_invocation_key(
+        sessions.as_ref(),
         &SessionId::from("recovery-000000"),
         &TurnId::from("run"),
-    );
+    )
+    .await
+    .expect("recorded executor")
+    .expect("invocation");
     assert!(
         first
             .failed

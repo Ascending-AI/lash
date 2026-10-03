@@ -21,7 +21,9 @@ use lash_core::engine::{
 };
 use lash_core::store::{EnginePark, RunExecutor};
 
-use crate::session_shifts::{parse_turn_workflow_key, turn_workflow_key};
+use crate::session_shifts::{
+    admission_invocation_key, parse_turn_invocation_key, recorded_turn_invocation_key,
+};
 use crate::{RestateAdminClient, RestateIngressClient, RestateInvocationId};
 
 pub(crate) struct RestateSessionControl {
@@ -126,31 +128,45 @@ pub(crate) async fn end_lost_run_executions(
     if page.is_empty() {
         return Ok(pass);
     }
-    let keys: Vec<String> = page
+    let recorded_keys: Vec<Option<String>> = page
         .iter()
-        .map(|open| turn_workflow_key(&open.target.session, &open.target.run))
+        .map(|open| match &open.executor {
+            Some(RunExecutor::Run { admission }) => {
+                Some(admission_invocation_key(&open.target.session, admission))
+            }
+            _ => None,
+        })
         .collect();
-    let runs = match recovery_request(deadline, admin.run_executions(namespace, &keys)).await {
-        Ok(runs) => runs,
-        Err(RecoveryRequestError::Failed(error)) => {
-            return Err(lash_core::StoreError::Backend(format!(
-                "read run executes from Restate: {error}"
-            )));
-        }
-        Err(error) => {
-            pass.failed
-                .push(("lost-run-page".into(), error.to_string()));
-            return Ok(pass);
+    let keys: Vec<String> = recorded_keys.iter().flatten().cloned().collect();
+    let runs = if keys.is_empty() {
+        Vec::new()
+    } else {
+        match recovery_request(deadline, admin.run_executions(namespace, &keys)).await {
+            Ok(runs) => runs,
+            Err(RecoveryRequestError::Failed(error)) => {
+                return Err(lash_core::StoreError::Backend(format!(
+                    "read run executes from Restate: {error}"
+                )));
+            }
+            Err(error) => {
+                pass.failed
+                    .push(("lost-run-page".into(), error.to_string()));
+                return Ok(pass);
+            }
         }
     };
-    for (OpenRun { target, executor }, key) in page.iter().zip(&keys) {
+    for (OpenRun { target, executor }, recorded_key) in page.iter().zip(&recorded_keys) {
+        let label = format!("{}/{}", target.session, target.run);
+        let key = recorded_key.as_deref().unwrap_or(&label);
         let key_runs: Vec<&crate::RestateInvocationStatus> = runs
             .iter()
-            .filter(|executed| executed.target_service_key.as_deref() == Some(key.as_str()))
+            .filter(|executed| {
+                recorded_key.is_some() && executed.target_service_key.as_deref() == Some(key)
+            })
             .collect();
         let loss = if key_runs.is_empty() {
             let lost = match executor {
-                Some(RunExecutor::Run) => Ok(true),
+                Some(RunExecutor::Run { .. }) => Ok(true),
                 Some(RunExecutor::Acceptor {
                     scope: lash_core::ExecutionScope::Process { process_id },
                 }) => recovery_request(deadline, process_ended(processes, process_id))
@@ -165,7 +181,7 @@ pub(crate) async fn end_lost_run_executions(
                     continue;
                 }
                 Err(error) => {
-                    pass.failed.push((key.clone(), error));
+                    pass.failed.push((key.to_owned(), error));
                     continue;
                 }
             }
@@ -180,7 +196,7 @@ pub(crate) async fn end_lost_run_executions(
                     continue;
                 }
                 Err(error) => {
-                    pass.failed.push((key.clone(), error));
+                    pass.failed.push((key.to_owned(), error));
                     continue;
                 }
             }
@@ -204,7 +220,7 @@ pub(crate) async fn end_lost_run_executions(
                 pass.ended.push(target.clone());
             }
             Ok(None) => pass.unchanged += 1,
-            Err(error) => pass.failed.push((key.clone(), error.to_string())),
+            Err(error) => pass.failed.push((key.to_owned(), error.to_string())),
         }
     }
     Ok(pass)
@@ -261,7 +277,7 @@ async fn recorded_outcome(
     deadline: tokio::time::Instant,
 ) -> Result<bool, String> {
     for run in failed {
-        let outcome: Option<lash_core::engine::RunOutcome> = recovery_request(
+        let outcome: Option<crate::RestateRunOutcome> = recovery_request(
             deadline,
             ingress.call_lash_workflow(&run.target_service_name, key, "outcome", &()),
         )
@@ -484,30 +500,47 @@ impl RestateSessionControl {
                     .await
             }
             None => {
+                let Some(key) = recorded_turn_invocation_key(
+                    self.sessions.as_ref(),
+                    &target.session,
+                    &target.run,
+                )
+                .await
+                .map_err(refusal)?
+                else {
+                    return Ok(None);
+                };
                 self.admin
-                    .workflow_invocation_status(
-                        &self.namespace.stable(crate::LashService::TurnDriver).name(),
-                        &turn_workflow_key(&target.session, &target.run),
-                        "run",
-                    )
+                    .run_executions(&self.namespace, &[key])
                     .await
+                    .map(|statuses| {
+                        let mut statuses = statuses;
+                        let index = statuses
+                            .iter()
+                            .position(|status| status.is_still_active())
+                            .or_else(|| statuses.iter().position(|status| status.status.is_open()))
+                            .unwrap_or(0);
+                        (!statuses.is_empty()).then(|| statuses.swap_remove(index))
+                    })
             }
         }
         .map_err(refusal)?;
         // A stored handle names the run's execution: a `LashTurn` run of
-        // the run's session. A follow-on's recovery runs under an admitted
-        // name of its own, so the key's run may differ from the park's.
+        // the run's session. Its suffix is opaque: retained invocations keep
+        // their recorded routes, including those started by a predecessor.
         if let Some(status) = status.as_ref()
             && (!self
                 .namespace
                 .parse(&status.target_service_name)
                 .is_some_and(|route| route.service() == crate::LashService::TurnDriver)
                 || status.target_handler_name != "run"
-                || status
-                    .target_service_key
-                    .as_deref()
-                    .and_then(parse_turn_workflow_key)
-                    .is_none_or(|(session, _)| session != target.session))
+                || status.target_service_key.as_deref().is_none_or(|key| {
+                    !key.starts_with(&format!(
+                        "{}:{}",
+                        target.session.as_str().len(),
+                        target.session.as_str()
+                    ))
+                }))
         {
             return Err(EngineRefusal::permanent(
                 lash_core::RuntimeErrorCode::EngineHandleMismatch,
@@ -560,7 +593,22 @@ impl RestateSessionControl {
         } else if service == Some(crate::LashService::EffectGroupDispatch) {
             self.reconcile_group_work(parks, invocation, &key, report)
                 .await?;
-        } else if let Some((session, run)) = parse_turn_workflow_key(&key) {
+        } else if service == Some(crate::LashService::TurnDriver)
+            && let Some((session, _)) = parse_turn_invocation_key(&key)
+        {
+            let admitted: Option<lash_core::engine::Admitted> = self
+                .ingress
+                .call_lash_workflow(&invocation.target_service_name, &key, "admission", &())
+                .await
+                .map_err(refusal)?;
+            let Some(admitted) = admitted else {
+                // Selection has not completed: retain this intent's handle as
+                // an admission park, without inventing a run invocation key.
+                return self
+                    .reconcile_shift(parks, invocation, session, report)
+                    .await;
+            };
+            let run = admitted.run().clone();
             let target = ParkTarget::Run {
                 session: session.clone(),
                 run: run.clone(),
@@ -808,11 +856,32 @@ impl RestateSessionControl {
         &self,
         session: &lash_core::SessionId,
     ) -> Result<bool, EngineRefusal> {
-        let paused = self
+        let mut paused = self
             .admin
             .paused_session_shifts(&self.namespace, session.as_str())
             .await
             .map_err(refusal)?;
+        for invocation in self
+            .admin
+            .paused_session_admissions(&self.namespace, session.as_str())
+            .await
+            .map_err(refusal)?
+        {
+            let Some(key) = invocation.target_service_key.as_deref() else {
+                continue;
+            };
+            if !parse_turn_invocation_key(key).is_some_and(|(owner, _)| owner == *session) {
+                continue;
+            }
+            let admission: Option<lash_core::engine::Admitted> = self
+                .ingress
+                .call_lash_workflow(&invocation.target_service_name, key, "admission", &())
+                .await
+                .map_err(refusal)?;
+            if admission.is_none() {
+                paused.push(invocation);
+            }
+        }
         for shift in &paused {
             self.admin
                 .resume_invocation(&shift.invocation_id())
