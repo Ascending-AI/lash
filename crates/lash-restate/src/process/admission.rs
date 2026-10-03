@@ -105,6 +105,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// change, so one lands by bumping this epoch, which changes the build's
 /// generation and keeps the old journal replaying only under its own build.
 /// The bump guard pins the handler prefix steps below.
+/// Epoch 3 (FIG-4914) separates FIG-4857's tagged plugin-transition bases
+/// and added process/command transition steps from the preceding journals.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -118,14 +120,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 2;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 3;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 3;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 4;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

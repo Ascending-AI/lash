@@ -686,6 +686,10 @@ mod tests {
         BehaviorRevision, PluginDeclaration, PluginFactory, PluginSpec, StaticPluginFactory,
     };
 
+    #[cfg(feature = "restate")]
+    #[path = "plugin_transition_generation.rs"]
+    mod plugin_transition_generation;
+
     /// The composition of no plugins.
     fn bare() -> PluginComposition {
         composition(&[])

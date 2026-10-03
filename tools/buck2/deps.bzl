@@ -1090,6 +1090,7 @@ PACKAGE_DEPS = {
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_subagents": "//crates/lash-subagents:lash-subagents",
             "lashlang": "//crates/lashlang:lashlang",
+            "restate_sdk": "//third-party/rust:p0297",
             "rmp_serde": "//third-party/rust:p0304",
             "rusqlite": "//third-party/rust:p0305",
             "serde_bytes": "//third-party/rust:p0332",
