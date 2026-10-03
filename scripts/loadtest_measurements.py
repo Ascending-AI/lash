@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reconcile FIG-3790 smoke measurements. This command establishes no budgets."""
 import argparse
+import base64
 from collections import Counter, defaultdict
 import hashlib
 import json
@@ -421,6 +422,288 @@ def reconcile_witness(run, operations, witness, evidence):
                 require(int(detail['terminal_ns']) == operation['observed_ns'], 'witness terminal timestamp differs from operation')
                 require(detail.get('response') == operation['response'] and detail.get('error') == operation['error'],
                         'witness terminal differs from client response')
+
+
+
+def _protobuf_fields(payload):
+    """Decode the public service-protocol fields needed by the cost receipt."""
+    fields = defaultdict(list)
+    position = 0
+    def varint():
+        nonlocal position
+        value = shift = 0
+        while position < len(payload) and shift < 70:
+            byte = payload[position]
+            position += 1
+            value |= (byte & 127) << shift
+            if byte < 128:
+                return value
+            shift += 7
+        raise ValueError('invalid receipt protobuf varint')
+    while position < len(payload):
+        key = varint()
+        number, wire = key >> 3, key & 7
+        require(number > 0, 'invalid receipt protobuf field')
+        if wire == 0:
+            value = varint()
+        elif wire == 2:
+            length = varint()
+            require(position + length <= len(payload), 'truncated receipt protobuf value')
+            value = payload[position:position + length]
+            position += length
+        else:
+            raise ValueError(f'unsupported receipt protobuf wire type {wire}')
+        fields[number].append(value)
+    return fields
+
+
+def _journal_json(row):
+    fields = _protobuf_fields(base64.b64decode(row['payload_base64'], validate=True))
+    tag = 14 if row['entry_type'] in {'InputCommand', 'OutputCommand'} else 5
+    if tag not in fields:
+        return None
+    content = _protobuf_fields(fields[tag][0]).get(1, [b''])[0]
+    try:
+        value = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    while isinstance(value, dict) and 'body' in value:
+        value = value['body']
+    return value
+
+
+
+def tool_route_census(receipt):
+    """Locate admission-to-incorporation by journal identities, then follow calls."""
+    invocations = {row['id']: row for row in receipt['invocations']}
+    entries = defaultdict(list)
+    targets = {}
+    primitives = {'RunCommand', 'CallCommand', 'OneWayCallCommand', 'SleepCommand',
+                  'AwakeableCommand', 'CompleteAwakeableCommand'}
+    for row in receipt['journal']:
+        entries[row['id']].append(row)
+        if row['entry_type'] == 'CallInvocationIdCompletionNotification':
+            fields = _protobuf_fields(base64.b64decode(row['payload_base64']))
+            targets[(row['id'], fields.get(1, [0])[0])] = fields[16][0].decode()
+    call_targets = {}
+    for row in receipt['journal']:
+        if row['entry_type'] in {'CallCommand', 'OneWayCallCommand'}:
+            fields = _protobuf_fields(base64.b64decode(row['payload_base64']))
+            target = targets[(row['id'], fields.get(10, [0])[0])]
+            require(target in invocations, 'missing called invocation descendant')
+            call_targets[(row['id'], row['index'])] = target
+    presentation = []
+    for identity, rows in entries.items():
+        for row in rows:
+            if row['entry_type'] == 'RunCommand' and (row['name'] or '').endswith(':present'):
+                completion_id = _protobuf_fields(base64.b64decode(row['payload_base64'])).get(11, [0])[0]
+                result = next(item for item in rows if item['entry_type'] == 'RunCompletionNotification' and
+                              _protobuf_fields(base64.b64decode(item['payload_base64'])).get(1, [0])[0] == completion_id)
+                presentation.append(dict(id=identity, command_index=row['index'], result_index=result['index'],
+                                         payload_bytes=result['payload_bytes'], output_copies=result['output_copies'],
+                                         output_decimal_copies=result['output_decimal_copies']))
+    if receipt['fixture']['branch'] != 'done':
+        return dict(presentation_records=presentation, boundary='whole Run census; ordinary budget does not apply to this branch')
+    opener = next(row['id'] for row in receipt['journal']
+                  if row['entry_type'] == 'RunCommand' and (row['name'] or '').endswith(':requests'))
+    rows = entries[opener]
+    start = next(row['index'] for row in rows if (row['name'] or '').endswith(':requests'))
+    complete = receipt['branch_observation']['boundary_complete']
+    if complete:
+        incorporated = max(row['index'] for row in rows if 'effect-group-incorporate:' in (row['name'] or ''))
+        end = next(row['index'] for row in rows if row['index'] > incorporated and row['entry_type'] == 'RunCommand')
+    else:
+        end = rows[-1]['index'] + 1
+    selected = [row for row in rows if start <= row['index'] < end]
+    selected_ids = {call_targets[(row['id'], row['index'])] for row in selected
+                    if row['entry_type'] in {'CallCommand', 'OneWayCallCommand'}}
+    while True:
+        children = {row['id'] for row in invocations.values() if row['invoked_by_id'] in selected_ids}
+        if children <= selected_ids:
+            break
+        selected_ids |= children
+    selected.extend(row for row in receipt['journal'] if row['id'] in selected_ids)
+    source = Counter(row['entry_type'] for row in selected if row['entry_type'] in primitives)
+    raw = Counter(row['entry_type'] for row in selected)
+    responses = []
+    for identity in selected_ids:
+        invocation = invocations[identity]
+        if invocation['target_service_name'] == 'EffectGroupIndex' and invocation['target_handler_name'] in {'subscribe', 'read_rank'}:
+            data = {row['entry_type']: _journal_json(row) for row in entries[identity]
+                    if row['entry_type'] in {'InputCommand', 'OutputCommand'}}
+            responses.append(dict(id=identity, handler=invocation['target_handler_name'], **data))
+    ready = [row for row in responses if row['handler'] == 'subscribe' and row['InputCommand']['notice']['type'] == 'ready']
+    reads = [row for row in responses if row['handler'] == 'read_rank' and row['InputCommand']['run']]
+    # The first read is identified by its calling command's journal position.
+    read_ids = {row['id'] for row in reads}
+    first_id = next(call_targets[(row['id'], row['index'])] for row in sorted(selected, key=lambda row: row['index'])
+                    if row['id'] == opener and row['entry_type'] == 'CallCommand' and call_targets[(row['id'], row['index'])] in read_ids)
+    first_read = next(row for row in reads if row['id'] == first_id)['OutputCommand']
+    width = receipt['fixture']['width']
+    assumptions = dict(no_intents=receipt['branch_observation']['no_declared_intents'],
+                       immediately_done=receipt['branch_observation']['attempts'] == width,
+                       no_attachments=receipt['branch_observation']['no_attachments'],
+                       ready_already_true=len(ready) == 1 and ready[0]['OutputCommand']['type'] == 'notified',
+                       all_ranks_seated_on_first_read=first_read['type'] == 'settled_run' and len(first_read['ranks']) == width,
+                       one_ready_awakeable=source['AwakeableCommand'] == 1,
+                       single_consuming_read=len(reads) == 1)
+    latency = dict(tool_admission_to_incorporation_ms=None,
+                   boundary='request-binding Run command observed to next model Run command after incorporation')
+    opener_view = invocations[opener]
+    runs = [row for row in rows if row['entry_type'] == 'RunCommand']
+    timestamps = [frame[2] for frame in opener_view['endpoint_response_frames'] if frame[0] == 'RunCommand']
+    if complete and opener_view['attempts'] == 1:
+        require(len(runs) == len(timestamps), 'Run journal/frame timeline mismatch')
+        observed = {row['index']: timestamp for row, timestamp in zip(runs, timestamps)}
+        require(observed[end] >= observed[start], 'negative tool incorporation interval')
+        latency['tool_admission_to_incorporation_ms'] = (observed[end] - observed[start]) / 1e6
+    else:
+        latency['unavailable_reason'] = 'incomplete boundary or replayed opener'
+    budget = 1 + 3 * width
+    # Response values can include giant rendered payload arrays. Preserve the raw
+    # bytes in the receipt; the summary keeps only the branch evidence.
+    branch_responses = [dict(id=row['id'], handler=row['handler'], input=row['InputCommand'],
+                            result_type=row['OutputCommand']['type'],
+                            seated_ranks=len(row['OutputCommand'].get('ranks', []))) for row in responses]
+    return dict(boundary_complete=complete, latency=latency, presentation_records=presentation, opener=opener, opener_indices=[start, end], descendant_ids=sorted(selected_ids),
+                source_commands=sum(source.values()), source_by_kind=dict(source),
+                raw_engine_records=sum(raw.values()), raw_by_kind=dict(raw),
+                common_run_source_commands=receipt['source']['total'] - sum(source.values()),
+                historical_estimate=14 + 19 * width, historical_assumptions=assumptions,
+                historical_branch_matches=all(assumptions.values()), branch_responses=branch_responses,
+                target_budget=budget, source_target_met=sum(source.values()) <= budget,
+                raw_target_met=sum(raw.values()) <= budget,
+                boundary='opener request binding through incorporation and close, plus every called descendant')
+
+def tool_sql_transactions(sql):
+    """Group interleaved connection-worker traces; retain every statement index."""
+    opened, transactions, standalone = {}, [], []
+    for index, row in enumerate(sql['rows']):
+        worker = row['connection_worker']
+        verb = row['sql'].lstrip().split()[0].lower()
+        if verb == 'begin':
+            require(worker not in opened, 'nested SQL transaction in cost trace')
+            opened[worker] = [index]
+        elif worker in opened:
+            opened[worker].append(index)
+            if verb in {'commit', 'rollback'}:
+                indices = opened.pop(worker)
+                templates = ' '.join(sql['rows'][i]['sql'].lower() for i in indices)
+                roles = [role for role, needles in {
+                    'material': ('blobs',),
+                    'retention': ('referrer', 'lease', 'artifact_'),
+                    'process': ('process_',),
+                    'session': ('session_', 'turn_',),
+                }.items() if any(needle in templates for needle in needles)]
+                transactions.append(dict(connection_worker=worker, statement_indices=indices,
+                                         ended=verb, table_roles=roles or ['other']))
+        else:
+            standalone.append(index)
+    require(not opened, 'unfinished application SQL transaction in cost trace')
+    require(len(transactions) == sql['application_transactions'], 'application SQL trace boundary mismatch')
+    return dict(transactions=transactions, standalone_statement_indices=standalone,
+                attribution='table roles overlap; these are application writes, not engine persistence')
+
+
+def tool_serial_waits(invocations, complete):
+    intervals = []
+    for invocation in invocations:
+        for start, end in invocation['sdk_input_waits']:
+            require(not complete or end is not None, 'unfinished SDK wait in complete cost receipt')
+            require(end is None or end >= start, 'negative SDK wait in cost receipt')
+            intervals.append(dict(id=invocation['id'], start_ns=start, end_ns=end, elapsed_ns=None if end is None else end-start, censored=end is None))
+    return dict(intervals=intervals,
+                boundary='SDK input Pending to next read or stream end; opener intervals are serial, descendants overlap')
+
+
+def tool_cost_census(receipt):
+    """Reconcile a complete controlled tool receipt without conflating counts.
+
+    The source census counts SDK run/call/send/timer/awakeable issuance. The
+    raw census also includes inputs, outputs, state operations and notifications.
+    HTTP requests and endpoint streams are separate transport populations.
+    """
+    require(receipt['contract'] == 'lash.tool-cost.controlled.v1', 'unknown tool cost contract')
+    invocations = {row['id']: row for row in receipt['invocations']}
+    require(len(invocations) == len(receipt['invocations']) and invocations,
+            'duplicate or missing invocation identities')
+    raw = Counter()
+    source = Counter()
+    indices = defaultdict(list)
+    source_kinds = {'CallCommand', 'OneWayCallCommand', 'RunCommand', 'SleepCommand',
+                    'AwakeableCommand', 'CompleteAwakeableCommand'}
+    size = receipt['fixture']['payload_bytes']
+    markers = {'request': b'q' * size, 'output': b'x' * size}
+    decimal_markers = {name: ((str(value) + ',') * (size - 1) + str(value)).encode()
+                       for name, value in [('request', 113), ('output', 120)]}
+    for row in receipt['journal']:
+        require(row['id'] in invocations, 'journal entry outside the captured invocation tree')
+        payload = base64.b64decode(row['payload_base64'], validate=True)
+        require(len(payload) == row['payload_bytes'], 'raw journal payload byte mismatch')
+        for name, marker in markers.items():
+            require(payload.count(marker) == row[name + '_copies'],
+                    f'{name} payload copy mismatch')
+        for name, marker in decimal_markers.items():
+            require(payload.count(marker) == row[name + '_decimal_copies'], f'{name} decimal copy mismatch')
+        indices[row['id']].append(row['index'])
+        raw[row['entry_type']] += 1
+        if row['entry_type'] in source_kinds:
+            source[row['entry_type']] += 1
+    for identity, invocation in invocations.items():
+        require(sorted(indices[identity]) == list(range(invocation['journal_size'])),
+                f'incomplete raw journal for {identity}')
+        parent = invocation['invoked_by_id']
+        require(parent is None or parent in invocations, 'missing invocation ancestor')
+        require(not receipt['branch_observation']['boundary_complete'] or invocation['status'] == 'completed', 'captured an unfinished invocation')
+    for name, counts in [('engine', raw), ('source', source)]:
+        require(dict(counts) == receipt[name]['by_kind'], f'{name} per-kind census mismatch')
+        require(sum(counts.values()) == receipt[name]['total'], f'{name} total census mismatch')
+    sql = receipt['sql']
+    require(sum(sql['by_verb'].values()) == sql['statements'] == len(sql['rows']),
+            'SQL trace population mismatch')
+    require(sql['application_transactions'] == sql['by_verb']['begin'], 'SQL transaction count mismatch')
+    require(sql['expanded_statement_bytes'] == sum(row['expanded_bytes'] for row in sql['rows']),
+            'SQL byte census mismatch')
+    require(receipt['bytes']['journal_protobuf_payload'] == sum(row['payload_bytes'] for row in receipt['journal']),
+            'journal byte census mismatch')
+    require(receipt['bytes']['endpoint_request_framed'] == sum(row['endpoint_request_bytes'] for row in invocations.values()),
+            'endpoint request byte census mismatch')
+    require(receipt['bytes']['endpoint_response_framed'] == sum(frame[1] for row in invocations.values() for frame in row['endpoint_response_frames']),
+            'endpoint response byte census mismatch')
+    byte_services = {}
+    for row in receipt['journal']:
+        service = invocations[row['id']]['target_service_name']
+        subtotal = byte_services.setdefault(service, Counter())
+        subtotal['protobuf_payload_bytes'] += row['payload_bytes']
+        for role in ('request', 'output'):
+            subtotal[role + '_payload_occurrences'] += row[role + '_copies']
+            subtotal[role + '_decimal_occurrences'] += row[role + '_decimal_copies']
+    for role in ('request', 'output'):
+        for encoding in ('payload', 'decimal'):
+            key = role + '_' + encoding + '_occurrences'
+            require(sum(row[key] for row in byte_services.values()) == receipt['bytes'][key],
+                    'aggregate material copy census mismatch')
+    route = tool_route_census(receipt)
+    waits = tool_serial_waits(receipt['invocations'], receipt['branch_observation']['boundary_complete'])
+    if 'opener' in route:
+        waits['opener_serial_wait_ns'] = sum(row['elapsed_ns'] or 0 for row in waits['intervals'] if row['id'] == route['opener'])
+        waits['opener_serial_waits'] = sum(row['id'] == route['opener'] for row in waits['intervals'])
+    if not receipt['branch_observation']['boundary_complete']:
+        refusals = receipt['branch_observation']['codec_refusals']
+        require(receipt['fixture']['payload_bytes'] >= 1_000_000 and refusals, 'unexplained incomplete cost boundary')
+        for refusal in refusals:
+            require(refusal['id'] in invocations and refusal['code'] == 400
+                    and 'JSON decode nodes limit 1000000 exceeded by 1000001' in refusal['message'],
+                    'codec refusal identity or cause mismatch')
+            failures = [row for row in receipt['journal'] if row['id'] == refusal['id'] and row['entry_type'] == 'OutputCommand']
+            require(len(failures) == 1, 'missing raw codec refusal')
+            failure = _protobuf_fields(_protobuf_fields(base64.b64decode(failures[0]['payload_base64']))[15][0])
+            require(failure[1][0] == refusal['code'] and failure[2][0].decode() == refusal['message'], 'raw codec refusal differs from reported cause')
+    return {'byte_services': byte_services, 'boundary_complete': receipt['branch_observation']['boundary_complete'], 'codec_refusals': receipt['branch_observation']['codec_refusals'], 'tool_route': route, 'sql_trace': tool_sql_transactions(sql), 'sdk_waits': waits,
+            'source_commands': sum(source.values()), 'raw_engine_records': sum(raw.values()),
+            'invocations': len(invocations), 'application_transactions': sql['application_transactions'],
+            'historical_source_hypothesis': receipt['branch_observation']['historical_source_hypothesis'],
+            'target_source_budget': receipt['branch_observation']['target_source_budget']}
 
 
 def cancellation_census(samples, owned, disappeared):

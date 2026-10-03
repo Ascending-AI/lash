@@ -4,7 +4,7 @@
 //! module and every call site out unless `perf-witness` is explicitly enabled.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -22,6 +22,18 @@ static COPIED_BYTES: AtomicU64 = AtomicU64::new(0);
 static POOL_CHECKOUT_WAIT_NANOS: LazyLock<Mutex<Vec<u64>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 static SQL_STATEMENTS: AtomicU64 = AtomicU64::new(0);
+static SQL_RECEIPTS: LazyLock<Mutex<Vec<SqlStatementReceipt>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+static SQL_RECEIPTS_ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Statement text and expanded byte length, without retaining bound values.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SqlStatementReceipt {
+    pub sql: String,
+    /// SQLite connection workers keep statements on one thread.
+    pub connection_worker: String,
+    pub expanded_bytes: usize,
+}
 static SQL_STATEMENTS_BY_VERB: [AtomicU64; SqlVerb::COUNT] =
     [const { AtomicU64::new(0) }; SqlVerb::COUNT];
 
@@ -125,6 +137,7 @@ pub struct Snapshot {
     /// The same total split by leading keyword; the values sum to
     /// `sql_statements`.
     pub sql_statements_by_verb: BTreeMap<&'static str, u64>,
+    pub sql_receipts: Vec<SqlStatementReceipt>,
 }
 
 /// Exclusive process-global runtime-work witness.
@@ -146,6 +159,14 @@ impl std::error::Error for AlreadyInstalled {}
 
 impl Collector {
     pub fn install() -> Result<Self, AlreadyInstalled> {
+        Self::install_configured(false)
+    }
+
+    pub fn install_with_sql_receipts() -> Result<Self, AlreadyInstalled> {
+        Self::install_configured(true)
+    }
+
+    fn install_configured(sql_receipts: bool) -> Result<Self, AlreadyInstalled> {
         COLLECTOR_STATE
             .compare_exchange(INACTIVE, INSTALLING, Ordering::AcqRel, Ordering::Relaxed)
             .map_err(|_| AlreadyInstalled)?;
@@ -154,6 +175,11 @@ impl Collector {
         BODY_COPY_PASSES.store(0, Ordering::Relaxed);
         COPIED_BYTES.store(0, Ordering::Relaxed);
         SQL_STATEMENTS.store(0, Ordering::Relaxed);
+        SQL_RECEIPTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        SQL_RECEIPTS_ENABLED.store(sql_receipts, Ordering::Relaxed);
         for counter in &SQL_STATEMENTS_BY_VERB {
             counter.store(0, Ordering::Relaxed);
         }
@@ -171,6 +197,10 @@ impl Collector {
             copied_bytes: COPIED_BYTES.load(Ordering::Relaxed),
             pool_checkout_wait_nanos: lock_pool_checkout_waits().clone(),
             sql_statements: SQL_STATEMENTS.load(Ordering::Relaxed),
+            sql_receipts: SQL_RECEIPTS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
             sql_statements_by_verb: SqlVerb::ALL
                 .iter()
                 .map(|verb| {
@@ -220,11 +250,31 @@ pub fn record_pool_checkout_wait(elapsed: Duration) {
 
 #[inline]
 pub fn record_sql_statement(sql: &str) {
+    record_sql_statement_bytes(sql, sql.len());
+}
+
+#[inline]
+pub fn record_sql_statement_bytes(sql: &str, expanded_bytes: usize) {
     if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
         return;
     }
     SQL_STATEMENTS.fetch_add(1, Ordering::Relaxed);
     SQL_STATEMENTS_BY_VERB[SqlVerb::classify(sql) as usize].fetch_add(1, Ordering::Relaxed);
+    if SQL_RECEIPTS_ENABLED.load(Ordering::Relaxed) {
+        SQL_RECEIPTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(SqlStatementReceipt {
+                sql: sql.to_owned(),
+                connection_worker: format!("{:?}", std::thread::current().id()),
+                expanded_bytes,
+            });
+    }
+}
+
+pub fn sql_receipts_enabled() -> bool {
+    COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE
+        && SQL_RECEIPTS_ENABLED.load(Ordering::Relaxed)
 }
 
 fn lock_pool_checkout_waits() -> MutexGuard<'static, Vec<u64>> {

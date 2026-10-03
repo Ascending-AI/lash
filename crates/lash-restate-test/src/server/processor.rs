@@ -118,6 +118,19 @@ pub struct Stats {
     /// rule delivered.
     pub scripted_cancels: u64,
     pub timers_fired: u64,
+    /// Completed ingress/admin HTTP requests. Endpoint streams are counted
+    /// separately per invocation by the journal census.
+    pub http_requests: Vec<HttpReceipt>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct HttpReceipt {
+    pub method: String,
+    pub url: String,
+    pub request_body_bytes: usize,
+    pub response_body_bytes: usize,
+    pub status: u16,
+    pub elapsed_ns: u64,
 }
 
 /// The effective invoker retry policy of one handler.
@@ -312,6 +325,8 @@ impl State {
             modified_seq: 0,
             attempts: 0,
             suspensions: 0,
+            input_probes: Vec::new(),
+            response_frames: Vec::new(),
             parent: submission.parent,
             children: Vec::new(),
             pending_runs: std::collections::BTreeSet::new(),
@@ -488,7 +503,14 @@ impl State {
             },
         };
         let (sender, receiver) = mpsc::unbounded_channel();
-        let probe = Arc::new(InputProbe::default());
+        let probe = Arc::new(if sh.config.cost_receipts {
+            InputProbe::with_receipts(sh.receipt_epoch)
+        } else {
+            InputProbe::default()
+        });
+        if sh.config.cost_receipts {
+            invocation.input_probes.push(Arc::clone(&probe));
+        }
         // Every frame queued is counted on the probe first: the attempt is
         // starved only once it has read them all.
         probe.fed();

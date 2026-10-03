@@ -31,6 +31,7 @@ test = false
 workspace = true
 
 [dependencies]
+base64 = { workspace = true }
 lash-sansio = { workspace = true }
 lashlang = { workspace = true }
 lash-typescript = { workspace = true }
@@ -41,6 +42,7 @@ rmp-serde = { workspace = true }
 libc = { workspace = true }
 lash-conformance = { workspace = true }
 lash-core = { workspace = true, features = ["perf-witness", "testing"] }
+lash-core-worker = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
 lash-restate = { workspace = true }
 lash-restate-test = { workspace = true }

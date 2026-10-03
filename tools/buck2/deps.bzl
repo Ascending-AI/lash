@@ -1004,6 +1004,7 @@ PACKAGE_DEPS = {
         "normal": {
             "anyhow": "//third-party/rust:p0011",
             "async_trait": "//third-party/rust:p0015",
+            "base64": "//third-party/rust:p0023",
             "chrono": "//third-party/rust:p0047",
             "clap": "//third-party/rust:p0052",
             "crc32fast": "//third-party/rust:p0072",
@@ -1013,6 +1014,7 @@ PACKAGE_DEPS = {
             "lash": "//crates/lash:lash",
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
+            "lash_core_worker": "//crates/lash-core-worker:lash-core-worker",
             "lash_lashlang_runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
             "lash_llm_tools": "//crates/lash-llm-tools:lash-llm-tools",
             "lash_plugin_process_controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls",

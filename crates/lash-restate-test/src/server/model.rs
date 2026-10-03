@@ -255,6 +255,8 @@ pub struct Invocation {
     pub modified_seq: u64,
     pub attempts: u32,
     pub suspensions: u32,
+    pub input_probes: Vec<Arc<super::body::InputProbe>>,
+    pub response_frames: Vec<(String, usize, u64)>,
     /// The invocation that called or sent this one, if any.
     pub parent: Option<InvKey>,
     /// Invocations this one's journal called or sent, for kill's cascade.

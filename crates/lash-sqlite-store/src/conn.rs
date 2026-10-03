@@ -337,7 +337,14 @@ fn install_perf_statement_witness(connection: &Connection) {
         rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
         Some(|event: rusqlite::trace::TraceEvent<'_>| {
             if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
-                lash_core_execution::perf_witness::record_sql_statement(&statement.sql());
+                if lash_core_execution::perf_witness::sql_receipts_enabled() {
+                    lash_core_execution::perf_witness::record_sql_statement_bytes(
+                        &statement.sql(),
+                        statement.expanded_sql().map_or(0, |sql| sql.len()),
+                    );
+                } else {
+                    lash_core_execution::perf_witness::record_sql_statement(&statement.sql());
+                }
             }
         }),
     );

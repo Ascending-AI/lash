@@ -3,8 +3,8 @@
 
 use std::convert::Infallible;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
@@ -34,12 +34,29 @@ pub struct InputProbe {
     fed: AtomicU64,
     /// Frames the attempt has read.
     read: AtomicU64,
+    read_bytes: AtomicU64,
+    receipt_epoch: Option<std::time::Instant>,
+    receipt_waits: Mutex<Vec<(u64, Option<u64>)>>,
     /// Whether the attempt's last read of its input came up empty.
     parked: AtomicBool,
     response_drained: AtomicBool,
 }
 
 impl InputProbe {
+    pub(super) fn with_receipts(epoch: std::time::Instant) -> Self {
+        Self {
+            receipt_epoch: Some(epoch),
+            ..Self::default()
+        }
+    }
+
+    pub fn receipt_waits(&self) -> Vec<(u64, Option<u64>)> {
+        self.receipt_waits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     /// Parked on its input with every queued frame read.
     pub fn is_starved(&self) -> bool {
         // The counts before the park: an attempt clears its park before it
@@ -63,13 +80,33 @@ impl InputProbe {
 
     /// The attempt read a frame: no longer parked, then one more read (in
     /// that order, see [`is_starved`](Self::is_starved)).
-    fn read_frame(&self) {
-        self.parked.store(false, Ordering::SeqCst);
+    fn read_frame(&self, bytes: usize) {
+        self.set_parked(false);
         self.read.fetch_add(1, Ordering::SeqCst);
+        self.read_bytes.fetch_add(bytes as u64, Ordering::SeqCst);
     }
 
-    fn set_parked(&self, parked: bool) {
-        self.parked.store(parked, Ordering::SeqCst);
+    pub fn read_bytes(&self) -> u64 {
+        self.read_bytes.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn set_parked(&self, parked: bool) {
+        let prior = self.parked.swap(parked, Ordering::SeqCst);
+        if prior == parked {
+            return;
+        }
+        if let Some(epoch) = self.receipt_epoch {
+            let now = epoch.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+            let mut waits = self
+                .receipt_waits
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if parked {
+                waits.push((now, None));
+            } else if let Some((_, end)) = waits.last_mut() {
+                *end = Some(now);
+            }
+        }
     }
 
     /// Whether the attempt task's last poll of the response body found
@@ -111,7 +148,7 @@ impl Body for AttemptBody {
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         match self.receiver.poll_recv(cx) {
             Poll::Ready(Some(bytes)) => {
-                self.probe.read_frame();
+                self.probe.read_frame(bytes.len());
                 Poll::Ready(Some(Ok(Frame::data(bytes))))
             }
             Poll::Ready(None) => {
@@ -131,7 +168,7 @@ impl Body for AttemptBody {
                     if !self.receiver.is_empty() {
                         self.probe.set_parked(false);
                         if let Poll::Ready(Some(bytes)) = self.receiver.poll_recv(cx) {
-                            self.probe.read_frame();
+                            self.probe.read_frame(bytes.len());
                             return Poll::Ready(Some(Ok(Frame::data(bytes))));
                         }
                     } else if self.probe.is_starved() {

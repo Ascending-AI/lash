@@ -38,7 +38,7 @@ pub use crash::{CrashCount, CrashPoint, CrashRule, RandomCrashes};
 pub(crate) use crash::{CrashPlan, CrashSite};
 pub use ids::{DeploymentId, InvocationId};
 pub use model::TimerView;
-pub use processor::{RetryPolicy, Stats};
+pub use processor::{HttpReceipt, RetryPolicy, Stats};
 
 use catalog::{Catalog, HandlerSpec};
 use model::{InvKey, Status};
@@ -91,6 +91,11 @@ pub struct ServerConfig {
     /// handler suspends at every await the journal cannot answer and every
     /// step replays — the `INACTIVITY_TIMEOUT=0s` mode.
     pub always_replay: bool,
+    /// Retain transport receipts for a controlled cost census. Ordinary
+    /// semantic tests do not retain this instrumentation.
+    pub cost_receipts: bool,
+    /// Override the turn's budget independently of the process-segment budget.
+    pub run_effect_budget: Option<u64>,
     pub time: TimeMode,
     /// Virtual epoch milliseconds the server starts at.
     pub start_time_ms: u64,
@@ -112,6 +117,8 @@ impl Default for ServerConfig {
             seed: 0,
             protocol: ProtocolVersion::V6,
             always_replay: false,
+            cost_receipts: false,
+            run_effect_budget: None,
             time: TimeMode::auto(),
             start_time_ms: 1_800_000_000_000,
             inactivity_timeout: Duration::from_secs(60),
@@ -129,6 +136,14 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
+    pub fn with_cost_receipts(mut self) -> Self {
+        self.cost_receipts = true;
+        self
+    }
+    pub fn with_run_effect_budget(mut self, budget: u64) -> Self {
+        self.run_effect_budget = Some(budget);
+        self
+    }
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
@@ -295,6 +310,7 @@ pub enum RemoveDeploymentError {
 }
 
 pub(crate) struct Shared {
+    receipt_epoch: std::time::Instant,
     /// Every deployment ever registered, in registration order; removal
     /// drops its entry. Lock after `state`, never before it.
     deployments: Mutex<Vec<Arc<Deployment>>>,
@@ -457,6 +473,28 @@ impl Shared {
 
     fn on_frame(self: &Arc<Self>, key: InvKey, number: u32, frame: Frame) -> Flow {
         let mut state = self.lock();
+        if self.config.cost_receipts {
+            state.invocations[key.0].response_frames.push((
+                format!("{:?}", frame.ty),
+                8 + frame.payload.len(),
+                self.receipt_epoch
+                    .elapsed()
+                    .as_nanos()
+                    .min(u128::from(u64::MAX)) as u64,
+            ));
+        }
+        if self.config.cost_receipts
+            && matches!(
+                frame.ty,
+                crate::protocol::MessageType::OutputCommand
+                    | crate::protocol::MessageType::Suspension
+                    | crate::protocol::MessageType::End
+                    | crate::protocol::MessageType::Error
+            )
+            && let Some(probe) = state.invocations[key.0].input_probes.last()
+        {
+            probe.set_parked(false);
+        }
         let flow = state.on_frame(self, key, number, frame);
         drop(state);
         flow
@@ -718,6 +756,7 @@ impl RestateTestServer {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| StartError::NoRuntime)?;
         let state = State::new(config.seed, config.start_time_ms);
         let shared = Arc::new(Shared {
+            receipt_epoch: std::time::Instant::now(),
             deployments: Mutex::new(Vec::new()),
             registration_requests: Mutex::new(Vec::new()),
             next_deployment_ordinal: AtomicUsize::new(0),

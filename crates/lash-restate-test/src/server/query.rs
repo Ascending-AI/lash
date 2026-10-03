@@ -205,6 +205,32 @@ fn row(state: &State, invocation: &Invocation) -> Map<String, Value> {
     );
     row.insert("invoked_by_id".into(), json!(parent));
     row.insert("journal_size".into(), json!(invocation.journal.len()));
+    row.insert("attempts".into(), json!(invocation.attempts));
+    row.insert("suspensions".into(), json!(invocation.suspensions));
+    row.insert(
+        "endpoint_request_bytes".into(),
+        json!(
+            invocation
+                .input_probes
+                .iter()
+                .map(|probe| probe.read_bytes())
+                .sum::<u64>()
+        ),
+    );
+    row.insert(
+        "endpoint_response_frames".into(),
+        json!(invocation.response_frames),
+    );
+    row.insert(
+        "sdk_input_waits".into(),
+        json!(
+            invocation
+                .input_probes
+                .iter()
+                .flat_map(|probe| probe.receipt_waits())
+                .collect::<Vec<_>>()
+        ),
+    );
     row.insert(
         "retry_count".into(),
         json!(invocation.retry.failures_in_loop),

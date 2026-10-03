@@ -1,0 +1,174 @@
+{
+  "runtime_source_sha": "e4735b406286c266e6ef2965242634afcd35d6a5",
+  "red": {
+    "selector": "tool_cost::tests::complete_cost_receipt_includes_descendants_and_incorporation",
+    "executed": 1,
+    "passed": 0,
+    "failed": 1,
+    "log_sha256": "0ce76c7c8673113b3a4291e1e09f23abcb20671d0ec277199f023dddc70cfe94",
+    "stdout": "---- STDOUT ----\n[2026-10-03T03:36:42.227+02:00]\n[2026-10-03T03:36:42.227+02:00] running 1 test\n[2026-10-03T03:36:42.227+02:00]\n[2026-10-03T03:36:42.227+02:00] thread 'tool_cost::tests::complete_cost_receipt_includes_descendants_and_incorporation' (7) panicked at crates/lash-perf/src/bin/tool_batch_baseline/mod.rs:431:9:\n[2026-10-03T03:36:42.227+02:00] the invocation tree must include the dispatch, not just the opener\n[2026-10-03T03:36:42.227+02:00] note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n[2026-10-03T03:36:42.227+02:00] test tool_cost::tests::complete_cost_receipt_includes_descendants_and_incorporation ... FAILED\n[2026-10-03T03:36:42.227+02:00]\n[2026-10-03T03:36:42.227+02:00] failures:\n[2026-10-03T03:36:42.227+02:00]\n[2026-10-03T03:36:42.227+02:00] failures:\n[2026-10-03T03:36:42.227+02:00]     tool_cost::tests::complete_cost_receipt_includes_descendants_and_incorporation\n[2026-10-03T03:36:42.227+02:00]\n[2026-10-03T03:36:42.227+02:00] test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s\n[2026-10-03T03:36:42.227+02:00]\n[2026-10-03T03:36:42.227+02:00]\n[2026-10-03T03:36:42.227+02:00] "
+  },
+  "green": [
+    {
+      "selector": "tool_cost::tests::complete_cost_receipt_includes_descendants_and_incorporation",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 1,
+      "log": ".buck2/test-invocations/20261003T043843-9qwaux_5/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "cca63d585a4546e117aa7d4ebf05414c269088c7de10e36eddbbfa652b48f8bd"
+    },
+    {
+      "selector": "tool_cost::tests::done_small",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 2,
+      "log": ".buck2/test-invocations/20261003T043851-lpw49_9d/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "c1f7b0a3e74121ce2b3819d76d25e29a1e1761dcedbff42659fc4e90cd1606ca"
+    },
+    {
+      "selector": "tool_cost::tests::done_eight_kib",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T043856-p398_ia6/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "3091598e7374633998d2038e08088588e07eed7c9fe0b95469fc0c5cad8b4c0d"
+    },
+    {
+      "selector": "tool_cost::tests::done_two_fifty_six_kib",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T043905-bwt7dyj6/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "ac964b3e7200c1ffa30787c7cd2b47375cf8705fb1e91ead5e440de83f7a29c1"
+    },
+    {
+      "selector": "tool_cost::tests::done_sixty_four_kib",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T044107-zhpnp0b2/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "b9d4f0b2edef526bcc5bc665424555018cad1e07a546408e8af3c2da4ecb4809"
+    },
+    {
+      "selector": "tool_cost::tests::done_one_mib",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T042959-bdp5fwv1/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "df5bfb9ecb6f88823817040ee0f29f82578026c381305032059a49c5ed58c329"
+    },
+    {
+      "selector": "tool_cost::tests::reported_retry",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T044131-6mxxbpk9/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "40e49f6c27225fdde60aed1c0ed9f68d1bf643c2952c5782d6f04f069540621c"
+    },
+    {
+      "selector": "tool_cost::tests::external_deferred",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T044135-uz_z3egb/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "618e1cd24b250f948e1561d18358987e2a8aae7cb98b5dec677fadb9dc0e24ce"
+    },
+    {
+      "selector": "tool_cost::tests::declared_process_start",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T045446-rul3hy1y/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "075ae4b65d690f249a60d4299e0c41cec13b97ada89cd9b14231bff600986c2a"
+    },
+    {
+      "selector": "tool_cost::tests::run_cancellation",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T044345-vucckdht/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "da710e839ec47f6263a26a2e68f3cab0a199dcfc9ab91d8e2352970e3c2b2c58"
+    },
+    {
+      "selector": "tool_cost::tests::surviving_race_loser",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T051828-1fe7r69a/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "897054f6bee9359d6866df0cbbbd3d104a91643ceeadb93aab39d9b00b987bcf"
+    },
+    {
+      "selector": "tool_cost::tests::turn_continuation",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T044548-occckdgg/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "9d58e5e598b144a125b2e3e28d6c4745b4ca16116cb52e66ff60d25851c021ec"
+    },
+    {
+      "selector": "tool_cost::tests::process_continuation",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "receipts": 3,
+      "log": ".buck2/test-invocations/20261003T053112-vq20anxe/test-results/root/crates/lash-perf/tool_batch_baseline__bin__unit_test/test.log",
+      "log_sha256": "dd5106c7d67c0c353a7c2c11cc159ae36254b29106ad45b4167036d3f6122a72"
+    }
+  ],
+  "python": {
+    "selector": "test_loadtest_measurements.ToolCostMeasurementsTests.test_pinned_receipts_reconcile_and_reject_incomplete_evidence",
+    "executed": 1,
+    "passed": 1,
+    "negative_mutations": [
+      "journal entry",
+      "payload bytes",
+      "SQL statement",
+      "ancestor",
+      "called descendant"
+    ],
+    "log_sha256": "0997ee1932ea4decd8fa4332688af2ddf8690064077e5fdc3d8f16f6d781195d"
+  },
+  "gates": {
+    "schema_checks": {
+      "passed": true,
+      "log_sha256": "61cbc2424310e325575c7b23e624bf9973ba29c5e5f82cf12d2a4ae4a2b7b4ea"
+    },
+    "format": {
+      "passed": true
+    },
+    "clippy": {
+      "passed": true,
+      "build_id": "070cd55a-35c2-4bac-8f2a-69ef2ca3ff36",
+      "log_sha256": "203a75c3b08a4bcc470e4c9f55ccb7f48113a5b014e08f3b3d47aea07601193c",
+      "targets": [
+        "//crates/lash-perf:tool_batch_baseline__bin",
+        "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
+        "//crates/lash-restate-test:lash-restate-test",
+        "//crates/lash-core-ids:lash-core-ids",
+        "//crates/lash-sqlite-store:lash-sqlite-store"
+      ],
+      "initial_invocation": {
+        "passed": false,
+        "log_sha256": "df20591dd9a2a04dfa386e61d2f0d6ea3cc861afb10f4bd9808f96e36c586b48",
+        "corrected_lints": [
+          "collapsible_if in telemetry terminal-frame handling",
+          "collapsible_if in exact codec-refusal detection"
+        ]
+      },
+      "validated_main_sha": "00011becc2a7a97248418febfa00e4ea8138fd38",
+      "resolved_cli_has_direct_sdk_dependency": false
+    }
+  }
+}

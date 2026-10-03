@@ -1,0 +1,45 @@
+{
+  "archive_head": "e4735b406286c266e6ef2965242634afcd35d6a5",
+  "runtime_source_revisions": [
+    "e4735b406286c266e6ef2965242634afcd35d6a5"
+  ],
+  "samples": 36,
+  "tier": "in-process Restate server double",
+  "unavailable_predecessor_routes": {
+    "explicit_isolated_process_start": "A01/D04 declaration absent",
+    "operation_run_transfer": "O01/O02 operation Run absent"
+  },
+  "build_profile": "debug",
+  "test_runtime_threads": 4,
+  "rust_toolchain": "1.98.1",
+  "dependency_versions": {
+    "restate-sdk": "0.11.1",
+    "rusqlite": "0.37.0",
+    "tokio": "1.52.3"
+  },
+  "cargo_lock_sha256": "471ad6d626535e77064b73530a98e0932bf2428833f99cbaa778314e310c1af7",
+  "instrumentation_files_sha256": {
+    "crates/lash-perf/src/bin/tool_batch_baseline.rs": "0e51398f469df1e004be89ab3b15a32ddb729a1d69f9b3ca51f3e31afdfd1f8c",
+    "crates/lash-perf/src/bin/tool_batch_baseline/mod.rs": "93ce9f4b7dc028ea4783d34b87036c50b01a97ec015d3e4a0acfc7f95b71d011",
+    "crates/lash-core-ids/src/perf_witness.rs": "2ea7870793af1f341bfef3c97ffdb1ace45a365d706fb02b0fd9d0dc5c1072e5",
+    "crates/lash-sqlite-store/src/conn.rs": "4ace72d620b0cc762adeab9c4571eeb351d4bd109ae9cb7576657478a741cf1f",
+    "crates/lash-restate-test/src/backend.rs": "b12221fff69b210e4b9c241028e890e495bc4deda0406874fb4cc0ba9137ecdc",
+    "crates/lash-restate-test/src/server/attempt.rs": "c9fc945a5b1a9bc59b812da5e7059af298bf162e7f1c0dce3f7aa3fb027d8c53",
+    "crates/lash-restate-test/src/server/body.rs": "1dddd7894821208ada58702460dd5866c456a1ff8469e7e971073d94ca2cfe0b",
+    "crates/lash-restate-test/src/server/catalog.rs": "e36a1b147f40954b1b70bb4dcaf261bc72a9f82f7bdc912a0e3cddab017037fc",
+    "crates/lash-restate-test/src/server/commands.rs": "8be072ee9050640773a0bb07c2b8ab5906500e447ab82ccec201cebafe3e7a1c",
+    "crates/lash-restate-test/src/server/crash.rs": "fc0485a80dfcc0e7c0296f0568ccce9e95359572e5ae79febff0d591b9fdae9f",
+    "crates/lash-restate-test/src/server/ids.rs": "e7496a145bd2fcd0ebd552a6d59e24a57d9f81b3dc48c23359ec313ee773bc69",
+    "crates/lash-restate-test/src/server/ingress.rs": "17bfd217b36157fa782e4f6fe412654738858fe8256a4d1230f384b2dda0313f",
+    "crates/lash-restate-test/src/server/mod.rs": "d932072e801a59462382563eb3c845e689b20043de7784bc697315f5bc3e903e",
+    "crates/lash-restate-test/src/server/model.rs": "cabf731af23eecaa5ef7bafc6f7d3a8a5f29cfb5ac3cf1effcd979523ff05cb6",
+    "crates/lash-restate-test/src/server/processor.rs": "c3a19b125cbda897fbe6088c7713c9436e4ae8ef8ffb3dd1b1a5a5ae6d52475d",
+    "crates/lash-restate-test/src/server/query.rs": "1652009a60281fb729a23780bf9d53ea72edbc48ec8a0483342e99c183d3362f",
+    "crates/lash-restate-test/src/server/timers.rs": "3c015abe710f6f858b78cfbe1ab8fafeae7591f1bbfc3f7aaa5580ee49370ac0",
+    "scripts/loadtest_measurements.py": "428a0fb2f1dcbaf2460cc058ef884a9cde5a3a148b683b91ee6e92a4e4b4d325",
+    "scripts/tool-batch-baseline.sh": "cd8b5aabc653c43d93f2db7cf4acf749f5563d5bbf5957855b4ddad5724e6d85"
+  },
+  "raw_receipts_sha256": "7b81c5180bd6d1d815aaad3386fc2f6825f420788cb005c563770530dae43aa2",
+  "latency_claim": "diagnostic only; live paired comparison and quiet-host release are external",
+  "tree_status": " M Cargo.lock\n M crates/lash-core-ids/src/perf_witness.rs\n M crates/lash-perf/Cargo.toml\n M crates/lash-perf/src/bin/tool_batch_baseline.rs\n M crates/lash-restate-test/src/backend.rs\n M crates/lash-restate-test/src/lib.rs\n M crates/lash-restate-test/src/server/body.rs\n M crates/lash-restate-test/src/server/ingress.rs\n M crates/lash-restate-test/src/server/mod.rs\n M crates/lash-restate-test/src/server/model.rs\n M crates/lash-restate-test/src/server/processor.rs\n M crates/lash-restate-test/src/server/query.rs\n M crates/lash-sqlite-store/src/conn.rs\n M scripts/loadtest_measurements.py\n M scripts/test_loadtest_measurements.py\n M scripts/tool-batch-baseline.sh\n M tools/buck2/deps.bzl\n M tools/buck2/target-inventory.json\n?? crates/lash-perf/src/bin/tool_batch_baseline/\n?? crates/lash-perf/testdata/\n?? docs/performance/\n"
+}

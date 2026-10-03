@@ -61,13 +61,39 @@ impl HttpTransport for IngressTransport {
             .response_start_timeout_message
             .clone()
             .unwrap_or_else(|| format!("{} timed out", request.url));
+        let method = request.method.to_string();
+        let url = request.url.clone();
+        let request_body_bytes = request.body.len();
+        let started = std::time::Instant::now();
         run_with_timeout(
             async {
-                Ok(Routes {
+                let response = Routes {
                     shared: Arc::clone(&shared),
                 }
                 .route(request)
-                .await)
+                .await;
+                let response_body_bytes = match &response.body {
+                    HttpResponseBody::Buffered(bytes) => bytes.len(),
+                    HttpResponseBody::Streamed(_) => {
+                        unreachable!("the double buffers ingress responses")
+                    }
+                };
+                if shared.config.cost_receipts {
+                    shared
+                        .lock()
+                        .stats
+                        .http_requests
+                        .push(super::processor::HttpReceipt {
+                            method,
+                            url,
+                            request_body_bytes,
+                            response_body_bytes,
+                            status: response.status,
+                            elapsed_ns: started.elapsed().as_nanos().min(u128::from(u64::MAX))
+                                as u64,
+                        });
+                }
+                Ok(response)
             },
             timeout,
             &message,

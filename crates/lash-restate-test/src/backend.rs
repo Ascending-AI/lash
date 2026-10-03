@@ -1197,7 +1197,7 @@ impl Process {
                 RestateConfig::new(connection.clone(), connection.clone(), authority.clone())
                     .stamped(server.config().build_generation.clone())
                     .with_namespace(namespace.clone());
-            match segment_effect_budget {
+            match server.config().run_effect_budget.or(segment_effect_budget) {
                 Some(budget) => config.with_run_effect_budget(budget),
                 None => config,
             }

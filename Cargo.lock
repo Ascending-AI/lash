@@ -2937,6 +2937,7 @@ version = "0.0.0-dev"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "crc32fast",
@@ -2946,6 +2947,7 @@ dependencies = [
  "jsonschema",
  "lash-internal-conformance",
  "lash-internal-core",
+ "lash-internal-core-worker",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-tools",
