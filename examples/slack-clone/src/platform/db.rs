@@ -132,6 +132,23 @@ pub struct MessageRow {
     pub metadata_json: Option<String>,
 }
 
+impl MessageRow {
+    pub fn transcript(&self) -> anyhow::Result<Option<lash::transcript::TranscriptRowRecord>> {
+        let Some(raw) = self.metadata_json.as_deref() else {
+            return Ok(None);
+        };
+        let metadata: serde_json::Value = serde_json::from_str(raw)?;
+        metadata
+            .get("event_payload")
+            .and_then(|payload| payload.get("transcript"))
+            .filter(|row| !row.is_null())
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(Into::into)
+    }
+}
+
 /// Who wrote a message.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Author {

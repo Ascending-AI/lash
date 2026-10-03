@@ -238,7 +238,28 @@
       return fragment;
     }
 
+    // transcript-renderer:start
+    function renderTranscriptRow(row, message, target, seen, channelView, interactive) {
+      if (row.suppressed) return;
+      const start = target.children.length;
+      const content = row.content;
+      const text = [content.text, ...content.reasoning, content.code, content.output, content.error,
+        ...content.tools.map(tool => `${tool.operation}: ${tool.status}`),
+        content.tools_omitted ? `${content.tools_omitted} tool calls omitted` : null,
+        ...content.attachments.map(attachment => attachment.id)].filter(Boolean).join('\n');
+      renderMessage({ ...message, transcript:null, text,
+        is_bot:row.kind !== 'user' }, target, seen, channelView, interactive);
+      for (const element of Array.from(target.children).slice(start)) {
+        element.dataset.transcriptRowId = row.row_id;
+        element.dataset.turnId = row.provenance.turn_id || '';
+      }
+    }
+    // transcript-renderer:end
     function renderMessage(message, target, seen, channelView, interactive = true) {
+      if (message.transcript) {
+        renderTranscriptRow(message.transcript, message, target, seen, channelView, interactive);
+        return;
+      }
       if (seen.has(message.ts)) return;
       seen.add(message.ts);
       const row = document.createElement('div');

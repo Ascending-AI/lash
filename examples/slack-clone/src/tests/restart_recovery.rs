@@ -138,6 +138,32 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
         2,
         "one reply before the restart, one after — never a duplicate"
     );
+    let transcript = bot
+        .core()
+        .session(session_id(&channel))
+        .durable()
+        .await
+        .expect("durable channel")
+        .transcript()
+        .await
+        .expect("canonical channel rows");
+    for message in platform.bot_messages(&channel).await {
+        let posted: lash::transcript::TranscriptRowRecord = serde_json::from_value(
+            message
+                .metadata
+                .as_ref()
+                .expect("bot metadata")
+                .event_payload["transcript"]
+                .clone(),
+        )
+        .expect("bot reply carries its canonical row");
+        assert!(posted.provenance.is_turn_reply);
+        assert_eq!(
+            transcript.visible().find(|row| row.row_id == posted.row_id),
+            Some(&posted)
+        );
+        assert_eq!(message.text, posted.content.text);
+    }
 }
 
 #[tokio::test]
@@ -176,7 +202,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
             app_mention.event_id.clone(),
             StageKind::Accepted,
             Stage::ReplyPending {
-                reply: "Recovered answer.".to_string(),
+                reply: ledger::reply_fixture("Recovered answer."),
             },
         )
         .await
@@ -251,7 +277,7 @@ async fn a_crash_between_posting_and_recording_does_not_produce_a_second_reply()
             app_mention.event_id.clone(),
             StageKind::Replied,
             Stage::ReplyPending {
-                reply: "Posted once.".to_string(),
+                reply: ledger::reply_fixture("Posted once."),
             },
         )
         .await

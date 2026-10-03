@@ -1,8 +1,6 @@
 use std::path::Path;
 
 use axum::http::StatusCode;
-use lash::TurnEvent;
-use lash::remote::usage::RemoteTurnEvent;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -40,8 +38,7 @@ impl ChatMessage {
         self.body.role()
     }
 
-    /// The row's `text` column. Its meaning is the body's, which the `kind`
-    /// tag selects: message body, reasoning body, tool name, or language.
+    /// The product message or canonical record's display text.
     pub(crate) fn text(&self) -> &str {
         self.body.text()
     }
@@ -51,11 +48,7 @@ impl ChatMessage {
     }
 }
 
-/// A transcript row's body, internally tagged by `kind`.
-///
-/// `role` is stored only for `Message`, the one kind where the caller chooses
-/// it; the other kinds derive theirs. The serialized form is the historical
-/// flat `{kind, role, text, payload}` object, so the wire shape is unchanged.
+/// Product messages and canonical records share the product's SQL envelope.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum ChatMessageBody {
@@ -65,53 +58,22 @@ pub(crate) enum ChatMessageBody {
         #[serde(default)]
         payload: Option<serde_json::Value>,
     },
-    Reasoning {
-        text: String,
-    },
-    ToolCall {
-        #[serde(rename = "text")]
-        name: String,
-        payload: serde_json::Value,
-    },
-    CodeBlock {
-        #[serde(rename = "text")]
-        language: String,
-        payload: serde_json::Value,
-    },
 }
-
 impl ChatMessageBody {
     pub(crate) fn kind(&self) -> &'static str {
-        match self {
-            Self::Message { .. } => "message",
-            Self::Reasoning { .. } => "reasoning",
-            Self::ToolCall { .. } => "tool_call",
-            Self::CodeBlock { .. } => "code_block",
-        }
+        "message"
     }
-
     pub(crate) fn role(&self) -> &str {
-        match self {
-            Self::Message { role, .. } => role,
-            Self::Reasoning { .. } | Self::CodeBlock { .. } => "assistant",
-            Self::ToolCall { .. } => "tool",
-        }
+        let Self::Message { role, .. } = self;
+        role
     }
-
     pub(crate) fn text(&self) -> &str {
-        match self {
-            Self::Message { text, .. } | Self::Reasoning { text } => text,
-            Self::ToolCall { name, .. } => name,
-            Self::CodeBlock { language, .. } => language,
-        }
+        let Self::Message { text, .. } = self;
+        text
     }
-
     pub(crate) fn payload(&self) -> Option<&serde_json::Value> {
-        match self {
-            Self::Message { payload, .. } => payload.as_ref(),
-            Self::Reasoning { .. } => None,
-            Self::ToolCall { payload, .. } | Self::CodeBlock { payload, .. } => Some(payload),
-        }
+        let Self::Message { payload, .. } = self;
+        payload.as_ref()
     }
 }
 
@@ -170,19 +132,11 @@ impl AppDb {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
                 kind TEXT NOT NULL DEFAULT 'message'
-                    CHECK (kind IN ('message', 'reasoning', 'tool_call', 'code_block')),
+                    CHECK (kind = 'message'),
                 role TEXT NOT NULL,
                 text TEXT NOT NULL,
                 payload TEXT,
-                created_at TEXT NOT NULL,
-                -- `role` is a function of `kind` for every kind except
-                -- 'message', and each kind fixes whether it uses `payload`.
-                -- These CHECKs only exist on database files created after the
-                -- constraint; the row mapper derives the same facts on read.
-                CHECK (kind = 'message' OR role = CASE kind
-                    WHEN 'tool_call' THEN 'tool' ELSE 'assistant' END),
-                CHECK (kind != 'reasoning' OR payload IS NULL),
-                CHECK (kind NOT IN ('tool_call', 'code_block') OR payload IS NOT NULL)
+                created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_messages_chat_id_id
                 ON messages(chat_id, id);
@@ -594,163 +548,29 @@ impl AppDb {
         })
     }
 
-    pub(crate) fn insert_reasoning(&mut self, chat_id: &str, text: &str) -> AppResult<ChatMessage> {
-        let created_at = now();
-        self.conn.execute(
-            "INSERT INTO messages (chat_id, kind, role, text, payload, created_at)
-             VALUES (?1, 'reasoning', 'assistant', ?2, NULL, ?3)",
-            params![chat_id, text, created_at],
-        )?;
-        self.conn.execute(
-            "UPDATE chats SET updated_at = ?1 WHERE id = ?2",
-            params![now(), chat_id],
-        )?;
-        let id = self.conn.last_insert_rowid();
-        Ok(ChatMessage {
-            id,
-            chat_id: chat_id.to_string(),
-            body: ChatMessageBody::Reasoning {
-                text: text.to_string(),
-            },
-            created_at,
-        })
-    }
-
-    pub(crate) fn update_reasoning(&mut self, id: i64, text: &str) -> AppResult<ChatMessage> {
-        self.conn.execute(
-            "UPDATE messages SET text = ?1 WHERE id = ?2 AND kind = 'reasoning'",
-            params![text, id],
-        )?;
-        self.message_by_id(id)
-    }
-
-    pub(crate) fn insert_tool_call(
+    pub(crate) fn insert_transcript_row(
         &mut self,
         chat_id: &str,
-        event: TurnEvent,
+        row: &lash::transcript::TranscriptRowRecord,
     ) -> AppResult<ChatMessage> {
-        let payload = tool_payload(event)?;
-        let created_at = now();
-        let tool_name = payload["name"].as_str().unwrap_or("tool").to_string();
+        let row_id = serde_json::to_value(&row.row_id)
+            .map_err(|error| AppError::internal(error.to_string()))?;
+        let existing: Option<i64> = self.conn.query_row(
+            "SELECT id FROM messages WHERE chat_id = ?1 AND json_extract(payload, '$.transcript.row_id') = ?2",
+            params![chat_id, row_id.as_str()], |record| record.get(0),
+        ).optional()?;
+        if let Some(id) = existing {
+            return self.message_by_id(id);
+        }
+        let payload = json!({ "transcript": row });
         self.conn.execute(
-            "INSERT INTO messages (chat_id, kind, role, text, payload, created_at)
-             VALUES (?1, 'tool_call', 'tool', ?2, ?3, ?4)",
-            params![chat_id, tool_name, payload.to_string(), created_at],
-        )?;
-        self.conn.execute(
-            "UPDATE chats SET updated_at = ?1 WHERE id = ?2",
-            params![now(), chat_id],
+            "INSERT INTO messages (chat_id, kind, role, text, payload, created_at) VALUES (?1, 'message', 'assistant', ?2, ?3, ?4)",
+            params![chat_id, row.content.text, payload.to_string(), row.timestamp],
         )?;
         let id = self.conn.last_insert_rowid();
-        Ok(ChatMessage {
-            id,
-            chat_id: chat_id.to_string(),
-            body: ChatMessageBody::ToolCall {
-                name: tool_name,
-                payload,
-            },
-            created_at,
-        })
-    }
-
-    pub(crate) fn update_tool_call(&mut self, id: i64, event: TurnEvent) -> AppResult<ChatMessage> {
-        let payload = tool_payload(event)?;
-        let tool_name = payload["name"].as_str().unwrap_or("tool").to_string();
-        self.conn.execute(
-            "UPDATE messages SET text = ?1, payload = ?2
-             WHERE id = ?3 AND kind = 'tool_call'",
-            params![tool_name, payload.to_string(), id],
-        )?;
-        self.message_by_id(id)
-    }
-
-    pub(crate) fn insert_code_block(
-        &mut self,
-        chat_id: &str,
-        event: TurnEvent,
-        code: Option<String>,
-    ) -> AppResult<ChatMessage> {
-        let payload = match event {
-            TurnEvent::CodeBlockStarted {
-                language,
-                code,
-                graph_key,
-            } => json!({
-                "phase": "started",
-                "language": language,
-                "code": code,
-                "graph_key": graph_key,
-            }),
-            TurnEvent::CodeBlockCompleted {
-                language,
-                output,
-                error,
-                duration_ms,
-                tool_call_ids,
-                graph_key,
-            } => json!({
-                "phase": "completed",
-                "language": language,
-                "output": output,
-                "error": error,
-                "duration_ms": duration_ms,
-                "tool_call_ids": tool_call_ids,
-                "code": code,
-                "graph_key": graph_key,
-            }),
-            _ => return Err(AppError::internal("expected code-block event")),
-        };
-        let created_at = now();
-        let language = payload["language"].as_str().unwrap_or("code").to_string();
-        self.conn.execute(
-            "INSERT INTO messages (chat_id, kind, role, text, payload, created_at)
-             VALUES (?1, 'code_block', 'assistant', ?2, ?3, ?4)",
-            params![chat_id, language, payload.to_string(), created_at],
-        )?;
         self.conn.execute(
             "UPDATE chats SET updated_at = ?1 WHERE id = ?2",
-            params![now(), chat_id],
-        )?;
-        let id = self.conn.last_insert_rowid();
-        Ok(ChatMessage {
-            id,
-            chat_id: chat_id.to_string(),
-            body: ChatMessageBody::CodeBlock { language, payload },
-            created_at,
-        })
-    }
-
-    pub(crate) fn update_code_block(
-        &mut self,
-        id: i64,
-        event: TurnEvent,
-        code: Option<String>,
-    ) -> AppResult<ChatMessage> {
-        let payload = match event {
-            TurnEvent::CodeBlockCompleted {
-                language,
-                output,
-                error,
-                duration_ms,
-                tool_call_ids,
-                graph_key,
-            } => json!({
-                "phase": "completed",
-                "language": language,
-                "output": output,
-                "error": error,
-                "duration_ms": duration_ms,
-                "tool_call_ids": tool_call_ids,
-                "code": code,
-                "graph_key": graph_key,
-            }),
-            _ => return Err(AppError::internal("expected code-block event")),
-        };
-        let language = payload["language"].as_str().unwrap_or("code").to_string();
-        self.conn.execute(
-            "UPDATE messages SET text = ?1, payload = ?2
-             WHERE id = ?3 AND kind = 'code_block'",
-            params![language, payload.to_string(), id],
+            params![row.timestamp, chat_id],
         )?;
         self.message_by_id(id)
     }
@@ -796,40 +616,6 @@ impl AppDb {
     }
 }
 
-fn tool_payload(event: TurnEvent) -> AppResult<serde_json::Value> {
-    let event =
-        RemoteTurnEvent::try_from(event).map_err(|error| AppError::internal(error.to_string()))?;
-    match event {
-        RemoteTurnEvent::ToolCallStarted {
-            call_id,
-            name,
-            args,
-            ..
-        } => Ok(json!({
-            "phase": "started",
-            "call_id": call_id,
-            "name": name,
-            "args": args,
-        })),
-        RemoteTurnEvent::ToolCallCompleted {
-            call_id,
-            name,
-            args,
-            output,
-            duration_ms,
-            ..
-        } => Ok(json!({
-            "phase": "completed",
-            "call_id": call_id,
-            "name": name,
-            "args": args,
-            "output": output,
-            "duration_ms": duration_ms,
-        })),
-        _ => Err(AppError::internal("expected tool-call event")),
-    }
-}
-
 fn chat_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatSummary> {
     let model: String = row.get(4)?;
     let model_variant: Option<String> = row.get(5)?;
@@ -850,7 +636,7 @@ fn chat_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessag
     let role: String = row.get(3)?;
     let text: String = row.get(4)?;
     let payload: Option<String> = row.get(5)?;
-    let mut payload = payload
+    let payload = payload
         .map(|value| {
             serde_json::from_str::<serde_json::Value>(&value).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
@@ -861,28 +647,11 @@ fn chat_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessag
             })
         })
         .transpose()?;
-    if kind == "tool_call"
-        && let Some(payload) = payload.as_mut()
-    {
-        normalize_legacy_tool_result(payload);
-    }
     let body = match kind.as_str() {
-        // 'message' is the only kind whose role is caller-chosen; every other
-        // kind's role is derived from the tag, so the stored column is not
-        // read for them.
         "message" => ChatMessageBody::Message {
             role,
             text,
             payload,
-        },
-        "reasoning" => ChatMessageBody::Reasoning { text },
-        "tool_call" => ChatMessageBody::ToolCall {
-            name: text,
-            payload: payload.unwrap_or_default(),
-        },
-        "code_block" => ChatMessageBody::CodeBlock {
-            language: text,
-            payload: payload.unwrap_or_default(),
         },
         _ => {
             return Err(rusqlite::Error::FromSqlConversionFailure(
@@ -898,25 +667,6 @@ fn chat_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessag
         body,
         created_at: row.get(6)?,
     })
-}
-
-fn normalize_legacy_tool_result(payload: &mut serde_json::Value) {
-    let Some(result) = payload.pointer_mut("/output/outcome/payload") else {
-        return;
-    };
-    let serde_json::Value::Object(wrapper) = result else {
-        return;
-    };
-    if wrapper.len() != 2
-        || wrapper.get("$lash_tool_value").and_then(|tag| tag.as_str()) != Some("untrusted_json")
-    {
-        return;
-    }
-    // This legacy heuristic unwraps a genuine user value if it is exactly this two-key wrapper.
-    let Some(value) = wrapper.get("value").cloned() else {
-        return;
-    };
-    *result = value;
 }
 
 fn branch_point_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatBranchPoint> {
@@ -981,98 +731,38 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn replayed_tool_result_matches_live_payload_shape() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let mut db = AppDb::open(&temp.path().join("app.db")).expect("open db");
-        let chat = db
-            .create_chat("tool replay", "mock-model", None)
-            .expect("create chat");
-        db.insert_tool_call(
-            &chat.id,
-            TurnEvent::ToolCallCompleted {
-                call_id: lash::ToolCallId::fixture("move-1"),
-                provider_call_id: None,
-                name: "play_move".to_string(),
-                args: json!({ "cell": 4 }),
-                output: lash::tools::ToolCallOutput::success(json!({
-                    "accepted": true,
-                    "move": { "cell": 4 },
-                    "board": {
-                        "cells": [null, null, null, null, "O", null, null, null, null],
-                        "turn": "X"
-                    }
-                })),
-                duration_ms: 7,
-                graph_key: None,
-            },
-        )
-        .expect("persist completed tool call");
-
-        let stored_payload: String = db
-            .conn
-            .query_row(
-                "SELECT payload FROM messages
-                 WHERE chat_id = ?1 AND kind = 'tool_call'
-                 ORDER BY id DESC LIMIT 1",
-                params![&chat.id],
-                |row| row.get(0),
-            )
-            .expect("read persisted tool payload");
-        let stored_payload: serde_json::Value =
-            serde_json::from_str(&stored_payload).expect("parse persisted tool payload");
-        let replayed_result = &stored_payload["output"]["outcome"]["payload"];
-
-        assert_eq!(
-            replayed_result,
-            &json!({
-                "accepted": true,
-                "move": { "cell": 4 },
-                "board": {
-                    "cells": [null, null, null, null, "O", null, null, null, null],
-                    "turn": "X"
-                }
-            }),
-            "persisted replay must expose the same bare tool result as the live stream"
-        );
+    fn canonical_row(kind: &str) -> lash::transcript::TranscriptRowRecord {
+        serde_json::from_value(json!({
+            "row_id":"opaque-row", "kind":kind,
+            "provenance": {"turn_id":"turn-1", "input_id":null, "plugin_id":null, "is_turn_reply":false},
+            "content": {"text":"", "reasoning":[], "attachments":[], "language":"typescript",
+              "code":"board.play(4)", "output":"ok", "success":true, "error":null,
+              "tools":[{"operation":"play_move", "status":"success"}], "tools_omitted":0},
+            "timestamp":"2026-08-18T12:00:00Z", "suppressed":null
+        })).expect("canonical row fixture")
     }
 
     #[test]
-    fn legacy_wrapped_tool_result_replays_as_live_payload_shape() {
+    fn committed_rows_replay_without_changing_content_identity_or_timestamp() {
         let temp = tempfile::tempdir().expect("tempdir");
         let mut db = AppDb::open(&temp.path().join("app.db")).expect("open db");
         let chat = db
-            .create_chat("legacy tool replay", "mock-model", None)
+            .create_chat("transcript replay", "mock-model", None)
             .expect("create chat");
-        let legacy_payload = json!({
-            "phase": "completed",
-            "call_id": "move-legacy",
-            "name": "play_move",
-            "args": { "cell": 4 },
-            "output": {
-                "outcome": {
-                    "status": "success",
-                    "payload": {
-                        "$lash_tool_value": "untrusted_json",
-                        "value": { "accepted": true, "move": { "cell": 4 } }
-                    }
-                }
-            },
-            "duration_ms": 7
-        });
-        db.conn
-            .execute(
-                "INSERT INTO messages (chat_id, kind, role, text, payload, created_at)
-                 VALUES (?1, 'tool_call', 'tool', 'play_move', ?2, ?3)",
-                params![&chat.id, legacy_payload.to_string(), now()],
-            )
-            .expect("insert legacy tool row");
-
-        let messages = db.list_messages(&chat.id).expect("replay transcript");
-
+        let row = canonical_row("code_block");
+        let inserted = db
+            .insert_transcript_row(&chat.id, &row)
+            .expect("mirror committed row");
+        let repeated = db
+            .insert_transcript_row(&chat.id, &row)
+            .expect("idempotent mirror");
+        assert_eq!(repeated.id, inserted.id);
+        let messages = db.list_messages(&chat.id).expect("replay mirror");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].created_at, row.timestamp);
         assert_eq!(
-            messages[0].payload().expect("tool payload")["output"]["outcome"]["payload"],
-            json!({ "accepted": true, "move": { "cell": 4 } })
+            messages[0].payload().expect("row payload")["transcript"],
+            serde_json::to_value(&row).expect("row wire")
         );
     }
 
@@ -1212,32 +902,9 @@ mod tests {
         let source = db
             .create_chat("source", "mock-model", None)
             .expect("create source");
-        db.insert_tool_call(
-            &source.id,
-            TurnEvent::ToolCallCompleted {
-                call_id: lash::ToolCallId::fixture("move-1"),
-                provider_call_id: None,
-                name: "play_move".to_string(),
-                args: json!({ "cell": 4 }),
-                output: lash::tools::ToolCallOutput::success(json!({ "accepted": true })),
-                duration_ms: 1,
-                graph_key: None,
-            },
-        )
-        .expect("persist tool call");
-        db.insert_code_block(
-            &source.id,
-            TurnEvent::CodeBlockCompleted {
-                language: "rust".to_string(),
-                output: "ok".to_string(),
-                error: None,
-                duration_ms: 1,
-                tool_call_ids: vec![lash::ToolCallId::fixture("move-1")],
-                graph_key: None,
-            },
-            Some("fn main() {}".to_string()),
-        )
-        .expect("persist code block");
+        let row = canonical_row("code_block");
+        db.insert_transcript_row(&source.id, &row)
+            .expect("mirror committed code row");
         db.upsert_chat_board(&source.id, &default_board())
             .expect("seed board");
         db.save_branch_point(&source.id, "node-pinned")
@@ -1250,19 +917,27 @@ mod tests {
             .list_messages(&source.id)
             .expect("list source messages")
             .into_iter()
-            .find(|message| message.kind() == "code_block")
+            .find(|message| {
+                message
+                    .payload()
+                    .is_some_and(|payload| payload["transcript"]["kind"] == "code_block")
+            })
             .expect("source code block");
         let branch_code_block = db
             .list_messages("branch")
             .expect("list branch messages")
             .into_iter()
-            .find(|message| message.kind() == "code_block")
+            .find(|message| {
+                message
+                    .payload()
+                    .is_some_and(|payload| payload["transcript"]["kind"] == "code_block")
+            })
             .expect("branch code block");
 
         assert_eq!(branch_code_block.payload(), source_code_block.payload());
         assert_eq!(
-            branch_code_block.payload().expect("code block payload")["tool_call_ids"],
-            json!([lash::ToolCallId::fixture("move-1").as_str()])
+            branch_code_block.payload().expect("code block payload")["transcript"],
+            serde_json::to_value(&row).expect("row wire")
         );
     }
 

@@ -390,18 +390,20 @@ pub async fn history(
                 Author::App { bot_id, username } => (bot_id.clone(), username.clone(), true),
             };
             let summary = summaries.get(&row.ts);
-            json!({
+            Ok(json!({
                 "ts": row.ts.to_string(),
                 "author_id": author_id,
                 "author_name": author_name,
                 "is_bot": is_bot,
                 "text": row.text,
+                "transcript": row.transcript()?,
                 "thread_ts": row.thread_ts.map(|ts| ts.to_string()),
                 "reply_broadcast": row.reply_broadcast,
                 "reply_count": summary.map(|summary| summary.reply_count).unwrap_or(0),
-            })
+            }))
         })
-        .collect::<Vec<_>>();
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(|error| PlatformError::internal("decode committed transcript metadata", error))?;
     Ok(Json(json!({ "messages": messages })))
 }
 

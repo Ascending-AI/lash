@@ -53,7 +53,9 @@ pub enum SuppressionReason {
     UnrecognizedProtocolEvent,
 }
 
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct RowProvenance {
     pub turn_id: Option<TurnId>,
     pub input_id: Option<InputId>,
@@ -62,7 +64,9 @@ pub struct RowProvenance {
 }
 
 /// Display-only tool facts carried by committed nodes, without execution state.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct RowTool {
     pub operation: String,
     pub status: String,
@@ -70,7 +74,9 @@ pub struct RowTool {
 
 /// Protocol-neutral display content. Reasoning and attachments can accompany a
 /// reply in its one node-backed row; they do not create extra identities.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct RowContent {
     pub text: String,
     pub reasoning: Vec<String>,
@@ -85,7 +91,9 @@ pub struct RowContent {
 }
 
 /// Transportable display data. It has no snapshot ordinal or resume position.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TranscriptRowRecord {
     pub row_id: RowId,
     pub kind: TranscriptRowKind,

@@ -21,7 +21,8 @@ class Element {
     if (value) this.children.push(new Element(), new Element());
   }
   get lastElementChild() { return this.children.at(-1); }
-  appendChild(child) { this.children.push(child); return child; }
+  appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+  remove() { const children = this.parentNode.children; children.splice(children.indexOf(this), 1); }
   querySelector(selector) {
     if (!this.selectors.has(selector)) this.selectors.set(selector, new Element());
     return this.selectors.get(selector);
@@ -44,6 +45,7 @@ const message = (text, snapshot) => ({ role: 'assistant', text, payload: snapsho
 function controller() {
   const elements = new Map();
   const requests = [];
+  const storedBoards = new Map();
   const alerts = [];
   const context = vm.createContext({
     document: {
@@ -55,6 +57,10 @@ function controller() {
     },
     TextDecoder, Map, Set, alert: (text) => alerts.push(text),
     fetch(url, options) {
+      if (url.endsWith('/board')) {
+        const id = url.split('/')[3];
+        return Promise.resolve({ok:true, json:async () => storedBoards.get(id) || {cells:Array(9).fill(null), turn:'X'}});
+      }
       const response = deferred();
       requests.push({ url, options, ...response });
       return response.promise;
@@ -76,7 +82,8 @@ function controller() {
     const buttons = elements.get('#chats').children;
     return buttons[['A', 'B', 'C'].indexOf(id)].onclick();
   };
-  const history = async (id, messages = [], points = []) => {
+  const history = async (id, messages = [], points = [], productBoard = null) => {
+    storedBoards.set(id, productBoard || messages.findLast(message => message.payload?.board)?.payload.board || {cells:Array(9).fill(null), turn:'X'});
     reply(`/api/chats/${id}/messages`, messages);
     await tick();
     reply(`/api/chats/${id}/branch-points`, points);
@@ -97,7 +104,7 @@ function controller() {
     };
     request('/api/chats/A/messages', 'POST').resolve({
       ok: true,
-      headers: { get: () => JSON.stringify({ negotiation: 'accept', selected: 100, supported: { min: 100, max: 100 } }) },
+      headers: { get: key => key === 'x-lash-turn-id' ? 'typed-live-turn' : JSON.stringify({ negotiation: 'accept', selected: 100, supported: { min: 100, max: 100 } }) },
       body: { getReader: () => reader },
     });
     return {
@@ -231,7 +238,6 @@ test('tool code linking reasoning and replay gaps preserve event order', async (
     { type: 'replay_cursor', cursor: { sequence: 1 } },
     { type: 'replay_gap', gap: { latest_cursor: { sequence: 5 } } },
     observation({ type: 'reasoning_delta', text: 'thinking delta' }),
-    { type: 'message', message: { kind: 'reasoning', text: 'persisted reasoning' } },
     observation({ type: 'code_block_started', code: 'play_move(1)' }),
     observation(tool), observation({ ...tool, call_id: 'unlinked', name: 'read_board' }),
     observation({ type: 'code_block_completed', language: 'js', tool_call_ids: ['move'] }),
@@ -240,26 +246,49 @@ test('tool code linking reasoning and replay gaps preserve event order', async (
   const children = h.elements.get('#messages').children;
   assert.deepEqual(children.map(child => child.className), ['reasoning', 'code-block', 'tool', 'msg assistant']);
   assert.equal(children[1].children.at(-1).className, 'tool');
-  assert.equal(children[0].querySelector('pre').textContent, 'persisted reasoning');
+  assert.equal(children[0].querySelector('pre').textContent, 'thinking delta');
   assert.equal(children[1].querySelector('pre').textContent, 'play_move(1)');
   assert.deepEqual(h.read('typeof activeRun === \'undefined\' ? replayCursor : activeRun.replayCursor'), { sequence: 5 });
   await finishVisible(h, stream, send);
   assert.equal(stream.released(), true);
 });
 
-test('reloaded code linked tools appear once and retain the durable board', async () => {
+function canonical(row_id, kind, content) {
+  return {row_id, kind, provenance:{turn_id:'typed-live-turn'}, timestamp:'recorded', suppressed:null,
+    content:{text:'', reasoning:[], attachments:[], tools:[], tools_omitted:0, ...content}};
+}
+function mirrored(row) { return {kind:'message', role:'assistant', text:row.content.text, payload:{transcript:row}}; }
+
+test('reloaded canonical code summaries preserve the separately owned board', async () => {
   const h = controller();
   const selection = h.select('B');
   await h.history('B', [
-    { kind: 'tool_call', payload: tool },
-    { kind: 'code_block', payload: { phase: 'completed', tool_call_ids: ['move'], code: 'saved code' } },
-    message('saved answer'),
-  ]);
+    mirrored(canonical('opaque-code', 'code_block', {code:'saved code', output:'saved output', attachments:[{id:'sha256:printed-image'}], tools:[{operation:'play_move',status:'success'}]})),
+    mirrored(canonical('opaque-reply', 'assistant_reply', {text:'saved answer'})),
+  ], [], board);
   await selection;
   const children = h.elements.get('#messages').children;
   assert.deepEqual(children.map(child => child.className), ['code-block', 'msg assistant']);
-  assert.equal(children[0].children.at(-1).className, 'tool');
+  assert.equal(children[0].children.find(child => child.className === 'attachment-ref').textContent, 'sha256:printed-image');
+  assert.equal(children[0].children.at(-1).className, 'tool-summary');
+  assert.equal(children[0].children.at(-1).textContent, 'play_move: success · arguments, result and duration unavailable');
+  assert.deepEqual(children.map(child => child.dataset.transcriptRowId), ['opaque-code','opaque-reply']);
   assert.deepEqual(h.read('currentBoard().cells'), board.cells);
+});
+
+test('a committed row retires only its typed turn preview', async () => {
+  const h = controller();
+  const send = h.evaluate("sendText('A turn')");
+  const stream = h.stream();
+  await stream.items(observation({type:'assistant_prose_delta', text:'temporary answer'}), observation({type:'reasoning_delta',text:'temporary thought'}));
+  const unrelated = new Element(); unrelated.textContent = 'other turn'; unrelated.dataset.provisionalTurnId = 'other-turn';
+  h.elements.get('#messages').appendChild(unrelated);
+  await stream.items({type:'message',message:mirrored(canonical('opaque-committed-reply','assistant_reply',{text:'committed answer'}))});
+  assert.doesNotMatch(h.transcript(), /temporary answer|temporary thought/);
+  assert.match(h.transcript(), /committed answer|other turn/);
+  assert.equal(h.elements.get('#messages').children.filter(child => child.dataset.transcriptRowId === 'opaque-committed-reply').length, 1);
+  assert.ok(h.elements.get('#messages').children.includes(unrelated));
+  await finishVisible(h, stream, send);
 });
 
 test('an older completion refresh cannot overwrite a newer run', async () => {

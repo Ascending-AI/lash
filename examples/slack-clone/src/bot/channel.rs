@@ -20,15 +20,12 @@
 //! is idempotent: the admission and its turn by the send's id, and the post by
 //! the `event_id` its `metadata` carries.
 
-use lash::TurnId;
 use lash::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
-use lash::messages::{MessageOrigin, MessageRole};
-use lash::persistence::ChronologicalPayload;
 use lash::{DurableSession, LashCore, SendHandle, TurnInput, TurnOutcome, TurnStop};
 use tokio::sync::RwLock;
 
@@ -880,13 +877,7 @@ impl ChannelBot {
             });
         }
 
-        let Some(reply) = output
-            .result
-            .assistant_message()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .map(str::to_string)
-        else {
+        let Some(reply) = committed_reply(session, input_id).await? else {
             self.settle(
                 record,
                 Stage::Folded {
@@ -918,12 +909,7 @@ impl ChannelBot {
         // The application was read from the store, so the transcript comes
         // from the same authority: a handle opened before an engine-driven
         // turn committed legitimately lacks its messages.
-        let view = session
-            .read()
-            .await
-            .context("read the committed view for transcript replay")?
-            .context("a committed mention implies a readable committed view")?;
-        match reply_from_transcript(&view, input_id) {
+        match committed_reply(session, input_id).await? {
             Some(reply) => {
                 self.owe_and_post(record, reply, ReplySource::Transcript)
                     .await
@@ -966,7 +952,7 @@ impl ChannelBot {
     async fn owe_and_post(
         &self,
         record: &EventRecord,
-        reply: String,
+        reply: lash::transcript::TranscriptRowRecord,
         source: ReplySource,
     ) -> Result<DeliveryOutcome> {
         // A failed post, an unreachable platform or a crash now all leave a row that says
@@ -1085,8 +1071,13 @@ impl ChannelBot {
         })
     }
 
-    async fn post_reply(&self, record: &EventRecord, text: &str) -> Result<String> {
-        let request = match record.thread_ts.as_deref() {
+    async fn post_reply(
+        &self,
+        record: &EventRecord,
+        row: &lash::transcript::TranscriptRowRecord,
+    ) -> Result<String> {
+        let text = row.content.text.as_str();
+        let mut request = match record.thread_ts.as_deref() {
             Some(thread_ts) => ChatPostMessageRequest::thread_reply(
                 &record.channel_id,
                 text,
@@ -1095,6 +1086,10 @@ impl ChannelBot {
             ),
             None => ChatPostMessageRequest::reply(&record.channel_id, text, &record.event_id),
         };
+        if let Some(metadata) = request.metadata.as_mut() {
+            metadata.event_payload["transcript"] =
+                serde_json::to_value(row).context("encode committed reply row")?;
+        }
         let posted = self
             .api
             .chat_post_message(&request)
@@ -1250,58 +1245,25 @@ impl Drop for SessionLockLease {
     }
 }
 
-/// Used when a resumed mention's input was already answered by a committed
-/// turn: a previous process ran it and died before its reply was recorded. Correlation is by the
-/// typed provenance Lash publishes on committed messages
-/// ([`MessageOrigin::TurnInput`]) — not by parsing id strings:
-///
-/// 1. find the committed message whose origin names `input_id`, and take its
-///    `turn_id`;
-/// 2. walk forward, remembering the last `Assistant` message, and stop at the
-///    first message admitted by a *different* turn.
-///
-/// Step 2's stop condition is what prevents misattribution when later turns
-/// exist, and "last, not first" is what skips the intermediate assistant messages
-/// that carry tool calls in a standard-mode loop. Returns `None` when the turn
-/// committed no assistant text at all, which the caller reports honestly rather
-/// than papering over.
-fn reply_from_transcript(
-    read_view: &lash::persistence::SessionReadView,
+/// Read the same committed reply for a live completion and a recovered input.
+async fn committed_reply(
+    session: &DurableSession,
     input_id: &str,
-) -> Option<String> {
-    let mut turn_id: Option<TurnId> = None;
-    let mut answer: Option<String> = None;
-    for entry in read_view.chronological_projection().into_entries() {
-        let ChronologicalPayload::Message(message) = entry.payload else {
-            continue;
-        };
-        let admitted_by = match message.origin.as_ref() {
-            Some(MessageOrigin::TurnInput {
-                turn_id,
-                input_id: admitted,
-            }) => Some((turn_id.as_str(), admitted.as_deref())),
-            _ => None,
-        };
-        match (&turn_id, admitted_by) {
-            // Our input's committed copy: remember which turn consumed it.
-            (None, Some((turn, Some(admitted)))) if admitted == input_id => {
-                turn_id = TurnId::parse(turn).ok();
-            }
-            // Nothing found yet; keep scanning.
-            (None, _) => {}
-            // A later turn begins: whatever we have is our turn's answer.
-            (Some(ours), Some((turn, _))) if turn != ours => break,
-            // Inside our turn (including its sibling admissions).
-            (Some(_), _) => {
-                if message.role == MessageRole::Assistant {
-                    answer = Some(lash::message_text(&message));
-                }
-            }
-        }
-    }
-    answer
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty())
+) -> Result<Option<lash::transcript::TranscriptRowRecord>> {
+    let projection = session
+        .transcript()
+        .await
+        .context("read committed transcript rows")?;
+    let application = session
+        .turn_input_applications()
+        .await
+        .context("read the input's committed run identity")?
+        .into_iter()
+        .find(|application| application.input_id.as_str() == input_id);
+    Ok(application
+        .and_then(|application| projection.reply(&application.turn_id))
+        .filter(|row| !row.content.text.trim().is_empty())
+        .cloned())
 }
 
 /// What the bot should do with an event.

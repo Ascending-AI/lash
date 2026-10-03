@@ -383,11 +383,6 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       }
       return { args: cleanArgs(event.args), result: raw };
     }
-    function renderTerminalValue(value) {
-      if (value === null || value === undefined) return '';
-      if (typeof value === 'string') return value;
-      return JSON.stringify(value, null, 2);
-    }
 
     async function api(url, options = {}) {
       const res = await fetch(url, { headers: { 'content-type': 'application/json' }, ...options });
@@ -512,41 +507,60 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       const messages = await (await api(`/api/chats/${id}/messages`)).json();
       if (!isCurrentView(view) || requestGeneration !== messageReadGeneration
           || (activeRun && isCurrentView(activeRun))) return;
-      boards.set(id, emptyBoard());
+      const board = await (await api(`/api/chats/${id}/board`)).json();
+      if (!isCurrentView(view) || requestGeneration !== messageReadGeneration
+          || (activeRun && isCurrentView(activeRun))) return;
+      boards.set(id, board);
       messagesEl.innerHTML = '';
-      // Replay persisted board snapshots in message order. User messages carry
-      // the human move; tool rows carry accepted agent moves.
-      const toolsByCallId = new Map();
-      const codeLinkedToolIds = new Set();
-      for (const message of messages) {
-        if (message.kind === 'tool_call' && message.payload?.phase === 'completed' && message.payload.call_id) {
-          toolsByCallId.set(message.payload.call_id, message.payload);
-        }
-        if (message.kind === 'code_block' && message.payload?.phase === 'completed') {
-          for (const callId of message.payload.tool_call_ids || []) codeLinkedToolIds.add(callId);
-        }
-      }
-      for (const message of messages) appendMessage(message, view, { toolsByCallId, codeLinkedToolIds });
+      for (const message of messages) appendMessage(message, view);
+      boards.set(id, board);
       renderBoard();
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
-    function appendMessage(message, owner, replay = {}) {
-      if (message.kind === 'reasoning') {
-        appendReasoningMessage(message.text, owner);
-        return;
+    // transcript-renderer:start
+    function retireTurnPreview(run, turnId) {
+      if (!turnId || run.turnId !== turnId || run.previewRetired) return;
+      for (const element of Array.from(messagesEl.children)) {
+        if (element.dataset.provisionalTurnId === turnId) element.remove();
       }
-      if (message.kind === 'tool_call' && message.payload) {
-        if (message.payload.phase !== 'completed') return;
-        if (message.payload.call_id && replay.codeLinkedToolIds?.has(message.payload.call_id)) return;
-        appendTool(message.payload, owner);
-        return;
+      run.reasoning = null;
+      run.streaming = null;
+      run.pendingCodeBlock = null;
+      run.pendingTools = [];
+      run.previewRetired = true;
+    }
+    function appendTranscriptRow(row, owner) {
+      if (row.suppressed || !isCurrentView(owner)) return;
+      retireTurnPreview(owner, row.provenance.turn_id);
+      const start = messagesEl.children.length;
+      for (const text of row.content.reasoning) appendReasoningMessage(text, owner);
+      if (row.kind === 'code_block') {
+        const element = appendCodeBlock({ ...row.content, phase:'completed' }, owner, []);
+        for (const tool of row.content.tools) {
+          const summary = document.createElement('div');
+          summary.className = 'tool-summary';
+          summary.textContent = `${tool.operation}: ${tool.status} · arguments, result and duration unavailable`;
+          element.appendChild(summary);
+        }
+        if (row.content.tools_omitted) {
+          const summary = document.createElement('div');
+          summary.className = 'tool-summary';
+          summary.textContent = `${row.content.tools_omitted} tool calls omitted`;
+          element.appendChild(summary);
+        }
+      } else if (row.kind !== 'reasoning') {
+        appendMessage({ kind:'message', role:row.kind === 'user' ? 'user' : 'assistant',
+          text:row.content.text, payload:null, attachments:row.content.attachments }, owner);
       }
-      if (message.kind === 'code_block' && message.payload) {
-        if (message.payload.phase !== 'completed') return;
-        const linkedTools = (message.payload.tool_call_ids || [])
-          .map((callId) => replay.toolsByCallId?.get(callId))
-          .filter(Boolean);
-        appendCodeBlock(message.payload, owner, linkedTools);
+      for (const element of Array.from(messagesEl.children).slice(start)) {
+        element.dataset.transcriptRowId = row.row_id;
+        element.dataset.turnId = row.provenance.turn_id || '';
+      }
+    }
+    // transcript-renderer:end
+    function appendMessage(message, owner) {
+      if (message.payload?.transcript) {
+        appendTranscriptRow(message.payload.transcript, owner);
         return;
       }
       if (message.payload?.board?.cells) setBoard(owner, message.payload.board);
@@ -556,6 +570,12 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       el.innerHTML = `<div class="meta"></div><div></div>`;
       el.querySelector('.meta').textContent = message.role;
       el.lastElementChild.textContent = message.text;
+      for (const attachment of message.attachments || []) {
+        const link = document.createElement('span');
+        link.className = 'attachment-ref';
+        link.textContent = attachment.id;
+        el.appendChild(link);
+      }
       messagesEl.appendChild(el);
     }
     function appendTool(event, owner, parent = messagesEl) {
@@ -598,10 +618,17 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       el.innerHTML = '<summary></summary><pre></pre>';
       const toolCount = linkedTools.length || (event.tool_call_ids || []).length;
       const toolLabel = toolCount ? ` · ${toolCount} tool${toolCount === 1 ? '' : 's'}` : '';
-      const label = `${event.language || 'code'} ${event.error ? 'failed' : 'completed'} in ${event.duration_ms || 0}ms${toolLabel}`;
+      const duration = event.duration_ms == null ? '' : ` in ${event.duration_ms}ms`;
+      const label = `${event.language || 'code'} ${event.error ? 'failed' : 'completed'}${duration}${toolLabel}`;
       el.querySelector('summary').textContent = label;
       const code = event.code || el.querySelector('pre').textContent || '';
-      el.querySelector('pre').textContent = code;
+      el.querySelector('pre').textContent = [code, event.output, event.error].filter(Boolean).join('\n');
+      for (const attachment of event.attachments || []) {
+        const link = document.createElement('span');
+        link.className = 'attachment-ref';
+        link.textContent = attachment.id;
+        el.appendChild(link);
+      }
       for (const tool of linkedTools) appendTool(tool, owner, el);
       messagesEl.appendChild(el);
       return el;
@@ -668,13 +695,13 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       run.streaming.lastElementChild.textContent += delta;
     }
     function handleTurnEvent(event, run) {
+      const start = messagesEl.children.length;
       if (event.type === 'assistant_prose_delta') appendStreamText(event.text, run);
       if (event.type === 'reasoning_delta') appendReasoning(event.text, run);
       if (event.type === 'code_block_started') run.pendingCodeBlock = event;
       if (event.type === 'code_block_completed') completeCodeBlock(event, run);
       if (event.type === 'tool_call_completed') appendCompletedTool({ ...event, phase:'completed' }, run);
-      if (event.type === 'final_value') appendStreamText(renderTerminalValue(event.value), run);
-      if (event.type === 'tool_value') appendStreamText(renderTerminalValue(event.value), run);
+      for (const element of Array.from(messagesEl.children).slice(start)) element.dataset.provisionalTurnId = run.turnId || '';
     }
     function handleObservation(event, run) {
       if (event.type === 'turn_activity') handleTurnEvent(event.activity, run);
@@ -710,6 +737,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
             || accept.supported?.min > 100 || accept.supported?.max < 100) {
           throw new Error('remote protocol negotiation failed');
         }
+        run.turnId = res.headers.get('x-lash-turn-id');
         run.reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';

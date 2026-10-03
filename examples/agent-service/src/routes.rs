@@ -1,9 +1,10 @@
 use lash::SessionId;
 use lash::TurnId;
 use lash::sync::MutexExt;
-use std::collections::HashMap;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+#[cfg(test)]
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use async_trait::async_trait;
 use axum::Json;
@@ -22,10 +23,7 @@ use lash::remote::{Envelope, Negotiated};
 #[cfg(test)]
 use lash::remote::{Negotiation, REMOTE_PROTOCOL};
 use lash::rlm::RlmSendBuilderExt as _;
-use lash::{
-    LashSession, TurnActivity, TurnActivitySink, TurnCancelOutcome, TurnEvent, TurnInput,
-    TurnOutput,
-};
+use lash::{LashSession, TurnActivity, TurnActivitySink, TurnCancelOutcome, TurnInput, TurnOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -398,9 +396,28 @@ pub(crate) async fn list_messages(
     State(state): State<AppStateData>,
     AxumPath(chat_id): AxumPath<String>,
 ) -> AppResult<Json<Vec<ChatMessage>>> {
+    let durable = state
+        .core()
+        .session(SessionId::parse(&chat_id)?)
+        .durable()
+        .await?;
+    let rows = if durable.exists().await? {
+        durable
+            .transcript()
+            .await?
+            .visible()
+            .filter(|row| row.kind != lash::transcript::TranscriptRowKind::User)
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     state
         .with_db(move |db| {
             db.require_chat(&chat_id)?;
+            for row in &rows {
+                db.insert_transcript_row(&chat_id, row)?;
+            }
             db.list_messages(&chat_id)
         })
         .await
@@ -648,53 +665,31 @@ pub(crate) async fn send_message(
                 let chat_id = chat_id.clone();
                 let tx = tx.clone();
                 async move {
-                    let turn_state = Arc::new(Mutex::new(TurnPersistenceState::default()));
-                    let ui_events = ChannelTurnEvents::persistence(
-                        run_state.clone(),
-                        chat_id.clone(),
-                        Arc::clone(&turn_state),
-                        Some(tx.clone()),
-                    );
                     let turn = match accepted {
-                        Some(turn) => turn.outcome_into(&ui_events).await,
+                        Some(turn) => turn.outcome().await,
                         None => match session
                             .send(TurnInput::text(turn_input))
-                            .id(turn_id)
+                            .id(turn_id.clone())
                             .require_finish()
                         {
-                            Ok(turn) => turn.outcome_into(&ui_events).await,
+                            Ok(turn) => match turn.await {
+                                Ok(turn) => turn.outcome().await,
+                                Err(error) => Err(error),
+                            },
                             Err(err) => Err(err),
                         },
                     };
-                    let output = match turn.map_err(TurnRefusal::from).and_then(answered_output) {
+                    let _output = match turn.map_err(TurnRefusal::from).and_then(answered_output) {
                         Ok(output) => output,
                         Err(refusal) => {
                             let _ = tx.send(refusal.into_stream_item()).await;
                             return Ok(TurnAttempt::Failed);
                         }
                     };
-                    let assistant_text = assistant_text_for_persistence(
-                        &output,
-                        turn_state.lock_recover().assistant_prose(),
-                    );
-                    let inserted = run_state
-                        .with_db({
-                            let chat_id = chat_id.clone();
-                            move |db| db.insert_message(&chat_id, "assistant", &assistant_text)
-                        })
-                        .await;
-                    match inserted {
-                        Ok(message) => {
-                            let _ = tx.send(StreamItem::Message { message }).await;
-                        }
-                        Err(err) => {
-                            let _ = tx
-                                .send(StreamItem::Error {
-                                    message: err.message,
-                                    retryable: false,
-                                })
-                                .await;
-                        }
+                    let messages =
+                        mirror_committed_turn(&run_state, &chat_id, &session, &turn_id).await?;
+                    for message in messages {
+                        let _ = tx.send(StreamItem::Message { message }).await;
                     }
                     Ok(TurnAttempt::Completed)
                 }
@@ -793,208 +788,6 @@ pub(crate) async fn cancel_turn(
     }))
 }
 
-pub(crate) struct ChannelTurnEvents {
-    state: AppStateData,
-    chat_id: String,
-    /// Where a failed persistence write is reported, when a client streams
-    /// the turn.
-    errors: Option<mpsc::Sender<StreamItem>>,
-    turn_state: Arc<Mutex<TurnPersistenceState>>,
-}
-
-#[derive(Default)]
-pub(crate) struct TurnPersistenceState {
-    reasoning: Option<(i64, String)>,
-    assistant_prose: String,
-    code: Option<String>,
-    code_message: Option<i64>,
-    tools: HashMap<String, i64>,
-}
-
-impl TurnPersistenceState {
-    pub(crate) fn assistant_prose(&self) -> &str {
-        &self.assistant_prose
-    }
-}
-
-impl ChannelTurnEvents {
-    pub(crate) fn persistence(
-        state: AppStateData,
-        chat_id: String,
-        turn_state: Arc<Mutex<TurnPersistenceState>>,
-        errors: Option<mpsc::Sender<StreamItem>>,
-    ) -> Self {
-        Self {
-            state,
-            chat_id,
-            errors,
-            turn_state,
-        }
-    }
-
-    async fn emit_error(&self, message: String) {
-        if let Some(errors) = &self.errors {
-            let _ = errors
-                .send(StreamItem::Error {
-                    message,
-                    retryable: false,
-                })
-                .await;
-        }
-    }
-
-    async fn handle(&self, activity: TurnActivity) {
-        let event = &activity.event;
-        if let TurnEvent::AssistantProseDelta { text, .. } = &event {
-            self.turn_state
-                .lock_recover()
-                .assistant_prose
-                .push_str(text);
-            return;
-        }
-        // Keep persisted message order tied to event start order. The browser
-        // only renders completed code/tool rows, but reload should still
-        // reconstruct "thinking -> cell -> tools -> assistant".
-        if let TurnEvent::ReasoningDelta { text, .. } = &event {
-            let update = {
-                let mut state = self.turn_state.lock_recover();
-                match state.reasoning.as_mut() {
-                    Some((id, existing)) => {
-                        existing.push_str(text);
-                        Some((*id, existing.clone(), false))
-                    }
-                    None => Some((0, text.to_string(), true)),
-                }
-            };
-            if let Some((id, reasoning, insert)) = update {
-                let result = if insert {
-                    self.state
-                        .with_db({
-                            let chat_id = self.chat_id.clone();
-                            let reasoning = reasoning.clone();
-                            move |db| db.insert_reasoning(&chat_id, &reasoning)
-                        })
-                        .await
-                        .map(|message| {
-                            self.turn_state.lock_recover().reasoning =
-                                Some((message.id, reasoning));
-                        })
-                } else {
-                    self.state
-                        .with_db({
-                            let reasoning = reasoning.clone();
-                            move |db| db.update_reasoning(id, &reasoning)
-                        })
-                        .await
-                        .map(|_| ())
-                };
-                if let Err(err) = result {
-                    self.emit_error(err.message).await;
-                }
-            }
-            return;
-        }
-        if let TurnEvent::CodeBlockStarted { code, .. } = &event {
-            self.turn_state.lock_recover().code = Some(code.clone());
-            match self
-                .state
-                .with_db({
-                    let chat_id = self.chat_id.clone();
-                    let event = event.clone();
-                    let code = code.clone();
-                    move |db| db.insert_code_block(&chat_id, event, Some(code))
-                })
-                .await
-            {
-                Ok(message) => {
-                    self.turn_state.lock_recover().code_message = Some(message.id);
-                }
-                Err(err) => {
-                    self.emit_error(err.message).await;
-                }
-            }
-            return;
-        }
-        if matches!(&event, TurnEvent::ToolCallStarted { .. }) {
-            match self
-                .state
-                .with_db({
-                    let chat_id = self.chat_id.clone();
-                    let event = event.clone();
-                    move |db| db.insert_tool_call(&chat_id, event)
-                })
-                .await
-            {
-                Ok(message) => {
-                    self.turn_state
-                        .lock_recover()
-                        .tools
-                        .insert(activity.correlation_id.0.to_string(), message.id);
-                }
-                Err(err) => {
-                    self.emit_error(err.message).await;
-                }
-            }
-            return;
-        }
-        if matches!(&event, TurnEvent::ToolCallCompleted { .. }) {
-            let existing = self
-                .turn_state
-                .lock_recover()
-                .tools
-                .remove(activity.correlation_id.0.as_ref());
-            let result = self
-                .state
-                .with_db({
-                    let chat_id = self.chat_id.clone();
-                    let event = event.clone();
-                    move |db| {
-                        if let Some(id) = existing {
-                            db.update_tool_call(id, event)
-                        } else {
-                            db.insert_tool_call(&chat_id, event)
-                        }
-                    }
-                })
-                .await;
-            if let Err(err) = result {
-                self.emit_error(err.message).await;
-            }
-            return;
-        }
-        if matches!(&event, TurnEvent::CodeBlockCompleted { .. }) {
-            let (code, existing) = {
-                let mut state = self.turn_state.lock_recover();
-                (state.code.take(), state.code_message.take())
-            };
-            let result = self
-                .state
-                .with_db({
-                    let chat_id = self.chat_id.clone();
-                    let event = event.clone();
-                    move |db| {
-                        if let Some(id) = existing {
-                            db.update_code_block(id, event, code)
-                        } else {
-                            db.insert_code_block(&chat_id, event, code)
-                        }
-                    }
-                })
-                .await;
-            if let Err(err) = result {
-                self.emit_error(err.message).await;
-            }
-        }
-    }
-}
-
-#[async_trait]
-impl TurnActivitySink for ChannelTurnEvents {
-    async fn emit(&self, activity: TurnActivity) {
-        self.handle(activity).await;
-    }
-}
-
 pub(crate) fn spawn_live_replay_forwarder(
     session: LashSession,
     cursor: SessionCursor,
@@ -1063,7 +856,7 @@ async fn forward_live_replay_until_commit(
             RemoteSessionObservationStreamItem::Event(event) => {
                 let committed = matches!(
                     &event.event,
-                    RemoteSessionObservationEventPayload::Committed
+                    RemoteSessionObservationEventPayload::Committed { .. }
                 );
                 if tx
                     .send(StreamItem::Observation {
@@ -1339,25 +1132,26 @@ where
     }
 }
 
-pub(crate) fn assistant_text_for_persistence(output: &TurnOutput, streamed_prose: &str) -> String {
-    if let Some(value) = output.final_value() {
-        return terminal_value_text(value);
-    }
-    if let Some((_tool_name, value)) = output.tool_value() {
-        return terminal_value_text(value);
-    }
-    output
-        .assistant_message()
-        .filter(|text| !text.trim().is_empty())
-        .unwrap_or(streamed_prose)
-        .to_string()
-}
-
-fn terminal_value_text(value: &serde_json::Value) -> String {
-    value
-        .as_str()
-        .map(str::to_string)
-        .unwrap_or_else(|| value.to_string())
+pub(crate) async fn mirror_committed_turn(
+    state: &AppStateData,
+    chat_id: &str,
+    session: &LashSession,
+    turn_id: &TurnId,
+) -> AppResult<Vec<ChatMessage>> {
+    let transcript = session.durable().transcript().await?;
+    let rows = transcript.visible()
+        .filter(|row| row.provenance.turn_id.as_ref() == Some(turn_id))
+        // The product owns the submitted board-click row, including its board.
+        .filter(|row| row.kind != lash::transcript::TranscriptRowKind::User)
+        .cloned().collect::<Vec<_>>();
+    let chat_id = chat_id.to_owned();
+    state
+        .with_db(move |db| {
+            rows.iter()
+                .map(|row| db.insert_transcript_row(&chat_id, row))
+                .collect()
+        })
+        .await
 }
 
 #[cfg(test)]

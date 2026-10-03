@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
-use lash::persistence::{ChronologicalPayload, StoreError};
+use lash::persistence::StoreError;
 use lash::{DurableSession, LashCore, Target};
 
 use super::ledger::{EventLedger, EventRecord, IgnoreReason, Stage};
@@ -132,7 +132,7 @@ pub async fn open_thread_session(
         .exists()
         .await
         .context("check whether the thread child session exists")?;
-    let channel = if !child_exists {
+    let _channel = if !child_exists {
         let started = tokio::time::Instant::now();
         let mut backoff = ROOT_ADMISSION_INITIAL_BACKOFF;
         let (fork_revision, channel) = loop {
@@ -251,8 +251,7 @@ pub async fn open_thread_session(
         }
         Err(error) => return Err(error).context("open thread session"),
     };
-    let inherited_context =
-        inherited_thread_context(ledger, &channel, &session, record, thread_ts).await?;
+    let inherited_context = inherited_thread_context(ledger, &session, record, thread_ts).await?;
     Ok(ThreadSessionOpen::Ready {
         session: Box::new(session),
         inherited_context,
@@ -498,27 +497,16 @@ pub async fn retain_admission_boundary(
 /// open, or a boot recovery sends the same bytes.
 async fn inherited_thread_context(
     ledger: &EventLedger,
-    channel: &DurableSession,
     thread: &DurableSession,
     record: &EventRecord,
     thread_ts: &str,
 ) -> Result<String> {
-    let committed_in_thread: HashSet<String> = thread
-        .read()
+    let committed_in_thread = thread
+        .transcript()
         .await?
-        .context("thread session has no committed view")?
-        .chronological_projection()
-        .into_entries()
-        .into_iter()
-        .filter_map(|entry| match entry.payload {
-            ChronologicalPayload::Message(message) => Some(message.id),
-            ChronologicalPayload::ProtocolEvent(_) => None,
-        })
-        .collect();
-    let applications = channel
-        .turn_input_applications()
-        .await
-        .context("read channel applications for thread inheritance")?;
+        .visible()
+        .filter_map(|row| row.provenance.input_id.clone())
+        .collect::<HashSet<_>>();
     let inherited = ledger
         .channel_context_through(record.channel_id.clone(), thread_ts.to_string())
         .await
@@ -536,10 +524,9 @@ async fn inherited_thread_context(
             continue;
         }
         let already_in_graph = row.input_id.as_deref().is_some_and(|input_id| {
-            applications.iter().any(|application| {
-                application.input_id == input_id
-                    && committed_in_thread.contains(&application.committed_message_id)
-            })
+            committed_in_thread
+                .iter()
+                .any(|committed| committed == input_id)
         });
         if already_in_graph {
             continue;

@@ -199,12 +199,22 @@ reasons!(StageKind {
 /// A stage owns exactly the payload that recovery may use at that stage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stage {
-    Accepted { deferral: Option<DeferralReason> },
-    ReplyPending { reply: String },
-    Folded { reason: Option<FoldReason> },
-    Replied { reply_ts: String },
+    Accepted {
+        deferral: Option<DeferralReason>,
+    },
+    ReplyPending {
+        reply: lash::transcript::TranscriptRowRecord,
+    },
+    Folded {
+        reason: Option<FoldReason>,
+    },
+    Replied {
+        reply_ts: String,
+    },
     ProviderError(ProviderFailure),
-    Ignored { reason: IgnoreReason },
+    Ignored {
+        reason: IgnoreReason,
+    },
 }
 
 impl Stage {
@@ -233,7 +243,9 @@ impl Stage {
     pub fn detail(&self) -> Option<String> {
         match self {
             Self::Accepted { deferral } => deferral.map(|reason| reason.as_str().to_owned()),
-            Self::ReplyPending { reply } => Some(reply.clone()),
+            Self::ReplyPending { reply } => {
+                Some(serde_json::to_string(reply).expect("transcript rows serialize"))
+            }
             Self::Folded { reason } => reason.map(|reason| reason.as_str().to_owned()),
             Self::Ignored { reason } => Some(reason.as_str().to_owned()),
             Self::Replied { .. } | Self::ProviderError(_) => None,
@@ -786,9 +798,10 @@ fn decode_stage(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stage> {
                 .transpose()?,
         },
         StageKind::ReplyPending => Stage::ReplyPending {
-            reply: detail
-                .filter(|reply| !reply.trim().is_empty())
-                .ok_or_else(|| corrupt("missing reply debt"))?,
+            reply: serde_json::from_str::<lash::transcript::TranscriptRowRecord>(
+                &detail.ok_or_else(|| corrupt("missing reply debt"))?,
+            )
+            .map_err(|error| corrupt(format!("invalid committed reply debt: {error}")))?,
         },
         StageKind::Folded => Stage::Folded {
             reason: detail
@@ -871,6 +884,15 @@ fn now_seconds() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs() as i64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+pub(crate) fn reply_fixture(text: &str) -> lash::transcript::TranscriptRowRecord {
+    serde_json::from_value(serde_json::json!({
+        "row_id":"debt-fixture", "kind":"assistant_reply", "timestamp":"2026-10-03T00:00:00Z", "suppressed":null,
+        "provenance":{"turn_id":"fixture-turn", "input_id":null, "plugin_id":null, "is_turn_reply":true},
+        "content":{"text":text, "reasoning":[], "attachments":[], "language":null, "code":null, "output":null, "success":null, "error":null, "tools":[], "tools_omitted":0}
+    })).expect("reply debt fixture")
 }
 
 #[cfg(test)]
@@ -1042,7 +1064,7 @@ mod tests {
                     "Ev1".to_string(),
                     StageKind::Accepted,
                     Stage::ReplyPending {
-                        reply: "stale text".to_string()
+                        reply: reply_fixture("stale text")
                     }
                 )
                 .await
@@ -1071,7 +1093,7 @@ mod tests {
                 "Ev1".to_string(),
                 StageKind::Accepted,
                 Stage::ReplyPending {
-                    reply: "owed reply".to_string(),
+                    reply: reply_fixture("owed reply"),
                 },
             )
             .await
@@ -1119,7 +1141,7 @@ mod tests {
                 "Ev3".to_string(),
                 StageKind::Accepted,
                 Stage::ReplyPending {
-                    reply: "owed".to_string(),
+                    reply: reply_fixture("owed"),
                 },
             )
             .await

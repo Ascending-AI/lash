@@ -166,6 +166,74 @@ finish("done through route");
         .durable()
         .await
         .expect("durable session");
+    let canonical = durable.transcript().await.expect("canonical rows");
+    let mirrored = state
+        .with_db({
+            let chat_id = chat.id.clone();
+            move |db| db.list_messages(&chat_id)
+        })
+        .await
+        .expect("SQL mirror");
+    let records = mirrored
+        .iter()
+        .filter_map(|message| {
+            message
+                .payload()
+                .and_then(|payload| payload.get("transcript"))
+        })
+        .map(|row| {
+            serde_json::from_value::<lash::transcript::TranscriptRowRecord>(row.clone())
+                .expect("typed mirror")
+        })
+        .collect::<Vec<_>>();
+    let expected = canonical
+        .visible()
+        .filter(|row| row.kind != lash::transcript::TranscriptRowKind::User)
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        records, expected,
+        "SQL replay must preserve every non-user canonical record"
+    );
+    let streamed = lines
+        .iter()
+        .filter_map(|line| line.pointer("/message/payload/transcript"))
+        .map(|row| {
+            serde_json::from_value::<lash::transcript::TranscriptRowRecord>(row.clone())
+                .expect("typed streamed mirror")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        streamed, records,
+        "live completion and SQL replay must carry identical rows"
+    );
+    let connection =
+        rusqlite::Connection::open(data_dir.join("app.db")).expect("mirror crash fixture");
+    connection
+        .execute(
+            "DELETE FROM messages WHERE chat_id = ?1 AND role <> 'user'",
+            [&chat.id],
+        )
+        .expect("simulate a lost host mirror after core commit");
+    let Json(reloaded) = list_messages(State(state.clone()), AxumPath(chat.id.clone()))
+        .await
+        .expect("read-only core recovery repairs the host mirror");
+    let recovered_records = reloaded
+        .iter()
+        .filter_map(|message| {
+            message
+                .payload()
+                .and_then(|payload| payload.get("transcript"))
+        })
+        .map(|row| {
+            serde_json::from_value::<lash::transcript::TranscriptRowRecord>(row.clone())
+                .expect("recovered record")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        recovered_records, expected,
+        "crash recovery preserves canonical identity, content and timestamp"
+    );
     let recovered = durable
         .attach(input_id)
         .outcome()
