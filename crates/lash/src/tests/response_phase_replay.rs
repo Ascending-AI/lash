@@ -812,6 +812,8 @@ response_phase_replay_laws! {
     owed_unavailable_callback_parks_sqlite_file: HookChange::CallbackUnavailable, Storage::SqliteFile, false;
     completed_callback_state_survives_cold_replay_sqlite_memory: HookChange::StateRetained, Storage::SqliteMemory, false;
     completed_callback_state_survives_cold_replay_sqlite_file: HookChange::StateRetained, Storage::SqliteFile, false;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+    completed_callback_state_survives_cold_replay_postgres: HookChange::StateRetained, Storage::Postgres, false;
     removed_hook_sqlite_memory: HookChange::Removed, Storage::SqliteMemory, false;
     removed_hook_sqlite_file: HookChange::Removed, Storage::SqliteFile, false;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]

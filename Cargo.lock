@@ -2136,6 +2136,7 @@ dependencies = [
  "lash-internal-core-llm",
  "lash-internal-core-store",
  "lash-internal-core-worker",
+ "lash-internal-postgres-store",
  "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",

@@ -35,7 +35,7 @@ pub enum CrashPoint {
     /// Before the server stores the command with this 0-based journal
     /// command index (the input command is index 0).
     BeforeCommand { index: usize },
-    /// Before the server applies any frame of this message type.
+    /// Before the server applies a frame of this type, or delivers a V7 run ACK.
     BeforeFrame { ty: MessageType },
 }
 
@@ -238,8 +238,7 @@ impl CrashPlan {
         ) {
             return false;
         }
-        if let Some(rule) = self.rules.iter_mut().find(|rule| rule.matches(site)) {
-            rule.times -= 1;
+        if self.should_crash_scripted(site) {
             return true;
         }
         if let Some(random) = &mut self.random
@@ -247,6 +246,15 @@ impl CrashPlan {
             && draw % 1000 < u64::from(random.per_mille)
         {
             random.budget -= 1;
+            return true;
+        }
+        false
+    }
+
+    /// Explicit rules also cut ACK delivery without adding a random crash site.
+    pub(super) fn should_crash_scripted(&mut self, site: &CrashSite) -> bool {
+        if let Some(rule) = self.rules.iter_mut().find(|rule| rule.matches(site)) {
+            rule.times -= 1;
             return true;
         }
         false

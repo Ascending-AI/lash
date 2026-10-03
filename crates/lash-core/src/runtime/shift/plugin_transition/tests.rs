@@ -1,3 +1,4 @@
+//! Raw-store atomicity and receipt laws. Production publication/adoption is in `publication`.
 use super::*;
 use crate::testing::store_fixtures::{root_session_request, seal_shift_fence_for_test};
 use std::collections::BTreeMap;
@@ -443,3 +444,5 @@ async fn one_refused_namespace_publishes_neither_sqlite_memory() {
 async fn one_refused_namespace_publishes_neither_sqlite_file() {
     matrix(true, false, true).await;
 }
+
+mod publication;

@@ -903,6 +903,12 @@ impl State {
                             NotificationKey::Completion(completion_id),
                             false,
                         );
+                        let mut site = self.crash_site(key, &frame);
+                        site.ty = MessageType::ProposeRunCompletionAck;
+                        if self.crash_plan.should_crash_scripted(&site) {
+                            self.crash(sh, key);
+                            return Ok(Flow::Stop);
+                        }
                         if let Some(attempt) = self.running_attempt(key, number) {
                             attempt.push(
                                 Frame::of(
