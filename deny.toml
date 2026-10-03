@@ -103,9 +103,10 @@ confidence-threshold = 0.8
 ignore = true
 
 [sources]
-# The workspace currently consumes registry crates from crates.io only. Git
-# sources and any other registry must be reviewed explicitly before use.
+# Git sources and other registries require explicit review.
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# FIG-4906 (U02) removes this entry when a publishable crate replaces the git pin.
+allow-git = ["https://github.com/SamGalanakis/sdk-rust"]
+required-git-spec = "rev"

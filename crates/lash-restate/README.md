@@ -59,6 +59,16 @@ code runs inside the open atomic tool attempt. Composite tool-batch and
 exec-code interpreters are rebuilt for every handler attempt; their nested
 atomic effects retain stable replay keys. Runtime sleeps outside tool attempts
 use Restate durable timers.
+
+The workspace pins the concurrent-run SDK fork to an exact git revision.
+Sequential `ctx.run` calls retain fluent `.name(...)` and `.retry_policy(...)`
+configuration and are awaited directly. To start concurrent work, configure
+each run and call consuming `.start()` in deterministic order before awaiting
+any result. Started closures own their captures and futures for the invocation;
+they keep progressing while the handler awaits another result. Sequential
+actions may borrow local values. Hosts use the existing SDK re-export and one
+Endpoint.
+
 Upgrade note: invocations that journaled `ExecCode` under the pre-fix wrapping
 will diverge on replay after upgrade; they were already panic-looping and need
 an admin `KILL`.

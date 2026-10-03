@@ -1792,13 +1792,17 @@ features = ["__rustls", "__rustls-aws-lc-rs", "__tls", "form", "http2", "json", 
 
 [dependencies.p0297]
 package = "restate-sdk"
-version = "=0.11.1"
+version = "=0.12.1"
+git = "https://github.com/SamGalanakis/sdk-rust"
+rev = "c25608305340e431dff8808a3303bc3106762d6c"
 default-features = false
-features = ["http-body-util", "http_server", "hyper", "hyper-util"]
+features = ["http_server", "hyper"]
 
 [dependencies.p0298]
 package = "restate-sdk-macros"
-version = "=0.11.1"
+version = "=0.12.1"
+git = "https://github.com/SamGalanakis/sdk-rust"
+rev = "c25608305340e431dff8808a3303bc3106762d6c"
 default-features = false
 features = []
 

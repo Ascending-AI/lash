@@ -59,7 +59,7 @@ pub use server::{
 extern crate self as restate_sdk;
 #[allow(unused_imports)]
 use lash_restate::restate_sdk::{
-    context, discovery, endpoint, errors, handler, object, prelude, service, workflow,
+    context, discovery, endpoint, errors, handler, ingress, object, prelude, service, workflow,
 };
 
 /// Completed group-dispatch and opener suspensions on a server double.

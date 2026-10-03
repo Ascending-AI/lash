@@ -31,7 +31,8 @@ use restate_sdk::prelude::*;
 extern crate self as restate_sdk;
 #[allow(unused_imports)]
 use lash_restate::restate_sdk::{
-    context, discovery, endpoint, errors, handler, http_server, object, prelude, service, workflow,
+    context, discovery, endpoint, errors, handler, http_server, ingress, object, prelude, service,
+    workflow,
 };
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,37 @@ fn counter(name: &str) -> &'static AtomicUsize {
 }
 
 struct Counter;
+
+struct ParallelRuns {
+    entered: tokio::sync::mpsc::UnboundedSender<usize>,
+    release: [Arc<tokio::sync::Notify>; 3],
+}
+
+#[restate_sdk::service]
+impl ParallelRuns {
+    #[handler]
+    async fn receipts(&self, ctx: Context<'_>) -> HandlerResult<Json<Vec<String>>> {
+        let runs: Vec<_> = (0..3)
+            .map(|index| {
+                let entered = self.entered.clone();
+                let release = Arc::clone(&self.release[index]);
+                ctx.run(move || async move {
+                    entered.send(index).unwrap();
+                    release.notified().await;
+                    Ok(Json(format!("receipt-{index}")))
+                })
+                .name(format!("attempt-{index}"))
+                .retry_policy(RunRetryPolicy::new().max_attempts(1))
+                .start()
+            })
+            .collect();
+        let mut receipts = Vec::new();
+        for run in runs {
+            receipts.push(run.await?.0);
+        }
+        Ok(Json(receipts))
+    }
+}
 
 #[restate_sdk::object]
 impl Counter {
@@ -305,6 +337,74 @@ fn modes() -> [ServerConfig; 4] {
 // ---------------------------------------------------------------------------
 // Laws
 // ---------------------------------------------------------------------------
+
+/// L01: all bodies enter before any completes, and each has its own receipt.
+#[tokio::test]
+async fn concurrent_runs_record_independent_receipts_in_completion_order() {
+    let (entered, mut entries) = tokio::sync::mpsc::unbounded_channel();
+    let release = std::array::from_fn(|_| Arc::new(tokio::sync::Notify::new()));
+    let endpoint = Endpoint::builder()
+        .bind(ParallelRuns {
+            entered,
+            release: release.clone(),
+        })
+        .build();
+    let server = RestateTestServer::start(endpoint, ServerConfig::default())
+        .await
+        .unwrap();
+    let invocation = send_invocation(&server, "ParallelRuns/receipts", "null").await;
+
+    let mut started = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        for _ in 0..3 {
+            started.push(entries.recv().await.unwrap());
+        }
+    })
+    .await
+    .expect("every independent body enters before any is released");
+    started.sort_unstable();
+    assert_eq!(started, [0, 1, 2]);
+
+    let mut expected = Vec::new();
+    for index in [2, 0, 1] {
+        release[index].notify_one();
+        expected.push(format!("receipt-{index}"));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let recorded: Vec<String> = server
+                    .journal(&invocation)
+                    .unwrap()
+                    .into_iter()
+                    .filter_map(|entry| entry.run_completion())
+                    .map(|result| serde_json::from_slice(&result.unwrap()).unwrap())
+                    .collect();
+                if recorded.len() >= expected.len() {
+                    assert_eq!(recorded, expected);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("each released body durably records its own receipt");
+    }
+    assert_eq!(
+        post(
+            &server,
+            &format!("restate/invocation/{invocation}/attach"),
+            "null"
+        )
+        .await,
+        (200, "[\"receipt-0\",\"receipt-1\",\"receipt-2\"]".into())
+    );
+    let names: Vec<String> = server
+        .journal(&invocation)
+        .unwrap()
+        .into_iter()
+        .filter_map(|entry| entry.name)
+        .collect();
+    assert_eq!(names, ["attempt-0", "attempt-1", "attempt-2"]);
+}
 
 #[tokio::test]
 async fn sdk_sleep_deadline_survives_a_held_response_frame() {

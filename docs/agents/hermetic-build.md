@@ -186,10 +186,14 @@ kiln analyze
 `tools/buck2/sync.py --check` rejects stale generated files. The target inventory
 is `tools/buck2/target-inventory.json`. Third-party rules live in
 `third-party/rust/BUCK`, with checksum-pinned crate archive downloads as Buck2
-inputs. Bootstrap also prepares a Cargo vendor cache, but the generated Buck2
-graph currently consumes the archive directories. Do not hand-edit generated
-BUCK files. Normal builds reject drift; they do not silently update lockfiles
-or Cargo features.
+inputs for registry packages. Git packages retain their full resolved revision
+in the synthetic manifest. Bootstrap copies their Cargo-vendored files into
+the ignored, fork-local `third-party/rust/.git-sources/` tree, verifies Cargo's
+file checksums, and exposes them through generated filegroups. The generated
+`git-sources.json` records repository subdirectories, including nested packages;
+fresh forks recreate these inputs before checking the graph receipt. Do not
+hand-edit generated BUCK files. Normal builds reject drift; they do not
+silently update lockfiles or Cargo features.
 
 Reindeer fixups under `tools/buck2/fixups/` describe AWS-LC, SQLite, ring and
 other native dependencies. Build scripts use declared compiler/linker, headers

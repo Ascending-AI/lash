@@ -333,11 +333,23 @@ def synthetic_manifest(canonical: dict) -> str:
         alias = f"p{index:04d}"
         seen_names.add(package["name"])
         features = sorted(nodes[package["id"]]["features"])
+        source_lines = []
+        source = package.get("source") or ""
+        if source.startswith("git+"):
+            repository, _, revision = source.removeprefix("git+").rpartition("#")
+            if not repository or not re.fullmatch(r"[0-9a-f]{40}", revision):
+                raise ValueError(f"missing full resolved git revision: {source}")
+            repository = repository.partition("?")[0]
+            source_lines = [
+                f"git = {toml_string(repository)}\n",
+                f"rev = {toml_string(revision)}\n",
+            ]
         lines.extend(
             [
                 f"[dependencies.{alias}]\n",
                 f"package = {toml_string(package['name'])}\n",
                 f"version = {toml_string('=' + package['version'])}\n",
+                *source_lines,
                 "default-features = false\n",
                 "features = " + json.dumps(features) + "\n\n",
             ]
@@ -507,6 +519,107 @@ def buckify_stdout() -> str:
         ]
     )
     return result.stdout
+
+
+def vendored_git_rules(content: str, resolved: dict) -> tuple[str, dict]:
+    """Use Cargo's pinned vendor tree instead of local-only git fetch actions."""
+    packages = {
+        (package["name"], package["version"]): package
+        for package in resolved["packages"]
+        if (package.get("source") or "").startswith("git+")
+    }
+    sources = []
+
+    def replace(match: re.Match[str]) -> str:
+        block = match.group(1)
+        name = re.search(r'^\s*name = "([^"]+)"', block, re.M).group(1)
+        root = name.removesuffix(".git")
+        members = {}
+        for library in re.findall(r"third_party_rust_library\(\n(.*?)\n\)\n", content, re.S):
+            if f'":{name}"' not in library:
+                continue
+            package_name = re.search(r'"CARGO_PKG_NAME": "([^"]+)"', library).group(1)
+            version = re.search(r'"CARGO_PKG_VERSION": "([^"]+)"', library).group(1)
+            package = packages[(package_name, version)]
+            crate_root = re.search(r'^\s*crate_root = "([^"]+)"', library, re.M).group(1)
+            for target in package["targets"]:
+                relative = pathlib.Path(target["src_path"]).relative_to(
+                    pathlib.Path(package["manifest_path"]).parent
+                ).as_posix()
+                if crate_root.endswith("/" + relative):
+                    directory = crate_root.removeprefix(root + "/")[:-len(relative)].rstrip("/")
+                    members[directory] = {
+                        "directory": directory,
+                        "vendor": f"{package_name}-{version}",
+                        "source": package["source"],
+                    }
+                    break
+            else:
+                raise ValueError(f"git crate root does not match Cargo targets: {crate_root}")
+        if not members:
+            raise ValueError(f"git fetch has no Cargo packages: {name}")
+        sources.append({"root": root, "packages": list(members.values())})
+        prefix = f".git-sources/{root}/"
+        return (
+            "filegroup(\n"
+            f"    name = {toml_string(name)},\n"
+            f"    srcs = {{path[{len(prefix)}:]: path for path in glob([{toml_string(prefix + '**')}])}},\n"
+            f"    out = {toml_string(root)},\n"
+            "    copy = False,\n"
+            "    visibility = [],\n"
+            ")\n"
+        )
+
+    rendered = re.sub(r"git_fetch\(\n(.*?)\n\)\n", replace, content, flags=re.S)
+    return rendered, {"sources": sources}
+
+
+def materialize_git_sources() -> None:
+    recipe = SYNTHETIC / "rust/git-sources.json"
+    if not recipe.is_file():
+        return
+    destination = SYNTHETIC / "rust/.git-sources"
+    for source in json.loads(recipe.read_text())["sources"]:
+        root = destination / source["root"]
+        if destination.is_symlink() or root.is_symlink():
+            raise ValueError(f"refusing symlinked git source tree: {root}")
+        expected = {}
+        for package in source["packages"]:
+            vendor = ROOT / "vendor" / package["vendor"]
+            checksum = vendor / ".cargo-checksum.json"
+            hashes = json.loads(checksum.read_text())["files"]
+            hashes[checksum.name] = digest_path(checksum)
+            for path, digest in hashes.items():
+                relative = (pathlib.Path(package["directory"]) / path).as_posix()
+                if relative in expected and expected[relative] != digest:
+                    raise ValueError(f"conflicting vendored git file: {relative}")
+                expected[relative] = digest
+        actual = {
+            path.relative_to(root).as_posix(): digest_path(path)
+            for path in root.rglob("*") if path.is_file()
+        } if root.is_dir() and not root.is_symlink() else {}
+        if actual == expected:
+            continue
+        destination.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=destination) as temporary:
+            staging = pathlib.Path(temporary) / "tree"
+            for package in source["packages"]:
+                vendor = ROOT / "vendor" / package["vendor"]
+                for path in vendor.rglob("*"):
+                    if path.is_file():
+                        target = staging / package["directory"] / path.relative_to(vendor)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        if not target.exists():
+                            shutil.copy2(path, target)
+            copied = {
+                path.relative_to(staging).as_posix(): digest_path(path)
+                for path in staging.rglob("*") if path.is_file()
+            }
+            if copied != expected:
+                raise ValueError(f"vendored git sources do not match Cargo checksums: {root}")
+            if root.exists():
+                shutil.rmtree(root)
+            staging.rename(root)
 
 
 def parse_third_party_targets(content: str) -> dict[tuple[str, str], str]:
@@ -1184,6 +1297,8 @@ def main() -> int:
         cwd=ROOT,
         check=True,
     )
+    if args.check:
+        materialize_git_sources()
     if args.check and not args.verify_resolution and (receipt_is_current() or adopt_shared_receipt()):
         print("Buck2 graph receipt is current")
         return 0
@@ -1215,6 +1330,8 @@ def main() -> int:
         enable_buildscript_link_directives(buckify_stdout(), buildscript_link_opt_outs()),
         derived,
     )
+    third_party_buck, git_sources = vendored_git_rules(third_party_buck, derived)
+    outputs[SYNTHETIC / "rust/git-sources.json"] = json.dumps(git_sources, indent=2) + "\n"
     targets = parse_third_party_targets(third_party_buck)
     outputs[ROOT / "third-party/rust/BUCK"] = third_party_buck
     outputs[BUCK2 / "deps.bzl"] = deps_bzl(dependency_table(canonical, targets))
@@ -1229,6 +1346,9 @@ def main() -> int:
         return 1
     result = write_or_check(outputs, args.check)
     if result == 0:
+        if not args.check:
+            subprocess.run([sys.executable, str(BUCK2 / "bootstrap_vendor.py")], cwd=ROOT, check=True)
+            materialize_git_sources()
         write_receipt(outputs)
     return result
 

@@ -7,6 +7,7 @@
 /tools/buck2/toolchains/rust-files/
 /tools/buck2/bin/
 /vendor
+/third-party/rust/.git-sources/
 /.tgt/
 *.perf
 *.old

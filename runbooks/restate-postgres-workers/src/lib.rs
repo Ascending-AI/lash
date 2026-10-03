@@ -22,7 +22,7 @@ pub mod witness;
 extern crate self as restate_sdk;
 #[allow(unused_imports)]
 use lash::restate::restate_sdk::{
-    context, discovery, endpoint, errors, handler, object, prelude, service, workflow,
+    context, discovery, endpoint, errors, handler, ingress, object, prelude, service, workflow,
 };
 
 use anyhow::{Context, Result, bail};

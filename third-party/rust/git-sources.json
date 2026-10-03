@@ -1,0 +1,19 @@
+{
+  "sources": [
+    {
+      "root": "sdk-rust-c8d53c08db5bc6c8",
+      "packages": [
+        {
+          "directory": "",
+          "vendor": "restate-sdk-0.12.1",
+          "source": "git+https://github.com/SamGalanakis/sdk-rust?rev=c25608305340e431dff8808a3303bc3106762d6c#c25608305340e431dff8808a3303bc3106762d6c"
+        },
+        {
+          "directory": "macros",
+          "vendor": "restate-sdk-macros-0.12.1",
+          "source": "git+https://github.com/SamGalanakis/sdk-rust?rev=c25608305340e431dff8808a3303bc3106762d6c#c25608305340e431dff8808a3303bc3106762d6c"
+        }
+      ]
+    }
+  ]
+}

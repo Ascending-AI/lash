@@ -11,6 +11,14 @@ load(
     "third_party_rust_prebuilt_cxx_library",
 )
 
+filegroup(
+    name = "sdk-rust-c8d53c08db5bc6c8.git",
+    srcs = {path[39:]: path for path in glob([".git-sources/sdk-rust-c8d53c08db5bc6c8/**"])},
+    out = "sdk-rust-c8d53c08db5bc6c8",
+    copy = False,
+    visibility = [],
+)
+
 third_party_http_archive(
     name = "addr2line-0.25.1.crate",
     sha256 = "1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b",
@@ -17272,28 +17280,20 @@ third_party_rust_library(
 
 alias(
     name = "p0297",
-    actual = ":restate-sdk-0.11",
+    actual = ":restate-sdk-0.12",
     visibility = ["PUBLIC"],
 )
 
-third_party_http_archive(
-    name = "restate-sdk-0.11.1.crate",
-    sha256 = "1a900d7d9d250d727034f68b16bdfc5314c64ee8a7e5b78e8f37106e3a98bf88",
-    strip_prefix = "restate-sdk-0.11.1",
-    urls = ["https://static.crates.io/crates/restate-sdk/0.11.1/download"],
-    visibility = [],
-)
-
 third_party_rust_library(
-    name = "restate-sdk-0.11",
-    srcs = [":restate-sdk-0.11.1.crate"],
+    name = "restate-sdk-0.12",
+    srcs = [":sdk-rust-c8d53c08db5bc6c8.git"],
     crate = "restate_sdk",
-    crate_root = "restate-sdk-0.11.1.crate/src/lib.rs",
+    crate_root = "sdk-rust-c8d53c08db5bc6c8/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_BIN_NAME": "restate_sdk",
         "CARGO_CRATE_NAME": "restate_sdk",
-        "CARGO_MANIFEST_DIR": "restate-sdk-0.11.1.crate",
+        "CARGO_MANIFEST_DIR": "sdk-rust-c8d53c08db5bc6c8",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Restate SDK for Rust",
         "CARGO_PKG_HOMEPAGE": "",
@@ -17301,23 +17301,21 @@ third_party_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/restatedev/sdk-rust",
         "CARGO_PKG_RUST_VERSION": "1.90.0",
-        "CARGO_PKG_VERSION": "0.11.1",
+        "CARGO_PKG_VERSION": "0.12.1",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "11",
+        "CARGO_PKG_VERSION_MINOR": "12",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :restate-sdk-0.11-build-script-run[out_dir])",
+        "OUT_DIR": "$(location :restate-sdk-0.12-build-script-run[out_dir])",
     },
     features = [
-        "http-body-util",
         "http_server",
         "hyper",
-        "hyper-util",
     ],
     platform = {
         "linux-x86_64": dict(),
     },
-    rustc_flags = ["@$(location :restate-sdk-0.11-build-script-run[rustc_flags])"],
+    rustc_flags = ["@$(location :restate-sdk-0.12-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
         ":bytes-1",
@@ -17327,9 +17325,10 @@ third_party_rust_library(
         ":http-body-util-0.1",
         ":hyper-1",
         ":hyper-util-0.1",
+        ":percent-encoding-2",
         ":pin-project-lite-0.2",
         ":regress-0.10",
-        ":restate-sdk-macros-0.11",
+        ":restate-sdk-macros-0.12",
         ":restate-sdk-shared-core-7",
         ":serde-1",
         ":serde_json-1",
@@ -17340,15 +17339,15 @@ third_party_rust_library(
 )
 
 third_party_rust_binary(
-    name = "restate-sdk-0.11-build-script-build",
-    srcs = [":restate-sdk-0.11.1.crate"],
+    name = "restate-sdk-0.12-build-script-build",
+    srcs = [":sdk-rust-c8d53c08db5bc6c8.git"],
     crate = "build_script_build",
-    crate_root = "restate-sdk-0.11.1.crate/build.rs",
+    crate_root = "sdk-rust-c8d53c08db5bc6c8/build.rs",
     edition = "2024",
     env = {
         "CARGO_BIN_NAME": "build-script-build",
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "restate-sdk-0.11.1.crate",
+        "CARGO_MANIFEST_DIR": "sdk-rust-c8d53c08db5bc6c8",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Restate SDK for Rust",
         "CARGO_PKG_HOMEPAGE": "",
@@ -17356,17 +17355,15 @@ third_party_rust_binary(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/restatedev/sdk-rust",
         "CARGO_PKG_RUST_VERSION": "1.90.0",
-        "CARGO_PKG_VERSION": "0.11.1",
+        "CARGO_PKG_VERSION": "0.12.1",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "11",
+        "CARGO_PKG_VERSION_MINOR": "12",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
-        "http-body-util",
         "http_server",
         "hyper",
-        "hyper-util",
     ],
     platform = {
         "linux-x86_64": dict(),
@@ -17382,9 +17379,9 @@ third_party_rust_binary(
 )
 
 third_party_buildscript_run(
-    name = "restate-sdk-0.11-build-script-run",
+    name = "restate-sdk-0.12-build-script-run",
     package_name = "restate-sdk",
-    buildscript_rule = ":restate-sdk-0.11-build-script-build",
+    buildscript_rule = ":restate-sdk-0.12-build-script-build",
     env = {
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Restate SDK for Rust",
@@ -17393,48 +17390,39 @@ third_party_buildscript_run(
         "CARGO_PKG_REPOSITORY": "https://github.com/restatedev/sdk-rust",
         "CARGO_PKG_RUST_VERSION": "1.90.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "11",
+        "CARGO_PKG_VERSION_MINOR": "12",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
-        "http-body-util",
         "http_server",
         "hyper",
-        "hyper-util",
     ],
+    manifest_dir = ":sdk-rust-c8d53c08db5bc6c8.git",
     platform = {
         "linux-x86_64": dict(),
     },
     rustc_link_lib = True,
     rustc_link_search = True,
-    version = "0.11.1",
+    version = "0.12.1",
 )
 
 alias(
     name = "p0298",
-    actual = ":restate-sdk-macros-0.11",
+    actual = ":restate-sdk-macros-0.12",
     visibility = ["PUBLIC"],
 )
 
-third_party_http_archive(
-    name = "restate-sdk-macros-0.11.1.crate",
-    sha256 = "393a519e55cb4572e916d2023aa778e59864f6e7d6e7c28017d7ad8dfc983272",
-    strip_prefix = "restate-sdk-macros-0.11.1",
-    urls = ["https://static.crates.io/crates/restate-sdk-macros/0.11.1/download"],
-    visibility = [],
-)
-
 third_party_rust_library(
-    name = "restate-sdk-macros-0.11",
-    srcs = [":restate-sdk-macros-0.11.1.crate"],
+    name = "restate-sdk-macros-0.12",
+    srcs = [":sdk-rust-c8d53c08db5bc6c8.git"],
     crate = "restate_sdk_macros",
-    crate_root = "restate-sdk-macros-0.11.1.crate/src/lib.rs",
+    crate_root = "sdk-rust-c8d53c08db5bc6c8/macros/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_BIN_NAME": "restate_sdk_macros",
         "CARGO_CRATE_NAME": "restate_sdk_macros",
-        "CARGO_MANIFEST_DIR": "restate-sdk-macros-0.11.1.crate",
+        "CARGO_MANIFEST_DIR": "sdk-rust-c8d53c08db5bc6c8",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Restate SDK for Rust macros",
         "CARGO_PKG_HOMEPAGE": "",
@@ -17442,9 +17430,9 @@ third_party_rust_library(
         "CARGO_PKG_README": "",
         "CARGO_PKG_REPOSITORY": "https://github.com/restatedev/sdk-rust",
         "CARGO_PKG_RUST_VERSION": "1.90.0",
-        "CARGO_PKG_VERSION": "0.11.1",
+        "CARGO_PKG_VERSION": "0.12.1",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "11",
+        "CARGO_PKG_VERSION_MINOR": "12",
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },

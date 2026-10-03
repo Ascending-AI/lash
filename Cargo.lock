@@ -4139,9 +4139,8 @@ dependencies = [
 
 [[package]]
 name = "restate-sdk"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a900d7d9d250d727034f68b16bdfc5314c64ee8a7e5b78e8f37106e3a98bf88"
+version = "0.12.1"
+source = "git+https://github.com/SamGalanakis/sdk-rust?rev=c25608305340e431dff8808a3303bc3106762d6c#c25608305340e431dff8808a3303bc3106762d6c"
 dependencies = [
  "bytes",
  "futures",
@@ -4151,6 +4150,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "jsonptr",
+ "percent-encoding",
  "pin-project-lite",
  "prettyplease",
  "regress 0.10.5",
@@ -4167,9 +4167,8 @@ dependencies = [
 
 [[package]]
 name = "restate-sdk-macros"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "393a519e55cb4572e916d2023aa778e59864f6e7d6e7c28017d7ad8dfc983272"
+version = "0.12.1"
+source = "git+https://github.com/SamGalanakis/sdk-rust?rev=c25608305340e431dff8808a3303bc3106762d6c#c25608305340e431dff8808a3303bc3106762d6c"
 dependencies = [
  "jiff",
  "proc-macro2",

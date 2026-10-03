@@ -43,7 +43,7 @@ mod ui;
 extern crate self as restate_sdk;
 #[allow(unused_imports)]
 use lash::restate::restate_sdk::{
-    context, discovery, endpoint, errors, handler, object, prelude, service, workflow,
+    context, discovery, endpoint, errors, handler, ingress, object, prelude, service, workflow,
 };
 
 fn default_openrouter_llm_profile_capability() -> lash::provider::LlmProfileCapability {
