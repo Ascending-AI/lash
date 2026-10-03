@@ -842,11 +842,11 @@ pub mod plugins {
         ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState, InvalidExecutionLeafName,
         LeafChange, PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
         PluginSessionRequest, PluginState, PluginStateEffect, PluginStateMutation,
-        PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest, PrepareTurnRequest,
-        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
-        ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
-        SessionAuthorityContext, SystemPromptContext, SystemPromptPurpose, TurnFinalization,
-        TurnPreparation,
+        PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+        PrepareTurnRequest, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
+        ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
+        ProtocolSessionRestoreView, SessionAuthorityContext, SystemPromptContext,
+        SystemPromptPurpose, TurnFinalization, TurnPreparation,
     };
     /// The registration groups [`PluginRegistrar`]'s accessors return
     /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take

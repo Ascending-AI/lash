@@ -16,8 +16,25 @@ pub struct PluginTransitionId(pub crate::EffectAddress);
 pub struct PluginTransitionRequest {
     pub id: PluginTransitionId,
     pub owner: crate::RuntimeOwner,
-    pub base: crate::store::SessionHeadRef,
+    pub base: PluginTransitionBase,
     pub target: PluginAdmission,
+}
+
+/// The retained session head or captured process segment this transition admits.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PluginTransitionBase {
+    /// The command run's first recorded effect selects and retains its head.
+    SessionCommand {
+        run: crate::TurnId,
+    },
+    Session {
+        head: crate::store::SessionHeadRef,
+    },
+    Process {
+        environment: crate::ProcessExecutionEnvRef,
+        segment: crate::ExecutionScope,
+    },
 }
 
 /// Each namespace retains either its complete postimage or its typed refusal.
@@ -29,6 +46,7 @@ pub struct PluginTransitionRecord {
     pub source: crate::BlobRef,
     pub namespaces: BTreeMap<String, Result<PluginNamespaceState, PluginError>>,
     pub config: Result<PluginConfig, FormatRefusal>,
+    pub publication: Option<Box<crate::store::RuntimeCommit>>,
 }
 
 impl PluginTransitionRecord {
@@ -56,22 +74,44 @@ impl PluginHost {
         let preflight = self
             .validate_state_formats(state)
             .and_then(|()| self.validate_config_formats(config));
-        let namespaces = state
+        let native_config = preflight.clone().and_then(|()| self.decode_config(config));
+        let mut namespaces: BTreeMap<String, Result<PluginNamespaceState, PluginError>> = state
             .plugins
             .iter()
             .map(|(id, namespace)| {
-                let result = match &preflight {
+                let result = match &native_config {
                     Err(refusal) => Err(PluginError::from(refusal.clone())),
-                    Ok(()) => self.decode_namespace(id, namespace),
+                    Ok(_) => self.decode_namespace(id, namespace),
                 };
                 (id.clone(), result)
             })
             .collect();
+        for factory in self.factories() {
+            if !namespaces.contains_key(factory.id()) {
+                let result = match &native_config {
+                    Err(refusal) => Err(PluginError::from(refusal.clone())),
+                    Ok(config) => {
+                        factory
+                            .initialize_state(&request.owner, config)
+                            .and_then(|values| {
+                                super::state::validate_namespace(&values)?;
+                                Ok(PluginNamespaceState {
+                                    format_version: factory.declaration().format_version,
+                                    generation: 0,
+                                    values,
+                                })
+                            })
+                    }
+                };
+                namespaces.insert(factory.id().into(), result);
+            }
+        }
         PluginTransitionRecord {
             request,
             source: super::state::state_ref(state),
             namespaces,
-            config: preflight.and_then(|()| self.decode_config(config)),
+            config: native_config,
+            publication: None,
         }
     }
 }
@@ -86,6 +126,12 @@ impl PluginSession {
             return Err(PluginStateError::EffectOwnerMismatch.into());
         }
         let (candidate, config) = record.candidate()?;
+        *self.native_view.lock_recover() = Some(PluginNativeView {
+            request: record.request.clone(),
+            source: record.source.clone(),
+            state: candidate.clone(),
+            config: config.clone(),
+        });
         let mut live = self.state.lock_recover();
         live.hydrate_live(&candidate);
         live.source = Some(record.source.clone());
@@ -93,5 +139,91 @@ impl PluginSession {
         self.adopt_plugin_admission(record.request.target.clone());
         self.authority.write_recover().plugin_config.config = Arc::new(config);
         Ok(())
+    }
+}
+
+/// The successful transition and current native values carried by its checkpoint.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginNativeView {
+    pub request: PluginTransitionRequest,
+    pub source: crate::BlobRef,
+    pub state: PluginState,
+    pub config: PluginConfig,
+}
+
+impl PluginNativeView {
+    pub fn encode(&self) -> Result<Arc<[u8]>, PluginError> {
+        rmp_serde::to_vec_named(self)
+            .map(Arc::from)
+            .map_err(|error| PluginError::StoredDataCorrupt {
+                record_kind: "plugin_admission".into(),
+                message: error.to_string(),
+            })
+    }
+    pub fn decode(bytes: &[u8]) -> Result<Self, PluginError> {
+        rmp_serde::from_slice(bytes).map_err(|error| PluginError::StoredDataCorrupt {
+            record_kind: "plugin_admission".into(),
+            message: error.to_string(),
+        })
+    }
+}
+
+impl PluginSession {
+    pub fn adopt_native_view(&self, bytes: &[u8]) -> Result<(), PluginError> {
+        let view = PluginNativeView::decode(bytes)?;
+        if view.request.owner != self.owner {
+            return Err(PluginStateError::EffectOwnerMismatch.into());
+        }
+        for admitted in view.request.target.plugins() {
+            if !view.state.plugins.contains_key(&admitted.plugin) {
+                return Err(PluginError::StoredDataCorrupt {
+                    record_kind: "plugin_admission".into(),
+                    message: format!(
+                        "admitted plugin `{}` has no recorded namespace",
+                        admitted.plugin
+                    ),
+                });
+            }
+        }
+        self.host
+            .validate_native_formats(&view.state, &view.config)?;
+        self.state.lock_recover().hydrate_live(&view.state);
+        self.adopt_plugin_admission(view.request.target.clone());
+        self.authority.write_recover().plugin_config.config = Arc::new(view.config.clone());
+        *self.native_view.lock_recover() = Some(view);
+        Ok(())
+    }
+
+    pub fn native_view(&self) -> Result<Option<Arc<[u8]>>, PluginError> {
+        if !self.host.export_plugin_namespaces {
+            return Ok(None);
+        }
+        self.capture_native_view(None)
+    }
+
+    pub(super) fn capture_native_view(
+        &self,
+        config: Option<&PluginConfig>,
+    ) -> Result<Option<Arc<[u8]>>, PluginError> {
+        let Some(mut view) = self.native_view.lock_recover().clone() else {
+            return Ok(None);
+        };
+        view.state = self.capture_state();
+        if let Some(config) = config {
+            if self
+                .host
+                .validate_native_formats(&view.state, config)
+                .is_ok()
+            {
+                view.config = config.clone();
+            } else {
+                let writers = view.request.target.writers();
+                if self.host.encode_config(&view.config, &writers)? != *config {
+                    self.host.validate_native_formats(&view.state, config)?;
+                }
+            }
+        }
+        view.encode().map(Some)
     }
 }

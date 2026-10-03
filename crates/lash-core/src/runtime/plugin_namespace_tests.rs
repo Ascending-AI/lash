@@ -4,6 +4,134 @@ use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 #[tokio::test]
+async fn runtime_open_defers_capabilities_until_recorded_publication() {
+    #[derive(Clone)]
+    struct ConstructionProbe(Arc<std::sync::atomic::AtomicUsize>);
+    impl crate::PluginFactory for ConstructionProbe {
+        fn id(&self) -> &'static str {
+            "construction-probe"
+        }
+        fn declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(crate::PluginFactory::id(self))
+        }
+        fn build(
+            &self,
+            _: &crate::PluginSessionContext,
+        ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Arc::new(self.clone()))
+        }
+    }
+    impl crate::SessionPlugin for ConstructionProbe {
+        fn id(&self) -> &'static str {
+            "construction-probe"
+        }
+        fn register(&self, _: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        fn session_ready(
+            &self,
+            _: crate::plugin::SessionReadyContext,
+        ) -> Result<(), crate::PluginError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut factories = crate::testing::test_standard_protocol_factories();
+    factories.push(Arc::new(ConstructionProbe(calls.clone())));
+    let core = crate::RuntimeHostConfig::new(
+        crate::testing::sqlite_memory_store_backend().await,
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
+    let current_factories = factories.clone();
+    let runtime = crate::runtime::EmbeddedRuntimeBuilder::new(
+        core.clone(),
+        crate::testing::runtime_lease_owner(),
+    )
+    .with_session_id("deferred-construction")
+    .with_policy(crate::testing::mock_session_policy())
+    .with_plugin_factories(factories)
+    .build()
+    .await
+    .unwrap();
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(runtime.session.is_none());
+    drop(runtime);
+
+    let old_host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
+    let id = crate::SessionId::from("deferred-cold-composition");
+    let request = crate::plugin::PluginTransitionRequest {
+        id: crate::plugin::PluginTransitionId(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn(&id, "old-run"),
+                "plugin-transition",
+            )
+            .unwrap(),
+        ),
+        owner: crate::RuntimeOwner::Session(id.clone()),
+        base: crate::plugin::PluginTransitionBase::Session {
+            head: crate::store::SessionHeadRef {
+                generation: 0,
+                revision: 0,
+                leaf: None,
+                checkpoint: None,
+            },
+        },
+        target: crate::store::plugin_writers::PluginAdmission::from_plugins(
+            old_host
+                .factories()
+                .iter()
+                .map(|factory| {
+                    let declaration = factory.declaration();
+                    crate::store::plugin_writers::AdmittedPlugin {
+                        plugin: factory.id().into(),
+                        behavior_revision: declaration.behavior_revision,
+                        writer: declaration.format_version,
+                    }
+                })
+                .collect(),
+        ),
+    };
+    let record = old_host.transition_plugins(request, &Default::default(), &Default::default());
+    let (native_state, native_config) = record.candidate().unwrap();
+    let view = crate::plugin::PluginNativeView {
+        request: record.request,
+        source: record.source,
+        state: native_state.clone(),
+        config: native_config.clone(),
+    };
+    let mut state = crate::RuntimeSessionState::new(crate::testing::mock_session_policy());
+    state.session_id = id;
+    state.set_plugin_state(Some(native_state));
+    state.authority.plugin_config = native_config;
+    state.set_plugin_admission_snapshot(view.encode().unwrap());
+    let runtime =
+        crate::runtime::EmbeddedRuntimeBuilder::new(core, crate::testing::runtime_lease_owner())
+            .with_initial_state(state)
+            .with_plugin_factories(current_factories)
+            .build()
+            .await
+            .unwrap();
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "a changed composition waits for the engine's recorded transition"
+    );
+    assert!(runtime.session.is_none());
+    assert!(
+        !runtime
+            .services
+            .plugins
+            .export_state()
+            .plugins
+            .contains_key("construction-probe")
+    );
+}
+
+#[tokio::test]
 async fn plugin_context_host_exports_cannot_escape_namespaces() {
     #[derive(Clone)]
     struct Fixture {
@@ -17,6 +145,17 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
 
         fn declaration(&self) -> crate::plugin::PluginDeclaration {
             crate::plugin::PluginDeclaration::initial(crate::plugin::PluginFactory::id(self))
+        }
+        fn initialize_state(
+            &self,
+            _: &crate::RuntimeOwner,
+            _: &crate::PluginConfig,
+        ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, crate::PluginError>
+        {
+            Ok(std::collections::BTreeMap::from([(
+                self.id.into(),
+                serde_json::json!(self.id),
+            )]))
         }
         fn build(
             &self,
@@ -34,7 +173,6 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             reg: &mut crate::plugin::PluginRegistrar,
         ) -> Result<(), crate::PluginError> {
             let state = reg.state();
-            state.set(self.id, serde_json::json!(self.id))?;
             let hosts = self.hosts.clone();
             reg.turn().before(Arc::new(move |ctx| {
                 let hosts = hosts.clone();
@@ -124,11 +262,52 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     ]);
     let host = crate::PluginHost::new(factories);
     let parent = host
-        .build_session(PluginSessionRequest::creation(
+        .defer_session(PluginSessionRequest::creation(
             "private-parent",
             Default::default(),
         ))
         .unwrap();
+    let transition = |id: &str, state: &crate::PluginState| {
+        host.transition_plugins(
+            crate::plugin::PluginTransitionRequest {
+                id: crate::plugin::PluginTransitionId(
+                    crate::EffectAddress::new(
+                        crate::ExecutionScope::turn(crate::SessionId::fixture(id), "run"),
+                        "plugin-transition",
+                    )
+                    .unwrap(),
+                ),
+                owner: crate::RuntimeOwner::Session(crate::SessionId::fixture(id)),
+                base: crate::plugin::PluginTransitionBase::Session {
+                    head: crate::store::SessionHeadRef {
+                        generation: 0,
+                        revision: 0,
+                        leaf: None,
+                        checkpoint: None,
+                    },
+                },
+                target: crate::store::plugin_writers::PluginAdmission::from_plugins(
+                    host.factories()
+                        .iter()
+                        .map(|factory| {
+                            let declaration = factory.declaration();
+                            crate::store::plugin_writers::AdmittedPlugin {
+                                plugin: factory.id().into(),
+                                behavior_revision: declaration.behavior_revision,
+                                writer: declaration.format_version,
+                            }
+                        })
+                        .collect(),
+                ),
+            },
+            state,
+            &Default::default(),
+        )
+    };
+    parent
+        .adopt_plugin_transition(&transition("private-parent", &parent.export_state()))
+        .unwrap();
+    parent.materialize().unwrap();
     assert!(
         parent.export_state().plugins["neighbor-secret-key"]
             .values
@@ -141,6 +320,11 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     let child = restricted
         .fork_for_session("private-child", Default::default())
         .unwrap();
+    let owned_child = host.session(&SessionId::from("private-child")).unwrap();
+    owned_child
+        .adopt_plugin_transition(&transition("private-child", &owned_child.export_state()))
+        .unwrap();
+    assert!(child.native_view().unwrap().is_none());
     assert!(child.export_state().plugins.is_empty());
     assert!(
         host.session(&SessionId::from("private-child"))

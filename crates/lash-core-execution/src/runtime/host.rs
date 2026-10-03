@@ -10,6 +10,54 @@ use super::{
     SessionWorkEngine, TerminationPolicy,
 };
 
+struct BackendWaitReceipts {
+    stores: Arc<dyn crate::StoreSet>,
+    store: std::sync::OnceLock<Arc<dyn crate::store::WaitReceiptStore>>,
+}
+
+impl BackendWaitReceipts {
+    fn new(backend: &crate::Backend) -> Self {
+        Self {
+            stores: backend.stores(),
+            store: std::sync::OnceLock::new(),
+        }
+    }
+
+    fn store(&self) -> &Arc<dyn crate::store::WaitReceiptStore> {
+        self.store
+            .get_or_init(|| self.stores.session_store_factory())
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::store::WaitReceiptStore for BackendWaitReceipts {
+    async fn record_wait_request(
+        &self,
+        request: &crate::store::WaitRequestReceipt,
+    ) -> Result<crate::store::StoreTransition<crate::store::WaitRequestReceipt>, crate::StoreError>
+    {
+        self.store().record_wait_request(request).await
+    }
+
+    async fn record_wait_resolution(
+        &self,
+        resolution: &crate::store::WaitResolutionReceipt,
+    ) -> Result<crate::store::StoreTransition<crate::store::WaitResolutionReceipt>, crate::StoreError>
+    {
+        self.store().record_wait_resolution(resolution).await
+    }
+
+    async fn retire_wait_receipts(
+        &self,
+        owner_key: &str,
+        retired_at_ms: u64,
+    ) -> Result<(), crate::StoreError> {
+        self.store()
+            .retire_wait_receipts(owner_key, retired_at_ms)
+            .await
+    }
+}
+
 /// Required host configuration for all runtimes.
 ///
 /// A config is built over exactly one [`Backend`](crate::Backend) (ADR 0102,
@@ -229,7 +277,7 @@ impl RuntimeHostConfig {
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
             },
             tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock))
-                .with_wait_receipts(backend.session_store_factory()),
+                .with_wait_receipts(Arc::new(BackendWaitReceipts::new(&backend))),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             clock,
         }
@@ -265,7 +313,7 @@ impl RuntimeHostConfig {
             .with_artifact_ports(ArtifactReferrerPorts::of_backend(&backend));
         config.tracing = config
             .tracing
-            .with_wait_receipts(backend.session_store_factory());
+            .with_wait_receipts(Arc::new(BackendWaitReceipts::new(&backend)));
         Self { backend, ..config }
     }
 

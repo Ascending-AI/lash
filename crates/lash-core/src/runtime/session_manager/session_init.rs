@@ -202,7 +202,7 @@ pub(in crate::runtime::session_manager) struct StarterFacts<'a> {
     pub(in crate::runtime::session_manager) policy: &'a SessionPolicy,
     pub(in crate::runtime::session_manager) plugin_config: crate::AdmittedPluginConfig,
     pub(in crate::runtime::session_manager) plugin_host: &'a crate::PluginHost,
-    pub(in crate::runtime::session_manager) protocol_plugin_id: &'a str,
+    pub(in crate::runtime::session_manager) protocol_plugin_id: Option<&'a str>,
     /// The plugin admission the starter runs under (FIG-4747): a session it
     /// creates records its namespaces in the same formats. Empty when the
     /// starter adopted none, and each plugin then writes its native format.
@@ -219,7 +219,7 @@ impl<'a> StarterFacts<'a> {
             policy: &current.policy,
             plugin_config: current.plugins.admitted_plugin_config(),
             plugin_host: current.plugins.host(),
-            protocol_plugin_id: current.plugins.protocol_plugin_id(),
+            protocol_plugin_id: current.plugins.host().protocol_plugin_id(),
             plugin_admission: current.plugins.plugin_admission().unwrap_or_default(),
             models: current.host.core.providers.models.as_ref(),
         }
@@ -300,7 +300,7 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
     let plugin_config = starter
         .plugin_host
         .resolve_creation_plugin_config(
-            Some(starter.protocol_plugin_id),
+            starter.protocol_plugin_id,
             &request.plugin_options,
             is_child.then_some(starter.plugin_config.config.as_ref()),
             !is_child,
@@ -340,7 +340,7 @@ pub(in crate::runtime::session_manager) fn admit_session_turn_child(
         policy: &environment.policy,
         plugin_config: environment.plugin_config.clone(),
         plugin_host: current.plugins.host(),
-        protocol_plugin_id: current.plugins.protocol_plugin_id(),
+        protocol_plugin_id: current.plugins.host().protocol_plugin_id(),
         plugin_admission: current.plugins.plugin_admission().unwrap_or_default(),
         models: current.host.core.providers.models.as_ref(),
     };
@@ -389,6 +389,7 @@ fn build_runtime_state(
     base.checkpoint_components.complete_for_new_session()?;
     // The child captures its own live namespaces at its first boundary.
     base.set_plugin_state(None);
+    base.clear_plugin_admission_snapshot();
     base.policy = policy.clone();
     base.authority.tool_access = request.tool_access.clone();
     base.authority.subagent = request.subagent.clone();
@@ -423,6 +424,7 @@ async fn materialize_session_init(
         // refusal at creation apply to a forked child exactly as they do to a
         // reopening session (FIG-3367).
         initial_state.set_tool_state_snapshot(Some(init.tool_state.clone()));
+        initial_state.set_plugin_state(Some(init.plugin_state.clone()));
     }
     let store_binding = bind_session_store(current, plan).await?;
     // Session creation routes through the same assembler as live open and
@@ -440,7 +442,10 @@ async fn materialize_session_init(
         ),
     )
     .await
-    .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+    .map_err(|err| match err {
+        crate::SessionError::Plugin(error) => error,
+        error => crate::PluginError::Session(error.to_string()),
+    })?;
 
     Ok(MaterializedSession {
         runtime,
@@ -460,7 +465,7 @@ fn build_session_plugins<'a>(
 > {
     match &plan.protocol_request.plugin_source {
         crate::SessionPluginSource::CurrentHostFresh => Ok((
-            current.plugins.host().build_session(PluginSessionRequest {
+            current.plugins.host().defer_session(PluginSessionRequest {
                 parent_session_id: plan.relation.parent_session_id().map(SessionId::from),
                 ..PluginSessionRequest::creation(&plan.session_id, plan.plugin_config.clone())
             })?,
@@ -471,7 +476,7 @@ fn build_session_plugins<'a>(
         // request — on a process worker that session is a synthetic runtime
         // carrying fresh host plugins, not the real parent.
         crate::SessionPluginSource::ParentFork(init) => {
-            let session = current.plugins.host().build_session(PluginSessionRequest {
+            let session = current.plugins.host().defer_session(PluginSessionRequest {
                 parent_session_id: plan.relation.parent_session_id().map(SessionId::from),
                 tool_catalog_overlay: init.tool_catalog_overlay.clone(),
                 tool_snapshot: Some(init.tool_state.clone()),
@@ -881,11 +886,11 @@ async fn reopen_committed_session(
     };
     let plugin_host = current.plugins.host();
     let plugins = match state.plugin_state() {
-        Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
+        Some(snapshot) => plugin_host.defer_session(PluginSessionRequest {
             parent_session_id: parent_session_id.clone(),
             ..PluginSessionRequest::rematerialization(state.session_id.clone(), snapshot, authority)
         }),
-        None => plugin_host.build_session(PluginSessionRequest {
+        None => plugin_host.defer_session(PluginSessionRequest {
             parent_session_id: parent_session_id.clone(),
             ..PluginSessionRequest::creation(state.session_id.clone(), authority)
         }),
@@ -1602,7 +1607,7 @@ mod tests {
                 policy,
                 plugin_config: crate::AdmittedPluginConfig::default(),
                 plugin_host: &plugin_host,
-                protocol_plugin_id: "test_protocol",
+                protocol_plugin_id: Some("test_protocol"),
                 plugin_admission: crate::store::plugin_writers::PluginAdmission::default(),
                 models: models.as_ref(),
             },

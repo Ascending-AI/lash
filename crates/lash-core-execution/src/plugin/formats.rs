@@ -40,6 +40,38 @@ impl PluginHost {
         Ok(())
     }
 
+    pub(super) fn validate_native_formats(
+        &self,
+        state: &PluginState,
+        config: &PluginConfig,
+    ) -> Result<(), FormatRefusal> {
+        for factory in self.factories() {
+            let native = factory.declaration().format_version;
+            for (namespace, stored) in [
+                (
+                    FormatNamespace::State,
+                    state.plugins.get(factory.id()).map(|ns| ns.format_version),
+                ),
+                (
+                    FormatNamespace::Config,
+                    config.namespace(factory.id()).map(|ns| ns.format_version),
+                ),
+            ] {
+                if let Some(stored) = stored
+                    && stored != native
+                {
+                    return Err(FormatRefusal {
+                        plugin: factory.id().into(),
+                        namespace,
+                        stored,
+                        readable: native,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Decode every active namespace before materialization. Inactive namespaces
     /// retain their original format and values.
     pub fn decode_state(&self, state: &PluginState) -> Result<PluginState, PluginError> {

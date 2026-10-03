@@ -1,7 +1,32 @@
 //! Accepted plugin-state mutations journaled with their callback outcome.
 use super::*;
 use crate::{RuntimeEffectControllerError, RuntimeEffectKind, RuntimeEffectOutcome};
+use std::cell::Cell;
 use std::future::Future;
+
+thread_local! {
+    static READ_ONLY_CONSTRUCTION: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(in crate::plugin) struct ReadOnlyConstruction {
+    previous: bool,
+    thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl ReadOnlyConstruction {
+    pub(in crate::plugin) fn enter() -> Self {
+        Self {
+            previous: READ_ONLY_CONSTRUCTION.with(|scope| scope.replace(true)),
+            thread: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for ReadOnlyConstruction {
+    fn drop(&mut self) {
+        READ_ONLY_CONSTRUCTION.with(|scope| scope.set(self.previous));
+    }
+}
 
 /// The state accepted by one recorded effect, in accepted batch order.
 ///
@@ -33,6 +58,23 @@ struct Capture {
 
 tokio::task_local! {
     static ACCEPTED: Arc<Mutex<Capture>>;
+}
+
+pub(super) fn require_scope(
+    state: &Arc<Mutex<PluginStateRegistry>>,
+    plugin: &str,
+) -> Result<(), PluginStateError> {
+    let admitted = !READ_ONLY_CONSTRUCTION.with(Cell::get)
+        && ACCEPTED
+            .try_with(|capture| Arc::ptr_eq(&capture.lock_recover().state, state))
+            .unwrap_or(false);
+    if admitted {
+        Ok(())
+    } else {
+        Err(PluginStateError::WriteScopeRequired {
+            plugin: plugin.into(),
+        })
+    }
 }
 
 pub(super) fn record_accepted(
@@ -203,4 +245,22 @@ impl crate::PluginSession {
         live.applied_effects.insert(state.address);
         *result
     }
+}
+
+#[cfg(test)]
+pub(super) fn test_scope<T>(store: &PluginStateStore, body: impl FnOnce() -> T) -> T {
+    let capture = Arc::new(Mutex::new(Capture {
+        state: Arc::clone(&store.state),
+        before: Vec::new(),
+        record: PluginStateEffect {
+            owner: store.owner().clone(),
+            address: crate::EffectAddress::new(
+                crate::ExecutionScope::turn("fixture", "run"),
+                "unit-callback",
+            )
+            .expect("valid unit callback address"),
+            mutations: Vec::new(),
+        },
+    }));
+    ACCEPTED.sync_scope(capture, body)
 }

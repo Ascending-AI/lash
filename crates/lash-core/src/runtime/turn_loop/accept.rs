@@ -114,11 +114,7 @@ impl LashRuntime {
             &mut input,
             opts.scoped_effect_controller().execution_scope(),
         );
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
+        let Some(store) = self.services.store.clone() else {
             let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
             return Box::pin(self.execute_logical_turn(
                 LogicalTurnStart::Input(input),

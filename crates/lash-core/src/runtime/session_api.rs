@@ -69,9 +69,6 @@ impl LashRuntime {
                 self.state.set_tool_state_snapshot(Some(snapshot));
             }
             self.state.capture_plugin_states(session.plugins())?;
-        } else {
-            self.state.set_tool_state_snapshot(None);
-            self.state.set_plugin_state(None);
         }
         Ok(())
     }
@@ -91,14 +88,8 @@ impl LashRuntime {
     ///   (FIG-2415, FIG-2987).
     pub(in crate::runtime) fn install_resident_state(
         &mut self,
-        mut state: crate::RuntimeSessionState,
+        state: crate::RuntimeSessionState,
     ) -> Result<(), crate::FormatRefusal> {
-        if let Some(session) = &self.session {
-            state.authority.plugin_config = session
-                .plugins()
-                .host()
-                .decode_config(&state.authority.plugin_config)?;
-        }
         self.state = state;
         self.reapply_tool_state_preservation_marker();
         self.publish_resident_authority()
@@ -120,7 +111,7 @@ impl LashRuntime {
             session
                 .plugins()
                 .host()
-                .decode_config(&resolved.config().plugin_config)?;
+                .validate_config_formats(&resolved.config().plugin_config)?;
         }
         self.state.install_run_view(resolved);
         self.publish_resident_authority()
@@ -162,10 +153,6 @@ impl LashRuntime {
         let Some(session) = self.session.as_ref() else {
             return Ok(());
         };
-        self.state.authority.plugin_config = session
-            .plugins()
-            .host()
-            .decode_config(&self.state.authority.plugin_config)?;
         session
             .plugins()
             .publish_plugin_config(self.state.admitted_plugin_config())?;
@@ -275,11 +262,7 @@ impl LashRuntime {
     }
 
     pub async fn refresh_session_graph_from_store(&mut self) -> Result<(), SessionError> {
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
+        let Some(store) = self.services.store.clone() else {
             self.resident_session.mark_graph_head_current();
             return Ok(());
         };
@@ -356,11 +339,7 @@ impl LashRuntime {
         &mut self,
         base: &crate::store::SessionHeadRef,
     ) -> Result<(), SessionError> {
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
+        let Some(store) = self.services.store.clone() else {
             return Ok(());
         };
         if self.state.head_revision == base.revision
@@ -442,19 +421,20 @@ impl LashRuntime {
     /// Callers box this future: the restore is large, and every refresh and
     /// admitted-head adoption would otherwise inline it into the turn's stack
     /// (a 2 MiB tokio worker overflowed in lash-perf without the box).
-    async fn adopt_resident_state(
+    pub(in crate::runtime) async fn adopt_resident_state(
         &mut self,
         mut adopted: crate::RuntimeSessionState,
     ) -> Result<(), SessionError> {
+        if self.session.is_none() {
+            self.install_resident_state(adopted)?;
+            return Ok(());
+        }
         let tracing = self.host.core.tracing.clone();
         let tool_restore =
             Box::pin(self.restore_resident_session_components(&mut adopted, &tracing))
                 .await
                 .map_err(|(_stage, error)| {
-                    if matches!(
-                        error.cause.as_ref(),
-                        Some(crate::RuntimeErrorCause::PluginFormat { .. })
-                    ) {
+                    if error.cause.is_some() {
                         SessionError::Plugin(crate::PluginError::Runtime(error))
                     } else {
                         SessionError::Protocol(format!(
@@ -698,11 +678,7 @@ impl LashRuntime {
         }
         let source_key = command.source_key(&idempotency_key);
         let session_id = self.state.session_id.clone();
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
+        let Some(store) = self.services.store.clone() else {
             let receipt = crate::SessionCommandReceipt {
                 session_id,
                 batch_id: crate::BatchId::prefixed("inline-command:", uuid::Uuid::new_v4()),
@@ -1230,11 +1206,7 @@ impl LashRuntime {
                 }
             }
         }
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
+        let Some(store) = self.services.store.clone() else {
             return Ok(true);
         };
         let Some((completion, shift_fence)) = applied else {

@@ -178,7 +178,13 @@ impl PluginDispatchContext<'_> {
         clock: &dyn crate::Clock,
     ) -> Result<TurnFinalization, PluginError> {
         let session_id = turn.state.session_id.clone();
-        let directives = if self.session.contributions.after_turn_hooks.is_empty() {
+        let directives = if self
+            .session
+            .capabilities()
+            .contributions
+            .after_turn_hooks
+            .is_empty()
+        {
             Vec::new()
         } else {
             self.after_turn(TurnResultHookContext {

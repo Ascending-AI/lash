@@ -81,7 +81,7 @@ impl EmbeddedRuntimeBuilder {
     }
 
     pub fn with_plugin_stack(self, stack: PluginStack) -> Self {
-        self.with_plugin_factories(stack.into_factories())
+        self.with_plugin_host(stack.into_host())
     }
 
     pub fn with_trace_sink(mut self, sink: Option<Arc<dyn lash_trace::TraceSink>>) -> Self {
@@ -212,22 +212,29 @@ impl EmbeddedRuntimeBuilder {
     ) -> Result<Arc<PluginSession>, SessionError> {
         match &self.plugin_source {
             PluginSource::Session(session) => Ok(Arc::clone(session)),
-            PluginSource::Host(host) => host
-                .clone()
-                .with_trace_runtime(self.core.tracing.clone())
-                .isolated_registry()
-                .build_session(PluginSessionRequest {
-                    parent_session_id,
-                    ..PluginSessionRequest::creation(
+            PluginSource::Host(host) => {
+                let authority = crate::plugin::SessionAuthorityContext {
+                    tool_access: state.authority.tool_access.clone(),
+                    subagent: state.authority.subagent.clone(),
+                    plugin_config: state.admitted_plugin_config(),
+                };
+                let request = match state.plugin_state() {
+                    Some(snapshot) => PluginSessionRequest::rematerialization(
                         state.session_id.clone(),
-                        crate::plugin::SessionAuthorityContext {
-                            tool_access: state.authority.tool_access.clone(),
-                            subagent: state.authority.subagent.clone(),
-                            plugin_config: state.admitted_plugin_config(),
-                        },
-                    )
-                })
-                .map_err(SessionError::Plugin),
+                        snapshot,
+                        authority,
+                    ),
+                    None => PluginSessionRequest::creation(state.session_id.clone(), authority),
+                };
+                host.clone()
+                    .with_trace_runtime(self.core.tracing.clone())
+                    .isolated_registry()
+                    .defer_session(PluginSessionRequest {
+                        parent_session_id,
+                        ..request
+                    })
+                    .map_err(SessionError::Plugin)
+            }
         }
     }
 
@@ -242,9 +249,6 @@ impl EmbeddedRuntimeBuilder {
             super::lifecycle::recorded_parent_session_id(self.store.as_ref()).await?;
         let is_root_session = parent_session_id.is_none();
         let plugins = self.resolve_plugins(&state, parent_session_id)?;
-        state.authority.plugin_config = plugins
-            .host()
-            .decode_config(&state.authority.plugin_config)?;
         if created {
             // A new session records what every installed owner resolves for
             // it, under the protocol its plugins registered (FIG-4379).
@@ -261,7 +265,7 @@ impl EmbeddedRuntimeBuilder {
                 None => crate::store::plugin_writers::PluginAdmission::default(),
             };
             state.authority.plugin_config = plugins.host().resolve_creation_plugin_config(
-                Some(plugins.protocol_plugin_id()),
+                plugins.host().protocol_plugin_id(),
                 &crate::PluginOptions::default(),
                 None,
                 is_root_session,

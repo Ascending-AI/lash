@@ -43,6 +43,7 @@ pub(crate) enum AcceptedExecutionRetention {
 }
 
 mod checkpoint_component;
+mod plugin_admission;
 mod plugin_source;
 use checkpoint_component::{
     PendingCheckpointComponentBody, ResidentCheckpointComponent, ResidentCheckpointComponentBody,
@@ -1135,7 +1136,12 @@ impl RuntimeSessionState {
         &mut self,
         plugins: &dyn SessionPluginStateSource,
     ) -> Result<(), crate::RuntimeError> {
-        self.refresh_plugin_states_with(plugins, |source| source.capture_plugin_state())
+        let native = plugins.capture_plugin_admission(&self.authority.plugin_config)?;
+        self.refresh_plugin_states_with(plugins, |source| source.capture_plugin_state())?;
+        if let Some(bytes) = native {
+            self.set_plugin_admission_snapshot(bytes);
+        }
+        Ok(())
     }
 
     fn refresh_plugin_states_with(

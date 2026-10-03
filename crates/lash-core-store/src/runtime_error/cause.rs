@@ -18,6 +18,10 @@ pub enum RuntimeErrorCause {
     MaterialRefused {
         refusal: Box<crate::tool_run::MaterialRefusal>,
     },
+    /// A retained state handle attempted a write outside an admitted callback.
+    PluginStateWriteScopeRequired {
+        plugin: String,
+    },
     /// A recorded callback's accepted state belongs to another owner.
     PluginStateEffectOwnerMismatch,
     /// Replay cannot install an accepted batch over a different namespace.

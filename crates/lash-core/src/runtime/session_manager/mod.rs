@@ -384,6 +384,9 @@ impl ProcessCapability {
 }
 
 impl RuntimeSessionServices {
+    pub(in crate::runtime) fn plugins(&self) -> &Arc<crate::PluginSession> {
+        &self.current.plugins
+    }
     /// Adopt `admission` as the plugin admission the owner's plugins write
     /// under (FIG-4747).
     pub(in crate::runtime) fn adopt_plugin_admission(
@@ -568,15 +571,10 @@ impl RuntimeSessionServices {
         turn_graph_appends: Option<&TurnGraphAppendDraft>,
         held_shift_fence: Option<&ShiftFence>,
     ) -> Result<Self, PluginOperationInvokeError> {
-        let Some(session) = runtime.session.as_ref() else {
-            return Err(PluginOperationInvokeError::Unknown(
-                "session_manager".to_string(),
-            ));
-        };
         Ok(Self {
             current: CurrentOwnerCapability::new(
                 runtime,
-                Arc::clone(session.plugins()),
+                Arc::clone(&runtime.services.plugins),
                 turn_graph_appends,
                 held_shift_fence,
             ),

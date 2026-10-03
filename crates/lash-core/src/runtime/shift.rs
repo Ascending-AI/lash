@@ -48,6 +48,7 @@ mod interval;
 mod lanes;
 mod parent_end_relay;
 mod park;
+mod plugin_transition;
 mod reconcile;
 pub mod relay;
 mod relays;
@@ -1312,15 +1313,12 @@ impl LashRuntime {
     }
 
     fn shift_store(&self) -> Result<crate::store::SessionStore, ShiftAbort> {
-        self.session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .ok_or_else(|| {
-                ShiftAbort::Refused(RuntimeError::new(
-                    RuntimeErrorCode::QueuedWork,
-                    "a session shift requires a durable session store",
-                ))
-            })
+        self.services.store.clone().ok_or_else(|| {
+            ShiftAbort::Refused(RuntimeError::new(
+                RuntimeErrorCode::QueuedWork,
+                "a session shift requires a durable session store",
+            ))
+        })
     }
 }
 

@@ -191,22 +191,21 @@ pub(super) struct LiveSessionAuthority {
 #[derive(Clone)]
 pub struct PluginSession {
     pub(super) state: Arc<std::sync::Mutex<PluginStateRegistry>>,
+    pub(super) native_view: Arc<std::sync::Mutex<Option<PluginNativeView>>>,
     pub(super) host: PluginHost,
     pub(super) owner: crate::RuntimeOwner,
-    pub(super) plugins: Vec<Arc<dyn SessionPlugin>>,
-    pub(super) tools: Arc<dyn ToolProvider>,
-    pub(super) tool_registry: Arc<crate::ToolRegistry>,
+    pub(super) capabilities: Arc<std::sync::OnceLock<PluginSessionCapabilities>>,
+    pub(super) materialized: Arc<std::sync::atomic::AtomicBool>,
+    pub(super) materialization_lock: Arc<std::sync::Mutex<()>>,
+    pub(super) parent_session_id: Option<SessionId>,
+    pub(super) materialization: PluginSessionMaterialization,
+    pub(super) tool_snapshot: Option<crate::ToolState>,
     pub(super) tool_catalog_overlay: ToolCatalogContribution,
     pub(super) authority: Arc<std::sync::RwLock<LiveSessionAuthority>>,
     pub(super) extensions: PluginExtensions,
-    /// Extensions contributed by this session's plugins. Distinct from
-    /// `extensions` (the host-static contributions every session inherits).
-    pub(super) session_extensions: PluginExtensions,
-    pub(super) triggers: crate::TriggerEventCatalog,
-    pub(super) contributions: PluginContributions,
     /// Whether a plugin kept its state store past registration or
-    /// `session_ready`: such a plugin can read and mutate session state at
-    /// any time (FIG-3712).
+    /// `session_ready`: such a plugin can read state and write it in an
+    /// engine-owned callback scope (FIG-3712).
     pub(super) retains_state: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the session's plugins were seeded from a parent session's
     /// capture rather than built fresh or rematerialized from their own.
@@ -218,6 +217,35 @@ pub struct PluginSession {
     pub(super) admission:
         Arc<std::sync::Mutex<Option<crate::store::plugin_writers::PluginAdmission>>>,
 }
+pub(super) struct PluginSessionCapabilities {
+    pub(super) plugins: Vec<Arc<dyn SessionPlugin>>,
+    pub(super) tools: Arc<dyn ToolProvider>,
+    pub(super) tool_registry: Arc<crate::ToolRegistry>,
+    pub(super) session_extensions: PluginExtensions,
+    pub(super) triggers: crate::TriggerEventCatalog,
+    pub(super) contributions: PluginContributions,
+}
+
+impl PluginSession {
+    pub fn materialize(self: &Arc<Self>) -> Result<(), PluginError> {
+        self.host.materialize_session(self)
+    }
+
+    pub fn is_materialized(&self) -> bool {
+        self.materialized.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the engine publishes admission before invoking capabilities"
+    )]
+    pub(super) fn capabilities(&self) -> &PluginSessionCapabilities {
+        self.capabilities
+            .get()
+            .expect("plugin capabilities require published admission")
+    }
+}
+
 /// A plugin dispatch bound to its already-resolved turn instrumentation.
 ///
 /// Explicitly unstable internal instrumentation. See
@@ -235,7 +263,7 @@ impl PluginDispatchContext<'_> {
     ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
         self.session.validate_recorded_admission()?;
         collect_owned_async(
-            &self.session.contributions.before_turn_hooks,
+            &self.session.capabilities().contributions.before_turn_hooks,
             ctx,
             "before_turn",
             self.phase_probe,
@@ -250,7 +278,7 @@ impl PluginDispatchContext<'_> {
     ) -> Result<Vec<PluginOwned<AfterTurnPluginDirective>>, PluginError> {
         self.session.validate_recorded_admission()?;
         collect_owned_async(
-            &self.session.contributions.after_turn_hooks,
+            &self.session.capabilities().contributions.after_turn_hooks,
             ctx,
             "after_turn",
             self.phase_probe,
@@ -265,6 +293,7 @@ impl PluginDispatchContext<'_> {
         let mut pending = FuturesUnordered::new();
         for (ordinal, registered) in self
             .session
+            .capabilities()
             .contributions
             .runtime_event_hooks
             .iter()
@@ -363,7 +392,7 @@ impl PluginSession {
     ) -> Result<PluginRevision, PluginError> {
         let source = source
             .map(str::to_owned)
-            .or_else(|| self.tool_registry.execution_source_id(tool));
+            .or_else(|| self.capabilities().tool_registry.execution_source_id(tool));
         self.host
             .plugin_revisions()
             .into_iter()
@@ -411,6 +440,13 @@ impl PluginSession {
         let Some(writers) = self.recorded_writers() else {
             return Ok(None);
         };
+        if config.namespaces().iter().all(|(id, namespace)| {
+            writers
+                .get(id)
+                .is_none_or(|writer| namespace.format_version == *writer)
+        }) {
+            return Ok(None);
+        }
         let encoded = self.host.encode_config(config, &writers)?;
         Ok((encoded != *config).then_some(encoded))
     }
@@ -423,11 +459,12 @@ impl PluginSession {
     fn is_committed_form(&self, snapshot: &PluginState) -> bool {
         // Written natively, the committed form is the live state itself,
         // which the hydration check already compares.
-        self.recorded_writers().is_some_and(|writers| {
-            self.host
-                .encode_state(&self.capture_state(), &writers)
-                .is_ok_and(|committed| committed == *snapshot)
-        })
+        self.is_materialized()
+            && self.recorded_writers().is_some_and(|writers| {
+                self.host
+                    .encode_state(&self.capture_state(), &writers)
+                    .is_ok_and(|committed| committed == *snapshot)
+            })
     }
     /// Who this plugin session was built for.
     pub fn owner(&self) -> &crate::RuntimeOwner {
@@ -455,9 +492,9 @@ impl PluginSession {
     /// recorded one, or the head's — to this session's hooks.
     pub fn publish_plugin_config(
         &self,
-        mut plugin_config: super::AdmittedPluginConfig,
+        plugin_config: super::AdmittedPluginConfig,
     ) -> Result<(), super::FormatRefusal> {
-        plugin_config.config = Arc::new(self.host.decode_config(&plugin_config.config)?);
+        self.host.validate_config_formats(&plugin_config.config)?;
         self.authority.write_recover().plugin_config = plugin_config;
         Ok(())
     }
@@ -508,11 +545,11 @@ impl PluginSession {
     /// Extensions contributed by this session's plugins, distinct from the
     /// host-static extensions in [`Self::extensions`].
     pub fn session_extensions(&self) -> &PluginExtensions {
-        &self.session_extensions
+        &self.capabilities().session_extensions
     }
 
     pub fn triggers(&self) -> &crate::TriggerEventCatalog {
-        &self.triggers
+        &self.capabilities().triggers
     }
 
     pub fn host(&self) -> &PluginHost {
@@ -520,11 +557,11 @@ impl PluginSession {
     }
 
     pub fn tools(&self) -> Arc<dyn ToolProvider> {
-        Arc::clone(&self.tools)
+        Arc::clone(&self.capabilities().tools)
     }
 
     pub fn tool_registry(&self) -> Arc<crate::ToolRegistry> {
-        Arc::clone(&self.tool_registry)
+        Arc::clone(&self.capabilities().tool_registry)
     }
 
     /// The id of the plugin that registered this session's protocol: the
@@ -536,6 +573,7 @@ impl PluginSession {
     )]
     pub fn protocol_plugin_id(&self) -> &str {
         &self
+            .capabilities()
             .contributions
             .protocol_session
             .as_ref()
@@ -551,6 +589,7 @@ impl PluginSession {
     )]
     pub fn protocol_session(&self) -> &Arc<dyn ProtocolSessionPlugin> {
         &self
+            .capabilities()
             .contributions
             .protocol_session
             .as_ref()
@@ -559,14 +598,16 @@ impl PluginSession {
     }
 
     pub fn code_executor(&self) -> Option<Arc<dyn CodeExecutorPlugin>> {
-        self.contributions
+        self.capabilities()
+            .contributions
             .code_executor
             .as_ref()
             .map(|entry| Arc::clone(&entry.hook))
     }
 
     pub fn assistant_prose_projector(&self) -> Option<Arc<dyn AssistantProseProjectorPlugin>> {
-        self.contributions
+        self.capabilities()
+            .contributions
             .assistant_prose_projector
             .as_ref()
             .map(|entry| Arc::clone(&entry.hook))
@@ -577,7 +618,8 @@ impl PluginSession {
         reason = "session assembly refuses a contribution set without a protocol driver before this object exists"
     )]
     pub fn protocol_driver(&self) -> Arc<dyn ProtocolDriverPlugin> {
-        self.contributions
+        self.capabilities()
+            .contributions
             .protocol_driver
             .as_ref()
             .map(|entry| Arc::clone(&entry.hook))
@@ -585,7 +627,8 @@ impl PluginSession {
     }
 
     pub fn plugin_operations(&self) -> Vec<PluginOperationDef> {
-        self.contributions
+        self.capabilities()
+            .contributions
             .plugin_operations
             .values()
             .map(|op| op.def().clone())
@@ -596,6 +639,7 @@ impl PluginSession {
     pub fn assistant_response_plan(&self) -> crate::runtime::AssistantResponsePlan {
         crate::runtime::AssistantResponsePlan {
             callbacks: self
+                .capabilities()
                 .contributions
                 .assistant_response_hooks
                 .iter()
@@ -605,11 +649,16 @@ impl PluginSession {
     }
 
     pub fn has_assistant_stream_hooks(&self) -> bool {
-        !self.contributions.assistant_stream_hooks.is_empty()
+        !self
+            .capabilities()
+            .contributions
+            .assistant_stream_hooks
+            .is_empty()
     }
 
     pub fn has_assistant_stream_finished_hooks(&self) -> bool {
         !self
+            .capabilities()
             .contributions
             .assistant_stream_finished_hooks
             .is_empty()
@@ -625,7 +674,7 @@ impl PluginSession {
     ) -> Result<crate::session_model::context::PreparedContext, ContextError> {
         self.validate_recorded_admission()?;
         let mut current = input;
-        for (_, registered) in &self.contributions.turn_context_transforms {
+        for (_, registered) in &self.capabilities().contributions.turn_context_transforms {
             let phase_name = plugin_hook_phase_name(
                 "context_transform",
                 registered.identity.owner.plugin.as_str(),
@@ -643,7 +692,11 @@ impl PluginSession {
     }
 
     pub fn has_context_pressure_hooks(&self) -> bool {
-        !self.contributions.context_pressure_hooks.is_empty()
+        !self
+            .capabilities()
+            .contributions
+            .context_pressure_hooks
+            .is_empty()
     }
 
     /// Ask each registered context-pressure hook, in priority order, what the
@@ -657,7 +710,7 @@ impl PluginSession {
     ) -> Result<Vec<DecidedContextPressure>, ContextError> {
         self.validate_recorded_admission()?;
         let mut decided = Vec::new();
-        for (_, registered) in &self.contributions.context_pressure_hooks {
+        for (_, registered) in &self.capabilities().contributions.context_pressure_hooks {
             let phase_name = plugin_hook_phase_name(
                 "context_pressure",
                 registered.identity.owner.plugin.as_str(),
@@ -691,7 +744,7 @@ impl PluginSession {
         ctx: &CompactionContext<'_>,
     ) -> Result<Option<ContextCompaction>, ContextError> {
         self.validate_recorded_admission()?;
-        for (_, registered) in &self.contributions.context_compactors {
+        for (_, registered) in &self.capabilities().contributions.context_compactors {
             if let Some(compaction) = registered.hook.compact(ctx).await?
                 && !compaction.is_empty()
             {
@@ -707,7 +760,13 @@ impl PluginSession {
     ) -> Result<Vec<PluginOwned<BeforeToolCallPluginDirective>>, PluginError> {
         self.validate_recorded_admission()?;
         let mut out = Vec::new();
-        for (index, registered) in self.contributions.before_tool_call_hooks.iter().enumerate() {
+        for (index, registered) in self
+            .capabilities()
+            .contributions
+            .before_tool_call_hooks
+            .iter()
+            .enumerate()
+        {
             let directives = (registered.hook)(ctx.clone()).await?;
             for directive in directives {
                 let replacement_args = directive.replacement_args().cloned();
@@ -717,7 +776,9 @@ impl PluginSession {
                 });
                 if let Some(replacement_args) = replacement_args {
                     ctx.args = replacement_args;
-                    for earlier in &self.contributions.before_tool_call_hooks[..index] {
+                    for earlier in
+                        &self.capabilities().contributions.before_tool_call_hooks[..index]
+                    {
                         let repeated = (earlier.hook)(ctx.clone()).await?;
                         for directive in repeated {
                             if directive.replacement_args().is_some() {
@@ -751,7 +812,13 @@ impl PluginSession {
         self.validate_recorded_admission()?;
         let mut out = Vec::new();
         let mut effective_replacement: Option<ToolOutcome> = None;
-        for (index, registered) in self.contributions.after_tool_call_hooks.iter().enumerate() {
+        for (index, registered) in self
+            .capabilities()
+            .contributions
+            .after_tool_call_hooks
+            .iter()
+            .enumerate()
+        {
             let directives = (registered.hook)(ctx.clone()).await?;
             for directive in directives {
                 let replacement = directive.successful_replacement();
@@ -761,7 +828,8 @@ impl PluginSession {
                 });
                 if let Some(replacement) = replacement {
                     ctx.result = replacement.clone();
-                    for earlier in &self.contributions.after_tool_call_hooks[..index] {
+                    for earlier in &self.capabilities().contributions.after_tool_call_hooks[..index]
+                    {
                         let repeated = (earlier.hook)(ctx.clone()).await?;
                         for directive in repeated {
                             if directive.successful_replacement().is_some() {
@@ -799,7 +867,7 @@ impl PluginSession {
     ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
         self.validate_recorded_admission()?;
         collect_owned_async(
-            &self.contributions.checkpoint_hooks,
+            &self.capabilities().contributions.checkpoint_hooks,
             ctx,
             "checkpoint",
             None,
@@ -816,7 +884,7 @@ impl PluginSession {
         self.validate_recorded_admission()?;
         let mut current = chunk;
         let mut transforms = Vec::new();
-        for registered in &self.contributions.assistant_stream_hooks {
+        for registered in &self.capabilities().contributions.assistant_stream_hooks {
             let transform = (registered.hook)(AssistantStreamHookContext {
                 session_id: session_id.clone(),
                 plugin_config: self.admitted_plugin_config(),
@@ -847,7 +915,8 @@ impl PluginSession {
         plan.callbacks
             .iter()
             .map(|callback| {
-                self.contributions
+                self.capabilities()
+                    .contributions
                     .assistant_response_hooks
                     .iter()
                     .find(|registered| &registered.identity == callback)
@@ -907,6 +976,7 @@ impl PluginSession {
         self.validate_recorded_admission()?;
         let mut states = Vec::new();
         for (index, registered) in self
+            .capabilities()
             .contributions
             .assistant_stream_finished_hooks
             .iter()
@@ -918,11 +988,15 @@ impl PluginSession {
                 reason,
             })
             .await?;
-            let ordinal = self.contributions.assistant_stream_finished_hooks[..index]
+            let ordinal = self
+                .capabilities()
+                .contributions
+                .assistant_stream_finished_hooks[..index]
                 .iter()
                 .filter(|previous| previous.identity.owner == registered.identity.owner)
                 .count();
             let response = self
+                .capabilities()
                 .contributions
                 .assistant_response_hooks
                 .iter()
@@ -973,7 +1047,7 @@ impl PluginSession {
             .map_err(crate::RuntimeEffectControllerError::from)?;
         let mut model_return =
             crate::ModelToolReturn::from_output(ctx.tool_name.clone(), &ctx.output);
-        if let Some(presenter) = &self.contributions.presentation_presenter {
+        if let Some(presenter) = &self.capabilities().contributions.presentation_presenter {
             model_return = (presenter.hook)(ToolPresentationInput {
                 previous: model_return,
                 settlement: Arc::clone(&settlement),
@@ -981,7 +1055,7 @@ impl PluginSession {
             })
             .await?;
         }
-        for registered in &self.contributions.presentation_steps {
+        for registered in &self.capabilities().contributions.presentation_steps {
             let input = ToolPresentationInput {
                 previous: model_return,
                 settlement: Arc::clone(&settlement),
@@ -1023,7 +1097,11 @@ impl PluginSession {
     }
 
     pub fn has_runtime_event_hooks(&self) -> bool {
-        !self.contributions.runtime_event_hooks.is_empty()
+        !self
+            .capabilities()
+            .contributions
+            .runtime_event_hooks
+            .is_empty()
     }
 
     /// Host handles capture every namespace. Plugin-facing handles export none.
@@ -1073,7 +1151,7 @@ impl PluginSession {
         if self.is_committed_form(snapshot) {
             return Ok(());
         }
-        let snapshot = self.host.decode_state(snapshot)?;
+        let snapshot = snapshot.clone();
         if self.state.lock_recover().was_hydrated_from(&snapshot) {
             Ok(())
         } else {
@@ -1088,10 +1166,12 @@ impl PluginSession {
         if self.is_committed_form(snapshot) {
             return Ok(());
         }
-        let snapshot = self.host.decode_state(snapshot)?;
+        self.host
+            .validate_native_formats(snapshot, &self.admitted_plugin_config().config)?;
+        let snapshot = snapshot.clone();
         let mut live = self.state.lock_recover();
         live.hydrate_live(&snapshot);
-        for plugin in &self.plugins {
+        for plugin in &self.capabilities().plugins {
             live.data.plugins.entry(plugin.id().into()).or_default();
         }
         Ok(())
@@ -1105,7 +1185,7 @@ impl PluginSession {
         let snapshot = self.capture_state();
         self.host.build_session(PluginSessionRequest {
             tool_catalog_overlay: self.tool_catalog_overlay.clone(),
-            tool_snapshot: Some(self.tool_registry.export_state()),
+            tool_snapshot: Some(self.capabilities().tool_registry.export_state()),
             materialization: PluginSessionMaterializationRequest::Creation {
                 config,
                 seed_snapshot: Some(&snapshot),
@@ -1126,7 +1206,7 @@ impl PluginSession {
         crate::SessionPluginInit::captured(
             self.capture_state(),
             self.tool_catalog_overlay.clone(),
-            self.tool_registry.export_state(),
+            self.capabilities().tool_registry.export_state(),
         )
     }
 
@@ -1167,7 +1247,13 @@ impl PluginSession {
         default_to_current_session: bool,
         invocation: PluginOperationInvocation,
     ) -> Result<(String, ErasedPluginOperationOutcome), PluginOperationInvokeError> {
-        let Some(operation) = self.contributions.plugin_operations.get(name).cloned() else {
+        let Some(operation) = self
+            .capabilities()
+            .contributions
+            .plugin_operations
+            .get(name)
+            .cloned()
+        else {
             return Err(PluginOperationInvokeError::Unknown(name.to_string()));
         };
         if operation.def().kind() != invocation.kind() {
@@ -1314,6 +1400,14 @@ impl PluginSession {
 }
 
 impl lash_core_store::session_state::SessionPluginStateSource for PluginSession {
+    fn capture_plugin_admission(
+        &self,
+        config: &PluginConfig,
+    ) -> Result<Option<Arc<[u8]>>, crate::RuntimeError> {
+        self.capture_native_view(Some(config))
+            .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
+    }
+
     fn tool_state_generation(&self) -> u64 {
         self.tool_registry().generation()
     }

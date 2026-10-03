@@ -34,6 +34,7 @@ impl RuntimeErrorCause {
             | Self::RunShapeRefused { .. }
             | Self::ConfigRefused { .. }
             | Self::MaxToolCallsExceeded { .. }
+            | Self::PluginStateWriteScopeRequired { .. }
             | Self::PluginStateEffectOwnerMismatch
             | Self::PluginStateEffectReplayMismatch { .. }
             | Self::PluginFormat { .. }

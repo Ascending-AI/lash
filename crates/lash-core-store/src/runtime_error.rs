@@ -1427,6 +1427,7 @@ impl RuntimeError {
             | RuntimeErrorCause::ConfigRefused { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
             | RuntimeErrorCause::StoreRefusal { .. }
+            | RuntimeErrorCause::PluginStateWriteScopeRequired { .. }
             | RuntimeErrorCause::PluginStateEffectOwnerMismatch
             | RuntimeErrorCause::PluginStateEffectReplayMismatch { .. }
             | RuntimeErrorCause::PluginExecution { .. }

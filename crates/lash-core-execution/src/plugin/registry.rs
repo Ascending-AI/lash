@@ -723,6 +723,16 @@ pub trait PluginFactory: Send + Sync {
     /// share a lane with the build it changed. Must be cheap and perform no
     /// I/O; it is read before any session is built.
     fn declaration(&self) -> PluginDeclaration;
+    /// Pure initial values for a namespace absent from the recorded base.
+    /// The engine records this result before any capability is constructed.
+    fn initialize_state(
+        &self,
+        _owner: &crate::RuntimeOwner,
+        _config: &super::PluginConfig,
+    ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, PluginError> {
+        Ok(std::collections::BTreeMap::new())
+    }
+
     /// Pure conversion of this namespace into the factory's native format.
     /// No I/O or access to other namespaces is permitted.
     fn migrate_format(

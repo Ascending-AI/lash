@@ -71,6 +71,7 @@ use lash_core_execution::runtime::process;
 #[cfg(test)]
 mod plugin_namespace_tests;
 use lash_core_store::queued_drain_policy;
+mod plugin_transition;
 mod process_runtime;
 mod run_start;
 pub mod scenario_contracts;

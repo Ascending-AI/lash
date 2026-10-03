@@ -41,7 +41,7 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
             Default::default(),
         ))
         .unwrap();
-    let identity = &session.contributions.before_turn_hooks[0].identity;
+    let identity = &session.capabilities().contributions.before_turn_hooks[0].identity;
     assert_eq!(identity.key, "before_turn:0");
     assert_eq!(identity.owner.plugin, "revision-probe");
     assert_eq!(identity.owner.behavior_revision.get(), 2);
@@ -54,7 +54,7 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
         .unwrap();
     assert_eq!(
         identity,
-        &rebuilt.contributions.before_turn_hooks[0].identity
+        &rebuilt.capabilities().contributions.before_turn_hooks[0].identity
     );
     session.adopt_plugin_admission(recorded);
     let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
@@ -544,7 +544,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
 }
 
 #[test]
-fn plugin_formats_migrate_on_decode_and_replay_identically() {
+fn plugin_formats_convert_only_in_recorded_transition() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(calls))]);
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
@@ -562,7 +562,7 @@ fn plugin_formats_migrate_on_decode_and_replay_identically() {
     for owner in ["first-decode", "replay-decode"] {
         let session = host
             .isolated_registry()
-            .build_session(PluginSessionRequest::rematerialization(
+            .defer_session(PluginSessionRequest::rematerialization(
                 owner,
                 &snapshot,
                 crate::plugin::SessionAuthorityContext {
@@ -571,6 +571,10 @@ fn plugin_formats_migrate_on_decode_and_replay_identically() {
                 },
             ))
             .unwrap();
+        let request = transition_request(owner, &host);
+        let record = host.transition_plugins(request, &snapshot, &config);
+        session.adopt_plugin_transition(&record).unwrap();
+        session.materialize().unwrap();
         let decoded = session.export_state();
         assert_eq!(
             decoded.plugins["format-probe"].values.get("native"),
@@ -593,7 +597,8 @@ fn plugin_formats_migrate_on_decode_and_replay_identically() {
         );
         assert_eq!(decoded_config.revision, 3);
         assert_eq!(decoded.plugins["format-probe"].generation, 8);
-        session.hydrate_state(&snapshot).unwrap();
+        let bytes = session.native_view().unwrap().unwrap();
+        session.adopt_native_view(&bytes).unwrap();
         assert_eq!(session.export_state(), decoded);
         results.push(rmp_serde::to_vec_named(&(decoded, decoded_config)).unwrap());
     }
@@ -604,96 +609,101 @@ fn plugin_formats_migrate_on_decode_and_replay_identically() {
 #[test]
 fn plugin_formats_stamp_every_state_write() {
     let state = store();
-    state.set("value", serde_json::json!(17)).unwrap();
-    let encoded = serde_json::to_value(&state.state.lock_recover().data).unwrap();
-    assert_eq!(encoded["mock"]["format_version"], serde_json::json!(1));
-    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(Arc::new(
-        std::sync::atomic::AtomicUsize::new(0),
-    )))]);
-    let native: PluginState = serde_json::from_value(serde_json::json!({
-        "format-probe": {"generation": 8, "format_version": 2, "values": {"native": 18}},
-        "inactive": {"generation": 7, "format_version": 99, "values": {"opaque": 5}}
-    }))
-    .unwrap();
-    let mut config = crate::PluginConfig::default();
-    config.insert_versioned(
-        "format-probe",
-        crate::FormatVersion::new(2).unwrap(),
-        serde_json::json!({"native": 18}),
-    );
-    config.insert_versioned(
-        "inactive",
-        crate::FormatVersion::new(99).unwrap(),
-        serde_json::json!({"opaque": 5}),
-    );
-    for version in [1, 2] {
-        let writer = crate::FormatVersion::new(version).unwrap();
-        let writers = BTreeMap::from([("format-probe".into(), writer)]);
-        let encoded_state = host.encode_state(&native, &writers).unwrap();
-        let encoded_config = host.encode_config(&config, &writers).unwrap();
-        let key = if version == 1 { "old" } else { "native" };
-        assert_eq!(
-            encoded_state.plugins["format-probe"].values[key],
-            serde_json::json!(18)
-        );
-        assert_eq!(encoded_state.plugins["format-probe"].format_version, writer);
-        assert_eq!(
-            encoded_state.plugins["inactive"],
-            native.plugins["inactive"]
-        );
-        assert_eq!(
-            encoded_config.get("format-probe").unwrap()[key],
-            serde_json::json!(18)
-        );
-        assert_eq!(
-            encoded_config
-                .namespace("format-probe")
-                .unwrap()
-                .format_version,
-            writer
-        );
-        assert_eq!(
-            encoded_config.namespace("inactive"),
-            config.namespace("inactive")
-        );
-        let init = crate::SessionPluginInit::captured(
-            encoded_state.clone(),
-            Default::default(),
-            Default::default(),
-        )
+    super::effect::test_scope(&state, || {
+        state.set("value", serde_json::json!(17)).unwrap();
+        let encoded = serde_json::to_value(&state.state.lock_recover().data).unwrap();
+        assert_eq!(encoded["mock"]["format_version"], serde_json::json!(1));
+        let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(Arc::new(
+            std::sync::atomic::AtomicUsize::new(0),
+        )))]);
+        let native: PluginState = serde_json::from_value(serde_json::json!({
+            "format-probe": {"generation": 8, "format_version": 2, "values": {"native": 18}},
+            "inactive": {"generation": 7, "format_version": 99, "values": {"opaque": 5}}
+        }))
         .unwrap();
-        let init: crate::SessionPluginInit =
-            rmp_serde::from_slice(&rmp_serde::to_vec_named(&init).unwrap()).unwrap();
-        assert_eq!(init.plugin_state, encoded_state);
-        let options = crate::PluginOptions {
-            plugins: encoded_config.namespaces().clone(),
-        };
-        let options: crate::PluginOptions =
-            rmp_serde::from_slice(&rmp_serde::to_vec_named(&options).unwrap()).unwrap();
-        assert_eq!(options.plugins["format-probe"].format_version, writer);
-        let environment = crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::new(encoded_config, 3),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        let mut config = crate::PluginConfig::default();
+        config.insert_versioned(
+            "format-probe",
+            crate::FormatVersion::new(2).unwrap(),
+            serde_json::json!({"native": 18}),
         );
-        let environment: crate::ProcessExecutionEnvSpec =
-            rmp_serde::from_slice(&rmp_serde::to_vec_named(&environment).unwrap()).unwrap();
-        assert_eq!(
-            environment
-                .plugin_config
-                .config
-                .namespace("format-probe")
-                .unwrap()
-                .format_version,
-            writer
+        config.insert_versioned(
+            "inactive",
+            crate::FormatVersion::new(99).unwrap(),
+            serde_json::json!({"opaque": 5}),
         );
-    }
-    assert!(
-        host.encode_state(
-            &native,
-            &BTreeMap::from([("format-probe".into(), crate::FormatVersion::new(3).unwrap())])
-        )
-        .is_err()
-    );
+        for version in [1, 2] {
+            let writer = crate::FormatVersion::new(version).unwrap();
+            let writers = BTreeMap::from([("format-probe".into(), writer)]);
+            let encoded_state = host.encode_state(&native, &writers).unwrap();
+            let encoded_config = host.encode_config(&config, &writers).unwrap();
+            let key = if version == 1 { "old" } else { "native" };
+            assert_eq!(
+                encoded_state.plugins["format-probe"].values[key],
+                serde_json::json!(18)
+            );
+            assert_eq!(encoded_state.plugins["format-probe"].format_version, writer);
+            assert_eq!(
+                encoded_state.plugins["inactive"],
+                native.plugins["inactive"]
+            );
+            assert_eq!(
+                encoded_config.get("format-probe").unwrap()[key],
+                serde_json::json!(18)
+            );
+            assert_eq!(
+                encoded_config
+                    .namespace("format-probe")
+                    .unwrap()
+                    .format_version,
+                writer
+            );
+            assert_eq!(
+                encoded_config.namespace("inactive"),
+                config.namespace("inactive")
+            );
+            let init = crate::SessionPluginInit::captured(
+                encoded_state.clone(),
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap();
+            let init: crate::SessionPluginInit =
+                rmp_serde::from_slice(&rmp_serde::to_vec_named(&init).unwrap()).unwrap();
+            assert_eq!(init.plugin_state, encoded_state);
+            let options = crate::PluginOptions {
+                plugins: encoded_config.namespaces().clone(),
+            };
+            let options: crate::PluginOptions =
+                rmp_serde::from_slice(&rmp_serde::to_vec_named(&options).unwrap()).unwrap();
+            assert_eq!(options.plugins["format-probe"].format_version, writer);
+            let environment = crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::new(encoded_config, 3),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            );
+            let environment: crate::ProcessExecutionEnvSpec =
+                rmp_serde::from_slice(&rmp_serde::to_vec_named(&environment).unwrap()).unwrap();
+            assert_eq!(
+                environment
+                    .plugin_config
+                    .config
+                    .namespace("format-probe")
+                    .unwrap()
+                    .format_version,
+                writer
+            );
+        }
+        assert!(
+            host.encode_state(
+                &native,
+                &BTreeMap::from([("format-probe".into(), crate::FormatVersion::new(3).unwrap())])
+            )
+            .is_err()
+        );
+    });
 }
 
 fn store() -> PluginStateStore {
@@ -767,94 +777,96 @@ fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
 #[test]
 fn state_keys_values_and_batches_are_atomic() {
     let state = store();
-    fn assert_traits<T: Clone + Send + Sync + 'static>() {}
-    assert_traits::<PluginStateStore>();
-    assert_eq!(state.generation(), 0);
-    for (key, reason) in [
-        ("".to_string(), KeyRejection::Empty),
-        ("x".repeat(129), KeyRejection::TooLong),
-        (
-            "a/b".to_string(),
-            KeyRejection::IllegalCharacter { at: 1, byte: b'/' },
-        ),
-    ] {
-        assert!(
-            matches!(state.set(&key, Value::Null), Err(PluginStateError::InvalidKey { reason: found, .. }) if found == reason)
+    super::effect::test_scope(&state, || {
+        fn assert_traits<T: Clone + Send + Sync + 'static>() {}
+        assert_traits::<PluginStateStore>();
+        assert_eq!(state.generation(), 0);
+        for (key, reason) in [
+            ("".to_string(), KeyRejection::Empty),
+            ("x".repeat(129), KeyRejection::TooLong),
+            (
+                "a/b".to_string(),
+                KeyRejection::IllegalCharacter { at: 1, byte: b'/' },
+            ),
+        ] {
+            assert!(
+                matches!(state.set(&key, Value::Null), Err(PluginStateError::InvalidKey { reason: found, .. }) if found == reason)
+            );
+            assert!(state.remove(&key).is_err());
+        }
+        assert_eq!(state.set(&"x".repeat(128), Value::Null).unwrap(), 1);
+        assert_eq!(state.set("a._-09AZ", Value::Null).unwrap(), 2);
+        assert_eq!(
+            state.set("a._-09AZ", Value::Null).unwrap(),
+            3,
+            "identical writes bump"
         );
-        assert!(state.remove(&key).is_err());
-    }
-    assert_eq!(state.set(&"x".repeat(128), Value::Null).unwrap(), 1);
-    assert_eq!(state.set("a._-09AZ", Value::Null).unwrap(), 2);
-    assert_eq!(
-        state.set("a._-09AZ", Value::Null).unwrap(),
-        3,
-        "identical writes bump"
-    );
-    assert_eq!(state.remove("missing").unwrap(), 3);
-    assert_eq!(
-        state.apply(vec![]).unwrap(),
-        4,
-        "accepted batches bump exactly once"
-    );
-    let before = state.state.lock_recover().data.clone();
-    assert!(
-        state
-            .apply(vec![
-                PluginStateEdit::Set {
-                    key: "valid".into(),
-                    value: Value::Bool(true)
-                },
-                PluginStateEdit::Set {
-                    key: "illegal/".into(),
-                    value: Value::Null
-                }
-            ])
-            .is_err()
-    );
-    assert_eq!(state.state.lock_recover().data, before);
-    assert!(
-        matches!(state.set("huge", Value::String("x".repeat(VALUE_LIMIT - 1))), Err(PluginStateError::ValueTooLarge { bytes, limit: VALUE_LIMIT, .. }) if bytes == VALUE_LIMIT + 1)
-    );
-    assert_eq!(state.state.lock_recover().data, before);
-    assert!(matches!(
-        state.apply(
-            (0..5)
-                .map(|i| PluginStateEdit::Set {
-                    key: format!("value{i}"),
-                    value: Value::String("x".repeat(VALUE_LIMIT - 2))
-                })
-                .collect()
-        ),
-        Err(PluginStateError::StoreTooLarge { .. })
-    ));
-    assert_eq!(state.state.lock_recover().data, before);
-    let generation = state
-        .apply_guarded(
+        assert_eq!(state.remove("missing").unwrap(), 3);
+        assert_eq!(
+            state.apply(vec![]).unwrap(),
             4,
-            vec![
-                PluginStateEdit::Remove {
-                    key: "a._-09AZ".into(),
-                },
-                PluginStateEdit::Set {
-                    key: "valid".into(),
-                    value: serde_json::json!([1, 2]),
-                },
-            ],
-        )
-        .unwrap();
-    assert_eq!(generation, 5);
-    let mut copy = state.get("valid").unwrap();
-    copy.as_array_mut().unwrap().clear();
-    assert_eq!(
-        state.get("valid"),
-        Some(serde_json::json!([1, 2])),
-        "reads are owned"
-    );
-    assert!(matches!(
-        state.get_as::<String>("valid"),
-        Err(PluginStateError::Decode { .. })
-    ));
-    assert_eq!(state.get_as::<String>("missing").unwrap(), None);
+            "accepted batches bump exactly once"
+        );
+        let before = state.state.lock_recover().data.clone();
+        assert!(
+            state
+                .apply(vec![
+                    PluginStateEdit::Set {
+                        key: "valid".into(),
+                        value: Value::Bool(true)
+                    },
+                    PluginStateEdit::Set {
+                        key: "illegal/".into(),
+                        value: Value::Null
+                    }
+                ])
+                .is_err()
+        );
+        assert_eq!(state.state.lock_recover().data, before);
+        assert!(
+            matches!(state.set("huge", Value::String("x".repeat(VALUE_LIMIT - 1))), Err(PluginStateError::ValueTooLarge { bytes, limit: VALUE_LIMIT, .. }) if bytes == VALUE_LIMIT + 1)
+        );
+        assert_eq!(state.state.lock_recover().data, before);
+        assert!(matches!(
+            state.apply(
+                (0..5)
+                    .map(|i| PluginStateEdit::Set {
+                        key: format!("value{i}"),
+                        value: Value::String("x".repeat(VALUE_LIMIT - 2))
+                    })
+                    .collect()
+            ),
+            Err(PluginStateError::StoreTooLarge { .. })
+        ));
+        assert_eq!(state.state.lock_recover().data, before);
+        let generation = state
+            .apply_guarded(
+                4,
+                vec![
+                    PluginStateEdit::Remove {
+                        key: "a._-09AZ".into(),
+                    },
+                    PluginStateEdit::Set {
+                        key: "valid".into(),
+                        value: serde_json::json!([1, 2]),
+                    },
+                ],
+            )
+            .unwrap();
+        assert_eq!(generation, 5);
+        let mut copy = state.get("valid").unwrap();
+        copy.as_array_mut().unwrap().clear();
+        assert_eq!(
+            state.get("valid"),
+            Some(serde_json::json!([1, 2])),
+            "reads are owned"
+        );
+        assert!(matches!(
+            state.get_as::<String>("valid"),
+            Err(PluginStateError::Decode { .. })
+        ));
+        assert_eq!(state.get_as::<String>("missing").unwrap(), None);
+    });
 }
 
 #[test]
@@ -866,11 +878,13 @@ fn state_encoding_errors_leave_generation_and_values_unchanged() {
         }
     }
     let state = store();
-    assert!(
-        matches!(state.set_as("bad", &Reject), Err(PluginStateError::Encode { key, .. }) if key == "bad")
-    );
-    assert_eq!(state.generation(), 0);
-    assert!(state.keys().is_empty());
+    super::effect::test_scope(&state, || {
+        assert!(
+            matches!(state.set_as("bad", &Reject), Err(PluginStateError::Encode { key, .. }) if key == "bad")
+        );
+        assert_eq!(state.generation(), 0);
+        assert!(state.keys().is_empty());
+    });
 }
 
 #[test]
@@ -883,19 +897,21 @@ fn guarded_state_winner_is_atomic() {
             let barrier = barrier.clone();
             std::thread::spawn(move || {
                 barrier.wait();
-                state.apply_guarded(
-                    0,
-                    vec![
-                        PluginStateEdit::Set {
-                            key: "winner".into(),
-                            value: serde_json::json!(i),
-                        },
-                        PluginStateEdit::Set {
-                            key: format!("worker{i}"),
-                            value: Value::Bool(true),
-                        },
-                    ],
-                )
+                super::effect::test_scope(&state, || {
+                    state.apply_guarded(
+                        0,
+                        vec![
+                            PluginStateEdit::Set {
+                                key: "winner".into(),
+                                value: serde_json::json!(i),
+                            },
+                            PluginStateEdit::Set {
+                                key: format!("worker{i}"),
+                                value: Value::Bool(true),
+                            },
+                        ],
+                    )
+                })
             })
         })
         .collect::<Vec<_>>();
@@ -955,263 +971,22 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
         durable.plugins["absent-plugin"]
     );
     let state = store();
-    state
-        .set("v", serde_json::json!({"z": {"b": 1, "a": 2}, "a": 3}))
-        .unwrap();
-    let first = rmp_serde::to_vec_named(&state.state.lock_recover().data).unwrap();
-    let other = store();
-    other
-        .set("v", serde_json::json!({"a": 3, "z": {"a": 2, "b": 1}}))
-        .unwrap();
-    assert_eq!(
-        first,
-        rmp_serde::to_vec_named(&other.state.lock_recover().data).unwrap()
-    );
-}
-
-#[test]
-fn readiness_runs_after_hydration_and_its_writes_survive() {
-    #[derive(Clone)]
-    struct ReadyPlugin(Arc<Mutex<Vec<(String, u64)>>>, Arc<Mutex<Vec<u64>>>);
-    impl crate::plugin::PluginFactory for ReadyPlugin {
-        fn id(&self) -> &'static str {
-            "ready-plugin"
-        }
-
-        fn declaration(&self) -> crate::plugin::PluginDeclaration {
-            crate::plugin::PluginDeclaration::initial(crate::plugin::PluginFactory::id(self))
-        }
-        fn build(
-            &self,
-            _: &crate::plugin::PluginSessionContext,
-        ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
-            Ok(Arc::new(self.clone()))
-        }
-    }
-    impl crate::plugin::SessionPlugin for ReadyPlugin {
-        fn id(&self) -> &'static str {
-            "ready-plugin"
-        }
-        fn register(
-            &self,
-            reg: &mut crate::plugin::PluginRegistrar,
-        ) -> Result<(), crate::PluginError> {
-            let token = reg.state().set("value", serde_json::json!("register"))?;
-            self.1.lock_recover().push(token);
-            Ok(())
-        }
-        fn session_ready(
-            &self,
-            ctx: crate::plugin::SessionReadyContext,
-        ) -> Result<(), crate::PluginError> {
-            assert_eq!(
-                self.1.lock_recover().last().copied(),
-                Some(ctx.state.generation()),
-                "accepted registration generation must survive hydration"
-            );
-            self.0.lock_recover().push((
-                ctx.state.get_as::<String>("value")?.unwrap(),
-                ctx.state.generation(),
-            ));
-            ctx.state.set("value", serde_json::json!("ready"))?;
-            Ok(())
-        }
-    }
-    let observed = Arc::new(Mutex::new(Vec::new()));
-    let host = crate::PluginHost::new(vec![Arc::new(ReadyPlugin(
-        observed.clone(),
-        Arc::new(Mutex::new(Vec::new())),
-    ))]);
-    let initial = host
-        .build_session(PluginSessionRequest::creation(
-            "initial",
-            Default::default(),
-        ))
-        .unwrap();
-    let state = initial.export_state();
-    assert_eq!(state.plugins["ready-plugin"].generation, 2);
-    let rebuilt = host
-        .build_session(PluginSessionRequest::rematerialization(
-            "rebuilt",
-            &state,
-            crate::plugin::SessionAuthorityContext::default(),
-        ))
-        .unwrap();
-    assert_eq!(
-        *observed.lock_recover(),
-        vec![("register".into(), 1), ("register".into(), 3)]
-    );
-    assert_eq!(rebuilt.export_state().plugins["ready-plugin"].generation, 4);
-}
-
-#[test]
-fn register_remove_rebuilt_generation_five() {
-    let snapshot = PluginState {
-        plugins: BTreeMap::from([(
-            "mock".into(),
-            PluginNamespaceState {
-                format_version: lash_core_ids::FormatVersion::ONE,
-                generation: 5,
-                values: BTreeMap::from([("seed".into(), Value::Bool(true))]),
-            },
-        )]),
-    };
-    let registry = Arc::new(Mutex::new(PluginStateRegistry::registering(Some(
-        &snapshot,
-    ))));
-    let state = PluginStateStore::bind(
-        &crate::RuntimeOwner::Session(SessionId::from("rebuilt")),
-        "mock",
-        registry.clone(),
-    );
-    state.remove("seed").unwrap();
-    registry
-        .lock_recover()
-        .initialize(state.owner(), Some(&snapshot))
-        .unwrap();
-    assert_eq!(
-        state.get("seed"),
-        None,
-        "register remove must delete the durable key"
-    );
-    assert_eq!(state.generation(), 6);
-}
-
-fn hydration_fixture(
-    snapshot: &PluginState,
-) -> (PluginStateStore, Arc<Mutex<PluginStateRegistry>>) {
-    let registry = Arc::new(Mutex::new(PluginStateRegistry::registering(Some(snapshot))));
-    let state = PluginStateStore::bind(
-        &crate::RuntimeOwner::Session(SessionId::from("session")),
-        "mock",
-        registry.clone(),
-    );
-    state.set("registered", Value::Bool(true)).unwrap();
-    registry
-        .lock_recover()
-        .initialize(state.owner(), Some(snapshot))
-        .unwrap();
-    (state, registry)
-}
-
-fn hydration_head() -> PluginState {
-    PluginState {
-        plugins: BTreeMap::from([(
-            "mock".into(),
-            PluginNamespaceState {
-                format_version: lash_core_ids::FormatVersion::ONE,
-                generation: 5,
-                values: BTreeMap::from([("seed".into(), Value::Bool(true))]),
-            },
-        )]),
-    }
-}
-
-fn assert_hydration_predicate_sees_ready_writes(
-    predicate: impl Fn(&PluginStateRegistry, &PluginState) -> bool,
-) {
-    let snapshot = hydration_head();
-    for mutation in 0..5 {
-        let (state, registry) = hydration_fixture(&snapshot);
-        assert!(predicate(&registry.lock_recover(), &snapshot));
-        let before = state.generation();
-        assert!(state.set("invalid/key", Value::Null).is_err());
-        assert!(state.apply_guarded(before + 1, vec![]).is_err());
-        state.remove("absent").unwrap();
-        assert!(
-            predicate(&registry.lock_recover(), &snapshot),
-            "refusals and absent removes leave hydration intact"
-        );
-        match mutation {
-            0 => {
-                state.set("tail", Value::Bool(true)).unwrap();
-            }
-            1 => {
-                state.remove("seed").unwrap();
-            }
-            2 => {
-                state.apply(vec![]).unwrap();
-            }
-            3 => {
-                state.apply_guarded(before, vec![]).unwrap();
-            }
-            4 => {
-                state.set("registered", Value::Bool(true)).unwrap();
-            }
-            _ => unreachable!(),
-        }
-        assert!(
-            !predicate(&registry.lock_recover(), &snapshot),
-            "accepted mutation {mutation} invalidates hydration"
-        );
-    }
-}
-
-#[test]
-fn hydration_law_was_hydrated_from_sees_ready_writes() {
-    assert_hydration_predicate_sees_ready_writes(|registry, snapshot| {
-        registry.was_hydrated_from(snapshot)
-    });
-}
-
-#[test]
-fn hydration_law_matches_ref_sees_ready_writes() {
-    assert_hydration_predicate_sees_ready_writes(|registry, snapshot| {
-        registry.matches_ref(&state_ref(snapshot))
-    });
-}
-
-#[test]
-fn hydration_law_live_adoption_equals_a_cold_rebuild() {
-    let snapshot = hydration_head();
-    let (state, registry) = hydration_fixture(&snapshot);
-    let newcomer = PluginStateStore::bind(state.owner(), "newcomer", registry.clone());
-    state.set("tail", Value::Bool(true)).unwrap();
-    newcomer.set("tail", Value::Bool(true)).unwrap();
-    for head in [snapshot.clone(), PluginState::default(), snapshot] {
-        let (_, cold) = hydration_fixture(&head);
-        PluginStateStore::bind(state.owner(), "newcomer", cold.clone());
-        registry.lock_recover().hydrate_live(&head);
+    super::effect::test_scope(&state, || {
+        state
+            .set("v", serde_json::json!({"z": {"b": 1, "a": 2}, "a": 3}))
+            .unwrap();
+        let first = rmp_serde::to_vec_named(&state.state.lock_recover().data).unwrap();
+        let other = store();
+        super::effect::test_scope(&other, || {
+            other
+                .set("v", serde_json::json!({"a": 3, "z": {"a": 2, "b": 1}}))
+                .unwrap()
+        });
         assert_eq!(
-            registry.lock_recover().data,
-            cold.lock_recover().data,
-            "live checkpoint includes the same registration edits and bound namespaces as a cold rebuild"
+            first,
+            rmp_serde::to_vec_named(&other.state.lock_recover().data).unwrap()
         );
-        state.set("tail", Value::Bool(true)).unwrap();
-    }
-}
-
-#[test]
-fn hydration_law_generations_never_reuse_a_guard_token() {
-    let snapshot = hydration_head();
-    let (state, registry) = hydration_fixture(&snapshot);
-    let mut stale = Vec::new();
-    for head in [snapshot.clone(), PluginState::default(), snapshot] {
-        let accepted = state.set("tail", Value::Bool(true)).unwrap();
-        stale.push(accepted);
-        registry.lock_recover().hydrate_live(&head);
-        let adopted = state.generation();
-        assert!(
-            adopted > accepted,
-            "changing content invalidates every previously observed generation"
-        );
-        for expected in &stale {
-            assert_eq!(
-                state.apply_guarded(*expected, vec![]),
-                Err(PluginStateError::GenerationConflict {
-                    expected: *expected,
-                    actual: adopted
-                })
-            );
-        }
-        registry.lock_recover().hydrate_live(&head);
-        assert_eq!(
-            state.generation(),
-            adopted,
-            "repeating the same hydration is idempotent"
-        );
-        assert_eq!(state.apply_guarded(adopted, vec![]).unwrap(), adopted + 1);
-    }
+    });
 }
 
 /// A fleet record a law moves the way a finalize would.
@@ -1264,10 +1039,6 @@ impl crate::store::FleetFormatStore for FleetRecord {
     }
 }
 
-/// FIG-4747: a session writes plugin state in the format its admission
-/// recorded. A finalize that widens the fleet's range changes what the next
-/// admission chooses; a retry that adopts the recorded admission again
-/// writes the bytes it wrote before.
 #[tokio::test]
 async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_finalize() {
     let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(Arc::new(
@@ -1280,15 +1051,22 @@ async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_final
     .unwrap();
     let session = host
         .isolated_registry()
-        .build_session(PluginSessionRequest::rematerialization(
+        .defer_session(PluginSessionRequest::rematerialization(
             "admitted",
             &stored,
             Default::default(),
         ))
         .unwrap();
+    let record = host.transition_plugins(
+        transition_request("admitted", &host),
+        &stored,
+        &Default::default(),
+    );
+    session.adopt_plugin_transition(&record).unwrap();
+    session.materialize().unwrap();
     let native = session.export_state();
     assert_eq!(native.plugins["format-probe"].format_version.get(), 2);
-    // No admission adopted: the native format, as before any Run.
+    // The initialization transition chooses the native formats before a fleet Run.
     assert_eq!(session.committed_state().unwrap(), native);
 
     // Admitted inside the window: the fleet permits format 1 only.
@@ -1410,7 +1188,7 @@ async fn recorded_effect_state_is_atomic_owner_checked_and_idempotent() {
     );
 
     let later = PluginStateStore::bind(&cold.owner, "first", Arc::clone(&cold.state));
-    later.set("later", Value::Bool(true)).unwrap();
+    super::effect::test_scope(&later, || later.set("later", Value::Bool(true)).unwrap());
     let with_later = cold.export_state();
     cold.restore_effect_state(effect.clone()).unwrap();
     assert_eq!(
@@ -1442,9 +1220,8 @@ async fn recorded_effect_state_is_atomic_owner_checked_and_idempotent() {
             Default::default(),
         ))
         .unwrap();
-    PluginStateStore::bind(&divergent.owner, "second", Arc::clone(&divergent.state))
-        .set("other", Value::Bool(true))
-        .unwrap();
+    let other = PluginStateStore::bind(&divergent.owner, "second", Arc::clone(&divergent.state));
+    super::effect::test_scope(&other, || other.set("other", Value::Bool(true)).unwrap());
     let before_refusal = divergent.export_state();
     let refusal = divergent.restore_effect_state(effect).unwrap_err();
     assert_eq!(
@@ -1607,11 +1384,13 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
             .unwrap(),
         ),
         owner: crate::RuntimeOwner::Session("transition-owner".into()),
-        base: crate::store::SessionHeadRef {
-            generation: 0,
-            revision: 7,
-            leaf: None,
-            checkpoint: Some(super::state_ref(&base)),
+        base: crate::plugin::PluginTransitionBase::Session {
+            head: crate::store::SessionHeadRef {
+                generation: 0,
+                revision: 7,
+                leaf: None,
+                checkpoint: Some(super::state_ref(&base)),
+            },
         },
         target: crate::store::plugin_writers::PluginAdmission::from_plugins(
             host.factories()
@@ -1712,4 +1491,232 @@ async fn abandoned_effect_state_drops_accepted_tail_and_invalidates_guards() {
         store.apply_guarded(0, vec![]),
         Err(PluginStateError::GenerationConflict { .. })
     ));
+}
+
+fn transition_request(
+    owner: &str,
+    host: &crate::PluginHost,
+) -> crate::plugin::PluginTransitionRequest {
+    crate::plugin::PluginTransitionRequest {
+        id: crate::plugin::PluginTransitionId(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn(crate::SessionId::fixture(owner), "run"),
+                "plugin-transition",
+            )
+            .unwrap(),
+        ),
+        owner: crate::RuntimeOwner::Session(crate::SessionId::fixture(owner)),
+        base: crate::plugin::PluginTransitionBase::Session {
+            head: crate::store::SessionHeadRef {
+                generation: 0,
+                revision: 0,
+                leaf: None,
+                checkpoint: None,
+            },
+        },
+        target: crate::store::plugin_writers::PluginAdmission::from_plugins(
+            host.factories()
+                .iter()
+                .map(|factory| {
+                    let declaration = factory.declaration();
+                    crate::store::plugin_writers::AdmittedPlugin {
+                        plugin: factory.id().into(),
+                        behavior_revision: declaration.behavior_revision,
+                        writer: declaration.format_version,
+                    }
+                })
+                .collect(),
+        ),
+    }
+}
+
+#[tokio::test]
+async fn retained_handle_refuses_background_writes_with_typed_cause() {
+    let session = crate::PluginHost::empty()
+        .build_session(PluginSessionRequest::creation(
+            "scope-owner",
+            Default::default(),
+        ))
+        .unwrap();
+    let state = PluginStateStore::bind(&session.owner, "retained", Arc::clone(&session.state));
+    let before = session.export_state();
+    let effect = super::effect::record_effect(
+        session.clone(),
+        crate::RuntimeEffectKind::LanguageRuntimeValue,
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn("scope-owner", "run"),
+            "callback",
+        )
+        .unwrap(),
+        async {
+            let retained = state.clone();
+            let refusal =
+                crate::task::spawn(async move { retained.set("background", Value::Bool(true)) })
+                    .await
+                    .unwrap()
+                    .unwrap_err();
+            assert_eq!(
+                refusal,
+                PluginStateError::WriteScopeRequired {
+                    plugin: "retained".into()
+                }
+            );
+            let error =
+                crate::RuntimeEffectControllerError::from(crate::PluginError::State(refusal))
+                    .into_runtime_error();
+            assert_eq!(
+                error.cause,
+                Some(crate::RuntimeErrorCause::PluginStateWriteScopeRequired {
+                    plugin: "retained".into()
+                })
+            );
+            let wire: crate::RuntimeError =
+                rmp_serde::from_slice(&rmp_serde::to_vec_named(&error).unwrap()).unwrap();
+            assert_eq!(wire.cause, error.cause);
+            assert_eq!(session.export_state(), before);
+            state.set("accepted", Value::Bool(true)).unwrap();
+            Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        effect,
+        crate::RuntimeEffectOutcome::PluginState { .. }
+    ));
+    assert_eq!(
+        state.remove("accepted"),
+        Err(PluginStateError::WriteScopeRequired {
+            plugin: "retained".into()
+        })
+    );
+}
+
+#[test]
+fn native_hydration_drops_the_tail_and_never_reuses_guard_tokens() {
+    let state = store();
+    super::effect::test_scope(&state, || {
+        state.set("value", serde_json::json!(1)).unwrap();
+        let head = state.state.lock_recover().data.clone();
+        let mut stale = Vec::new();
+        for _ in 0..5 {
+            let accepted = state.set("value", serde_json::json!(2)).unwrap();
+            stale.push(accepted);
+            state.state.lock_recover().hydrate_live(&head);
+            let adopted = state.generation();
+            assert!(adopted > accepted);
+            assert_eq!(state.get("value"), Some(serde_json::json!(1)));
+            assert_eq!(state.state.lock_recover().data, head);
+            for expected in &stale {
+                assert_eq!(
+                    state.apply_guarded(*expected, vec![]),
+                    Err(PluginStateError::GenerationConflict {
+                        expected: *expected,
+                        actual: adopted
+                    })
+                );
+            }
+            state.state.lock_recover().hydrate_live(&head);
+            assert_eq!(state.generation(), adopted);
+        }
+    });
+}
+
+#[tokio::test]
+async fn pure_initialization_precedes_read_only_registration_and_readiness() {
+    #[derive(Clone)]
+    struct ReadOnly(Arc<std::sync::atomic::AtomicUsize>);
+    impl crate::PluginFactory for ReadOnly {
+        fn id(&self) -> &'static str {
+            "read-only"
+        }
+        fn declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(crate::PluginFactory::id(self))
+        }
+        fn initialize_state(
+            &self,
+            _: &crate::RuntimeOwner,
+            _: &crate::PluginConfig,
+        ) -> Result<BTreeMap<String, Value>, crate::PluginError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(BTreeMap::from([("initial".into(), serde_json::json!(17))]))
+        }
+        fn build(
+            &self,
+            _: &crate::PluginSessionContext,
+        ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
+            Ok(Arc::new(self.clone()))
+        }
+    }
+    impl crate::SessionPlugin for ReadOnly {
+        fn id(&self) -> &'static str {
+            "read-only"
+        }
+        fn register(
+            &self,
+            registrar: &mut crate::PluginRegistrar,
+        ) -> Result<(), crate::PluginError> {
+            let state = registrar.state();
+            assert_eq!(state.get("initial"), Some(serde_json::json!(17)));
+            assert_eq!(
+                state.set("register", Value::Null),
+                Err(PluginStateError::WriteScopeRequired {
+                    plugin: "read-only".into()
+                })
+            );
+            Ok(())
+        }
+        fn session_ready(
+            &self,
+            ctx: crate::plugin::SessionReadyContext,
+        ) -> Result<(), crate::PluginError> {
+            assert_eq!(ctx.state.get("initial"), Some(serde_json::json!(17)));
+            assert_eq!(
+                ctx.state.remove("initial"),
+                Err(PluginStateError::WriteScopeRequired {
+                    plugin: "read-only".into()
+                })
+            );
+            Ok(())
+        }
+    }
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let host = crate::PluginHost::new(vec![Arc::new(ReadOnly(calls.clone()))]);
+    let request = transition_request("read-only-owner", &host);
+    let record = host.transition_plugins(request, &Default::default(), &Default::default());
+    let view = crate::plugin::PluginNativeView {
+        request: record.request.clone(),
+        source: record.source.clone(),
+        state: record.candidate().unwrap().0,
+        config: record.candidate().unwrap().1,
+    }
+    .encode()
+    .unwrap();
+    for callback in ["initial-construction", "cold-construction"] {
+        let session = host
+            .isolated_registry()
+            .defer_session(PluginSessionRequest::creation(
+                "read-only-owner",
+                Default::default(),
+            ))
+            .unwrap();
+        session.adopt_native_view(&view).unwrap();
+        super::effect::record_effect(
+            session.clone(),
+            crate::RuntimeEffectKind::LanguageRuntimeValue,
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn("read-only-owner", "run"),
+                callback,
+            )
+            .unwrap(),
+            async {
+                session.materialize().unwrap();
+                Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(session.export_state().plugins["read-only"].generation, 0);
+    }
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 }

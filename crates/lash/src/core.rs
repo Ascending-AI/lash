@@ -1159,7 +1159,10 @@ impl LashCoreBuilder {
         if self.duplicate_telemetry {
             return Err(EmbedError::DuplicateTelemetry);
         }
-        let protocol_factory = self.protocol_factory.clone();
+        let protocol_factory = self
+            .protocol_factory
+            .clone()
+            .or_else(|| self.plugin_stack.protocol_factory().cloned());
         if protocol_factory.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);
         }
@@ -1411,7 +1414,11 @@ pub(crate) fn build_plugin_host(
         factories.push(Arc::clone(protocol_factory));
     }
     factories.extend(plugin_factories.iter().cloned());
-    Ok(PluginHost::new(factories).with_trace_runtime(tracing.clone()))
+    let mut host = PluginHost::new(factories).with_trace_runtime(tracing.clone());
+    if let Some(protocol) = protocol_factory {
+        host = host.with_protocol_plugin(Arc::clone(protocol));
+    }
+    Ok(host)
 }
 
 impl LashCore {

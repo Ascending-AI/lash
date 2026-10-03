@@ -423,7 +423,7 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
                 .map_err(crate::runtime::runtime_error_from_store_commit)?,
             _ => crate::store::plugin_writers::PluginAdmission::default(),
         };
-        let resolution = self
+        let mut resolution = self
             .registry
             .resolve(
                 &self.base,
@@ -432,6 +432,14 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
                 &writers,
             )
             .map_err(crate::RecordedNamespaceCorrupt::into_store_error)?;
+        if let (Some(host), crate::ConfigResolutionDecision::Applied { namespaces, .. }) =
+            (&self.plugin_host, &mut resolution.result)
+        {
+            let mut candidate = crate::PluginConfig::default();
+            candidate.apply_namespace_updates(namespaces);
+            let native = host.decode_config(&candidate)?;
+            *namespaces = native.namespaces().clone();
+        }
         Ok(crate::RuntimeEffectOutcome::ResolveConfigTransaction {
             resolution: Box::new(resolution),
         })

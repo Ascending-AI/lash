@@ -69,6 +69,7 @@ impl ProcessRuntimeContext {
             plugin_host: ports.plugin_host,
             lease_owner: ports.lease_owner,
             turn_phase_probe: ports.turn_phase_probe,
+            reconstruct_tool_child: false,
         })
     }
 
@@ -90,6 +91,7 @@ impl ProcessRuntimeContext {
             plugin_host,
             lease_owner,
             turn_phase_probe: None,
+            reconstruct_tool_child: true,
         })
     }
 
@@ -102,8 +104,9 @@ impl ProcessRuntimeContext {
             plugin_host,
             lease_owner,
             turn_phase_probe,
+            reconstruct_tool_child,
         } = build;
-        let plugins = plugin_host.isolated_registry().build_session(
+        let plugins = plugin_host.isolated_registry().defer_session(
             crate::plugin::PluginSessionRequest::process_creation(
                 process_id.clone(),
                 crate::plugin::SessionAuthorityContext {
@@ -112,6 +115,10 @@ impl ProcessRuntimeContext {
                 },
             ),
         )?;
+        // Standalone tool-child reconstruction is removed by FIG-4864.
+        if reconstruct_tool_child {
+            plugins.materialize()?;
+        }
         // The process's attachments are held by its own record: a put it
         // makes names `ProcessRecord(id)` as its referrer, and the cleanup its
         // terminal publication plans ends that edge (ADR 0124).
@@ -170,6 +177,7 @@ struct ProcessRuntimeBuild {
     plugin_host: Arc<crate::PluginHost>,
     lease_owner: crate::LeaseOwnerIdentity,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+    reconstruct_tool_child: bool,
 }
 
 #[async_trait::async_trait]
@@ -191,6 +199,41 @@ impl crate::runtime::effect::ProcessRunner for ProcessRuntimeContext {
                 )),
             ));
         }
+        let environment = admitted.registration.env_ref.clone().ok_or_else(|| {
+            crate::PluginError::attempt_fault("admitted process has no captured environment")
+        })?;
+        let plugins = self.services.plugins();
+        let target = execution_context.plugin_admission.clone().ok_or_else(|| {
+            crate::PluginError::attempt_fault("process segment has no recorded plugin admission")
+        })?;
+        let address = crate::EffectAddress::new(
+            scoped_effect_controller.execution_scope().clone(),
+            "plugin-transition",
+        )
+        .map_err(|error| {
+            crate::ProcessInfraError::from(crate::PluginError::Runtime(crate::RuntimeError::from(
+                error,
+            )))
+        })?;
+        let request = crate::plugin::PluginTransitionRequest {
+            id: crate::plugin::PluginTransitionId(address),
+            owner: crate::RuntimeOwner::Process(self.process_id.clone()),
+            base: crate::plugin::PluginTransitionBase::Process {
+                environment,
+                segment: scoped_effect_controller.execution_scope().clone(),
+            },
+            target,
+        };
+        let record = super::plugin_transition::record_native_transition(
+            &scoped_effect_controller,
+            plugins.host().clone(),
+            request,
+            plugins.export_state(),
+            (*plugins.admitted_plugin_config().config).clone(),
+        )
+        .await?;
+        plugins.adopt_plugin_transition(&record)?;
+        plugins.materialize()?;
         self.services
             .run_admitted_process(
                 admitted,

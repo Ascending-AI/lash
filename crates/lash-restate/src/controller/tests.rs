@@ -371,11 +371,13 @@ fn plugin_transition_is_journaled_with_attempt_faults_retried() {
     let request = lash_core::plugin::PluginTransitionRequest {
         id: lash_core::plugin::PluginTransitionId(address.clone()),
         owner: lash_core::RuntimeOwner::Session("transition-owner".into()),
-        base: lash_core::store::SessionHeadRef {
-            generation: 0,
-            revision: 0,
-            leaf: None,
-            checkpoint: None,
+        base: lash_core::plugin::PluginTransitionBase::Session {
+            head: lash_core::store::SessionHeadRef {
+                generation: 0,
+                revision: 0,
+                leaf: None,
+                checkpoint: None,
+            },
         },
         target: Default::default(),
     };

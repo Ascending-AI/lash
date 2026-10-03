@@ -65,29 +65,35 @@ captured counter without the old resident's uncommitted tokens.
 `SessionReadyContext.state` supplies it at readiness. Hook closures retain the
 registration handle; shared hook contexts need no plugin-id selector.
 
-Materialization validates state and config stamps before factory build, registration
-or readiness. An unreadable active namespace returns `FormatRefusal`; no durable
-bytes change. Readable older namespaces pass through the factory's pure
-`migrate_format` at decode, including resident checkpoint adoption. Inactive
-namespaces retain their stamp and values. A migrated state advances its capture
-generation so the next normal commit writes the converted representation.
-Registration and readiness perform no durable writes; their accepted in-memory
-edits reach storage through the first normal recorded commit.
-Materialization hydrates namespaces before registration so reads and size checks
-see decoded data. `session_ready` observes registration's accepted edits on
-that snapshot.
-Initialization finalizes the accepted registration and readiness edits as one
-materialization log. Later writes invalidate its hydration source. The plugin
-view of the host cannot export other namespaces.
+The engine records pure initialization and conversion as one complete
+`PluginTransitionRecord` before constructing capabilities. The request names
+its effect address, runtime owner, retained session head or captured process
+segment, and target plugin admission. A refused namespace or config keeps the
+whole candidate unpublished. Inactive namespaces retain their stamp and values.
+
+For a session, one fenced `RuntimeCommit` publishes the namespace checkpoint,
+recorded admission and native view with the existing operation receipt. Replay
+serves the recorded candidate, and acknowledgement loss reuses that receipt.
+Factory build, registration and readiness reconstruct capabilities over the
+published native view. These callbacks can read their bound namespace; a write
+returns `PluginStateError::WriteScopeRequired`. There is no resident
+materialization edit log. The plugin view of the host cannot export other
+namespaces.
+
+Retained handles accept writes only in an engine-owned recorded callback scope
+for their own registry. A spawned background task inherits no such scope and
+receives the same typed refusal. Accepted batches are recorded beside the
+callback result, including terminal failures. Replay installs the complete
+postimages before returning that result, without invoking the callback.
 
 ### 5. Read-your-writes, and the durability boundary
 
-Each call or batch is atomic. All cloned handles observe accepted writes.
-The resident map can be ahead of the committed checkpoint; the next runtime
-boundary commits the captured state. A turn failure does not roll back the map.
-A cold rebuild observes the committed state and loses any uncommitted tail.
-Plugins that require agreement with a committed outcome write from an
-appropriate committed-path hook.
+Each accepted call or batch is atomic. All cloned handles observe its writes.
+The callback's journal records accepted mutations with its result; the next
+runtime boundary publishes the captured state. An abandoned callback attempt
+rolls back its unrecorded tail and invalidates its guard tokens. Cold replay
+restores a completed callback's recorded edits even if the deployment died
+before that next runtime commit.
 
 ### 6. The checkpoint component
 
@@ -97,15 +103,17 @@ with format version, generation and ordered values. Content addressing gives the
 The runtime recaptures when namespaces exist and the component is absent or
 its captured generations differ. Otherwise it retains the reference.
 
+The `plugin_admission` opaque checkpoint component carries the transition
+request and current native namespace/config view. It uses the existing
+checkpoint blob and operation receipt machinery, with no second journal or
+transition table. Resident adoption reads this native view and performs no
+conversion. The separately encoded `plugin_state` component retains the
+admission's writer formats.
+
 Per-key generations add no useful invalidation boundary because capture writes
-the whole component. A resident hydration adopts the recorded head's
-namespaces. The head is durable truth, committed by the shift that owned it
-(ADR 0105), so accepted writes it does not carry are an uncommitted tail: the
-hydration drops them, replays the materialization log as a cold rebuild from
-that head does (§5), and traces the drop. A namespace bound live but absent
-from the head stays bound with its materialization edits or its default values.
-Resident acceptance tokens do not alter the restored checkpoint bytes, so an
-unchanged recorded head still parks without a write.
+the whole component. Resident hydration adopts the recorded native namespaces
+and drops an uncommitted tail. Acceptance tokens retain their high-water marks
+without changing the restored checkpoint bytes.
 
 ### 7. Fork
 
@@ -141,8 +149,10 @@ at a later runtime boundary, so acceptance and commit have distinct lifetimes.
 
 ## Code references
 
-- `crates/lash-core-execution/src/plugin/state.rs:12-28,66-280,325-406` implements the handle, bounds, batches, and hydration.
-- `crates/lash-core-execution/src/plugin/runtime_impl.rs:306-316` orders initialization and readiness.
-- `crates/lash-core-execution/src/plugin/registrar.rs:511` delivers the registration handle.
-- `crates/lash-core-store/src/plugin_state.rs:7-18` defines checkpoint namespaces.
-- `crates/lash-core-store/src/session_state.rs:1083-1110` gates capture by generations.
+- `crates/lash-core-execution/src/plugin/state.rs` implements scoped writes, bounds, batches and native hydration.
+- `crates/lash-core-execution/src/plugin/state/effect.rs` records and restores callback edits.
+- `crates/lash-core-execution/src/plugin/transition.rs` defines complete transitions and checkpoint native views.
+- `crates/lash-core/src/runtime/shift/plugin_transition.rs` prepares and publishes the session transition.
+- `crates/lash-core/src/runtime/process_runtime.rs` adopts a process segment's recorded transition.
+- `crates/lash-core-execution/src/plugin/runtime_impl.rs` reconstructs read-only capabilities.
+- `crates/lash-core-store/src/session_state.rs` captures the checkpoint components.

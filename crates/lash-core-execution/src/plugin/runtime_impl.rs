@@ -11,6 +11,7 @@ use super::*;
 pub struct PluginHost {
     trace_runtime: crate::trace::TraceRuntime,
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
+    protocol_factory: Option<Arc<dyn PluginFactory>>,
     pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
     sessions: Arc<StdMutex<BTreeMap<RuntimeOwner, Weak<PluginSession>>>>,
@@ -97,7 +98,6 @@ pub enum PluginSessionMaterializationRequest<'a> {
 struct BuiltSessionContributions {
     plugins: Vec<Arc<dyn SessionPlugin>>,
     contributions: PluginContributions,
-    state: Arc<StdMutex<PluginStateRegistry>>,
     triggers: crate::TriggerEventCatalog,
 }
 
@@ -141,12 +141,32 @@ impl PluginHost {
         let config_registry = Arc::new(std::sync::OnceLock::new());
         Self {
             factories: Arc::new(all_factories),
+            protocol_factory: None,
             export_plugin_namespaces: true,
             extensions,
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
             config_registry,
             trace_runtime: crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
         }
+    }
+
+    /// Select the protocol factory without constructing a session.
+    pub fn with_protocol_plugin(mut self, protocol: Arc<dyn PluginFactory>) -> Self {
+        let factories = Arc::make_mut(&mut self.factories);
+        if let Some(existing) = factories
+            .iter_mut()
+            .find(|factory| factory.id() == protocol.id())
+        {
+            *existing = Arc::clone(&protocol);
+        } else {
+            factories.push(Arc::clone(&protocol));
+        }
+        self.protocol_factory = Some(protocol);
+        self
+    }
+
+    pub fn protocol_plugin_id(&self) -> Option<&str> {
+        self.protocol_factory.as_ref().map(|factory| factory.id())
     }
 
     pub fn with_trace_runtime(mut self, trace_runtime: crate::trace::TraceRuntime) -> Self {
@@ -166,6 +186,7 @@ impl PluginHost {
     pub fn isolated_registry(&self) -> Self {
         Self {
             factories: Arc::clone(&self.factories),
+            protocol_factory: self.protocol_factory.clone(),
             export_plugin_namespaces: self.export_plugin_namespaces,
             extensions: self.extensions.clone(),
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
@@ -321,7 +342,8 @@ impl PluginHost {
         Ok(())
     }
 
-    pub fn build_session(
+    /// Retain raw state and recorded config without constructing capabilities.
+    pub fn defer_session(
         &self,
         request: PluginSessionRequest<'_>,
     ) -> Result<Arc<PluginSession>, PluginError> {
@@ -349,54 +371,16 @@ impl PluginHost {
                 false,
             ),
         };
-        // A factory that misstates its declared owner or format set is refused
-        // before any decode, factory build or callback: the session runs under
-        // the declared composition or not at all.
         self.composition()?;
-        self.validate_config_formats(&authority.plugin_config.config)?;
-        if let Some(snapshot) = snapshot {
-            self.validate_state_formats(snapshot)?;
-        }
-        let mut authority = authority;
-        authority.plugin_config.config =
-            Arc::new(self.decode_config(&authority.plugin_config.config)?);
-        let decoded_snapshot = snapshot
-            .map(|snapshot| self.decode_state(snapshot))
-            .transpose()?;
-        let snapshot = decoded_snapshot.as_ref();
-        let ctx = PluginSessionContext {
-            tracing: self.trace_runtime.clone(),
-            trace: None,
-            owner,
-            tool_access: authority.tool_access.clone(),
-            subagent: authority.subagent.clone(),
-            plugin_config: authority.plugin_config.clone(),
-            materialization,
-            extensions: self.extensions.clone(),
-            parent_session_id,
-        };
-        let owner = ctx.owner.clone();
-        let BuiltSessionContributions {
-            plugins,
-            contributions,
-            state,
-            triggers,
-        } = self.build_session_contributions(&ctx, snapshot)?;
-        let registry = build_tool_registry(&contributions, tool_snapshot)?;
-        let tools = Arc::clone(&registry) as Arc<dyn ToolProvider>;
-        let session_extensions = PluginExtensions::from_contributions(
-            plugins
-                .iter()
-                .flat_map(|plugin| plugin.extension_contributions()),
-        );
-
-        let session = Arc::new(PluginSession {
-            state,
+        Ok(Arc::new(PluginSession {
+            state: Arc::new(StdMutex::new(PluginStateRegistry::from_snapshot(snapshot))),
+            native_view: Arc::new(StdMutex::new(None)),
             host: self.clone(),
-            owner: ctx.owner,
-            plugins,
-            tools,
-            tool_registry: registry,
+            owner,
+            parent_session_id,
+            materialization,
+            tool_snapshot,
+            capabilities: Arc::new(std::sync::OnceLock::new()),
             tool_catalog_overlay,
             authority: Arc::new(std::sync::RwLock::new(
                 super::session_obj::LiveSessionAuthority {
@@ -406,17 +390,83 @@ impl PluginHost {
                 },
             )),
             extensions: self.extensions.clone(),
-            session_extensions,
-            triggers,
-            retains_state: Arc::new(std::sync::atomic::AtomicBool::new(
-                !contributions.state_retaining_plugins.is_empty(),
-            )),
-            contributions,
+            materialized: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            materialization_lock: Arc::new(StdMutex::new(())),
+            retains_state: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             forked,
-            admission: Arc::new(std::sync::Mutex::new(None)),
-        });
-        self.register_session(&owner, &session)?;
-        for plugin in &session.plugins {
+            admission: Arc::new(StdMutex::new(None)),
+        }))
+    }
+
+    pub fn build_session(
+        &self,
+        request: PluginSessionRequest<'_>,
+    ) -> Result<Arc<PluginSession>, PluginError> {
+        let session = self.defer_session(request)?;
+        // Callers of this constructor supply an admitted native snapshot.
+        self.materialize_session(&session)?;
+        Ok(session)
+    }
+
+    pub(super) fn materialize_session(
+        &self,
+        session: &Arc<PluginSession>,
+    ) -> Result<(), PluginError> {
+        let _materialization = session.materialization_lock.lock_recover();
+        let _read_only = super::state::ReadOnlyConstruction::enter();
+        session.validate_recorded_admission()?;
+        if session.is_materialized() {
+            return Ok(());
+        }
+        if session.capabilities.get().is_none() {
+            let authority = session.live_authority();
+            let snapshot = session.capture_state();
+            for factory in self.factories() {
+                if let Some(namespace) = snapshot.plugins.get(factory.id()) {
+                    super::state::validate_namespace(&namespace.values)?;
+                }
+            }
+            self.validate_native_formats(&snapshot, &authority.plugin_config.config)?;
+            let ctx = PluginSessionContext {
+                tracing: self.trace_runtime.clone(),
+                trace: None,
+                owner: session.owner.clone(),
+                tool_access: authority.tool_access,
+                subagent: authority.subagent,
+                plugin_config: authority.plugin_config,
+                materialization: session.materialization,
+                extensions: self.extensions.clone(),
+                parent_session_id: session.parent_session_id.clone(),
+            };
+            let BuiltSessionContributions {
+                plugins,
+                contributions,
+                triggers,
+            } = self.build_session_contributions(&ctx, Arc::clone(&session.state))?;
+            let registry = build_tool_registry(&contributions, session.tool_snapshot.clone())?;
+            let tools = Arc::clone(&registry) as Arc<dyn ToolProvider>;
+            let session_extensions = PluginExtensions::from_contributions(
+                plugins
+                    .iter()
+                    .flat_map(|plugin| plugin.extension_contributions()),
+            );
+            session.retains_state.store(
+                !contributions.state_retaining_plugins.is_empty(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            let _ = session
+                .capabilities
+                .set(super::session_obj::PluginSessionCapabilities {
+                    plugins,
+                    contributions,
+                    tool_registry: registry,
+                    tools,
+                    session_extensions,
+                    triggers,
+                });
+        }
+        self.register_session(&session.owner, session)?;
+        for plugin in &session.capabilities().plugins {
             let state =
                 PluginStateStore::bind(&session.owner, plugin.id(), Arc::clone(&session.state));
             let probe = state.retention_probe();
@@ -433,21 +483,18 @@ impl PluginHost {
                     .store(true, std::sync::atomic::Ordering::SeqCst);
             }
         }
-        // Registration and readiness both contribute to a cold materialization.
-        // Freeze their replay log before later writes become an uncommitted tail.
         session
-            .state
-            .lock_recover()
-            .initialize(&session.owner, snapshot)?;
-        Ok(session)
+            .materialized
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
     }
 
     fn build_session_contributions(
         &self,
         ctx: &PluginSessionContext,
-        snapshot: Option<&PluginState>,
+        state: Arc<StdMutex<PluginStateRegistry>>,
     ) -> Result<BuiltSessionContributions, PluginError> {
-        let mut registry = PluginStateRegistry::registering(snapshot);
+        let mut registry = state.lock_recover();
         for factory in self.factories() {
             registry
                 .data
@@ -458,7 +505,7 @@ impl PluginHost {
                     ..Default::default()
                 });
         }
-        let state = Arc::new(StdMutex::new(registry));
+        drop(registry);
         let mut plugins = Vec::new();
         let mut contributions = PluginContributions::default();
         let mut tool_names = Default::default();
@@ -519,7 +566,6 @@ impl PluginHost {
                 PluginError::Registration(format!("invalid trigger event catalog: {message}"))
             })?;
         Ok(BuiltSessionContributions {
-            state,
             plugins,
             contributions,
             triggers,

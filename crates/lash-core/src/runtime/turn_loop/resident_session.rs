@@ -371,45 +371,18 @@ impl LashRuntime {
                 ),
             )
         })?;
-        session
-            .plugins()
-            .host()
-            .validate_config_formats(&durable_state.authority.plugin_config)
-            .map_err(|error| {
-                (
-                    ResidentReloadStage::ProtocolSessionRestore,
-                    RuntimeError::from(error),
-                )
-            })?;
-        if let Some(snapshot) = durable_state.plugin_state() {
+        if let Some(bytes) = durable_state.plugin_admission_snapshot() {
             session
                 .plugins()
-                .host()
-                .validate_state_formats(snapshot)
+                .adopt_native_view(&bytes)
                 .map_err(|error| {
                     (
                         ResidentReloadStage::ProtocolSessionRestore,
-                        RuntimeError::from(error),
+                        crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
                     )
                 })?;
-        }
-        durable_state.authority.plugin_config = session
-            .plugins()
-            .host()
-            .decode_config(&durable_state.authority.plugin_config)
-            .map_err(|error| {
-                (
-                    ResidentReloadStage::ProtocolSessionRestore,
-                    RuntimeError::from(error),
-                )
-            })?;
-        if let Some(snapshot) = durable_state.plugin_state() {
-            session.plugins().hydrate_state(snapshot).map_err(|error| {
-                (
-                    ResidentReloadStage::ProtocolSessionRestore,
-                    crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
-                )
-            })?;
+            durable_state.authority.plugin_config =
+                (*session.plugins().admitted_plugin_config().config).clone();
         }
         session.invalidate_runtime_caches();
         // A `PreservePersisted` open never installed its snapshot, so the
@@ -439,10 +412,7 @@ impl LashRuntime {
             .map_err(|err| {
                 (
                     ResidentReloadStage::ToolStateRestore,
-                    RuntimeError::new(
-                        RuntimeErrorCode::ResidentSessionReloadFailed,
-                        err.to_string(),
-                    ),
+                    restore_session_error(err),
                 )
             })?;
             tool_restore = Some(report);
@@ -451,10 +421,7 @@ impl LashRuntime {
             session.refresh_tool_catalog().await.map_err(|err| {
                 (
                     ResidentReloadStage::ToolCatalogRefresh,
-                    RuntimeError::new(
-                        RuntimeErrorCode::ResidentSessionReloadFailed,
-                        err.to_string(),
-                    ),
+                    restore_session_error(err),
                 )
             })?;
         }
@@ -469,10 +436,7 @@ impl LashRuntime {
             .map_err(|err| {
                 (
                     ResidentReloadStage::ProtocolSessionRestore,
-                    RuntimeError::new(
-                        RuntimeErrorCode::ResidentSessionReloadFailed,
-                        err.to_string(),
-                    ),
+                    restore_session_error(err),
                 )
             })?;
 
@@ -630,6 +594,18 @@ impl LashRuntime {
     ) -> Result<(), SessionError> {
         self.reload_invalidated_resident_session_state()
             .await
-            .map_err(|err| SessionError::Protocol(err.to_string()))
+            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))
+    }
+}
+
+fn restore_session_error(error: crate::SessionError) -> RuntimeError {
+    match error {
+        crate::SessionError::Plugin(error) => {
+            crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+        }
+        error => RuntimeError::new(
+            RuntimeErrorCode::ResidentSessionReloadFailed,
+            error.to_string(),
+        ),
     }
 }

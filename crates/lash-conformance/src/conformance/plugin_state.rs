@@ -10,6 +10,9 @@ use lash_sansio::sync::MutexExt;
 use pretty_assertions::assert_eq;
 use std::sync::Mutex;
 
+#[path = "plugin_state_support.rs"]
+mod support;
+
 #[derive(Clone, Copy, Default)]
 enum Registration {
     #[default]
@@ -33,6 +36,17 @@ impl PluginFactory for MockPlugin {
     fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(PluginFactory::id(self))
     }
+    fn initialize_state(
+        &self,
+        _: &crate::RuntimeOwner,
+        _: &crate::PluginConfig,
+    ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, PluginError> {
+        Ok(if self.writes_on_ready {
+            std::collections::BTreeMap::from([("ready".into(), serde_json::json!(true))])
+        } else {
+            Default::default()
+        })
+    }
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(self.clone()))
     }
@@ -43,28 +57,16 @@ impl SessionPlugin for MockPlugin {
     }
     fn register(&self, registrar: &mut PluginRegistrar) -> Result<(), PluginError> {
         let state = registrar.state();
-        match self.registration {
-            Registration::None => {}
-            Registration::Remove => {
-                assert_eq!(state.remove("counter")?, 6);
-                assert_eq!(state.remove("absent")?, 6);
-                assert_eq!(state.get("counter"), None);
-            }
-            Registration::Admission => {
-                assert!(
-                    matches!(
-                        state.set("overflow", serde_json::json!("x".repeat(32766))),
-                        Err(PluginStateError::StoreTooLarge { .. })
-                    ),
-                    "oversize register write must be rejected at registration"
-                );
-                assert_eq!(state.generation(), 5);
-                assert_eq!(state.get("overflow"), None);
-                assert_eq!(
-                    state.set("accepted", serde_json::json!("x".repeat(1024)))?,
-                    6
-                );
-            }
+        if !matches!(self.registration, Registration::None) {
+            assert!(matches!(
+                state.remove("counter"),
+                Err(PluginStateError::WriteScopeRequired { .. })
+            ));
+            assert!(matches!(
+                state.set("accepted", serde_json::json!(true)),
+                Err(PluginStateError::WriteScopeRequired { .. })
+            ));
+            assert_eq!(state.generation(), 5, "registration is read-only");
         }
         self.handles
             .lock_recover()
@@ -94,7 +96,11 @@ impl SessionPlugin for MockPlugin {
             "ready must observe hydrated state through the captured registrar handle"
         );
         if self.writes_on_ready {
-            context.state.set("ready", serde_json::json!(true))?;
+            assert!(matches!(
+                context.state.set("ready", serde_json::json!(true)),
+                Err(PluginStateError::WriteScopeRequired { .. })
+            ));
+            assert_eq!(context.state.get("ready"), Some(serde_json::json!(true)));
         }
         Ok(())
     }
@@ -175,158 +181,182 @@ pub async fn plugin_state_boundary_trace(
     child_store: Arc<dyn RuntimeStore>,
     child_id: &str,
 ) -> Vec<lash_core::PluginState> {
-    let fixture = MockPlugin::default();
-    let host = fixture.host();
-    let plugins = host
-        .build_session(PluginSessionRequest::creation(
-            SessionId::fixture(parent_id),
-            Default::default(),
-        ))
-        .expect("build");
-    let handle = fixture.state(parent_id);
-    let mut state = RuntimeSessionState {
-        session_id: parent_id.parse().unwrap(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-    };
-    state
-        .refresh_plugin_states(&plugins)
-        .expect("the live plugin state is captured");
-    commit(&store, &mut state).await;
-    let before = state.plugin_state_ref().cloned();
-    assert_eq!(handle.set("counter", serde_json::json!(1)).unwrap(), 1);
-    assert_eq!(
-        handle.clone().get("counter"),
-        Some(serde_json::json!(1)),
-        "read your writes"
-    );
-    let rejected = handle.apply_guarded(
-        0,
-        vec![PluginStateEdit::Set {
-            key: "counter".into(),
-            value: serde_json::json!(99),
-        }],
-    );
-    assert!(matches!(
-        rejected,
-        Err(PluginStateError::GenerationConflict {
-            expected: 0,
-            actual: 1
+    Box::pin(async move {
+        let fixture = MockPlugin::default();
+        let host = fixture.host();
+        let plugins = support::construct(&host, parent_id, None, Default::default()).await;
+        let handle = fixture.state(parent_id);
+        let mut state = RuntimeSessionState {
+            session_id: parent_id.parse().unwrap(),
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ))
+        };
+        state
+            .refresh_plugin_states(&plugins)
+            .expect("the live plugin state is captured");
+        commit(&store, &mut state).await;
+        let before = state.plugin_state_ref().cloned();
+        support::callback(&plugins, "first-write", {
+            let handle = handle.clone();
+            async move {
+                assert_eq!(handle.set("counter", serde_json::json!(1)).unwrap(), 1);
+                assert_eq!(
+                    handle.clone().get("counter"),
+                    Some(serde_json::json!(1)),
+                    "read your writes"
+                );
+                let rejected = handle.apply_guarded(
+                    0,
+                    vec![PluginStateEdit::Set {
+                        key: "counter".into(),
+                        value: serde_json::json!(99),
+                    }],
+                );
+                assert!(matches!(
+                    rejected,
+                    Err(PluginStateError::GenerationConflict {
+                        expected: 0,
+                        actual: 1
+                    })
+                ));
+                assert_eq!(handle.get("counter"), Some(serde_json::json!(1)));
+            }
         })
-    ));
-    assert_eq!(handle.get("counter"), Some(serde_json::json!(1)));
-    let crash_state =
-        crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(parent_id))
-            .await
-            .unwrap()
+        .await;
+        let crash_state =
+            crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(parent_id))
+                .await
+                .unwrap()
+                .unwrap();
+        let rebuilt_fixture = MockPlugin::default();
+        let rebuilt_host = rebuilt_fixture.host();
+        let rebuilt = support::construct(
+            &rebuilt_host,
+            parent_id,
+            crash_state.plugin_state(),
+            Default::default(),
+        )
+        .await;
+        assert_eq!(
+            rebuilt_fixture.state(parent_id).get("counter"),
+            None,
+            "uncommitted tail is lost on rebuild"
+        );
+        drop(rebuilt);
+        state
+            .refresh_plugin_states(&plugins)
+            .expect("the live plugin state is captured");
+        let changed = RuntimeCommit::persisted_state_for_test(&state);
+        assert!(
+            matches!(
+                changed.checkpoint.components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
+                crate::HydratedCheckpointComponent::Changed { .. }
+            ),
+            "generation moved: checkpoint must be Changed"
+        );
+        commit(&store, &mut state).await;
+        assert_ne!(state.plugin_state_ref(), before.as_ref());
+        state
+            .refresh_plugin_states(&plugins)
+            .expect("the live plugin state is captured");
+        let unchanged = RuntimeCommit::persisted_state_for_test(&state);
+        assert!(
+            matches!(
+                unchanged.checkpoint.components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
+                crate::HydratedCheckpointComponent::Unchanged { .. }
+            ),
+            "generation unchanged: checkpoint must use its resident reference"
+        );
+        let durable =
+            crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(parent_id))
+                .await
+                .unwrap()
+                .unwrap();
+        let rebuilt = support::construct(
+            &rebuilt_host,
+            parent_id,
+            durable.plugin_state(),
+            Default::default(),
+        )
+        .await;
+        assert_eq!(
+            rebuilt_fixture.state(parent_id).get("counter"),
+            Some(serde_json::json!(1)),
+            "committed write survives process reconstruction"
+        );
+        assert_eq!(
+            rebuilt_fixture.ready_values.lock_recover()[parent_id],
+            Some(serde_json::json!(1)),
+            "session_ready itself must see the committed value"
+        );
+        assert_eq!(rebuilt.export_state(), plugins.export_state());
+        support::callback(&plugins, "parent-fork-write", {
+            let handle = handle.clone();
+            async move {
+                handle.set("counter", serde_json::json!(2)).unwrap();
+            }
+        })
+        .await;
+        let child = plugins
+            .fork_for_session(SessionId::fixture(child_id), Default::default())
             .unwrap();
-    let rebuilt_fixture = MockPlugin::default();
-    let rebuilt_host = rebuilt_fixture.host();
-    let rebuilt = rebuilt_host
-        .build_session(PluginSessionRequest::rematerialization(
-            SessionId::fixture(parent_id),
-            crash_state.plugin_state().unwrap(),
-            SessionAuthorityContext::default(),
-        ))
+        let child_handle = fixture.state(child_id);
+        assert_eq!(child_handle.generation(), handle.generation());
+        assert_eq!(
+            child_handle.get("counter"),
+            Some(serde_json::json!(2)),
+            "fork includes uncommitted live parent state"
+        );
+        support::callback(&plugins, "parent-isolated-write", {
+            let handle = handle.clone();
+            async move {
+                handle.set("counter", serde_json::json!(3)).unwrap();
+            }
+        })
+        .await;
+        support::callback(&child, "child-isolated-write", {
+            let child_handle = child_handle.clone();
+            async move {
+                child_handle
+                    .set("child-only", serde_json::json!(true))
+                    .unwrap();
+            }
+        })
+        .await;
+        assert_eq!(child_handle.get("counter"), Some(serde_json::json!(2)));
+        assert_eq!(handle.get("child-only"), None);
+        let mut child_state = RuntimeSessionState {
+            session_id: child_id.parse().unwrap(),
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ))
+        };
+        child_state
+            .refresh_plugin_states(&child)
+            .expect("the live plugin state is captured");
+        commit(&child_store, &mut child_state).await;
+        let child_durable = crate::conformance::helpers::load_window_state(
+            &child_store,
+            &SessionId::fixture(child_id),
+        )
+        .await
+        .unwrap()
         .unwrap();
-    assert_eq!(
-        rebuilt_fixture.state(parent_id).get("counter"),
-        None,
-        "uncommitted tail is lost on rebuild"
-    );
-    drop(rebuilt);
-    state
-        .refresh_plugin_states(&plugins)
-        .expect("the live plugin state is captured");
-    let changed = RuntimeCommit::persisted_state_for_test(&state);
-    assert!(
-        matches!(
-            changed.checkpoint.components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
-            crate::HydratedCheckpointComponent::Changed { .. }
-        ),
-        "generation moved: checkpoint must be Changed"
-    );
-    commit(&store, &mut state).await;
-    assert_ne!(state.plugin_state_ref(), before.as_ref());
-    state
-        .refresh_plugin_states(&plugins)
-        .expect("the live plugin state is captured");
-    let unchanged = RuntimeCommit::persisted_state_for_test(&state);
-    assert!(
-        matches!(
-            unchanged.checkpoint.components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
-            crate::HydratedCheckpointComponent::Unchanged { .. }
-        ),
-        "generation unchanged: checkpoint must use its resident reference"
-    );
-    let durable =
-        crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(parent_id))
-            .await
-            .unwrap()
-            .unwrap();
-    let rebuilt = rebuilt_host
-        .build_session(PluginSessionRequest::rematerialization(
-            SessionId::fixture(parent_id),
-            durable.plugin_state().unwrap(),
-            SessionAuthorityContext::default(),
-        ))
-        .unwrap();
-    assert_eq!(
-        rebuilt_fixture.state(parent_id).get("counter"),
-        Some(serde_json::json!(1)),
-        "committed write survives process reconstruction"
-    );
-    assert_eq!(
-        rebuilt_fixture.ready_values.lock_recover()[parent_id],
-        Some(serde_json::json!(1)),
-        "session_ready itself must see the committed value"
-    );
-    assert_eq!(rebuilt.export_state(), plugins.export_state());
-    handle.set("counter", serde_json::json!(2)).unwrap();
-    let child = plugins
-        .fork_for_session(SessionId::fixture(child_id), Default::default())
-        .unwrap();
-    let child_handle = fixture.state(child_id);
-    assert_eq!(child_handle.generation(), handle.generation());
-    assert_eq!(
-        child_handle.get("counter"),
-        Some(serde_json::json!(2)),
-        "fork includes uncommitted live parent state"
-    );
-    handle.set("counter", serde_json::json!(3)).unwrap();
-    child_handle
-        .set("child-only", serde_json::json!(true))
-        .unwrap();
-    assert_eq!(child_handle.get("counter"), Some(serde_json::json!(2)));
-    assert_eq!(handle.get("child-only"), None);
-    let mut child_state = RuntimeSessionState {
-        session_id: child_id.parse().unwrap(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-    };
-    child_state
-        .refresh_plugin_states(&child)
-        .expect("the live plugin state is captured");
-    commit(&child_store, &mut child_state).await;
-    let child_durable =
-        crate::conformance::helpers::load_window_state(&child_store, &SessionId::fixture(child_id))
-            .await
-            .unwrap()
-            .unwrap();
-    assert_eq!(child_durable.plugin_state(), Some(&child.export_state()));
-    vec![
-        crash_state.plugin_state().unwrap().clone(),
-        durable.plugin_state().unwrap().clone(),
-        child_durable.plugin_state().unwrap().clone(),
-    ]
+        assert_eq!(child_durable.plugin_state(), Some(&child.export_state()));
+        vec![
+            crash_state.plugin_state().unwrap().clone(),
+            durable.plugin_state().unwrap().clone(),
+            child_durable.plugin_state().unwrap().clone(),
+        ]
+    })
+    .await
 }
 
-// Exercise production construction and park; this witness never explicitly
-// refreshes components or manufactures a checkpoint for the runtime.
+// Publish the recorded initialization before runtime assembly, then exercise
+// production park without refreshing after the callback writes.
 #[expect(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -348,17 +378,12 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
         )),
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
     };
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: id.into(),
         ..RuntimeSessionState::new(policy.clone())
     };
-    let plugins = fixture
-        .host()
-        .build_session(PluginSessionRequest::creation(
-            SessionId::fixture(id),
-            Default::default(),
-        ))
-        .unwrap();
+    let plugins = support::construct(&fixture.host(), id, None, Default::default()).await;
+    state.capture_plugin_states(&plugins).unwrap();
     let hook_session = plugins.clone();
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -379,22 +404,28 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
     )
     .await
     .unwrap();
-    let hook_error = hook_session
-        .dispatch(None)
-        .before_turn(crate::plugin::TurnHookContext {
-            session_id: id.into(),
-            state: runtime.read_view(),
-            sessions: runtime.session_state_service().unwrap(),
-            turn_context: crate::TurnContext::default(),
-            plugin_config: Default::default(),
-        })
-        .await
-        .expect_err("hook deliberately fails after its accepted write");
-    assert!(hook_error.to_string().contains("deliberate hook failure"));
-    fixture
-        .state(id)
-        .set("counter", serde_json::json!(11))
-        .unwrap();
+    support::callback(&hook_session, "failed-turn-hook", {
+        let hook_session = hook_session.clone();
+        let read_view = runtime.read_view();
+        let sessions = runtime.session_state_service().unwrap();
+        let handle = fixture.state(id);
+        async move {
+            let hook_error = hook_session
+                .dispatch(None)
+                .before_turn(crate::plugin::TurnHookContext {
+                    session_id: id.into(),
+                    state: read_view,
+                    sessions,
+                    turn_context: crate::TurnContext::default(),
+                    plugin_config: Default::default(),
+                })
+                .await
+                .expect_err("hook deliberately fails after its accepted write");
+            assert!(hook_error.to_string().contains("deliberate hook failure"));
+            handle.set("counter", serde_json::json!(11)).unwrap();
+        }
+    })
+    .await;
     Box::pin(runtime.park()).await.unwrap();
     let state = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
         .await
@@ -419,18 +450,17 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
         writes_on_ready: true,
         ..Default::default()
     };
-    let plugins = rebuilt
-        .host()
-        .build_session(PluginSessionRequest::rematerialization(
-            SessionId::fixture(id),
-            durable,
-            SessionAuthorityContext {
-                plugin_config: state.admitted_plugin_config(),
-                ..Default::default()
-            },
-        ))
-        .unwrap();
-    assert_eq!(rebuilt.state(id).generation(), generation + 1);
+    let plugins = support::construct(
+        &rebuilt.host(),
+        id,
+        Some(durable),
+        SessionAuthorityContext {
+            plugin_config: state.admitted_plugin_config(),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(rebuilt.state(id).generation(), generation);
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
@@ -452,8 +482,8 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
     .unwrap();
     assert_eq!(
         rebuilt.state(id).generation(),
-        generation + 1,
-        "runtime assembly must preserve ready writes"
+        generation,
+        "runtime assembly must preserve initialized state"
     );
     Box::pin(runtime.park()).await.unwrap();
     let final_state = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
@@ -462,12 +492,13 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
         .unwrap();
     assert_eq!(
         final_state.plugin_state().unwrap().plugins["mock-state"].generation,
-        generation + 1,
-        "an otherwise idle park persists accepted ready writes"
+        generation,
+        "an otherwise idle park preserves the recorded initialization"
     );
 }
 
-// Seed generation five durably, then exercise registration on a cold rebuild.
+// Seed generation five durably, assert cold construction is read-only, then
+// exercise the registered handle inside an accepted recorded callback.
 #[expect(
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
@@ -478,23 +509,23 @@ async fn registration_state_law(
     registration: Registration,
 ) {
     let fixture = MockPlugin::default();
-    let plugins = fixture
-        .host()
-        .build_session(PluginSessionRequest::creation(
-            SessionId::fixture(id.to_string()),
-            Default::default(),
-        ))
-        .unwrap();
+    let plugins = support::construct(&fixture.host(), id, None, Default::default()).await;
     let handle = fixture.state(id);
-    handle.set("counter", serde_json::json!(true)).unwrap();
-    for key in ["large-a", "large-b", "large-c"] {
-        handle
-            .set(key, serde_json::json!("x".repeat(32766)))
-            .unwrap();
-    }
-    handle
-        .set("padding", serde_json::json!("x".repeat(100)))
-        .unwrap();
+    support::callback(&plugins, "registration-seed", {
+        let handle = handle.clone();
+        async move {
+            handle.set("counter", serde_json::json!(true)).unwrap();
+            for key in ["large-a", "large-b", "large-c"] {
+                handle
+                    .set(key, serde_json::json!("x".repeat(32766)))
+                    .unwrap();
+            }
+            handle
+                .set("padding", serde_json::json!("x".repeat(100)))
+                .unwrap();
+        }
+    })
+    .await;
     assert_eq!(handle.generation(), 5);
     let mut state = RuntimeSessionState {
         session_id: id.parse().unwrap(),
@@ -515,14 +546,40 @@ async fn registration_state_law(
         registration,
         ..Default::default()
     };
-    let plugins = rebuilt
-        .host()
-        .build_session(PluginSessionRequest::rematerialization(
-            SessionId::fixture(id),
-            durable.plugin_state().unwrap(),
-            SessionAuthorityContext::default(),
-        ))
-        .unwrap();
+    let plugins = support::construct(
+        &rebuilt.host(),
+        id,
+        durable.plugin_state(),
+        Default::default(),
+    )
+    .await;
+    let handle = rebuilt.state(id);
+    assert_eq!(handle.generation(), 5, "cold construction changes no state");
+    support::callback(&plugins, "registered-callback", async move {
+        match registration {
+            Registration::Remove => {
+                assert_eq!(handle.remove("counter").unwrap(), 6);
+                assert_eq!(handle.remove("absent").unwrap(), 6);
+                assert_eq!(handle.get("counter"), None);
+            }
+            Registration::Admission => {
+                assert!(matches!(
+                    handle.set("overflow", serde_json::json!("x".repeat(32766))),
+                    Err(PluginStateError::StoreTooLarge { .. })
+                ));
+                assert_eq!(handle.generation(), 5);
+                assert_eq!(handle.get("overflow"), None);
+                assert_eq!(
+                    handle
+                        .set("accepted", serde_json::json!("x".repeat(1024)))
+                        .unwrap(),
+                    6
+                );
+            }
+            Registration::None => unreachable!(),
+        }
+    })
+    .await;
     assert_eq!(rebuilt.state(id).generation(), 6);
     durable.refresh_plugin_states(&plugins).unwrap();
     commit(&store, &mut durable).await;
@@ -579,6 +636,7 @@ impl PluginFactory for FormatPlugin {
                 readable: self.declaration().format_version,
             });
         }
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let map = value.as_object_mut().unwrap();
         let old = map.remove("count").unwrap();
         map.insert("total".into(), old);
@@ -734,17 +792,15 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
     let bytes = rmp_serde::to_vec_named(&original).unwrap();
     let original_head = durable.head_revision;
     calls.store(0, std::sync::atomic::Ordering::SeqCst);
-    let request = PluginSessionRequest::rematerialization(
-        SessionId::fixture(session_id),
+    let record = support::transition(
+        &host,
+        session_id,
         &original,
-        SessionAuthorityContext {
-            plugin_config: durable.admitted_plugin_config(),
-            ..Default::default()
-        },
-    );
-    let result = host.isolated_registry().build_session(request.clone());
+        &durable.authority.plugin_config,
+    )
+    .await;
     if version > 2 {
-        assert!(matches!(result, Err(PluginError::Format(_))));
+        assert!(matches!(record.candidate(), Err(PluginError::Format(_))));
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
         let after =
             crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(session_id))
@@ -758,8 +814,35 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
         );
         return;
     }
-    let decoded = result.unwrap();
-    let replay = host.isolated_registry().build_session(request).unwrap();
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the recorded state and config each convert once"
+    );
+    let recorded = rmp_serde::to_vec_named(&record).unwrap();
+    let request = PluginSessionRequest::rematerialization(
+        SessionId::fixture(session_id),
+        &original,
+        SessionAuthorityContext {
+            plugin_config: durable.admitted_plugin_config(),
+            ..Default::default()
+        },
+    );
+    let decoded = host
+        .isolated_registry()
+        .defer_session(request.clone())
+        .unwrap();
+    decoded.adopt_plugin_transition(&record).unwrap();
+    decoded.materialize().unwrap();
+    let replay = host.isolated_registry().defer_session(request).unwrap();
+    let replay_record = rmp_serde::from_slice(&recorded).unwrap();
+    replay.adopt_plugin_transition(&replay_record).unwrap();
+    replay.materialize().unwrap();
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        8,
+        "two capability reconstructions run build/register/ready, with no converter replay"
+    );
     assert_eq!(decoded.export_state(), replay.export_state());
     assert_eq!(
         decoded.admitted_plugin_config(),

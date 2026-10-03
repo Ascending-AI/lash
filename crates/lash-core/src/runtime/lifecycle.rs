@@ -255,6 +255,63 @@ impl LashRuntime {
                 "plugin-state reference must be hydrated before runtime construction".into(),
             ));
         }
+        let mut tool_restore_report = None;
+        let mut admitted_capabilities = false;
+        if let Some(bytes) = state.plugin_admission_snapshot() {
+            match services.plugins.adopt_native_view(&bytes) {
+                Ok(()) => {
+                    admitted_capabilities =
+                        services
+                            .plugins
+                            .plugin_admission()
+                            .is_some_and(|admission| {
+                                services
+                                    .plugins
+                                    .host()
+                                    .validate_plugin_admission(&admission)
+                                    .is_ok()
+                            });
+                    if admitted_capabilities {
+                        services.plugins.materialize()?;
+                    }
+                }
+                Err(crate::PluginError::Format(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
+            state.authority.plugin_config =
+                (*services.plugins.admitted_plugin_config().config).clone();
+        }
+        let session = if admitted_capabilities && services.plugins.is_materialized() {
+            let (session, report) =
+                Self::restore_constructed_session(&host, &services, &mut state).await?;
+            tool_restore_report = report;
+            Some(session)
+        } else {
+            None
+        };
+        let resident_session = ResidentSessionContinuity::fresh();
+        Ok(Self {
+            session,
+            host,
+            services,
+            state,
+            runtime_lease_owner,
+            runtime_lease_executor_id,
+            engine_retries_run: false,
+            admitted_turn_index: None,
+            shift_run: None,
+            process_sync_needed: Arc::new(AtomicBool::new(false)),
+            turn_phase_probe: None,
+            resident_session,
+            tool_restore_report,
+        })
+    }
+
+    pub(in crate::runtime) async fn restore_constructed_session(
+        host: &RuntimeHost,
+        services: &RuntimeServices,
+        state: &mut RuntimeSessionState,
+    ) -> Result<(Session, Option<crate::ToolRestoreReport>), SessionError> {
         let mut session = Session::new(services.clone(), &state.session_id).await?;
         let mut tool_restore_report = None;
         // FIG-3353: an open that will not run a turn declares
@@ -302,7 +359,7 @@ impl LashRuntime {
         protocol_session
             .restore_session(
                 crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
-                crate::plugin::ProtocolSessionRestoreView::new(&state),
+                crate::plugin::ProtocolSessionRestoreView::new(state),
             )
             .await?;
         if session.history_store().is_some() {
@@ -314,28 +371,27 @@ impl LashRuntime {
             .plugins()
             .dispatch(None)
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
-                crate::SessionReadView::from_persisted_state(&state),
+                crate::SessionReadView::from_persisted_state(state),
             ))
             .await
         {
             tracing::warn!(?error, "session restore observer failed");
         }
-        let resident_session = ResidentSessionContinuity::fresh();
-        Ok(Self {
-            session: Some(session),
-            host,
-            services,
-            state,
-            runtime_lease_owner,
-            runtime_lease_executor_id,
-            engine_retries_run: false,
-            admitted_turn_index: None,
-            shift_run: None,
-            process_sync_needed: Arc::new(AtomicBool::new(false)),
-            turn_phase_probe: None,
-            resident_session,
-            tool_restore_report,
-        })
+        Ok((session, tool_restore_report))
+    }
+
+    pub(in crate::runtime) async fn materialize_published_session(
+        &mut self,
+    ) -> Result<(), SessionError> {
+        self.services.plugins.materialize()?;
+        if self.session.is_none() {
+            let (session, report) =
+                Self::restore_constructed_session(&self.host, &self.services, &mut self.state)
+                    .await?;
+            self.session = Some(session);
+            self.tool_restore_report = report;
+        }
+        Ok(())
     }
 
     pub async fn from_embedded_state(
@@ -549,7 +605,7 @@ impl LashRuntime {
             plugin_config: state.admitted_plugin_config(),
         };
         let plugin_session = match state.plugin_state() {
-            Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
+            Some(snapshot) => plugin_host.defer_session(PluginSessionRequest {
                 parent_session_id: parent_session_id.clone(),
                 ..PluginSessionRequest::rematerialization(
                     state.session_id.clone(),
@@ -557,7 +613,7 @@ impl LashRuntime {
                     authority,
                 )
             }),
-            None => plugin_host.build_session(PluginSessionRequest {
+            None => plugin_host.defer_session(PluginSessionRequest {
                 parent_session_id,
                 ..PluginSessionRequest::creation(state.session_id.clone(), authority)
             }),

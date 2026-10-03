@@ -3605,6 +3605,22 @@
       "oneOf": [
         {
           "properties": {
+            "plugin": {
+              "type": "string"
+            },
+            "type": {
+              "const": "write_scope_required",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "plugin"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "type": {
               "const": "effect_owner_mismatch",
               "type": "string"
@@ -10289,6 +10305,23 @@
           "required": [
             "kind",
             "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A retained state handle attempted a write outside an admitted callback.",
+          "properties": {
+            "kind": {
+              "const": "plugin_state_write_scope_required",
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "plugin"
           ],
           "type": "object"
         },

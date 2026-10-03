@@ -103,6 +103,7 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.plugins().host().config_registry().ok());
         let runner = ResolveTurnConfigRunner {
+            plugin_host: self.services.plugins.host().clone(),
             run: run.clone(),
             snapshot: crate::store::persisted_session_config_from_state(&self.state),
             spec,
@@ -194,6 +195,7 @@ fn run_resolve_fault(
 /// run's spec against the snapshot captured at the funnel and records the
 /// result. None of it enters the envelope, which names only the run.
 struct ResolveTurnConfigRunner {
+    plugin_host: crate::PluginHost,
     run: TurnId,
     snapshot: PersistedSessionConfig,
     spec: Option<RecordedRunSpec>,
@@ -353,6 +355,14 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
                 .await?
             }
         };
+        // Native execution config is part of this recorded resolution. Cold
+        // adoption never calls a decoder, including for inherited overrides.
+        resolved.base.plugin_config = self
+            .plugin_host
+            .decode_config(&resolved.base.plugin_config)?;
+        if let Some(config) = resolved.resolved.as_mut() {
+            config.plugin_config = self.plugin_host.decode_config(&config.plugin_config)?;
+        }
         // An override is judged by the owner of every namespace it changed,
         // as a config command's candidate is: an overlay cannot set what the
         // owner does not admit. The refusal is the run's recorded shape.

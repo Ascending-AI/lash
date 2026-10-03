@@ -13,9 +13,14 @@ impl PluginSession {
     /// Pin this plugin session's resolved tool surface: its registry and the
     /// catalog its owner's calls resolve against.
     pub fn pin_resolved_tool_surface(&self) -> Result<ResolvedToolSurface, PluginError> {
-        let registry = Arc::new(self.tool_registry.pin_session_surface(Vec::new()).map_err(
-            |error| PluginError::Session(format!("failed to pin direct tool surface: {error}")),
-        )?);
+        let registry = Arc::new(
+            self.capabilities()
+                .tool_registry
+                .pin_session_surface(Vec::new())
+                .map_err(|error| {
+                    PluginError::Session(format!("failed to pin direct tool surface: {error}"))
+                })?,
+        );
         let provider = Arc::clone(&registry) as Arc<dyn crate::ToolProvider>;
         let tools = provider.tool_manifests();
         let contract_provider = Arc::clone(&provider);
@@ -82,7 +87,7 @@ impl PluginSession {
     ) -> Result<crate::ToolCatalog, PluginError> {
         self.validate_recorded_admission()?;
         let mut contributions = collect_owned_sync(
-            &self.contributions.tool_catalog_contributors,
+            &self.capabilities().contributions.tool_catalog_contributors,
             ToolCatalogContext {
                 owner: ctx.owner.clone(),
                 tools: ctx.tools.clone(),

@@ -18,9 +18,9 @@ impl LashRuntime {
     /// A runtime holding no store writes nothing durable, so the build's own
     /// generation is the only honest answer it can give.
     pub(super) fn fleet_format(&self) -> crate::FleetFormat {
-        self.session
+        self.services
+            .store
             .as_ref()
-            .and_then(|session| session.history_store())
             .map(|store| store.fleet_format())
             .unwrap_or_else(crate::FleetFormat::current)
     }
@@ -30,12 +30,14 @@ impl LashRuntime {
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn set_persisted_state(
         &mut self,
-        state: super::state::RuntimeSessionState,
+        mut state: super::state::RuntimeSessionState,
     ) -> Result<(), SessionError> {
         let mut installed_tool_restore = None;
         if let Some(session) = self.session.as_ref() {
-            if let Some(snapshot) = state.plugin_state() {
-                session.plugins().hydrate_state(snapshot)?;
+            if let Some(bytes) = state.plugin_admission_snapshot() {
+                session.plugins().adopt_native_view(&bytes)?;
+                state.authority.plugin_config =
+                    (*session.plugins().admitted_plugin_config().config).clone();
             } else if let Some(reference) = state.plugin_state_ref()
                 && self.state.plugin_state_ref() != Some(reference)
                 && !session.plugins().matches_state_ref(reference)

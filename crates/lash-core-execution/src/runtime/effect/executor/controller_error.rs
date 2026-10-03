@@ -45,6 +45,15 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 error
             }
             PluginError::Format(refusal) => refusal.into(),
+            PluginError::State(crate::PluginStateError::WriteScopeRequired { plugin }) => {
+                let mut error = Self::new(
+                    RuntimeErrorCode::Plugin,
+                    format!("plugin `{plugin}` writes require an engine-owned callback scope"),
+                );
+                error.cause =
+                    Some(crate::RuntimeErrorCause::PluginStateWriteScopeRequired { plugin });
+                error
+            }
             PluginError::State(crate::PluginStateError::EffectOwnerMismatch) => {
                 let mut error = Self::new(
                     RuntimeErrorCode::EffectReplayDivergence,

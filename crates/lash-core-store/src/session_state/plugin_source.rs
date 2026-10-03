@@ -5,6 +5,12 @@
 /// `lash-core`'s `PluginSession` is the sole implementor; the trait exists so
 /// the durable state struct does not need the plugin host to describe itself.
 pub trait SessionPluginStateSource {
+    /// Recorded transition receipt and current native view, without conversion.
+    fn capture_plugin_admission(
+        &self,
+        config: &crate::PluginConfig,
+    ) -> Result<Option<std::sync::Arc<[u8]>>, crate::RuntimeError>;
+
     /// Current tool-registry generation.
     fn tool_state_generation(&self) -> u64;
 
@@ -40,6 +46,13 @@ impl<T> SessionPluginStateSource for std::sync::Arc<T>
 where
     T: SessionPluginStateSource + ?Sized,
 {
+    fn capture_plugin_admission(
+        &self,
+        config: &crate::PluginConfig,
+    ) -> Result<Option<std::sync::Arc<[u8]>>, crate::RuntimeError> {
+        T::capture_plugin_admission(self, config)
+    }
+
     fn tool_state_generation(&self) -> u64 {
         T::tool_state_generation(self)
     }

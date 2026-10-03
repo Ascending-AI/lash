@@ -108,10 +108,7 @@ impl LashRuntime {
                     generation: crate::runtime::turn_loop::generation_fence::current(self),
                     admitted_generation: admitted.admitted_generation().clone(),
                     executor,
-                    plugin_host: self
-                        .session
-                        .as_ref()
-                        .map(|session| session.plugins().host().clone()),
+                    plugin_host: Some(self.services.plugins.host().clone()),
                     trace: AdmissionTrace {
                         tracing: self.host.core.tracing.clone(),
                         // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
@@ -164,9 +161,17 @@ impl LashRuntime {
                     return Err(abort(error));
                 }
                 let transition = self
-                    .record_plugin_transition(run_controller, admitted, &admission)
+                    .record_plugin_transition(
+                        run_controller,
+                        admitted,
+                        &admission.base,
+                        &admission.plugins,
+                    )
                     .await?;
-                if let Err(error) = self
+                if matches!(
+                    verdict,
+                    AdmittedHeadVerdict::Overtaken { .. } | AdmittedHeadVerdict::Diverged { .. }
+                ) && let Err(error) = self
                     .adopt_admitted_turn(
                         AdmittedTurn {
                             base: &admission.base,
@@ -175,7 +180,7 @@ impl LashRuntime {
                             plugins: &admission.plugins,
                             run: &ran_execution,
                         },
-                        verdict,
+                        verdict.clone(),
                     )
                     .await
                 {
@@ -183,21 +188,25 @@ impl LashRuntime {
                         .await;
                     return Err(abort(error));
                 }
-                if let Some(record) = transition {
-                    let plugins = &self.services.plugins;
-                    plugins.adopt_plugin_transition(&record).map_err(|error| {
-                        abort(crate::RuntimeEffectControllerError::from(error).into_runtime_error())
-                    })?;
-                    self.state.authority.plugin_config = record
-                        .candidate()
-                        .map_err(|error| {
-                            abort(
-                                crate::RuntimeEffectControllerError::from(error)
-                                    .into_runtime_error(),
-                            )
-                        })?
-                        .1;
+                let resume = match &verdict {
+                    AdmittedHeadVerdict::Advanced { head } => Some(head),
+                    _ => None,
+                };
+                if let Err(error) = self
+                    .publish_plugin_transition(transition, fence, resume)
+                    .await
+                {
+                    self.record_turn_park_after_abort(&error, &ran_execution, None)
+                        .await;
+                    return Err(abort(error));
                 }
+                self.admitted_turn_index =
+                    Some(usize::try_from(admission.turn_index).map_err(|_| {
+                        abort(RuntimeError::new(
+                            RuntimeErrorCode::StoreCommitFailed,
+                            "admitted turn index exceeds platform range",
+                        ))
+                    })?);
                 *admission
             }
             Ok(RunAdmissionAnswer::Refused { .. }) => {
@@ -289,6 +298,12 @@ impl LashRuntime {
         fence: &crate::store::ShiftFence,
     ) -> Result<ExecutedRun, ShiftAbort> {
         let run = admitted.run().clone();
+        let transition = self
+            .record_command_plugin_transition(run_controller, admitted)
+            .await?;
+        self.publish_plugin_transition(transition, fence, None)
+            .await
+            .map_err(|error| shift_abort(Some(&run), error))?;
         loop {
             match Box::pin(self.drain_next_session_command_fenced(
                 fence,
@@ -408,10 +423,7 @@ impl LashRuntime {
                     follow_on: follow_on.turn.clone(),
                     attempts: follow_on.attempts,
                     generation: admitted.admitted_generation().clone(),
-                    plugin_host: self
-                        .session
-                        .as_ref()
-                        .map(|session| session.plugins().host().clone()),
+                    plugin_host: Some(self.services.plugins.host().clone()),
                     base: crate::store::SessionHeadRef {
                         // Read by the decision body on its first execution.
                         generation: 0,
@@ -463,27 +475,32 @@ impl LashRuntime {
                 plugins,
             ),
         };
-        // The recovery is the follow-on's admission by this build, and a
-        // run's segment boundary is a plugin adoption point (FIG-4739): every
-        // commit of the follow-on's turn writes plugin namespaces in the
-        // formats the decision recorded (FIG-4747), on this execution and on
-        // every replay of it.
-        if let Some(session) = self.session.as_ref() {
-            if let Err(error) = session.plugins().host().validate_plugin_admission(&plugins) {
-                let error = error.into_turn_failure(RuntimeErrorCode::Plugin);
-                self.record_turn_park_after_abort(&error, &run, None).await;
-                return Err(shift_abort(Some(&run), error));
-            }
-            session.plugins().adopt_plugin_admission(plugins);
-        }
-        // The follow-on's turn runs on the head its decision recorded, at the
-        // index it recorded, whatever head this execution refreshed: a replay
-        // after the follow-on's own commit finds a head that commit moved
-        // (FIG-4380).
-        if let Err(error) = self.adopt_recorded_turn(&base, turn_index).await {
+        if let Err(error) = self
+            .services
+            .plugins
+            .host()
+            .validate_plugin_admission(&plugins)
+        {
+            let error = error.into_turn_failure(RuntimeErrorCode::Plugin);
             self.record_turn_park_after_abort(&error, &run, None).await;
             return Err(shift_abort(Some(&run), error));
         }
+        let transition = self
+            .record_plugin_transition(run_controller, admitted, &base, &plugins)
+            .await?;
+        if let Err(error) = self
+            .publish_plugin_transition(transition, fence, None)
+            .await
+        {
+            self.record_turn_park_after_abort(&error, &run, None).await;
+            return Err(shift_abort(Some(&run), error));
+        }
+        self.admitted_turn_index = Some(usize::try_from(turn_index).map_err(|_| {
+            ShiftAbort::Refused(RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "follow-on turn index exceeds platform range",
+            ))
+        })?);
         // The recorded base is read without its pending fact, and the fact
         // the turn runs under is the recorded one: the head's while the head
         // owes the follow-on, since the decision's first execution raised or
@@ -537,68 +554,6 @@ impl LashRuntime {
                 empty_drain: Some(reason),
             },
         })
-    }
-
-    /// Adopt the head a run's admission admitted it on and pin its recorded
-    /// turn index for the prepare phase (FIG-3682).
-    ///
-    /// The recorded inspection alone decides which head the resident session
-    /// is rebuilt from: a `Ready` verdict rebuilds it from the admission's
-    /// base, whatever the live head is now; an `Advanced` one from the head
-    /// the run's own commits published (FIG-4201); an `Overtaken` verdict
-    /// ends the run typed `StoreCommitSuperseded`, and a `Diverged` one
-    /// parks it.
-    ///
-    /// A base the store no longer retains parks the run too.
-    async fn record_plugin_transition(
-        &self,
-        controller: &ScopedEffectController<'_>,
-        admitted: &Admitted,
-        admission: &crate::store::RunAdmission,
-    ) -> Result<Option<crate::plugin::PluginTransitionRecord>, ShiftAbort> {
-        let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
-        let request = crate::plugin::PluginTransitionRequest {
-            id: crate::plugin::PluginTransitionId(invocation.address().clone()),
-            owner: crate::RuntimeOwner::Session(admitted.session().clone()),
-            base: admission.base.clone(),
-            target: admission.plugins.clone(),
-        };
-        let runner = PluginTransitionRunner {
-            host: self.services.plugins.host().clone(),
-            store: self.shift_store()?,
-            initial: self.state.clone(),
-        };
-        let outcome = controller
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::TransitionPlugins {
-                        request: Box::new(request),
-                    },
-                ),
-                lash_core_execution::core_internal::owned_runner_executor(Box::new(runner), None),
-            )
-            .await
-            .map_err(|error| shift_abort(Some(admitted.run()), error.into_runtime_error()))?;
-        match outcome {
-            crate::RuntimeEffectOutcome::TransitionPlugins { record } => {
-                record.candidate().map_err(|error| {
-                    shift_abort(
-                        Some(admitted.run()),
-                        crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
-                    )
-                })?;
-                Ok(Some(*record))
-            }
-            other => Err(shift_abort(
-                Some(admitted.run()),
-                crate::RuntimeEffectControllerError::wrong_outcome(
-                    crate::RuntimeEffectKind::TransitionPlugins,
-                    other.kind(),
-                )
-                .into_runtime_error(),
-            )),
-        }
     }
 
     async fn adopt_admitted_turn(
@@ -702,7 +657,7 @@ impl LashRuntime {
 /// later admission of the same run replays the step its first execution
 /// recorded, so the run executes exactly the rows its journal was written
 /// for.
-fn run_step_invocation(
+pub(super) fn run_step_invocation(
     run_controller: &ScopedEffectController<'_>,
     admitted: &Admitted,
     step: &str,
@@ -1616,58 +1571,6 @@ impl AdmitRunRunner {
             RunAdmissionProbe::Answer(RunAdmissionAnswer::Refused {
                 refusal: RunAdmissionRefusal::HeadGone,
             })
-        })
-    }
-}
-
-struct PluginTransitionRunner {
-    host: crate::PluginHost,
-    store: crate::store::SessionStore,
-    initial: crate::RuntimeSessionState,
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectLocalRunner for PluginTransitionRunner {
-    async fn execute(
-        self: Box<Self>,
-        envelope: crate::RuntimeEffectEnvelope,
-        _effect_attempt: Option<crate::EffectAttempt>,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        let crate::RuntimeEffectCommand::TransitionPlugins { request } = envelope.command else {
-            return Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "plugin transition requires its recorded request",
-            ));
-        };
-        let state = if request.base.revision == 0 {
-            self.initial
-        } else {
-            crate::store::load_session_window_state(
-                &self.store,
-                crate::store::WindowSelector::Admitted(request.base.clone()),
-            )
-            .await
-            .map_err(|error| {
-                crate::RuntimeEffectControllerError::from(
-                    crate::runtime::runtime_error_from_store_commit(error),
-                )
-                .retryable_uncommitted_derivation()
-            })?
-            .ok_or_else(|| {
-                crate::runtime::runtime_error_from_store_commit(
-                    crate::StoreError::TurnBaseNotRetained {
-                        revision: request.base.revision,
-                    },
-                )
-            })?
-            .state
-        };
-        let plugins = state.plugin_state().cloned().unwrap_or_default();
-        let record =
-            self.host
-                .transition_plugins(*request, &plugins, &state.authority.plugin_config);
-        Ok(crate::RuntimeEffectOutcome::TransitionPlugins {
-            record: Box::new(record),
         })
     }
 }

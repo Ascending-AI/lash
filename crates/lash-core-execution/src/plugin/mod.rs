@@ -2,7 +2,10 @@ mod formats;
 mod transition;
 use std::future::Future;
 use std::sync::Arc;
-pub use transition::{PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest};
+pub use transition::{
+    PluginNativeView, PluginTransitionBase, PluginTransitionId, PluginTransitionRecord,
+    PluginTransitionRequest,
+};
 
 use crate::runtime::AssembledTurn;
 use crate::{MessageRole, SessionPolicy, ToolManifest, ToolOutcome, ToolProvider};
@@ -423,7 +426,6 @@ mod tests {
         }
 
         fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-            reg.state().set("session_id", json!(self.session_id))?;
             reg.tools().provider(Arc::new(MockToolProvider))?;
             let session_id = self.session_id.clone();
             reg.operations().query(

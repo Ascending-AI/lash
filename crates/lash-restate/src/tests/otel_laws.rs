@@ -611,13 +611,18 @@ async fn golden_tree_survives_replay_and_redrive() {
 
 #[tokio::test]
 async fn a_replay_only_wait_resolution_emits_once_from_its_sql_receipt() {
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("SQLite memory");
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("SQLite memory"),
+    );
     let sink = Arc::new(RecordingTraceSink::default());
-    let tracing = lash_core::facade_support::TraceRuntime::default()
-        .with_trace_sink(sink.clone())
-        .with_wait_receipts(stores.session_store_factory());
+    let host = lash_core::facade_support::RuntimeHostConfig::new(
+        lash_conformance::recording_backend_over(stores),
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
+    let tracing = host.tracing.with_trace_sink(sink.clone());
     let session = SessionId::fixture("replayed-wait-session");
     let turn = TurnId::from("replayed-wait-turn");
     let scope = ExecutionScope::turn(&session, &turn);
