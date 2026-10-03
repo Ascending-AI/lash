@@ -180,10 +180,11 @@ impl McpToolProvider {
     }
 }
 
-/// Non-resident MCP provider for RLM deferred execution.
+/// Non-resident MCP catalog provider for explicit RLM execution grants.
 ///
 /// It advertises no catalog members, but resolves and executes known MCP tools
-/// by id for explicit deferred grants.
+/// by id for explicit grants. Its attempts complete inline; the grant supplies
+/// no durable remote completion source or isolated process implementation.
 pub struct McpDeferredToolProvider {
     pool: Arc<McpConnectionPool>,
 }
@@ -243,13 +244,15 @@ impl ToolProvider for McpToolProvider {
             .map(|tool| Arc::new(tool.contract()))
     }
 
+    async fn prepare_tool_call(
+        &self,
+        call: lash_core::ToolPrepareCall<'_>,
+    ) -> Result<lash_core::PreparedToolCall, ToolOutcome> {
+        self.pool.prepare_mcp_call(call)
+    }
+
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        // Resident calls carry no protocol execution binding; only the
-        // deferred provider validates it.
-        self.pool
-            .call_tool_by_id(call.tool_id(), call.args, call.context)
-            .await
-            .into()
+        self.pool.call_admitted_tool(call).await.into()
     }
 }
 
@@ -276,16 +279,40 @@ impl ToolProvider for McpDeferredToolProvider {
             .map(|tool| Arc::new(tool.contract()))
     }
 
+    async fn prepare_tool_call(
+        &self,
+        call: lash_core::ToolPrepareCall<'_>,
+    ) -> Result<lash_core::PreparedToolCall, ToolOutcome> {
+        Self::validate_execution_binding(&call.tool_id, call.context.tool_execution_binding())?;
+        self.pool.prepare_mcp_call(call)
+    }
+
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         if let Err(result) =
             Self::validate_execution_binding(call.tool_id(), call.context.tool_execution_binding())
         {
             return result.into();
         }
-        self.pool
-            .call_tool_by_id(call.tool_id(), call.args, call.context)
-            .await
-            .into()
+        let binding = match crate::pool::admitted_binding(call.manifest()) {
+            Ok(binding) => binding,
+            Err(failure) => return failure.into(),
+        };
+        if call
+            .context
+            .tool_execution_binding()
+            .get("server")
+            .and_then(serde_json::Value::as_str)
+            != Some(binding.server.as_str())
+        {
+            return ToolOutcome::from(
+                crate::call_failure::McpCallFailure::InvalidExecutionBinding {
+                    tool_id: call.tool_id().to_string(),
+                    binding: call.context.tool_execution_binding().clone(),
+                },
+            )
+            .into();
+        }
+        self.pool.call_admitted_tool(call).await.into()
     }
 }
 
@@ -293,273 +320,9 @@ impl ToolProvider for McpDeferredToolProvider {
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use serde_json::json;
     use std::collections::BTreeMap;
 
-    /// Drive a deferred MCP call through the single `execute` seam and project
-    /// the attempt outcome to the plain outcome these assertions inspect. The
-    /// projection asserts the deferred provider declares no leaf intents.
-    async fn deferred_outcome(
-        deferred: &McpDeferredToolProvider,
-        tool_id: &ToolId,
-        args: &Value,
-        context: &lash_core::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let manifest = deferred
-            .resolve_manifest_by_id(tool_id)
-            .expect("deferred tool manifest resolves");
-        match deferred
-            .execute(ToolCall::new(&manifest, args, context))
-            .await
-        {
-            lash_core::ToolAttemptOutcome::Done { result, intents } => {
-                assert!(intents.is_empty(), "deferred MCP declares no intents");
-                ToolOutcome::from_output(result.into_output())
-            }
-            lash_core::ToolAttemptOutcome::HostFailed(error) => {
-                panic!("unexpected host fault: {error}")
-            }
-            lash_core::ToolAttemptOutcome::Pending(pending) => {
-                ToolOutcome::Pending(Box::new(pending))
-            }
-        }
-    }
-
-    /// Full stdio integration test: spin up a tiny `sh` mock that emits three
-    /// pre-canned JSON-RPC responses (initialize, tools/list, tools/call)
-    /// matching rmcp's request-id sequence (0, 1, 2), then verify the pool
-    /// imports the advertised tool with the right discovery metadata and
-    /// executes it end-to-end.
-    #[tokio::test]
-    async fn adapter_imports_and_executes_stdio_tools() {
-        let initialize = json!({
-            "jsonrpc": "2.0",
-            "id": 0,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": { "tools": {} },
-                "serverInfo": { "name": "demo", "version": "1.0.0" }
-            }
-        });
-        let list = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {
-                "tools": [{
-                    "name": "search-docs",
-                    "description": "Search docs",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "query": { "type": "string" }
-                        },
-                        "required": ["query"],
-                        "additionalProperties": false
-                    },
-                    "outputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "matches": { "type": "array" }
-                        },
-                        "required": ["matches"]
-                    }
-                }]
-            }
-        });
-        let call = |id: u32| {
-            json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {
-                    "structuredContent": {
-                        "matches": ["matched"]
-                    },
-                    "content": [{
-                        "type": "text",
-                        "text": "{\n  \"matches\": [\"matched\"]\n}"
-                    }]
-                }
-            })
-        };
-
-        // Read each request line before emitting the matching response —
-        // rmcp drops responses that arrive before their request is in flight,
-        // so a "dump all responses upfront" mock races against the event
-        // loop and the third response never gets matched. Reading one line
-        // per request keeps the sequence deterministic.
-        // Lines:
-        //   1. initialize          → respond with RESP1
-        //   2. notifications/initialized (no response)
-        //   3. tools/list          → respond with RESP2
-        //   4. tools/call (deferred, valid binding) → respond with RESP3
-        //   5. tools/call (resident, null binding)  → respond with RESP4
-        // The binding-refused deferred calls never reach the wire, so they
-        // consume no script line — the resident call must still see RESP4.
-        let script = "\
-            read -r _; printf '%s\\n' \"$RESP1\"; \
-            read -r _; \
-            read -r _; printf '%s\\n' \"$RESP2\"; \
-            read -r _; printf '%s\\n' \"$RESP3\"; \
-            read -r _; printf '%s\\n' \"$RESP4\"; \
-            cat >/dev/null"
-            .to_string();
-
-        let mut env = BTreeMap::new();
-        env.insert("RESP1".to_string(), initialize.to_string());
-        env.insert("RESP2".to_string(), list.to_string());
-        env.insert("RESP3".to_string(), call(2).to_string());
-        env.insert("RESP4".to_string(), call(3).to_string());
-
-        let mut servers = BTreeMap::new();
-        servers.insert(
-            "docs".to_string(),
-            McpServerConfig {
-                startup_timeout_ms: 10_000,
-                call_policy: crate::McpCallPolicy {
-                    call_timeout_ms: 10_000,
-                    ..Default::default()
-                },
-                shutdown_policy: Default::default(),
-                transport: McpTransport::Stdio(McpStdioTransport {
-                    command: "sh".to_string(),
-                    args: vec!["-c".to_string(), script],
-                    env,
-                    cwd: None,
-                }),
-            },
-        );
-
-        let factory = McpPluginFactory::new(servers)
-            .await
-            .expect("factory connects to stdio mock");
-
-        let defs = factory.pool().advertised_tools();
-        assert_eq!(defs.len(), 1, "expected one imported tool, got {defs:?}");
-        let expected_name = crate::mcp_tool_names("docs", &["search-docs"])["search-docs"].clone();
-        assert_eq!(defs[0].name(), expected_name);
-        assert_eq!(defs[0].manifest.id.as_str(), "mcp:4:docs/11:search-docs");
-        // The binding is always written: the manifest key is lash's internal
-        // projection, so assert its content unconditionally.
-        let recorded = defs[0]
-            .manifest
-            .bindings
-            .get(lash_tool_support::TOOL_BINDING_KEY)
-            .expect("mcp tool carries its tool binding");
-        assert_eq!(
-            recorded.get("module_path"),
-            Some(&serde_json::json!(["docs"])),
-            "{recorded:?}"
-        );
-        assert_eq!(
-            recorded.get("operation"),
-            Some(&serde_json::json!("search_docs")),
-            "{recorded:?}"
-        );
-        assert!(recorded.get("aliases").is_none(), "{recorded:?}");
-        assert_eq!(
-            defs[0]
-                .contract
-                .input_schema
-                .canonical
-                .as_value()
-                .get("properties")
-                .and_then(Value::as_object)
-                .and_then(|props| props.get("query"))
-                .and_then(|query| query.get("type"))
-                .cloned(),
-            Some(json!("string"))
-        );
-        assert_eq!(
-            defs[0].contract.output_schema.canonical.as_value()["properties"]["structuredContent"],
-            json!({
-                "$id": "urn:lash:mcp:structured-content",
-                "type": "object",
-                "properties": {
-                    "matches": { "type": "array" }
-                },
-                "required": ["matches"]
-            })
-        );
-        assert_eq!(
-            defs[0].contract.output_schema.canonical.as_value()["properties"]["content"]["type"],
-            json!("array")
-        );
-
-        let deferred = McpDeferredToolProvider::new(Arc::clone(factory.pool()));
-        let tool_id = defs[0].manifest.id.clone();
-        let args = json!({ "query": "lash" });
-        let missing_binding = deferred_outcome(
-            &deferred,
-            &tool_id,
-            &args,
-            &lash_core::testing::mock_attempt_context(),
-        )
-        .await;
-        let lash_core::ToolCallOutcome::Failure(missing_binding) = &missing_binding
-            .as_done_output()
-            .expect("inline failure")
-            .outcome
-        else {
-            panic!("missing binding must fail")
-        };
-        assert!(
-            missing_binding
-                .message
-                .contains("requires an execution binding"),
-            "{missing_binding:?}"
-        );
-
-        let wrong_binding_context = lash_core::testing::mock_attempt_context_with_execution_binding(
-            json!({ "kind": "mcp", "server": "docs", "tool_id": "mcp:docs/other" }),
-        );
-        let wrong_binding =
-            deferred_outcome(&deferred, &tool_id, &args, &wrong_binding_context).await;
-        assert!(!wrong_binding.is_success());
-
-        let valid_binding_context = lash_core::testing::mock_attempt_context_with_execution_binding(
-            json!({ "kind": "mcp", "server": "docs", "tool_id": tool_id.to_string() }),
-        );
-        let deferred_result =
-            deferred_outcome(&deferred, &tool_id, &args, &valid_binding_context).await;
-        assert!(deferred_result.is_success(), "{deferred_result:?}");
-        assert_eq!(
-            deferred_result.value_for_projection(),
-            json!({ "structuredContent": { "matches": ["matched"] }, "content": [] })
-        );
-
-        // The resident provider makes no execution-binding demand: a resident
-        // context legitimately carries a null binding, and the call still
-        // reaches the MCP server exactly once.
-        let resident = McpToolProvider::new(Arc::clone(factory.pool()));
-        let resident_manifest = resident
-            .resolve_manifest_by_id(&tool_id)
-            .expect("resident tool manifest resolves");
-        let resident_attempt = resident
-            .execute(ToolCall::new(
-                &resident_manifest,
-                &args,
-                &lash_core::testing::mock_attempt_context(),
-            ))
-            .await;
-        let lash_core::ToolAttemptOutcome::Done {
-            result: resident_result,
-            intents: resident_intents,
-        } = resident_attempt
-        else {
-            panic!("resident MCP call completes inline")
-        };
-        assert!(resident_intents.is_empty());
-        let resident_outcome = ToolOutcome::from_output(resident_result.into_output());
-        assert!(resident_outcome.is_success(), "{resident_outcome:?}");
-        assert_eq!(
-            resident_outcome.value_for_projection(),
-            json!({ "structuredContent": { "matches": ["matched"] }, "content": [] })
-        );
-
-        factory.shutdown().await.expect("shut down MCP factory");
-    }
-
-    #[cfg(unix)]
     #[tokio::test]
     async fn plugin_shutdown_kills_stdio_child_without_drop_and_is_idempotent() {
         let scratch = tempfile::tempdir().expect("tempdir");

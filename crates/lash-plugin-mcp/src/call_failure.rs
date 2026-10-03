@@ -26,6 +26,14 @@ pub(crate) enum McpCallFailure {
         tool_id: String,
         binding: Value,
     },
+    ExecutionBindingChanged {
+        server: String,
+        tool_id: String,
+    },
+    UnsupportedRemoteCompletion {
+        server: String,
+        tool_id: String,
+    },
     PoolShutDown,
     ServerUnavailable {
         server: String,
@@ -134,7 +142,15 @@ impl std::fmt::Display for McpCallFailure {
             ),
             Self::InvalidExecutionBinding { tool_id, .. } => write!(
                 f,
-                "MCP deferred execution for tool id `{tool_id}` requires an execution binding with kind `mcp` and matching `tool_id`"
+                "MCP tool id `{tool_id}` requires an execution binding for its admitted server and tool"
+            ),
+            Self::ExecutionBindingChanged { server, tool_id } => write!(
+                f,
+                "MCP admitted binding for `{server}` tool `{tool_id}` is unavailable or changed"
+            ),
+            Self::UnsupportedRemoteCompletion { server, tool_id } => write!(
+                f,
+                "MCP tool `{tool_id}` on `{server}` requires a durable remote completion adapter; a socket supports inline attempts only"
             ),
             Self::PoolShutDown => f.write_str("MCP connection pool has shut down"),
             Self::ServerUnavailable { server, health, .. } => match health {
@@ -232,6 +248,18 @@ impl From<McpCallFailure> for ToolFailure {
             F::InvalidExecutionBinding { .. } => (
                 C::InvalidRequest,
                 "mcp_invalid_execution_binding",
+                S::Plugin,
+                ToolRetryStatus::Never,
+            ),
+            F::ExecutionBindingChanged { .. } => (
+                C::Unavailable,
+                "mcp_execution_binding_changed",
+                S::Plugin,
+                ToolRetryStatus::Never,
+            ),
+            F::UnsupportedRemoteCompletion { .. } => (
+                C::Unavailable,
+                "mcp_unsupported_remote_completion",
                 S::Plugin,
                 ToolRetryStatus::Never,
             ),

@@ -1366,6 +1366,11 @@ impl<'a> ToolCall<'a> {
     pub fn name(&self) -> &'a str {
         &self.manifest.name
     }
+
+    /// The admitted manifest, including the provider's recorded execution binding.
+    pub fn manifest(&self) -> &'a ToolManifest {
+        self.manifest
+    }
 }
 
 /// Trait for providing leaf tools to the sandbox.

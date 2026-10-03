@@ -66,6 +66,9 @@ impl McpEntry {
 
 const MOCK_SERVER: &str = include_str!("policy_peer.py");
 
+#[path = "pool/attempt_tests.rs"]
+mod attempts;
+
 #[derive(Clone, Copy)]
 struct MockOptions {
     behavior: &'static str,

@@ -55,6 +55,53 @@ fn test_attempt_context() -> crate::AttemptContext<'static> {
     crate::testing::mock_attempt_context_from(&tool_context)
 }
 
+#[tokio::test]
+async fn l12_pinned_routes_preserve_the_admitted_binding_and_declaration() {
+    struct Echo(ToolDefinition);
+    #[async_trait::async_trait]
+    impl ToolProvider for Echo {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            vec![self.0.manifest()]
+        }
+        fn resolve_contract(&self, _: &str) -> Option<Arc<ToolContract>> {
+            Some(Arc::new(self.0.contract()))
+        }
+        async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            ToolOutcome::ok(json!({
+                "name": call.name(), "binding": call.manifest().bindings["lash.mcp"],
+                "isolated": call.manifest().declaration.isolated,
+            }))
+            .into()
+        }
+    }
+    let mut definition = test_tool("native", "binding projection");
+    definition
+        .manifest
+        .bindings
+        .insert("lash.mcp".into(), json!({"revision": "current"}));
+    let registry = ToolRegistry::from_tool_provider(Arc::new(Echo(definition))).unwrap();
+    let pinned = registry.pin_session_surface(Vec::new()).unwrap();
+    let mut admitted = pinned.tool_manifests().remove(0);
+    admitted.name = "curated_alias".into();
+    admitted
+        .bindings
+        .insert("lash.mcp".into(), json!({"revision": "admitted"}));
+    admitted.declaration.isolated = true;
+    let context = test_attempt_context();
+    let crate::ToolAttemptOutcome::Done { result, .. } = pinned
+        .execute(ToolCall::new(&admitted, &json!({}), &context))
+        .await
+    else {
+        panic!("inline probe")
+    };
+    assert_eq!(
+        ToolOutcome::from_output(result.into_output()).value_for_projection(),
+        json!({
+            "name": "native", "binding": {"revision": "admitted"}, "isolated": true,
+        })
+    );
+}
+
 #[async_trait::async_trait]
 impl ToolProvider for ToggleExactProvider {
     fn tool_manifests(&self) -> Vec<ToolManifest> {

@@ -15,7 +15,11 @@
 mod catalog;
 mod result_schema;
 use result_schema::mcp_result_schema;
+mod admission;
+mod attempt;
 mod lifecycle_actor;
+pub(crate) use admission::admitted_binding;
+use admission::{McpToolBinding, RemoteCompletion};
 
 use lash_sansio::sync::{LockResultExt, MutexExt, RwLockExt};
 use std::collections::BTreeMap;
@@ -266,6 +270,8 @@ struct ImportedTool {
     /// prefixing/normalisation).
     original_name: String,
     definition: ToolDefinition,
+    tool_digest: String,
+    completion: RemoteCompletion,
 }
 
 #[derive(Clone)]
@@ -285,6 +291,7 @@ struct ResolvedToolTarget {
     entry: Arc<McpEntry>,
     advertised_name: String,
     native_name: String,
+    binding: Option<McpToolBinding>,
 }
 
 impl McpConnectionPool {
@@ -649,133 +656,6 @@ impl McpConnectionPool {
         self.call_resolved_tool(target, args, context).await
     }
 
-    async fn call_resolved_tool(
-        &self,
-        target: ResolvedToolTarget,
-        args: &Value,
-        context: &AttemptContext<'_>,
-    ) -> ToolOutcome {
-        if self.shut_down.load(Ordering::SeqCst) {
-            return pool_shut_down_failure();
-        }
-        let ResolvedToolTarget {
-            entry,
-            advertised_name,
-            native_name,
-        } = target;
-
-        let call_timeout = entry.config.call_timeout();
-        let server_name = entry.server_name.clone();
-        let arguments = match args {
-            Value::Object(map) => Some(map.clone()),
-            Value::Null => None,
-            other => {
-                return McpCallFailure::InvalidArguments {
-                    tool: advertised_name,
-                    arguments: other.clone(),
-                }
-                .into();
-            }
-        };
-
-        // The actor publishes a peer/generation snapshot through `watch`.
-        // Dispatch clones that cheap handle without awaiting or routing calls
-        // through lifecycle coordination.
-        let (peer, service_generation) = {
-            match entry.service_snapshot() {
-                Some(service) => (service.peer.clone(), service.generation),
-                None => {
-                    return McpCallFailure::ServerUnavailable {
-                        server: server_name,
-                        health: entry.health.read_recover().clone(),
-                        after_ms: entry.config.reconnect_initial_backoff().as_millis() as u64,
-                    }
-                    .into();
-                }
-            }
-        };
-
-        // `RunningService::is_closed()` only reflects explicit cancellation or
-        // whether its join handle was taken; a dead child transport can still
-        // report open. Health checks must use the peer transport sender.
-        if peer.is_transport_closed() {
-            let cause =
-                format!("MCP server `{server_name}` transport was closed before tool dispatch");
-            entry.mark_disconnected(cause.clone(), service_generation);
-            return McpCallFailure::ConnectionLost {
-                server: server_name,
-                cause: McpServiceFailure::TransportClosed,
-                after_ms: entry.config.reconnect_initial_backoff().as_millis() as u64,
-                shutting_down: entry.is_shutting_down(),
-            }
-            .into();
-        }
-
-        let mut params = CallToolRequestParams::new(native_name);
-        params.arguments = arguments;
-        let mut options = PeerRequestOptions::with_timeout(call_timeout)
-            .with_max_total_timeout(entry.config.call_max_total_timeout());
-        if entry.config.reset_call_timeout_on_progress() {
-            options = options.reset_timeout_on_progress();
-        }
-        let response = match peer
-            .send_cancellable_request(
-                ClientRequest::CallToolRequest(Request::new(params)),
-                options,
-            )
-            .await
-        {
-            Ok(handle) => handle.await_response().await,
-            Err(err) => Err(err),
-        };
-
-        match response {
-            Ok(ServerResult::CallToolResult(result)) => {
-                entry.record_call_success(service_generation);
-                tool_result_from_rmcp(result, context).await
-            }
-            Ok(_) => McpCallFailure::UnexpectedResponse.into(),
-            Err(ServiceError::Timeout { timeout }) => {
-                entry
-                    .handle_call_timeout(&peer, service_generation, timeout)
-                    .await
-            }
-            Err(ServiceError::Cancelled { reason }) => ToolOutcome::cancelled(format!(
-                "MCP tool call on `{server_name}` was cancelled{}",
-                reason
-                    .as_deref()
-                    .map(|reason| format!(": {reason}"))
-                    .unwrap_or_default()
-            )),
-            Err(err) => match McpServiceFailure::from(err) {
-                cause @ (McpServiceFailure::TransportClosed
-                | McpServiceFailure::TransportSend { .. }) => {
-                    entry.mark_disconnected(
-                        format!("MCP server `{server_name}` connection lost: {cause:?}"),
-                        service_generation,
-                    );
-                    McpCallFailure::ConnectionLost {
-                        server: server_name,
-                        cause,
-                        after_ms: entry.config.reconnect_initial_backoff().as_millis() as u64,
-                        shutting_down: entry.is_shutting_down(),
-                    }
-                    .into()
-                }
-                McpServiceFailure::JsonRpc { error } => McpCallFailure::JsonRpc { error }.into(),
-                McpServiceFailure::UnexpectedResponse => McpCallFailure::UnexpectedResponse.into(),
-                McpServiceFailure::UnsupportedSdkError { diagnostic } => {
-                    McpCallFailure::UnsupportedSdkError { diagnostic }.into()
-                }
-                McpServiceFailure::Timeout { .. }
-                | McpServiceFailure::Cancelled { .. }
-                | McpServiceFailure::ConsecutiveTimeouts { .. } => unreachable!(
-                    "timeout and cancellation handled above; consecutive timeout is actor-only"
-                ),
-            },
-        }
-    }
-
     fn lookup_by_name(&self, prefixed_name: &str) -> Option<ResolvedToolTarget> {
         let guard = self.entries.read_recover();
         for entry in guard.values() {
@@ -787,6 +667,7 @@ impl McpConnectionPool {
                     entry: Arc::clone(entry),
                     advertised_name: tool.definition.manifest.name.clone(),
                     native_name: tool.original_name.clone(),
+                    binding: admission::admitted_binding(&tool.definition.manifest).ok(),
                 });
             if target.is_some() {
                 return target;
@@ -807,6 +688,7 @@ impl McpConnectionPool {
                     entry: Arc::clone(entry),
                     advertised_name: tool.definition.manifest.name.clone(),
                     native_name: tool.original_name.clone(),
+                    binding: admission::admitted_binding(&tool.definition.manifest).ok(),
                 });
             if target.is_some() {
                 return target;
@@ -1347,6 +1229,12 @@ fn import_tools_with_name_builder(
         instructions,
     });
     for tool in tools {
+        let tool_digest = admission::tool_digest(&tool)?;
+        let completion = if tool.task_support() == rmcp::model::TaskSupport::Required {
+            RemoteCompletion::UnsupportedTask
+        } else {
+            RemoteCompletion::Inline
+        };
         let original_name = tool.name.to_string();
         let description = tool
             .description
@@ -1370,6 +1258,8 @@ fn import_tools_with_name_builder(
         let imported_tool = ImportedTool {
             original_name,
             definition,
+            tool_digest,
+            completion,
         };
         match imported.entry(prefixed.clone()) {
             std::collections::btree_map::Entry::Vacant(slot) => {

@@ -390,9 +390,9 @@ impl LeafToolSourceExecutor for PinnedToolProviderSource {
             return ToolOutcome::err_fmt(format_args!("Unknown tool id: {}", call.tool_id()))
                 .into();
         };
-        // The provider sees the pinned route manifest, not the caller's view:
-        // a curated model-facing alias must not reach the provider-facing name.
-        let provider_call = ToolCall::new(&route.manifest, call.args, call.context);
+        let mut manifest = call.manifest().clone();
+        manifest.name.clone_from(&route.manifest.name);
+        let provider_call = ToolCall::new(&manifest, call.args, call.context);
         route.provider.execute(provider_call).await
     }
 }

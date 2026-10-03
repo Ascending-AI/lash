@@ -1074,6 +1074,8 @@ mod discovery_execution;
 mod drain_hand_over;
 mod failure_settlement;
 mod finalize_fault;
+#[cfg(all(feature = "mcp", feature = "restate"))]
+mod mcp_run_attempts;
 mod output_retention;
 mod plugin_generation;
 mod plugin_reopen;

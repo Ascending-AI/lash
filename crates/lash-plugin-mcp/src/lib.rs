@@ -31,6 +31,20 @@
 //! Tool refreshes retain them; reconnects capture the new initialize response.
 //! Hosts can read them from advertised manifests for discovery. Standard and
 //! RLM prompts render them once per visible module from the recorded catalog.
+//!
+//! Preparation seals the manifest's server, native tool, transport and peer
+//! identity, tool contract, timeout policy and inline completion capability
+//! in the canonical prepared payload. An attempt requires that sealed binding
+//! to agree with both its manifest and its target; a missing payload refuses.
+//! Replays refuse a changed binding before sending. Each `tools/call` carries
+//! `lash.dev/tool-call-id` and `lash.dev/tool-attempt` in `_meta`; JSON-RPC ids
+//! correlate deliveries only. Servers must implement deduplication by the Lash
+//! call id to suppress repeated remote effects after an unrecorded result.
+//! Transport timeouts are body failures. Cancellation is advisory to the
+//! server and records a local cancelled attempt, with no remote termination
+//! claim. Neither a socket nor a non-resident catalog grant supplies a durable
+//! completion source or process adapter; required remote tasks, deferred work
+//! and isolation refuse before send.
 
 mod call_failure;
 pub mod config;

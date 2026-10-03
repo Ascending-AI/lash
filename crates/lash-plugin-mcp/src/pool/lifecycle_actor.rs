@@ -16,6 +16,7 @@ use rmcp::service::QuitReason;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, timeout};
 
+use super::admission;
 use super::{
     McpEntry, McpServerFault, McpServerHealth, McpToolListRefresh, PublishedService, import_tools,
 };
@@ -601,19 +602,23 @@ impl LifecycleActor {
         };
 
         let instructions = peer.peer_info().and_then(|info| info.instructions.clone());
-        let imported = match import_tools(&server_name, tools, instructions.clone()) {
-            Ok(imported) => imported,
-            Err(error) => {
-                self.record_mcp_error(&error);
-                let shutdown = connection.cancel_and_reap(self, &server_name).await;
-                if shutdown {
-                    send_shutdown(initial_reply);
-                    return ConnectionExit::Shutdown;
+        let imported =
+            match import_tools(&server_name, tools, instructions.clone()).and_then(|tools| {
+                let entry = self.entry.upgrade().ok_or(McpError::PoolShutDown)?;
+                admission::bind_imported_tools(tools, &entry, &peer)
+            }) {
+                Ok(imported) => imported,
+                Err(error) => {
+                    self.record_mcp_error(&error);
+                    let shutdown = connection.cancel_and_reap(self, &server_name).await;
+                    if shutdown {
+                        send_shutdown(initial_reply);
+                        return ConnectionExit::Shutdown;
+                    }
+                    send_result(initial_reply, Err(error));
+                    return ConnectionExit::Failed;
                 }
-                send_result(initial_reply, Err(error));
-                return ConnectionExit::Failed;
-            }
-        };
+            };
         let Some(entry) = self.entry.upgrade() else {
             let _ = connection.cancel_and_reap(self, &server_name).await;
             return ConnectionExit::Shutdown;
@@ -663,6 +668,10 @@ impl LifecycleActor {
                         return if shutdown { ConnectionExit::Shutdown } else { ConnectionExit::Disconnected };
                     };
                     match result.and_then(|tools| import_tools(&server_name, tools, instructions.clone()))
+                        .and_then(|tools| {
+                            let entry = self.entry.upgrade().ok_or(McpError::PoolShutDown)?;
+                            admission::bind_imported_tools(tools, &entry, &peer)
+                        })
                         .and_then(|tools| self.entry.upgrade()
                             .ok_or(McpError::PoolShutDown)?
                             .replace_imported_tools(tools))
