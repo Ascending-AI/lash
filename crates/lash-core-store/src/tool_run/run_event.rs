@@ -231,6 +231,17 @@ pub struct RunRecord {
     pub segment: SegmentOrdinal,
     pub first: RunEventOrdinal,
     pub events: Vec<RunEvent>,
+    /// Original observation data. Retained reads never restore a permit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<RunTraceFacts>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunTraceFacts {
+    pub at_ms: u64,
+    pub owner: lash_trace::TraceToolOwner,
+    pub admissions: BTreeMap<ToolCallId, lash_trace::DurableTraceScope>,
 }
 
 /// One Run record as its journal entry holds it (FIG-4877): the record and

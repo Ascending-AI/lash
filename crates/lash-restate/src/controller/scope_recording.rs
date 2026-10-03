@@ -31,6 +31,7 @@ pub(super) struct ScopeRecordingController<'run, 'ctx, C> {
     /// [`RestateRuntimeEffectController::scoped_effect_controller_for_group_child`]
     /// (FIG-3470). `None` for an unbound scope controller.
     pub(super) binding: Option<lash_core::GroupChildBinding>,
+    pub(super) run_records: lash_core::facade_support::RunRecordObserver,
 }
 
 /// The handler controller a scope view forwards to: borrowed from the
@@ -125,6 +126,7 @@ where
             inner: self.inner.clone(),
             admitted,
             binding,
+            run_records: Default::default(),
         })
     }
 }
@@ -285,12 +287,16 @@ where
         self.inner.record_process_drive_step(name, step).await
     }
 
+    fn run_record_observer(&self) -> Option<&lash_core::facade_support::RunRecordObserver> {
+        Some(&self.run_records)
+    }
+
     async fn record_run_record(
         &self,
         name: String,
         step: lash_core::RunRecordStep<'_>,
     ) -> Result<lash_core::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
-        self.inner.record_run_record(name, step).await
+        self.run_records.record(&*self.inner, name, step).await
     }
 
     async fn execute_effect(

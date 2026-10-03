@@ -121,6 +121,7 @@ impl Log {
 
     fn push(&mut self, event: RunEvent) -> Result<(), RunEventRefusal> {
         let record = RunRecord {
+            trace: None,
             segment: SegmentOrdinal(0),
             first: self.ledger.next_ordinal(),
             events: vec![event],
@@ -192,6 +193,7 @@ fn the_singleton_route_is_four_records_and_its_codec_is_pinned() {
     let mut ledger = RunLedger::new(opener());
     for events in &records {
         let record = RunRecord {
+            trace: None,
             segment: SegmentOrdinal(0),
             first: ledger.next_ordinal(),
             events: events.clone(),
@@ -208,6 +210,7 @@ fn the_singleton_route_is_four_records_and_its_codec_is_pinned() {
         .append(
             SegmentOrdinal(0),
             &RunRecord {
+                trace: None,
                 segment: SegmentOrdinal(0),
                 first: RunEventOrdinal(5),
                 events: vec![RunEvent::Lifecycle {
@@ -586,6 +589,7 @@ fn the_ledger_refuses_gaps_and_appends_from_other_segments() {
         round: round(vec![call("a")]),
     };
     let record = |segment: u32, first: u64| RunRecord {
+        trace: None,
         segment: SegmentOrdinal(segment),
         first: RunEventOrdinal(first),
         events: vec![admitted.clone()],
@@ -616,6 +620,7 @@ fn the_ledger_refuses_gaps_and_appends_from_other_segments() {
         ledger.append(
             SegmentOrdinal(1),
             &RunRecord {
+                trace: None,
                 segment: SegmentOrdinal(1),
                 first: RunEventOrdinal(1),
                 events: Vec::new(),
@@ -634,6 +639,7 @@ fn the_ledger_refuses_gaps_and_appends_from_other_segments() {
         ledger.append(
             SegmentOrdinal(1),
             &RunRecord {
+                trace: None,
                 segment: SegmentOrdinal(1),
                 first: before,
                 events: vec![done(&ToolCallId::fixture("a"), 1), foreign],

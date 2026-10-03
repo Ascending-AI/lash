@@ -550,10 +550,14 @@ pub enum TraceScopeOwner {
         session_id: SessionId,
         turn_id: TurnId,
     },
-    /// One tool call of a turn.
-    Tool {
+    /// One logical operation Run.
+    Operation {
         session_id: SessionId,
-        turn_id: TurnId,
+        operation_id: String,
+    },
+    /// One tool call under its original logical owner.
+    Tool {
+        owner: TraceToolOwner,
         call_id: String,
     },
     /// One host-submitted tool intent, by its replay key, under the
@@ -566,6 +570,27 @@ pub enum TraceScopeOwner {
     Process { process_id: ProcessId },
     /// One accepted trigger occurrence.
     TriggerOccurrence { occurrence_id: String },
+}
+
+/// The logical owner of a tool call, independent of its execution route.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TraceToolOwner {
+    Run {
+        session_id: SessionId,
+        run: TurnId,
+    },
+    Turn {
+        session_id: SessionId,
+        turn_id: TurnId,
+    },
+    Process {
+        process_id: ProcessId,
+    },
+    Operation {
+        session_id: SessionId,
+        operation_id: String,
+    },
 }
 
 /// The kind of a scope owner: the static spelling exported telemetry uses.
@@ -627,6 +652,7 @@ impl TraceScopeId {
     pub fn kind(&self) -> TraceScopeKind {
         match self.owner {
             TraceScopeOwner::Run { .. } => TraceScopeKind::Run,
+            TraceScopeOwner::Operation { .. } => TraceScopeKind::Run,
             TraceScopeOwner::Turn { .. } => TraceScopeKind::Turn,
             TraceScopeOwner::Tool { .. } => TraceScopeKind::Tool,
             TraceScopeOwner::ToolIntent { .. } => TraceScopeKind::ToolIntent,

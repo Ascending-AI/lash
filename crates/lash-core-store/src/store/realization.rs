@@ -9,7 +9,6 @@ pub async fn commit_runtime_state_verified(
     store: &(dyn SessionCommitStore + '_),
     commit: RuntimeCommit,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
-    permit: Option<&lash_trace::EmissionPermit>,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     let meta = store
         .load_session_meta_for_commit(&commit.session_id)
@@ -26,7 +25,10 @@ pub async fn commit_runtime_state_verified(
             ),
         });
     }
-    commit.validate_budget_and_record_size(metrics, permit)?;
+    let permit = lash_trace::EmissionPermit::live_execution(lash_trace::TraceAttemptId::new(
+        uuid::Uuid::new_v4().to_string(),
+    ));
+    commit.validate_budget_and_record_size(metrics, Some(&permit))?;
     let expected_revision = commit.expected_head_revision;
     let receipt = store.commit_runtime_state(commit).await?;
     assert!(
@@ -48,14 +50,10 @@ mod tests {
         store: &dyn SessionCommitStore,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
-        let permit = lash_trace::EmissionPermit::live_execution(lash_trace::TraceAttemptId::new(
-            "test-commit-body",
-        ));
         super::commit_runtime_state_verified(
             store,
             commit,
             &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
-            Some(&permit),
         )
         .await
     }
@@ -71,6 +69,12 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SessionCommitStore for FacadeTestStore {
+        async fn tool_request_receipt(
+            &self,
+            _: &str,
+        ) -> Result<Option<ToolRequestReceipt>, StoreError> {
+            Ok(None)
+        }
         async fn record_tool_request(
             &self,
             _: &ToolRequestReceipt,
@@ -245,6 +249,31 @@ mod tests {
             metrics.histogram_count("lash.runtime_commit.budgeted_size"),
             1,
             "the facade owns the only histogram observation even when the planner revalidates"
+        );
+    }
+
+    #[tokio::test]
+    async fn verified_commit_owns_the_live_budget_observation_at_its_sql_boundary() {
+        let metrics = crate::operational_metrics::TestMetrics::install();
+        let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ));
+        let store = FacadeTestStore {
+            materialized_session: Some(state.session_id.clone()),
+            advances_revision: true,
+            ..Default::default()
+        };
+        super::commit_runtime_state_verified(
+            &store,
+            RuntimeCommit::persisted_state_for_test(&state),
+            &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            metrics.histogram_count("lash.runtime_commit.budgeted_size"),
+            1
         );
     }
 

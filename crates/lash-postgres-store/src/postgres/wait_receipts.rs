@@ -86,13 +86,22 @@ impl WaitReceiptStore for PostgresStore {
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(StoreTransition { record, changed })
     }
-    async fn retire_wait_receipts(
+    async fn retire_observation_receipts(
         &self,
         owner_key: &str,
         retired_at_ms: u64,
     ) -> Result<(), StoreError> {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         sqlx::query(sql().retire.sql())
+            .bind(owner_key)
+            .bind(clamp_epoch_ms(retired_at_ms))
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let tool_sql = lash_store_sql::tool_receipts::ToolReceiptStatements::render(
+            lash_store_sql::Dialect::postgres(),
+        );
+        sqlx::query(tool_sql.retire.sql())
             .bind(owner_key)
             .bind(clamp_epoch_ms(retired_at_ms))
             .execute(&mut **tx)

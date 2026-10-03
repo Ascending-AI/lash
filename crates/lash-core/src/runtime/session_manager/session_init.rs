@@ -608,11 +608,7 @@ async fn commit_initialized_session(
     // this commit.
     let result = materialized
         .store_binding
-        .commit_runtime_state_verified(
-            commit,
-            materialized.runtime.host.core.tracing.metrics(),
-            None,
-        )
+        .commit_runtime_state_verified(commit, materialized.runtime.host.core.tracing.metrics())
         .await
         .map_err(|err| crate::PluginError::Session(err.to_string()))?;
     persisted_state.apply_persisted_commit_result(result);

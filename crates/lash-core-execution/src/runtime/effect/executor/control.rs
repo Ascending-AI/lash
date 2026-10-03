@@ -482,6 +482,11 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// again under the same name and call identity. The default refuses: a
     /// controller that journals no Run record cannot host a Run-owned tool
     /// call. Forwarding wrappers forward.
+    /// The scope-bound Run-record observer, when this engine journals Run records.
+    fn run_record_observer(&self) -> Option<&crate::trace::RunRecordObserver> {
+        None
+    }
+
     async fn record_run_record(
         &self,
         name: String,

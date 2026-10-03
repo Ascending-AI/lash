@@ -283,6 +283,10 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.record_process_drive_step(name, step).await
     }
 
+    fn run_record_observer(&self) -> Option<&crate::trace::RunRecordObserver> {
+        self.inner.run_record_observer()
+    }
+
     async fn record_run_record(
         &self,
         name: String,

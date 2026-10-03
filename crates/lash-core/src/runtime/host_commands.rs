@@ -750,7 +750,7 @@ impl LashRuntime {
             SESSION_COMMAND_STAGED_PHASE,
         ));
         match store
-            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None)
+            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
             .await
         {
             Ok(result) => {

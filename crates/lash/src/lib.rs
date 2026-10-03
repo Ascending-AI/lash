@@ -1502,7 +1502,9 @@ pub mod tracing {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     /// Where engine code stands when it observes, and the journaled-step
     /// boundary that grants the right to.
-    pub use lash_core::facade_support::{JournalFrontier, LiveStep, StepIssue, TraceStanding};
+    pub use lash_core::facade_support::{
+        JournalFrontier, LiveStep, RunRecordObserver, StepIssue, TraceStanding,
+    };
     pub use lash_core::facade_support::{ProviderCompletionSideband, StoreObserver};
     pub use lash_sansio::{AttachmentMaterializationReason, AttachmentMaterializationSource};
     /// The scope, cause, permit and identity vocabulary the trace runtime's
@@ -1517,8 +1519,9 @@ pub mod tracing {
         TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainCompletion,
         TraceDomainOperation, TraceDomainProjector, TraceDomainStatus, TraceHostOperation,
         TraceLinks, TraceLlmAttempt, TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory,
-        TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner, TraceTransitionKind,
-        UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+        TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner, TraceToolOwner,
+        TraceToolTerminal, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags,
+        W3cTraceId, W3cTraceState,
     };
     pub use lash_trace::{
         TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,

@@ -14530,7 +14530,30 @@
         },
         {
           "additionalProperties": false,
-          "description": "One tool call of a turn.",
+          "description": "One logical operation Run.",
+          "properties": {
+            "kind": {
+              "const": "operation",
+              "type": "string"
+            },
+            "operation_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "operation_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One tool call under its original logical owner.",
           "properties": {
             "call_id": {
               "type": "string"
@@ -14539,19 +14562,13 @@
               "const": "tool",
               "type": "string"
             },
-            "session_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "turn_id": {
-              "minLength": 1,
-              "type": "string"
+            "owner": {
+              "$ref": "#/$defs/TraceToolOwner"
             }
           },
           "required": [
             "kind",
-            "session_id",
-            "turn_id",
+            "owner",
             "call_id"
           ],
           "type": "object"
@@ -14611,6 +14628,96 @@
           "required": [
             "kind",
             "occurrence_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceToolOwner": {
+      "description": "The logical owner of a tool call, independent of its execution route.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "run",
+              "type": "string"
+            },
+            "run": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "run"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "turn",
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "turn_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "process",
+              "type": "string"
+            },
+            "process_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "process_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "operation",
+              "type": "string"
+            },
+            "operation_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "operation_id"
           ],
           "type": "object"
         }

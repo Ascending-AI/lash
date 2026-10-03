@@ -8,12 +8,17 @@ impl RuntimeExecutionContext<'_> {
         requested_at_ms: u64,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         Box::pin(async {
-            let (Some(store), Some(session_id)) = (
-                self.dispatch.tool_receipts.clone(),
-                self.dispatch.owner.session_id().cloned(),
-            ) else {
+            let Some(store) = self.dispatch.tool_receipts.clone() else {
                 return Ok(());
             };
+            let owner =
+                crate::EffectOpener::for_scope(&self.admitted_scope()).map_err(|error| {
+                    crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                        error.to_string(),
+                    )
+                })?;
+            let owner = crate::trace::run_receipts::tool_owner(&owner);
             let payload = serde_json::json!({
                 "call_id": record.call_id,
                 "provider_call_id": record.provider_call_id,
@@ -61,7 +66,7 @@ impl RuntimeExecutionContext<'_> {
                                 scope
                             });
                         let request = crate::store::ToolRequestReceipt {
-                            session_id,
+                            owner,
                             request_key,
                             payload_digest: digest,
                             payload,
@@ -122,7 +127,7 @@ impl RuntimeExecutionContext<'_> {
             if request.payload_digest != offered_digest {
                 return Err(crate::RuntimeEffectControllerError::from(
                     crate::store::StoreError::ToolRequestConflict {
-                        session_id: request.session_id,
+                        owner: request.owner,
                         request_key: request.request_key,
                     },
                 ));
@@ -173,7 +178,7 @@ impl RuntimeExecutionContext<'_> {
                 move || async move {
                     let receipt = store
                         .record_tool_completion(&crate::store::ToolCompletionReceipt {
-                            session_id: request.session_id.clone(),
+                            owner: request.owner.clone(),
                             request_key: request.request_key.clone(),
                             payload_digest: request.payload_digest.clone(),
                             result: serde_json::to_value(&record).map_err(|e| {

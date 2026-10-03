@@ -363,7 +363,7 @@ impl LashRuntime {
                 );
             }
             let error = match store
-                .commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None)
+                .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
                 .await
             {
                 Ok(result) => {

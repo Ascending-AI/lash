@@ -47,13 +47,13 @@ impl crate::store::WaitReceiptStore for BackendWaitReceipts {
         self.store().record_wait_resolution(resolution).await
     }
 
-    async fn retire_wait_receipts(
+    async fn retire_observation_receipts(
         &self,
         owner_key: &str,
         retired_at_ms: u64,
     ) -> Result<(), crate::StoreError> {
         self.store()
-            .retire_wait_receipts(owner_key, retired_at_ms)
+            .retire_observation_receipts(owner_key, retired_at_ms)
             .await
     }
 }
@@ -277,7 +277,8 @@ impl RuntimeHostConfig {
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
             },
             tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock))
-                .with_wait_receipts(Arc::new(BackendWaitReceipts::new(&backend))),
+                .with_wait_receipts(Arc::new(BackendWaitReceipts::new(&backend)))
+                .with_tool_receipts(backend.stores()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             clock,
         }
@@ -313,7 +314,8 @@ impl RuntimeHostConfig {
             .with_artifact_ports(ArtifactReferrerPorts::of_backend(&backend));
         config.tracing = config
             .tracing
-            .with_wait_receipts(Arc::new(BackendWaitReceipts::new(&backend)));
+            .with_wait_receipts(Arc::new(BackendWaitReceipts::new(&backend)))
+            .with_tool_receipts(backend.stores());
         Self { backend, ..config }
     }
 

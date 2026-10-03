@@ -453,11 +453,15 @@ impl<'run> ScopedEffectController<'run> {
 
     /// Exposes controller to effect-host implementors while scoping and journaling durable effects.
     pub fn controller(&self) -> &dyn RuntimeEffectController {
-        match &self.controller {
+        let controller: &dyn RuntimeEffectController = match &self.controller {
             ScopedEffectControllerInner::Borrowed(controller) => *controller,
             ScopedEffectControllerInner::Shared(controller) => controller.as_ref(),
             ScopedEffectControllerInner::Owned(controller) => controller.as_ref(),
+        };
+        if let Some(observer) = controller.run_record_observer() {
+            observer.bind(self);
         }
+        controller
     }
 
     fn validate_envelope_scope(

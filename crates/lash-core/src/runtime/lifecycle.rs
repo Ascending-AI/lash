@@ -749,7 +749,7 @@ impl LashRuntime {
         // A write outside every shift: the store refuses it while a shift
         // owns the head (FIG-4202).
         let result = store
-            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None)
+            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
             .await
             .map_err(|source| session_commit_error("failed to persist runtime state", source))?;
         flushed.apply_persisted_commit_result(result);

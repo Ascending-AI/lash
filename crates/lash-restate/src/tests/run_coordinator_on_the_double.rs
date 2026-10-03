@@ -391,6 +391,7 @@ fn unrelated_record(probe: Arc<Probe>) -> lash_core::RunRecordStep<'static> {
                 events: vec![RunEvent::Lifecycle {
                     state: RunLifecycle::Closing,
                 }],
+                trace: None,
             },
             materials: Vec::new(),
         })
@@ -451,6 +452,12 @@ async fn drive(
             let finished = Arc::clone(&finished);
             let terminals = Arc::clone(&terminals);
             Box::pin(async move {
+                // Independent whole/crashed executions use the same injected
+                // observation time; the law compares their complete records.
+                lash_core::facade_support::TraceRuntime::new(Arc::new(
+                    lash_core::testing::TestClock::new(1),
+                ))
+                .turn_execution(&scoped);
                 let handlers: &dyn SingletonToolHandlers = probe.as_ref();
                 let mut run =
                     RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);

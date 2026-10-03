@@ -75,8 +75,8 @@ pub use telemetry::{
     TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
     TraceCause, TraceDomainProjector, TraceHostOperation, TraceLinks, TraceRecordIdentity,
     TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer,
-    TraceScopeOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
-    W3cTraceState,
+    TraceScopeOwner, TraceToolOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags,
+    W3cTraceId, W3cTraceState,
 };
 
 /// Version of the durable trace JSONL schema, written to
@@ -577,6 +577,14 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         issuing_node_id: Option<String>,
     },
+    /// A logical receipt from recorded Run events. A final is observed only
+    /// after its protected presentation; a Deferred attempt has no terminal.
+    ToolReceipt {
+        call_id: lash_sansio::ToolCallId,
+        name: String,
+        started_at_ms: u64,
+        terminal: Option<TraceToolTerminal>,
+    },
     ToolCallCompleted {
         /// Lash's identity for the call (ADR 0117).
         call_id: lash_sansio::ToolCallId,
@@ -846,6 +854,7 @@ impl TraceEvent {
                 | "runtime_stream_event"
                 | "tool_call_started"
                 | "tool_call_completed"
+                | "tool_receipt"
                 | "exec_code_started"
                 | "exec_code_completed"
                 | "exec_code_failed"
@@ -903,6 +912,10 @@ impl TraceEvent {
                 TraceToolCallOutcome::Failure(_) => true,
                 TraceToolCallOutcome::Success(_) | TraceToolCallOutcome::Cancelled(_) => false,
             },
+            Self::ToolReceipt { terminal, .. } => matches!(
+                terminal,
+                Some(TraceToolTerminal::Denied | TraceToolTerminal::Aborted)
+            ),
             Self::TurnCompleted { outcome, .. } => outcome.is_failed(),
             Self::DomainCompleted { completion } => completion.status == TraceDomainStatus::Failed,
             Self::LanguageExecution { event, .. } => match &event.payload {
@@ -977,6 +990,7 @@ impl TraceEvent {
             Self::ProviderStreamEvent { .. } => "provider_stream_event",
             Self::RuntimeStreamEvent { .. } => "runtime_stream_event",
             Self::ToolCallStarted { .. } => "tool_call_started",
+            Self::ToolReceipt { .. } => "tool_receipt",
             Self::ToolCallCompleted { .. } => "tool_call_completed",
             Self::ExecCodeStarted { .. } => "exec_code_started",
             Self::ExecCodeCompleted { .. } => "exec_code_completed",
@@ -1004,6 +1018,16 @@ pub struct TraceToolCallOutput {
     pub outcome: TraceToolCallOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<Value>,
+}
+
+/// The recorded final-or-cancel decision of one logical tool call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceToolTerminal {
+    Final,
+    Denied,
+    Cancelled,
+    Aborted,
 }
 
 impl TraceToolCallOutput {

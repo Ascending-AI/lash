@@ -161,6 +161,7 @@ impl RunJournal<'_> {
             segment: self.segment,
             first: self.ledger.next_ordinal(),
             events,
+            trace: None,
         }
     }
 

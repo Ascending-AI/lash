@@ -973,6 +973,12 @@ impl Default for SessionHeadPayload {
 /// must fail instead of persisting a checkpoint that hydrates to `None`.
 #[async_trait::async_trait]
 pub trait SessionCommitStore: Send + Sync {
+    /// Read the accepted request when a Run restores only its suffix.
+    /// A retained receipt carries identity and original facts, never a permit.
+    async fn tool_request_receipt(
+        &self,
+        request_key: &str,
+    ) -> Result<Option<ToolRequestReceipt>, StoreError>;
     /// Retain the first sealed request. The disposition is issued after commit.
     async fn record_tool_request(
         &self,

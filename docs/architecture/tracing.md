@@ -59,15 +59,20 @@ For example, a protocol plugin reports compile/link evidence as
 `program_step`, and every backend uses the neutral `lash.store.pool.*`
 instruments through its `StoreObserver`.
 
-These producer gaps remain open under FIG-4830's tool arc (R01):
+The `record_run_record` boundary observes accepted A/X/D/V records.
+Admission grants the accepted
+receipt. A withheld decision grants its terminal receipt; a final grants its
+terminal only after its protected presentation is recorded. Deferred stays
+pending. Folding a retained prefix after replay or handover reconstructs the
+call without another export: SQL first writers grant the emission permits.
+The receipt owner is a Turn, Run, Process or Operation, independent of route.
+Scope retirement marks wait and tool receipts together for the retention sweep.
 
-- the successful scalar `call_command_tool` path has no tool request or
-  completion receipt;
-- process-owned tool calls have no typed tool scope;
-- `report_undispatched_tool_call` has no retained request to complete;
-- the `lash.runtime_commit.budgeted_size` histogram is unbound at its
-  commit callers;
-- deferred `AwaitToolCompletions` waits have no wait receipt.
+Scalar commands and undispatched protocol calls retain their original requests
+before completing them. Process tool scopes retain their process parent.
+Deferred `AwaitToolCompletions` uses the same durable wait request and resolution
+receipts as other engine waits. The SQL commit wrapper owns the Live permit
+for its physical budget validation and histogram observation.
 
-The six tracing rulings and laws P1-P8 define acceptance. Passing a registry
-or compile check cannot close these producer gaps.
+Recorded model usage and provider responses remain result data. Lash has no
+billing ledger, and tracing never resends a provider request.

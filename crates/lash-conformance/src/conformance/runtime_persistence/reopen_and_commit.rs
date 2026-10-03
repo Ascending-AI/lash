@@ -844,7 +844,6 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
         store.as_ref(),
         divergent_replay,
         &Default::default(),
-        None,
     )
     .await
     .expect_err("the store must reject a mutated commit reusing an operation id");

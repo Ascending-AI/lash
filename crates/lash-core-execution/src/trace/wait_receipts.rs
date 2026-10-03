@@ -24,6 +24,7 @@ impl WaitBoundary {
         let kind = match &envelope.command {
             RuntimeEffectCommand::AwaitEvent { .. } => EngineWaitKind::Event,
             RuntimeEffectCommand::Sleep { .. } => EngineWaitKind::Timer,
+            RuntimeEffectCommand::AwaitToolCompletions { .. } => EngineWaitKind::ToolCompletion,
             RuntimeEffectCommand::Process { command }
                 if matches!(command.as_ref(), ProcessCommand::Await { .. }) =>
             {
@@ -85,6 +86,16 @@ impl WaitBoundary {
         outcome: &RuntimeEffectOutcome,
     ) -> Result<(), RuntimeEffectControllerError> {
         let resolution = match outcome {
+            RuntimeEffectOutcome::AwaitToolCompletions { event } => match event {
+                crate::ToolCompletionEvent::Resolved { resolution, .. } => match resolution {
+                    crate::Resolution::Ok(_) => TraceDurableWaitResolution::Ok,
+                    crate::Resolution::Err(_) => TraceDurableWaitResolution::Error,
+                    crate::Resolution::Timeout => TraceDurableWaitResolution::Timeout,
+                    crate::Resolution::Cancelled => TraceDurableWaitResolution::Cancelled,
+                },
+                crate::ToolCompletionEvent::DispatchReady => TraceDurableWaitResolution::Resolved,
+                crate::ToolCompletionEvent::HandedOver => return Ok(()),
+            },
             RuntimeEffectOutcome::AwaitEvent { resolution } => match resolution {
                 crate::Resolution::Ok(_) => TraceDurableWaitResolution::Ok,
                 crate::Resolution::Err(_) => TraceDurableWaitResolution::Error,

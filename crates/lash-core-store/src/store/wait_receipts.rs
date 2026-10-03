@@ -8,6 +8,7 @@ pub enum EngineWaitKind {
     Event,
     Timer,
     Process,
+    ToolCompletion,
 }
 impl EngineWaitKind {
     pub fn as_str(self) -> &'static str {
@@ -15,6 +16,7 @@ impl EngineWaitKind {
             Self::Event => "await_event",
             Self::Timer => "sleep",
             Self::Process => "process_await",
+            Self::ToolCompletion => "tool_completion",
         }
     }
 }
@@ -48,8 +50,8 @@ pub trait WaitReceiptStore: Send + Sync {
         &self,
         resolution: &WaitResolutionReceipt,
     ) -> Result<StoreTransition<WaitResolutionReceipt>, StoreError>;
-    /// Mark receipts eligible for retention only after their owner has retired.
-    async fn retire_wait_receipts(
+    /// Mark wait and tool receipts eligible for retention only after their owner has retired.
+    async fn retire_observation_receipts(
         &self,
         owner_key: &str,
         retired_at_ms: u64,

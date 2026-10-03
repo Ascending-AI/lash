@@ -489,16 +489,13 @@ impl RuntimeExecutionContext<'_> {
                 })
                 .collect());
         };
-        let Some(session_id) = self.dispatch.owner.session_id().cloned() else {
-            return Ok(formed
-                .iter()
-                .map(|formed| {
-                    formed
-                        .as_ref()
-                        .map(|(call, _)| call.prepared_payload.clone())
-                })
-                .collect());
-        };
+        let owner = crate::EffectOpener::for_scope(&self.admitted_scope()).map_err(|error| {
+            crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                error.to_string(),
+            )
+        })?;
+        let owner = crate::trace::run_receipts::tool_owner(&owner);
         let offers = formed
             .iter()
             .map(|formed| {
@@ -552,7 +549,7 @@ impl RuntimeExecutionContext<'_> {
                                 scope
                             });
                         let request = crate::store::ToolRequestReceipt {
-                            session_id: session_id.clone(),
+                            owner: owner.clone(),
                             request_key: format!("{}:{}", execution_scope_id, call.call_id),
                             payload_digest: digest,
                             payload: serde_json::to_value(&call).map_err(|e| {

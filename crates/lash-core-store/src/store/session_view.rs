@@ -62,14 +62,12 @@ impl SessionStore {
         &self,
         commit: RuntimeCommit,
         metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
-        permit: Option<&lash_trace::EmissionPermit>,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
         self.check_request(&commit)?;
         Box::pin(commit_runtime_state_verified(
             self.store.as_ref(),
             commit,
             metrics,
-            permit,
         ))
         .await
     }
@@ -126,8 +124,6 @@ macro_rules! carries_session_field {
 }
 
 carries_session_field! {
-    ToolRequestReceipt => |request| &request.session_id;
-    ToolCompletionReceipt => |request| &request.session_id;
     RuntimeCommit => |request| &request.session_id;
     ShiftFence => |request| request.session();
     AdmitRunRequest => |request| request.fence.session();

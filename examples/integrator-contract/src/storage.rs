@@ -169,6 +169,12 @@ impl SessionCatalogStore for Integrator {
 
 #[lash::async_trait]
 impl SessionCommitStore for Integrator {
+    async fn tool_request_receipt(
+        &self,
+        request_key: &str,
+    ) -> Result<Option<ToolRequestReceipt>, StoreError> {
+        unreachable!("external signature witness")
+    }
     async fn record_tool_request(
         &self,
         request: &ToolRequestReceipt,
@@ -903,7 +909,7 @@ impl WaitReceiptStore for Integrator {
     ) -> Result<StoreTransition<WaitResolutionReceipt>, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn retire_wait_receipts(
+    async fn retire_observation_receipts(
         &self,
         owner_key: &str,
         retired_at_ms: u64,

@@ -38,7 +38,9 @@ pub fn composition_schema_serialization_count() -> usize {
 mod boundary;
 pub(crate) mod wait_receipts;
 pub use boundary::TraceBoundaryReceipt;
+pub(crate) mod run_receipts;
 mod runtime;
+pub use run_receipts::RunRecordObserver;
 pub use runtime::{
     JournalFrontier, LiveStep, StepIssue, TraceEmitter, TraceRuntime, TraceStanding,
     tool_trace_scope,
@@ -174,7 +176,8 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
             set_span(context, self_id, turn_node);
         }
         TraceEvent::ToolCallStarted { call_id, .. }
-        | TraceEvent::ToolCallCompleted { call_id, .. } => {
+        | TraceEvent::ToolCallCompleted { call_id, .. }
+        | TraceEvent::ToolReceipt { call_id, .. } => {
             set_span(context, Some(tool_node_id(call_id.as_str())), turn_node);
         }
         TraceEvent::ProviderRequest { .. }

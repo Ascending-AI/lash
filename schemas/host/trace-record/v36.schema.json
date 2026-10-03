@@ -3229,6 +3229,16 @@
       ],
       "type": "object"
     },
+    "TraceToolTerminal": {
+      "description": "The recorded final-or-cancel decision of one logical tool call.",
+      "enum": [
+        "final",
+        "denied",
+        "cancelled",
+        "aborted"
+      ],
+      "type": "string"
+    },
     "TraceTurnCancellationEvidence": {
       "description": "Durable evidence that the traced turn was cancelled. Mirrors the runtime's\n`TurnCancellationEvidence`, which only [`TurnStop::Cancelled`] can carry, so\na cancelled trace outcome can never be stated without saying which request\nproduced it.\n\n[`TurnStop::Cancelled`]: lash_sansio::session_model::TurnStop::Cancelled",
       "properties": {
@@ -3985,6 +3995,43 @@
         "call_id",
         "name",
         "args"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A logical receipt from recorded Run events. A final is observed only\nafter its protected presentation; a Deferred attempt has no terminal.",
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "started_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToolTerminal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "const": "tool_receipt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "call_id",
+        "name",
+        "started_at_ms"
       ],
       "type": "object"
     },

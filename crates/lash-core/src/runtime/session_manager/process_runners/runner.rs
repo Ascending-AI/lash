@@ -198,14 +198,11 @@ impl RuntimeSessionServices {
             // handle, under the process's scope.
             let tracing = &services.current.host.core.tracing;
             if tracing.is_observed() || tracing.emitter().has_product_observers() {
-                context = context.with_tracing(Some(
-                    crate::RuntimeExecutionTracing::new(
-                        tracing.clone(),
-                        retained_scope.clone(),
-                        lash_trace::TraceContext::default(),
-                    )
-                    .without_tool_lifecycle(),
-                ));
+                context = context.with_tracing(Some(crate::RuntimeExecutionTracing::new(
+                    tracing.clone(),
+                    retained_scope.clone(),
+                    lash_trace::TraceContext::default(),
+                )));
             }
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);

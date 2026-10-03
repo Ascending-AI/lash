@@ -435,7 +435,7 @@ impl LashRuntime {
         commit.shift_fence = Some(Box::new(shift_commit.fence.clone()));
         commit.run_terminal = shift_commit.terminal.clone().map(Box::new);
         match store
-            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None)
+            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
             .await
         {
             Ok(receipt) => {

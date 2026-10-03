@@ -48,6 +48,7 @@ where
                 inner: scope_recording::HandlerController::Owned(self),
                 admitted: admitted.clone(),
                 binding: None,
+                run_records: Default::default(),
             }),
             admitted,
         )
@@ -89,6 +90,7 @@ where
                 inner: scope_recording::HandlerController::Borrowed(self),
                 admitted: admitted.clone(),
                 binding: None,
+                run_records: Default::default(),
             }),
             admitted,
         )
@@ -112,6 +114,7 @@ where
                 inner: scope_recording::HandlerController::Borrowed(self),
                 admitted: admitted.clone(),
                 binding: Some(binding),
+                run_records: Default::default(),
             }),
             admitted,
         )

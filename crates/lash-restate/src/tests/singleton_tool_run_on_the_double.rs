@@ -36,6 +36,683 @@ const PLUGIN: &str = "fig4877-tools";
 const OUTPUT: &str = "fig4877 done";
 const PRESENTATION: &str = "fig4877 presented";
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logical_receipts_follow_recorded_admission_and_protected_presentation() {
+    for always_replay in [false, true] {
+        for (label, admitted, owner, cancel_at) in [
+            (
+                "turn",
+                AdmittedScope::turn("session", "turn"),
+                EffectOpener::turn("session", "turn"),
+                CancelAt::Never,
+            ),
+            (
+                "run",
+                AdmittedScope::turn("session", "run"),
+                EffectOpener::turn("session", "run"),
+                CancelAt::Never,
+            ),
+            (
+                "process",
+                AdmittedScope::session_operation("session", "process-receipt-fixture"),
+                EffectOpener::process(lash_sansio::ProcessId::fixture("receipt-process")),
+                CancelAt::Never,
+            ),
+            (
+                "operation",
+                AdmittedScope::session_operation("session", "operation"),
+                EffectOpener::session_operation("session", "operation"),
+                CancelAt::Never,
+            ),
+            (
+                "cancelled",
+                AdmittedScope::turn("session", "cancelled"),
+                EffectOpener::turn("session", "cancelled"),
+                CancelAt::Body,
+            ),
+        ] {
+            let backend = lash_restate_test::backend(
+                0x4830,
+                ServerConfig::default().always_replay(always_replay),
+            )
+            .await
+            .unwrap();
+            let sink = Arc::new(super::RecordingTraceSink::default());
+            let tracing =
+                lash_core::facade_support::TraceRuntime::default().with_trace_sink(sink.clone());
+            let tracing = if label == "run" {
+                let core = lash::LashCore::standard_builder(backend.lash_backend())
+                    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                    .trace_runtime(tracing)
+                    .build(lash_core::LeaseOwnerIdentity::opaque(
+                        "receipt-fixture",
+                        "custom-tracing",
+                    ))
+                    .unwrap();
+                core.durable_process_worker_config()
+                    .unwrap()
+                    .runtime_host
+                    .tracing
+            } else {
+                tracing.with_tool_receipts(backend.engine_stores().clone())
+            };
+            let probe = Probe::new(Probe::done(), cancel_at);
+            let mut call = call(label);
+            call.owner = owner;
+            let original = call.call_id.clone();
+            let handler_runs = Arc::new(AtomicUsize::new(0));
+            let attempt: lash_restate_test::HandlerAttempt = {
+                let probe = probe.clone();
+                let handler_runs = handler_runs.clone();
+                Arc::new(move |scoped| {
+                    let tracing = tracing.clone();
+                    let probe = probe.clone();
+                    let call = call.clone();
+                    let handler_runs = handler_runs.clone();
+                    Box::pin(async move {
+                        handler_runs.fetch_add(1, Ordering::SeqCst);
+                        let process_scope;
+                        let scoped = if label == "process" {
+                            // The record-only fixture lends the engine to the
+                            // process owner; it dispatches no process effect.
+                            process_scope = lash_core::ScopedEffectController::borrowed(
+                                scoped.controller(),
+                                AdmittedScope::process(lash_sansio::ProcessId::fixture(
+                                    "receipt-process",
+                                )),
+                            )
+                            .unwrap()
+                            .in_drive_of(&scoped);
+                            &process_scope
+                        } else {
+                            &scoped
+                        };
+                        let scoped = if label == "run" {
+                            (*scoped)
+                                .clone()
+                                .with_trace_scope(lash_trace::DurableTraceScope {
+                                    scope: lash_trace::TraceScopeId::admission(
+                                        lash_trace::TraceScopeOwner::Run {
+                                            session_id: "session".into(),
+                                            run: "run".into(),
+                                        },
+                                    ),
+                                    cause: lash_trace::TraceCause::Root,
+                                    anchor: lash_trace::TraceAnchor::Untraced,
+                                    started_at_ms: 1,
+                                })
+                        } else {
+                            (*scoped).clone()
+                        };
+                        tracing.turn_execution(&scoped);
+                        run_singleton_tool(&scoped, &call, probe.as_ref())
+                            .await
+                            .unwrap();
+                    })
+                })
+            };
+            backend.run_in_handler(admitted, attempt).await.unwrap();
+            let records = sink.records.lock().unwrap();
+            let receipts = records
+                .iter()
+                .filter_map(|record| match &record.event {
+                    lash_trace::TraceEvent::ToolReceipt {
+                        call_id, terminal, ..
+                    } => Some((call_id, terminal)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let terminal = if cancel_at == CancelAt::Body {
+                lash_trace::TraceToolTerminal::Cancelled
+            } else {
+                lash_trace::TraceToolTerminal::Final
+            };
+            assert_eq!(
+                receipts,
+                [(&original, &None), (&original, &Some(terminal))],
+                "{label} replay={always_replay}"
+            );
+            assert_eq!(
+                probe.executions(),
+                1,
+                "serving recorded X never reruns its body"
+            );
+            assert_eq!(
+                probe.presentations.load(Ordering::SeqCst),
+                usize::from(cancel_at == CancelAt::Never)
+            );
+            if always_replay {
+                assert!(handler_runs.load(Ordering::SeqCst) > 1);
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancelled_spending_calls_and_unreturned_losers_keep_recorded_provider_results() {
+    use lash_core::llm::types::{LlmRequest, LlmRequestScope, LlmResponse, LlmUsage};
+    use lash_core::tool_run::{
+        AdmittedCall, AttemptResult, CheckRecord, MaterialEntry, MaterialLocation, MaterialOwner,
+        MaterialPayload, MaterialRole, RoundAdmission, RunJournalEntry, RunLedger,
+        RuntimeCallPolicy,
+    };
+    let backend = lash_restate_test::backend(0x4833, ServerConfig::default().always_replay(true))
+        .await
+        .unwrap();
+    let sink = Arc::new(super::RecordingTraceSink::default());
+    let tracing = lash_core::facade_support::TraceRuntime::default()
+        .with_tool_receipts(backend.engine_stores().clone())
+        .with_trace_sink(sink.clone());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let retained = Arc::new(Mutex::new(Vec::new()));
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let calls = calls.clone();
+        let retained = retained.clone();
+        Arc::new(move |scoped| {
+            let calls = calls.clone();
+            let retained = retained.clone();
+            let tracing = tracing.clone();
+            Box::pin(async move {
+                tracing.turn_execution(&scoped);
+                let owner = EffectOpener::turn("receipt-spend", "turn");
+                let request = MaterialPayload::new(
+                    MaterialOwner::Run {
+                        opener: owner.clone(),
+                    },
+                    MaterialRole::PreparedRequest,
+                    None,
+                    "{}".into(),
+                )
+                .reference(MaterialLocation::JournalLocal)
+                .unwrap();
+                let ids = [
+                    ToolCallId::fixture("cancelled-spender"),
+                    ToolCallId::fixture("unreturned-loser"),
+                ];
+                let round = RoundAdmission {
+                    owner: owner.clone(),
+                    members: ids
+                        .iter()
+                        .map(|call_id| AdmittedCall {
+                            call_id: call_id.clone(),
+                            tool_name: "spend".into(),
+                            request: request.clone(),
+                            declaration: ToolDeclaration::default(),
+                            binding: binding(1),
+                            policy: RuntimeCallPolicy::default(),
+                            checks: CheckRecord::reduce(Vec::new()),
+                        })
+                        .collect(),
+                    operands: vec![0, 1],
+                };
+                round.clone().admit(&[revision(1)], |_| true).unwrap();
+                let mut ledger = RunLedger::new(owner.clone());
+                let entry = scoped
+                    .controller()
+                    .record_run_record(
+                        "spend-admission".into(),
+                        Box::pin(async move {
+                            Ok(RunJournalEntry {
+                                record: RunRecord {
+                                    segment: SegmentOrdinal(0),
+                                    first: lash_core::tool_run::RunEventOrdinal(0),
+                                    events: vec![RunEvent::Admitted { round }],
+                                    trace: None,
+                                },
+                                materials: Vec::new(),
+                            })
+                        }),
+                    )
+                    .await
+                    .unwrap();
+                ledger.append(SegmentOrdinal(0), &entry.record).unwrap();
+                let mut results = Vec::new();
+                for call_id in &ids {
+                    let call_id = call_id.clone();
+                    let owner = owner.clone();
+                    let calls = calls.clone();
+                    let first = ledger.next_ordinal();
+                    let entry = scoped.controller().record_run_record(format!("spend-output-{call_id}"), Box::pin(async move {
+                        let mut provider = lash_core::testing::TestProvider::builder().kind("recorded-spend").complete(move |request: LlmRequest| {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            let response = LlmResponse {
+                                usage: LlmUsage { input_tokens: 11, output_tokens: 7, ..Default::default() },
+                                provider_usage: Some(serde_json::json!({"reported_tokens": 18})),
+                                response_metadata: std::collections::BTreeMap::from([("header:x-request-id".into(), serde_json::json!(format!("provider:{}", request.request_id())))]),
+                                ..Default::default()
+                            };
+                            async move { Ok::<_, lash_core::llm::transport::LlmTransportError>(response) }
+                        }).build().into_handle();
+                        let metadata = lash_core::LlmProfileMetadata::builder("spend-model").context_window_tokens(1024).build().unwrap();
+                        let completion = provider.complete(LlmRequest {
+                            instructions: None,
+                            model: lash_core::testing::test_llm_profile_config("spend-model", metadata),
+                            messages: Vec::new(), resolved_stored: Default::default(), tools: Default::default(), tool_choice: Default::default(), attachment_acceptance: Default::default(), generation: Default::default(),
+                            scope: LlmRequestScope::new("receipt-spend", "frame", call_id.to_string()),
+                            output_spec: None, stream_events: None, provider_trace: None,
+                        }).await.unwrap();
+                        let payload = MaterialPayload::new(MaterialOwner::Run { opener: owner }, MaterialRole::AttemptOutput, None, serde_json::json!({"response": completion.response, "call_record": completion.call_record}).to_string());
+                        let output = payload.reference(MaterialLocation::JournalLocal).unwrap();
+                        Ok(RunJournalEntry {
+                            record: RunRecord { segment: SegmentOrdinal(0), first, events: vec![RunEvent::AttemptRecorded { call_id, attempt: AttemptOrdinal::FIRST, result: AttemptResult::Done { output: output.clone() } }], trace: None },
+                            materials: vec![MaterialEntry::Available { reference: output, payload: Box::new(payload) }],
+                        })
+                    })).await.unwrap();
+                    ledger.append(SegmentOrdinal(0), &entry.record).unwrap();
+                    results.push(entry);
+                }
+                let first = ledger.next_ordinal();
+                let entry = scoped
+                    .controller()
+                    .record_run_record(
+                        "spend-cancel-and-abort".into(),
+                        Box::pin(async move {
+                            Ok(RunJournalEntry {
+                                record: RunRecord {
+                                    segment: SegmentOrdinal(0),
+                                    first,
+                                    events: vec![
+                                        RunEvent::Decided {
+                                            call_id: ids[0].clone(),
+                                            rank: 1,
+                                            decision: CallDecision::Cancelled,
+                                            after: None,
+                                        },
+                                        RunEvent::Decided {
+                                            call_id: ids[1].clone(),
+                                            rank: 2,
+                                            decision: CallDecision::Aborted,
+                                            after: Some(CheckRecord::reduce(vec![AttributedVerdict {
+                                                callback: binding(1).executable,
+                                                verdict: AfterCheckVerdict::AbortRun {
+                                                    cause: lash_core::tool_run::HookCause {
+                                                        error_type: "spend-abort".into(),
+                                                        error_version: std::num::NonZeroU32::new(1).unwrap(),
+                                                        payload: serde_json::json!({"withhold": true}),
+                                                    },
+                                                },
+                                            }])),
+                                        },
+                                    ],
+                                    trace: None,
+                                },
+                                materials: Vec::new(),
+                            })
+                        }),
+                    )
+                    .await
+                    .unwrap();
+                ledger.append(SegmentOrdinal(0), &entry.record).unwrap();
+                assert!(ledger.aborted());
+                *retained.lock().unwrap() = results;
+            })
+        })
+    };
+    backend
+        .run_in_handler(AdmittedScope::turn("receipt-spend", "turn"), attempt)
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "recorded X never dispatches its provider again"
+    );
+    let retained = retained.lock().unwrap();
+    assert_eq!(retained.len(), 2, "both withheld calls retain their X");
+    for (entry, id) in retained
+        .iter()
+        .zip(["cancelled-spender", "unreturned-loser"])
+    {
+        assert!(
+            !entry
+                .record
+                .events
+                .iter()
+                .any(|event| matches!(event, RunEvent::Presented { .. }))
+        );
+        let MaterialEntry::Available { payload, .. } = &entry.materials[0] else {
+            panic!("recorded provider result is retained")
+        };
+        let result: serde_json::Value = serde_json::from_str(&payload.text).unwrap();
+        assert_eq!(result["response"]["usage"]["input_tokens"], 11);
+        assert_eq!(result["response"]["provider_usage"]["reported_tokens"], 18);
+        assert_eq!(
+            result["response"]["response_metadata"]["header:x-request-id"],
+            format!("provider:{}", ToolCallId::fixture(id))
+        );
+        assert_eq!(
+            result["call_record"]["call_id"],
+            ToolCallId::fixture(id).to_string()
+        );
+        assert_eq!(
+            result["call_record"]["attempts"][0]["usage"]["output_tokens"],
+            7
+        );
+    }
+    let records = sink.records.lock().unwrap();
+    let terminals = records
+        .iter()
+        .filter_map(|record| match &record.event {
+            lash_trace::TraceEvent::ToolReceipt {
+                call_id,
+                terminal: Some(terminal),
+                ..
+            } => Some((call_id.to_string(), *terminal)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        terminals,
+        [
+            (
+                ToolCallId::fixture("cancelled-spender").to_string(),
+                lash_trace::TraceToolTerminal::Cancelled
+            ),
+            (
+                ToolCallId::fixture("unreturned-loser").to_string(),
+                lash_trace::TraceToolTerminal::Aborted
+            )
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
+    use lash_core::tool_run::{
+        AdmittedCall, AttemptResult, CheckRecord, MaterialLocation, MaterialOwner, MaterialPayload,
+        MaterialRole, RoundAdmission, RunJournalEntry, RunLedger, RuntimeCallPolicy,
+    };
+    let backend = lash_restate_test::backend(0x4831, ServerConfig::default().always_replay(true))
+        .await
+        .unwrap();
+    let sink = Arc::new(super::RecordingTraceSink::default());
+    let tracing = lash_core::facade_support::TraceRuntime::default()
+        .with_tool_receipts(backend.engine_stores().clone())
+        .with_trace_sink(sink.clone());
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let sink = sink.clone();
+        Arc::new(move |scoped| {
+            let tracing = tracing.clone();
+            let sink = sink.clone();
+            Box::pin(async move {
+                tracing.turn_execution(&scoped);
+                let owner = EffectOpener::turn("receipt-group", "turn");
+                let payload = MaterialPayload::new(
+                    MaterialOwner::Run {
+                        opener: owner.clone(),
+                    },
+                    MaterialRole::PreparedRequest,
+                    None,
+                    "{}".into(),
+                );
+                let request = payload.reference(MaterialLocation::JournalLocal).unwrap();
+                let members = ["grouped", "isolated", "deferred"]
+                    .into_iter()
+                    .map(|label| {
+                        let mut declaration = ToolDeclaration::default();
+                        declaration.isolated = label == "isolated";
+                        declaration.may_defer = !declaration.isolated;
+                        AdmittedCall {
+                            call_id: ToolCallId::fixture(label),
+                            tool_name: "probe".into(),
+                            request: request.clone(),
+                            declaration,
+                            binding: binding(1),
+                            policy: RuntimeCallPolicy {
+                                retry: if label == "grouped" {
+                                    lash_core::tool_run::RecordedRetryPolicy::Reported {
+                                        max_attempts: std::num::NonZeroU32::new(2).unwrap(),
+                                        base_delay_ms: 0,
+                                        max_delay_ms: 0,
+                                    }
+                                } else {
+                                    Default::default()
+                                },
+                                ..Default::default()
+                            },
+                            checks: CheckRecord::reduce(Vec::new()),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let source = scoped
+                    .controller()
+                    .await_event_key(
+                        scoped.execution_scope(),
+                        lash_core::AwaitEventWaitIdentity::Custom {
+                            key: "receipt-deferred".into(),
+                        },
+                    )
+                    .await
+                    .unwrap();
+                let a = members[0].call_id.clone();
+                let b = members[1].call_id.clone();
+                let c = members[2].call_id.clone();
+                let isolated_output = MaterialPayload::new(
+                    MaterialOwner::Run {
+                        opener: owner.clone(),
+                    },
+                    MaterialRole::AttemptOutput,
+                    None,
+                    "isolated done".into(),
+                )
+                .reference(MaterialLocation::JournalLocal)
+                .unwrap();
+                let resolved = MaterialPayload::new(
+                    MaterialOwner::Source {
+                        source: source.clone(),
+                    },
+                    MaterialRole::AttemptOutput,
+                    None,
+                    "resolved".into(),
+                )
+                .reference(MaterialLocation::JournalLocal)
+                .unwrap();
+                let batches = vec![
+                    vec![RunEvent::Admitted {
+                        round: RoundAdmission {
+                            owner: owner.clone(),
+                            members,
+                            operands: vec![0, 1, 2],
+                        },
+                    }],
+                    vec![
+                        RunEvent::AttemptRecorded {
+                            call_id: a.clone(),
+                            attempt: AttemptOrdinal::new(1).unwrap(),
+                            result: AttemptResult::Failed {
+                                output: isolated_output.clone(),
+                                retryable: true,
+                            },
+                        },
+                        RunEvent::AttemptRecorded {
+                            call_id: b.clone(),
+                            attempt: AttemptOrdinal::new(1).unwrap(),
+                            result: AttemptResult::Done {
+                                output: isolated_output,
+                            },
+                        },
+                        RunEvent::AttemptRecorded {
+                            call_id: c.clone(),
+                            attempt: AttemptOrdinal::FIRST,
+                            result: AttemptResult::Deferred {
+                                source: source.clone(),
+                            },
+                        },
+                    ],
+                    vec![
+                        RunEvent::RetryScheduled {
+                            call_id: a.clone(),
+                            failed: AttemptOrdinal::FIRST,
+                            next: AttemptOrdinal::new(2).unwrap(),
+                            backoff_ms: 0,
+                        },
+                        RunEvent::AttemptRecorded {
+                            call_id: a.clone(),
+                            attempt: AttemptOrdinal::new(2).unwrap(),
+                            result: AttemptResult::Deferred {
+                                source: source.clone(),
+                            },
+                        },
+                    ],
+                    vec![
+                        RunEvent::Decided {
+                            call_id: a.clone(),
+                            rank: 1,
+                            decision: CallDecision::Cancelled,
+                            after: None,
+                        },
+                        RunEvent::Decided {
+                            call_id: b.clone(),
+                            rank: 2,
+                            decision: CallDecision::Final {
+                                source: ResultSource::Attempt {
+                                    attempt: AttemptOrdinal::FIRST,
+                                },
+                                declares: false,
+                            },
+                            after: Some(CheckRecord::reduce(Vec::new())),
+                        },
+                        RunEvent::Decided {
+                            call_id: c.clone(),
+                            rank: 3,
+                            decision: CallDecision::Final {
+                                source: ResultSource::DeferredCompletion {
+                                    attempt: AttemptOrdinal::new(1).unwrap(),
+                                    resolved: Box::new(resolved),
+                                },
+                                declares: true,
+                            },
+                            after: Some(CheckRecord::reduce(Vec::new())),
+                        },
+                    ],
+                    vec![
+                        RunEvent::DeclarationsIssued { call_id: c.clone() },
+                        RunEvent::DeclarationsSettled { call_id: c.clone() },
+                    ],
+                    vec![RunEvent::Presented {
+                        call_id: b.clone(),
+                        presentation: None,
+                    }],
+                    vec![RunEvent::Presented {
+                        call_id: c.clone(),
+                        presentation: None,
+                    }],
+                ];
+                let mut ledger = RunLedger::new(owner);
+                let mut prefix = Vec::new();
+                for (index, events) in batches.into_iter().enumerate() {
+                    let record = RunRecord {
+                        segment: SegmentOrdinal(0),
+                        first: ledger.next_ordinal(),
+                        events,
+                        trace: None,
+                    };
+                    for event in &record.events {
+                        if let RunEvent::Admitted { round } = event {
+                            round.clone().admit(&[revision(1)], |_| true).unwrap();
+                        }
+                    }
+                    let boundary_sink = sink.clone();
+                    let entry = scoped
+                        .controller()
+                        .record_run_record(
+                            format!("receipt-fixture-{index}"),
+                            Box::pin(async move {
+                                if index == 1 || index == 4 {
+                                    let count = boundary_sink
+                                        .records
+                                        .lock()
+                                        .unwrap()
+                                        .iter()
+                                        .filter(|record| record.event.kind() == "tool_receipt")
+                                        .count();
+                                    assert_eq!(
+                                        count,
+                                        if index == 1 { 3 } else { 4 },
+                                        "no terminal from X or protected declaration work"
+                                    );
+                                }
+                                Ok(RunJournalEntry {
+                                    record,
+                                    materials: Vec::new(),
+                                })
+                            }),
+                        )
+                        .await
+                        .unwrap();
+                    ledger.append(SegmentOrdinal(0), &entry.record).unwrap();
+                    prefix.push(entry.record);
+                    if index == 1 {
+                        // Re-adopted material retains the same call identity;
+                        // only SQL owns emission rights on prefix restoration.
+                        for record in &mut prefix {
+                            if let Some(RunEvent::Admitted { round }) = record.events.first_mut() {
+                                for member in &mut round.members {
+                                    member.request.location = MaterialLocation::RetainedArtifact {
+                                        artifact: lash_core::ArtifactName {
+                                            store: lash_core::ArtifactStoreId::ToolMaterial,
+                                            artifact_ref: "retained-receipt-request".into(),
+                                        },
+                                    };
+                                }
+                            }
+                            let record = record.clone();
+                            scoped
+                                .controller()
+                                .record_run_record(
+                                    format!("retained-prefix-{}", record.first.0),
+                                    Box::pin(async move {
+                                        Ok(RunJournalEntry {
+                                            record,
+                                            materials: Vec::new(),
+                                        })
+                                    }),
+                                )
+                                .await
+                                .unwrap();
+                        }
+                    }
+                }
+            })
+        })
+    };
+    backend
+        .run_in_handler(AdmittedScope::turn("receipt-group", "turn"), attempt)
+        .await
+        .unwrap();
+    let records = sink.records.lock().unwrap();
+    let receipts = records
+        .iter()
+        .filter_map(|record| match &record.event {
+            lash_trace::TraceEvent::ToolReceipt {
+                call_id, terminal, ..
+            } => Some((call_id.clone(), *terminal)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        receipts,
+        [
+            (ToolCallId::fixture("grouped"), None),
+            (ToolCallId::fixture("isolated"), None),
+            (ToolCallId::fixture("deferred"), None),
+            (
+                ToolCallId::fixture("grouped"),
+                Some(lash_trace::TraceToolTerminal::Cancelled)
+            ),
+            (
+                ToolCallId::fixture("isolated"),
+                Some(lash_trace::TraceToolTerminal::Final)
+            ),
+            (
+                ToolCallId::fixture("deferred"),
+                Some(lash_trace::TraceToolTerminal::Final)
+            ),
+        ]
+    );
+}
+
 fn revision(value: u32) -> PluginRevision {
     PluginRevision::new(PLUGIN, BehaviorRevision::new(value).unwrap())
 }

@@ -698,7 +698,7 @@ impl AwaitEventResolver for RestateEffectHostController {
             return Err(restate_scope_not_retirable(scope));
         }
         retire_restate_scope_via_ingress(&self.await_event_ingress, scope, false).await?;
-        self.retire_wait_receipts(scope).await
+        self.retire_observation_receipts(scope).await
     }
 
     /// Revoke and fence the scope's index only if no durable wait under it is
@@ -731,7 +731,7 @@ impl AwaitEventResolver for RestateEffectHostController {
                 )
             })?;
         if retired {
-            self.retire_wait_receipts(scope).await?;
+            self.retire_observation_receipts(scope).await?;
         }
         Ok(retired)
     }
@@ -1640,7 +1640,10 @@ impl RuntimeEffectController for RestateEffectHostController {
 mod tests;
 
 impl RestateEffectHostController {
-    async fn retire_wait_receipts(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+    async fn retire_observation_receipts(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
         if let Some((store, clock)) = self.wait_receipts.get() {
             let owner = serde_json::to_string(scope).map_err(|e| {
                 RuntimeError::new(
@@ -1649,7 +1652,7 @@ impl RestateEffectHostController {
                 )
             })?;
             store
-                .retire_wait_receipts(&owner, clock.timestamp_ms())
+                .retire_observation_receipts(&owner, clock.timestamp_ms())
                 .await
                 .map_err(|error| RuntimeEffectControllerError::from(error).into_runtime_error())?;
         }

@@ -895,7 +895,7 @@ impl TurnBoundary {
         // peek cannot reconstruct.
         let result = loop {
             match store
-                .commit_runtime_state_verified(commit.clone(), metrics, None)
+                .commit_runtime_state_verified(commit.clone(), metrics)
                 .await
             {
                 Ok(result) => break result,

@@ -1000,6 +1000,22 @@ impl RuntimeExecutionContext<'_> {
         completed: &crate::sansio::CompletedToolCall,
         call_key: &str,
     ) {
+        let record = ToolCallRecord {
+            call_id: completed.call_id.clone(),
+            provider_call_id: completed.provider_call_id.clone(),
+            tool: completed.tool_name.clone(),
+            args: completed.args.clone(),
+            output: completed.output.clone(),
+        };
+        // The protocol supplied this original call identity and refused it
+        // before dispatch. Retain that fact before notifying observers.
+        if let Err(error) = self
+            .retain_unadmitted_tool_request(&record, self.dispatch.clock.timestamp_ms())
+            .await
+        {
+            self.record_nested_effect_error(error);
+            return;
+        }
         self.emit_tool_call_started(
             call_key,
             &ToolCallIds {
@@ -1014,20 +1030,8 @@ impl RuntimeExecutionContext<'_> {
         // The call completed host-side; no measured window exists on this
         // path, so the observation reports 0 rather than a live clock read
         // made long after the work ran (FIG-3696).
-        self.emit_tool_call_completed(
-            call_key,
-            &ToolCallRecord {
-                call_id: completed.call_id.clone(),
-                provider_call_id: completed.provider_call_id.clone(),
-                tool: completed.tool_name.clone(),
-                args: completed.args.clone(),
-                output: completed.output.clone(),
-            },
-            &[],
-            0,
-            &completed.intent_outcomes,
-        )
-        .await;
+        self.emit_tool_call_completed(call_key, &record, &[], 0, &completed.intent_outcomes)
+            .await;
     }
 
     /// `call_key` is the material the settled call's observation lanes key
@@ -1484,6 +1488,29 @@ impl RuntimeExecutionContext<'_> {
         )
         .await;
 
+        let request = ToolCallRecord {
+            call_id: call_id.clone(),
+            provider_call_id: None,
+            tool: manifest.name.clone(),
+            args: args.clone(),
+            output: ToolCallOutput::success(serde_json::Value::Null),
+        };
+        if let Err(error) = self
+            .retain_unadmitted_tool_request(&request, requested_at_ms)
+            .await
+        {
+            return self
+                .refused_completion(
+                    ids,
+                    request.tool,
+                    request.args,
+                    error,
+                    &call_key,
+                    elapsed_ms(self),
+                )
+                .await;
+        }
+
         let parent_invocation = Some(command.clone());
         let mut dispatch = (*self.dispatch).clone();
         dispatch.parent_invocation = parent_invocation.clone();
@@ -1529,15 +1556,7 @@ impl RuntimeExecutionContext<'_> {
                 .await;
                 coordinated.launch
             }
-            ToolPreparationOutcome::Completed(outcome) => {
-                if let Err(error) = self
-                    .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
-                    .await
-                {
-                    self.record_nested_effect_error(error);
-                }
-                ToolCallLaunch::Done(outcome)
-            }
+            ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(outcome),
         };
         let mut outcome = match launch {
             ToolCallLaunch::Done(outcome) => *outcome,

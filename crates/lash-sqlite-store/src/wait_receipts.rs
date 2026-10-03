@@ -112,7 +112,7 @@ impl WaitReceiptStore for SqliteStore {
             .await
             .map_err(sqlite_error)?
     }
-    async fn retire_wait_receipts(
+    async fn retire_observation_receipts(
         &self,
         owner_key: &str,
         retired_at_ms: u64,
@@ -122,6 +122,13 @@ impl WaitReceiptStore for SqliteStore {
             .write(move |tx| {
                 tx.execute(
                     sql().retire.sql(),
+                    params![owner, clamp_epoch_ms(retired_at_ms)],
+                )?;
+                let tool_sql = lash_store_sql::tool_receipts::ToolReceiptStatements::render(
+                    crate::schema_layout::Schema::Main.dialect(),
+                );
+                tx.execute(
+                    tool_sql.retire.sql(),
                     params![owner, clamp_epoch_ms(retired_at_ms)],
                 )?;
                 Ok(())

@@ -446,6 +446,17 @@ impl<'a> Projection<'a> {
                 projection.operation = Some("execute_tool");
                 projection.tool = Some(name);
             }
+            TraceEvent::ToolReceipt {
+                name,
+                started_at_ms,
+                terminal: Some(_),
+                ..
+            } => {
+                projection.span = DomainSpan::Tool;
+                projection.operation = Some("execute_tool");
+                projection.tool = Some(name);
+                projection.started_at_ms = Some(*started_at_ms);
+            }
             TraceEvent::ExecCodeCompleted { duration_ms, .. } => {
                 projection.span = DomainSpan::ExecCode;
                 projection.duration_ms = Some(*duration_ms);
@@ -538,7 +549,8 @@ impl<'a> Projection<'a> {
                     out.push(A::ErrorType.value("domain_failure"));
                 }
             }
-            TraceEvent::ToolCallCompleted { call_id, .. } => {
+            TraceEvent::ToolCallCompleted { call_id, .. }
+            | TraceEvent::ToolReceipt { call_id, .. } => {
                 out.push(A::ToolCallId.value(call_id.to_string()));
                 if self.failed(record) {
                     out.push(A::ErrorType.value("tool_failure"));

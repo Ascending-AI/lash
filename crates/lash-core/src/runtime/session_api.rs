@@ -1276,7 +1276,7 @@ impl LashRuntime {
             .map_err(super::runtime_error_from_store_commit)?;
         commit.shift_fence = Some(Box::new(shift_fence.clone()));
         commit.applied_commands = Some(completion);
-        let result = match store.commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None).await {
+        let result = match store.commit_runtime_state_verified(commit, self.host.core.tracing.metrics()).await {
             // A host withdrew a command since the lane was read: the commit
             // applied nothing, and the lane is read again (FIG-3927 §2.7).
             Err(crate::StoreError::SessionCommandWithdrawn { .. }) => return Ok(false),

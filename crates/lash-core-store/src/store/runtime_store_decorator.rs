@@ -72,11 +72,12 @@ macro_rules! runtime_store_operations {
             WaitReceiptStore {
                 [catalog] fn record_wait_request(&self, request: &WaitRequestReceipt) -> Result<StoreTransition<WaitRequestReceipt>, StoreError>;
                 [catalog] fn record_wait_resolution(&self, resolution: &WaitResolutionReceipt) -> Result<StoreTransition<WaitResolutionReceipt>, StoreError>;
-                [catalog] fn retire_wait_receipts(&self, owner_key: &str, retired_at_ms: u64) -> Result<(), StoreError>;
+                [catalog] fn retire_observation_receipts(&self, owner_key: &str, retired_at_ms: u64) -> Result<(), StoreError>;
             }
             SessionCommitStore {
-                [carried request] fn record_tool_request(&self, request: &ToolRequestReceipt) -> Result<StoreTransition<ToolRequestReceipt>, StoreError>;
-                [carried completion] fn record_tool_completion(&self, completion: &ToolCompletionReceipt) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError>;
+                [catalog] fn tool_request_receipt(&self, request_key: &str) -> Result<Option<ToolRequestReceipt>, StoreError>;
+                [catalog] fn record_tool_request(&self, request: &ToolRequestReceipt) -> Result<StoreTransition<ToolRequestReceipt>, StoreError>;
+                [catalog] fn record_tool_completion(&self, completion: &ToolCompletionReceipt) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError>;
                 [session] fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError>;
                 [carried fence] fn admit_session_state(&self, fence: &ShiftFence) -> Result<SessionStateAdmission, StoreError>;
                 [session] fn load_session_head_meta(&self, session_id: &SessionId) -> Result<Option<SessionHeadMeta>, StoreError>;

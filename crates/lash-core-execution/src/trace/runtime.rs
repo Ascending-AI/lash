@@ -41,6 +41,7 @@ struct TraceRuntimeParts {
     base_context: TraceContext,
     metrics: TelemetryMetrics,
     wait_receipts: Option<Arc<dyn crate::store::WaitReceiptStore>>,
+    tool_receipts: Option<Arc<dyn crate::StoreSet>>,
 }
 
 impl TraceRuntime {
@@ -55,6 +56,7 @@ impl TraceRuntime {
                 base_context: TraceContext::default(),
                 metrics: TelemetryMetrics::default(),
                 wait_receipts: None,
+                tool_receipts: None,
             }),
         }
     }
@@ -80,6 +82,21 @@ impl TraceRuntime {
     }
     pub(crate) fn wait_receipts(&self) -> Option<&Arc<dyn crate::store::WaitReceiptStore>> {
         self.parts.wait_receipts.as_ref()
+    }
+
+    /// Binds the deployment's durable logical tool receipts. The factory is
+    /// opened only when a recorded tool fact is observed.
+    #[must_use]
+    pub fn with_tool_receipts(mut self, stores: Arc<dyn crate::StoreSet>) -> Self {
+        Arc::make_mut(&mut self.parts).tool_receipts = Some(stores);
+        self
+    }
+
+    pub(crate) fn tool_receipts(&self) -> Option<Arc<dyn crate::store::SessionCommitStore>> {
+        self.parts.tool_receipts.as_ref().map(|stores| {
+            let store: Arc<dyn crate::store::SessionCommitStore> = stores.session_store_factory();
+            store
+        })
     }
 
     /// The identity-producing scope factory: [`UntracedScopes`] unless the
@@ -933,27 +950,44 @@ impl TraceStanding {
     }
 }
 
-/// The scope of one tool call of the turn `turn` scopes, parented to the
-/// turn's anchor. A standing under any other scope has no tool scope.
+/// The scope of a call under its logical owner and retained parent anchor.
 pub fn tool_trace_scope(
-    turn: &DurableTraceScope,
+    parent: &DurableTraceScope,
     call_id: &crate::ToolCallId,
     started_at_ms: u64,
 ) -> Option<DurableTraceScope> {
-    let TraceScopeOwner::Turn {
-        session_id,
-        turn_id,
-    } = &turn.scope.owner
-    else {
-        return None;
+    use lash_trace::TraceToolOwner;
+    let owner = match &parent.scope.owner {
+        TraceScopeOwner::Turn {
+            session_id,
+            turn_id,
+        } => TraceToolOwner::Turn {
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+        },
+        TraceScopeOwner::Run { session_id, run } => TraceToolOwner::Run {
+            session_id: session_id.clone(),
+            run: run.clone(),
+        },
+        TraceScopeOwner::Process { process_id } => TraceToolOwner::Process {
+            process_id: process_id.clone(),
+        },
+        TraceScopeOwner::Operation {
+            session_id,
+            operation_id,
+        } => TraceToolOwner::Operation {
+            session_id: session_id.clone(),
+            operation_id: operation_id.clone(),
+        },
+        TraceScopeOwner::Tool { owner, .. } => owner.clone(),
+        _ => return None,
     };
     Some(DurableTraceScope {
         scope: TraceScopeId::admission(TraceScopeOwner::Tool {
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
+            owner,
             call_id: call_id.to_string(),
         }),
-        cause: match &turn.anchor {
+        cause: match &parent.anchor {
             TraceAnchor::Untraced => TraceCause::Root,
             TraceAnchor::Context(context) => TraceCause::Parent(context.clone()),
         },

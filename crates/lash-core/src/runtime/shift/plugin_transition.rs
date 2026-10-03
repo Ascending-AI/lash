@@ -117,7 +117,7 @@ impl LashRuntime {
         })?;
         commit.shift_fence = Some(Box::new(fence.clone()));
         let receipt = store
-            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None)
+            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
             .await
             .map_err(crate::runtime::runtime_error_from_store_commit)?;
         let crate::plugin::PluginTransitionBase::Session { head } = &record.request.base else {

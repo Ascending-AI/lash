@@ -117,6 +117,26 @@ fn end_frames_tx(
 
 #[async_trait::async_trait]
 impl SessionCommitStore for SqliteStore {
+    async fn tool_request_receipt(
+        &self,
+        request_key: &str,
+    ) -> Result<Option<ToolRequestReceipt>, StoreError> {
+        let request_key = request_key.to_owned();
+        let json: Option<String> = self
+            .conn
+            .read(move |conn| {
+                conn.query_row(
+                    tool_receipt_sql().select_request.sql(),
+                    params![request_key],
+                    |row| row.get(0),
+                )
+                .optional()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        json.map(|json| serde_json::from_str(&json).map_err(|e| StoreError::Backend(e.to_string())))
+            .transpose()
+    }
     async fn record_tool_request(
         &self,
         request: &ToolRequestReceipt,
@@ -920,14 +940,17 @@ async fn record_tool_request(
         .conn
         .write_flow(move |tx| {
             Ok(tool_receipt_outcome((|| {
-                crate::persistence::ensure_session_not_deleted_conn(tx, &request.session_id)?;
+                if let Some(session_id) = request.session_id() {
+                    crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
+                }
                 let sql = tool_receipt_sql();
                 let changed = tx
                     .execute(
                         sql.insert_request.sql(),
                         params![
                             request.request_key,
-                            request.session_id.as_str(),
+                            request.session_id().map(|id| id.to_string()),
+                            request.owner_key()?,
                             request.payload_digest,
                             clamp_epoch_ms(request.requested_at_ms),
                             serde_json::to_string(&request)
@@ -964,7 +987,9 @@ async fn record_tool_completion(
         .conn
         .write_flow(move |tx| {
             Ok(tool_receipt_outcome((|| {
-                crate::persistence::ensure_session_not_deleted_conn(tx, &completion.session_id)?;
+                if let Some(session_id) = completion.session_id() {
+                    crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
+                }
                 let sql = tool_receipt_sql();
                 let json: String = tx
                     .query_row(
@@ -975,11 +1000,11 @@ async fn record_tool_completion(
                     .map_err(sqlite_error)?;
                 let request: ToolRequestReceipt =
                     serde_json::from_str(&json).map_err(|e| StoreError::Backend(e.to_string()))?;
-                if request.session_id != completion.session_id
+                if request.owner != completion.owner
                     || request.payload_digest != completion.payload_digest
                 {
                     return Err(StoreError::ToolRequestConflict {
-                        session_id: completion.session_id.clone(),
+                        owner: completion.owner.clone(),
                         request_key: completion.request_key.clone(),
                     });
                 }

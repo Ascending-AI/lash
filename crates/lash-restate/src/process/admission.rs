@@ -109,6 +109,7 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// and added process/command transition steps from the preceding journals.
 /// Epoch 4 (FIG-4855) records presentation callback selection before the
 /// presentation effect, separating that added step from preceding journals.
+/// Epoch 5 retains scalar tool requests before execution (FIG-4830).
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -122,14 +123,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 4;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 5;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 5;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 6;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

@@ -40,12 +40,14 @@ CREATE INDEX IF NOT EXISTS idx_wait_receipts_owner ON wait_receipts(owner_key);
 
 CREATE TABLE IF NOT EXISTS tool_call_receipts (
     request_key TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
+    session_id TEXT,
+    owner_key TEXT NOT NULL,
     payload_digest TEXT NOT NULL,
     requested_at_ms INTEGER NOT NULL,
     request_json TEXT NOT NULL,
     completion_json TEXT,
-    completed_at_ms INTEGER
+    completed_at_ms INTEGER,
+    retired_at_ms INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_tool_call_receipts_retention ON tool_call_receipts(session_id, completed_at_ms);
 

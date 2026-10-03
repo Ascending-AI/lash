@@ -14,6 +14,7 @@
 
 use super::*;
 use corrupt_input_cases::CorruptBackup;
+use lash_core::store::SessionCommitStore as _;
 use lash_core::store::WaitReceiptStore;
 
 /// A well-formed but never-sealed shift fence, for the inventory steps that
@@ -1910,56 +1911,99 @@ async fn tool_receipt_law(
     store: &dyn RuntimeStore,
     session_id: &SessionId,
 ) -> Result<String, StoreError> {
-    let request = lash_core::store::ToolRequestReceipt {
-        session_id: session_id.clone(),
-        request_key: format!("{session_id}:receipt-tool"),
-        payload_digest: "first-digest".into(),
-        payload: serde_json::json!({"prepared": "first"}),
-        scope: None,
-        context: Default::default(),
-        requested_at_ms: 7,
-    };
-    let first = store.record_tool_request(&request).await?;
-    let mut retry = request.clone();
-    retry.requested_at_ms = 99;
-    let reused = store.record_tool_request(&retry).await?;
-    if !first.changed
-        || reused.changed
-        || reused.record != first.record
-        || reused.permit().is_some()
-    {
-        return Err(StoreError::Backend(
-            "request first-writer law failed".into(),
-        ));
-    }
-    retry.payload_digest = "conflicting-digest".into();
-    if !matches!(
-        store.record_tool_request(&retry).await,
-        Err(StoreError::ToolRequestConflict { .. })
-    ) {
-        return Err(StoreError::Backend("request conflict law failed".into()));
-    }
-    let completion = lash_core::store::ToolCompletionReceipt {
-        session_id: session_id.clone(),
-        request_key: request.request_key.clone(),
-        payload_digest: request.payload_digest.clone(),
-        result: serde_json::json!({"output":"first"}),
-        intent_outcomes: serde_json::json!([]),
-        completed_at_ms: 11,
-    };
-    let completed = store.record_tool_completion(&completion).await?;
-    let mut retry = completion;
-    retry.completed_at_ms = 101;
-    retry.result = serde_json::json!({"output":"later"});
-    let reused = store.record_tool_completion(&retry).await?;
-    if !completed.changed
-        || reused.changed
-        || reused.record != completed.record
-        || reused.permit().is_some()
-    {
-        return Err(StoreError::Backend(
-            "completion first-writer law failed".into(),
-        ));
+    let owners = [
+        lash::tracing::TraceToolOwner::Turn {
+            session_id: session_id.clone(),
+            turn_id: "receipt-turn".into(),
+        },
+        lash::tracing::TraceToolOwner::Run {
+            session_id: session_id.clone(),
+            run: "receipt-run".into(),
+        },
+        lash::tracing::TraceToolOwner::Operation {
+            session_id: session_id.clone(),
+            operation_id: "receipt-operation".into(),
+        },
+        lash::tracing::TraceToolOwner::Process {
+            process_id: lash_sansio::ProcessId::fixture("receipt-process"),
+        },
+    ];
+    for (index, owner) in owners.into_iter().enumerate() {
+        let request = lash_core::store::ToolRequestReceipt {
+            owner,
+            request_key: format!("{session_id}:receipt-tool:{index}"),
+            payload_digest: "first-digest".into(),
+            payload: serde_json::json!({"prepared": "first"}),
+            scope: None,
+            context: Default::default(),
+            requested_at_ms: 7,
+        };
+        if store
+            .tool_request_receipt(&request.request_key)
+            .await?
+            .is_some()
+        {
+            return Err(StoreError::Backend(
+                "unaccepted request lookup law failed".into(),
+            ));
+        }
+        let first = store.record_tool_request(&request).await?;
+        if store.tool_request_receipt(&request.request_key).await? != Some(first.record.clone()) {
+            return Err(StoreError::Backend(
+                "accepted request lookup law failed".into(),
+            ));
+        }
+        let mut retry = request.clone();
+        retry.requested_at_ms = 99;
+        let reused = store.record_tool_request(&retry).await?;
+        if !first.changed
+            || reused.changed
+            || reused.record != first.record
+            || reused.permit().is_some()
+        {
+            return Err(StoreError::Backend(
+                "request first-writer law failed".into(),
+            ));
+        }
+        retry.owner = lash::tracing::TraceToolOwner::Process {
+            process_id: lash_sansio::ProcessId::fixture("another-owner"),
+        };
+        if !matches!(
+            store.record_tool_request(&retry).await,
+            Err(StoreError::ToolRequestConflict { .. })
+        ) {
+            return Err(StoreError::Backend("owner conflict law failed".into()));
+        }
+        retry.owner = request.owner.clone();
+        retry.payload_digest = "conflicting-digest".into();
+        if !matches!(
+            store.record_tool_request(&retry).await,
+            Err(StoreError::ToolRequestConflict { .. })
+        ) {
+            return Err(StoreError::Backend("request conflict law failed".into()));
+        }
+        let completion = lash_core::store::ToolCompletionReceipt {
+            owner: request.owner.clone(),
+            request_key: request.request_key.clone(),
+            payload_digest: request.payload_digest.clone(),
+            result: serde_json::json!({"output":"first"}),
+            intent_outcomes: serde_json::json!([]),
+            completed_at_ms: 11,
+        };
+        let completed = store.record_tool_completion(&completion).await?;
+        let mut retry = completion;
+        retry.completed_at_ms = 101;
+        retry.result = serde_json::json!({"output":"later"});
+        let reused = store.record_tool_completion(&retry).await?;
+        if !completed.changed
+            || reused.changed
+            || reused.record != completed.record
+            || reused.permit().is_some()
+        {
+            return Err(StoreError::Backend(
+                "completion first-writer law failed".into(),
+            ));
+        }
     }
     Ok("request=first completion=first conflicts=typed permits=one".into())
 }
@@ -2037,7 +2081,9 @@ async fn wait_receipt_law(
         store.record_wait_resolution(&retry).await,
         Err(StoreError::WaitReceiptConflict { .. })
     ));
-    store.retire_wait_receipts(&request.owner_key, 12).await?;
+    store
+        .retire_observation_receipts(&request.owner_key, 12)
+        .await?;
     Ok("wait=request-first resolution-first conflicts=typed permits=one".into())
 }
 #[tokio::test]
@@ -2067,6 +2113,25 @@ async fn wait_receipt_sweep_retains_committed_times_and_reclaims_only_retired_ow
         .record_wait_request(&active)
         .await
         .expect("active wait");
+    let tool = lash_core::store::ToolRequestReceipt {
+        owner: lash::tracing::TraceToolOwner::Process {
+            process_id: lash_sansio::ProcessId::fixture("retiring-tool-owner"),
+        },
+        request_key: "retiring-tool".into(),
+        payload_digest: "tool".into(),
+        payload: serde_json::Value::Null,
+        scope: None,
+        context: Default::default(),
+        requested_at_ms: 5,
+    };
+    store
+        .record_tool_request(&tool)
+        .await
+        .expect("process request without a session");
+    store
+        .retire_observation_receipts(&tool.owner_key().unwrap(), 12)
+        .await
+        .expect("retire tool owner");
     let report = store
         .reclaim_retained_evidence(lash_core::store::RetentionBound {
             committed_before_epoch_ms: 13,
@@ -2074,7 +2139,7 @@ async fn wait_receipt_sweep_retains_committed_times_and_reclaims_only_retired_ow
         })
         .await
         .expect("retention sweep");
-    assert_eq!(report.removed_receipt_count, 1);
+    assert_eq!(report.removed_receipt_count, 2);
     let reused = store
         .record_wait_request(&active)
         .await

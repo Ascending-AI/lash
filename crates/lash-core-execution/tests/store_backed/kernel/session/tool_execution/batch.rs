@@ -3,6 +3,7 @@ mod tests {
     use crate::plugin::PluginSessionRequest;
     use crate::session::*;
     use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
+    use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
     use lash_sansio::sync::MutexExt as _;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -434,6 +435,91 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn scalar_and_undispatched_calls_retain_one_original_lifecycle_pair() {
+        let stores = crate::support::sqlite_memory_store_set().await;
+        let receipts: Arc<dyn crate::RuntimeStore> = stores.session_store_factory();
+        let sink = Arc::new(ToolLifecycleTraceSink::default());
+        let runtime = crate::trace::TraceRuntime::default().with_trace_sink(sink.clone());
+        let scope = lash_trace::DurableTraceScope {
+            scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Operation {
+                session_id: "session".into(),
+                operation_id: "test-runtime-effect-controller".into(),
+            }),
+            cause: lash_trace::TraceCause::Root,
+            anchor: lash_trace::TraceAnchor::Untraced,
+            started_at_ms: 1,
+        };
+        let context = batch_failure_context(
+            Arc::new(BatchFailureEffectController),
+            crate::engine::NullObservationSink::arc(),
+            Some(receipts),
+        )
+        .with_tracing(Some(crate::RuntimeExecutionTracing::new(
+            runtime,
+            Some(scope),
+            Default::default(),
+        )));
+        let call_id = crate::ToolCallId::fixture("scalar-original");
+        let reply = context
+            .call_command_tool(
+                &crate::CommandReplayKey::new("scalar-command"),
+                ToolInvocation::new(
+                    call_id.clone(),
+                    "tool:batch_failure".into(),
+                    serde_json::json!({}),
+                ),
+            )
+            .await;
+        assert!(
+            reply.output.is_success(),
+            "the scalar success reaches completion"
+        );
+        let refused = crate::sansio::CompletedToolCall {
+            call_id: crate::ToolCallId::fixture("undispatched-original"),
+            provider_call_id: Some("provider-original".into()),
+            tool_name: "missing".into(),
+            args: serde_json::json!({"original":true}),
+            output: crate::ToolCallOutput::success(serde_json::Value::Null),
+            model_return: crate::ModelToolReturn::text("missing".into(), "refused"),
+            intent_outcomes: Vec::new(),
+            replay: None,
+        };
+        context
+            .report_undispatched_tool_call(&refused, "undispatched-command")
+            .await;
+        assert!(!context.has_nested_effect_error());
+        let first = sink.records.lock_recover().clone();
+        assert_eq!(
+            first.len(),
+            4,
+            "scalar success and protocol refusal both have original request/terminal pairs"
+        );
+        context
+            .report_undispatched_tool_call(&refused, "undispatched-command")
+            .await;
+        assert_eq!(
+            sink.records.lock_recover().len(),
+            4,
+            "SQL first writers suppress repeated reporting"
+        );
+        let ids = sink
+            .lifecycle
+            .lock_recover()
+            .iter()
+            .map(|entry| entry.0.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            [
+                call_id.to_string(),
+                call_id.to_string(),
+                refused.call_id.to_string(),
+                refused.call_id.to_string()
+            ]
+        );
+    }
+
     /// A controller with no group substrate: formation of the batch's group
     /// fails, and the batch surface must fail closed rather than report any
     /// settlement.
@@ -561,7 +647,10 @@ mod tests {
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: crate::runtime::ScopedEffectController::shared(
                 controller,
-                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+                crate::AdmittedScope::session_operation(
+                    "session",
+                    "test-runtime-effect-controller",
+                ),
             )
             .expect("valid test runtime scope"),
             direct_completions: crate::DirectCompletionClient::unavailable(

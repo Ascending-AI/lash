@@ -477,10 +477,7 @@ impl LashRuntime {
             ResidentSessionState::Invalidated { decision_id } => decision_id.clone(),
         };
         let resident_head_revision = self.state.head_revision;
-        let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store());
+        let store = self.services.store.clone();
         let durable_source = if store.is_some() {
             ResidentReloadDurableSource::HistoryStore
         } else {
@@ -529,9 +526,15 @@ impl LashRuntime {
                 durable_head_revision = durable_state.head_revision;
             }
 
-            reloaded_tool_restore =
-                Box::pin(self.restore_resident_session_components(&mut durable_state, &tracing))
-                    .await?;
+            // A replay can invalidate the cold runtime before its recorded
+            // plugin transition publishes. It has durable state to reload,
+            // but no protocol session to restore until that publication.
+            if self.session.is_some() {
+                reloaded_tool_restore = Box::pin(
+                    self.restore_resident_session_components(&mut durable_state, &tracing),
+                )
+                .await?;
+            }
             // The durable reload replaced the whole resident state; the
             // install reasserts the per-open `PreservePersisted` claim from
             // host configuration so later stamps keep the loaded snapshot

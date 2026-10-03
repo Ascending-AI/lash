@@ -702,6 +702,10 @@ impl RuntimeEffectController for LayeredController<'_> {
             .await
     }
 
+    fn run_record_observer(&self) -> Option<&crate::trace::RunRecordObserver> {
+        self.inner.as_ref().run_record_observer()
+    }
+
     async fn record_run_record(
         &self,
         name: String,

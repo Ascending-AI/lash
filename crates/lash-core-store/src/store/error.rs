@@ -279,9 +279,9 @@ pub enum StoreError {
     PreparedProcessRegistrationStale { process_id: crate::ProcessId },
     #[error("wait {wait_id} conflicts with its retained receipt")]
     WaitReceiptConflict { wait_id: String },
-    #[error("tool request {request_key} of {session_id} conflicts with its retained request")]
+    #[error("tool request {request_key} of {owner:?} conflicts with its retained request")]
     ToolRequestConflict {
-        session_id: crate::SessionId,
+        owner: lash_trace::TraceToolOwner,
         request_key: String,
     },
     #[error("prepared run admission for {run} of {session_id} is stale")]

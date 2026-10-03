@@ -133,7 +133,8 @@ pub mod facade_support {
     /// The shift-tracing seam a durable substrate implements against (the trace runtime,
     /// a step's issue and its standing), public in every feature variant.
     pub use lash_core_execution::trace::{
-        JournalFrontier, LiveStep, StepIssue, TraceBoundaryReceipt, TraceRuntime, TraceStanding,
+        JournalFrontier, LiveStep, RunRecordObserver, StepIssue, TraceBoundaryReceipt,
+        TraceRuntime, TraceStanding,
     };
     pub use lash_core_ids::operational_metrics::StoreObserver;
     pub use lash_core_llm::core_internal::ProviderCompletionSideband;

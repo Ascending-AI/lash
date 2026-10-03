@@ -172,6 +172,18 @@ async fn carry_into_successor_tx(
 
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresStore {
+    async fn tool_request_receipt(
+        &self,
+        request_key: &str,
+    ) -> Result<Option<ToolRequestReceipt>, StoreError> {
+        let json: Option<String> = sqlx::query_scalar(tool_receipt_sql().select_request.sql())
+            .bind(request_key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(store_sqlx_error)?;
+        json.map(|json| serde_json::from_str(&json).map_err(|e| StoreError::Backend(e.to_string())))
+            .transpose()
+    }
     async fn record_tool_request(
         &self,
         request: &ToolRequestReceipt,
@@ -1112,12 +1124,15 @@ async fn record_tool_request(
     request: &ToolRequestReceipt,
 ) -> Result<StoreTransition<ToolRequestReceipt>, StoreError> {
     let mut tx = begin_guarded(&store.pool, &store.fence).await?;
-    super::lock_session_history_mutation_tx(&mut tx, &request.session_id).await?;
-    super::ensure_session_not_deleted_tx(&mut tx, &request.session_id).await?;
+    if let Some(session_id) = request.session_id() {
+        super::lock_session_history_mutation_tx(&mut tx, &session_id).await?;
+        super::ensure_session_not_deleted_tx(&mut tx, &session_id).await?;
+    }
     let sql = tool_receipt_sql();
     let changed = sqlx::query(sql.insert_request.sql())
         .bind(&request.request_key)
-        .bind(request.session_id.as_str())
+        .bind(request.session_id().map(|id| id.to_string()))
+        .bind(request.owner_key()?)
         .bind(&request.payload_digest)
         .bind(clamp_epoch_ms(request.requested_at_ms))
         .bind(serde_json::to_string(request).map_err(|e| StoreError::Backend(e.to_string()))?)
@@ -1145,8 +1160,10 @@ async fn record_tool_completion(
     completion: &ToolCompletionReceipt,
 ) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError> {
     let mut tx = begin_guarded(&store.pool, &store.fence).await?;
-    super::lock_session_history_mutation_tx(&mut tx, &completion.session_id).await?;
-    super::ensure_session_not_deleted_tx(&mut tx, &completion.session_id).await?;
+    if let Some(session_id) = completion.session_id() {
+        super::lock_session_history_mutation_tx(&mut tx, &session_id).await?;
+        super::ensure_session_not_deleted_tx(&mut tx, &session_id).await?;
+    }
     let sql = tool_receipt_sql();
     let json: String = sqlx::query_scalar(sql.select_request.sql())
         .bind(&completion.request_key)
@@ -1155,11 +1172,9 @@ async fn record_tool_completion(
         .map_err(store_sqlx_error)?;
     let request: ToolRequestReceipt =
         serde_json::from_str(&json).map_err(|e| StoreError::Backend(e.to_string()))?;
-    if request.session_id != completion.session_id
-        || request.payload_digest != completion.payload_digest
-    {
+    if request.owner != completion.owner || request.payload_digest != completion.payload_digest {
         return Err(StoreError::ToolRequestConflict {
-            session_id: completion.session_id.clone(),
+            owner: completion.owner.clone(),
             request_key: completion.request_key.clone(),
         });
     }

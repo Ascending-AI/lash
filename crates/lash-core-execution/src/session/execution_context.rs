@@ -212,10 +212,6 @@ pub struct RuntimeExecutionTracing {
     pub(super) runtime: crate::trace::TraceRuntime,
     pub(super) scope: Option<lash_trace::DurableTraceScope>,
     pub(super) scope_context: lash_trace::TraceContext,
-    /// Whether this execution's coordination reports its tool calls'
-    /// lifecycle. A turn's does; a process execution carries the handle for
-    /// what runs in it and reports no per-call lifecycle of its own.
-    tool_lifecycle: bool,
 }
 
 impl RuntimeExecutionTracing {
@@ -228,15 +224,7 @@ impl RuntimeExecutionTracing {
             runtime,
             scope,
             scope_context,
-            tool_lifecycle: true,
         }
-    }
-
-    /// The handle of an execution that reports no per-call tool lifecycle.
-    #[must_use]
-    pub fn without_tool_lifecycle(mut self) -> Self {
-        self.tool_lifecycle = false;
-        self
     }
 
     /// The runtime's shared trace handle.
@@ -742,19 +730,16 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// Places this context at `standing` for a fixture: the right to emit is
     /// the standing's, whatever controller the context issues steps through.
     /// A context given no tracing handle takes the standing's runtime and
-    /// scope and reports no per-call tool lifecycle.
+    /// scope.
     #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn with_trace_standing(mut self, standing: crate::trace::TraceStanding) -> Self {
         if self.tracing.is_none() {
-            self.tracing = Some(
-                RuntimeExecutionTracing::new(
-                    standing.runtime().clone(),
-                    standing.scope().cloned(),
-                    lash_trace::TraceContext::default(),
-                )
-                .without_tool_lifecycle(),
-            );
+            self.tracing = Some(RuntimeExecutionTracing::new(
+                standing.runtime().clone(),
+                standing.scope().cloned(),
+                lash_trace::TraceContext::default(),
+            ));
         }
         self.fixture_standing = Some(standing);
         self
