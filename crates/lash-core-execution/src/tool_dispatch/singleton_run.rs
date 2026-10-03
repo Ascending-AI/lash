@@ -44,6 +44,13 @@
 //! the start holds the process only until its launch is durable.
 //!
 //! [`RuntimeEffectController::record_run_record`]: crate::RuntimeEffectController::record_run_record
+//!
+//! An isolated declaration binds its registered implementation, boundary and
+//! canonical start in admission. Its attempt records that binding without
+//! calling `execute`. The protected start drain returns a process descriptor.
+//! A hard-isolation cancel records the physical worker's termination receipt
+//! before releasing the consumer hold. Ordinary bodies retain their own
+//! timeout behavior and are never rerouted into this start path.
 
 use std::sync::Arc;
 
@@ -104,6 +111,29 @@ pub struct SingletonToolCall {
 pub struct SingletonPreparedRequest {
     pub arguments: serde_json::Value,
     pub prepared: serde_json::Value,
+    /// The recorded process route, never an ordinary body or Deferred source.
+    pub isolation: Option<RecordedIsolatedStart>,
+}
+
+/// The process implementation and canonical start material admission bound.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedIsolatedStart {
+    pub implementation: crate::store::plugin_writers::PluginCallbackIdentity,
+    pub engine_kind: String,
+    pub boundary: super::ProcessExecutionBoundary,
+    pub start: SingletonStart,
+}
+
+/// An isolated call's result names the independently executing process.
+/// Physical cancellation carries the implementation's retained reap receipt.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IsolatedProcessDescriptor {
+    pub process_id: ProcessId,
+    pub start_key: StartKey,
+    pub boundary: super::ProcessExecutionBoundary,
+    pub termination: Option<super::WorkerTerminationReceipt>,
 }
 
 /// What an attempt captured (X), or the cached success a before-check
@@ -116,6 +146,8 @@ pub struct SingletonPreparedRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SingletonCapture {
+    /// A process bound at admission. No ordinary body produced this capture.
+    Isolated { binding: Box<RecordedIsolatedStart> },
     Done {
         output: String,
         /// The declared Lash intents the result asks the Run to realize.
@@ -159,7 +191,7 @@ impl SingletonCapture {
     pub fn output(&self) -> Option<&str> {
         match self {
             Self::Done { output, .. } | Self::Failed { output, .. } => Some(output),
-            Self::Refused { .. } | Self::StartRefused { .. } => None,
+            Self::Refused { .. } | Self::StartRefused { .. } | Self::Isolated { .. } => None,
         }
     }
 
@@ -168,14 +200,17 @@ impl SingletonCapture {
     pub fn stream(&self) -> Option<&AttemptStream> {
         match self {
             Self::Done { stream, .. } | Self::Failed { stream, .. } => Some(stream),
-            Self::Refused { .. } | Self::StartRefused { .. } => None,
+            Self::Refused { .. } | Self::StartRefused { .. } | Self::Isolated { .. } => None,
         }
     }
 
     pub(super) fn intents(&self) -> &[ToolIntentKind] {
         match self {
             Self::Done { intents, .. } => intents,
-            Self::Failed { .. } | Self::Refused { .. } | Self::StartRefused { .. } => &[],
+            Self::Failed { .. }
+            | Self::Refused { .. }
+            | Self::StartRefused { .. }
+            | Self::Isolated { .. } => &[],
         }
     }
 
@@ -184,6 +219,7 @@ impl SingletonCapture {
     pub fn start(&self) -> Option<&SingletonStart> {
         match self {
             Self::Done { start, .. } => start.as_deref(),
+            Self::Isolated { binding } => Some(&binding.start),
             Self::Failed { .. } | Self::Refused { .. } | Self::StartRefused { .. } => None,
         }
     }
@@ -244,6 +280,17 @@ pub enum BeforeCheckReply {
 /// An `Err` is a fault: the record stays unjournaled and its step runs again.
 #[async_trait::async_trait]
 pub trait SingletonToolHandlers: Send + Sync {
+    /// The actual process implementations installed by this host.
+    fn process_engines(&self) -> Option<&crate::ProcessEngineRegistry> {
+        None
+    }
+
+    /// Bind an isolated call to its process implementation and stable start.
+    /// This selects data only; it must never run the ordinary tool body.
+    fn isolated_start(&self, _call: &SingletonToolCall) -> Option<super::IsolatedToolStart> {
+        None
+    }
+
     /// Prepare the request (A).
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String>;
 
@@ -341,11 +388,14 @@ pub enum SingletonDrift {
     CallId,
     ToolName,
     Arguments,
+    IsolationBinding,
 }
 
 /// Why a singleton stopped before it ended. None of these runs a body.
 #[derive(Debug, thiserror::Error)]
 pub enum SingletonRunError {
+    #[error("isolated start refused: {0}")]
+    Isolation(#[from] super::IsolatedStartRefusal),
     /// Admission refused the call, or a recorded admission no longer binds an
     /// available plugin revision.
     #[error("admission refused call: {0}")]

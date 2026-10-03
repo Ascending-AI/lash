@@ -5,6 +5,13 @@
 use super::*;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 
+/// A physical worker owned by a law's host, alive until that host terminates it.
+/// Laws retain the child handle to prove that cancellation killed and reaped
+/// the same worker whose PID their process descriptor names.
+pub fn spawn_isolation_law_worker() -> std::io::Result<std::process::Child> {
+    std::process::Command::new("/bin/sleep").arg("600").spawn()
+}
+
 pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, suite: &str) {
     assert!(
         !Arc::ptr_eq(left, right),

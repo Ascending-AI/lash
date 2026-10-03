@@ -92,6 +92,9 @@ impl From<&str> for SessionScopeId {
 /// sessions and externally completed work. `Engine` is the extension point for deployment-specific
 /// process runtimes; those rows require a matching [`crate::ProcessEngine`] in
 /// the host's process engine registry.
+/// A registered engine gives the work independent process lifetime. Hard
+/// isolation also requires its [`crate::PhysicalProcessWorker`] implementation;
+/// an engine input by itself is not an OS process boundary.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProcessInput {

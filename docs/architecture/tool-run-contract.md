@@ -334,3 +334,21 @@ disconnected from removed transport. A contraction removes a definition with
 its imports, re-exports, constructors, trait methods, exhaustive matches,
 format tables, guards, codecs, tests, corpus loaders, generated schemas and
 target membership in one compiling landing.
+
+An isolated call binds `IsolatedToolStart` at admission, including the registered
+process implementation's callback revision, execution boundary and stable start.
+Admission owns its canonical obligation material. The attempt references it and
+runs no ordinary body. The existing protected start drain recovers one process
+under that key and returns `IsolatedProcessDescriptor`. A missing implementation,
+an unavailable revision or an unsupported physical boundary refuses before a
+body or new process identity.
+
+`ProcessInput::Engine` alone promises independent invocation lifetime. A hard
+isolation claim requires the registered engine's `PhysicalProcessWorker` contract.
+On cancellation that implementation terminates and reaps its worker, or recovers
+its retained `WorkerTerminationReceipt`. The discharge journals that receipt
+before the descriptor is presented, and releases the consumer hold only after
+termination. Replay cannot replace the recorded implementation with a newly bound
+engine. Ordinary tool bodies keep cooperative duration semantics and their own
+transport timeouts; neither slow execution nor a reported timeout reroutes one
+as a process.

@@ -570,6 +570,13 @@ impl<'run> ProcessEngineRunContext<'run> {
 pub trait ProcessEngine: Send + Sync {
     fn kind(&self) -> &'static str;
 
+    /// The physical worker implementation, when this engine supplies one.
+    /// An engine input alone promises no OS isolation. A physical boundary
+    /// requires this termination-and-reaping contract as well as a worker.
+    fn physical_worker(&self) -> Option<&dyn super::PhysicalProcessWorker> {
+        None
+    }
+
     /// The executable generation a run of `payload` would run as (FIG-3571):
     /// the value the incarnation's start record carries and every later
     /// attempt and segment must match before its first step. `None` for an

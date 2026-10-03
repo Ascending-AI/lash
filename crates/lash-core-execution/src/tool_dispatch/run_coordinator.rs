@@ -43,23 +43,24 @@ use lash_sansio::ToolCallId;
 use lash_sansio::ToolIntentKind;
 
 use super::singleton_run::{
-    BeforeCheckReply, SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
-    SingletonPreparedRequest, SingletonRunError, SingletonStart, SingletonTerminal,
-    SingletonToolCall, SingletonToolHandlers,
+    BeforeCheckReply, IsolatedProcessDescriptor, RecordedIsolatedStart, SingletonAttempt,
+    SingletonBodyOutcome, SingletonCapture, SingletonDrift, SingletonPreparedRequest,
+    SingletonRunError, SingletonStart, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
 };
 use crate::runtime::effect::{AttemptStreamRecorder, ScopedEffectController};
 use crate::runtime::process::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, DeclaredStartPhase,
-    StartCancelDecision,
+    IsolatedStartRefusal, IsolatedToolStart, ProcessExecutionBoundary, StartCancelDecision,
+    WorkerTerminationReceipt,
 };
 use crate::store::plugin_writers::PluginRevision;
 use crate::tool_run::{
     AdmissionRefusal, AdmittedCall, AfterCheckVerdict, AttemptOrdinal, AttemptResult,
     AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CallDecision, CheckRecord,
-    ExternalCancelPolicy, MaterialEntry, MaterialLocation, MaterialOwner, MaterialPayload,
-    MaterialRef, MaterialRefusal, MaterialRole, OutcomeShape, ResultSource, RoundAdmission,
-    RunEvent, RunEventRefusal, RunJournalEntry, RunLedger, RunRecord, RuntimeCallPolicy,
-    SegmentOrdinal,
+    DeclarationRefusal, ExternalCancelPolicy, MaterialEntry, MaterialLocation, MaterialOwner,
+    MaterialPayload, MaterialRef, MaterialRefusal, MaterialRole, OutcomeShape, ResultSource,
+    RoundAdmission, RunEvent, RunEventRefusal, RunJournalEntry, RunLedger, RunRecord,
+    RuntimeCallPolicy, SegmentOrdinal,
 };
 use crate::{
     AwaitEventKey, ConsumerHold, EffectOpener, ProcessId, ProcessStartRegistration,
@@ -167,11 +168,11 @@ impl RunJournal<'_> {
 
     /// Journal one record, or serve the recorded one, and admit it through
     /// the fold and the material check before anything acts on it.
-    async fn append(
+    async fn append_entry(
         &mut self,
         name: String,
         step: crate::RunRecordStep<'_>,
-    ) -> Result<RunRecord, SingletonRunError> {
+    ) -> Result<(RunRecord, Vec<MaterialRef>), SingletonRunError> {
         self.scoped.admit_journal_write()?;
         let entry = self
             .scoped
@@ -179,9 +180,25 @@ impl RunJournal<'_> {
             .record_run_record(name, step)
             .await?;
         self.ledger.append(self.segment, &entry.record)?;
+        let references = entry
+            .materials
+            .iter()
+            .map(|material| match material {
+                MaterialEntry::Available { reference, .. }
+                | MaterialEntry::Retired { reference } => reference.clone(),
+            })
+            .collect();
         self.materials.admit(entry.materials)?;
         self.records.push(entry.record.clone());
-        Ok(entry.record)
+        Ok((entry.record, references))
+    }
+
+    async fn append(
+        &mut self,
+        name: String,
+        step: crate::RunRecordStep<'_>,
+    ) -> Result<RunRecord, SingletonRunError> {
+        Ok(self.append_entry(name, step).await?.0)
     }
 }
 
@@ -191,19 +208,61 @@ fn record_name(call_id: &ToolCallId, step: &str) -> String {
 
 /// Admission's typed refusal of the call itself, checked before the
 /// admission record is written so that no refused call is ever recorded.
-fn admit_live(call: &SingletonToolCall) -> Result<(), AdmissionRefusal> {
+fn admit_live(
+    call: &SingletonToolCall,
+    handlers: &dyn SingletonToolHandlers,
+) -> Result<Option<IsolatedToolStart>, SingletonRunError> {
     call.declaration
         .validate()
         .map_err(|cause| AdmissionRefusal::Declaration { member: 0, cause })?;
-    if call.declaration.isolated {
-        return Err(AdmissionRefusal::UnsupportedIsolation { member: 0 });
-    }
+
     call.binding
         .require_available(&call.available)
         .map_err(|cause| AdmissionRefusal::BindingUnavailable {
             member: 0,
             cause: Box::new(cause),
-        })
+        })?;
+    if !call.declaration.isolated {
+        return Ok(None);
+    }
+    let start = handlers
+        .isolated_start(call)
+        .ok_or(AdmissionRefusal::UnsupportedIsolation { member: 0 })?;
+    let Some(crate::ProcessInput::Engine { kind, .. }) = start.registration.input.input() else {
+        return Err(IsolatedStartRefusal::NotEngine.into());
+    };
+    require_isolated_engine(handlers, kind, start.boundary)?;
+    bind_start(
+        call,
+        &RuntimeCallPolicy {
+            cancel: call.cancel,
+            ..RuntimeCallPolicy::default()
+        },
+        start.registration.clone(),
+    )
+    .map_err(|cause| IsolatedStartRefusal::Start { cause })?;
+    Ok(Some(start))
+}
+
+fn require_isolated_engine(
+    handlers: &dyn SingletonToolHandlers,
+    kind: &str,
+    boundary: ProcessExecutionBoundary,
+) -> Result<std::sync::Arc<dyn crate::ProcessEngine>, IsolatedStartRefusal> {
+    let engine = handlers
+        .process_engines()
+        .and_then(|engines| engines.require(kind).ok())
+        .ok_or_else(|| IsolatedStartRefusal::Unavailable {
+            kind: kind.to_owned(),
+        })?;
+    if boundary == ProcessExecutionBoundary::WorkerProcess && engine.physical_worker().is_none() {
+        return Err(IsolatedStartRefusal::Boundary {
+            kind: kind.to_owned(),
+            recorded: boundary,
+            available: ProcessExecutionBoundary::Invocation,
+        });
+    }
+    Ok(engine)
 }
 
 fn before_verdict(
@@ -310,20 +369,54 @@ impl<'a> RunCoordinator<'a> {
         call: &'a SingletonToolCall,
         handlers: &'a dyn SingletonToolHandlers,
     ) -> Result<DecidedCall, SingletonRunError> {
-        admit_live(call)?;
+        let live_start = admit_live(call, handlers)?;
         let journal = &mut self.journal;
 
         // A: preparation and every before-check, on one prepared request.
         let first = journal.record(Vec::new());
         let owner = journal.materials.owner.clone();
         let admit = Box::pin(async move {
+            let mut minted = Vec::new();
+            let isolation = match live_start {
+                None => None,
+                Some(start) => {
+                    let Some(crate::ProcessInput::Engine { kind, .. }) =
+                        start.registration.input.input()
+                    else {
+                        return Err(IsolatedStartRefusal::NotEngine.to_string());
+                    };
+                    let engine_kind = kind.clone();
+                    let obligation = bind_start(
+                        call,
+                        &RuntimeCallPolicy {
+                            cancel: call.cancel,
+                            ..RuntimeCallPolicy::default()
+                        },
+                        start.registration,
+                    )
+                    .map_err(|cause| cause.to_string())?;
+                    let (reference, entry) =
+                        mint(&owner, MaterialRole::PreparedRequest, encode(&obligation)?)?;
+                    minted.push(entry);
+                    Some(RecordedIsolatedStart {
+                        implementation: call.binding.executable.clone(),
+                        engine_kind,
+                        boundary: start.boundary,
+                        start: SingletonStart {
+                            start_key: obligation.start_key().clone(),
+                            obligation: reference,
+                        },
+                    })
+                }
+            };
             let request = SingletonPreparedRequest {
                 arguments: call.arguments.clone(),
                 prepared: handlers.prepare(call).await?,
+                isolation,
             };
             let (request_ref, request_entry) =
                 mint(&owner, MaterialRole::PreparedRequest, encode(&request)?)?;
-            let mut minted = vec![request_entry];
+            minted.push(request_entry);
             let mut checks = Vec::new();
             for reply in handlers.before_checks(call, &request).await {
                 checks.push(before_verdict(&owner, reply, &mut minted)?);
@@ -382,20 +475,52 @@ impl<'a> RunCoordinator<'a> {
         }
         // The recorded round passes admission against this build's revisions
         // before anything executes; replay never consults the live catalog.
-        round
-            .clone()
-            .admit(&journal.materials.available, |_| false)?;
+        round.clone().admit(&journal.materials.available, |_| {
+            request.isolation.is_some()
+        })?;
+        if member.declaration.isolated {
+            let binding = request
+                .isolation
+                .as_ref()
+                .ok_or(AdmissionRefusal::UnsupportedIsolation { member: 0 })?;
+            if binding.implementation != member.binding.executable {
+                return Err(SingletonRunError::Drift {
+                    call_id: call.call_id.clone(),
+                    drift: SingletonDrift::IsolationBinding,
+                });
+            }
+            require_isolated_engine(handlers, &binding.engine_kind, binding.boundary)?;
+            let obligation = recorded_obligation(journal, &call.call_id, &binding.start)?;
+            if !matches!(obligation.registration.input.input(), Some(crate::ProcessInput::Engine { kind, .. }) if kind == &binding.engine_kind)
+            {
+                return Err(IsolatedStartRefusal::NotEngine.into());
+            }
+        } else if request.isolation.is_some() {
+            return Err(IsolatedStartRefusal::NotEngine.into());
+        }
 
         // The result candidate the decision checks, and where it came from.
         let candidate = match member.selection() {
             BeforeSelection::Execute => {
                 match attempt(journal, call, &member, &request, handlers).await? {
-                    AttemptCaptured::Captured(capture) => Some((
-                        ResultSource::Attempt {
-                            attempt: AttemptOrdinal::FIRST,
-                        },
-                        capture,
-                    )),
+                    AttemptCaptured::Captured(capture) => {
+                        let recorded = match &capture {
+                            SingletonCapture::Isolated { binding } => Some(binding.as_ref()),
+                            _ => None,
+                        };
+                        if recorded != request.isolation.as_ref() {
+                            return Err(SingletonRunError::Drift {
+                                call_id: call.call_id.clone(),
+                                drift: SingletonDrift::IsolationBinding,
+                            });
+                        }
+                        Some((
+                            ResultSource::Attempt {
+                                attempt: AttemptOrdinal::FIRST,
+                            },
+                            capture,
+                        ))
+                    }
                     AttemptCaptured::Deferred(source) => {
                         return Ok(DecidedCall::Deferred { source });
                     }
@@ -410,7 +535,16 @@ impl<'a> RunCoordinator<'a> {
                     }
                     .into());
                 };
-                Some((ResultSource::Cached, journal.materials.decode(result)?))
+                Some((
+                    ResultSource::Cached,
+                    if member.declaration.isolated {
+                        SingletonCapture::Refused {
+                            refusal: DeclarationRefusal::InlineOutcomeFromIsolated,
+                        }
+                    } else {
+                        journal.materials.decode(result)?
+                    },
+                ))
             }
             BeforeSelection::Deny | BeforeSelection::Cancel | BeforeSelection::AbortRun => None,
         };
@@ -543,6 +677,7 @@ impl<'a> RunCoordinator<'a> {
         // settle.
         let mut settle = Vec::new();
         let mut launched = None;
+        let mut termination = None;
         if *declares {
             if !journal.ledger.drain_frontier_open(rank) {
                 return Err(RunEventRefusal::DrainFrontier { call_id }.into());
@@ -573,7 +708,14 @@ impl<'a> RunCoordinator<'a> {
                 )
                 .await?;
             if let Some(obligation) = &obligation {
-                launched = Some(drain_start(journal, &call_id, obligation, handlers).await?);
+                let isolated = match &capture {
+                    SingletonCapture::Isolated { binding } => Some(binding.as_ref()),
+                    _ => None,
+                };
+                let (process, receipt) =
+                    drain_start(journal, &call_id, obligation, isolated, handlers).await?;
+                launched = Some(process);
+                termination = receipt;
             }
             settle.push(RunEvent::DeclarationsSettled {
                 call_id: call_id.clone(),
@@ -587,6 +729,17 @@ impl<'a> RunCoordinator<'a> {
         let final_capture = capture.clone();
         let declares = *declares;
         let step_call = call_id.clone();
+        let descriptor = match (&capture, &launched) {
+            (SingletonCapture::Isolated { binding }, Some(process_id)) => {
+                Some(IsolatedProcessDescriptor {
+                    process_id: process_id.clone(),
+                    start_key: binding.start.start_key.clone(),
+                    boundary: binding.boundary,
+                    termination,
+                })
+            }
+            _ => None,
+        };
         let present = Box::pin(async move {
             if declares && !final_capture.intents().is_empty() {
                 handlers
@@ -596,7 +749,10 @@ impl<'a> RunCoordinator<'a> {
             if let Some(stream) = final_capture.stream() {
                 handlers.emit_stream(&step_call, stream);
             }
-            let text = handlers.present(&step_call, &final_capture).await?;
+            let text = match descriptor {
+                Some(descriptor) => encode(&descriptor)?,
+                None => handlers.present(&step_call, &final_capture).await?,
+            };
             let mut owned = Vec::new();
             let presentation = if final_capture.output() == Some(text.as_str()) {
                 None
@@ -697,8 +853,9 @@ async fn drain_start(
     journal: &mut RunJournal<'_>,
     call_id: &ToolCallId,
     obligation: &DeclaredStartObligation,
+    isolated: Option<&RecordedIsolatedStart>,
     handlers: &dyn SingletonToolHandlers,
-) -> Result<ProcessId, SingletonRunError> {
+) -> Result<(ProcessId, Option<WorkerTerminationReceipt>), SingletonRunError> {
     let start_key = obligation.start_key().clone();
     let launch_record = journal.record(Vec::new());
     let (step_call, key) = (call_id.clone(), start_key.clone());
@@ -728,6 +885,12 @@ async fn drain_start(
     };
     let process_id = process_id.clone();
 
+    let engine = isolated
+        .map(|binding| require_isolated_engine(handlers, &binding.engine_kind, binding.boundary))
+        .transpose()?;
+    let hard =
+        isolated.is_some_and(|binding| binding.boundary == ProcessExecutionBoundary::WorkerProcess);
+    let owner = journal.materials.owner.clone();
     let discharge_record = journal.record(Vec::new());
     let (step_call, launched_id) = (call_id.clone(), process_id.clone());
     let discharge = Box::pin(async move {
@@ -739,6 +902,22 @@ async fn drain_start(
                     ..
                 }
             );
+        let mut materials = Vec::new();
+        if cancel && hard {
+            let worker = engine
+                .as_ref()
+                .and_then(|engine| engine.physical_worker())
+                .ok_or("the admitted physical worker is unavailable")?;
+            let receipt = worker
+                .terminate_worker(&launched_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            if receipt.process_id != launched_id {
+                return Err(IsolatedStartRefusal::TerminationOwner.to_string());
+            }
+            let (_, entry) = mint(&owner, MaterialRole::AttemptOutput, encode(&receipt)?)?;
+            materials.push(entry);
+        }
         handlers
             .discharge_start(obligation, &launched_id, cancel)
             .await?;
@@ -751,13 +930,37 @@ async fn drain_start(
                 }],
                 ..discharge_record
             },
-            materials: Vec::new(),
+            materials,
         })
     });
-    journal
-        .append(record_name(call_id, "start:discharge"), discharge)
+    let (record, references) = journal
+        .append_entry(record_name(call_id, "start:discharge"), discharge)
         .await?;
-    Ok(process_id)
+    let receipt = match references.first() {
+        Some(reference) => {
+            let receipt: WorkerTerminationReceipt = journal.materials.decode(reference)?;
+            if receipt.process_id != process_id {
+                return Err(IsolatedStartRefusal::TerminationOwner.into());
+            }
+            Some(receipt)
+        }
+        _ => None,
+    };
+    if hard
+        && receipt.is_none()
+        && record.events.iter().any(|event| {
+            matches!(
+                event,
+                RunEvent::StartDischarged {
+                    cancelled: true,
+                    ..
+                }
+            )
+        })
+    {
+        return Err(IsolatedStartRefusal::TerminationMissing.into());
+    }
+    Ok((process_id, receipt))
 }
 
 fn boundary(call_id: &ToolCallId) -> SingletonRunError {
@@ -804,27 +1007,41 @@ async fn attempt(
         // The obligation material a declared start owns in this record.
         let mut started = Vec::new();
         let recorder = AttemptStreamRecorder::start();
-        let outcome = handlers
-            .execute(SingletonAttempt {
-                call_id: &call.call_id,
-                attempt: AttemptOrdinal::FIRST,
-                request,
-                stream: &recorder,
-            })
-            .await?;
+        let outcome = if request.isolation.is_some() {
+            None
+        } else {
+            Some(
+                handlers
+                    .execute(SingletonAttempt {
+                        call_id: &call.call_id,
+                        attempt: AttemptOrdinal::FIRST,
+                        request,
+                        stream: &recorder,
+                    })
+                    .await?,
+            )
+        };
         let stream = recorder.finish();
         let capture = match outcome {
-            SingletonBodyOutcome::Deferred { source } => {
+            None => Ok(SingletonCapture::Isolated {
+                binding: Box::new(
+                    request
+                        .isolation
+                        .clone()
+                        .ok_or("the isolated route has no admission")?,
+                ),
+            }),
+            Some(SingletonBodyOutcome::Deferred { source }) => {
                 match declaration.admits(OutcomeShape::Deferred) {
                     Ok(()) => Err(source),
                     Err(refusal) => Ok(SingletonCapture::Refused { refusal }),
                 }
             }
-            SingletonBodyOutcome::Done {
+            Some(SingletonBodyOutcome::Done {
                 output,
                 intents,
                 start,
-            } => {
+            }) => {
                 // A declared start is a StartProcess intent of the result.
                 let mut declared = intents.clone();
                 if start.is_some() && !declared.contains(&ToolIntentKind::StartProcess) {
@@ -857,14 +1074,17 @@ async fn attempt(
                     },
                 }
             }
-            SingletonBodyOutcome::Failed { output } => {
+            Some(SingletonBodyOutcome::Failed { output }) => {
                 Ok(SingletonCapture::Failed { output, stream })
             }
         };
         let (result, materials) = match capture {
             Err(source) => (AttemptResult::Deferred { source }, Vec::new()),
             Ok(capture) => {
-                let done = matches!(capture, SingletonCapture::Done { .. });
+                let done = matches!(
+                    capture,
+                    SingletonCapture::Done { .. } | SingletonCapture::Isolated { .. }
+                );
                 let (output, entry) = mint(&owner, MaterialRole::AttemptOutput, encode(&capture)?)?;
                 let result = if done {
                     AttemptResult::Done { output }

@@ -38,7 +38,8 @@ pub use awaiter::{
 };
 pub use declared_start::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, DeclaredStartPhase,
-    StartCancelDecision,
+    IsolatedStartRefusal, IsolatedToolStart, PhysicalProcessWorker, ProcessExecutionBoundary,
+    StartCancelDecision, WorkerTerminationReceipt,
 };
 pub use definition::{
     InvalidProcessDefinitionId, ProcessDefinition, ProcessDefinitionDraft,

@@ -20,10 +20,11 @@ use lash_core::plugin::{BehaviorRevision, PluginRevision};
 use lash_core::runtime::AttemptStream;
 use lash_core::store::plugin_writers::PluginCallbackIdentity;
 use lash_core::tool_dispatch::{
-    BeforeCheckReply, DeclaredStartObligation, DeclaredStartObligationRefusal, SingletonAttempt,
-    SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest, SingletonRunError,
-    SingletonRunOutcome, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
-    run_singleton_tool,
+    BeforeCheckReply, DeclaredStartObligation, DeclaredStartObligationRefusal,
+    IsolatedProcessDescriptor, IsolatedStartRefusal, IsolatedToolStart, PhysicalProcessWorker,
+    ProcessExecutionBoundary, SingletonAttempt, SingletonBodyOutcome, SingletonCapture,
+    SingletonPreparedRequest, SingletonRunError, SingletonRunOutcome, SingletonTerminal,
+    SingletonToolCall, SingletonToolHandlers, WorkerTerminationReceipt, run_singleton_tool,
 };
 use lash_core::tool_run::{
     AdmittedBinding, AfterCheckVerdict, AttributedVerdict, CallDecision, DeclarationRefusal,
@@ -112,6 +113,7 @@ fn declaring(key: Option<StartKey>) -> SingletonBodyOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CancelAt {
     Never,
+    Preparation,
     /// Inside the body: before the decision, so before the start's admission.
     Body,
     /// Inside the launch: after the start's admission.
@@ -129,6 +131,10 @@ struct Starter {
     executions: AtomicUsize,
     launches: Mutex<Vec<ProcessId>>,
     discharges: Mutex<Vec<(ProcessId, bool)>>,
+    engines: Option<lash_core::ProcessEngineRegistry>,
+    isolation: Option<ProcessExecutionBoundary>,
+    worker: Option<Arc<IsolatedEngine>>,
+    slow: bool,
 }
 
 impl Starter {
@@ -145,6 +151,10 @@ impl Starter {
             executions: AtomicUsize::new(0),
             launches: Mutex::new(Vec::new()),
             discharges: Mutex::new(Vec::new()),
+            engines: None,
+            isolation: None,
+            worker: None,
+            slow: false,
         })
     }
 
@@ -159,7 +169,36 @@ impl Starter {
 
 #[async_trait::async_trait]
 impl SingletonToolHandlers for Starter {
+    fn process_engines(&self) -> Option<&lash_core::ProcessEngineRegistry> {
+        self.engines.as_ref()
+    }
+
+    fn isolated_start(&self, call: &SingletonToolCall) -> Option<IsolatedToolStart> {
+        let boundary = self.isolation?;
+        let label = call.arguments["label"].as_str().unwrap();
+        let registration = ProcessStartRegistration::of_target(
+            ProcessInput::Engine {
+                kind: self
+                    .worker
+                    .as_ref()
+                    .map_or("fig4884-index", |engine| engine.kind)
+                    .to_owned(),
+                payload: serde_json::json!({"label": label}),
+            },
+            ProcessProvenance::host(),
+            Lifetime::Detached,
+        )
+        .with_start_key(Some(start_key(label)));
+        Some(IsolatedToolStart {
+            boundary,
+            registration,
+        })
+    }
+
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
+        if self.cancel_at == CancelAt::Preparation {
+            self.cancel.store(true, Ordering::SeqCst);
+        }
         Ok(call.arguments.clone())
     }
 
@@ -176,6 +215,9 @@ impl SingletonToolHandlers for Starter {
         _attempt: SingletonAttempt<'_>,
     ) -> Result<SingletonBodyOutcome, String> {
         self.executions.fetch_add(1, Ordering::SeqCst);
+        if self.slow {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         if self.cancel_at == CancelAt::Body {
             self.cancel.store(true, Ordering::SeqCst);
         }
@@ -237,6 +279,9 @@ impl SingletonToolHandlers for Starter {
             .register_process(registration)
             .await
             .map_err(|error| error.to_string())?;
+        if let Some(engine) = &self.worker {
+            engine.launch(&record.id);
+        }
         self.launches.lock().unwrap().push(record.id.clone());
         Ok(record.id)
     }
@@ -257,6 +302,12 @@ impl SingletonToolHandlers for Starter {
                 )
                 .await
                 .map_err(|error| error.to_string())?;
+        }
+        if cancel && self.isolation == Some(ProcessExecutionBoundary::WorkerProcess) {
+            assert!(
+                self.worker.as_ref().unwrap().receipt(process_id).is_some(),
+                "termination precedes hold release"
+            );
         }
         let hold = obligation
             .registration
@@ -402,22 +453,40 @@ impl Driven {
 }
 
 async fn drive(crash: Option<&str>, call: SingletonToolCall, starter: Arc<Starter>) -> Driven {
+    drive_with_replay(crash, call, starter, None).await
+}
+
+async fn drive_with_replay(
+    crash: Option<&str>,
+    call: SingletonToolCall,
+    starter: Arc<Starter>,
+    replay: Option<Arc<Starter>>,
+) -> Driven {
     let backend = lash_restate_test::backend(0x4884, ServerConfig::default())
         .await
         .unwrap();
     if let Some(step) = crash {
-        backend
-            .server()
-            .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
-                name: Some(format!("lash:run:{}:{step}", call.call_id)),
-            }));
+        let name = format!("lash:run:{}:{step}", call.call_id);
+        let point = if replay.is_some() {
+            // Binding drift is judged before a fresh attempt. Its command
+            // must not already occupy the positional journal's next slot.
+            CrashPoint::BeforeRun { name }
+        } else {
+            CrashPoint::BeforeRunResult { name: Some(name) }
+        };
+        backend.server().crash_on(CrashRule::new(point));
     }
     let returned: Returned = Arc::new(Mutex::new(Vec::new()));
     let attempt: lash_restate_test::HandlerAttempt = {
         let returned = Arc::clone(&returned);
+        let attempts = AtomicUsize::new(0);
         Arc::new(move |scoped| {
             let call = call.clone();
-            let starter = Arc::clone(&starter);
+            let starter = if attempts.fetch_add(1, Ordering::SeqCst) > 0 {
+                Arc::clone(replay.as_ref().unwrap_or(&starter))
+            } else {
+                Arc::clone(&starter)
+            };
             let returned = Arc::clone(&returned);
             Box::pin(async move {
                 let outcome = run_singleton_tool(&scoped, &call, starter.as_ref()).await;
@@ -725,5 +794,385 @@ async fn a_start_without_key_environment_or_declaration_is_refused_before_admiss
             "a refused start declares nothing"
         );
         assert_eq!(stores.rows().await, Vec::new());
+    }
+}
+
+struct IsolatedEngine {
+    kind: &'static str,
+    physical: bool,
+    workers: Mutex<std::collections::BTreeMap<ProcessId, Worker>>,
+    spawned: AtomicUsize,
+}
+
+enum Worker {
+    Running(std::process::Child),
+    Reaped(WorkerTerminationReceipt),
+}
+
+impl IsolatedEngine {
+    fn new(kind: &'static str, physical: bool) -> Arc<Self> {
+        Arc::new(Self {
+            kind,
+            physical,
+            workers: Mutex::new(Default::default()),
+            spawned: AtomicUsize::new(0),
+        })
+    }
+
+    fn launch(&self, process: &ProcessId) {
+        if !self.physical {
+            return;
+        }
+        let mut workers = self.workers.lock().unwrap();
+        if workers.contains_key(process) {
+            return;
+        }
+        let child = lash_conformance::spawn_isolation_law_worker().unwrap();
+        assert_ne!(
+            child.id(),
+            std::process::id(),
+            "the body has a physical boundary"
+        );
+        workers.insert(process.clone(), Worker::Running(child));
+        self.spawned.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn receipt(&self, process: &ProcessId) -> Option<WorkerTerminationReceipt> {
+        match self.workers.lock().unwrap().get(process) {
+            Some(Worker::Reaped(receipt)) => Some(receipt.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl Drop for IsolatedEngine {
+    fn drop(&mut self) {
+        for worker in self.workers.get_mut().unwrap().values_mut() {
+            if let Worker::Running(child) = worker {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl PhysicalProcessWorker for IsolatedEngine {
+    async fn terminate_worker(
+        &self,
+        process: &ProcessId,
+    ) -> Result<WorkerTerminationReceipt, lash_core::PluginError> {
+        let mut workers = self.workers.lock().unwrap();
+        let worker = workers.get_mut(process).unwrap();
+        match worker {
+            Worker::Reaped(receipt) => Ok(receipt.clone()),
+            Worker::Running(child) => {
+                let pid = std::num::NonZeroU32::new(child.id()).unwrap();
+                child.kill().unwrap();
+                let status = child.wait().unwrap();
+                assert!(!status.success(), "cancellation terminated the worker");
+                assert_eq!(
+                    child.try_wait().unwrap(),
+                    Some(status),
+                    "the worker was reaped"
+                );
+                let receipt = WorkerTerminationReceipt {
+                    process_id: process.clone(),
+                    worker_pid: pid,
+                };
+                *worker = Worker::Reaped(receipt.clone());
+                Ok(receipt)
+            }
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessEngine for IsolatedEngine {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    fn physical_worker(&self) -> Option<&dyn PhysicalProcessWorker> {
+        self.physical.then_some(self)
+    }
+
+    async fn run(
+        &self,
+        _context: lash_core::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
+        unreachable!("the law's launch callback owns process delivery")
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &lash_core::ReferrerClaim,
+        _artifact_ref: &str,
+    ) -> Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+}
+
+fn isolated_call(label: &str, policy: ExternalCancelPolicy) -> SingletonToolCall {
+    let mut call = call(label, policy);
+    call.declaration = ToolDeclaration {
+        isolated: true,
+        ..ToolDeclaration::default()
+    };
+    call
+}
+
+fn isolated_starter(
+    stores: &Stores,
+    physical: bool,
+    cancel: CancelAt,
+    kind: &'static str,
+) -> Arc<Starter> {
+    let mut starter = Starter::new(stores.set.process_registry(), declaring(None), cancel);
+    let engine = IsolatedEngine::new(kind, physical);
+    let owned = Arc::get_mut(&mut starter).unwrap();
+    owned.engines = Some(lash_core::ProcessEngineRegistry::new().with_registration(
+        lash_core::ProcessEngineRegistration::accepting(engine.clone()),
+    ));
+    owned.worker = Some(engine);
+    owned.isolation = Some(if physical {
+        ProcessExecutionBoundary::WorkerProcess
+    } else {
+        ProcessExecutionBoundary::Invocation
+    });
+    starter
+}
+
+/// L08: a supported isolated call fixes a registered implementation at A,
+/// recovers one process through every cut and never invokes an ordinary body.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_isolated_call_starts_its_registered_process_without_an_ordinary_body() {
+    for tier in [Tier::Memory, Tier::FileReopen] {
+        for cut in std::iter::once(None).chain(STEPS.iter().copied().map(Some)) {
+            let stores = Stores::open(tier).await;
+            let call = isolated_call("isolated", ExternalCancelPolicy::Ignore);
+            let starter = isolated_starter(&stores, false, CancelAt::Never, "fig4884-index");
+            let driven = drive(cut, call.clone(), Arc::clone(&starter)).await;
+            let (terminal, records) = driven.finished();
+            let SingletonTerminal::Final {
+                launched: Some(process),
+                presentation,
+                ..
+            } = terminal
+            else {
+                panic!("{tier:?} {cut:?}: {terminal:?}")
+            };
+            let descriptor: IsolatedProcessDescriptor =
+                serde_json::from_str(&presentation).unwrap();
+            assert_eq!(descriptor.process_id, process);
+            assert_eq!(descriptor.start_key, start_key("isolated"));
+            assert_eq!(descriptor.boundary, ProcessExecutionBoundary::Invocation);
+            assert_eq!(descriptor.termination, None);
+            assert_eq!(
+                starter.executions.load(Ordering::SeqCst),
+                0,
+                "no ordinary body"
+            );
+            assert_eq!(
+                starter.launches(),
+                vec![process.clone(); 1 + usize::from(cut == Some("start:launch"))]
+            );
+            assert_eq!(
+                start_events(&records),
+                drained(&call.call_id, &start_key("isolated"), &process, false)
+            );
+            assert_eq!(
+                stores.rows().await,
+                vec![Row::drained(&process, &start_key("isolated"), false)]
+            );
+        }
+    }
+}
+
+/// L08: pre-admission cancellation forbids launch. A protected start recovers
+/// the same worker on cancellation, records a physical reap receipt, and
+/// releases its hold after termination even when launch or discharge is lost.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_isolated_cancel_forbids_launch_or_recovers_and_reaps_the_same_worker() {
+    for tier in [Tier::Memory, Tier::FileReopen] {
+        for (cancel_at, cut) in [
+            (CancelAt::Preparation, None),
+            (CancelAt::Launch, None),
+            (CancelAt::Launch, Some("start:launch")),
+            (CancelAt::Launch, Some("start:discharge")),
+            (CancelAt::Launch, Some("present")),
+        ] {
+            let stores = Stores::open(tier).await;
+            let call = isolated_call("physical", ExternalCancelPolicy::CancelExternalWork);
+            let starter = isolated_starter(&stores, true, cancel_at, "fig4884-index");
+            let driven = drive(cut, call.clone(), Arc::clone(&starter)).await;
+            let (terminal, records) = driven.finished();
+            let engine = starter.worker.as_ref().unwrap();
+            assert_eq!(starter.executions.load(Ordering::SeqCst), 0);
+            if cancel_at == CancelAt::Preparation {
+                assert_eq!(
+                    terminal,
+                    SingletonTerminal::Withheld {
+                        decision: CallDecision::Cancelled
+                    }
+                );
+                assert_eq!(engine.spawned.load(Ordering::SeqCst), 0);
+                assert!(start_events(&records).is_empty());
+                assert!(stores.rows().await.is_empty());
+            } else {
+                let SingletonTerminal::Final {
+                    launched: Some(process),
+                    presentation,
+                    ..
+                } = terminal
+                else {
+                    panic!("{tier:?} {cut:?}: {terminal:?}")
+                };
+                let descriptor: IsolatedProcessDescriptor =
+                    serde_json::from_str(&presentation).unwrap();
+                assert_eq!(descriptor.process_id, process);
+                assert_eq!(descriptor.boundary, ProcessExecutionBoundary::WorkerProcess);
+                assert_eq!(descriptor.termination, engine.receipt(&process));
+                assert!(
+                    descriptor.termination.is_some(),
+                    "a physical termination receipt is required"
+                );
+                assert_eq!(
+                    engine.spawned.load(Ordering::SeqCst),
+                    1,
+                    "a replay never spawns a replacement worker"
+                );
+                assert!(starter.launches().iter().all(|id| *id == process));
+                assert_eq!(
+                    start_events(&records),
+                    drained(&call.call_id, &start_key("physical"), &process, true)
+                );
+                assert_eq!(
+                    stores.rows().await,
+                    vec![Row::drained(&process, &start_key("physical"), true)]
+                );
+            }
+        }
+    }
+}
+
+/// L08 and L12: unsupported isolation and unavailable recorded implementations
+/// refuse before a body or new route. A cooperative engine cannot claim a
+/// physical worker. A replacement live binding cannot replace a recorded one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn unsupported_or_changed_isolation_refuses_before_a_body_or_new_identity() {
+    let stores = Stores::open(Tier::Memory).await;
+    for kind in ["missing", "physical-claim", "unavailable", "revision"] {
+        let mut call = isolated_call(kind, ExternalCancelPolicy::Ignore);
+        if kind == "revision" {
+            call.available.clear();
+        }
+        let mut starter = isolated_starter(&stores, false, CancelAt::Never, "fig4884-index");
+        let owned = Arc::get_mut(&mut starter).unwrap();
+        match kind {
+            "missing" => owned.isolation = None,
+            "physical-claim" => owned.isolation = Some(ProcessExecutionBoundary::WorkerProcess),
+            "unavailable" => owned.engines = None,
+            _ => {}
+        }
+        let driven = drive(None, call, Arc::clone(&starter)).await;
+        let refused = driven.returned.lock().unwrap().pop().unwrap().unwrap_err();
+        if kind == "revision" {
+            assert!(matches!(
+                refused,
+                SingletonRunError::Admission(
+                    lash_core::tool_run::AdmissionRefusal::BindingUnavailable { .. }
+                )
+            ));
+            assert_eq!(starter.executions.load(Ordering::SeqCst), 0);
+            assert!(starter.launches().is_empty());
+            continue;
+        }
+        match (kind, refused) {
+            (
+                "missing",
+                SingletonRunError::Admission(
+                    lash_core::tool_run::AdmissionRefusal::UnsupportedIsolation { member: 0 },
+                ),
+            )
+            | (
+                "physical-claim",
+                SingletonRunError::Isolation(IsolatedStartRefusal::Boundary { .. }),
+            )
+            | (
+                "unavailable",
+                SingletonRunError::Isolation(IsolatedStartRefusal::Unavailable { .. }),
+            ) => {}
+            (_, error) => panic!("{kind}: {error:?}"),
+        }
+        assert_eq!(starter.executions.load(Ordering::SeqCst), 0);
+        assert!(starter.launches().is_empty());
+    }
+    let original = isolated_starter(&stores, false, CancelAt::Never, "fig4884-index");
+    let replacement = isolated_starter(&stores, false, CancelAt::Never, "replacement-engine");
+    let driven = drive_with_replay(
+        Some("attempt:1"),
+        isolated_call("drift", ExternalCancelPolicy::Ignore),
+        Arc::clone(&original),
+        Some(Arc::clone(&replacement)),
+    )
+    .await;
+    let refused = driven.returned.lock().unwrap().pop().unwrap().unwrap_err();
+    assert!(
+        matches!(refused, SingletonRunError::Isolation(IsolatedStartRefusal::Unavailable { kind }) if kind == "fig4884-index")
+    );
+    for starter in [&original, &replacement] {
+        assert_eq!(starter.executions.load(Ordering::SeqCst), 0);
+        assert!(starter.launches().is_empty());
+    }
+    assert!(stores.rows().await.is_empty());
+}
+
+/// Q3 and D04: ordinary work remains cooperative. A slow success or a
+/// body-owned transport timeout stays that one ordinary attempt even when
+/// the provider also has a registered process implementation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process() {
+    for body in [
+        SingletonBodyOutcome::Failed {
+            output: "transport timed out".to_owned(),
+        },
+        SingletonBodyOutcome::Done {
+            output: OUTPUT.to_owned(),
+            intents: Vec::new(),
+            start: None,
+        },
+    ] {
+        let stores = Stores::open(Tier::Memory).await;
+        let mut starter = isolated_starter(&stores, false, CancelAt::Never, "fig4884-index");
+        let owned = Arc::get_mut(&mut starter).unwrap();
+        owned.body = body;
+        owned.slow = true;
+        let mut call = call("ordinary", ExternalCancelPolicy::Ignore);
+        call.declaration = ToolDeclaration::default();
+        let driven = drive(None, call, Arc::clone(&starter)).await;
+        let (terminal, _) = driven.finished();
+        assert!(matches!(
+            terminal,
+            SingletonTerminal::Final { launched: None, .. }
+        ));
+        assert_eq!(starter.executions.load(Ordering::SeqCst), 1);
+        assert!(starter.launches().is_empty());
+        assert!(stores.rows().await.is_empty());
     }
 }

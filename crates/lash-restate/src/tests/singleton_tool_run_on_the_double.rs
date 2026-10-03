@@ -881,6 +881,9 @@ impl SingletonToolHandlers for Probe {
     ) -> Result<String, String> {
         self.presentations.fetch_add(1, Ordering::SeqCst);
         let declared = match capture {
+            SingletonCapture::Isolated { .. } => {
+                panic!("an isolated result bypasses the ordinary presenter")
+            }
             SingletonCapture::Done { intents, .. } => intents.len(),
             SingletonCapture::Failed { .. }
             | SingletonCapture::Refused { .. }

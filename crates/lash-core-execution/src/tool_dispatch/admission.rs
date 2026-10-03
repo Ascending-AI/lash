@@ -15,8 +15,8 @@
 use crate::{ToolAdmissionRefusal, ToolFailure, ToolFailureCause, ToolFailureClass, ToolManifest};
 
 /// Whether a process implementation is bound to run `manifest`'s tool
-/// isolated. None is yet: an isolated declaration refuses at admission rather
-/// than ever running its body inline.
+/// isolated on this ordinary-body route. Process bindings are admitted by the
+/// Run coordinator; this route refuses them before an inline body can run.
 fn supports_isolation(_manifest: &ToolManifest) -> bool {
     false
 }
