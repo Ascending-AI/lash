@@ -111,6 +111,25 @@ endpoints = ["DEP_A", "DEP_B"]
 shards = 1
 timeout_seconds = 120
 
+# Concurrent `ctx.run` results wake their handler on a live V7 server
+# (FIG-4872): the server double's run-wake laws, checked against the pinned
+# server with its V7 protocol enabled, which every law asserts the invocation
+# negotiated. The live leg holds each attempt's request stream open; the
+# replay leg runs the legs that hold with every stream closed after its replay.
+[suites.run-wake]
+label = "//crates/lash-restate-test:run_wake__test"
+cwd = "crates/lash-restate-test"
+filters = ["live_restate_"]
+endpoints = ["RW_ENDPOINT"]
+shards = 1
+timeout_seconds = 120
+
+[suites.run-wake.live.server_env]
+RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7 = "true"
+
+[suites.run-wake.replay.server_env]
+RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7 = "true"
+
 # Deployment namespaces against the real server (FIG-3898): two cores in
 # distinct namespaces share the server without cross-talk, and a registration
 # over another deployment's names is refused. Two endpoint binds per shard, one
