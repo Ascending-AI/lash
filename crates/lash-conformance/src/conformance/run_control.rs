@@ -291,6 +291,7 @@ impl AdmittedRun {
                 admitted_generation: lash_core::engine::BuildGeneration::for_test("run-control"),
                 executor: lash_core::store::RunExecutor::Run,
                 plugins: Default::default(),
+                turn_cancellation: None,
                 trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),
             })
             .await
@@ -772,6 +773,7 @@ pub async fn a_refused_run_ends_once_and_its_next_input_admits_a_new_run(
         admitted_generation: lash_core::engine::BuildGeneration::for_test("refused-end"),
         executor: lash_core::store::RunExecutor::Run,
         plugins: Default::default(),
+        turn_cancellation: None,
         trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),
     };
     parts

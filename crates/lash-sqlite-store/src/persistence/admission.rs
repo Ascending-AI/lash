@@ -64,6 +64,14 @@ pub(crate) async fn admit_run_sqlite(
         (|| {
             let session_id = request.session_id();
             super::shift_epoch::require_fence_conn(tx, session_id, &request.fence)?;
+            if let Some(binding) = &request.turn_cancellation {
+                super::turn_input::check_turn_cancellation_conn(
+                    tx,
+                    session_id,
+                    &binding.binding_id,
+                    &binding.admitted_scope,
+                )?;
+            }
             let runs = crate::session_runs::session_runs_sql();
             let existing: Option<Option<String>> = tx
                 .query_row(
@@ -84,6 +92,16 @@ pub(crate) async fn admit_run_sqlite(
                         recorded: Box::new(admission.executor),
                         admitting: Box::new(request.executor.clone()),
                     });
+                }
+                if prepared.is_some()
+                    && let Some(binding) = &request.turn_cancellation
+                {
+                    super::turn_input::bind_turn_cancellation_conn(
+                        tx,
+                        session_id,
+                        &binding.binding_id,
+                        &binding.admitted_scope,
+                    )?;
                 }
                 return Ok(TxOutcome::Commit(Some(admission)));
             }
@@ -192,6 +210,16 @@ pub(crate) async fn admit_run_sqlite(
                     session_id: session_id.clone(),
                     run: request.run.clone(),
                 });
+            }
+            // Revalidate the exact trace proposal before binding either the
+            // cancellation authority or admitted rows.
+            if let Some(binding) = &request.turn_cancellation {
+                super::turn_input::bind_turn_cancellation_conn(
+                    tx,
+                    session_id,
+                    &binding.binding_id,
+                    &binding.admitted_scope,
+                )?;
             }
             if let Some(inputs) = admission.inputs.as_deref() {
                 bind_turn_inputs_conn(tx, now, &request.run, RUN_ADMISSION_STEP, inputs)?;

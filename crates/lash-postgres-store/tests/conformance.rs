@@ -2011,6 +2011,8 @@ mod run_control {
     (a_terminal_run_never_reparks, "s7b-0"),
     (one_unfinished_run_per_session, "run-one-unfinished"),
     (admission_delivers_every_row_it_binds, "run-admission-delivers"),
+    (run_admission_binds_cancellation_authority_with_its_rows, "run-admission-cancel-binding"),
+    (preparing_or_refusing_admission_leaves_cancellation_authority_unbound, "run-admission-unbound-proposal"),
     (a_run_admission_is_idempotent_across_new_rows_and_fences, "run-admission-idempotent"),
     (a_run_admission_survives_a_worker_crash_without_widening, "shift-admission-commit-crash"),
     (a_diverged_run_parks_once_holds_its_admitted_rows_blocks_admission_and_completes_after_restore, "s7b-15"),

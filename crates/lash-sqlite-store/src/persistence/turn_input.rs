@@ -13,6 +13,76 @@ fn decode_binding_scope(
         .transpose()
 }
 
+/// Validate the selected authority without selecting one during trace preparation.
+pub(super) fn check_turn_cancellation_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    binding_id: &str,
+    admitted_scope: &lash_core_execution::ExecutionScope,
+) -> Result<bool, StoreError> {
+    admitted_scope
+        .validate()
+        .map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: "TurnCancellationBinding",
+            message: error.to_string(),
+        })?;
+    let physical_scope = admitted_scope
+        .session_id()
+        .is_none()
+        .then_some(admitted_scope);
+    let existing = tx
+        .query_row(
+            crate::turn_ingress::turn_ingress_sql()
+                .bindings
+                .select_by_session
+                .sql(),
+            params![session_id.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    match existing {
+        Some((expected, encoded_scope))
+            if expected != binding_id
+                || decode_binding_scope(encoded_scope.as_deref())?.as_ref() != physical_scope =>
+        {
+            Err(StoreError::TurnCancelBindingMismatch {
+                session_id: session_id.clone(),
+                expected,
+                presented: binding_id.to_string(),
+            })
+        }
+        Some(_) => Ok(true),
+        None => Ok(false),
+    }
+}
+
+/// Select the authority in the caller's fenced transaction, never replacing it.
+pub(super) fn bind_turn_cancellation_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    binding_id: &str,
+    admitted_scope: &lash_core_execution::ExecutionScope,
+) -> Result<(), StoreError> {
+    if !check_turn_cancellation_conn(tx, session_id, binding_id, admitted_scope)? {
+        let encoded_scope = admitted_scope
+            .session_id()
+            .is_none()
+            .then(|| encode_json(admitted_scope))
+            .transpose()?;
+        crate::conn::cached_execute(
+            tx,
+            crate::turn_ingress::turn_ingress_sql()
+                .bindings_sqlite
+                .insert_new
+                .sql(),
+            params![session_id.as_str(), binding_id, encoded_scope],
+        )
+        .map_err(sqlite_error)?;
+    }
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn validate_turn_cancellation_binding(
@@ -22,60 +92,16 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         binding_id: &str,
         admitted_scope: &lash_core_execution::ExecutionScope,
     ) -> Result<(), StoreError> {
-        admitted_scope
-            .validate()
-            .map_err(|error| StoreError::StoredDataCorrupt {
-                record_kind: "TurnCancellationBinding",
-                message: error.to_string(),
-            })?;
         let session_id = session_id.clone();
         let fence = fence.clone();
         let binding_id = binding_id.to_string();
-        let admitted_physical_scope = admitted_scope
-            .session_id()
-            .is_none()
-            .then(|| admitted_scope.clone());
-        let admitted_scope_json = admitted_physical_scope
-            .as_ref()
-            .map(encode_json)
-            .transpose()?;
+        let admitted_scope = admitted_scope.clone();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<(), StoreError> = (|| {
+                let outcome = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
                     super::shift_epoch::require_fence_conn(tx, &session_id, &fence)?;
-                    let sql = crate::turn_ingress::turn_ingress_sql();
-                    let existing = tx
-                        .query_row(
-                            sql.bindings.select_by_session.sql(),
-                            params![session_id.as_str()],
-                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?;
-                    match existing {
-                        Some((expected, encoded_scope))
-                            if expected != binding_id
-                                || decode_binding_scope(encoded_scope.as_deref())?
-                                    != admitted_physical_scope =>
-                        {
-                            Err(StoreError::TurnCancelBindingMismatch {
-                                session_id,
-                                expected,
-                                presented: binding_id,
-                            })
-                        }
-                        Some(_) => Ok(()),
-                        None => {
-                            crate::conn::cached_execute(
-                                tx,
-                                sql.bindings_sqlite.insert_new.sql(),
-                                params![session_id.as_str(), binding_id, admitted_scope_json],
-                            )
-                            .map_err(sqlite_error)?;
-                            Ok(())
-                        }
-                    }
+                    bind_turn_cancellation_conn(tx, &session_id, &binding_id, &admitted_scope)
                 })();
                 Ok(match outcome {
                     Ok(()) => TxOutcome::Commit(Ok(())),

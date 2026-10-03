@@ -13,6 +13,7 @@ macro_rules! direct_turn_acceptance_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::direct_turn_acceptance_tests!(@catalogue [$(#[$attr])*] $fixture; [
             (direct_turn_accepts_before_executing, "direct-turn-accepts-before-executing"),
+            (a_failed_run_admission_leaves_no_cancellation_binding, "direct-turn-failed-admission-binding"),
             (direct_turn_acceptance_mints_no_idempotency_key, "direct-turn-identity"),
             (vacuum_then_redrive_replays_receipt_single_row, "direct-turn-vacuum-redrive-single"),
             (vacuum_then_redrive_replays_receipt_absorbed_rows, "direct-turn-vacuum-redrive-absorbed"),

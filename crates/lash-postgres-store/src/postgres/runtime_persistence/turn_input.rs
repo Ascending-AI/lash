@@ -3,6 +3,100 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_mode_wire, turn_cancel_undelivered_wire,
 };
 
+/// Validate the selected authority without selecting one during trace preparation.
+pub(super) async fn check_turn_cancellation_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    binding_id: &str,
+    admitted_scope: &ExecutionScope,
+) -> Result<bool, StoreError> {
+    admitted_scope
+        .validate()
+        .map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: "TurnCancellationBinding",
+            message: error.to_string(),
+        })?;
+    let physical_scope = admitted_scope
+        .session_id()
+        .is_none()
+        .then_some(admitted_scope);
+    let existing: Option<(String, Option<String>)> = sqlx::query_as(
+        crate::turn_ingress::turn_ingress_sql()
+            .bindings_postgres
+            .select_by_session_for_update
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    match existing {
+        Some((expected, encoded_scope))
+            if expected != binding_id
+                || encoded_scope
+                    .as_deref()
+                    .map(serde_json::from_str::<ExecutionScope>)
+                    .transpose()
+                    .map_err(|error| StoreError::StoredDataCorrupt {
+                        record_kind: "TurnCancellationBinding",
+                        message: error.to_string(),
+                    })?
+                    .as_ref()
+                    != physical_scope =>
+        {
+            Err(StoreError::TurnCancelBindingMismatch {
+                session_id: session_id.clone(),
+                expected,
+                presented: binding_id.to_string(),
+            })
+        }
+        Some(_) => Ok(true),
+        None => Ok(false),
+    }
+}
+
+/// Select the authority in the caller's fenced transaction, never replacing it.
+pub(super) async fn bind_turn_cancellation_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    binding_id: &str,
+    admitted_scope: &ExecutionScope,
+) -> Result<(), StoreError> {
+    if !check_turn_cancellation_tx(tx, session_id, binding_id, admitted_scope).await? {
+        let encoded_scope = admitted_scope
+            .session_id()
+            .is_none()
+            .then(|| serde_json::to_string(admitted_scope))
+            .transpose()
+            .map_err(|error| StoreError::RecordEncodingFailed {
+                record_kind: "TurnCancellationBinding".to_string(),
+                message: error.to_string(),
+            })?;
+        let sql = crate::turn_ingress::turn_ingress_sql();
+        sqlx::query(sql.bindings_postgres.insert_new.sql())
+            .bind(session_id.as_str())
+            .bind(binding_id)
+            .bind(&encoded_scope)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let selected: (String, Option<String>) =
+            sqlx::query_as(sql.bindings.select_by_session.sql())
+                .bind(session_id.as_str())
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        if selected.0 != binding_id || selected.1 != encoded_scope {
+            return Err(StoreError::TurnCancelBindingMismatch {
+                session_id: session_id.clone(),
+                expected: format!("{} at {:?}", selected.0, selected.1),
+                presented: binding_id.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl lash_core_execution::TurnInputStore for PostgresStore {
     async fn validate_turn_cancellation_binding(
@@ -12,24 +106,6 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         binding_id: &str,
         admitted_scope: &ExecutionScope,
     ) -> Result<(), StoreError> {
-        admitted_scope
-            .validate()
-            .map_err(|error| StoreError::StoredDataCorrupt {
-                record_kind: "TurnCancellationBinding",
-                message: error.to_string(),
-            })?;
-        let admitted_physical_scope = admitted_scope
-            .session_id()
-            .is_none()
-            .then(|| admitted_scope.clone());
-        let admitted_scope_json = admitted_physical_scope
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| StoreError::RecordEncodingFailed {
-                record_kind: "TurnCancellationBinding".to_string(),
-                message: error.to_string(),
-            })?;
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
@@ -37,68 +113,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             .await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         super::shift_epoch::require_fence_tx(&mut tx, session_id, fence).await?;
-        let existing: Option<(String, Option<String>)> = sqlx::query_as(
-            crate::turn_ingress::turn_ingress_sql()
-                .bindings_postgres
-                .select_by_session_for_update
-                .sql(),
-        )
-        .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        match existing {
-            Some((expected, encoded_scope))
-                if expected != binding_id
-                    || encoded_scope
-                        .as_deref()
-                        .map(serde_json::from_str::<ExecutionScope>)
-                        .transpose()
-                        .map_err(|error| StoreError::StoredDataCorrupt {
-                            record_kind: "TurnCancellationBinding",
-                            message: error.to_string(),
-                        })?
-                        != admitted_physical_scope =>
-            {
-                return Err(StoreError::TurnCancelBindingMismatch {
-                    session_id: session_id.clone(),
-                    expected,
-                    presented: binding_id.to_string(),
-                });
-            }
-            Some(_) => {}
-            None => {
-                sqlx::query(
-                    crate::turn_ingress::turn_ingress_sql()
-                        .bindings_postgres
-                        .insert_new
-                        .sql(),
-                )
-                .bind(session_id.as_str())
-                .bind(binding_id)
-                .bind(&admitted_scope_json)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-                let selected: (String, Option<String>) = sqlx::query_as(
-                    crate::turn_ingress::turn_ingress_sql()
-                        .bindings
-                        .select_by_session
-                        .sql(),
-                )
-                .bind(session_id.as_str())
-                .fetch_one(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-                if selected.0 != binding_id || selected.1 != admitted_scope_json {
-                    return Err(StoreError::TurnCancelBindingMismatch {
-                        session_id: session_id.clone(),
-                        expected: format!("{} at {:?}", selected.0, selected.1),
-                        presented: binding_id.to_string(),
-                    });
-                }
-            }
-        }
+        bind_turn_cancellation_tx(&mut tx, session_id, binding_id, admitted_scope).await?;
         tx.commit().await.map_err(store_sqlx_error)
     }
 

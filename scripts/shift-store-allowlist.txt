@@ -28,7 +28,6 @@ crates/lash-core/src/runtime/shift/run.rs  |  .list_queued_work()  |  1  # RECOR
 crates/lash-core/src/runtime/shift/run.rs  |  .load_pending_follow_on()  |  1  # RECORDED follow-on recovery decision step reads the owed fact once (FIG-4361)
 crates/lash-core/src/runtime/shift/run.rs  |  .load_session_head_meta()  |  1  # RECORDED admitted-head inspection step reads once whether a shift-fenced commit published the live head
 crates/lash-core/src/runtime/shift/run.rs  |  .raise_pending_follow_on_attempts(  |  1  # RECORDED follow-on recovery decision step raises the recovery count under the fence (FIG-4361) and restamps its root with the recovering generation (FIG-4739)
-crates/lash-core/src/runtime/shift/run.rs  |  .validate_turn_cancellation_binding(  |  1  # RECORDED root admission step checks the session's turn-cancellation binding under the fence before it admits
 crates/lash-core/src/runtime/shift/run.rs  |  generation: self.store.read_session_state_version().await?,  |  1  # RECORDED follow-on recovery decision step reads the base generation once (FIG-4380)
 crates/lash-core/src/runtime/shift/run.rs  |  let admission = match self.store.admit_run(&request).await {  |  1  # RECORDED
 crates/lash-core/src/runtime/shift/run.rs  |  self.store.retain_admission_base(&self.fence, &base).await?;  |  1  # RECORDED follow-on recovery decision step retains the base its turn runs on under the fence (FIG-4380)

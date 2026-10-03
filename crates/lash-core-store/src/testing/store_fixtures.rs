@@ -323,6 +323,7 @@ pub fn admit_run_request_for_test(
         admitted_generation: crate::build_generation::BuildGeneration::for_test("conformance"),
         executor: crate::store::RunExecutor::Run,
         plugins: Default::default(),
+        turn_cancellation: None,
         trace_scopes: std::sync::Arc::new(lash_trace::UntracedScopes),
     }
 }

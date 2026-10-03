@@ -132,6 +132,81 @@ pub(super) fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
     input
 }
 
+struct FailedAdmissionStore {
+    inner: Arc<dyn crate::RuntimeStore>,
+    admissions: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl crate::store::RuntimeStoreDecorator for FailedAdmissionStore {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
+    }
+
+    async fn admit_run(
+        &self,
+        _request: &crate::store::AdmitRunRequest,
+    ) -> Result<Option<crate::store::RunAdmission>, crate::StoreError> {
+        self.admissions.fetch_add(1, Ordering::SeqCst);
+        Err(crate::StoreError::RecordEncodingFailed {
+            record_kind: "RunAdmission".into(),
+            message: "admission cannot be encoded".into(),
+        })
+    }
+}
+
+/// FIG-4848 G3: a failed admission cannot select the session's cancellation
+/// authority in an earlier transaction. No rows were admitted, so another
+/// authority must still be able to bind under the current fence.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_failed_run_admission_leaves_no_cancellation_binding(
+    prefix: &str,
+    backend: crate::Backend,
+    store: Arc<dyn crate::RuntimeStore>,
+) {
+    let turn = TurnId::fixture(format!("{prefix}-failed-admission-binding"));
+    let fault = Arc::new(FailedAdmissionStore {
+        inner: Arc::clone(&store),
+        admissions: AtomicUsize::new(0),
+    });
+    let failing_store: Arc<dyn crate::RuntimeStore> = fault.clone();
+    let (provider, requests) = recording_provider("never executed");
+    let journal = Journal::new(&backend);
+    let error = journal
+        .run(&failing_store, provider, &turn, "unadmitted input")
+        .await
+        .expect_err("the unencodable admission is refused");
+    assert_eq!(error.code, crate::RuntimeErrorCode::RecordEncodingFailed);
+    assert_eq!(fault.admissions.load(Ordering::SeqCst), 1);
+    assert!(journal.controller.journaled_shift().is_none());
+    assert!(requests.lock().expect("requests").is_empty());
+    assert!(applications(&store).await.is_empty());
+    let pending = store
+        .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
+        .await
+        .expect("accepted input remains queued");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].status, crate::PendingTurnInputReadStatus::Open);
+    let fence = crate::store::current_shift_fence(store.as_ref(), &SessionId::from(SESSION_ID))
+        .await
+        .expect("read the sealed fence")
+        .expect("the run reached its seal");
+    store
+        .validate_turn_cancellation_binding(
+            &SessionId::from(SESSION_ID),
+            &fence,
+            "other-cancellation-authority",
+            &crate::ExecutionScope::turn(SESSION_ID, &turn),
+        )
+        .await
+        .expect("a failed admission did not bind the session to its authority");
+}
+
 /// A direct turn commits its input as admission evidence *before* it executes,
 /// and settles that exact row when it commits.
 ///

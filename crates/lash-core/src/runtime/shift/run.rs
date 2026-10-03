@@ -1392,10 +1392,10 @@ impl RuntimeEffectLocalRunner for AdmitRunRunner {
         // The retry marker rejects terminal causes, so the journal records
         // the typed refusal and the run answers its sender.
         let run = self.run.clone();
-        self.activate_turn_cancel_binding().await.map_err(|error| {
+        let cancellation = self.turn_cancel_binding().await.map_err(|error| {
             crate::RuntimeEffectControllerError::from(error).retryable_uncommitted_derivation()
         })?;
-        let answer = match self.admit().await.map_err(|err| {
+        let answer = match self.admit(cancellation).await.map_err(|err| {
             let mut fault = crate::RuntimeEffectControllerError::from(
                 crate::runtime::runtime_error_from_store_commit(err),
             );
@@ -1481,27 +1481,23 @@ impl AdmitRunRunner {
         })
     }
 
-    /// The shift's fenced activation gate: the session's turn-cancellation
-    /// binding is recorded on first use and checked on every later run, so
-    /// a reopened host with a different physical authority is refused before
-    /// the run admits anything or does any other session work.
-    async fn activate_turn_cancel_binding(&self) -> Result<(), RuntimeError> {
+    /// Resolve the host authority without selecting it in the store. The
+    /// admission transaction owns both that selection and its admitted rows.
+    async fn turn_cancel_binding(
+        &self,
+    ) -> Result<crate::store::TurnCancellationBinding, RuntimeError> {
         let scoped = self.effect_host.scoped(self.scope.clone())?;
         let binding = self.effect_host.turn_control_binding(&scoped).await?;
         let binding_id = binding.binding_id();
         let session_id = self.fence.session();
-        self.store
-            .validate_turn_cancellation_binding(
-                &self.fence,
+        Ok(crate::store::TurnCancellationBinding {
+            binding_id: binding_id.to_string(),
+            admitted_scope: crate::runtime::effect::executor::admitted_turn_cancel_scope(
+                &crate::TurnAddress::new(session_id, &self.run),
+                scoped.execution_scope(),
                 binding_id,
-                &crate::runtime::effect::executor::admitted_turn_cancel_scope(
-                    &crate::TurnAddress::new(session_id, &self.run),
-                    scoped.execution_scope(),
-                    binding_id,
-                ),
-            )
-            .await
-            .map_err(crate::runtime::runtime_error_from_store_commit)
+            ),
+        })
     }
 
     /// Observes one decision of the admission body. `payload` is built only
@@ -1548,7 +1544,10 @@ impl AdmitRunRunner {
     /// cancelled, or pruned, and the run cedes; still present means the
     /// admission raced, so the step asks to run again rather than record a
     /// refusal. Nothing here ever drops, withdraws, or re-admits a row.
-    async fn admit(&self) -> Result<RunAdmissionProbe, crate::StoreError> {
+    async fn admit(
+        &self,
+        cancellation: crate::store::TurnCancellationBinding,
+    ) -> Result<RunAdmissionProbe, crate::StoreError> {
         // The admission is the adoption point (FIG-4747): this build's
         // composition, and each plugin's writer chosen from the fleet record
         // as it stands now. The store records the first admission's choice
@@ -1570,6 +1569,7 @@ impl AdmitRunRunner {
             admitted_generation: self.admitted_generation.clone(),
             executor: self.executor.clone(),
             plugins,
+            turn_cancellation: Some(cancellation),
             trace_scopes: std::sync::Arc::clone(self.trace.tracing.scopes()),
         };
         let admission = match self.store.admit_run(&request).await {

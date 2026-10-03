@@ -205,6 +205,8 @@ macro_rules! shift_admission_tests {
             (one_authorized_shift_per_session, "shift-one-authorized"),
             (one_unfinished_run_per_session, "run-one-unfinished"),
             (admission_delivers_every_row_it_binds, "run-admission-delivers"),
+    (run_admission_binds_cancellation_authority_with_its_rows, "run-admission-cancel-binding"),
+    (preparing_or_refusing_admission_leaves_cancellation_authority_unbound, "run-admission-unbound-proposal"),
             (a_run_admission_is_idempotent_across_new_rows_and_fences, "run-admission-idempotent"),
             (one_shift_admits_many_items, "shift-many-items"),
             (replay_cannot_mint_ownership, "shift-replay-ownership"),

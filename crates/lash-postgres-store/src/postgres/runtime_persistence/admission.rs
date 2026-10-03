@@ -52,6 +52,15 @@ pub(crate) async fn admit_run_postgres(
         .set_transaction_lease_clock_for_testing(&mut tx)
         .await?;
     require_shift_fence_tx(&mut tx, &request.fence).await?;
+    if let Some(binding) = &request.turn_cancellation {
+        super::turn_input::check_turn_cancellation_tx(
+            &mut tx,
+            session_id,
+            &binding.binding_id,
+            &binding.admitted_scope,
+        )
+        .await?;
+    }
     let runs = crate::session_runs::session_runs_sql();
     let existing: Option<Option<String>> = sqlx::query_scalar(runs.runs.select_admission.sql())
         .bind(session_id.as_str())
@@ -69,6 +78,17 @@ pub(crate) async fn admit_run_postgres(
                 recorded: Box::new(admission.executor),
                 admitting: Box::new(request.executor.clone()),
             });
+        }
+        if prepared.is_some()
+            && let Some(binding) = &request.turn_cancellation
+        {
+            super::turn_input::bind_turn_cancellation_tx(
+                &mut tx,
+                session_id,
+                &binding.binding_id,
+                &binding.admitted_scope,
+            )
+            .await?;
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         return Ok(Some(admission));
@@ -180,6 +200,17 @@ pub(crate) async fn admit_run_postgres(
             session_id: session_id.clone(),
             run: request.run.clone(),
         });
+    }
+    // Revalidate the exact trace proposal before binding either the
+    // cancellation authority or admitted rows.
+    if let Some(binding) = &request.turn_cancellation {
+        super::turn_input::bind_turn_cancellation_tx(
+            &mut tx,
+            session_id,
+            &binding.binding_id,
+            &binding.admitted_scope,
+        )
+        .await?;
     }
     if let Some(inputs) = admission.inputs.as_deref() {
         bind_turn_inputs_tx(&mut tx, now, &request.run, RUN_ADMISSION_STEP, inputs).await?;

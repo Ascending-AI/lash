@@ -88,6 +88,10 @@ impl Case {
                     AdmittedHead::Batch(self.ids[0].clone()),
                 );
                 request.policy = policy;
+                request.turn_cancellation = Some(lash_core::store::TurnCancellationBinding {
+                    binding_id: "atomicity-authority".into(),
+                    admitted_scope: lash_core::ExecutionScope::turn("root", &run),
+                });
                 Ok(self
                     .store
                     .admit_run(&request)

@@ -43,6 +43,17 @@ async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
             )
             .unwrap();
         assert_eq!(bound, 0, "{entry:?}: the first row's bind must roll back");
+        let bindings: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM turn_cancellation_bindings",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bindings, 0,
+            "{entry:?}: a refused admission must roll back its cancellation authority"
+        );
         conn.execute_batch("DROP TRIGGER lose_second_bind").unwrap();
         assert_eq!(
             case.admit().await.unwrap().len(),

@@ -682,7 +682,7 @@ pub mod persistence {
     pub use lash_core::store::{
         AdmitRunRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
         IngressRowId, IngressSettlement, RUN_ADMISSION_STEP, RunAdmission, RunAdmissionAnswer,
-        RunAdmissionRefusal, RunExecutor, UnfinishedRun,
+        RunAdmissionRefusal, RunExecutor, TurnCancellationBinding, UnfinishedRun,
     };
     /// The multi-session store's catalog and bounded history segments, the
     /// one-session view runtime code holds, and the window loaders (ADR 0112).
