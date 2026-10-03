@@ -44,6 +44,7 @@ fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommit
         command_outcomes: Default::default(),
         turn_input_applications: Vec::new(),
         turn_cancel_input_outcome: Default::default(),
+        work_remaining: true,
         receipt_replayed: false,
     }
 }

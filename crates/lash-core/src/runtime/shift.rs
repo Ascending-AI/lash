@@ -162,6 +162,7 @@ pub(crate) struct RunExecution {
     /// the run reads alike, never whether this execution was the writer
     /// (FIG-3893).
     terminal_written: bool,
+    pub(crate) work_remaining: bool,
     trace_scope: Option<lash_trace::DurableTraceScope>,
 }
 
@@ -172,6 +173,7 @@ impl RunExecution {
             fence,
             journal_generation: admitted.admitted_generation().clone(),
             terminal_written: false,
+            work_remaining: true,
             trace_scope: None,
         }
     }

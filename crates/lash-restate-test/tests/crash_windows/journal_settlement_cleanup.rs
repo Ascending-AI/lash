@@ -92,6 +92,7 @@ impl SessionShifts for HeldShifts {
         // attempt. Terminal evidence alone does not settle its journal.
         self.held().await;
         RunEnd::owing_nothing(Ok(RunOutcome::Committed {
+            work_remaining: true,
             run,
             kind: lash_core::store::RunTerminalKind::Answered,
         }))

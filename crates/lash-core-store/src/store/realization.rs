@@ -163,6 +163,7 @@ mod tests {
                 command_outcomes: commit.command_outcomes.clone(),
                 turn_input_applications: Vec::new(),
                 turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
+                work_remaining: true,
                 receipt_replayed: self.replayed,
             })
         }

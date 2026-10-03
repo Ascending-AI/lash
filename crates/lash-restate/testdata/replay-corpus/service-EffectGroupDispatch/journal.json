@@ -1,7 +1,7 @@
 {
   "scenario": "service-EffectGroupDispatch",
   "service": "EffectGroupDispatch",
-  "generation": "5bc550dad153",
+  "generation": "5ce8cac5b0d1",
   "handlers": {
     "child": [
       [
@@ -17,6 +17,8 @@
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:0:tool_batch:3:tc_#:attempt:1",
         "CallCommand LashDurableWaitIndex/group_child_membership",
         "CallCommand EffectGroupIndex/commit_child",
+        "CallCommand EffectGroupIndex/admit_semantic",
+        "RunCommand lash:tc_#:presentation_plan",
         "CallCommand EffectGroupIndex/admit_semantic",
         "RunCommand lash:tc_#:present",
         "RunCommand lash:effect-group:settled:replay-corpus-turn:group:replay-corpus-session:replay-corpus-turn:1:0:tool_batch:3:0",

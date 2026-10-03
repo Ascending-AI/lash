@@ -143,7 +143,7 @@ pub async fn a_committed_run_answers_its_terminal_by_run(
     );
     let outcome = shift(&runner, &parts, "run-answered-shift").await;
     let committed = match &outcome.ran[..] {
-        [RunOutcome::Committed { run: ran, kind }] if *ran == run => *kind,
+        [RunOutcome::Committed { run: ran, kind, .. }] if *ran == run => *kind,
         _ => panic!("the run commits: {outcome:?}"),
     };
     let evidence = terminal(&parts, &run)

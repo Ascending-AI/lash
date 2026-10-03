@@ -1,7 +1,7 @@
 {
   "scenario": "service-EffectGroupIndex",
   "service": "EffectGroupIndex",
-  "generation": "5bc550dad153",
+  "generation": "5ce8cac5b0d1",
   "handlers": {
     "admit_child": [
       [
@@ -135,6 +135,12 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "SetStateCommand effect-group/v1/subscriptions",
+        "OutputCommand"
+      ],
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
         "OutputCommand"
       ]
     ]

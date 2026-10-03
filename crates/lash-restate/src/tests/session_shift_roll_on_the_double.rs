@@ -243,6 +243,7 @@ impl SessionShifts for RollShifts {
                     ledger.consumed.push(run.as_str().to_owned());
                 }
                 Ok(RunOutcome::Committed {
+                    work_remaining: true,
                     kind: lash_core::store::RunTerminalKind::Answered,
                     run,
                 })

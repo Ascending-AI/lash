@@ -162,7 +162,7 @@ impl PreparedTurn {
             interrupted_turn,
             turn_control_resolver,
         } = request;
-        Box::pin(self.turn_pipeline.final_commit(
+        let work_remaining = Box::pin(self.turn_pipeline.final_commit(
             &mut self.turn,
             session,
             commit_effects.ingress_settlement,
@@ -179,6 +179,7 @@ impl PreparedTurn {
             turn: self.turn,
             events: self.events,
             resident_state: self.turn_pipeline.into_final_state(),
+            work_remaining,
         })
     }
 }
@@ -191,6 +192,7 @@ struct CommittedTurn {
     turn: AssembledTurn,
     events: Vec<SessionStreamEvent>,
     resident_state: RuntimeSessionState,
+    work_remaining: bool,
 }
 
 impl TypedTurnPhase for CommittedTurn {
@@ -206,6 +208,9 @@ impl CommittedTurn {
         runtime: &mut LashRuntime,
         trace_turn_id: &TurnId,
     ) -> Result<PostCommitDelivery, RuntimeError> {
+        if let Some(run) = runtime.shift_run.as_mut() {
+            run.work_remaining = self.work_remaining;
+        }
         runtime.install_resident_state(self.resident_state)?;
         let observation_revision =
             crate::runtime::observation::observation_revision(&runtime.state);

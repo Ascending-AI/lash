@@ -107,6 +107,8 @@ pub(super) async fn run_invocation(
         vec![counting_tool_plugin(Arc::clone(executions))],
     )
     .await;
+    let execution_context = ProcessExecutionContext::default()
+        .with_plugin_admission(Some(worker.admit_plugins().await?));
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(context));
     let scope = controller
         .process_scope_for_test(recorded_process_admission(registry.as_ref(), process_id).await)
@@ -115,7 +117,7 @@ pub(super) async fn run_invocation(
         .run_process_segment_with_scoped_effect_controller(
             process_id.clone(),
             registration.clone(),
-            ProcessExecutionContext::default(),
+            execution_context,
             invocation(process_id),
             scope,
             tokio_util::sync::CancellationToken::new(),

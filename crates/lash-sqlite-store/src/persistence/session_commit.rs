@@ -867,6 +867,11 @@ impl SqliteStore {
                         stored_checkpoint.checkpoint_ref,
                         stored_checkpoint.manifest,
                         now,
+                        commit.pending_follow_on.is_some() || tx.query_row(
+                            crate::turn_ingress::turn_ingress_sql().family.has_admissible_work.sql(),
+                            [commit.session_id.as_str()],
+                            |row| row.get::<_, bool>(0),
+                        ).map_err(sqlite_error)?,
                     );
                     result.turn_cancel_input_outcome = turn_cancel_input_outcome;
                     {

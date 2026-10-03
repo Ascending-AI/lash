@@ -27,7 +27,7 @@ mod recorded_assembly;
 pub use recorded_assembly::RecordedTurnAssembly;
 #[cfg(feature = "testing")]
 pub use recorded_assembly::classify_output_state;
-type FinalCommitResult = Result<crate::TurnCancelInputOutcome, StoreError>;
+type FinalCommitResult = Result<(crate::TurnCancelInputOutcome, bool), StoreError>;
 
 fn execution_state_capture_error(err: crate::SessionError) -> StoreError {
     match err {
@@ -424,7 +424,7 @@ impl TurnBoundary {
         interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
         turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-    ) -> Result<(), StoreError> {
+    ) -> Result<bool, StoreError> {
         // Record the outcome before capturing execution state: a second author
         // that conflicts refuses here, with nothing captured and nothing
         // written.
@@ -517,10 +517,10 @@ impl TurnBoundary {
             commit_result.is_ok(),
         )
         .await;
-        let turn_cancel_input_outcome = commit_result?;
+        let (turn_cancel_input_outcome, work_remaining) = commit_result?;
         returned_turn.state = self.final_state_mut().to_snapshot();
         returned_turn.turn_cancel_input_outcome = turn_cancel_input_outcome;
-        Ok(())
+        Ok(work_remaining)
     }
 
     pub(super) fn into_final_state(self) -> RuntimeSessionState {
@@ -759,7 +759,7 @@ impl TurnBoundary {
             // No store will ever rehydrate this commit: the accepted execution
             // stays resident for the next same-frame restore (FIG-2521).
             state.discard_runtime_snapshots_retaining_accepted_execution();
-            Ok(Default::default())
+            Ok((Default::default(), true))
         }
     }
 
@@ -979,9 +979,10 @@ impl TurnBoundary {
             );
         }
         let turn_cancel_input_outcome = result.turn_cancel_input_outcome.clone();
+        let work_remaining = result.work_remaining;
         state.apply_persisted_commit_result(result);
         state.mark_node_ids_persisted(persisted_node_ids);
-        Ok(turn_cancel_input_outcome)
+        Ok((turn_cancel_input_outcome, work_remaining))
     }
 }
 

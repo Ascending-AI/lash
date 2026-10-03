@@ -142,6 +142,7 @@ fn write_receipt(fleet: FleetFormat) -> Vec<u8> {
         turn_input_applications: Vec::new(),
         turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
         command_outcomes: Default::default(),
+        work_remaining: true,
         receipt_replayed: false,
     })
     .expect("encode the receipt")

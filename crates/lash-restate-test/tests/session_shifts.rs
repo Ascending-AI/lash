@@ -367,6 +367,7 @@ impl SessionShifts for ScriptedShifts {
                     }
                 }
                 Ok(RunOutcome::Committed {
+                    work_remaining: true,
                     kind: lash_core::store::RunTerminalKind::Answered,
                     run,
                 })

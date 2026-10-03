@@ -191,6 +191,26 @@ async fn an_untagged_transition_parks_before_decoding_or_invoking_work() {
     } else {
         2
     };
+    predecessor_journal_keeps_its_lane(predecessor_epoch, PredecessorShape::UntaggedTransition)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_empty_queue_stop_rule_keeps_predecessor_journals_on_their_drain_lane() {
+    let predecessor_epoch = if cfg!(feature = "synthetic-next") {
+        7
+    } else {
+        6
+    };
+    predecessor_journal_keeps_its_lane(predecessor_epoch, PredecessorShape::TaggedTransition).await;
+}
+
+enum PredecessorShape {
+    UntaggedTransition,
+    TaggedTransition,
+}
+
+async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: PredecessorShape) {
     let recorded = build_generation_of(
         durable_formats(),
         Some(predecessor_epoch),
@@ -198,15 +218,21 @@ async fn an_untagged_transition_parks_before_decoding_or_invoking_work() {
         &bare(),
     );
     let executing = bare_generation();
+    assert_ne!(
+        recorded, executing,
+        "changed handler logic needs a new lane"
+    );
     let mut old_envelope: serde_json::Value =
         serde_json::from_str(transition().canonical_form().unwrap().json()).unwrap();
-    let base = &mut old_envelope["command"]["request"]["base"];
-    *base = base["head"].take();
-    let decode = serde_json::from_value::<lash_core::plugin::PluginTransitionRequest>(
-        old_envelope["command"]["request"].clone(),
-    )
-    .expect_err("the Part 1 head has no Part 2 kind tag");
-    assert!(decode.to_string().contains("kind"), "{decode}");
+    if matches!(shape, PredecessorShape::UntaggedTransition) {
+        let base = &mut old_envelope["command"]["request"]["base"];
+        *base = base["head"].take();
+        let decode = serde_json::from_value::<lash_core::plugin::PluginTransitionRequest>(
+            old_envelope["command"]["request"].clone(),
+        )
+        .expect_err("the Part 1 head has no Part 2 kind tag");
+        assert!(decode.to_string().contains("kind"), "{decode}");
+    }
     let old_json = serde_json::to_string(&old_envelope).unwrap();
     let mut hasher = Blake3DomainHasher::new("lash-runtime-effect-envelope/v3");
     hasher.update(old_json.as_bytes());
@@ -230,6 +256,12 @@ async fn an_untagged_transition_parks_before_decoding_or_invoking_work() {
         bodies: Arc::default(),
         passes: Arc::default(),
     };
+    if matches!(shape, PredecessorShape::TaggedTransition) {
+        serde_json::from_value::<lash_core::RuntimeEffectOutcome>(
+            predecessor.entry["outcome"]["Ok"].clone(),
+        )
+        .expect("the immediately preceding generation wrote a tagged transition record");
+    }
     let server =
         RestateTestServer::new(ServerConfig::default().with_seed(0x4914)).expect("server double");
     let deployment = server

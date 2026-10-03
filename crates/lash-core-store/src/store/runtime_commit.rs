@@ -518,6 +518,9 @@ pub struct RuntimeCommitReceipt {
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     #[schemars(with = "std::collections::BTreeMap<String, serde_json::Value>")]
     pub command_outcomes: std::collections::BTreeMap<crate::BatchId, crate::SessionCommandOutcome>,
+    /// Whether session work remained after ingress settlement in the committing
+    /// transaction. Receipt replay returns this decision unchanged.
+    pub work_remaining: bool,
     /// Canonical input applications settled by this idempotent turn commit.
     ///
     /// Keeping these identities in the durable turn-commit result lets hosts

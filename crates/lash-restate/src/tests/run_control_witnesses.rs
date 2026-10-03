@@ -213,6 +213,7 @@ impl SessionShifts for Shifts {
                     .expect("commit run");
                 self.commits.fetch_add(1, Ordering::SeqCst);
                 Ok(RunOutcome::Committed {
+                    work_remaining: true,
                     run: run.clone(),
                     kind: lash_core::store::RunTerminalKind::Answered,
                 })

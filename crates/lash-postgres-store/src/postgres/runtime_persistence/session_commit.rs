@@ -1059,7 +1059,18 @@ impl PostgresStore {
             crate::revisions::release_unretained_tx(&mut tx, false, Some(&commit.session_id))
                 .await?;
         }
-        let mut result = plan.result(checkpoint_ref, manifest, now);
+        let work_remaining = commit.pending_follow_on.is_some()
+            || sqlx::query_scalar::<_, bool>(
+                crate::turn_ingress::turn_ingress_sql()
+                    .family
+                    .has_admissible_work
+                    .sql(),
+            )
+            .bind(commit.session_id.as_str())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let mut result = plan.result(checkpoint_ref, manifest, now, work_remaining);
         result.turn_cancel_input_outcome = turn_cancel_input_outcome;
         {
             let receipt = plan.receipt_write(&result);

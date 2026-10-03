@@ -132,6 +132,8 @@ pub enum RunOutcome {
     Committed {
         run: TurnId,
         kind: crate::store::RunTerminalKind,
+        /// The final commit's retained decision about remaining session work.
+        work_remaining: bool,
     },
     /// The run applied the session's open command run (ADR 0101 §4); it ran
     /// no turn.
@@ -322,7 +324,14 @@ impl ShiftLoop {
     /// `Some(stop)` when it stops.
     pub fn after(&mut self, work: &AdmittedWork, outcome: &RunOutcome) -> Option<ShiftStop> {
         match outcome {
-            RunOutcome::Committed { .. } => None,
+            RunOutcome::Committed {
+                work_remaining: false,
+                ..
+            } => Some(ShiftStop::Idle),
+            RunOutcome::Committed {
+                work_remaining: true,
+                ..
+            } => None,
             RunOutcome::Applied { run } => match work {
                 AdmittedWork::Commands { head } if self.commands_head == Some(*head) => {
                     Some(ShiftStop::Yielded { run: run.clone() })

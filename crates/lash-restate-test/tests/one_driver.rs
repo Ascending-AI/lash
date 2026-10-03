@@ -248,6 +248,120 @@ async fn a_host_submission_leaves_the_engine_the_only_driver() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_empty_commit_finishes_the_shift_without_another_admission() {
+    let backend = lash_restate_test::backend(0x4848_0001, ServerConfig::default())
+        .await
+        .expect("build the Restate test backend");
+    let barrier = Arc::new(Barrier::default());
+    let core = core(&backend, &barrier);
+    let session = created_session(&core, "empty-commit")
+        .await
+        .open()
+        .await
+        .expect("open the session");
+    let handle = session
+        .send(lash::TurnInput::text("answer once"))
+        .id("empty-commit-run")
+        .await
+        .expect("accept the input");
+    wait_until("the model call starts", || {
+        barrier.calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    barrier.release.notify_one();
+    assert_eq!(
+        handle.outcome().await.expect("the answer").status(),
+        lash::TurnStatus::Answered,
+    );
+    backend.settle_session_shift(&session.session_id()).await;
+    let shifts = journaled_steps(&backend, SESSION_SHIFT_SERVICE);
+    assert_eq!(shifts.len(), 1, "one shift owns the send: {shifts:?}");
+    let admissions: Vec<_> = shifts[0]
+        .1
+        .iter()
+        .filter(|name| name.starts_with("lash:shift-admission:"))
+        .collect();
+    assert_eq!(
+        admissions.len(),
+        1,
+        "the commit's empty-queue receipt ends the shift: {shifts:?}",
+    );
+    assert!(
+        !shifts[0].1.iter().any(|name| name == "lash.shift.boundary"),
+        "an empty queue needs no continuation boundary: {shifts:?}",
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn inputs_on_both_sides_of_an_empty_commit_keep_their_shift() {
+    let backend = lash_restate_test::backend(0x4848_0002, ServerConfig::default())
+        .await
+        .expect("build the Restate test backend");
+    let barrier = Arc::new(Barrier::default());
+    let core = core(&backend, &barrier);
+    let session = created_session(&core, "queue-commit")
+        .await
+        .open()
+        .await
+        .expect("open the session");
+    let first = session
+        .send(lash::TurnInput::text("first"))
+        .id("queue-first")
+        .await
+        .expect("accept the first input");
+    wait_until("the first model call starts", || {
+        barrier.calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    let before = session
+        .send(lash::TurnInput::text("before commit"))
+        .id("queue-before")
+        .await
+        .expect("accept while the first turn is running");
+    barrier.release.notify_one();
+    assert_eq!(
+        first.outcome().await.expect("first answer").status(),
+        lash::TurnStatus::Answered
+    );
+    wait_until("the queued input starts", || {
+        barrier.calls.load(Ordering::SeqCst) == 2
+    })
+    .await;
+    barrier.release.notify_one();
+    assert_eq!(
+        before.outcome().await.expect("queued answer").status(),
+        lash::TurnStatus::Answered
+    );
+    backend.settle_session_shift(&session.session_id()).await;
+    let after = session
+        .send(lash::TurnInput::text("after empty commit"))
+        .id("queue-after")
+        .await
+        .expect("accept after the empty commit");
+    wait_until("the later input starts its shift", || {
+        barrier.calls.load(Ordering::SeqCst) == 3
+    })
+    .await;
+    barrier.release.notify_one();
+    assert_eq!(
+        after.outcome().await.expect("later answer").status(),
+        lash::TurnStatus::Answered
+    );
+    backend.settle_session_shift(&session.session_id()).await;
+    assert_eq!(
+        session
+            .durable()
+            .turn_input_applications()
+            .await
+            .expect("applications")
+            .len(),
+        3
+    );
+    assert_eq!(barrier.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(barrier.most_in_flight.load(Ordering::SeqCst), 1);
+}
+
 /// This test crate's one path to a session that may not exist yet
 /// (FIG-4112): only `create` creates, so this creates `session_id` with the
 /// core's config unless the catalog already holds it, then hands back the

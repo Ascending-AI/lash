@@ -263,6 +263,7 @@ impl LashRuntime {
         let outcome = match frames.final_turn() {
             Some(turn) => RunOutcome::Committed {
                 run: ran_execution,
+                work_remaining: self.shift_run.as_ref().is_none_or(|run| run.work_remaining),
                 kind: crate::store::RunTerminalKind::of_stop(match &turn.outcome {
                     crate::TurnOutcome::Stopped(stop) => Some(stop),
                     _ => None,
@@ -617,6 +618,7 @@ impl LashRuntime {
             crate::runtime::turn_loop::QueuedTurnDrain::Ran(turn) => ExecutedRun {
                 outcome: RunOutcome::Committed {
                     run,
+                    work_remaining: self.shift_run.as_ref().is_none_or(|run| run.work_remaining),
                     kind: crate::store::RunTerminalKind::of_stop(match &turn.outcome {
                         crate::TurnOutcome::Stopped(stop) => Some(stop),
                         _ => None,

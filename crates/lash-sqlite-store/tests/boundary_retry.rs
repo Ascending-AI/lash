@@ -7,9 +7,62 @@ use lash_core_execution::store::WindowSelector;
 use lash_core_execution::{
     ExecutionScope, FleetFormatStore, OperationId, RuntimeCommit, RuntimeSessionState,
     SessionCatalogStore, SessionCommitStore, SessionHistoryStore, SessionPolicy, StoreError,
-    TurnBudget,
+    TurnBudget, TurnInputStore,
 };
 use lash_sqlite_store::SqliteStore;
+
+#[tokio::test]
+async fn a_commit_receipt_keeps_its_queue_decision_after_later_ingress_and_reopen() {
+    let directory = tempfile::tempdir().expect("database directory");
+    let path = directory.path().join("session.db");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("SQLite store");
+    admit_run(&store).await;
+    let first = commit("queue-snapshot", "empty", 0);
+    let original = store
+        .commit_runtime_state(first.clone())
+        .await
+        .expect("empty commit");
+    assert!(!original.work_remaining, "the committing snapshot is empty");
+    let session = lash_sansio::SessionId::from("root");
+    store
+        .admit_pending_turn_inputs(
+            lash_core::PendingTurnInputBatch::new(
+                session.clone(),
+                vec![lash_core::PendingTurnInputDraft::new(
+                    session,
+                    lash_core::TurnInputIngress::NextTurn,
+                    lash_core::TurnInput::text("later work"),
+                )],
+            )
+            .expect("input batch"),
+            60_000,
+        )
+        .await
+        .expect("enqueue after the empty commit");
+    drop(store);
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("reopen the stored receipt and ingress");
+    let replay = store
+        .commit_runtime_state(first)
+        .await
+        .expect("replay the empty commit");
+    assert!(replay.receipt_replayed);
+    assert!(
+        !replay.work_remaining,
+        "replay keeps the committed decision"
+    );
+    let current = store
+        .commit_runtime_state(commit("queue-snapshot", "pending", original.head_revision))
+        .await
+        .expect("commit with pending work");
+    assert!(
+        current.work_remaining,
+        "the next snapshot retains later work"
+    );
+}
 
 async fn admit_run(store: &SqliteStore) {
     store
