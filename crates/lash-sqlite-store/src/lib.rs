@@ -514,6 +514,7 @@ pub enum PersistedArtifactKind {
     LashlangModule,
     ProcessExecutionEnv,
     ProcessDefinition,
+    ToolMaterial,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -565,6 +566,13 @@ impl BlobArtifactDescriptor {
 
     pub fn process_definition() -> Self {
         Self::new(vec![BlobStorageHint::Compressible])
+    }
+
+    pub fn tool_material() -> Self {
+        Self::new(vec![
+            BlobStorageHint::Compressible,
+            BlobStorageHint::LargePayload,
+        ])
     }
 }
 

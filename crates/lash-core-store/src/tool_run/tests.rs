@@ -1023,13 +1023,14 @@ fn a_source_seals_once_and_only_its_authority_resolves_it() {
         },
         cancel: ExternalCancelPolicy::CancelExternalWork,
     };
+    let source_output = MaterialRef {
+        owner: MaterialOwner::Source {
+            source: source_key(&call_id),
+        },
+        ..run_material(MaterialRole::AttemptOutput)
+    };
     let resolved = SourceSeal::Resolved {
-        result: Box::new(MaterialRef {
-            owner: MaterialOwner::Source {
-                source: source_key(&call_id),
-            },
-            ..run_material(MaterialRole::AttemptOutput)
-        }),
+        result: Box::new(source_output.retained(tool_material("bundle-1"))),
     };
     let worker = SealWriter::Process {
         process_id: process_id.clone(),
@@ -1057,6 +1058,23 @@ fn a_source_seals_once_and_only_its_authority_resolves_it() {
             }
         ),
         Err(SealRefusal::ResultNotOwned)
+    );
+    assert_eq!(
+        descriptor.seal(
+            None,
+            &worker,
+            SourceSeal::Resolved {
+                result: Box::new(source_output)
+            }
+        ),
+        Err(SealRefusal::UnretainedResult),
+        "a seal publishes only material its source already retained"
+    );
+    assert_eq!(
+        descriptor.seal(None, &worker, resolved.clone()),
+        Ok(SealOutcome::Sealed {
+            seal: resolved.clone()
+        })
     );
     let cancelled = descriptor
         .seal(
@@ -1087,6 +1105,31 @@ fn a_source_seals_once_and_only_its_authority_resolves_it() {
     }
 }
 
+fn tool_material(artifact_ref: &str) -> ArtifactName {
+    ArtifactName {
+        store: ArtifactStoreId::ToolMaterial,
+        artifact_ref: artifact_ref.into(),
+    }
+}
+
+fn segment_holder(segment: u32) -> MaterialHolder {
+    MaterialHolder::Segment {
+        opener: opener(),
+        segment: SegmentOrdinal(segment),
+    }
+}
+
+fn leased_bundle(holder: MaterialHolder) -> RetainedBundle {
+    RetainedBundle {
+        holder,
+        artifact: tool_material("bundle-1"),
+        references: vec![
+            run_material(MaterialRole::AttemptOutput).retained(tool_material("bundle-1")),
+        ],
+        copy_bytes: 512,
+    }
+}
+
 fn transfer() -> RunTransfer {
     let call_id = ToolCallId::fixture("deferred");
     RunTransfer {
@@ -1094,12 +1137,7 @@ fn transfer() -> RunTransfer {
         reason: lash_sansio::BoundaryReason::HandOver,
         from: SegmentOrdinal(0),
         events: RunEventOrdinal(7),
-        material: vec![
-            run_material(MaterialRole::AttemptOutput).retained(ArtifactName {
-                store: ArtifactStoreId::Engine("restate".into()),
-                artifact_ref: "bundle-1".into(),
-            }),
-        ],
+        material: vec![leased_bundle(segment_holder(0))],
         subscriptions: vec![SourceSubscription {
             source: source_key(&call_id),
             owner: opener(),
@@ -1130,7 +1168,7 @@ fn a_cut_captures_only_after_local_quiescence() {
     let capturable = quiescing.observe(0);
     assert_eq!(transfer().check_capture(&capturable), Ok(()));
     let mut local = transfer();
-    local.material = vec![run_material(MaterialRole::AttemptOutput)];
+    local.material[0].references = vec![run_material(MaterialRole::AttemptOutput)];
     assert_eq!(
         local.check_capture(&capturable),
         Err(ContinuationRefusal::UnretainedMaterial)
@@ -1141,6 +1179,82 @@ fn a_cut_captures_only_after_local_quiescence() {
         foreign.check_capture(&capturable),
         Err(ContinuationRefusal::ForeignSubscription)
     );
+}
+
+/// FIG-4889: a reference relocated to an artifact is not retained until the
+/// transferring segment holds its dependency lease. Without the lease the
+/// bytes can be reclaimed between publication and the successor's acquire.
+#[test]
+fn a_transfer_refuses_retained_material_without_the_predecessor_lease() {
+    let capturable = Cut::request(lash_sansio::BoundaryReason::HandOver).observe(0);
+    let elsewhere = ArtifactName {
+        store: ArtifactStoreId::Engine("restate".into()),
+        artifact_ref: "bundle-1".into(),
+    };
+    let mut relocated = transfer();
+    relocated.material[0].artifact = elsewhere.clone();
+    for reference in &mut relocated.material[0].references {
+        *reference = reference.retained(elsewhere.clone());
+    }
+    assert_eq!(
+        relocated.check_capture(&capturable),
+        Err(ContinuationRefusal::UnretainedMaterial),
+        "a reference moved to some artifact has no lease behind it"
+    );
+    for holder in [
+        segment_holder(1),
+        MaterialHolder::Segment {
+            opener: EffectOpener::turn("session-1", "turn-2"),
+            segment: SegmentOrdinal(0),
+        },
+    ] {
+        let mut unleased = transfer();
+        unleased.material = vec![leased_bundle(holder)];
+        assert_eq!(
+            unleased.check_capture(&capturable),
+            Err(ContinuationRefusal::UnleasedMaterial)
+        );
+    }
+    assert_eq!(transfer().check_capture(&capturable), Ok(()));
+}
+
+/// FIG-4889: material that stays in its opener journal needs no artifact
+/// transaction, a bundle reports its handover copy, and a retained bundle
+/// whose bytes no longer hash to a reference refuses typed.
+#[test]
+fn bundles_retain_only_crossing_material_and_refuse_corrupt_bytes() {
+    assert_eq!(MaterialBundle::of(Vec::new()).unwrap(), None);
+    let owner = MaterialOwner::Run { opener: opener() };
+    let payload = MaterialPayload::new(
+        owner.clone(),
+        MaterialRole::AttemptOutput,
+        None,
+        "output".repeat(256),
+    );
+    let bundle = MaterialBundle::of([payload.clone(), payload.clone()])
+        .unwrap()
+        .unwrap();
+    let [reference] = bundle.references() else {
+        panic!("one payload, deduplicated by digest");
+    };
+    assert_eq!(bundle.artifact().store, ArtifactStoreId::ToolMaterial);
+    let retained = bundle.retained_by(segment_holder(0));
+    assert!(retained.is_retained());
+    assert_eq!(retained.copy_bytes, bundle.bytes().len() as u64);
+    assert_eq!(
+        MaterialBundle::read(bundle.bytes(), reference, &owner, &[]).unwrap(),
+        payload
+    );
+    let tampered = String::from_utf8(bundle.bytes().to_vec())
+        .unwrap()
+        .replace("outputoutput", "tamperedoutp");
+    let error = MaterialBundle::read(tampered.as_bytes(), reference, &owner, &[]).unwrap_err();
+    assert!(matches!(
+        error.cause,
+        Some(crate::RuntimeErrorCause::MaterialRefused { ref refusal })
+            if matches!(**refusal, MaterialRefusal::Corrupt { .. })
+    ));
+    assert!(error.journaled, "a refused read never grants a fresh body");
 }
 
 /// L10's protocol witness: a cancelled Run's continuation cannot infect a

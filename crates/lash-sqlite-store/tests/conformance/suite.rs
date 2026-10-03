@@ -726,6 +726,23 @@ lash_conformance::artifact_referrer_tests!({
     })
 });
 
+lash_conformance::tool_material_tests!({
+    let retained: Retained<TestBackend> = Retained::default();
+    (retained.clone(), move || {
+        let backend = retained.open_blocking();
+        let keep_reopen = retained.clone();
+        lash_conformance::material_retention::ReopenableToolMaterialStore {
+            open: backend.blocking_store(),
+            reopen: Arc::new(move || {
+                let source = backend.clone();
+                let reopened = sync_await(async move { source.reopen().await });
+                keep_reopen.keep(&reopened);
+                reopened.blocking_store() as Arc<dyn lash_core::store::ToolMaterialStore>
+            }),
+        }
+    })
+});
+
 lash_conformance::process_registry_reopenable_tests!({
     let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move |_label: &str| {

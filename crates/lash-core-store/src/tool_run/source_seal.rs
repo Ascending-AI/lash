@@ -13,9 +13,10 @@ use lash_sansio::ToolCallId;
 use serde::{Deserialize, Serialize};
 
 use super::admission::ExternalCancelPolicy;
-use super::material::{MaterialOwner, MaterialRef};
+use super::material::{MaterialLocation, MaterialOwner, MaterialRef};
 use super::run_event::SegmentOrdinal;
 use crate::ProcessId;
+use crate::artifact_referrer::ArtifactStoreId;
 use crate::await_event_identity::AwaitEventKey;
 use crate::effect_opener::EffectOpener;
 use crate::store::plugin_writers::PluginRevision;
@@ -86,6 +87,10 @@ pub enum SealRefusal {
     WrongAuthority,
     #[error("the resolved result is not owned by its source")]
     ResultNotOwned,
+    /// A seal is read by another segment, so its result must already be
+    /// retained, with the source's lease, before the seal publishes it.
+    #[error("the resolved result is not retained material")]
+    UnretainedResult,
 }
 
 impl SourceDescriptor {
@@ -95,8 +100,8 @@ impl SourceDescriptor {
     ///
     /// # Errors
     ///
-    /// [`SealRefusal`] for a writer without authority or a result another
-    /// owner holds; the source is unchanged.
+    /// [`SealRefusal`] for a writer without authority, a result another
+    /// owner holds or a result not yet retained; the source is unchanged.
     pub fn seal(
         &self,
         existing: Option<&SourceSeal>,
@@ -112,6 +117,13 @@ impl SourceDescriptor {
                     })
                 {
                     return Err(SealRefusal::ResultNotOwned);
+                }
+                if !matches!(
+                    &result.location,
+                    MaterialLocation::RetainedArtifact { artifact }
+                        if artifact.store == ArtifactStoreId::ToolMaterial
+                ) {
+                    return Err(SealRefusal::UnretainedResult);
                 }
                 matches!(
                     (&self.authority, writer),

@@ -1,0 +1,341 @@
+//! Retained tool-material laws (FIG-4889, L09/L12/L13) shared by the SQLite
+//! memory, SQLite file and PostgreSQL stores.
+//!
+//! Every step reads through a freshly reopened store, so a file-backed or
+//! PostgreSQL store proves each cut against what it made durable. Each law
+//! mints its own Run and source identities and shares no rows with another.
+
+use std::sync::Arc;
+
+use lash_core::store::ToolMaterialStore;
+use lash_core::tool_run::{
+    MaterialBundle, MaterialHolder, MaterialOwner, MaterialPayload, MaterialRef,
+    MaterialRetentionError, MaterialRole, SegmentOrdinal,
+};
+use pretty_assertions::assert_eq;
+
+/// A store and a factory that reopens the same durable catalog.
+pub struct ReopenableToolMaterialStore {
+    pub open: Arc<dyn ToolMaterialStore>,
+    pub reopen: Arc<dyn Fn() -> Arc<dyn ToolMaterialStore> + Send + Sync>,
+}
+
+/// A fresh logical Run's opener.
+fn run(label: &str) -> lash_core::EffectOpener {
+    lash_core::EffectOpener::turn(
+        lash_core::SessionId::prefixed(
+            "material-session-",
+            format!("{label}-{}", uuid::Uuid::new_v4().simple()),
+        ),
+        "material-turn",
+    )
+}
+
+fn segment(opener: &lash_core::EffectOpener, segment: u32) -> MaterialHolder {
+    MaterialHolder::Segment {
+        opener: opener.clone(),
+        segment: SegmentOrdinal(segment),
+    }
+}
+
+fn run_owner(opener: &lash_core::EffectOpener) -> MaterialOwner {
+    MaterialOwner::Run {
+        opener: opener.clone(),
+    }
+}
+
+fn payload(owner: &MaterialOwner, role: MaterialRole, text: &str) -> MaterialPayload {
+    MaterialPayload::new(owner.clone(), role, None, text.repeat(512))
+}
+
+#[expect(clippy::expect_used, reason = "law fixture encodes canonical payloads")]
+fn bundle(payloads: Vec<MaterialPayload>) -> MaterialBundle {
+    MaterialBundle::of(payloads)
+        .expect("encode bundle")
+        .expect("a non-empty bundle")
+}
+
+async fn read(
+    store: &Arc<dyn ToolMaterialStore>,
+    holder: &MaterialHolder,
+    reference: &MaterialRef,
+) -> Result<String, MaterialRetentionError> {
+    store
+        .read_material(holder, reference, &reference.owner, &[])
+        .await
+        .map(|payload| payload.text)
+}
+
+fn refusal_code(result: Result<impl std::fmt::Debug, MaterialRetentionError>) -> &'static str {
+    match result {
+        Err(MaterialRetentionError::Refused(refusal)) => refusal.code(),
+        Err(MaterialRetentionError::HolderEnded { .. }) => "holder_ended",
+        other => panic!("expected a typed refusal, got {other:?}"),
+    }
+}
+
+/// L13 cuts across a handover: the predecessor's lease, taken with the
+/// bytes before any reference is published, holds the bundle through
+/// publication and every reopen; the successor acquires before it reads and
+/// before the predecessor releases; consumption releases the last lease and
+/// retires the whole bundle at once. A released holder stays fenced, so its
+/// retired references refuse typed and nothing can republish or reacquire
+/// them: an expired reference never restarts work. Closing is not garbage
+/// collection: no lease ends until its holder releases it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates every store step"
+)]
+pub async fn handover_leases_hold_material_until_the_last_dependency_ends<F>(make: F)
+where
+    F: Fn() -> ReopenableToolMaterialStore,
+{
+    let fixture = make();
+    let reopen = || (fixture.reopen)();
+    let opener = run("handover");
+    let owner = run_owner(&opener);
+    let output = payload(&owner, MaterialRole::AttemptOutput, "attempt-output ");
+    let request = payload(&owner, MaterialRole::PreparedRequest, "prepared-request ");
+    let bundle = bundle(vec![output.clone(), request.clone()]);
+    let predecessor = segment(&opener, 0);
+    let successor = segment(&opener, 1);
+
+    // Before publication: the retain commits the bytes with the lease.
+    let retained = fixture
+        .open
+        .retain_material(&predecessor, &bundle)
+        .await
+        .expect("retain under the predecessor's lease");
+    assert_eq!(retained.holder, predecessor);
+    assert_eq!(retained.references, bundle.references());
+    assert_eq!(retained.copy_bytes, bundle.bytes().len() as u64);
+    assert_eq!(
+        reopen()
+            .retain_material(&predecessor, &bundle)
+            .await
+            .expect("a redelivered retain is the same fact"),
+        retained
+    );
+    let [first, second] = retained.references.as_slice() else {
+        panic!("two payloads, two references");
+    };
+    let texts = [first, second].map(|reference| {
+        if reference.role == MaterialRole::AttemptOutput {
+            output.text.clone()
+        } else {
+            request.text.clone()
+        }
+    });
+
+    // After publication, the successor has not acquired: it holds nothing.
+    let store = reopen();
+    assert_eq!(
+        read(&store, &predecessor, first).await.expect("read"),
+        texts[0]
+    );
+    assert_eq!(
+        refusal_code(read(&store, &successor, first).await),
+        "material_missing"
+    );
+
+    // Edge acquire: the successor's own lease, while the predecessor's holds.
+    let acquired = reopen()
+        .acquire_material(&successor, &retained)
+        .await
+        .expect("successor acquires before the predecessor releases");
+    assert_eq!(acquired.holder, successor);
+    assert_eq!(acquired.references, retained.references);
+
+    // Successor ownership is durable: the predecessor releases, and only it
+    // is fenced.
+    reopen()
+        .release_material(&predecessor)
+        .await
+        .expect("predecessor releases");
+    reopen()
+        .release_material(&predecessor)
+        .await
+        .expect("a repeated release is a no-op");
+    let store = reopen();
+    assert_eq!(
+        read(&store, &successor, first).await.expect("read"),
+        texts[0]
+    );
+    assert_eq!(
+        read(&store, &successor, second).await.expect("read"),
+        texts[1]
+    );
+    assert_eq!(
+        refusal_code(read(&store, &predecessor, first).await),
+        "material_retired"
+    );
+    assert_eq!(
+        refusal_code(store.retain_material(&predecessor, &bundle).await),
+        "holder_ended",
+        "a stale predecessor cannot republish after the transfer"
+    );
+    assert_eq!(
+        refusal_code(store.acquire_material(&predecessor, &retained).await),
+        "holder_ended"
+    );
+
+    // Consumption ends the last lease: the bundle retires atomically.
+    reopen()
+        .release_material(&successor)
+        .await
+        .expect("successor releases after consuming");
+    let store = reopen();
+    for reference in [first, second] {
+        assert_eq!(
+            refusal_code(read(&store, &successor, reference).await),
+            "material_retired"
+        );
+    }
+    let late = segment(&opener, 2);
+    assert_eq!(
+        refusal_code(store.acquire_material(&late, &retained).await),
+        "material_missing",
+        "a retired bundle cannot be reacquired"
+    );
+    for reference in [first, second] {
+        assert_eq!(
+            refusal_code(read(&store, &late, reference).await),
+            "material_missing"
+        );
+    }
+}
+
+/// L13: releasing a predecessor before its successor acquires retires the
+/// bundle, and the successor's acquire refuses typed instead of serving
+/// anything or minting a fresh body. This is why the predecessor's lease
+/// must outlive its successor's acquire.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates every store step"
+)]
+pub async fn early_release_retires_material_before_an_unacquired_successor<F>(make: F)
+where
+    F: Fn() -> ReopenableToolMaterialStore,
+{
+    let fixture = make();
+    let opener = run("early-release");
+    let bundle = bundle(vec![payload(
+        &run_owner(&opener),
+        MaterialRole::AttemptOutput,
+        "lost ",
+    )]);
+    let predecessor = segment(&opener, 0);
+    let successor = segment(&opener, 1);
+    let retained = fixture
+        .open
+        .retain_material(&predecessor, &bundle)
+        .await
+        .expect("retain");
+    fixture
+        .open
+        .release_material(&predecessor)
+        .await
+        .expect("release");
+    let store = (fixture.reopen)();
+    assert_eq!(
+        refusal_code(store.acquire_material(&successor, &retained).await),
+        "material_missing"
+    );
+    assert_eq!(
+        refusal_code(read(&store, &successor, &retained.references[0]).await),
+        "material_missing"
+    );
+}
+
+/// L12 and K4: a Deferred source retains its result under its own lease
+/// before its seal publishes it; the consumer reads it as the source's
+/// owner and nobody else's; the read checks the codec revision; and a
+/// reference to material that was never retained refuses typed.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates every store step"
+)]
+pub async fn source_material_reads_refuse_typed_without_a_fresh_body<F>(make: F)
+where
+    F: Fn() -> ReopenableToolMaterialStore,
+{
+    let fixture = make();
+    let opener = run("source-consumer");
+    let consumer = run_owner(&opener);
+    let source = lash_core::AwaitEventKey {
+        scope: lash_core::ExecutionScope::turn("material-source-session", "material-turn"),
+        wait: lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+            &format!("material-call-{}", uuid::Uuid::new_v4().simple()),
+        )),
+        key_id: "material-key".into(),
+        signature: "material-signature".into(),
+    };
+    let source_owner = MaterialOwner::Source {
+        source: source.clone(),
+    };
+    let holder = MaterialHolder::Source {
+        source: source.clone(),
+    };
+    let codec =
+        crate::plugin::PluginRevision::new("material-codec", crate::plugin::BehaviorRevision::ONE);
+    let result = MaterialPayload::new(
+        source_owner.clone(),
+        MaterialRole::AttemptOutput,
+        Some(codec.clone()),
+        "deferred-result ".repeat(512),
+    );
+    let retained = fixture
+        .open
+        .retain_material(&holder, &bundle(vec![result.clone()]))
+        .await
+        .expect("the source retains before sealing");
+    let reference = &retained.references[0];
+    let store = (fixture.reopen)();
+    assert_eq!(
+        store
+            .read_material(
+                &holder,
+                reference,
+                &source_owner,
+                std::slice::from_ref(&codec)
+            )
+            .await
+            .expect("the consumer reads the sealed result")
+            .text,
+        result.text
+    );
+    let wrong_owner = store
+        .read_material(&holder, reference, &consumer, std::slice::from_ref(&codec))
+        .await;
+    assert_eq!(refusal_code(wrong_owner), "material_wrong_owner");
+    let unavailable = store
+        .read_material(&holder, reference, &source_owner, &[])
+        .await;
+    assert_eq!(refusal_code(unavailable), "material_revision_mismatch");
+    let unretained = bundle(vec![payload(
+        &consumer,
+        MaterialRole::AttemptOutput,
+        "never ",
+    )]);
+    assert_eq!(
+        refusal_code(read(&store, &segment(&opener, 0), &unretained.references()[0]).await),
+        "material_missing"
+    );
+    store
+        .release_material(&holder)
+        .await
+        .expect("the consumer releases the source after consuming");
+    assert_eq!(
+        refusal_code(
+            (fixture.reopen)()
+                .read_material(
+                    &holder,
+                    reference,
+                    &source_owner,
+                    std::slice::from_ref(&codec)
+                )
+                .await
+        ),
+        "material_retired"
+    );
+}

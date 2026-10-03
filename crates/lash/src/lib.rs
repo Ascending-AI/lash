@@ -554,11 +554,15 @@ pub mod persistence {
     pub use lash_core_store::session_state::{
         InstalledRunView, RuntimeSessionAuthority, SessionPluginStateSource,
     };
+    /// Retained tool material: a store's dependency leases on bundles.
+    pub use lash_core_store::store::ToolMaterialStore;
     pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
     pub use lash_core_store::store::{
         EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow, StoreFault, StoreRefusal,
         StoredRunTerminal, SurfaceFormat, WriterPin,
     };
+    /// The segment of a logical Run a `RunSegment` referrer names.
+    pub use lash_core_store::tool_run::SegmentOrdinal;
     /// The protocol-generic form [`SessionHistoryRecord`] specializes.
     pub use lash_sansio::SessionHistoryRecord as GenericSessionHistoryRecord;
     pub use lash_sansio::{AppendVec, BaseRenderCache, ConversationRecord};
@@ -1453,6 +1457,8 @@ pub mod runtime {
     };
     /// Canonical material references and the refusals carried by runtime errors.
     pub use lash_core::tool_run::material;
+    /// Retained material bundles and the dependency leases that hold them.
+    pub use lash_core::tool_run::retention;
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
     /// wall-clock default; tests open a backend on their own to make expiry

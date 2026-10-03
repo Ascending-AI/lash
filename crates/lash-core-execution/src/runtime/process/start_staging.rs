@@ -164,6 +164,13 @@ impl ArtifactReferrerPorts {
                         .await
                 }
                 ArtifactStoreId::Engine(_) => continue,
+                // Tool material is held by Run-segment and source leases only.
+                ArtifactStoreId::ToolMaterial => {
+                    return Err(crate::PluginError::Session(format!(
+                        "a start cannot hold retained tool material `{}`",
+                        name.artifact_ref
+                    )));
+                }
             };
             if let Some(ended) = held_or_ended(claim, acquired.map_err(crate::PluginError::from))? {
                 return Ok(ended);

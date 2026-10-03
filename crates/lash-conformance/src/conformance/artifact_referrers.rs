@@ -428,6 +428,21 @@ where
         ArtifactReferrer::Upload(lash_core::UploadReferrerId::mint(
             lash_core::SessionId::from("canonical-session"),
         )),
+        ArtifactReferrer::RunSegment {
+            opener: Box::new(lash_core::EffectOpener::turn(
+                "canonical-session",
+                "canonical-turn",
+            )),
+            segment: lash_core::tool_run::SegmentOrdinal(2),
+        },
+        ArtifactReferrer::Source(Box::new(lash_core::AwaitEventKey {
+            scope: lash_core::ExecutionScope::turn("canonical-session", "canonical-turn"),
+            wait: lash_core::AwaitEventWaitIdentity::tool_completion(
+                lash_core::ToolCallId::fixture("canonical-call"),
+            ),
+            key_id: "canonical-key".into(),
+            signature: "canonical-signature".into(),
+        })),
     ];
     assert_eq!(values.len(), ArtifactReferrerKind::ALL.len());
     for value in values {

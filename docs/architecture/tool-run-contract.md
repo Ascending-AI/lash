@@ -22,7 +22,8 @@ effect-host simulator targets these seams, not `ToolChildHost`.
 | K0 | SDK `Endpoint`, contexts, serde and named `run` with a retry policy, reached only through `lash_restate::restate_sdk` | `crates/lash-restate/src/tests/tool_run_sdk_contract.rs` | compile | FIG-4870 (fork intake) | FIG-4871-4874, every host |
 | K1 | Whole-round admission: owner, call ids, operand aliases, prepared request, three-capability declaration, automatic callback binding, runtime retry/cancel policy, before-check record, reserved capacity | `lash_core_store::tool_run::admission` | codec, refusal | FIG-4875 | FIG-4877, FIG-4879, FIG-4855 |
 | K1/K3/K10 hooks | Tool hook phases, occurrences, verdicts, reducer and selection | `lash_core_store::tool_run::tool_hooks` | codec, reducer permutations | FIG-1399 (API cutover, ADR 0059 replacement) | FIG-4875, FIG-4877, FIG-4878 |
-| K2 | Owner-qualified material references and typed retained-result refusals (Q4) | `lash_core_store::tool_run::material` | codec, refusal | FIG-4876, FIG-4889 | FIG-4877, FIG-4883, FIG-4739 |
+| K2 | Owner-qualified material references and typed retained-result refusals (Q4) | `lash_core_store::tool_run::material` | codec, refusal | FIG-4876 | FIG-4877, FIG-4883, FIG-4739 |
+| K2/K6 retention | Retained bundles and their dependency leases: retain before publication, successor acquire, release, atomic retirement, holder fences | `lash_core_store::tool_run::retention`, `ToolMaterialStore` | codec, store laws (`tool_material_tests!`) | FIG-4889 | FIG-4739, FIG-4890, FIG-4883, FIG-4740 |
 | K3/K9 | Run events with stable ordinals, the sole-active-segment fold, final-or-cancel once, protected drain frontier, reported-retry schedule, `Live`/`Closing`/`Settled` | `lash_core_store::tool_run::run_event` | codec, fold refusals | FIG-4877, FIG-4879, FIG-4880, FIG-4882 | FIG-4881, FIG-4892, FIG-529 |
 | K4 | Immutable `Resolved(ref)`/`Cancelled` source seal, authority, short subscriptions | `lash_core_store::tool_run::source_seal` | codec, refusal | FIG-4883, FIG-4740, FIG-4891 | FIG-4886, FIG-4887 |
 | K5 | Declared start obligation: stable `StartKey`, registration, environment, consumer hold; cancel before/after admission | `crates/lash-core-execution/src/runtime/process/declared_start.rs` | codec, refusal | FIG-4884, FIG-4885 | FIG-4887, FIG-4888 |
@@ -82,9 +83,28 @@ entry carries its reference without text. Missing, retired, corrupt,
 wrong-owner, wrong-role, unsupported-format and unavailable-revision reads
 carry `RuntimeErrorCause::MaterialRefused` with the original `MaterialRefusal`
 under terminal `retained_result_refused`; no refusal grants execution authority.
-Resolution stays inside the controller. FIG-4889 owns artifact I/O, dependency
-leases and atomic publication into source seals and continuations, including
-the measured handover copy. The status-only drive reply remains unchanged.
+Resolution stays inside the controller. The status-only drive reply remains
+unchanged.
+
+**Retention (FIG-4889).** Same-segment material resolves from the opener
+journal and costs no artifact transaction. Material another segment or a
+Deferred source seal names is retained first: `MaterialBundle` packs the
+payloads into one immutable bundle in the `ToolMaterial` artifact store,
+named by its bytes under `lash-tool-material-bundle/v1`, and
+`ToolMaterialStore::retain_material` writes it together with the holder's
+lease, a `run_segment` or `source` referrer edge, in one transaction. Only the
+`RetainedBundle` that returns may be published: `RunTransfer::check_capture`
+refuses material outside a tool-material bundle (`UnretainedMaterial`) or
+held by another lease than the transferring segment's (`UnleasedMaterial`),
+and a seal refuses an unretained result (`UnretainedResult`). The successor
+acquires its own lease before it reads and before the predecessor releases,
+so the predecessor's lease lasts until successor ownership is durable. A
+release fences its holder, severs its leases and retires every bundle with
+no lease left, all payloads at once. The holder fence is the identity fence:
+an ended holder cannot republish, reacquire or read, its references refuse
+`Retired`, and a retired bundle refuses `Missing` to every later holder.
+Closing a Run is not garbage collection; only a release ends a lease.
+`RetainedBundle::copy_bytes` reports the measured handover copy.
 
 **Operation (Q2).** A tool-bearing host operation is a Run with its own input
 kind, driven by the session's keyed turn service, over the existing

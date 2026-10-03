@@ -106,6 +106,7 @@ pub(crate) use lash_core_ids::stable_identity;
 pub mod store;
 pub use lash_core_ids::task;
 pub use lash_core_store::store_backend_support;
+pub use lash_core_store::tool_run;
 /// Standard-lock poison recovery traits used across Lash hosts and runtimes.
 pub mod sync {
     pub use lash_sansio::sync::*;

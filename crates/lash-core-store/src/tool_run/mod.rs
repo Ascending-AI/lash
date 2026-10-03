@@ -14,7 +14,8 @@
 //! | --- | --- | --- |
 //! | K1 admission and declaration | [`admission`] | FIG-4875 |
 //! | K1/K3/K10 tool hook contract | [`tool_hooks`] | FIG-1399, wired by FIG-4875/4877/4878 |
-//! | K2 material references | [`material`] | FIG-4876, FIG-4889 |
+//! | K2 material references | [`material`] | FIG-4876 |
+//! | K2/K6 retained bundles and leases | [`retention`] | FIG-4889 |
 //! | K3/K9 Run events and retry schedule | [`run_event`] | FIG-4877, FIG-4879, FIG-4880 |
 //! | K4 source seal | [`source_seal`] | FIG-4883 |
 //! | K6 continuation | [`continuation`] | FIG-4881, FIG-4739, FIG-4890 |
@@ -30,6 +31,7 @@ pub mod continuation;
 pub mod material;
 pub mod operation;
 pub mod receipt;
+pub mod retention;
 pub mod run_event;
 pub mod source_seal;
 pub mod state_command;
@@ -47,6 +49,7 @@ pub use material::{
 };
 pub use operation::{OperationRun, RunInputKind};
 pub use receipt::{BusinessReceipt, LogicalTerminal, ObservationPermit, ObservedFact};
+pub use retention::{MaterialBundle, MaterialHolder, MaterialRetentionError, RetainedBundle};
 pub use run_event::{
     AttemptOrdinal, AttemptResult, CallDecision, ResultSource, RunEvent, RunEventOrdinal,
     RunEventRefusal, RunLedger, RunLifecycle, RunRecord, SegmentOrdinal,

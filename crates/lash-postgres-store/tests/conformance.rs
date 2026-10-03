@@ -862,6 +862,42 @@ lash_conformance::artifact_store_reopenable_tests!({
     })
 });
 
+lash_conformance::tool_material_tests!({
+    let Some((database_fixture, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres tool-material conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    let database_url = database_fixture.url().to_owned();
+    (database_fixture, move || {
+        let storage = Arc::clone(&storage);
+        let database_url = database_url.clone();
+        sync_await(async move {
+            reset(storage.pool()).await;
+            let open = PostgresStorage::connect(&database_url)
+                .await
+                .expect("open first Postgres tool-material pool");
+            let reopen_url = database_url.clone();
+            lash_conformance::material_retention::ReopenableToolMaterialStore {
+                open: Arc::new(open.tool_material_store())
+                    as Arc<dyn lash_core::store::ToolMaterialStore>,
+                reopen: Arc::new(move || {
+                    let reopen_url = reopen_url.clone();
+                    let reopened = sync_await(async move {
+                        PostgresStorage::connect(&reopen_url)
+                            .await
+                            .expect("reopen Postgres tool-material pool")
+                    });
+                    Arc::new(reopened.tool_material_store())
+                        as Arc<dyn lash_core::store::ToolMaterialStore>
+                }),
+            }
+        })
+    })
+});
+
 lash_conformance::artifact_referrer_tests!({
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(

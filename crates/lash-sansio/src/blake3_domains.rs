@@ -67,6 +67,7 @@ pub(crate) const BLAKE3_DOMAINS: &[&str] = &[
     "lash-tool-catalog-authority/v2",
     "lash-tool-intent-payload/v2",
     "lash-tool-intent-payload/v3",
+    "lash-tool-material-bundle/v1",
     "lash-tool-material/v1",
     "lash-tool-output-spill/v2",
     "lash-tool-schema-cache/v2",

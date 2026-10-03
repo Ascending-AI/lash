@@ -101,6 +101,9 @@ pub(crate) fn artifact_sql() -> &'static ArtifactSql {
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
+pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
+
+mod tool_material;
 
 /// The namespace of a store-set artifact store; an engine's own store has
 /// none here.
@@ -109,6 +112,7 @@ pub(crate) fn store_namespace(store: &ArtifactStoreId) -> Option<&'static str> {
         ArtifactStoreId::LashlangModule => Some(MODULE_ARTIFACT_NAMESPACE),
         ArtifactStoreId::ProcessEnv => Some(PROCESS_ENV_NAMESPACE),
         ArtifactStoreId::ProcessDefinition => Some(PROCESS_DEFINITION_NAMESPACE),
+        ArtifactStoreId::ToolMaterial => Some(TOOL_MATERIAL_NAMESPACE),
         ArtifactStoreId::Engine(_) => None,
     }
 }
@@ -124,6 +128,7 @@ pub(crate) fn artifact_namespace_kind(
         MODULE_ARTIFACT_NAMESPACE => Ok(PersistedArtifactKind::LashlangModule),
         PROCESS_ENV_NAMESPACE => Ok(PersistedArtifactKind::ProcessExecutionEnv),
         PROCESS_DEFINITION_NAMESPACE => Ok(PersistedArtifactKind::ProcessDefinition),
+        TOOL_MATERIAL_NAMESPACE => Ok(PersistedArtifactKind::ToolMaterial),
         unknown => Err(stored_data_corrupt(
             "artifact_refs namespace",
             format!("unknown artifact namespace `{unknown}`"),

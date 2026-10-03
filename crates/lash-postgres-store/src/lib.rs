@@ -1399,6 +1399,15 @@ impl PostgresStorage {
         }
     }
 
+    /// The retained tool-material store (FIG-4889), over the same artifact
+    /// and referrer tables.
+    pub fn tool_material_store(&self) -> PostgresLashlangArtifactStore {
+        PostgresLashlangArtifactStore {
+            pool: self.pool.clone(),
+            fence: self.fence.clone(),
+        }
+    }
+
     /// The build-generation drain marks and per-generation work reads over
     /// this catalog (FIG-3799, FIG-3884): the port the operator binary and a
     /// store set compose drain status from.

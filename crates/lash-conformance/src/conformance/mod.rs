@@ -37,6 +37,7 @@ mod attachment_referrers;
 pub use attachment_referrers::*;
 mod attachment_read_budgets;
 mod attachment_store;
+pub mod material_retention;
 pub use attachment_read_budgets::*;
 mod await_event_cold;
 mod bound_trigger_duplicate;

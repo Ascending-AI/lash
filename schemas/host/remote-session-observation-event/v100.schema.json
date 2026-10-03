@@ -42,7 +42,9 @@
         "execution",
         "host_pin",
         "session",
-        "upload"
+        "upload",
+        "run_segment",
+        "source"
       ],
       "type": "string"
     },
@@ -95,6 +97,19 @@
           "properties": {
             "store": {
               "const": "process_definition",
+              "type": "string"
+            }
+          },
+          "required": [
+            "store"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Retained tool material bundles (K2), held by Run-segment and source\nleases until their last dependency ends.",
+          "properties": {
+            "store": {
+              "const": "tool_material",
               "type": "string"
             }
           },

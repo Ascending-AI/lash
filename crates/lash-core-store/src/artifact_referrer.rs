@@ -2,7 +2,7 @@
 //! bytes alive.
 //!
 //! An artifact has one exact edge per (artifact, referrer) pair, and a
-//! referrer is a durable reader. There are nine kinds. Each referrer has one
+//! referrer is a durable reader. There are eleven kinds. Each referrer has one
 //! canonical `referrer_id` text, which is what the edge, fence and cleanup
 //! tables store; [`ArtifactReferrer::decode`] refuses every stored pair whose
 //! text is not exactly that rendering, and a store classifies the refusal
@@ -21,7 +21,10 @@ use lash_sansio::{EffectJournalIdentity, ExecutionScope};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::FrameNodeId;
+use crate::await_event_identity::AwaitEventKey;
+use crate::effect_opener::EffectOpener;
 use crate::process_identity::StartKey;
+use crate::tool_run::SegmentOrdinal;
 use crate::{ProcessId, SessionId};
 
 /// The referrer labels and their canonical id encodings at the 1.0 cut.
@@ -33,6 +36,9 @@ use crate::{ProcessId, SessionId};
 ///     ),
 ///     roots(path = "crates/lash-core-store/src/process_identity.rs", StartKey),
 ///     roots(path = "crates/lash-core-store/src/session_identity.rs", FrameNodeId),
+///     roots(path = "crates/lash-core-store/src/effect_opener.rs", EffectOpener),
+///     roots(path = "crates/lash-core-store/src/await_event_identity.rs", AwaitEventKey),
+///     roots(path = "crates/lash-core-store/src/tool_run/run_event.rs", SegmentOrdinal),
 ///     roots(path = "crates/lash-sansio/src/effect_identity.rs", EffectJournalIdentity),
 ///     items(
 ///         ALL, as_str, parse, canonical_id, decode, HOST_PIN_PREFIX, HOST_PIN_HEX_LEN,
@@ -112,11 +118,13 @@ pub enum ArtifactReferrerKind {
     HostPin,
     Session,
     Upload,
+    RunSegment,
+    Source,
 }
 
 impl ArtifactReferrerKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 11] = [
         Self::FrameEnvironment,
         Self::ProcessRecord,
         Self::SubscriptionRevision,
@@ -126,10 +134,13 @@ impl ArtifactReferrerKind {
         Self::HostPin,
         Self::Session,
         Self::Upload,
+        Self::RunSegment,
+        Self::Source,
     ];
 
     /// `frame_environment`, `process_record`, `subscription_revision`,
-    /// `start`, `start_input`, `execution`, `host_pin`, `session`, `upload`.
+    /// `start`, `start_input`, `execution`, `host_pin`, `session`, `upload`,
+    /// `run_segment`, `source`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -142,6 +153,8 @@ impl ArtifactReferrerKind {
             Self::HostPin => "host_pin",
             Self::Session => "session",
             Self::Upload => "upload",
+            Self::RunSegment => "run_segment",
+            Self::Source => "source",
         }
     }
 
@@ -181,6 +194,8 @@ impl ArtifactReferrerKind {
                 | Self::Start
                 | Self::Execution
                 | Self::HostPin
+                | Self::RunSegment
+                | Self::Source
         )
     }
 
@@ -231,6 +246,15 @@ pub enum ArtifactReferrer {
     HostPin(HostArtifactPin),
     Session(SessionId),
     Upload(UploadReferrerId),
+    /// One segment of a logical Run: the dependency lease on the retained
+    /// tool material its continuation names (K2/K6).
+    RunSegment {
+        opener: Box<EffectOpener>,
+        segment: SegmentOrdinal,
+    },
+    /// One Deferred source: the dependency lease on the retained result its
+    /// `Resolved` seal names (K2/K4).
+    Source(Box<AwaitEventKey>),
 }
 
 /// Hashes the stored pair: two referrers are equal exactly when their kinds
@@ -256,6 +280,8 @@ impl ArtifactReferrer {
             Self::HostPin(_) => ArtifactReferrerKind::HostPin,
             Self::Session(_) => ArtifactReferrerKind::Session,
             Self::Upload(_) => ArtifactReferrerKind::Upload,
+            Self::RunSegment { .. } => ArtifactReferrerKind::RunSegment,
+            Self::Source(_) => ArtifactReferrerKind::Source,
         }
     }
 
@@ -281,6 +307,8 @@ impl ArtifactReferrer {
             Self::HostPin(pin) => pin.as_str().to_owned(),
             Self::Session(id) => id.to_string(),
             Self::Upload(id) => json_text(&(id.session_id.as_str(), id.upload_id.as_str())),
+            Self::RunSegment { opener, segment } => json_text(&(opener, segment)),
+            Self::Source(source) => json_text(source),
         }
     }
 
@@ -365,6 +393,14 @@ impl ArtifactReferrer {
                     AttachmentUploadId::try_from(upload)?,
                 ))
             }
+            ArtifactReferrerKind::RunSegment => {
+                let (opener, segment): (EffectOpener, SegmentOrdinal) = json_parse(kind, id)?;
+                Self::RunSegment {
+                    opener: Box::new(opener),
+                    segment,
+                }
+            }
+            ArtifactReferrerKind::Source => Self::Source(Box::new(json_parse(kind, id)?)),
         };
         if referrer.canonical_id() != id {
             return Err(ArtifactReferrerError::NotCanonical { kind: label });
@@ -806,6 +842,9 @@ pub enum ArtifactStoreId {
     /// `ProcessDefinitionId` (ADR 0113 §3.6). A collectible artifact like the
     /// others: a descriptor lives exactly as long as some referrer holds it.
     ProcessDefinition,
+    /// Retained tool material bundles (K2), held by Run-segment and source
+    /// leases until their last dependency ends.
+    ToolMaterial,
 }
 
 impl ArtifactStoreId {
@@ -1130,9 +1169,9 @@ mod optional_journal_identity {
 fn json_text<T: Serialize>(value: &T) -> String {
     #[expect(
         clippy::expect_used,
-        reason = "tuples of strings and integers always encode"
+        reason = "referrer ids are strings, integers and string-keyed records, which always encode"
     )]
-    serde_json::to_string(value).expect("a tuple of strings and integers encodes")
+    serde_json::to_string(value).expect("a referrer id encodes")
 }
 
 fn json_parse<T: for<'de> Deserialize<'de>>(

@@ -59,6 +59,10 @@ pub(crate) fn artifact_sql() -> &'static ArtifactSql {
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
+pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
+
+#[path = "artifact_store/tool_material.rs"]
+mod tool_material;
 
 /// The namespace of a store-set artifact store; an engine's own store has
 /// none here.
@@ -70,6 +74,7 @@ pub(crate) fn store_namespace(
         ArtifactStoreId::LashlangModule => Some(MODULE_ARTIFACT_NAMESPACE),
         ArtifactStoreId::ProcessEnv => Some(PROCESS_ENV_NAMESPACE),
         ArtifactStoreId::ProcessDefinition => Some(PROCESS_DEFINITION_NAMESPACE),
+        ArtifactStoreId::ToolMaterial => Some(TOOL_MATERIAL_NAMESPACE),
         ArtifactStoreId::Engine(_) => None,
     }
 }

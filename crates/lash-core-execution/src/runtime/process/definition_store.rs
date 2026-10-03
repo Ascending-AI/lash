@@ -257,11 +257,12 @@ fn partition_manifest(
                 store_set.push(artifact.clone());
             }
             ArtifactStoreId::Engine(_) => engine_names.push(artifact.clone()),
-            ArtifactStoreId::ProcessDefinition => {
+            ArtifactStoreId::ProcessDefinition | ArtifactStoreId::ToolMaterial => {
                 return Err(definition_refused(format!(
-                    "definition `{}` names descriptor `{}` in its manifest",
+                    "definition `{}` names `{}` from store {:?} in its manifest",
                     draft.id(),
-                    artifact.artifact_ref
+                    artifact.artifact_ref,
+                    artifact.store
                 )));
             }
         }

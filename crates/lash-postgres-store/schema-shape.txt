@@ -262,6 +262,7 @@ table lash_process_park_events
   column seq bigint not-null
   primary-key (seq)
 table lash_process_segment_handovers
+  column committed_at_ms bigint not-null
   column handover_json text not-null
   column process_id text not-null
   column route text not-null
@@ -516,6 +517,15 @@ table lash_session_terminal_changes
   column recorded_at_ms bigint not-null
   column session_id text not-null
   primary-key (change_seq)
+table lash_tool_call_receipts
+  column completed_at_ms bigint nullable
+  column completion_json text nullable
+  column payload_digest text not-null
+  column request_json text not-null
+  column request_key text not-null
+  column requested_at_ms bigint not-null
+  column session_id text not-null
+  primary-key (request_key)
 table lash_tool_intent_submissions
   column execution_scope_id text not-null
   column intent_index bigint not-null
@@ -670,6 +680,16 @@ table lash_turn_parks
   column since_ms bigint not-null
   column turn_id text not-null
   primary-key (session_id)
+table lash_wait_receipts
+  column owner_key text not-null
+  column request_json text not-null
+  column resolution_json text nullable
+  column resolved_at_ms bigint nullable
+  column retired_at_ms bigint nullable
+  column session_id text nullable
+  column started_at_ms bigint not-null
+  column wait_id text not-null
+  primary-key (wait_id)
 table lash_wake_allocation_floors
   column allocation_floor bigint not-null
   column process_id text not-null

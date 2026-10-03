@@ -79,6 +79,9 @@ const STORE_TAG_PROCESS_ENV: u8 = 1;
 const STORE_TAG_LASHLANG_MODULE: u8 = 2;
 const STORE_TAG_ENGINE: u8 = 3;
 const STORE_TAG_PROCESS_DEFINITION: u8 = 4;
+/// Never in a stored definition, which refuses tool material; tagged so the
+/// preimage stays total.
+const STORE_TAG_TOOL_MATERIAL: u8 = 5;
 
 /// The canonical descriptor of one immutable process definition.
 ///
@@ -120,6 +123,10 @@ pub enum ProcessDefinitionDraftError {
     EmptyArtifactRef,
     #[error("a process definition artifact names an engine store with no engine kind")]
     EmptyArtifactEngineKind,
+    /// Retained tool material belongs to a Run or source lease, never to a
+    /// definition's manifest.
+    #[error("a process definition cannot name retained tool material")]
+    ToolMaterialArtifact,
 }
 
 impl ProcessDefinitionDraft {
@@ -129,7 +136,8 @@ impl ProcessDefinitionDraft {
     /// # Errors
     ///
     /// [`ProcessDefinitionDraftError`] for an empty engine kind, an empty
-    /// artifact reference or an engine store with no kind.
+    /// artifact reference, an engine store with no kind or retained tool
+    /// material.
     pub fn new(
         engine_kind: impl Into<ProcessEngineKind>,
         value: impl Into<ProcessDefinitionValue>,
@@ -146,6 +154,9 @@ impl ProcessDefinitionDraft {
             }
             if matches!(&artifact.store, ArtifactStoreId::Engine(kind) if kind.is_empty()) {
                 return Err(ProcessDefinitionDraftError::EmptyArtifactEngineKind);
+            }
+            if artifact.store == ArtifactStoreId::ToolMaterial {
+                return Err(ProcessDefinitionDraftError::ToolMaterialArtifact);
             }
             framed.push((artifact_preimage(&artifact), artifact));
         }
@@ -285,6 +296,7 @@ fn artifact_preimage(artifact: &ArtifactName) -> Vec<u8> {
             push_framed(&mut bytes, kind.as_bytes());
         }
         ArtifactStoreId::ProcessDefinition => bytes.push(STORE_TAG_PROCESS_DEFINITION),
+        ArtifactStoreId::ToolMaterial => bytes.push(STORE_TAG_TOOL_MATERIAL),
     }
     push_framed(&mut bytes, artifact.artifact_ref.as_bytes());
     bytes

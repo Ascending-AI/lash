@@ -1453,6 +1453,29 @@ macro_rules! artifact_referrer_tests {
     };
 }
 
+/// Register the retained tool-material laws (FIG-4889) on a fixture that
+/// returns `(guard, make)`, where `make()` yields a
+/// `ReopenableToolMaterialStore` over a fresh durable catalog.
+#[macro_export]
+macro_rules! tool_material_tests {
+    ($fixture:block) => {
+        $crate::tool_material_tests!(@catalogue $fixture; [
+            handover_leases_hold_material_until_the_last_dependency_ends,
+            early_release_retires_material_before_an_unacquired_successor,
+            source_material_reads_refuse_typed_without_a_fresh_body,
+        ]);
+    };
+    (@catalogue $fixture:block; [$($law:ident),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, make) = $fixture;
+                $crate::material_retention::$law(make).await;
+            }
+        )*
+    };
+}
+
 /// Register the fence-integrity corruption law.
 #[macro_export]
 macro_rules! fence_integrity_tests {

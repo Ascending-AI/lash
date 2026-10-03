@@ -67,6 +67,7 @@ mod semantic_boundary;
 mod session_config_views;
 mod session_view;
 mod shift_fence;
+pub mod tool_material;
 mod tool_receipts;
 mod wait_receipts;
 pub use session_config_views::{
@@ -213,6 +214,7 @@ pub use shift_fence::{
     StoredShiftEpoch, close_admission, current_shift_fence, decide_run_hold,
     decide_shift_epoch_seal, require_current_shift_fence,
 };
+pub use tool_material::ToolMaterialStore;
 
 pub use session_view::SessionStore;
 pub use state_version::{

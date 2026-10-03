@@ -18,7 +18,7 @@
 use lash_sansio::BoundaryReason;
 use serde::{Deserialize, Serialize};
 
-use super::material::MaterialRef;
+use super::retention::{MaterialHolder, RetainedBundle};
 use super::run_event::{RunEventOrdinal, RunLifecycle, SegmentOrdinal};
 use super::source_seal::SourceSubscription;
 use super::state_command::StateFrontier;
@@ -88,8 +88,10 @@ pub struct RunTransfer {
     /// Every event below this ordinal transfers; the successor appends at
     /// it.
     pub events: RunEventOrdinal,
-    /// Every unconsumed payload, each retained before publication.
-    pub material: Vec<MaterialRef>,
+    /// Every unconsumed payload, in bundles retained under the transferring
+    /// segment's lease before publication. The successor acquires its own
+    /// lease on each before the predecessor releases.
+    pub material: Vec<RetainedBundle>,
     /// Pending sources, rebound to the successor on adoption.
     pub subscriptions: Vec<SourceSubscription>,
     /// Declared starts admitted and not yet launched.
@@ -112,6 +114,8 @@ pub enum ContinuationRefusal {
     NotQuiescent,
     #[error("material is journal-local and cannot cross segments")]
     UnretainedMaterial,
+    #[error("retained material is not held by the transferring segment's lease")]
+    UnleasedMaterial,
     #[error("a subscription is not held by the transferring segment")]
     ForeignSubscription,
     #[error("the transfer belongs to another logical Run")]
@@ -127,14 +131,19 @@ impl RunTransfer {
     ///
     /// # Errors
     ///
-    /// [`ContinuationRefusal`] for a cut still quiescing, journal-local
-    /// material or a subscription another segment holds.
+    /// [`ContinuationRefusal`] for a cut still quiescing, material outside
+    /// a retained bundle, a bundle the transferring segment holds no lease
+    /// on, or a subscription another segment holds.
     pub fn check_capture(&self, cut: &Cut) -> Result<(), ContinuationRefusal> {
         if cut.phase != CutPhase::Capturable {
             return Err(ContinuationRefusal::NotQuiescent);
         }
-        if !self.material.iter().all(MaterialRef::crosses_segments) {
+        if !self.material.iter().all(RetainedBundle::is_retained) {
             return Err(ContinuationRefusal::UnretainedMaterial);
+        }
+        let holder = self.holder();
+        if self.material.iter().any(|bundle| bundle.holder != holder) {
+            return Err(ContinuationRefusal::UnleasedMaterial);
         }
         if self.subscriptions.iter().any(|subscription| {
             subscription.owner != self.owner || subscription.segment != self.from
@@ -142,6 +151,15 @@ impl RunTransfer {
             return Err(ContinuationRefusal::ForeignSubscription);
         }
         Ok(())
+    }
+
+    /// The lease holder of the transferring segment.
+    #[must_use]
+    pub fn holder(&self) -> MaterialHolder {
+        MaterialHolder::Segment {
+            opener: self.owner.clone(),
+            segment: self.from,
+        }
     }
 
     /// Adopt the transfer into segment `successor` of the Run `owner`,
