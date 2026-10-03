@@ -171,6 +171,40 @@ interface: production rounds keep their route until FIG-4894, FIG-1863 and
 FIG-4895 move them, so no handler lane moves with it. Reported retries are
 FIG-4879's schedule, and a Deferred attempt hands its call to FIG-4883's seal.
 
+**Protected drain (K3, FIG-4880).** `lash_core::tool_dispatch::RunCoordinator`
+runs several calls in one logical Run, each admitted as a singleton round.
+`decide` records a call's A, X and D; the decision takes the Run's next rank
+(`RunLedger::next_rank`, from 1), so ranks follow the order decisions became
+durable. `drain` then works through every decided call in rank order. A final
+whose result declares intents issues them (`declare`) only once every
+committed final ranked below it is seated (`RunLedger::drain_frontier_open`),
+realizes them behind their exactly-once fences inside its `present` step,
+and settles them in the same record as its presentation and incorporation.
+An intent-free final seats at its decision without waiting, so its seat
+certifies nothing about lower ranks: the frontier is every lower rank, never
+only the one just below (L18), and the fold refuses a declaration issued
+early with `DrainFrontier`. Presentation and incorporation follow rank order,
+so the incorporated calls are a rank prefix. The Run's cancellation is read
+only inside a decision's step: a final decided before it still drains, and a
+call decided after it is cancelled and declares nothing. A Deferred attempt
+takes no rank and no presentation; its descriptor grants neither value nor
+place in the drain. Records are appended one at a time in program order;
+an effect the caller issued before the drain keeps progressing while a
+final's declarations are held. Concurrent attempts and their recorded
+schedule are FIG-4879's. The laws are
+`crates/lash-restate/src/tests/run_coordinator_on_the_double.rs`, including
+the drain-transitivity oracle ported from `effect_group_drain_transitivity`.
+
+**Attempt stream (FIG-4880).** The bounded stream a body emits belongs to its
+attempt's capture (X): `SingletonAttempt::stream` is an
+`AttemptStreamRecorder` observation sink, and the capture carries the
+`AttemptStream` it records, with deltas of a block coalesced, shared call
+fields stored once and the bytes capped by `ATTEMPT_STREAM_BYTE_BUDGET` under
+a typed `AttemptStreamTruncation`. The Run emits it when it presents the call
+(`SingletonToolHandlers::emit_stream`); a replay that serves the presentation
+emits nothing again. The tool-child settlement still carries the same
+representation until FIG-4899 removes that transport.
+
 ## Field ownership
 
 | Record | Owns | Refers to |

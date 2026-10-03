@@ -524,7 +524,7 @@ pub struct DeferredToolCompletion {
     pub pending: Box<PendingToolDispatchOutcome>,
     pub armed: super::ArmedResolver,
     pub deadline_ms: Option<u64>,
-    pub stream: crate::runtime::effect::RecordedChildStream,
+    pub stream: crate::runtime::effect::AttemptStream,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

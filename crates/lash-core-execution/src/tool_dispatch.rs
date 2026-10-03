@@ -9,6 +9,7 @@ mod intent_executor;
 mod pending_resolver;
 mod preparation;
 mod retry;
+mod run_coordinator;
 mod singleton_run;
 
 pub use admission::{ToolRoundRefusal, admission_failure, admit_tool_round};
@@ -21,6 +22,7 @@ pub use pending_resolver::{
     consumer_hold_owner, discharge_abandoned_call, finish_parked_wait,
     model_visible_intent_outcomes,
 };
+pub use run_coordinator::{DecidedCall, RunCoordinator};
 pub use singleton_run::{
     BeforeCheckReply, SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
     SingletonPreparedRequest, SingletonRunError, SingletonRunOutcome, SingletonTerminal,

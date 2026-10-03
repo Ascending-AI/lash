@@ -36,7 +36,7 @@
 //!   reaches it through the engine's cancel of the child's invocation.
 //! * **The opener's stream.** A reconstructed child's stream events are
 //!   recorded instead: they ride its settlement as a bounded
-//!   [`RecordedChildStream`], and the opener emits them when it incorporates
+//!   [`AttemptStream`], and the opener emits them when it incorporates
 //!   the settlement.
 //! * **Sources with no recorded form.** Tools a turn's context overlay added,
 //!   plugins or a provider a particular open supplied, plugins forked from a
@@ -57,7 +57,7 @@ use std::sync::Arc;
 
 use lash_sansio::sync::MutexExt;
 
-use super::super::recorded_stream::{RecordedChildStream, RecordedChildStreamBuilder};
+use super::super::attempt_stream::AttemptStreamRecorder;
 use super::super::tool_child::ToolChildRequest;
 use crate::ScopedEffectController;
 use crate::tool_dispatch::ToolDispatchContext;
@@ -127,75 +127,16 @@ impl std::fmt::Debug for DeploymentToolChildContext {
     }
 }
 
-/// Records the stream events a reconstructed child emits, for its settlement
-/// to carry.
-///
-/// The child's dispatch points its [`ObservationSink`] here: observation is
-/// synchronous, so there is no channel to pin and no collector task to
-/// await — every `observe` pushes into a bounded
-/// [`RecordedChildStreamBuilder`] in program order, and [`Self::finish`]
-/// hands the stream back once the child's shift has returned. A session
-/// event is recorded raw: its projected activity is emitted where the
-/// settlement is incorporated, the way a live opener's forwarder projects
-/// it, so the stream never stores a payload twice. An activity the child
-/// observed is recorded with the `{key}#{ordinal}` id the observation
-/// minted — the same id a live opener's observer would publish.
-pub(super) struct ChildStreamRecorder {
-    stream: std::sync::Mutex<RecordedChildStreamBuilder>,
-}
-
-impl ChildStreamRecorder {
-    pub(super) fn start() -> Arc<Self> {
-        Arc::new(Self {
-            stream: std::sync::Mutex::new(RecordedChildStreamBuilder::default()),
-        })
-    }
-
-    /// Points `dispatch`'s observation sink at this recorder.
-    pub(super) fn attach(self: &Arc<Self>, dispatch: &mut ToolDispatchContext<'static>) {
-        dispatch.observer = Arc::clone(self) as Arc<dyn crate::engine::ObservationSink>;
-    }
-
-    /// Every event the child emitted, once its shift has returned.
-    pub(super) fn finish(&self) -> RecordedChildStream {
-        std::mem::take(&mut *self.stream.lock_recover()).finish()
-    }
-}
-
-impl crate::engine::ObservationSink for ChildStreamRecorder {
-    fn observe(&self, observation: crate::engine::ShiftObservation) {
-        let crate::engine::ShiftObservation {
-            key,
-            ordinal,
-            event,
-        } = observation;
-        let id = crate::TurnActivityId::new(format!("{key}#{ordinal}"));
-        let mut stream = self.stream.lock_recover();
-        match event {
-            crate::engine::ObservedEvent::Session(event) => {
-                // Raw, unprojected: the projection is emitted where the
-                // settlement is incorporated, so the recorded stream holds
-                // each payload once.
-                stream.push_session(&event);
-            }
-            crate::engine::ObservedEvent::Activity {
-                correlation_id,
-                event,
-            } => {
-                stream.push_activity(&crate::TurnActivity {
-                    correlation_id: correlation_id.unwrap_or_else(|| id.clone()),
-                    id,
-                    event,
-                });
-            }
-            crate::engine::ObservedEvent::RecordedSession(event) => {
-                stream.push_session(&event);
-            }
-            crate::engine::ObservedEvent::RecordedActivity(activity) => {
-                stream.push_activity(&activity);
-            }
-        }
-    }
+/// Points `dispatch`'s observation sink at `recorder`, so a reconstructed
+/// child's stream is recorded for its settlement to carry. A session event is
+/// recorded raw: its projected activity is emitted where the settlement is
+/// incorporated, the way a live opener's forwarder projects it, so the stream
+/// never stores a payload twice.
+pub(super) fn attach_stream_recorder(
+    recorder: &Arc<AttemptStreamRecorder>,
+    dispatch: &mut ToolDispatchContext<'static>,
+) {
+    dispatch.observer = Arc::clone(recorder) as Arc<dyn crate::engine::ObservationSink>;
 }
 
 /// The session services a deployment-built context serves: none that read

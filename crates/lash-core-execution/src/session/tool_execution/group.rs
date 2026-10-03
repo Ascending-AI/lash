@@ -1594,7 +1594,7 @@ impl RuntimeExecutionContext<'_> {
         call_key: &str,
         call_id: &crate::ToolCallId,
         record: &crate::ToolCallRecord,
-        stream: &crate::runtime::effect::RecordedChildStream,
+        stream: &crate::runtime::effect::AttemptStream,
     ) {
         let record = serde_json::to_value(record).unwrap_or_default();
         self.emit_recorded_child_stream_value(call_key, call_id, &record, stream);
@@ -1605,7 +1605,7 @@ impl RuntimeExecutionContext<'_> {
         call_key: &str,
         call_id: &crate::ToolCallId,
         record: &serde_json::Value,
-        stream: &crate::runtime::effect::RecordedChildStream,
+        stream: &crate::runtime::effect::AttemptStream,
     ) {
         let (events, undecodable) = stream.decode(record);
         if undecodable > 0 {
@@ -1621,10 +1621,10 @@ impl RuntimeExecutionContext<'_> {
         let observer = context.dispatch.observer.as_ref();
         for event in events {
             match event {
-                crate::runtime::effect::DecodedChildEvent::Session(event) => {
+                crate::runtime::effect::DecodedStreamEvent::Session(event) => {
                     cursor.observe(observer, crate::engine::ObservedEvent::Session(event));
                 }
-                crate::runtime::effect::DecodedChildEvent::Activity(activity) => {
+                crate::runtime::effect::DecodedStreamEvent::Activity(activity) => {
                     cursor.observe(
                         observer,
                         crate::engine::ObservedEvent::RecordedActivity(activity),

@@ -329,8 +329,8 @@ impl ToolChildHost {
                 // child's stream and observe the durable turn gate as a
                 // deployment-built context does.
                 let mut dispatch = pinned.dispatch().as_ref().clone();
-                let recorder = ChildStreamRecorder::start();
-                recorder.attach(&mut dispatch);
+                let recorder = AttemptStreamRecorder::start();
+                attach_stream_recorder(&recorder, &mut dispatch);
                 let refusal = SessionServicesRefusal::default();
                 refusal.attach(&mut dispatch);
                 Ok(ResolvedChildContext {
@@ -383,8 +383,8 @@ impl ToolChildHost {
                         )
                     })?;
                 let (mut dispatch, keepalive) = built.into_parts();
-                let recorder = ChildStreamRecorder::start();
-                recorder.attach(&mut dispatch);
+                let recorder = AttemptStreamRecorder::start();
+                attach_stream_recorder(&recorder, &mut dispatch);
                 let refusal = SessionServicesRefusal::default();
                 refusal.attach(&mut dispatch);
                 Ok(ResolvedChildContext {
@@ -710,7 +710,7 @@ enum InstalledContextSource {
 
 struct ResolvedChildContext {
     context: LiveOpenerContext,
-    recorder: Option<Arc<ChildStreamRecorder>>,
+    recorder: Option<Arc<AttemptStreamRecorder>>,
     /// Set on a built context: fires when the child reached a session service
     /// only its opener's turn can serve.
     refusal: Option<SessionServicesRefusal>,
@@ -1237,7 +1237,7 @@ async fn run_tool_child<'run>(
     if let Some(recorder) = resolved.recorder {
         let mut stream = recorder.finish();
         // What the child's own journaled record holds is referenced, not
-        // recorded twice (see `RecordedChildStream::settle_against`).
+        // recorded twice (see `AttemptStream::settle_against`).
         if let Ok(record) = serde_json::to_value(&outcome.record) {
             stream.settle_against(&record);
         }
@@ -1366,7 +1366,7 @@ async fn shift(
     request: &ToolChildRequest,
     child: crate::EffectAddress,
     turn_cancel_wait: crate::runtime::TurnCancelWait,
-    recorder: Option<&ChildStreamRecorder>,
+    recorder: Option<&AttemptStreamRecorder>,
 ) -> Result<CommittedToolDispatch, RuntimeEffectControllerError> {
     let tool_context = child_tool_context(dispatch, request, &turn_cancel_wait);
     let executor_context = tool_context.clone();
@@ -1470,7 +1470,7 @@ async fn shift(
                 armed,
                 deadline_ms,
                 stream: recorder
-                    .map(ChildStreamRecorder::finish)
+                    .map(AttemptStreamRecorder::finish)
                     .unwrap_or_default(),
             };
             crate::tool_dispatch::commit_deferred_group_child(
@@ -1757,8 +1757,9 @@ pub fn opener_for_execution_scope(admitted: &AdmittedScope) -> Option<EffectOpen
 }
 
 mod deployment_context;
-use deployment_context::{ChildStreamRecorder, SessionServicesRefusal};
+use super::attempt_stream::AttemptStreamRecorder;
 pub use deployment_context::{DeploymentToolChildContext, ToolChildContextSource};
+use deployment_context::{SessionServicesRefusal, attach_stream_recorder};
 
 #[cfg(test)]
 #[path = "tool_child_driver/tests.rs"]

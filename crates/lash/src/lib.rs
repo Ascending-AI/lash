@@ -783,8 +783,8 @@ pub mod plugins {
     };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
-        ChildStreamTruncation, DecodedChildEvent, IncorporatedGroupRank, RecordedChildChannel,
-        RecordedChildEvent, RecordedChildStream, ToolAttemptCapture, ToolSettlement,
+        AttemptStream, AttemptStreamChannel, AttemptStreamEvent, AttemptStreamTruncation,
+        DecodedStreamEvent, IncorporatedGroupRank, ToolAttemptCapture, ToolSettlement,
     };
     pub use lash_core::session::{
         CompletedProtocolToolCall, Incorporated, IncorporationLedger, OpenerGroupsClosed,

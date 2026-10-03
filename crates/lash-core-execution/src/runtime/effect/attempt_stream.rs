@@ -1,20 +1,20 @@
-//! The stream a tool child records when no opener is live where it runs
-//! (FIG-3712), in the journal's own shape.
+//! The bounded stream an attempt captures, in the journal's own shape.
 //!
-//! A child that runs beside its live opener streams its session events and
-//! turn activities to the opener as they happen. A child whose context the
-//! deployment built has no stream to reach, so it records them, and they ride
-//! its [`ToolSettlement`](super::ToolSettlement) until the opener incorporates
-//! it and emits them. They are late, never dropped, unless the budget below
-//! cut them.
+//! A tool body that runs beside its live opener streams its session events
+//! and turn activities to the opener as they happen. A body with no live
+//! stream to reach records them instead: a Run attempt records them in its
+//! attempt capture (X), and the Run emits them when it presents the call
+//! (FIG-4880); a tool child (FIG-3712) still carries them on its
+//! [`ToolSettlement`](super::ToolSettlement) until FIG-4899 removes that
+//! transport. They are late, never dropped, unless the budget below cut them.
 //!
 //! The journal owns this shape, not the stream types. A recorded event holds
 //! its event's serialized form as an opaque payload, tagged only with the
 //! channel it arrived on. A change to a stream or activity type therefore does
-//! not change the settlement's durable format: the opener decodes each payload
+//! not change the capture's durable format: the opener decodes each payload
 //! when it emits it, and a payload this build no longer decodes is skipped.
 //! That is sound because the stream is presentation, never an outcome the
-//! child or its opener acts on.
+//! body or its opener acts on.
 //!
 //! The recording is bounded:
 //!
@@ -25,15 +25,15 @@
 //!   `output` appear on its session event and on its activity. A payload
 //!   whose field equals the same call's earlier recorded field keeps a
 //!   reference to that entry instead, and emission restores it.
-//! * **What the settlement already holds is not recorded again.** The
-//!   child's call events carry the arguments and output its own journaled
-//!   call record holds. Once the child's shift has returned,
-//!   any sizable part of a recorded payload equal to a part of the child's
-//!   own journaled call record is replaced by a reference to it, and
-//!   emission restores it from that record.
+//! * **What the child's settlement already holds is not recorded again.** A
+//!   tool child's call events carry the arguments and output its own
+//!   journaled call record holds. Once the child's shift has returned, any
+//!   sizable part of a recorded payload equal to a part of that record is
+//!   replaced by a reference to it, and emission restores it from that
+//!   record.
 //! * **A byte budget caps the whole stream.** Past
-//!   [`CHILD_STREAM_BYTE_BUDGET`], nothing more is recorded, and a typed
-//!   [`ChildStreamTruncation`] says how much was dropped.
+//!   [`ATTEMPT_STREAM_BYTE_BUDGET`], nothing more is recorded, and a typed
+//!   [`AttemptStreamTruncation`] says how much was dropped.
 //!
 //! Order is kept within each channel. Across the two channels it is not
 //! guaranteed, just as it is not on a live opener's two channels, whose
@@ -41,12 +41,13 @@
 
 use std::collections::BTreeMap;
 
+use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// The most payload bytes a child's recorded stream holds. What does not fit
-/// is dropped and counted in its [`ChildStreamTruncation`].
-pub const CHILD_STREAM_BYTE_BUDGET: usize = 256 * 1024;
+/// The most payload bytes an attempt's recorded stream holds. What does not fit
+/// is dropped and counted in its [`AttemptStreamTruncation`].
+pub const ATTEMPT_STREAM_BYTE_BUDGET: usize = 256 * 1024;
 
 /// The fields a call's session event and activity both carry, stored
 /// once per call.
@@ -57,24 +58,24 @@ const SHARED_CALL_FIELDS: [&str; 2] = ["args", "output"];
 /// much as the value.
 const SETTLED_MIN_BYTES: usize = 64;
 
-/// The recorded stream a settlement carries.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// The recorded stream an attempt capture carries.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecordedChildStream {
+pub struct AttemptStream {
     /// The recorded events, in the order they were recorded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub events: Vec<RecordedChildEvent>,
+    pub events: Vec<AttemptStreamEvent>,
     /// Present when the budget cut the stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub truncated: Option<ChildStreamTruncation>,
+    pub truncated: Option<AttemptStreamTruncation>,
 }
 
 /// One recorded event.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecordedChildEvent {
+pub struct AttemptStreamEvent {
     /// The channel it arrived on.
-    pub channel: RecordedChildChannel,
+    pub channel: AttemptStreamChannel,
     /// The event's serialized form, less any field in `shared`.
     pub payload: Value,
     /// Fields removed from `payload` because an earlier entry recorded the
@@ -91,7 +92,7 @@ pub struct RecordedChildEvent {
 /// The stream channel a recorded event arrived on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RecordedChildChannel {
+pub enum AttemptStreamChannel {
     /// The session stream (`SessionStreamEvent`).
     Session,
     /// The turn activity stream (`TurnActivity`).
@@ -102,19 +103,19 @@ pub enum RecordedChildChannel {
 /// first event that did not fit.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ChildStreamTruncation {
+pub struct AttemptStreamTruncation {
     pub dropped_events: u64,
     pub dropped_bytes: u64,
 }
 
 /// A recorded event decoded for emission.
 #[derive(Clone, Debug)]
-pub enum DecodedChildEvent {
+pub enum DecodedStreamEvent {
     Session(crate::SessionStreamEvent),
     Activity(crate::TurnActivity),
 }
 
-impl RecordedChildStream {
+impl AttemptStream {
     pub fn is_empty(&self) -> bool {
         self.events.is_empty() && self.truncated.is_none()
     }
@@ -123,7 +124,7 @@ impl RecordedChildStream {
     /// restored: from `record`, the child's own journaled call record (as
     /// JSON), and from the earlier entries that hold a shared field. A
     /// payload this build cannot decode is skipped and counted.
-    pub fn decode(&self, record: &Value) -> (Vec<DecodedChildEvent>, usize) {
+    pub fn decode(&self, record: &Value) -> (Vec<DecodedStreamEvent>, usize) {
         let restored: Vec<Value> = self
             .events
             .iter()
@@ -154,11 +155,11 @@ impl RecordedChildStream {
                 }
             }
             let event = match event.channel {
-                RecordedChildChannel::Session => {
-                    serde_json::from_value(payload).map(DecodedChildEvent::Session)
+                AttemptStreamChannel::Session => {
+                    serde_json::from_value(payload).map(DecodedStreamEvent::Session)
                 }
-                RecordedChildChannel::Activity => {
-                    serde_json::from_value(payload).map(DecodedChildEvent::Activity)
+                AttemptStreamChannel::Activity => {
+                    serde_json::from_value(payload).map(DecodedStreamEvent::Activity)
                 }
             };
             match event {
@@ -251,32 +252,33 @@ fn escape_pointer(key: &str) -> String {
     key.replace('~', "~0").replace('/', "~1")
 }
 
-/// Builds a [`RecordedChildStream`] as events arrive.
+/// Builds a [`AttemptStream`] as events arrive.
 #[derive(Default)]
-pub(crate) struct RecordedChildStreamBuilder {
-    stream: RecordedChildStream,
+pub struct AttemptStreamBuilder {
+    stream: AttemptStream,
     bytes: usize,
     /// The entry holding each call's field value: `(call_id, field)` to index.
     call_fields: BTreeMap<(String, &'static str), u32>,
 }
 
-impl RecordedChildStreamBuilder {
-    pub(crate) fn push_session(&mut self, event: &crate::SessionStreamEvent) {
-        self.push(RecordedChildChannel::Session, serde_json::to_value(event));
+impl AttemptStreamBuilder {
+    pub fn push_session(&mut self, event: &crate::SessionStreamEvent) {
+        self.push(AttemptStreamChannel::Session, serde_json::to_value(event));
     }
 
-    pub(crate) fn push_activity(&mut self, activity: &crate::TurnActivity) {
+    pub fn push_activity(&mut self, activity: &crate::TurnActivity) {
         self.push(
-            RecordedChildChannel::Activity,
+            AttemptStreamChannel::Activity,
             serde_json::to_value(activity),
         );
     }
 
-    pub(crate) fn finish(self) -> RecordedChildStream {
+    #[must_use]
+    pub fn finish(self) -> AttemptStream {
         self.stream
     }
 
-    fn push(&mut self, channel: RecordedChildChannel, payload: serde_json::Result<Value>) {
+    fn push(&mut self, channel: AttemptStreamChannel, payload: serde_json::Result<Value>) {
         // A stream DTO always serializes; one that did not has nothing to
         // record.
         let Ok(mut payload) = payload else {
@@ -292,8 +294,8 @@ impl RecordedChildStreamBuilder {
         }
         let shared = self.share_call_fields(&mut payload);
         let bytes = payload_bytes(&payload);
-        if self.bytes + bytes > CHILD_STREAM_BYTE_BUDGET {
-            self.stream.truncated = Some(ChildStreamTruncation {
+        if self.bytes + bytes > ATTEMPT_STREAM_BYTE_BUDGET {
+            self.stream.truncated = Some(AttemptStreamTruncation {
                 dropped_events: 1,
                 dropped_bytes: bytes as u64,
             });
@@ -310,7 +312,7 @@ impl RecordedChildStreamBuilder {
                 }
             }
         }
-        self.stream.events.push(RecordedChildEvent {
+        self.stream.events.push(AttemptStreamEvent {
             channel,
             payload,
             shared,
@@ -320,7 +322,7 @@ impl RecordedChildStreamBuilder {
 
     /// Appends a delta to the channel's previous event when both are deltas
     /// of the same kind for the same block.
-    fn coalesce(&mut self, channel: RecordedChildChannel, payload: &Value) -> bool {
+    fn coalesce(&mut self, channel: AttemptStreamChannel, payload: &Value) -> bool {
         let Some((text_field, delta)) = delta_text(payload) else {
             return false;
         };
@@ -336,7 +338,7 @@ impl RecordedChildStreamBuilder {
         let same_block = previous.payload.get("type") == payload.get("type")
             && previous.payload.get("block") == payload.get("block")
             && previous.payload.get("correlation_id") == payload.get("correlation_id");
-        if !same_block || self.bytes + delta.len() > CHILD_STREAM_BYTE_BUDGET {
+        if !same_block || self.bytes + delta.len() > ATTEMPT_STREAM_BYTE_BUDGET {
             return false;
         }
         let Some(Value::String(text)) = previous.payload.get_mut(text_field) else {
@@ -370,6 +372,67 @@ impl RecordedChildStreamBuilder {
     }
 }
 
+/// Records the stream events an attempt's body emits, for its capture to
+/// carry.
+///
+/// The body's dispatch points its [`ObservationSink`] here: observation is
+/// synchronous, so there is no channel to pin and no collector task to
+/// await — every `observe` pushes into a bounded [`AttemptStreamBuilder`] in
+/// program order, and [`Self::finish`] hands the stream back once the body
+/// has returned. A session event is recorded raw, so the stream never stores
+/// a payload twice. An observed activity is recorded with the
+/// `{key}#{ordinal}` id the observation minted — the same id a live opener's
+/// observer would publish.
+///
+/// [`ObservationSink`]: crate::engine::ObservationSink
+#[derive(Default)]
+pub struct AttemptStreamRecorder {
+    stream: std::sync::Mutex<AttemptStreamBuilder>,
+}
+
+impl AttemptStreamRecorder {
+    #[must_use]
+    pub fn start() -> std::sync::Arc<Self> {
+        std::sync::Arc::default()
+    }
+
+    /// Every event the body emitted, once it has returned.
+    pub fn finish(&self) -> AttemptStream {
+        std::mem::take(&mut *self.stream.lock_recover()).finish()
+    }
+}
+
+impl crate::engine::ObservationSink for AttemptStreamRecorder {
+    fn observe(&self, observation: crate::engine::ShiftObservation) {
+        let crate::engine::ShiftObservation {
+            key,
+            ordinal,
+            event,
+        } = observation;
+        let id = crate::TurnActivityId::new(format!("{key}#{ordinal}"));
+        let mut stream = self.stream.lock_recover();
+        match event {
+            crate::engine::ObservedEvent::Session(event)
+            | crate::engine::ObservedEvent::RecordedSession(event) => {
+                stream.push_session(&event);
+            }
+            crate::engine::ObservedEvent::Activity {
+                correlation_id,
+                event,
+            } => {
+                stream.push_activity(&crate::TurnActivity {
+                    correlation_id: correlation_id.unwrap_or_else(|| id.clone()),
+                    id,
+                    event,
+                });
+            }
+            crate::engine::ObservedEvent::RecordedActivity(activity) => {
+                stream.push_activity(&activity);
+            }
+        }
+    }
+}
+
 fn call_id(payload: &Value) -> Option<&str> {
     payload.get("call_id").and_then(Value::as_str)
 }
@@ -396,8 +459,8 @@ fn payload_bytes(payload: &Value) -> usize {
 mod tests {
     use super::*;
 
-    fn builder_with(payloads: Vec<(RecordedChildChannel, Value)>) -> RecordedChildStream {
-        let mut builder = RecordedChildStreamBuilder::default();
+    fn builder_with(payloads: Vec<(AttemptStreamChannel, Value)>) -> AttemptStream {
+        let mut builder = AttemptStreamBuilder::default();
         for (channel, payload) in payloads {
             builder.push(channel, Ok(payload));
         }
@@ -409,7 +472,7 @@ mod tests {
     #[test]
     fn a_settled_completion_decodes_to_its_output() {
         let output = crate::ToolCallOutput::success(serde_json::json!({"rows": "q".repeat(128)}));
-        let mut builder = RecordedChildStreamBuilder::default();
+        let mut builder = AttemptStreamBuilder::default();
         builder.push_activity(&crate::TurnActivity::new(
             crate::TurnActivityId::new("tool:call-1"),
             crate::TurnEvent::ToolCallCompleted {
@@ -432,7 +495,7 @@ mod tests {
         let (decoded, undecodable) = stream.decode(&record);
         assert_eq!(undecodable, 0);
         match &decoded[..] {
-            [DecodedChildEvent::Activity(activity)] => match &activity.event {
+            [DecodedStreamEvent::Activity(activity)] => match &activity.event {
                 crate::TurnEvent::ToolCallCompleted {
                     output: restored, ..
                 } => {
@@ -446,12 +509,12 @@ mod tests {
 
     #[test]
     fn the_budget_cuts_the_stream_with_a_typed_marker() {
-        let big = "y".repeat(CHILD_STREAM_BYTE_BUDGET / 2);
+        let big = "y".repeat(ATTEMPT_STREAM_BYTE_BUDGET / 2);
         let stream = builder_with(
             (0..4)
                 .map(|index| {
                     (
-                        RecordedChildChannel::Session,
+                        AttemptStreamChannel::Session,
                         serde_json::json!({"type": "message", "kind": "k", "text": format!("{index}{big}")}),
                     )
                 })
@@ -460,6 +523,6 @@ mod tests {
         assert_eq!(stream.events.len(), 1);
         let truncated = stream.truncated.expect("the budget cut the stream");
         assert_eq!(truncated.dropped_events, 3);
-        assert!(truncated.dropped_bytes > (CHILD_STREAM_BYTE_BUDGET as u64));
+        assert!(truncated.dropped_bytes > (ATTEMPT_STREAM_BYTE_BUDGET as u64));
     }
 }

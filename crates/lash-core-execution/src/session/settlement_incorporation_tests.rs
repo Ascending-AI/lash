@@ -42,7 +42,7 @@ fn settlement() -> ToolSettlement {
             crate::MessageRole::User,
             "committed mid-attempt",
         )],
-        stream: crate::runtime::effect::RecordedChildStream::default(),
+        stream: crate::runtime::effect::AttemptStream::default(),
         model_return: crate::ModelToolReturn::text("tool".to_string(), "ok"),
     }
 }

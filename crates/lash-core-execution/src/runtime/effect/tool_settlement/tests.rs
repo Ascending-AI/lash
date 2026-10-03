@@ -35,7 +35,7 @@ fn settlement() -> ToolSettlement {
         possession: Vec::new(),
         triggers: Vec::new(),
         checkpoint_messages: Vec::new(),
-        stream: crate::runtime::effect::RecordedChildStream::default(),
+        stream: crate::runtime::effect::AttemptStream::default(),
         model_return: model_return(),
     }
 }

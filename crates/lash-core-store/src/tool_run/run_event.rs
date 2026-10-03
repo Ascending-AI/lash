@@ -329,6 +329,25 @@ impl RunLedger {
         RunEventOrdinal(self.next)
     }
 
+    /// The rank the Run's next decision takes: one above the last, from 1.
+    #[must_use]
+    pub fn next_rank(&self) -> u64 {
+        self.last_rank.map_or(1, |last| last + 1)
+    }
+
+    /// Whether a final ranked `rank` may issue its declarations (L18): every
+    /// committed final ranked below it is seated, whether or not it declared.
+    /// An intent-free final seats at its decision without waiting, so its
+    /// seat certifies nothing about the ranks below it; the frontier is
+    /// therefore every lower rank, never only the one just below.
+    #[must_use]
+    pub fn drain_frontier_open(&self, rank: u64) -> bool {
+        self.calls.values().all(|other| match &other.decision {
+            Some((lower, CallDecision::Final { .. })) if *lower < rank => other.seated,
+            _ => true,
+        })
+    }
+
     /// Apply `record`, appended by `active`, all of it or none of it.
     ///
     /// # Errors
@@ -566,11 +585,7 @@ impl RunLedger {
         if call.declarations_issued {
             return Err(boundary(call_id));
         }
-        let frontier_open = self.calls.values().all(|other| match &other.decision {
-            Some((lower, CallDecision::Final { .. })) if *lower < rank => other.seated,
-            _ => true,
-        });
-        if !frontier_open {
+        if !self.drain_frontier_open(rank) {
             return Err(RunEventRefusal::DrainFrontier {
                 call_id: call_id.clone(),
             });

@@ -33,11 +33,11 @@ pub use tool_presentation::{
     PresentationBinding, SessionPresentationArtifacts, TOOL_PRESENTATION_VERSION, ToolPresentation,
     retain_oversized_return,
 };
-mod recorded_stream;
+mod attempt_stream;
 mod request_digest;
-pub use recorded_stream::{
-    CHILD_STREAM_BYTE_BUDGET, ChildStreamTruncation, DecodedChildEvent, RecordedChildChannel,
-    RecordedChildEvent, RecordedChildStream,
+pub use attempt_stream::{
+    ATTEMPT_STREAM_BYTE_BUDGET, AttemptStream, AttemptStreamBuilder, AttemptStreamChannel,
+    AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation, DecodedStreamEvent,
 };
 pub(crate) mod tool_settlement;
 pub use tool_settlement::{

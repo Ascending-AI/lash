@@ -201,14 +201,14 @@ pub use causal::{CommandReplayKey, command_invocation};
 pub use clock::{Clock, ClockWallTime, SystemClock};
 pub use durable_queue::{DurableSessionOps, EMPTY_HEAD_REVISION};
 pub use effect::TurnCancelWait;
-/// Tool-child, presentation and recorded-stream vocabulary the effect
+/// Tool-child, presentation and attempt-stream vocabulary the effect
 /// contracts below name.
 pub use effect::{
-    AdmittedHeadVerdict, ChildStreamTruncation, CompactionBase, DecodedChildEvent,
-    IncorporatedGroupRank, PresentationBinding, ProcessDefinitionLocalExecution,
-    RecordedChildChannel, RecordedChildEvent, RecordedChildStream, ToolAttemptCapture,
-    ToolChildAdmission, ToolChildCompletionRouting, ToolChildScope, ToolPresentation,
-    ToolSettlement,
+    ATTEMPT_STREAM_BYTE_BUDGET, AdmittedHeadVerdict, AttemptStream, AttemptStreamBuilder,
+    AttemptStreamChannel, AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation,
+    CompactionBase, DecodedStreamEvent, IncorporatedGroupRank, PresentationBinding,
+    ProcessDefinitionLocalExecution, ToolAttemptCapture, ToolChildAdmission,
+    ToolChildCompletionRouting, ToolChildScope, ToolPresentation, ToolSettlement,
 };
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{

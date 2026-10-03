@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::plugin::{BehaviorRevision, PluginRevision};
+use lash_core::runtime::AttemptStream;
 use lash_core::store::plugin_writers::PluginCallbackIdentity;
 use lash_core::tool_dispatch::{
     BeforeCheckReply, SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
@@ -212,6 +213,8 @@ impl SingletonToolHandlers for Probe {
         }
         Ok(PRESENTATION.to_owned())
     }
+
+    fn emit_stream(&self, _call_id: &ToolCallId, _stream: &AttemptStream) {}
 }
 
 type Returned = Arc<Mutex<Vec<Result<SingletonRunOutcome, SingletonRunError>>>>;
@@ -404,6 +407,7 @@ async fn a_done_singleton_is_four_records_and_reruns_only_unrecorded_work_at_eve
                 capture: SingletonCapture::Done {
                     output: OUTPUT.to_owned(),
                     intents: Vec::new(),
+                    stream: AttemptStream::default(),
                 },
                 presentation: PRESENTATION.to_owned(),
             }

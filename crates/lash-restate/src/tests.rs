@@ -294,6 +294,7 @@ mod process_tool_replay;
 mod remote_turn_cancel;
 mod replay_corpus;
 mod run_control_witnesses;
+mod run_coordinator_on_the_double;
 mod segment_generation_handoff;
 mod segment_redrive_on_the_double;
 mod session_shift_roll_on_the_double;

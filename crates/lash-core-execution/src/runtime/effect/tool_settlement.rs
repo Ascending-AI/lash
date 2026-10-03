@@ -143,7 +143,7 @@ use crate::{PluginMessage, ProcessId};
 ///         path = "crates/lash-sansio/src/tool_output.rs",
 ///         path = "crates/lash-sansio/src/effect_identity.rs",
 ///         path = "crates/lash-sansio/src/causal.rs",
-///         path = "crates/lash-core-execution/src/runtime/effect/recorded_stream.rs",
+///         path = "crates/lash-core-execution/src/runtime/effect/attempt_stream.rs",
 ///         ToolIntentKind,
 ///     ),
 ///     file(
@@ -301,9 +301,9 @@ pub struct ToolSettlement {
     /// opener as they happen and records none here. A child that built its
     /// own context has no stream to reach, so its events are recorded, and
     /// the opener emits them when it incorporates this settlement. See
-    /// [`RecordedChildStream`](super::RecordedChildStream).
-    #[serde(default, skip_serializing_if = "super::RecordedChildStream::is_empty")]
-    pub stream: super::RecordedChildStream,
+    /// [`AttemptStream`](super::AttemptStream).
+    #[serde(default, skip_serializing_if = "super::AttemptStream::is_empty")]
+    pub stream: super::AttemptStream,
     /// The resolved model-facing return: the session's singleton plugin
     /// projector run once at this child's presentation boundary, or its
     /// recorded fallback on projector error, plus the
@@ -361,7 +361,7 @@ impl ToolSettlement {
                 .iter()
                 .flat_map(|capture| capture.messages.iter().cloned())
                 .collect(),
-            stream: super::RecordedChildStream::default(),
+            stream: super::AttemptStream::default(),
             model_return,
         }
     }
