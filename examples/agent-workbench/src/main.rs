@@ -19,6 +19,15 @@ mod ui;
 #[cfg(feature = "provider-wire-fixtures")]
 mod valid_empty_completion;
 
+// `#[restate_sdk::*]` expansions name `::restate_sdk` absolute paths; the SDK
+// reaches this crate through lash's re-export, so the crate answers to that
+// name and generated code resolves the modules below at the crate root.
+extern crate self as restate_sdk;
+#[allow(unused_imports)]
+use lash::restate::restate_sdk::{
+    context, discovery, endpoint, errors, handler, object, prelude, service, workflow,
+};
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::SocketAddr;
 use std::path::PathBuf;

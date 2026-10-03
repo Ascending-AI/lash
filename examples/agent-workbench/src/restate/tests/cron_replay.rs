@@ -21,7 +21,7 @@ use http::Request;
 use http_body_util::channel::Channel;
 use http_body_util::{BodyExt as _, Full};
 use lash::SessionId;
-use restate_sdk::prelude::Endpoint;
+use lash::restate::restate_sdk::prelude::Endpoint;
 use std::convert::Infallible;
 
 const INVOCATION_CONTENT_TYPE: &str = "application/vnd.restate.invocation.v6";

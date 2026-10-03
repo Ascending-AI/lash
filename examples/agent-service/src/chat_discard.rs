@@ -13,6 +13,7 @@
 
 use axum::http::StatusCode;
 use lash::LashCore;
+use lash::restate::restate_sdk;
 use lash::restate::{
     RestateAuthorityId, RestateConnection, RestateIngressClient, RestateSessionAdministration,
 };

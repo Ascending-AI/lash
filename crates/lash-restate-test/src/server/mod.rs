@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use lash_core::engine::BuildGeneration;
 use lash_http_transport::HttpTransport;
-use restate_sdk::endpoint::Endpoint;
+use lash_restate::restate_sdk::endpoint::Endpoint;
 use tokio::sync::Notify;
 
 pub use catalog::{HandlerKind, OnMaxAttempts, ServiceKind};

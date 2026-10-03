@@ -24,6 +24,15 @@ use restate_sdk::prelude::*;
 use serde_json::json;
 use tokio::sync::oneshot;
 
+// `#[restate_sdk::*]` expansions name `::restate_sdk` absolute paths; the SDK
+// reaches this crate through lash's re-export, so the crate answers to that
+// name and generated code resolves the modules below at the crate root.
+extern crate self as restate_sdk;
+#[allow(unused_imports)]
+use lash_restate::restate_sdk::{
+    context, discovery, endpoint, errors, handler, object, prelude, service, workflow,
+};
+
 /// A workflow that parks on a promise nobody resolves and a sleep nobody
 /// fires: whatever a dropped server leaves behind, this leaves it.
 struct Parked;

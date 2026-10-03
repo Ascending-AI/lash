@@ -19,8 +19,7 @@ use lash::{
     restate::RestateRuntimeEffectController,
 };
 use restate_sdk::errors::{HandlerResult, TerminalError};
-use restate_sdk::prelude::WorkflowContext;
-use restate_sdk::serde::Json;
+use restate_sdk::prelude::{Json, WorkflowContext};
 use serde_json::json;
 use std::fmt::Display;
 use std::net::SocketAddr;
@@ -45,6 +44,15 @@ use lash_restate_postgres_workers_e2e::{
     default_session_originator_id, e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env,
     journaled_session, record_terminal_result, record_turn_activity, record_worker_event,
     required_env, s3_store_from_env, turn_handler_error, turn_session_id,
+};
+
+// `#[restate_sdk::*]` expansions name `::restate_sdk` absolute paths; the SDK
+// reaches this crate through lash's re-export, so the crate answers to that
+// name and generated code resolves the modules below at the crate root.
+extern crate self as restate_sdk;
+#[allow(unused_imports)]
+use lash::restate::restate_sdk::{
+    context, discovery, endpoint, errors, handler, object, prelude, service, workflow,
 };
 
 fn terminal_error(err: impl Display) -> TerminalError {

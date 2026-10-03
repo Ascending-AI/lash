@@ -51,7 +51,6 @@ lash-restate = { workspace = true }
 lash-restate-test = { workspace = true }
 anyhow = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
-restate-sdk = { workspace = true }
 sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true, features = ["derive"] }

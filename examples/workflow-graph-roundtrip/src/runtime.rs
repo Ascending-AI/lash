@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use lash::LashCore;
 use lash::process::*;
+use lash::restate::restate_sdk;
 use lash::rlm::lang::{LinkedModule, ProcessRef, WorkflowGraph};
 use lash::tracing::{TraceEvent, TraceLanguageExecutionPayload};
 use tokio::sync::mpsc;

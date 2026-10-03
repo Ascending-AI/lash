@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use lash::restate::{RestateAuthorityId, RestateEngine};
+use lash_restate::restate_sdk;
 
 /// The environment variable naming the `restate-server` binary
 /// [`LocalRestateServer::spawn`] starts.

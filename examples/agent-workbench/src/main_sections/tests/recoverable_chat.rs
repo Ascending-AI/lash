@@ -2,6 +2,7 @@ use super::*;
 use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
+use lash::restate::restate_sdk;
 use lash::rlm::RlmSendBuilderExt;
 
 pub(crate) async fn recoverable_chat_test_state(

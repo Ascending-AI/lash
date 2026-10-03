@@ -8,6 +8,7 @@ use lash::plugins::{
     PluginExtensionContribution, PluginFactory, PluginRegistrar, PluginSessionContext,
     SessionPlugin,
 };
+use lash::restate::restate_sdk;
 use lash::testing::wait_until;
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::{RestateTestBackend, ServerConfig};

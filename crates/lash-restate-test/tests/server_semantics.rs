@@ -25,6 +25,15 @@ use lash_restate_test::{
 };
 use restate_sdk::prelude::*;
 
+// `#[restate_sdk::*]` expansions name `::restate_sdk` absolute paths; the SDK
+// reaches this crate through lash's re-export, so the crate answers to that
+// name and generated code resolves the modules below at the crate root.
+extern crate self as restate_sdk;
+#[allow(unused_imports)]
+use lash_restate::restate_sdk::{
+    context, discovery, endpoint, errors, handler, http_server, object, prelude, service, workflow,
+};
+
 // ---------------------------------------------------------------------------
 // Handlers under test
 // ---------------------------------------------------------------------------

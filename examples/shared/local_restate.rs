@@ -35,6 +35,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use lash::restate::restate_sdk;
 
 /// The environment variable naming the `restate-server` binary
 /// [`LocalRestateServer::shared`] starts; `restate-server` on `PATH` otherwise.

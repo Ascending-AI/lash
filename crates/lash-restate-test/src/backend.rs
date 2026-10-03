@@ -18,6 +18,7 @@ use lash_core::{
     AdmittedScope, ScopedEffectController, SessionShifts, SessionWorkEngine, StoreSet,
 };
 use lash_core_worker::DurableProcessWorker;
+use lash_restate::restate_sdk;
 use lash_restate::{
     RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine, RestateIngressClient,
     RestateNamespace, RestateProcessServing, RestateProcessWorkerSlot, RestateRegistrationError,
@@ -1101,6 +1102,7 @@ mod handler_host {
     )]
 
     use super::*;
+    use lash_restate::restate_sdk;
 
     #[restate_sdk::workflow]
     #[name = "LashTestHandlerHost"]

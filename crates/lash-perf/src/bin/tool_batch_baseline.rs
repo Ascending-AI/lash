@@ -33,8 +33,17 @@ use std::sync::Arc;
 use clap::Parser;
 use futures_util::FutureExt as _;
 use restate_sdk::errors::{HandlerResult, TerminalError};
-use restate_sdk::serde::Json;
+use restate_sdk::prelude::Json;
 use serde::Serialize;
+
+// `#[restate_sdk::*]` expansions name `::restate_sdk` absolute paths; the SDK
+// reaches this crate through lash's re-export, so the crate answers to that
+// name and generated code resolves the modules below at the crate root.
+extern crate self as restate_sdk;
+#[allow(unused_imports)]
+use lash_restate::restate_sdk::{
+    context, discovery, endpoint, errors, handler, object, prelude, service, workflow,
+};
 
 /// The durable-wait authority the probe's controller and deployment host share.
 const RESTATE_AUTHORITY: &str = "lash-perf-tool-batch";

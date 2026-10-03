@@ -364,6 +364,7 @@ pub(crate) mod anyhow_like {
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
+    use lash::restate::restate_sdk;
 
     /// The model every test chat runs: the service catalog's `mock-model`
     /// id with its provider-default reasoning.

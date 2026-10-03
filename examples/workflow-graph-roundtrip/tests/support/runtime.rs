@@ -6,6 +6,7 @@
     clippy::expect_used,
     reason = "the SQLite and Restate-double fixture must initialize"
 )]
+use lash::restate::restate_sdk;
 use workflow_graph_roundtrip::AppState;
 
 pub async fn state() -> (AppState, lash_restate_test::RestateTestBackend) {

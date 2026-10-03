@@ -1,5 +1,6 @@
 use super::*;
 use lash::SessionId;
+use lash::restate::restate_sdk;
 
 async fn register_cron_test_subscription(
     trigger_store: &lash::sqlite::SqliteTriggerStore,

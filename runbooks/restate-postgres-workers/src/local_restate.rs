@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use lash::restate::restate_sdk;
 
 /// The addresses `scripts/ci/with-service.sh restate` exports.
 #[derive(Clone, Debug)]

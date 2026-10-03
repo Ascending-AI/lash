@@ -19,6 +19,7 @@ use chrono_tz::Tz;
 use croner::parser::{CronParser, Seconds};
 use futures_util::FutureExt as _;
 use lash::TurnInput;
+use lash::restate::restate_sdk;
 use lash::runtime::AwaitEventResolver as _;
 use restate_sdk::context::{
     ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, RunFuture,

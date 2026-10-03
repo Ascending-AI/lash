@@ -1,5 +1,7 @@
 //! Session and error helpers every e2e Restate handler shares.
 
+use lash::restate::restate_sdk;
+
 /// A retryable lash error is not a workflow failure: it says the identical
 /// invocation is safe to run again and will converge. Turning it into a
 /// `TerminalError` would make an ordinary failover — where the accepted turn

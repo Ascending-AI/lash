@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use lash_core::{AdmittedScope, ScopedEffectController};
+use lash_restate::restate_sdk;
 use lash_restate::{RestateAuthorityId, RestateRuntimeEffectController};
 use restate_sdk::endpoint::{ContextInternal, InputMetadata};
 use restate_sdk::errors::{HandlerResult, TerminalError};

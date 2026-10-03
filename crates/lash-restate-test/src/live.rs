@@ -49,6 +49,7 @@ use http_body::{Body, Frame as BodyFrame};
 use http_body_util::BodyExt as _;
 use lash_core::{AdmittedScope, SessionWorkEngine, StoreSet};
 use lash_core_worker::DurableProcessWorker;
+use lash_restate::restate_sdk;
 use lash_restate::{
     RestateAdminClient, RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine,
     RestateIngressClient, RestateInvocationId, RestateNamespace, RestateProcessServing,

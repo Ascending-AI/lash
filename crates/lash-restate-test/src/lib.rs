@@ -53,6 +53,15 @@ pub use server::{
     RetryPolicy, ServedHook, ServerConfig, StartError, Stats, TimeMode, TimerView,
 };
 
+// `#[restate_sdk::*]` expansions name `::restate_sdk` absolute paths; the SDK
+// reaches this crate through lash's re-export, so the crate answers to that
+// name and generated code resolves the modules below at the crate root.
+extern crate self as restate_sdk;
+#[allow(unused_imports)]
+use lash_restate::restate_sdk::{
+    context, discovery, endpoint, errors, handler, object, prelude, service, workflow,
+};
+
 /// Completed group-dispatch and opener suspensions on a server double.
 /// Waits for dispatches because they can outlive the opener turn.
 pub async fn tool_batch_resumption_counts(server: &RestateTestServer) -> (u64, u64) {

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
-use restate_sdk::endpoint::Endpoint;
+use lash_restate::restate_sdk::endpoint::Endpoint;
 use serde::Deserialize;
 
 /// The Restate service kinds.

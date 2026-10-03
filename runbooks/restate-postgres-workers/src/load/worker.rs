@@ -11,6 +11,7 @@ use crate::{journaled_session, turn_handler_error};
 use anyhow::Result;
 use lash::restate::RestateRuntimeEffectController;
 use lash::restate::RestateWait;
+use lash::restate::restate_sdk;
 use lash::runtime::AwaitEventResolver as _;
 use lash::{SessionId, TurnInput};
 use lash_perf::workload::{Generator, ProcessPlan, QueuedInputPlan, TurnPlan};
@@ -31,6 +32,7 @@ use std::time::{Duration, Instant};
 )]
 mod service {
     use super::{LoadRequest, LoadResponse};
+    use lash::restate::restate_sdk;
     use restate_sdk::prelude::*;
 
     #[restate_sdk::workflow]

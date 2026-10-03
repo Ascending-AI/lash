@@ -18,7 +18,6 @@ dotenvy = "0.15"
 futures-util = { workspace = true }
 lash = { workspace = true, features = ["rlm", "restate", "sqlite", "openai"] }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
-restate-sdk = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

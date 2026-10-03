@@ -7,6 +7,7 @@ use crate::AppError;
 use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
+use lash::restate::restate_sdk;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

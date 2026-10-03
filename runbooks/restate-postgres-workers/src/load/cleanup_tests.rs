@@ -3,6 +3,7 @@
 #![allow(deprecated, reason = "the pinned SDK retains the trait workflow API")]
 
 use super::*;
+use lash::restate::restate_sdk;
 use lash::testing::wait_until;
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::{RestateTestBackend, ServerConfig};

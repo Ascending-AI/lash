@@ -15,7 +15,6 @@ workspace = true
 anyhow = { workspace = true }
 axum = "0.8"
 lash = { workspace = true, features = ["rlm", "typescript", "restate", "sqlite"] }
-restate-sdk = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls"] }
 thiserror = { workspace = true }
 schemars = { workspace = true }

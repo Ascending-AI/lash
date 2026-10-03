@@ -37,6 +37,15 @@ mod shutdown_marker;
 mod state;
 mod ui;
 
+// `#[restate_sdk::*]` expansions name `::restate_sdk` absolute paths; the SDK
+// reaches this crate through lash's re-export, so the crate answers to that
+// name and generated code resolves the modules below at the crate root.
+extern crate self as restate_sdk;
+#[allow(unused_imports)]
+use lash::restate::restate_sdk::{
+    context, discovery, endpoint, errors, handler, object, prelude, service, workflow,
+};
+
 fn default_openrouter_llm_profile_capability() -> lash::provider::LlmProfileCapability {
     lash::provider::LlmProfileCapability {
         instruction_role: Default::default(),

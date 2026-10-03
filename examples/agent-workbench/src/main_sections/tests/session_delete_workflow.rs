@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use lash::SessionId;
+use lash::restate::restate_sdk;
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
