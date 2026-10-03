@@ -1,6 +1,25 @@
 //! Native plugin views produced by the engine's existing journal.
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 
+/// With no fleet store, admit the validated composition with each plugin's
+/// native writer before resolving creation config or recording a transition.
+pub(super) fn native_plugin_admission(
+    host: &crate::PluginHost,
+) -> Result<crate::store::plugin_writers::PluginAdmission, crate::PluginError> {
+    let composition = host.composition()?;
+    Ok(crate::store::plugin_writers::PluginAdmission::from_plugins(
+        composition
+            .declarations()
+            .iter()
+            .map(|declaration| crate::store::plugin_writers::AdmittedPlugin {
+                plugin: declaration.id.as_str().into(),
+                behavior_revision: declaration.behavior_revision,
+                writer: declaration.format_version,
+            })
+            .collect(),
+    ))
+}
+
 pub(super) async fn record_native_transition(
     controller: &crate::ScopedEffectController<'_>,
     host: crate::PluginHost,
@@ -57,29 +76,12 @@ impl RuntimeEffectLocalRunner for NativeTransitionRunner {
         envelope: crate::RuntimeEffectEnvelope,
         _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        let crate::RuntimeEffectCommand::TransitionPlugins { mut request } = envelope.command
-        else {
+        let crate::RuntimeEffectCommand::TransitionPlugins { request } = envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 "native transition requires its recorded request",
             ));
         };
-        if request.target.is_empty() {
-            request.target = crate::store::plugin_writers::PluginAdmission::from_plugins(
-                self.host
-                    .factories()
-                    .iter()
-                    .map(|factory| {
-                        let declaration = factory.declaration();
-                        crate::store::plugin_writers::AdmittedPlugin {
-                            plugin: factory.id().into(),
-                            behavior_revision: declaration.behavior_revision,
-                            writer: declaration.format_version,
-                        }
-                    })
-                    .collect(),
-            );
-        }
         Ok(crate::RuntimeEffectOutcome::TransitionPlugins {
             record: Box::new(
                 self.host

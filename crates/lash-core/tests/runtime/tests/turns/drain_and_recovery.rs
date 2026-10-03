@@ -1256,6 +1256,77 @@ pub(super) async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does
     );
 }
 
+/// FIG-4915: a fresh storeless runtime records its complete local plugin
+/// admission before constructing capabilities for its first turn.
+#[tokio::test(flavor = "multi_thread")]
+pub(super) async fn a_fresh_storeless_runtime_materializes_its_first_turn() {
+    let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let calls = Arc::clone(&provider_calls);
+    let provider = TestProvider::builder()
+        .kind("storeless-first-turn")
+        .complete(move |_request| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async {
+                Ok::<_, LlmTransportError>(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: "first turn answered".to_string(),
+                        response_meta: None,
+                    }],
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let mut core = test_host_config(&backend).core;
+    core.providers.models = lash_core::testing::standard_test_llm_profiles(provider.into_handle());
+    let host = lash_core::testing::test_plugin_host(Vec::new());
+    assert!(!host.plugin_revisions().is_empty());
+    let mut runtime = Box::pin(
+        EmbeddedRuntimeBuilder::new(core, lash_core::testing::runtime_lease_owner())
+            .with_session_id("root")
+            .with_policy(standard_test_policy())
+            .with_plugin_host(host.clone())
+            .build(),
+    )
+    .await
+    .expect("build a fresh runtime without a session store");
+    let handler = open_turn(&double, sid("root"), "storeless-first-turn").await;
+    let turn = runtime
+        .execute_turn(
+            TurnInput::text("hello"),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
+        .await
+        .expect("the first storeless turn must materialize its nonempty plugin composition");
+    handler
+        .close()
+        .await
+        .expect("close the first turn's handler");
+
+    assert_eq!(turn.assistant_output.safe_text, "first turn answered");
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    let plugins = runtime.plugin_session().expect("materialized plugins");
+    let admission = plugins
+        .plugin_admission()
+        .expect("recorded local admission");
+    host.validate_plugin_admission(&admission)
+        .expect("the recorded admission covers the host's complete composition");
+    let composition = host.composition().expect("valid host composition");
+    for (admitted, declaration) in admission.plugins().iter().zip(composition.declarations()) {
+        assert_eq!(admitted.writer, declaration.format_version);
+    }
+    let view = lash_core::plugin::PluginNativeView::decode(
+        &runtime
+            .state()
+            .plugin_admission_snapshot()
+            .expect("recorded native view"),
+    )
+    .expect("decode the first turn's plugin transition");
+    assert_eq!(view.request.target, admission);
+}
+
 /// The storeless half of the empty-drain contract: with no durable store the
 /// queue does not exist at all, and the drain must say so by name. Reporting
 /// `ExecutionLaneBusy` or `AdmissionRefused` here would tell the host to retry or

@@ -255,14 +255,16 @@ impl EmbeddedRuntimeBuilder {
             // Creation is an adoption point of its own (FIG-4747): the
             // created head's namespaces are written in the formats the fleet
             // record permits now, and the session writes under that choice
-            // until its first Run records one.
+            // until its first Run records one. Without a fleet store, each
+            // plugin writes its declared native format.
             let admission = match &self.store {
                 Some(store) => plugins
                     .host()
                     .admit_plugins(store.store().as_ref())
                     .await
                     .map_err(|error| SessionError::Plugin(error.into()))?,
-                None => crate::store::plugin_writers::PluginAdmission::default(),
+                None => super::plugin_transition::native_plugin_admission(plugins.host())
+                    .map_err(SessionError::Plugin)?,
             };
             state.authority.plugin_config = plugins.host().resolve_creation_plugin_config(
                 plugins.host().protocol_plugin_id(),
@@ -271,9 +273,7 @@ impl EmbeddedRuntimeBuilder {
                 is_root_session,
                 &admission,
             )?;
-            if !admission.is_empty() {
-                plugins.adopt_plugin_admission(admission);
-            }
+            plugins.adopt_plugin_admission(admission);
             plugins.publish_plugin_config(state.admitted_plugin_config())?;
         }
         let mut persistence = super::lifecycle::RuntimePersistenceBindings::new(self.store);

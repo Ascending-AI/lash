@@ -76,7 +76,13 @@ impl LashRuntime {
                     "store-backed preparation requires a published plugin transition",
                 ));
             }
-            let target = plugins.plugin_admission().unwrap_or_default();
+            let target = match plugins.plugin_admission() {
+                Some(admission) => admission,
+                None => crate::runtime::plugin_transition::native_plugin_admission(plugins.host())
+                    .map_err(|error| {
+                        crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+                    })?,
+            };
             let address = crate::EffectAddress::new(
                 scoped_effect_controller.execution_scope().clone(),
                 "plugin-transition",
