@@ -59,7 +59,8 @@ pub(super) async fn retire_run(
         .into());
     }
     let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
-    for wait in load_indexed_waits(&ctx)
+    let keys = ctx.get_keys().await?;
+    for wait in load_indexed_waits_in(&ctx, &keys)
         .await?
         .into_iter()
         .filter(|wait| belongs_to_closed_run(&wait.key, &request.session_id, &request.run))
@@ -86,6 +87,22 @@ pub(super) async fn retire_run(
             resolve_indexed_waits(&ctx, object.writer, namespace, vec![key.clone()], false).await?;
         }
         ctx.clear(&durable_wait_index_state_key(&address));
+    }
+
+    // The closed run's Deferred sources end with it: an unsealed one is
+    // sealed `Cancelled`, its subscribers wake, and every row goes. A late
+    // write then finds no armed source and revives nothing.
+    let sources = source_seal::load_sources(&ctx, &keys, |armed| {
+        belongs_to_closed_run(&armed.descriptor.source, &request.session_id, &request.run)
+    })
+    .await?;
+    let cleared: Vec<_> = sources
+        .iter()
+        .map(|(address, _)| source_seal::source_state_key(address))
+        .collect();
+    source_seal::retire_sources(namespace, &ctx, object.writer, sources).await?;
+    for state_key in cleared {
+        ctx.clear(&state_key);
     }
 
     let before = metadata.cancel_decided.len() + metadata.awakeables.len();

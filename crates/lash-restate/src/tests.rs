@@ -1569,6 +1569,7 @@ mod conformance_and_poison;
 mod direct_turn_acceptance_on_the_double;
 mod drain_barrier;
 mod durable_wait_run_retirement;
+mod durable_wait_source_seal;
 mod durable_wait_turn_gate_peek;
 mod effect_execution;
 mod failure_settlement;

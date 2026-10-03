@@ -9,6 +9,7 @@ use restate_sdk::serde::Json;
 
 use crate::compat::{Call, Reply};
 
+use super::source_seal::{load_sources, retire_sources};
 use super::{
     DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX, DURABLE_WAIT_INDEX_EFFECT_PREFIX,
     DURABLE_WAIT_INDEX_GROUP_PREFIX, DURABLE_WAIT_INDEX_METADATA_KEY,
@@ -51,12 +52,21 @@ pub(super) async fn revoke_index(
     if keys
         .iter()
         .any(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX))
-        || (only_if_quiescent && (!waits.is_empty() || !metadata.awakeables.is_empty()))
+    {
+        return Ok(false);
+    }
+    // An unsealed Deferred source keeps a quiescence-proved or process
+    // retirement open; an unconditional revocation seals it `Cancelled`.
+    let open_sources = load_sources(ctx, &keys, |armed| armed.seal.is_none()).await?;
+    if (only_if_quiescent
+        && (!waits.is_empty() || !metadata.awakeables.is_empty() || !open_sources.is_empty()))
+        || (process_scope && !open_sources.is_empty())
         || ((only_if_quiescent || process_scope)
             && !scope_effects_and_groups_are_quiescent(ctx, namespace).await?)
     {
         return Ok(false);
     }
+    retire_sources(namespace, ctx, object.writer, open_sources).await?;
     let awakeables = std::mem::take(&mut metadata.awakeables);
     metadata.revoked = true;
     // A revoked index keeps its `_compat` record: it fences a stale handler

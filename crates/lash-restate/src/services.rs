@@ -578,6 +578,8 @@ lash_clients! {
         peek() -> Option<lash_core::Resolution>;
         resolve(crate::durable_wait::RestateDurableWaitResolveRequest)
             -> lash_core::ResolveOutcome;
+        seal_source(crate::durable_wait::RestateSourceSealWrite)
+            -> lash_core::tool_run::SealOutcome;
     }
 
 

@@ -41,10 +41,16 @@ use sha2::{Digest, Sha256};
 mod observer;
 mod run_retirement;
 mod scope_retirement;
+pub(crate) mod source_seal;
 
 use self::scope_retirement::revoke_index;
 
 pub(crate) use self::observer::{WaitObserver, observe_durable_wait};
+pub use self::source_seal::{
+    RestateSourceArmReply, RestateSourceArmRequest, RestateSourceSealReply,
+    RestateSourceSealRequest, RestateSourceSealWrite, RestateSourceSubscribeReply,
+    RestateSourceSubscribeRequest,
+};
 
 use self::run_retirement::closed_run_cancel_prefix;
 use crate::compat::{Call, Reply};
@@ -146,6 +152,12 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 ///         path = "crates/lash-restate/src/durable_wait/messages.rs",
 ///         RestateDurableWaitAwaitRequest,
 ///     ),
+///     roots(
+///         path = "crates/lash-restate/src/durable_wait/source_seal.rs",
+///         RestateSourceArmRequest, RestateSourceArmReply, RestateSourceSubscribeRequest,
+///         RestateSourceSubscribeReply, RestateSourceSealRequest, RestateSourceSealReply,
+///         RestateSourceSealWrite,
+///     ),
 /// )
 /// version_surface = "drain"
 /// format_manifest = "engine:restate.durable_wait_request"
@@ -160,6 +172,7 @@ pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 ///
 /// version_guard(
 ///     roots(RestateDurableWaitIndexMetadata, IndexedWait),
+///     roots(path = "crates/lash-restate/src/durable_wait/source_seal.rs", IndexedSource),
 ///     roots(path = "crates/lash-restate/src/ingress.rs", RestateInvocationId),
 ///     items(
 ///         DURABLE_WAIT_REGISTRY_FORMATS, DURABLE_WAIT_INDEX_METADATA_KEY,
@@ -167,6 +180,10 @@ pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 ///         DURABLE_WAIT_INDEX_EFFECT_PREFIX, DURABLE_WAIT_INDEX_GROUP_PREFIX,
 ///         DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX,
 ///         DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX, DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX,
+///     ),
+///     items(
+///         path = "crates/lash-restate/src/durable_wait/source_seal.rs",
+///         DURABLE_WAIT_INDEX_SOURCE_PREFIX, SOURCE_SEAL_PROMISE_KEY,
 ///     ),
 ///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
 /// )
@@ -230,81 +247,7 @@ const DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX: &str = "wait-index/v2/group-child/"
 const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v2/closure-participant/";
 
 #[cfg(test)]
-mod wait_registration_witness {
-    use super::*;
-
-    type WaitRegistrationWitness = tokio::sync::oneshot::Sender<RestateDurableWaitRegistration>;
-
-    static WAIT_REGISTRATION_WITNESSES: std::sync::LazyLock<
-        std::sync::Mutex<std::collections::HashMap<String, WaitRegistrationWitness>>,
-    > = std::sync::LazyLock::new(Default::default);
-
-    /// The receiver fires from the index handler, so an unfinished ingress task is
-    /// never mistaken for durable registration. The workflow key keeps concurrent
-    /// live tests independent.
-    pub(crate) fn arm_wait_registration_witness(
-        key: &AwaitEventKey,
-    ) -> tokio::sync::oneshot::Receiver<RestateDurableWaitRegistration> {
-        let address = RestateDurableWaitAddress::for_key(key);
-        let (send, receive) = tokio::sync::oneshot::channel();
-        WAIT_REGISTRATION_WITNESSES
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(address.workflow_key, send);
-        receive
-    }
-
-    type RegistrationHold = (
-        tokio::sync::oneshot::Sender<()>,
-        tokio::sync::oneshot::Receiver<()>,
-    );
-    static REGISTRATION_HOLDS: std::sync::LazyLock<
-        std::sync::Mutex<std::collections::HashMap<String, RegistrationHold>>,
-    > = std::sync::LazyLock::new(Default::default);
-
-    pub(crate) fn hold_wait_registration(
-        key: &AwaitEventKey,
-    ) -> (
-        tokio::sync::oneshot::Receiver<()>,
-        tokio::sync::oneshot::Sender<()>,
-    ) {
-        let (entered, waiting) = tokio::sync::oneshot::channel();
-        let (release, held) = tokio::sync::oneshot::channel();
-        REGISTRATION_HOLDS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(
-                RestateDurableWaitAddress::for_key(key).workflow_key,
-                (entered, held),
-            );
-        (waiting, release)
-    }
-
-    pub(super) async fn await_registration_release(key: &AwaitEventKey) {
-        let hold = REGISTRATION_HOLDS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&RestateDurableWaitAddress::for_key(key).workflow_key);
-        if let Some((entered, held)) = hold {
-            let _ = entered.send(());
-            let _ = held.await;
-        }
-    }
-
-    pub(super) fn observe_wait_registration(
-        key: &AwaitEventKey,
-        registration: &RestateDurableWaitRegistration,
-    ) {
-        let address = RestateDurableWaitAddress::for_key(key);
-        if let Some(witness) = WAIT_REGISTRATION_WITNESSES
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&address.workflow_key)
-        {
-            let _ = witness.send(registration.clone());
-        }
-    }
-}
+mod wait_registration_witness;
 
 #[cfg(test)]
 pub(crate) use wait_registration_witness::{arm_wait_registration_witness, hold_wait_registration};
@@ -609,6 +552,15 @@ pub trait LashDurableWaitWorkflow {
     async fn resolve(
         call: Call<RestateDurableWaitResolveRequest>,
     ) -> HandlerResult<Reply<ResolveOutcome>>;
+
+    /// Hold a Deferred source's seal (K4, FIG-4883): the first seal stays,
+    /// and a later write reads it. Only the source's
+    /// `LashDurableWaitIndex/seal_source` writes here, after authenticating
+    /// the write against the descriptor its Run pinned.
+    #[shared]
+    async fn seal_source(
+        call: Call<RestateSourceSealWrite>,
+    ) -> HandlerResult<Reply<lash_core::tool_run::SealOutcome>>;
 }
 
 /// [`LashDurableWaitWorkflow`] in one deployment's namespace (FIG-3898).
@@ -754,6 +706,14 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         ctx.resolve_promise(DURABLE_WAIT_PROMISE_KEY, payload);
         Ok(Reply::at(wire, ResolveOutcome::Accepted))
     }
+
+    async fn seal_source(
+        &self,
+        ctx: SharedWorkflowContext<'_>,
+        call: Call<RestateSourceSealWrite>,
+    ) -> HandlerResult<Reply<lash_core::tool_run::SealOutcome>> {
+        source_seal::hold_seal(ctx, call).await
+    }
 }
 /// Durable session-to-wait index used by cancellation and session deletion.
 ///
@@ -855,6 +815,26 @@ pub trait LashDurableWaitRegistry {
     async fn release_closure_participant(
         call: Call<RestateTurnCancelClosureParticipantRequest>,
     ) -> HandlerResult<Reply<()>>;
+    /// Pin a Deferred source's descriptor before its key leaves the call
+    /// (K4, FIG-4883). A re-arm with the same descriptor reads any seal the
+    /// source holds; another descriptor is refused.
+    async fn arm_source(
+        call: Call<RestateSourceArmRequest>,
+    ) -> HandlerResult<Reply<RestateSourceArmReply>>;
+    /// Subscribe a segment of the source's owning Run: a sealed source
+    /// answers its seal at once, an open one resolves the awakeable when it
+    /// seals.
+    async fn subscribe_source(
+        call: Call<RestateSourceSubscribeRequest>,
+    ) -> HandlerResult<Reply<RestateSourceSubscribeReply>>;
+    async fn unsubscribe_source(
+        call: Call<RestateSourceSubscribeRequest>,
+    ) -> HandlerResult<Reply<()>>;
+    /// Authenticate one seal write against the pinned descriptor and apply
+    /// first-writer-wins: the reply is the source's one seal.
+    async fn seal_source(
+        call: Call<RestateSourceSealRequest>,
+    ) -> HandlerResult<Reply<RestateSourceSealReply>>;
     /// Rewrite the index at the newest family format once finalize has
     /// moved the fleet to it, and raise its `_compat` (ADR 0115 §3.2,
     /// FIG-4041): the object sweep's step.
@@ -1014,15 +994,22 @@ async fn read_durable_wait_index_metadata(
 }
 
 async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<IndexedWait>, TerminalError> {
+    let keys = ctx.get_keys().await?;
+    load_indexed_waits_in(ctx, &keys).await
+}
+
+/// [`load_indexed_waits`] over a key listing the handler already read.
+async fn load_indexed_waits_in(
+    ctx: &ObjectContext<'_>,
+    keys: &[String],
+) -> Result<Vec<IndexedWait>, TerminalError> {
     let mut waits = Vec::new();
-    for state_key in ctx
-        .get_keys()
-        .await?
-        .into_iter()
+    for state_key in keys
+        .iter()
         .filter(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_WAIT_PREFIX))
     {
         let wait: IndexedWait =
-            object_state::get_stamped(ctx, &state_key, &DURABLE_WAIT_REGISTRY_FORMATS)
+            object_state::get_stamped(ctx, state_key, &DURABLE_WAIT_REGISTRY_FORMATS)
                 .await?
                 .ok_or_else(|| {
                     TerminalError::new(format!(
@@ -1030,7 +1017,7 @@ async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<IndexedWait>,
                     ))
                 })?;
         let address =
-            durable_wait_address_from_state_key(&wait.key, &state_key).ok_or_else(|| {
+            durable_wait_address_from_state_key(&wait.key, state_key).ok_or_else(|| {
                 TerminalError::new(format!(
                     "durable-wait index entry {state_key} does not match its key preimage"
                 ))
@@ -1770,6 +1757,38 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             request.participant_id,
         );
         Ok(Reply::at(wire, true))
+    }
+
+    async fn arm_source(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<RestateSourceArmRequest>,
+    ) -> HandlerResult<Reply<RestateSourceArmReply>> {
+        source_seal::arm_source(self, ctx, call).await
+    }
+
+    async fn subscribe_source(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<RestateSourceSubscribeRequest>,
+    ) -> HandlerResult<Reply<RestateSourceSubscribeReply>> {
+        source_seal::subscribe_source(self, ctx, call).await
+    }
+
+    async fn unsubscribe_source(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<RestateSourceSubscribeRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        source_seal::unsubscribe_source(self, ctx, call).await
+    }
+
+    async fn seal_source(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<RestateSourceSealRequest>,
+    ) -> HandlerResult<Reply<RestateSourceSealReply>> {
+        source_seal::seal_source(self, ctx, call).await
     }
 
     async fn release_closure_participant(

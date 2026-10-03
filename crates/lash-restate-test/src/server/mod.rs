@@ -745,6 +745,24 @@ impl JournalEntryView {
             .ok()
             .map(|complete| complete.awakeable_id)
     }
+
+    /// The awakeable a `CompleteAwakeableCommand` entry completed with a
+    /// value, and that value's bytes; `None` on every other entry.
+    pub fn completed_awakeable_value(&self) -> Option<(String, bytes::Bytes)> {
+        use crate::protocol::generated::complete_awakeable_command_message::Result;
+        use prost::Message as _;
+        if self.ty != MessageType::CompleteAwakeableCommand {
+            return None;
+        }
+        let complete = crate::protocol::generated::CompleteAwakeableCommandMessage::decode(
+            self.payload.clone(),
+        )
+        .ok()?;
+        match complete.result? {
+            Result::Value(value) => Some((complete.awakeable_id, value.content)),
+            Result::Failure(_) => None,
+        }
+    }
 }
 
 impl RestateTestServer {

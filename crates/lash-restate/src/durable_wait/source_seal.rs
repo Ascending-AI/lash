@@ -1,0 +1,432 @@
+//! K4: a Deferred source's one immutable terminal on the durable-wait family
+//! (FIG-4883).
+//!
+//! The Run arms a source before its completion key leaves the call: the
+//! scope's `LashDurableWaitIndex` pins the [`SourceDescriptor`] under the
+//! key's workflow address. Every seal write goes through that exclusive
+//! object, which authenticates it against the pinned descriptor and applies
+//! first-writer-wins; the source's `LashDurableWaitWorkflow` promise then
+//! holds the seal immutably, and the index row mirrors it for reads. A
+//! segment waits through a short subscription naming its awakeable: the
+//! subscribe call answers an existing seal at once, and a seal wakes every
+//! subscribed segment with it. Nothing waits inside a long invocation.
+//!
+//! A cancel is the owning Run's seal write, and its reply is the source's
+//! answer: when a resolution won first the cancel reads that seal, so the
+//! Run accepts the resolved result rather than a cancellation. A late write
+//! reads the existing seal and revives nothing. The seal decides one call's
+//! result versus its cancellation; the Run's rank and drain are its own
+//! records, with no transaction across the two objects. There is no deadline
+//! and no timeout terminal (binding Q3).
+
+use lash_core::AwaitEventKey;
+use lash_core::tool_run::{
+    SealOutcome, SealRefusal, SealWriter, SegmentOrdinal, SourceDescriptor, SourceSeal,
+    SourceSubscription,
+};
+use restate_sdk::context::{
+    ContextAwakeables, ContextPromises, ObjectContext, SharedWorkflowContext,
+};
+use restate_sdk::errors::{HandlerResult, TerminalError};
+use restate_sdk::serde::Json;
+use serde::{Deserialize, Serialize};
+
+use super::{
+    DURABLE_WAIT_REGISTRY_FORMATS, LASH_REPLAY_KEY_HEADER, LashDurableWaitRegistryImpl,
+    RestateDurableWaitAddress, derive_durable_wait_index_address, load_durable_wait_index_metadata,
+    object_state, verify_durable_wait_workflow_key,
+};
+use crate::compat::{Call, Reply};
+
+/// The workflow promise that holds a source's seal. It is distinct from the
+/// wait promise, so a key's older wait consumers read what they always did.
+pub(crate) const SOURCE_SEAL_PROMISE_KEY: &str = "source-seal";
+
+/// One armed source, keyed by its workflow address: the descriptor its Run
+/// pinned, the seal mirrored from the workflow promise, and the segments
+/// subscribed to it.
+/// version_surface = "coexist"
+/// version_guard(items(DURABLE_WAIT_INDEX_SOURCE_PREFIX, source_state_key))
+pub(super) const DURABLE_WAIT_INDEX_SOURCE_PREFIX: &str = "wait-index/v2/source/";
+
+/// An armed source's index row.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct IndexedSource {
+    pub(crate) descriptor: SourceDescriptor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) seal: Option<SourceSeal>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) subscribers: Vec<SourceSubscriber>,
+}
+
+/// One subscribed segment: the awakeable a seal resolves with it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SourceSubscriber {
+    pub(crate) segment: SegmentOrdinal,
+    pub(crate) awakeable_id: String,
+}
+
+/// Pin `descriptor` before the source's key leaves its call.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestateSourceArmRequest {
+    pub descriptor: SourceDescriptor,
+}
+
+/// A segment's short subscription: the seal resolves `awakeable_id` with
+/// the [`SourceSeal`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestateSourceSubscribeRequest {
+    pub subscription: SourceSubscription,
+    pub awakeable_id: String,
+}
+
+/// One authenticated seal write.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestateSourceSealRequest {
+    pub source: AwaitEventKey,
+    pub writer: SealWriter,
+    pub seal: SourceSeal,
+}
+
+/// The seal the index hands its source's workflow to hold.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestateSourceSealWrite {
+    pub source: AwaitEventKey,
+    pub seal: SourceSeal,
+}
+
+/// Why the index refused a source request; nothing was written.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RestateSourceRefusal {
+    /// The source's scope was retired: no source of it is armed, subscribed
+    /// or sealed again.
+    #[error("the source's scope is retired")]
+    Retired,
+    /// No Run armed this source, or its Run retired it.
+    #[error("the source is not armed")]
+    NotArmed,
+    /// The source is armed with another descriptor.
+    #[error("the source is armed with another descriptor")]
+    DescriptorMismatch,
+    /// A subscription named a Run other than the source's owner.
+    #[error("the subscription names a Run that does not own the source")]
+    WrongOwner,
+    /// The pinned descriptor refused the write.
+    #[error(transparent)]
+    Seal { seal: SealRefusal },
+}
+
+/// What `arm_source` answers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RestateSourceArmReply {
+    /// The source is armed; a re-arm reads any seal it already holds.
+    Armed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seal: Option<SourceSeal>,
+    },
+    Refused {
+        refusal: RestateSourceRefusal,
+    },
+}
+
+/// What `subscribe_source` answers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RestateSourceSubscribeReply {
+    /// The seal will resolve the subscription's awakeable.
+    Subscribed,
+    /// The source was already sealed: this is its seal, and nothing was
+    /// subscribed.
+    Sealed {
+        seal: SourceSeal,
+    },
+    Refused {
+        refusal: RestateSourceRefusal,
+    },
+}
+
+/// What `seal_source` answers: the source's one seal, or a refusal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RestateSourceSealReply {
+    Outcome { outcome: SealOutcome },
+    Refused { refusal: RestateSourceRefusal },
+}
+
+pub(super) fn source_state_key(address: &RestateDurableWaitAddress) -> String {
+    format!("{DURABLE_WAIT_INDEX_SOURCE_PREFIX}{}", address.workflow_key)
+}
+
+async fn load_source(
+    ctx: &ObjectContext<'_>,
+    address: &RestateDurableWaitAddress,
+) -> Result<Option<IndexedSource>, TerminalError> {
+    object_state::get_stamped(
+        ctx,
+        &source_state_key(address),
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+    )
+    .await
+}
+
+pub(super) async fn arm_source(
+    registry: &LashDurableWaitRegistryImpl,
+    ctx: ObjectContext<'_>,
+    call: Call<RestateSourceArmRequest>,
+) -> HandlerResult<Reply<RestateSourceArmReply>> {
+    let (wire, request) = call.open()?;
+    let object = registry.admit(&ctx).await?;
+    let address = derive_durable_wait_index_address(ctx.key(), &request.descriptor.source)?;
+    let refused = |refusal| Ok(Reply::at(wire, RestateSourceArmReply::Refused { refusal }));
+    if load_durable_wait_index_metadata(&ctx, object.writer)
+        .await?
+        .revoked
+    {
+        return refused(RestateSourceRefusal::Retired);
+    }
+    if let Some(armed) = load_source(&ctx, &address).await? {
+        if armed.descriptor != request.descriptor {
+            return refused(RestateSourceRefusal::DescriptorMismatch);
+        }
+        return Ok(Reply::at(
+            wire,
+            RestateSourceArmReply::Armed { seal: armed.seal },
+        ));
+    }
+    object_state::set_stamped(
+        &ctx,
+        &source_state_key(&address),
+        object.writer,
+        IndexedSource {
+            descriptor: request.descriptor,
+            seal: None,
+            subscribers: Vec::new(),
+        },
+    );
+    Ok(Reply::at(wire, RestateSourceArmReply::Armed { seal: None }))
+}
+
+pub(super) async fn subscribe_source(
+    registry: &LashDurableWaitRegistryImpl,
+    ctx: ObjectContext<'_>,
+    call: Call<RestateSourceSubscribeRequest>,
+) -> HandlerResult<Reply<RestateSourceSubscribeReply>> {
+    let (wire, request) = call.open()?;
+    let object = registry.admit(&ctx).await?;
+    let address = derive_durable_wait_index_address(ctx.key(), &request.subscription.source)?;
+    let refused = |refusal| {
+        Ok(Reply::at(
+            wire,
+            RestateSourceSubscribeReply::Refused { refusal },
+        ))
+    };
+    if load_durable_wait_index_metadata(&ctx, object.writer)
+        .await?
+        .revoked
+    {
+        return refused(RestateSourceRefusal::Retired);
+    }
+    let Some(mut armed) = load_source(&ctx, &address).await? else {
+        return refused(RestateSourceRefusal::NotArmed);
+    };
+    if armed.descriptor.owner != request.subscription.owner {
+        return refused(RestateSourceRefusal::WrongOwner);
+    }
+    if let Some(seal) = armed.seal {
+        return Ok(Reply::at(
+            wire,
+            RestateSourceSubscribeReply::Sealed { seal },
+        ));
+    }
+    let subscriber = SourceSubscriber {
+        segment: request.subscription.segment,
+        awakeable_id: request.awakeable_id,
+    };
+    if !armed.subscribers.contains(&subscriber) {
+        armed.subscribers.push(subscriber);
+        object_state::set_stamped(&ctx, &source_state_key(&address), object.writer, armed);
+    }
+    Ok(Reply::at(wire, RestateSourceSubscribeReply::Subscribed))
+}
+
+/// Drop one segment's subscription: a segment that stops waiting, or a
+/// predecessor whose successor subscribed. A source sealed since keeps its
+/// seal; an unknown subscription is already gone.
+pub(super) async fn unsubscribe_source(
+    registry: &LashDurableWaitRegistryImpl,
+    ctx: ObjectContext<'_>,
+    call: Call<RestateSourceSubscribeRequest>,
+) -> HandlerResult<Reply<()>> {
+    let (wire, request) = call.open()?;
+    let object = registry.admit(&ctx).await?;
+    let address = derive_durable_wait_index_address(ctx.key(), &request.subscription.source)?;
+    let Some(mut armed) = load_source(&ctx, &address).await? else {
+        return Ok(Reply::at(wire, ()));
+    };
+    let before = armed.subscribers.len();
+    armed.subscribers.retain(|subscriber| {
+        subscriber.segment != request.subscription.segment
+            || subscriber.awakeable_id != request.awakeable_id
+    });
+    if armed.subscribers.len() != before {
+        object_state::set_stamped(&ctx, &source_state_key(&address), object.writer, armed);
+    }
+    Ok(Reply::at(wire, ()))
+}
+
+pub(super) async fn seal_source(
+    registry: &LashDurableWaitRegistryImpl,
+    ctx: ObjectContext<'_>,
+    call: Call<RestateSourceSealRequest>,
+) -> HandlerResult<Reply<RestateSourceSealReply>> {
+    let (wire, request) = call.open()?;
+    let object = registry.admit(&ctx).await?;
+    let address = derive_durable_wait_index_address(ctx.key(), &request.source)?;
+    let refused = |refusal| Ok(Reply::at(wire, RestateSourceSealReply::Refused { refusal }));
+    if load_durable_wait_index_metadata(&ctx, object.writer)
+        .await?
+        .revoked
+    {
+        return refused(RestateSourceRefusal::Retired);
+    }
+    let Some(armed) = load_source(&ctx, &address).await? else {
+        return refused(RestateSourceRefusal::NotArmed);
+    };
+    if armed.descriptor.source != request.source {
+        return refused(RestateSourceRefusal::DescriptorMismatch);
+    }
+    let outcome = match armed
+        .descriptor
+        .seal(armed.seal.as_ref(), &request.writer, request.seal)
+    {
+        Err(seal) => return refused(RestateSourceRefusal::Seal { seal }),
+        Ok(outcome @ SealOutcome::AlreadySealed { .. }) => outcome,
+        Ok(SealOutcome::Sealed { seal }) => {
+            seal_and_wake(
+                &registry.namespace,
+                &ctx,
+                object.writer,
+                &address,
+                armed,
+                seal,
+            )
+            .await?
+        }
+    };
+    Ok(Reply::at(wire, RestateSourceSealReply::Outcome { outcome }))
+}
+
+/// Hand `seal` to the source's workflow, then wake every subscribed segment
+/// with the seal the workflow holds and mirror it into the row. The
+/// workflow call precedes every wake, so a crash between them replays the
+/// recorded seal and still wakes each subscriber once.
+async fn seal_and_wake(
+    namespace: &crate::RestateNamespace,
+    ctx: &ObjectContext<'_>,
+    writer: object_state::StoredValueWriter,
+    address: &RestateDurableWaitAddress,
+    mut armed: IndexedSource,
+    seal: SourceSeal,
+) -> Result<SealOutcome, TerminalError> {
+    let outcome = namespace
+        .durable_wait_workflow(ctx, address.workflow_key.clone())
+        .seal_source(RestateSourceSealWrite {
+            source: armed.descriptor.source.clone(),
+            seal,
+        })
+        .header(
+            LASH_REPLAY_KEY_HEADER.to_string(),
+            armed.descriptor.source.key_id.clone(),
+        )
+        .call()
+        .await?
+        .into_body();
+    let (SealOutcome::Sealed { seal } | SealOutcome::AlreadySealed { seal }) = &outcome;
+    for subscriber in std::mem::take(&mut armed.subscribers) {
+        ctx.resolve_awakeable(&subscriber.awakeable_id, Json(seal.clone()));
+    }
+    armed.seal = Some(seal.clone());
+    object_state::set_stamped(ctx, &source_state_key(address), writer, armed);
+    Ok(outcome)
+}
+
+/// The armed sources among `keys` that `retiring` selects, with their
+/// addresses.
+pub(super) async fn load_sources(
+    ctx: &ObjectContext<'_>,
+    keys: &[String],
+    mut retiring: impl FnMut(&IndexedSource) -> bool,
+) -> Result<Vec<(RestateDurableWaitAddress, IndexedSource)>, TerminalError> {
+    let mut sources = Vec::new();
+    for state_key in keys
+        .iter()
+        .filter(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_SOURCE_PREFIX))
+    {
+        let armed: IndexedSource =
+            object_state::get_stamped(ctx, state_key, &DURABLE_WAIT_REGISTRY_FORMATS)
+                .await?
+                .ok_or_else(|| {
+                    TerminalError::new(format!("source index entry {state_key} disappeared"))
+                })?;
+        let address = RestateDurableWaitAddress::for_key(&armed.descriptor.source);
+        if source_state_key(&address) != *state_key || address.index_key() != ctx.key() {
+            return Err(TerminalError::new(format!(
+                "source index entry {state_key} does not match its descriptor"
+            )));
+        }
+        if retiring(&armed) {
+            sources.push((address, armed));
+        }
+    }
+    Ok(sources)
+}
+
+/// Retire `sources`: an unsealed one is sealed `Cancelled` for its owning
+/// Run, and its subscribers wake with the seal the workflow holds. The row
+/// itself is the caller's to clear.
+pub(super) async fn retire_sources(
+    namespace: &crate::RestateNamespace,
+    ctx: &ObjectContext<'_>,
+    writer: object_state::StoredValueWriter,
+    sources: Vec<(RestateDurableWaitAddress, IndexedSource)>,
+) -> Result<(), TerminalError> {
+    for (address, armed) in sources {
+        if armed.seal.is_none() {
+            seal_and_wake(
+                namespace,
+                ctx,
+                writer,
+                &address,
+                armed,
+                SourceSeal::Cancelled,
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// The workflow half of a seal: the first seal its promise receives stays.
+/// Only the source's index calls it, one write at a time.
+pub(super) async fn hold_seal(
+    ctx: SharedWorkflowContext<'_>,
+    call: Call<RestateSourceSealWrite>,
+) -> HandlerResult<Reply<SealOutcome>> {
+    let (wire, request) = call.open()?;
+    verify_durable_wait_workflow_key(ctx.key(), &request.source)?;
+    if let Some(payload) = ctx.peek_promise::<String>(SOURCE_SEAL_PROMISE_KEY).await? {
+        let seal = serde_json::from_str(&payload).map_err(TerminalError::from_error)?;
+        return Ok(Reply::at(wire, SealOutcome::AlreadySealed { seal }));
+    }
+    let payload = serde_json::to_string(&request.seal).map_err(TerminalError::from_error)?;
+    ctx.resolve_promise(SOURCE_SEAL_PROMISE_KEY, payload);
+    Ok(Reply::at(wire, SealOutcome::Sealed { seal: request.seal }))
+}
