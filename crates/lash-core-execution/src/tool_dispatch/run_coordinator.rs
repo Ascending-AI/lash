@@ -152,10 +152,12 @@ fn encode<T: serde::Serialize>(value: &T) -> Result<String, String> {
 /// The fold and the material of one Run as its records are served.
 struct RunJournal<'a> {
     scoped: &'a ScopedEffectController<'a>,
+    owner: EffectOpener,
     segment: SegmentOrdinal,
     ledger: RunLedger,
     materials: Materials,
     records: Vec<RunRecord>,
+    entries: Vec<RunJournalEntry>,
 }
 
 impl RunJournal<'_> {
@@ -194,7 +196,8 @@ impl RunJournal<'_> {
 
     fn accept(&mut self, entry: RunJournalEntry) -> Result<RunRecord, SingletonRunError> {
         self.ledger.append(self.segment, &entry.record)?;
-        self.materials.admit(entry.materials)?;
+        self.materials.admit(entry.materials.clone())?;
+        self.entries.push(entry.clone());
         self.records.push(entry.record.clone());
         Ok(entry.record)
     }
@@ -584,6 +587,11 @@ pub struct RunCoordinator<'a> {
     journal: RunJournal<'a>,
     /// Decided calls whose presentation is owed, by rank.
     owed: BTreeMap<u64, Owed<'a>>,
+    pending: Vec<parallel::Pending<'a>>,
+    attempts: Vec<crate::tool_run::RunAttemptEntry>,
+    cut: Option<crate::tool_run::Cut>,
+    faulted: bool,
+    active_frame: bool,
 }
 
 impl<'a> RunCoordinator<'a> {
@@ -600,6 +608,7 @@ impl<'a> RunCoordinator<'a> {
         Self {
             journal: RunJournal {
                 scoped,
+                owner: owner.clone(),
                 segment,
                 ledger: RunLedger::new(owner.clone()),
                 materials: Materials {
@@ -608,8 +617,14 @@ impl<'a> RunCoordinator<'a> {
                     entries: BTreeMap::new(),
                 },
                 records: Vec::new(),
+                entries: Vec::new(),
             },
             owed: BTreeMap::new(),
+            pending: Vec::new(),
+            attempts: Vec::new(),
+            cut: None,
+            faulted: false,
+            active_frame: false,
         }
     }
 
@@ -631,6 +646,18 @@ impl<'a> RunCoordinator<'a> {
     ///
     /// A typed [`SingletonRunError`]; none of them executes a body.
     pub async fn decide(
+        &mut self,
+        call: &'a SingletonToolCall,
+        handlers: &'a dyn SingletonToolHandlers,
+    ) -> Result<DecidedCall, SingletonRunError> {
+        self.begin_frame()?;
+        let result = self.decide_inner(call, handlers).await;
+        self.active_frame = false;
+        self.note_fault(&result);
+        result
+    }
+
+    async fn decide_inner(
         &mut self,
         call: &'a SingletonToolCall,
         handlers: &'a dyn SingletonToolHandlers,
@@ -712,6 +739,12 @@ impl<'a> RunCoordinator<'a> {
         handlers: &dyn SingletonToolHandlers,
         retry: crate::tool_run::RecordedRetryPolicy,
     ) -> Result<Vec<(AdmittedCall, SingletonPreparedRequest)>, SingletonRunError> {
+        if self.faulted {
+            return Err(RunCutRefusal::InvocationFailed.into());
+        }
+        if let Some(cut) = self.cut {
+            return Err(RunCutRefusal::AdmissionFrozen { reason: cut.reason }.into());
+        }
         let Some(first_call) = calls.first() else {
             return Ok(Vec::new());
         };
@@ -883,6 +916,16 @@ impl<'a> RunCoordinator<'a> {
     /// ranks are not seated refuses with [`RunEventRefusal::DrainFrontier`]
     /// before it issues anything.
     pub async fn drain(
+        &mut self,
+    ) -> Result<Vec<(ToolCallId, SingletonTerminal)>, SingletonRunError> {
+        self.begin_frame()?;
+        let result = self.drain_inner().await;
+        self.active_frame = false;
+        self.note_fault(&result);
+        result
+    }
+
+    async fn drain_inner(
         &mut self,
     ) -> Result<Vec<(ToolCallId, SingletonTerminal)>, SingletonRunError> {
         let owed = std::mem::take(&mut self.owed);
@@ -1433,4 +1476,119 @@ async fn capture_attempt(
         result,
         materials,
     })
+}
+
+/// Why a physical boundary cannot admit work or capture the Run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum RunCutRefusal {
+    #[error("the invocation failed; its engine journal owns recovery")]
+    InvocationFailed,
+    #[error("no physical cut was requested")]
+    NotRequested,
+    #[error("issued local work has not been durably acknowledged")]
+    NotQuiescent,
+    #[error("new admission is frozen for the {reason:?} cut")]
+    AdmissionFrozen { reason: crate::BoundaryReason },
+}
+
+/// The acknowledged records a boundary may hand to continuation publication.
+/// Canonical material and resolved state remain in their original receipts.
+/// Pending Deferred sources remain descriptors in those records; no local
+/// handle, body, socket or borrowed context is exported.
+/// Turn and process owners retain their separate publication transactions.
+#[derive(Clone, Debug)]
+pub struct RunCutSnapshot {
+    pub owner: EffectOpener,
+    pub segment: SegmentOrdinal,
+    pub cut: crate::tool_run::Cut,
+    pub entries: Vec<RunJournalEntry>,
+    pub attempts: Vec<crate::tool_run::RunAttemptEntry>,
+}
+
+impl RunCoordinator<'_> {
+    fn begin_frame(&mut self) -> Result<(), SingletonRunError> {
+        if self.active_frame || self.faulted {
+            return Err(RunCutRefusal::InvocationFailed.into());
+        }
+        self.active_frame = true;
+        Ok(())
+    }
+
+    fn note_fault<T>(&mut self, result: &Result<T, SingletonRunError>) {
+        if result.is_err()
+            && !matches!(
+                result,
+                Err(SingletonRunError::Cut(
+                    RunCutRefusal::AdmissionFrozen { .. }
+                ))
+            )
+        {
+            self.faulted = true;
+        }
+    }
+
+    /// Freeze admission at this boundary, retaining the first requested reason.
+    /// Requesting a physical cut never closes or cancels the logical Run.
+    pub fn request_cut(&mut self, reason: crate::BoundaryReason) -> crate::tool_run::Cut {
+        let cut = *self
+            .cut
+            .get_or_insert_with(|| crate::tool_run::Cut::request(reason));
+        let observed = cut.observe(
+            self.pending
+                .len()
+                .saturating_add(usize::from(self.active_frame || self.faulted)),
+        );
+        self.cut = Some(observed);
+        observed
+    }
+
+    /// The current phase, derived from the handles still owed durable acceptance.
+    #[must_use]
+    pub fn cut(&self) -> Option<crate::tool_run::Cut> {
+        self.cut.map(|cut| {
+            cut.observe(
+                self.pending
+                    .len()
+                    .saturating_add(usize::from(self.active_frame || self.faulted)),
+            )
+        })
+    }
+
+    /// Poll issued work through durable acceptance, without draining protected
+    /// declarations or awaiting Deferred sources. Registered retry work belongs
+    /// to the already admitted calls and keeps its recorded schedule.
+    ///
+    /// # Errors
+    /// A missing request or a typed execution refusal. An invocation fault
+    /// exports nothing; its original engine journal owns recovery.
+    pub async fn quiesce(&mut self) -> Result<RunCutSnapshot, SingletonRunError> {
+        if self.cut.is_none() {
+            return Err(RunCutRefusal::NotRequested.into());
+        }
+        while !self.pending.is_empty() {
+            self.progress().await?;
+        }
+        self.capture_cut().map_err(Into::into)
+    }
+
+    /// Capture only durable receipts. This does not publish successor ownership.
+    ///
+    /// # Errors
+    /// A missing request or an issued handle still awaiting durable acceptance.
+    pub fn capture_cut(&self) -> Result<RunCutSnapshot, RunCutRefusal> {
+        if self.faulted || self.active_frame {
+            return Err(RunCutRefusal::InvocationFailed);
+        }
+        let cut = self.cut().ok_or(RunCutRefusal::NotRequested)?;
+        if cut.phase != crate::tool_run::CutPhase::Capturable {
+            return Err(RunCutRefusal::NotQuiescent);
+        }
+        Ok(RunCutSnapshot {
+            owner: self.journal.owner.clone(),
+            segment: self.journal.segment,
+            cut,
+            entries: self.journal.entries.clone(),
+            attempts: self.attempts.clone(),
+        })
+    }
 }

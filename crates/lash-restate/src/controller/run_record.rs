@@ -213,10 +213,23 @@ mod tests {
         predecessor.check(entry.get(BUILD_GENERATION_FIELD)).await;
         assert_eq!(
             crate::services::DEFAULT_NAMESPACE
-                .generation(crate::LashService::TurnDriver, old)
+                .generation(crate::LashService::TurnDriver, old.clone())
                 .generation_lane_name()
                 .unwrap(),
             old_lane
         );
+        // Local quiescence is shared by turn and process handlers (K6).
+        let predecessor_process = crate::services::DEFAULT_NAMESPACE
+            .generation(crate::LashService::ProcessWorkflow, old)
+            .generation_lane_name()
+            .unwrap();
+        let successor_process = crate::services::DEFAULT_NAMESPACE
+            .generation(
+                crate::LashService::ProcessWorkflow,
+                generation(crate::JOURNAL_LOGIC_EPOCH),
+            )
+            .generation_lane_name()
+            .unwrap();
+        assert_ne!(predecessor_process, successor_process);
     }
 }

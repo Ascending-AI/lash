@@ -48,6 +48,25 @@ D, and publishes after D is durable. Failed or cancelled candidates
 publish no success commands; replay installs the recorded resolutions
 without executing a body, check or reducer.
 
+`RunCoordinator::start_round` registers issued attempts with the coordinator;
+`progress` accepts one recorded selection at a time. A program effect can
+therefore run after a winner while another body remains unfinished.
+`request_cut` freezes further admission, and `quiesce` continues the same
+recorded schedule through durable acceptance of all issued local work.
+`capture_cut` refuses a pending handle, a failed invocation or a dropped
+progress frame. A body proposal is never an acknowledgement. Registered
+retry work retains its existing schedule and a pending Deferred source
+needs no local waiter.
+
+`RunCutSnapshot` exports the original journal and attempt receipts, including
+canonical material, resolved state, unconsumed decisions, pending Deferred
+sources and declared-start obligations. It carries no native handle and
+performs no Closing, cancellation, reroute or successor publication. Turn
+and process continuation integration belongs to FIG-4739 and FIG-4890;
+source transfer belongs to FIG-4891. This seam does not activate production
+handover callers. Its journal logic epoch moves with this landing; stored
+format versions remain frozen.
+
 The plugin registrar mints every callback key from `CallbackSlot`, so a
 callback slot cannot exist without its key prefix and its state authority.
 

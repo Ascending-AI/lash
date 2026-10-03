@@ -423,6 +423,8 @@ pub enum SingletonDrift {
 /// Why a singleton stopped before it ended. None of these runs a body.
 #[derive(Debug, thiserror::Error)]
 pub enum SingletonRunError {
+    #[error(transparent)]
+    Cut(#[from] super::run_coordinator::RunCutRefusal),
     #[error("isolated start refused: {0}")]
     Isolation(#[from] super::IsolatedStartRefusal),
     /// Admission refused the call, or a recorded admission no longer binds an
