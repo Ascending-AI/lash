@@ -1,5 +1,4 @@
 use super::*;
-use lash::SessionId;
 
 use lash::triggers::TriggerStore;
 
