@@ -413,7 +413,6 @@ impl PluginHost {
         session: &Arc<PluginSession>,
     ) -> Result<(), PluginError> {
         let _materialization = session.materialization_lock.lock_recover();
-        let _read_only = super::state::ReadOnlyConstruction::enter();
         session.validate_recorded_admission()?;
         if session.is_materialized() {
             return Ok(());
@@ -468,7 +467,7 @@ impl PluginHost {
         self.register_session(&session.owner, session)?;
         for plugin in &session.capabilities().plugins {
             let state =
-                PluginStateStore::bind(&session.owner, plugin.id(), Arc::clone(&session.state));
+                PluginStateView::bind(&session.owner, plugin.id(), Arc::clone(&session.state));
             let probe = state.retention_probe();
             plugin.session_ready(SessionReadyContext {
                 tracing: self.trace_runtime.clone(),
@@ -524,7 +523,7 @@ impl PluginHost {
             ));
             reg.contributions = contributions;
             reg.tool_names = tool_names;
-            reg.state = Some(PluginStateStore::bind(
+            reg.state = Some(PluginStateView::bind(
                 &ctx.owner,
                 plugin.id(),
                 Arc::clone(&state),

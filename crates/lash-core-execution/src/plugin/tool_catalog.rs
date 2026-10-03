@@ -1,5 +1,3 @@
-use crate::SessionId;
-
 use super::*;
 
 #[derive(Clone)]
@@ -49,12 +47,15 @@ impl PluginAbort {
 }
 
 /// What one before-turn or checkpoint observer contributes: messages the
-/// turn sees and runtime events the session publishes. Contributions are
-/// applied at the turn's owned boundary; an observer has no veto.
+/// turn sees, runtime events the session publishes, and commands against
+/// its own plugin state namespace. Contributions are applied at the turn's
+/// owned boundary; an observer has no veto.
 #[derive(Clone, Debug, Default)]
 pub struct TurnContributions {
     pub messages: Vec<PluginMessage>,
     pub events: Vec<PluginRuntimeEvent>,
+    /// Published with the callback's recorded decision (K10).
+    pub state: super::StateCommands,
 }
 
 /// What one after-turn observer contributes, applied before the turn's
@@ -66,28 +67,37 @@ pub struct AfterTurnContributions {
     /// Durable plugin records appended to the turn's graph, outside the
     /// conversation.
     pub records: Vec<PluginRecordContribution>,
+    /// Published with the callback's recorded decision (K10).
+    pub state: super::StateCommands,
 }
 
 /// A durable plugin record an after-turn observer appends to the turn.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PluginRecordContribution {
     pub plugin_type: String,
     pub body: serde_json::Value,
+}
+
+/// One before-turn or after-turn observer's recorded decision: what it
+/// contributed apart from its state commands, whose resolution the same
+/// recorded step carries. Replay serves it without running the observer.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedTurnContribution {
+    pub plugin_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<PluginMessage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<PluginRuntimeEvent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub records: Vec<PluginRecordContribution>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct TurnPreparation {
     pub messages: crate::MessageSequence,
     pub events: Vec<crate::SessionStreamEvent>,
-}
-
-#[derive(Clone)]
-pub struct PrepareTurnRequest {
-    pub session_id: SessionId,
-    pub state: SessionReadView,
-    pub messages: crate::MessageSequence,
-    pub sessions: Arc<dyn SessionStateService>,
-    pub turn_context: crate::TurnContext,
 }
 
 #[derive(Clone, Debug, Default)]

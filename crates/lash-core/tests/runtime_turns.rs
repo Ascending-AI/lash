@@ -24,7 +24,7 @@ mod runtime {
             LlmOutputPart, LlmProviderTraceSender, LlmRequest, LlmResponse, LlmStreamEvent,
         };
         pub(crate) use lash_core::plugin::{
-            CheckpointHookContext, PrepareTurnRequest, SessionConfigChangedContext, SessionRelation,
+            CheckpointHookContext, SessionConfigChangedContext, SessionRelation,
         };
         pub(crate) use lash_core::plugin::{
             RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,

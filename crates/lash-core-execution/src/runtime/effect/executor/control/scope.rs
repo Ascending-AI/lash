@@ -488,14 +488,20 @@ impl<'run> ScopedEffectController<'run> {
         ) {
             self.effects.fetch_add(1, Ordering::SeqCst);
         }
-        let plugins = local_executor.plugin_state_session();
+        // Boxed: it waits across the engine's execution of the effect.
+        let publication = local_executor.plugin_state_session().map(|plugins| {
+            Box::new(crate::plugin::EffectPublication::begin(
+                plugins,
+                envelope.invocation.address().clone(),
+            ))
+        });
         let wait = crate::trace::wait_receipts::WaitBoundary::begin(self, &envelope).await?;
         let result = self
             .controller()
             .execute_effect(envelope, local_executor)
             .await?;
-        let result = match plugins {
-            Some(plugins) => plugins.restore_effect_state(result)?,
+        let result = match publication {
+            Some(publication) => publication.publish(result)?,
             None => result,
         };
         if let Some(wait) = wait {

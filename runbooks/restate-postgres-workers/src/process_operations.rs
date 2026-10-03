@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, ensure};
 use lash::plugins::{
     PluginDeclaration, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
-    PluginStateStore, SessionPlugin, SessionReadyContext,
+    PluginStateView, SessionPlugin, SessionReadyContext, StateCommands,
 };
 use lash::process::{
     Lifetime, ObservedProcessEvent, ProcessCursor, ProcessEventPageEvents, ProcessEventPageMore,
@@ -26,7 +26,7 @@ const STATE_KEY: &str = "replacement-value";
 
 #[derive(Clone)]
 pub struct StatePlugin {
-    state: tokio::sync::watch::Sender<Option<PluginStateStore>>,
+    state: tokio::sync::watch::Sender<Option<PluginStateView>>,
 }
 
 impl Default for StatePlugin {
@@ -73,14 +73,15 @@ impl SessionPlugin for StatePlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        let state = reg.state();
         reg.turn().before(
             lash::hook_key!("process-operations"),
             Arc::new(move |_| {
-                let state = state.clone();
                 Box::pin(async move {
-                    state.set(STATE_KEY, json!({"value": "survives replacement"}))?;
-                    Ok(Default::default())
+                    Ok(lash::plugins::TurnContributions {
+                        state: StateCommands::new()
+                            .set(STATE_KEY, json!({"value": "survives replacement"})),
+                        ..Default::default()
+                    })
                 })
             }),
         )?;

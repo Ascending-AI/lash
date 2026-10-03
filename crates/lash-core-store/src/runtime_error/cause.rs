@@ -18,14 +18,22 @@ pub enum RuntimeErrorCause {
     MaterialRefused {
         refusal: Box<crate::tool_run::MaterialRefusal>,
     },
-    /// A retained state handle attempted a write outside an admitted callback.
-    PluginStateWriteScopeRequired {
+    /// A callback returned state commands where no recorded body carries
+    /// their resolution.
+    PluginStateUnrecorded {
         plugin: String,
     },
-    /// A recorded callback's accepted state belongs to another owner.
+    /// A recorded callback's published state belongs to another owner.
     PluginStateEffectOwnerMismatch,
-    /// Replay cannot install an accepted batch over a different namespace.
-    PluginStateEffectReplayMismatch {
+    /// A recorded state resolution does not follow its namespace's applied
+    /// frontier.
+    PluginStateFrontier {
+        refusal: Box<crate::tool_run::NamespaceFrontierRefusal>,
+    },
+    /// A namespace holds a reduced publication of unknown durability; it
+    /// publishes nothing more until the owner is rebuilt from durable state.
+    /// The attempt is not recorded: the invocation's recovery owns it.
+    PluginStatePublicationFenced {
         plugin: String,
     },
     /// A completed provider call's refusal, retained through plugin and host errors.

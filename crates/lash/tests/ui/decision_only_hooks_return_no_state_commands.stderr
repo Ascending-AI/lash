@@ -1,0 +1,7 @@
+error[E0560]: struct `AssistantResponseTransform` has no field named `state`
+  --> tests/ui/decision_only_hooks_return_no_state_commands.rs:10:9
+   |
+10 |         state: StateCommands::new(),
+   |         ^^^^^ `AssistantResponseTransform` does not have this field
+   |
+   = note: all struct fields are already assigned

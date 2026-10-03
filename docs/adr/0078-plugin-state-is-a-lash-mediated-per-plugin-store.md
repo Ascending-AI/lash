@@ -2,68 +2,96 @@
 
 ## Context
 
-Durable plugin state needs observable writes and a runtime-owned checkpoint
+Durable plugin state needs observable changes and a runtime-owned checkpoint
 boundary. A plugin's private freshness assertion cannot prove that the state
-captured at a boundary includes every accepted mutation.
+captured at a boundary includes every accepted change, and a change made
+inside work that is never recorded must not reach work that is.
 
 ## Decision
 
 Lash owns a JSON key-value namespace for each runtime owner and plugin id.
-For a session plugin the owner is its session. `PluginStateStore` binds that
-identity once; reads and writes do not accept another plugin id. A namespace carries the plugin's declared nonzero `format_version`. State and
-recorded config share that stamp and the factory's pure format codecs.
+For a session plugin the owner is its session. `PluginStateView` binds that
+identity once; reads do not accept another plugin id. A namespace carries the
+plugin's declared nonzero `format_version`. State and recorded config share
+that stamp and the factory's pure format codecs.
 
 ### 1. The surface
 
-The opaque, cloneable handle exposes `owner`, `plugin_id`, `generation`, `get`,
-`get_as`, `keys`, `set`, `set_as`, `remove`, `apply`, and `apply_guarded`.
-Calls are synchronous map operations under a shared mutex; they perform no I/O.
-Reads return owned JSON values. No mutable borrow, entry API, mutation closure,
-or storage guard crosses the plugin boundary. A read-modify-write uses an owned
-copy and a mediated write, with a generation guard when interleaving matters.
+The cloneable view exposes `owner`, `plugin_id`, `generation`, `get`, `get_as`
+and `keys` over the published namespace. It has no writer, and no handle a
+plugin retains writes. Reads are synchronous map operations under a shared
+mutex and return owned JSON values.
 
-Generation is an acceptance token, not a durability signal. The handle has no
-flush method, committed-generation accessor, or durability notification.
+A plugin changes its namespace only by returning `StateCommands` with a
+recorded result: from a tool body (`ToolOutcome::Done` carries them), or from a
+before-turn, after-turn, checkpoint or after-tool result-check callback. Every
+other callback slot is decision-only; its answer type has no command field.
+Commands are `set`, `remove` and `apply`, which names a pure reducer the
+plugin registered with `PluginRegistrar::state_reducer`. A read-modify-write
+goes through a reducer; it never reads a view and writes back.
 
-### 2. Keys, values, and the error type
+### 2. Keys, values, refusals and the error type
 
 Keys are 1 through 128 bytes of ASCII letters, digits, dot, underscore, or
 hyphen. Namespaces are flat. A JSON value is capped at 32 KiB of compact JSON;
-the namespace's values map is capped at 128 KiB. Limits are runtime constants.
-Invalid keys, size excesses, typed encode/decode failures, and generation
-conflicts return `PluginStateError`. Its `Into<PluginError>` conversion returns
-`PluginError::State` with the typed variant and fields, so hook bodies use `?`.
-`PluginStateError` and `KeyRejection` are cloneable and serializable; plugin JSON
-and process journals retain their variants and fields. `Encode` and `Decode`
-retain the key and diagnostic text in their `message` field.
+the namespace's values map is capped at 128 KiB; a batch holds at most 64
+commands. Limits are runtime constants.
 
-Key, quota, and codec refusals are terminal for the same input. A generation
-conflict requires reading current state and choosing a new edit; it carries
-neither a terminal signal nor permission to retry the identical edit. The facade
-preserves these classifications through plugin hook errors.
+A batch publishes all of its commands or none. An invalid key, an oversized
+value or namespace, too many commands, an unknown reducer, a reducer's typed
+refusal or panic, a batch for another plugin's revision, a stored writer
+format the plugin cannot write, and commands from a decision-only slot each
+refuse the whole batch with a typed `StateCommandRefusal`. The refusal is the
+batch's recorded resolution: it publishes no value and the namespace's
+generation advances once.
 
-Batches validate a candidate map before installing it. A rejected call leaves
-values and generation unchanged. These failures do not perform storage I/O.
+`PluginStateError` carries what a plugin can still fail on directly: a codec
+failure in `get_as` or `set_as`, and a pure initial or converted namespace over
+the limits. Its `Into<PluginError>` conversion returns `PluginError::State`
+with the typed variant and fields. `PluginStateError` and `KeyRejection` are
+cloneable and serializable; plugin JSON and process journals retain their
+variants and fields.
 
-### 3. Generation and batching
+### 3. One coordinator, sequenced per namespace
 
-A namespace begins at generation zero. `set` and an accepted `apply` or
-`apply_guarded` advance it once, regardless of batch size or equal values.
-`remove` advances it only when the key exists. Removing an absent key returns
-the current generation. Guards compare the expected generation under the same
-mutex as the write. Counters are local to a resident owner and plugin. Hydration
-restores the checkpoint generation and retains a resident acceptance-token
-high-water mark.
-Changing the restored namespace advances that token, so `apply_guarded` never
-accepts a token observed for different content. The next accepted write carries
-the advanced token into the checkpoint. A cold rebuild or fork inherits the
-captured counter without the old resident's uncommitted tokens.
+One coordinator per runtime owner reduces every batch privately. A recorded
+body's batches are held until the body returns its result; a failed result
+publishes nothing. The coordinator then reserves each namespace a batch names,
+waiting while another unreturned publication holds it, reduces the batch
+against the published namespace, and attaches each `StateResolution` to the
+body's recorded outcome. Bodies of other namespaces, and bodies that return no
+commands, never wait.
 
-### 4. Where the store is exposed
+A resolution names its plugin revision, origin (tool attempt or callback
+occurrence), owner segment, ordinal and predecessor. The ordinal is the
+namespace's generation after it publishes; the predecessor is the generation it
+was reduced against. A namespace's generation therefore counts its
+publications, and a checkpoint's generation is its applied frontier.
 
-`PluginRegistrar::state()` supplies the bound handle during registration.
+### 4. Publication and replay
+
+A resolution publishes only after the engine returns the outcome that carries
+it, so a published change is durable with its result. A publication the
+engine never returned may be durable: its namespace publishes nothing more
+until the owner is rebuilt from durable state, and that fence is never a
+body's recorded result.
+
+Replay installs recorded resolutions without running the body, the hook, the
+reducer or a format converter. A delivery ahead of its predecessor waits for
+it; one at or below the namespace's frontier applies nothing. After ownership
+moves to a later segment, an earlier segment's unapplied resolution is refused
+with a typed `FrontierRefusal`.
+
+Before-turn and after-turn callbacks run inside one recorded `PluginCallbacks`
+step per turn boundary; replay serves its decisions without calling them.
+After-tool result checks of a tool attempt are recorded with the attempt; a
+cached or deferred result's checks run inside their own recorded step.
+
+### 5. Where the view is exposed
+
+`PluginRegistrar::state()` supplies the bound view during registration.
 `SessionReadyContext.state` supplies it at readiness. Hook closures retain the
-registration handle; shared hook contexts need no plugin-id selector.
+registration view.
 
 The engine records pure initialization and conversion as one complete
 `PluginTransitionRecord` before constructing capabilities. The request names
@@ -75,25 +103,8 @@ For a session, one fenced `RuntimeCommit` publishes the namespace checkpoint,
 recorded admission and native view with the existing operation receipt. Replay
 serves the recorded candidate, and acknowledgement loss reuses that receipt.
 Factory build, registration and readiness reconstruct capabilities over the
-published native view. These callbacks can read their bound namespace; a write
-returns `PluginStateError::WriteScopeRequired`. There is no resident
-materialization edit log. The plugin view of the host cannot export other
+published native view. The plugin view of the host cannot export other
 namespaces.
-
-Retained handles accept writes only in an engine-owned recorded callback scope
-for their own registry. A spawned background task inherits no such scope and
-receives the same typed refusal. Accepted batches are recorded beside the
-callback result, including terminal failures. Replay installs the complete
-postimages before returning that result, without invoking the callback.
-
-### 5. Read-your-writes, and the durability boundary
-
-Each accepted call or batch is atomic. All cloned handles observe its writes.
-The callback's journal records accepted mutations with its result; the next
-runtime boundary publishes the captured state. An abandoned callback attempt
-rolls back its unrecorded tail and invalidates its guard tokens. Cold replay
-restores a completed callback's recorded edits even if the deployment died
-before that next runtime commit.
 
 ### 6. The checkpoint component
 
@@ -112,14 +123,13 @@ admission's writer formats.
 
 Per-key generations add no useful invalidation boundary because capture writes
 the whole component. Resident hydration adopts the recorded native namespaces
-and drops an uncommitted tail. Acceptance tokens retain their high-water marks
-without changing the restored checkpoint bytes.
+and their frontiers.
 
 ### 7. Fork
 
 Fork initialization uses a deep copy of captured parent namespaces and their
 generations. It preserves non-resident namespaces as well as resident ones.
-Parent and child writes are independent; there is no merge. Content-addressed
+Parent and child publications are independent; there is no merge. Content-addressed
 storage can deduplicate unchanged bodies. Retention policy governs how long
 the session's checkpoint contents remain available.
 
@@ -132,9 +142,11 @@ child's own transition. Adopting another owner's native view remains refused.
 ## Alternatives considered
 
 Snapshot callbacks and plugin-owned revision counters delegate freshness to
-the mutating plugin. Mediation makes freshness a runtime fact. Returning mutable
-values would allow writes without advancing it. Async setters imply an I/O or
-commit boundary that this handle does not provide.
+the mutating plugin. Mediation makes freshness a runtime fact. A writable
+handle with speculative capture and rollback lets an unrecorded write reach a
+sibling that becomes durable; per-edit base and postimage receipts and
+generation guards only detect that after the fact. Returned commands with one
+reducing coordinator keep every published change behind a recorded result.
 
 A global namespace has no session lifecycle owner. Append-only plugin logs add
 another write algebra and retention contract; capped JSON arrays already serve
@@ -149,14 +161,17 @@ The plugin owns its JSON schema and its pure migration and writer encoders.
 Encoding takes the caller's explicit writer version. The host never selects it
 from a live fleet read. Config stamps travel with options, recorded config and
 process environments; state stamps travel with every captured `SessionPluginInit`.
-Lash owns acceptance generations, serialization, and checkpoint capture.
-Derived caches can be rebuilt from the store. Accepted writes become durable
-at a later runtime boundary, so acceptance and commit have distinct lifetimes.
+Lash owns publication order, serialization, and checkpoint capture. Derived
+caches can be rebuilt from the store. A plugin sees its own commands only after
+their result returns; reducers must be pure, since a recorded resolution is
+replayed without them.
 
 ## Code references
 
-- `crates/lash-core-execution/src/plugin/state.rs` implements scoped writes, bounds, batches and native hydration.
-- `crates/lash-core-execution/src/plugin/state/effect.rs` records and restores callback edits.
+- `crates/lash-core-store/src/tool_run/state_command.rs` defines commands, slot authority, refusals, reduction and the frontier.
+- `crates/lash-core-execution/src/plugin/state.rs` implements the read-only view, bounds and native hydration.
+- `crates/lash-core-execution/src/plugin/state/publication.rs` is the coordinator: private reduction, recorded resolutions and publication.
+- `crates/lash-core-execution/src/plugin/recorded_callbacks.rs` records before-turn, after-turn and deferred result-check callbacks.
 - `crates/lash-core-execution/src/plugin/transition.rs` defines complete transitions and checkpoint native views.
 - `crates/lash-core/src/runtime/shift/plugin_transition.rs` prepares and publishes the session transition.
 - `crates/lash-core/src/runtime/process_runtime.rs` adopts a process segment's recorded transition.

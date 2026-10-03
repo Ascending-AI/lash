@@ -1,41 +1,37 @@
-//! Host-mediated plugin state and its deterministic checkpoint representation.
-mod effect;
-pub(super) use effect::ReadOnlyConstruction;
-pub(crate) use effect::record_effect;
-pub use effect::{PluginStateEffect, PluginStateMutation};
-pub use lash_core_store::plugin_state::{PluginNamespaceState, PluginState};
+//! Host-mediated plugin state: read-only views, declared commands, and the
+//! coordinator that publishes their recorded resolutions (K10, FIG-4878).
+//!
+//! No plugin holds a writable handle. A plugin reads its namespace through a
+//! [`PluginStateView`], which shows only published state. A tool body, or a
+//! before-turn, after-turn, checkpoint or after-tool callback, returns
+//! [`StateCommands`] with its result. The recorded body that ran it reduces
+//! them privately against the published namespace, records the resolution
+//! with its result, and publishes it once the engine returns that result
+//! durably. Replay installs the recorded resolution without running the
+//! body, the callback or a reducer.
+mod publication;
+pub use lash_core_store::plugin_state::{KeyRejection, PluginNamespaceState, PluginState};
+pub use lash_core_store::tool_run::{
+    FrontierRefusal, HookCause, HookOccurrence, NamespaceFrontierRefusal, PublicationOrdinal,
+    ResolvedStateChange, StateCommand, StateCommandOrigin, StateCommandRefusal, StateResolution,
+    StateResolutionOutcome,
+};
+pub use publication::{EffectPublication, PluginStateEffect, StateReducer, StateReduction};
+pub(crate) use publication::{
+    Proposal, collect_proposals, propose, propose_all, record_effect, records_state,
+};
 
+use lash_core_store::plugin_state::{
+    PLUGIN_STATE_NAMESPACE_LIMIT, PLUGIN_STATE_VALUE_LIMIT, validate_state_key,
+};
+use lash_core_store::tool_run::SegmentOrdinal;
 use lash_sansio::sync::MutexExt;
 use serde::Serialize;
 use serde_json::Value;
-#[allow(unused_imports)]
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-const VALUE_LIMIT: usize = 32 * 1024;
-const STORE_LIMIT: usize = 128 * 1024;
-
-/// A deterministic rejection of a plugin-state key.
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    thiserror::Error,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-pub enum KeyRejection {
-    #[error("empty key")]
-    Empty,
-    #[error("key exceeds 128 bytes")]
-    TooLong,
-    #[error("illegal byte {byte} at {at}")]
-    IllegalCharacter { at: usize, byte: u8 },
-}
-
-/// Rejections are atomic: neither values nor generation change.
+/// A typed plugin-state failure.
 #[derive(
     Clone,
     Debug,
@@ -48,12 +44,25 @@ pub enum KeyRejection {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PluginStateError {
-    #[error("plugin `{plugin}` writes require an engine-owned callback scope")]
-    WriteScopeRequired { plugin: String },
     #[error("recorded plugin state belongs to another runtime owner")]
     EffectOwnerMismatch,
-    #[error("plugin `{plugin}` does not match the recorded effect's state base")]
-    EffectReplayMismatch { plugin: String },
+    /// A recorded resolution does not follow its namespace's applied
+    /// frontier: it skips a publication, or a predecessor publishes after
+    /// ownership moved on.
+    #[error("plugin `{plugin}` cannot apply a recorded publication: {refusal}")]
+    Frontier {
+        plugin: String,
+        refusal: FrontierRefusal,
+    },
+    /// A reduced publication was abandoned before the engine returned it, so
+    /// whether it is durable is unknown: the namespace publishes nothing
+    /// more until it is rebuilt from durable state.
+    #[error("plugin `{plugin}` has a publication of unknown durability")]
+    PublicationFenced { plugin: String },
+    /// A callback returned commands where no recorded body can carry their
+    /// resolution.
+    #[error("plugin `{plugin}` returned state commands outside a recorded callback")]
+    Unrecorded { plugin: String },
     #[error("invalid key `{key}`: {reason}")]
     InvalidKey { key: String, reason: KeyRejection },
     #[error("value `{key}` is {bytes} bytes, limit {limit}")]
@@ -68,8 +77,6 @@ pub enum PluginStateError {
     Encode { key: String, message: String },
     #[error("cannot decode `{key}`: {message}")]
     Decode { key: String, message: String },
-    #[error("generation conflict: expected {expected}, actual {actual}")]
-    GenerationConflict { expected: u64, actual: u64 },
 }
 
 impl From<PluginStateError> for super::PluginError {
@@ -85,42 +92,127 @@ impl From<PluginStateError> for crate::RuntimeEffectControllerError {
 }
 
 impl PluginStateError {
-    /// Validation and codec refusals are permanent for the same input.
-    /// A generation conflict requires re-reading state and choosing a new edit.
+    /// Every state failure is permanent for the same input: a codec or limit
+    /// refusal does not change, and a fenced or out-of-order publication is
+    /// resolved only by rebuilding from durable state.
     pub fn is_terminal(&self) -> bool {
-        !matches!(self, Self::GenerationConflict { .. })
+        true
     }
 }
 
-/// A single edit in an atomic batch.
-#[derive(Clone, Debug)]
-pub enum PluginStateEdit {
-    Set { key: String, value: Value },
-    Remove { key: String },
+/// The commands a callback or tool body returns with its result: an ordered
+/// batch against its own plugin's namespace. Later commands see earlier
+/// ones; [`set`](Self::set) and [`remove`](Self::remove) are last-writer-wins,
+/// and a read-modify-write goes through a registered pure reducer with
+/// [`apply`](Self::apply).
+///
+/// The batch is bounded and all-or-none: one refused command publishes
+/// nothing of it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StateCommands(Vec<StateCommand>);
+
+impl StateCommands {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set `key` to `value`.
+    #[must_use]
+    pub fn set(mut self, key: impl Into<String>, value: Value) -> Self {
+        self.0.push(StateCommand::Set {
+            key: key.into(),
+            value,
+        });
+        self
+    }
+
+    /// Set `key` to `value`'s JSON encoding.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginStateError::Encode`] when `value` does not encode.
+    pub fn set_as<T: Serialize>(
+        self,
+        key: impl Into<String>,
+        value: &T,
+    ) -> Result<Self, PluginStateError> {
+        let key = key.into();
+        let value = serde_json::to_value(value).map_err(|source| PluginStateError::Encode {
+            key: key.clone(),
+            message: source.to_string(),
+        })?;
+        Ok(self.set(key, value))
+    }
+
+    /// Remove `key`.
+    #[must_use]
+    pub fn remove(mut self, key: impl Into<String>) -> Self {
+        self.0.push(StateCommand::Remove { key: key.into() });
+        self
+    }
+
+    /// Resolve `key` through the plugin's reducer `reducer` with `input`.
+    #[must_use]
+    pub fn apply(
+        mut self,
+        key: impl Into<String>,
+        reducer: impl Into<String>,
+        input: Value,
+    ) -> Self {
+        self.0.push(StateCommand::Apply {
+            key: key.into(),
+            name: reducer.into(),
+            input,
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    #[must_use]
+    pub fn commands(&self) -> &[StateCommand] {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn into_commands(self) -> Vec<StateCommand> {
+        self.0
+    }
 }
 
-/// Opaque capability for one session and plugin. Clones share read-your-writes;
-/// writes become durable only at the next runtime boundary commit.
+impl From<Vec<StateCommand>> for StateCommands {
+    fn from(commands: Vec<StateCommand>) -> Self {
+        Self(commands)
+    }
+}
+
+/// A plugin's read-only view of its namespace, for one session or process
+/// owner. It shows published state only: a value appears once the recorded
+/// resolution that wrote it is durable. Clones share the same view.
 #[derive(Clone)]
-pub struct PluginStateStore {
-    /// Who the plugin session this store belongs to was built for.
+pub struct PluginStateView {
+    /// Who the plugin session this view belongs to was built for.
     owner: crate::RuntimeOwner,
     plugin_id: Arc<str>,
     state: Arc<Mutex<PluginStateRegistry>>,
 }
 
-impl std::fmt::Debug for PluginStateStore {
+impl std::fmt::Debug for PluginStateView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PluginStateStore")
+        f.debug_struct("PluginStateView")
             .field("owner", &self.owner)
             .field("plugin_id", &self.plugin_id)
             .finish_non_exhaustive()
     }
 }
 
-impl PluginStateStore {
-    /// A handle whose strong count tells whether a plugin kept this store:
-    /// every clone of the store shares it.
+impl PluginStateView {
+    /// A handle whose strong count tells whether a plugin kept this view:
+    /// every clone of the view shares it.
     pub(super) fn retention_probe(&self) -> Arc<str> {
         Arc::clone(&self.plugin_id)
     }
@@ -142,23 +234,36 @@ impl PluginStateStore {
             state,
         }
     }
+
     pub fn owner(&self) -> &crate::RuntimeOwner {
         &self.owner
     }
+
     pub fn plugin_id(&self) -> &str {
         &self.plugin_id
     }
-    /// A resident acceptance token. Hydration never reuses a token for changed
-    /// content, even when it restores an older checkpoint generation.
+
+    /// The namespace's published generation: the count of publications it
+    /// has applied, which a checkpoint carries as its applied frontier.
     pub fn generation(&self) -> u64 {
-        self.state.lock_recover().generation(self.plugin_id())
+        self.state
+            .lock_recover()
+            .data
+            .plugins
+            .get(self.plugin_id())
+            .map_or(0, |namespace| namespace.generation)
     }
+
     pub fn get(&self, key: &str) -> Option<Value> {
-        self.state.lock_recover().data.plugins[self.plugin_id()]
-            .values
-            .get(key)
+        self.state
+            .lock_recover()
+            .data
+            .plugins
+            .get(self.plugin_id())
+            .and_then(|namespace| namespace.values.get(key))
             .cloned()
     }
+
     pub fn get_as<T: serde::de::DeserializeOwned>(
         &self,
         key: &str,
@@ -172,182 +277,35 @@ impl PluginStateStore {
             })
             .transpose()
     }
-    pub fn keys(&self) -> Vec<String> {
-        self.state.lock_recover().data.plugins[self.plugin_id()]
-            .values
-            .keys()
-            .cloned()
-            .collect()
-    }
-    pub fn set(&self, key: &str, value: Value) -> Result<u64, PluginStateError> {
-        self.apply(vec![PluginStateEdit::Set {
-            key: key.into(),
-            value,
-        }])
-    }
-    pub fn set_as<T: Serialize>(&self, key: &str, value: &T) -> Result<u64, PluginStateError> {
-        validate_key(key)?;
-        let value = serde_json::to_value(value).map_err(|source| PluginStateError::Encode {
-            key: key.into(),
-            message: source.to_string(),
-        })?;
-        self.set(key, value)
-    }
-    #[expect(
-        clippy::expect_used,
-        reason = "the store is constructed bound to a plugin id whose namespace the runtime inserts at bind time, \
-                  and a u64 generation counter cannot be exhausted"
-    )]
-    pub fn remove(&self, key: &str) -> Result<u64, PluginStateError> {
-        effect::require_scope(&self.state, self.plugin_id())?;
-        validate_key(key)?;
-        let mut state = self.state.lock_recover();
-        let accepted_generation = state.generation(self.plugin_id());
-        let namespace = state
-            .data
-            .plugins
-            .get_mut(self.plugin_id())
-            .expect("bound namespace");
-        let before = namespace.clone();
-        let removed = namespace.values.contains_key(key);
-        if removed {
-            let generation = accepted_generation
-                .checked_add(1)
-                .expect("plugin generation exhausted");
-            namespace.values.remove(key);
-            namespace.generation = generation;
-        }
-        let generation = if removed {
-            namespace.generation
-        } else {
-            accepted_generation
-        };
-        if removed {
-            effect::record_accepted(&self.state, self.plugin_id(), &before, namespace);
-            state
-                .acceptance_generations
-                .insert(self.plugin_id().into(), generation);
-            state.source = None;
-        }
-        Ok(generation)
-    }
-    pub fn apply(&self, edits: Vec<PluginStateEdit>) -> Result<u64, PluginStateError> {
-        self.edit(None, edits)
-    }
-    pub fn apply_guarded(
-        &self,
-        expected_generation: u64,
-        edits: Vec<PluginStateEdit>,
-    ) -> Result<u64, PluginStateError> {
-        self.edit(Some(expected_generation), edits)
-    }
-    #[expect(
-        clippy::expect_used,
-        reason = "the store is constructed bound to a plugin id whose namespace the runtime inserts at bind time, \
-                  a `serde_json::Value` re-encodes without a failing case, and a u64 generation counter \
-                  cannot be exhausted"
-    )]
-    fn edit(
-        &self,
-        expected: Option<u64>,
-        edits: Vec<PluginStateEdit>,
-    ) -> Result<u64, PluginStateError> {
-        effect::require_scope(&self.state, self.plugin_id())?;
-        let mut state = self.state.lock_recover();
-        let accepted_generation = state.generation(self.plugin_id());
-        if let Some(expected) = expected
-            && expected != accepted_generation
-        {
-            return Err(PluginStateError::GenerationConflict {
-                expected,
-                actual: accepted_generation,
-            });
-        }
-        let namespace = state
-            .data
-            .plugins
-            .get_mut(self.plugin_id())
-            .expect("bound namespace");
-        let before = namespace.clone();
-        let mut values = namespace.values.clone();
-        for edit in edits {
-            match edit {
-                PluginStateEdit::Set { key, mut value } => {
-                    validate_key(&key)?;
-                    let bytes = serde_json::to_vec(&value)
-                        .expect("JSON value encodes")
-                        .len();
-                    if bytes > VALUE_LIMIT {
-                        return Err(PluginStateError::ValueTooLarge {
-                            key,
-                            bytes,
-                            limit: VALUE_LIMIT,
-                        });
-                    }
-                    value.sort_all_objects();
-                    values.insert(key, value);
-                }
-                PluginStateEdit::Remove { key } => {
-                    validate_key(&key)?;
-                    values.remove(&key);
-                }
-            }
-        }
-        let bytes = serde_json::to_vec(&values).expect("JSON map encodes").len();
-        if bytes > STORE_LIMIT {
-            return Err(PluginStateError::StoreTooLarge {
-                bytes,
-                limit: STORE_LIMIT,
-            });
-        }
-        let generation = accepted_generation
-            .checked_add(1)
-            .expect("plugin generation exhausted");
-        namespace.values = values;
-        namespace.generation = generation;
-        effect::record_accepted(&self.state, self.plugin_id(), &before, namespace);
-        state
-            .acceptance_generations
-            .insert(self.plugin_id().into(), generation);
-        state.source = None;
-        Ok(generation)
-    }
-}
 
-fn validate_key(key: &str) -> Result<(), PluginStateError> {
-    let reason = if key.is_empty() {
-        Some(KeyRejection::Empty)
-    } else if key.len() > 128 {
-        Some(KeyRejection::TooLong)
-    } else {
-        key.bytes()
-            .enumerate()
-            .find(|(_, b)| !b.is_ascii_alphanumeric() && !b"._-".contains(b))
-            .map(|(at, byte)| KeyRejection::IllegalCharacter { at, byte })
-    };
-    match reason {
-        Some(reason) => Err(PluginStateError::InvalidKey {
-            key: key.into(),
-            reason,
-        }),
-        None => Ok(()),
+    pub fn keys(&self) -> Vec<String> {
+        self.state
+            .lock_recover()
+            .data
+            .plugins
+            .get(self.plugin_id())
+            .map(|namespace| namespace.values.keys().cloned().collect())
+            .unwrap_or_default()
     }
 }
 
 pub(super) fn validate_namespace(values: &BTreeMap<String, Value>) -> Result<(), PluginStateError> {
     for (key, value) in values {
-        validate_key(key)?;
+        validate_state_key(key).map_err(|reason| PluginStateError::InvalidKey {
+            key: key.clone(),
+            reason,
+        })?;
         let bytes = serde_json::to_vec(value)
             .map_err(|error| PluginStateError::Encode {
                 key: key.clone(),
                 message: error.to_string(),
             })?
             .len();
-        if bytes > VALUE_LIMIT {
+        if bytes > PLUGIN_STATE_VALUE_LIMIT {
             return Err(PluginStateError::ValueTooLarge {
                 key: key.clone(),
                 bytes,
-                limit: VALUE_LIMIT,
+                limit: PLUGIN_STATE_VALUE_LIMIT,
             });
         }
     }
@@ -357,10 +315,10 @@ pub(super) fn validate_namespace(values: &BTreeMap<String, Value>) -> Result<(),
             message: error.to_string(),
         })?
         .len();
-    if bytes > STORE_LIMIT {
+    if bytes > PLUGIN_STATE_NAMESPACE_LIMIT {
         return Err(PluginStateError::StoreTooLarge {
             bytes,
-            limit: STORE_LIMIT,
+            limit: PLUGIN_STATE_NAMESPACE_LIMIT,
         });
     }
     Ok(())
@@ -369,75 +327,63 @@ pub(super) fn validate_namespace(values: &BTreeMap<String, Value>) -> Result<(),
 #[cfg(test)]
 mod tests;
 
+/// The resident published state of one owner, and its publication slots.
 #[derive(Debug, Default)]
 pub(super) struct PluginStateRegistry {
+    /// Published state: every namespace's values at its applied generation.
     pub(super) data: PluginState,
-    applied_effects: std::collections::HashSet<crate::EffectAddress>,
     pub(super) source: Option<crate::BlobRef>,
-    /// Resident guards outlive checkpoint adoption. Checkpoint generations
-    /// describe restored data; these tokens must never authorize another value.
-    acceptance_generations: BTreeMap<String, u64>,
+    /// The segment that owns publication; a resolution recorded by an
+    /// earlier segment never applies (K6).
+    segment: SegmentOrdinal,
+    /// Namespaces with a reduced publication the engine has not yet
+    /// returned, by the recorded effect that reduced it. The next reduction
+    /// of such a namespace waits for it.
+    reserved: BTreeMap<String, crate::EffectAddress>,
+    /// Namespaces whose reduced publication was abandoned unreturned.
+    fenced: BTreeSet<String>,
+    /// Recorded resolutions a replay delivered ahead of a predecessor, by
+    /// namespace and ordinal: each applies once its predecessor has.
+    owed: BTreeMap<String, BTreeMap<u64, StateResolution>>,
+    /// Woken whenever a reservation settles.
+    settled: Arc<tokio::sync::Notify>,
 }
+
 impl PluginStateRegistry {
     // Hydrate before admission so register calls validate durable membership and
-    // size. Replay preserves accepted generations without a late size rejection.
+    // size.
     pub(super) fn from_snapshot(snapshot: Option<&PluginState>) -> Self {
         Self {
             data: snapshot.cloned().unwrap_or_default(),
             ..Self::default()
         }
     }
-    fn generation(&self, id: &str) -> u64 {
-        self.acceptance_generations
-            .get(id)
-            .copied()
-            .unwrap_or(self.data.plugins[id].generation)
-    }
+
     pub(super) fn matches_ref(&self, reference: &crate::BlobRef) -> bool {
         self.source.as_ref() == Some(reference) || state_ref(&self.data) == *reference
     }
+
     pub(super) fn was_hydrated_from(&self, snapshot: &PluginState) -> bool {
         self.source.as_ref() == Some(&state_ref(snapshot)) || self.data == *snapshot
     }
-    /// Adopt the same checkpoint data as a cold materialization, discarding
-    /// unrecorded writes. Resident guard tokens remain monotonic and
-    /// changing content invalidates guards issued before the adoption.
-    #[expect(
-        clippy::expect_used,
-        reason = "a u64 plugin generation counter cannot be exhausted"
-    )]
+
+    /// Adopt a recorded head's state as the published state. Its namespace
+    /// generations are the applied frontier the journal's recorded
+    /// resolutions are delivered against; nothing unrecorded is resident to
+    /// drop, and a rebuild from durable state lifts every fence.
     pub(super) fn hydrate_live(&mut self, snapshot: &PluginState) {
-        if self.was_hydrated_from(snapshot) {
+        if self.was_hydrated_from(snapshot) && self.fenced.is_empty() {
             return;
         }
-        let hydrated = snapshot.clone();
-        for (id, recorded) in &hydrated.plugins {
-            let Some(live) = self.data.plugins.get(id) else {
-                continue;
-            };
-            let mut generation = self.generation(id);
-            if recorded != live {
-                if recorded.generation <= generation {
-                    tracing::info!(
-                        event = "plugin_state.uncommitted_tail_dropped",
-                        plugin_id = %id,
-                        live_generation = generation,
-                        recorded_generation = recorded.generation,
-                        "live plugin state adopted a recorded head that does not carry its accepted writes"
-                    );
-                }
-                generation = generation
-                    .checked_add(1)
-                    .expect("plugin generation exhausted");
-            }
-            self.acceptance_generations
-                .insert(id.clone(), generation.max(recorded.generation));
-        }
-        self.data = hydrated;
-        self.applied_effects.clear();
+        self.data = snapshot.clone();
+        self.reserved.clear();
+        self.fenced.clear();
+        self.owed.clear();
         self.source = Some(state_ref(snapshot));
+        self.settled.notify_waiters();
     }
 }
+
 #[expect(
     clippy::expect_used,
     reason = "`PluginState` is a map of strings to `serde_json::Value`, which MessagePack encodes without a failing case"

@@ -3,7 +3,6 @@ use super::*;
 use std::future::Future;
 
 struct FixtureRunner<F> {
-    plugins: Option<Arc<crate::PluginSession>>,
     body: F,
 }
 
@@ -12,9 +11,6 @@ impl<F> crate::core_internal::RuntimeEffectLocalRunner for FixtureRunner<F>
 where
     F: Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>> + Send + 'static,
 {
-    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
-        self.plugins.clone()
-    }
     async fn execute(
         self: Box<Self>,
         _: RuntimeEffectEnvelope,
@@ -24,14 +20,19 @@ where
     }
 }
 
+/// Publish `commands` to the fixture plugin's namespace the way a body of its
+/// tool does: reduced inside a recorded body named `name`, and published once
+/// that body's outcome returns.
 #[expect(
     clippy::unwrap_used,
     reason = "fixture effect identities and outcomes are asserted"
 )]
-pub(super) async fn callback<F>(plugins: &Arc<crate::PluginSession>, name: &str, body: F)
-where
-    F: Future<Output = ()> + Send + 'static,
-{
+pub(super) async fn publish(
+    plugins: &Arc<crate::PluginSession>,
+    plugin: &str,
+    name: &str,
+    commands: lash_core::StateCommands,
+) -> RuntimeEffectOutcome {
     let address = crate::EffectAddress::new(
         crate::ExecutionScope::turn(
             SessionId::fixture(owner_key(plugins.owner())),
@@ -40,30 +41,9 @@ where
         name,
     )
     .unwrap();
-    let outcome = crate::testing::execute_effect_locally(
-        RuntimeEffectEnvelope::new(
-            crate::RuntimeEffectInvocation::new(address, crate::RuntimeAttribution::none(), name),
-            RuntimeEffectCommand::Sleep {
-                spec: crate::SleepSpec::For { duration_ms: 0 },
-            },
-        ),
-        crate::core_internal::owned_runner_executor(
-            Box::new(FixtureRunner {
-                plugins: Some(plugins.clone()),
-                body: async move {
-                    body.await;
-                    Ok(RuntimeEffectOutcome::Sleep)
-                },
-            }),
-            None,
-        ),
-    )
-    .await
-    .unwrap();
-    assert!(matches!(
-        plugins.restore_effect_state(outcome).unwrap(),
-        RuntimeEffectOutcome::Sleep
-    ));
+    lash_core::testing::runtime_internals::publish_plugin_state(plugins, plugin, address, commands)
+        .await
+        .unwrap()
 }
 
 #[expect(
@@ -125,7 +105,6 @@ pub(super) async fn transition(
         envelope,
         crate::core_internal::owned_runner_executor(
             Box::new(FixtureRunner {
-                plugins: None,
                 body: async move {
                     Ok(RuntimeEffectOutcome::TransitionPlugins {
                         record: Box::new(host.transition_plugins(request, &state, &config)),

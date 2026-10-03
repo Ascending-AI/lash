@@ -24,30 +24,86 @@ fn append_plugin_messages(
     }
 }
 
+/// The recorded decisions of a sequential turn callback slot: everything each
+/// callback contributed but its state commands, which the recorded body
+/// running them carries as resolutions.
+fn recorded_contributions<O>(
+    contributions: Vec<PluginOwned<O>>,
+    split: impl Fn(
+        O,
+    ) -> (
+        Vec<PluginMessage>,
+        Vec<PluginRuntimeEvent>,
+        Vec<PluginRecordContribution>,
+    ),
+) -> Vec<RecordedTurnContribution> {
+    contributions
+        .into_iter()
+        .map(|PluginOwned { plugin_id, value }| {
+            let (messages, events, records) = split(value);
+            RecordedTurnContribution {
+                plugin_id,
+                messages,
+                events,
+                records,
+            }
+        })
+        .collect()
+}
+
 impl PluginSession {
-    /// Apply before-turn contributions in recorded callback order.
-    fn apply_turn_contributions(
-        contributions: Vec<PluginOwned<TurnContributions>>,
+    /// Apply before-turn decisions in recorded callback order.
+    pub fn apply_before_turn(
+        recorded: Vec<RecordedTurnContribution>,
         mut messages: crate::MessageSequence,
-        message_scope_id: &str,
+        turn_scope_id: &str,
     ) -> TurnPreparation {
+        let message_scope_id = format!("{turn_scope_id}:before_turn");
         let mut events = Vec::new();
         let mut next_message_ordinal = 0usize;
-        for PluginOwned { plugin_id, value } in contributions {
+        for RecordedTurnContribution {
+            plugin_id,
+            messages: plugin_messages,
+            events: plugin_events,
+            ..
+        } in recorded
+        {
             append_plugin_messages(
                 &mut messages,
-                &value.messages,
-                message_scope_id,
+                &plugin_messages,
+                &message_scope_id,
                 &mut next_message_ordinal,
             );
             events.extend(crate::plugin::plugin_runtime_session_events(
                 &plugin_id,
-                value.events,
+                plugin_events,
             ));
         }
         TurnPreparation { messages, events }
     }
 
+    /// Whether any before-turn callback is registered: a turn records the
+    /// slot's decisions only then.
+    pub fn has_before_turn_hooks(&self) -> bool {
+        !self
+            .capabilities()
+            .contributions
+            .before_turn_hooks
+            .is_empty()
+    }
+
+    /// Whether any after-turn callback is registered: a turn records the
+    /// slot's decisions only then.
+    pub fn has_after_turn_hooks(&self) -> bool {
+        !self
+            .capabilities()
+            .contributions
+            .after_turn_hooks
+            .is_empty()
+    }
+
+    /// Run the checkpoint callbacks inside the checkpoint's recorded body:
+    /// their state commands publish with its outcome.
     pub async fn apply_checkpoint(
         &self,
         ctx: CheckpointHookContext,
@@ -67,71 +123,59 @@ impl PluginSession {
 }
 
 impl PluginDispatchContext<'_> {
-    pub async fn prepare_turn(
+    /// Run every before-turn callback, in recorded registration order, and
+    /// return their decisions. Their state commands go to the recorded body
+    /// this runs in, which carries them with these decisions.
+    pub async fn before_turn_decisions(
         &self,
-        request: PrepareTurnRequest,
-        turn_scope_id: &str,
-    ) -> Result<TurnPreparation, PluginError> {
-        let PrepareTurnRequest {
-            session_id,
-            state,
-            messages,
-            sessions,
-            turn_context,
-        } = request;
-        let contributions = self
-            .before_turn(TurnHookContext {
-                session_id,
-                plugin_config: self.session.admitted_plugin_config(),
-                state,
-                sessions,
-                turn_context,
-            })
-            .await?;
-        Ok(PluginSession::apply_turn_contributions(
-            contributions,
-            messages,
-            &format!("{turn_scope_id}:before_turn"),
+        ctx: TurnHookContext,
+    ) -> Result<Vec<RecordedTurnContribution>, PluginError> {
+        Ok(recorded_contributions(
+            self.before_turn(ctx).await?,
+            |TurnContributions {
+                 messages, events, ..
+             }| (messages, events, Vec::new()),
         ))
     }
 
+    /// Run every after-turn callback over `turn`, in recorded registration
+    /// order, and return their decisions. Their state commands go to the
+    /// recorded body this runs in, which carries them with these decisions.
+    pub async fn after_turn_decisions(
+        &self,
+        ctx: TurnResultHookContext,
+    ) -> Result<Vec<RecordedTurnContribution>, PluginError> {
+        Ok(recorded_contributions(
+            self.after_turn(ctx).await?,
+            |AfterTurnContributions {
+                 messages,
+                 events,
+                 records,
+                 ..
+             }| (messages, events, records),
+        ))
+    }
+
+    /// Apply the after-turn decisions to `turn`, in recorded callback order,
+    /// then deliver the finalized turn to the lifecycle observers.
     pub async fn finalize_turn(
         &self,
         mut turn: AssembledTurn,
-        sessions: Arc<dyn SessionStateService>,
-        session_graph: Arc<dyn SessionGraphService>,
+        recorded: Vec<RecordedTurnContribution>,
         turn_scope_id: &str,
         clock: &dyn crate::Clock,
-    ) -> Result<TurnFinalization, PluginError> {
-        let session_id = turn.state.session_id.clone();
-        let contributions = if self
-            .session
-            .capabilities()
-            .contributions
-            .after_turn_hooks
-            .is_empty()
-        {
-            Vec::new()
-        } else {
-            self.after_turn(TurnResultHookContext {
-                session_id: session_id.clone(),
-                plugin_config: self.session.admitted_plugin_config(),
-                turn: Arc::new(crate::plugin::TurnHookReport::from_assembled(&turn)),
-                sessions,
-                session_graph: Arc::clone(&session_graph),
-            })
-            .await?
-        };
+    ) -> TurnFinalization {
         let mut events = Vec::new();
         let mut updated_messages: Option<crate::MessageSequence> = None;
         let mut next_message_ordinal = 0usize;
         let mut next_plugin_ordinal = 0usize;
-        for PluginOwned { plugin_id, value } in contributions {
-            let AfterTurnContributions {
-                messages,
-                events: plugin_events,
-                records,
-            } = value;
+        for RecordedTurnContribution {
+            plugin_id,
+            messages,
+            events: plugin_events,
+            records,
+        } in recorded
+        {
             events.extend(crate::plugin::plugin_runtime_session_events(
                 &plugin_id,
                 plugin_events,
@@ -177,7 +221,7 @@ impl PluginDispatchContext<'_> {
             turn.errors.push(super::plugin_lifecycle_hook_issue(error));
         }
 
-        Ok(TurnFinalization { turn, events })
+        TurnFinalization { turn, events }
     }
 }
 

@@ -40,8 +40,9 @@ pub(in crate::runtime) struct PreparedTurnExecuteContext<'sinks, 'run> {
 
 /// The preamble step of the execute phase: the plugin prepare-turn hooks and
 /// the context transform that produce the message sequence the driver runs.
-struct TurnPreambleContext<'preamble> {
-    plugins: &'preamble crate::PluginSession,
+struct TurnPreambleContext<'preamble, 'run> {
+    plugins: &'preamble Arc<crate::PluginSession>,
+    scoped_effect_controller: &'preamble ScopedEffectController<'run>,
     manager: &'preamble Arc<RuntimeSessionServices>,
     messages: crate::MessageSequence,
     turn_policy: &'preamble crate::SessionPolicy,
@@ -184,12 +185,16 @@ async fn run_turn_effect_loop(
 }
 
 impl LashRuntime {
+    /// Run the turn's before-turn callbacks as one recorded step: their
+    /// decisions and the resolutions of their state commands are served from
+    /// the journal on replay, and no callback runs again (K10).
     async fn prepare_turn_preamble(
         &mut self,
-        context: TurnPreambleContext<'_>,
+        context: TurnPreambleContext<'_, '_>,
     ) -> Result<crate::plugin::TurnPreparation, RuntimeError> {
         let TurnPreambleContext {
             plugins,
+            scoped_effect_controller,
             manager,
             messages,
             turn_policy,
@@ -198,24 +203,41 @@ impl LashRuntime {
             turn_scope_id,
         } = context;
         self.mark_phase_begin(RuntimeTurnPhase::BeforeTurnHooks);
-        let dispatch = plugins.dispatch(self.turn_phase_probe.as_ref());
-        let prepare_turn = dispatch.prepare_turn(
-            PrepareTurnRequest {
+        let recorded = if plugins.has_before_turn_hooks() {
+            let hook_context = crate::plugin::TurnHookContext {
                 session_id: self.state.session_id.clone(),
+                plugin_config: plugins.admitted_plugin_config(),
                 state: crate::SessionReadView::from_runtime_state(
                     &self.state,
                     turn_policy.clone(),
                     effective_protocol_turn_options.clone(),
                 ),
-                messages,
                 sessions: manager.state_service(),
                 turn_context: turn_context.clone(),
-            },
-            turn_scope_id,
-        );
-        let prepared = Box::pin(prepare_turn)
+            };
+            let callbacks = Arc::clone(plugins);
+            let probe = self.turn_phase_probe.clone();
+            let step = format!("plugin-callbacks:before-turn:{turn_scope_id}");
+            let recorded = Box::pin(crate::plugin::record_plugin_callbacks(
+                scoped_effect_controller,
+                crate::RuntimeAttribution::for_session(self.state.session_id.clone()),
+                step,
+                crate::plugin::RecordedCallbackPhase::BeforeTurn,
+                Arc::clone(plugins),
+                Box::pin(async move {
+                    callbacks
+                        .dispatch(probe.as_ref())
+                        .before_turn_decisions(hook_context)
+                        .await
+                }),
+            ))
             .await
-            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?;
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+            recorded.map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?
+        } else {
+            Vec::new()
+        };
+        let prepared = crate::PluginSession::apply_before_turn(recorded, messages, turn_scope_id);
         self.mark_phase_end(RuntimeTurnPhase::BeforeTurnHooks);
         Ok(prepared)
     }
@@ -293,7 +315,8 @@ impl LashRuntime {
         // normal driver-construction frame clones state for the turn boundary.
         let mut prepared = self
             .prepare_turn_preamble(TurnPreambleContext {
-                plugins: plugins.as_ref(),
+                plugins: &plugins,
+                scoped_effect_controller: &scoped_effect_controller,
                 manager: &manager,
                 messages,
                 turn_policy: &turn_policy,

@@ -1,0 +1,17 @@
+error[E0599]: no method named `set` found for reference `&PluginStateView` in the current scope
+ --> tests/ui/plugin_state_has_no_writable_handle.rs:7:18
+  |
+7 |     let _ = view.set("key", ());
+  |                  ^^^
+  |
+help: there is a method `get` with a similar name, but with different arguments
+ --> $WORKSPACE/crates/lash-core-execution/src/plugin/state.rs
+  |
+  |     pub fn get(&self, key: &str) -> Option<Value> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `remove` found for reference `&PluginStateView` in the current scope
+ --> tests/ui/plugin_state_has_no_writable_handle.rs:8:18
+  |
+8 |     let _ = view.remove("key");
+  |                  ^^^^^^ method not found in `&PluginStateView`

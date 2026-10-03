@@ -596,6 +596,13 @@ pub enum RuntimeEffectCommand {
     ObserveDrainMark {
         generation: crate::engine::BuildGeneration,
     },
+    /// Record a sequential callback slot's decisions with the resolutions of
+    /// the state commands its callbacks returned (K10, FIG-4878). Replay
+    /// serves the decisions and publishes the resolutions; no callback or
+    /// reducer runs again.
+    PluginCallbacks {
+        phase: crate::plugin::RecordedCallbackPhase,
+    },
     /// Decide a follow-on recovery run before its turn (FIG-4361): whether
     /// the head still owes `follow_on`, and, from the recovery count
     /// `attempts` its shift admission recorded, whether it runs under a
@@ -788,6 +795,7 @@ impl RuntimeEffectCommand {
             Self::AdmitRun { .. } => RuntimeEffectKind::AdmitRun,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
+            Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
@@ -1488,6 +1496,11 @@ pub enum RuntimeEffectOutcome {
     ObserveDrainMark {
         draining: bool,
     },
+    /// A sequential callback slot's recorded decisions, or the failure of
+    /// one of its callbacks, which publishes none of the slot's commands.
+    PluginCallbacks {
+        result: Result<Vec<crate::plugin::RecordedTurnContribution>, crate::PluginError>,
+    },
     /// A follow-on recovery run's recorded decision (FIG-4361), with the
     /// head its turn runs on (FIG-4380).
     RecoverFollowOn {
@@ -1939,6 +1952,7 @@ impl RuntimeEffectOutcome {
             Self::AdmitRun { .. } => RuntimeEffectKind::AdmitRun,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
+            Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,

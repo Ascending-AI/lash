@@ -644,6 +644,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::AdmitRun { .. }
             | RuntimeEffectCommand::InspectAdmittedHead { .. }
             | RuntimeEffectCommand::ObserveDrainMark { .. }
+            | RuntimeEffectCommand::PluginCallbacks { .. }
             | RuntimeEffectCommand::RecoverFollowOn { .. }
             | RuntimeEffectCommand::AdmitShift { .. }
             | RuntimeEffectCommand::DrawRunStart { .. }

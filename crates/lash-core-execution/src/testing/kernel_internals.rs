@@ -54,14 +54,57 @@ pub async fn serve_effect_controller_task_request(
     request.into_future(controller).await;
 }
 
-/// `PluginStateStore::bind` over a session's plugin-state registry: the
-/// handle a plugin receives, which the checkpoint-generation laws write
-/// through between captures and commits.
-pub fn plugin_state_store(
+/// A read-only view of `plugin_id`'s namespace over a session's published
+/// plugin state: the view a plugin receives.
+pub fn plugin_state_view(
     plugins: &crate::PluginSession,
     plugin_id: &str,
-) -> crate::PluginStateStore {
-    plugins.plugin_state_store_for_testing(plugin_id)
+) -> crate::PluginStateView {
+    plugins.plugin_state_view_for_testing(plugin_id)
+}
+
+/// Publish `commands` to `plugin_id`'s namespace the way a body of that
+/// plugin's tool does: reduced inside a recorded body at `address`, then
+/// published once the body's outcome returns. The returned outcome is what a
+/// journal retains for the body; publishing it again applies nothing.
+pub async fn publish_plugin_state(
+    plugins: &std::sync::Arc<crate::PluginSession>,
+    plugin_id: &str,
+    address: crate::EffectAddress,
+    commands: crate::StateCommands,
+) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+    let owner = plugins
+        .host()
+        .plugin_revisions()
+        .into_iter()
+        .find(|revision| revision.plugin == plugin_id)
+        .ok_or_else(|| {
+            crate::PluginError::Registration(format!("plugin `{plugin_id}` is not installed"))
+        })?;
+    let proposal = crate::plugin::Proposal::for_tool(
+        owner,
+        crate::plugin::StateCommandOrigin::ToolAttempt {
+            call_id: crate::ToolCallId::fixture(&address.replay_key),
+            attempt: lash_core_store::tool_run::AttemptOrdinal::FIRST,
+        },
+        commands,
+    );
+    let body_plugins = std::sync::Arc::clone(plugins);
+    let recorded = crate::plugin::state::record_effect(
+        std::sync::Arc::clone(plugins),
+        crate::RuntimeEffectKind::LanguageRuntimeValue,
+        address.clone(),
+        async move {
+            crate::plugin::propose(&body_plugins, proposal)?;
+            Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue {
+                value: serde_json::Value::Null,
+            })
+        },
+    )
+    .await?;
+    crate::plugin::EffectPublication::begin(std::sync::Arc::clone(plugins), address)
+        .publish(recorded.clone())?;
+    Ok(recorded)
 }
 
 /// `RuntimeExecutionTracing::emit_tool_call_completed`: the trace a completed

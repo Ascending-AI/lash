@@ -1219,20 +1219,57 @@ pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
 /// The plugin namespace of the laws' host plugin.
 const HOST_PLUGIN_ID: &str = "conformance-host-commands";
 
-/// `runtime`'s own plugin-state handle for the laws' host plugin: the one
-/// the plugin receives, so a write through it is an accepted plugin write
-/// the runtime holds uncommitted until its next boundary.
+/// `runtime`'s own view of the laws' host plugin namespace: the one the
+/// plugin receives.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-fn host_plugin_state(runtime: &crate::LashRuntime) -> lash_core::PluginStateStore {
-    lash_core::testing::runtime_internals::plugin_state_store(
+fn host_plugin_state(runtime: &crate::LashRuntime) -> lash_core::PluginStateView {
+    lash_core::testing::runtime_internals::plugin_state_view(
         &runtime
             .plugin_session()
             .expect("a law runtime has a plugin session"),
         HOST_PLUGIN_ID,
     )
+}
+
+/// Publish `key` = `value` in `runtime`'s host plugin namespace as a body of
+/// the plugin's tool does: a recorded publication the runtime holds
+/// uncommitted until its next boundary.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn publish_host_plugin_state(
+    runtime: &crate::LashRuntime,
+    step: &str,
+    key: &str,
+    value: serde_json::Value,
+) {
+    let plugins = runtime
+        .plugin_session()
+        .expect("a law runtime has a plugin session");
+    let address = crate::EffectAddress::new(
+        crate::ExecutionScope::turn(
+            plugins
+                .owner()
+                .session_id()
+                .expect("a law runtime is a session")
+                .clone(),
+            "plugin-state-dirty-park",
+        ),
+        step,
+    )
+    .expect("a valid fixture address");
+    lash_core::testing::runtime_internals::publish_plugin_state(
+        &plugins,
+        HOST_PLUGIN_ID,
+        address,
+        lash_core::StateCommands::new().set(key, value),
+    )
+    .await
+    .expect("the plugin publication is accepted");
 }
 
 /// The laws' host plugin namespace the session's recorded head carries.
@@ -1286,12 +1323,14 @@ pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
     let while_held = hold.while_held(async {
         let before = law.head().await.head_revision;
         let dirty = build_runtime(&law.parts, None).await;
-        let accepted = host_plugin_state(&dirty)
-            .set(
-                TAIL_KEY,
-                serde_json::json!("accepted while the turn was bound"),
-            )
-            .expect("the plugin write is accepted");
+        publish_host_plugin_state(
+            &dirty,
+            "dirty-publication",
+            TAIL_KEY,
+            serde_json::json!("accepted while the turn was bound"),
+        )
+        .await;
+        let accepted = host_plugin_state(&dirty).generation();
         assert_eq!(accepted, recorded_before.generation + 1);
         assert!(
             refused_state
@@ -1357,16 +1396,14 @@ pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
     let (resident, accepted) = refused_state
         .into_inner()
         .expect("the refused runtime's state");
-    assert!(
-        resident.generation() > accepted,
-        "adopting a head never rewinds or reuses a resident guard token"
-    );
-    assert!(matches!(
-        resident.apply_guarded(accepted, vec![]),
-        Err(lash_core::PluginStateError::GenerationConflict { .. })
-    ));
-    assert_eq!(resident.get(TAIL_KEY), None);
     let recorded = recorded_host_plugin_namespace(&law).await;
+    assert_eq!(
+        resident.generation(),
+        recorded.generation,
+        "adopting a head adopts its applied frontier"
+    );
+    assert!(accepted > recorded.generation);
+    assert_eq!(resident.get(TAIL_KEY), None);
     assert_eq!(
         (recorded.values.get(TAIL_KEY), recorded.generation),
         (None, recorded_before.generation),
@@ -1388,12 +1425,13 @@ pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
     );
 
     let on_the_head = build_runtime(&law.parts, None).await;
-    host_plugin_state(&on_the_head)
-        .set(
-            LANDED_KEY,
-            serde_json::json!("accepted on the recorded head"),
-        )
-        .expect("the plugin write is accepted");
+    publish_host_plugin_state(
+        &on_the_head,
+        "landed-publication",
+        LANDED_KEY,
+        serde_json::json!("accepted on the recorded head"),
+    )
+    .await;
     Box::pin(on_the_head.park())
         .await
         .expect("a plugin-state-dirty park on the recorded head lands");

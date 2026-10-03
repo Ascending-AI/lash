@@ -4,7 +4,7 @@ use lash_core::facade_support::{
 };
 use lash_core::plugin::SessionReadyContext;
 use lash_core::testing::{EffectLayer, LayeredEffectHost, ProcessRegistryFaults};
-use lash_core::{PluginError, PluginStateEdit, PluginStateError, RuntimeError, RuntimeErrorCode};
+use lash_core::{PluginError, PluginStateError, RuntimeError, RuntimeErrorCode};
 use std::error::Error;
 
 #[path = "cleanup_fixture.rs"]
@@ -81,10 +81,13 @@ async fn tool_law() -> Result<()> {
 async fn tool_admin_preserves_reconfigure_variants() -> Result<()> {
     tool_law().await
 }
+/// A plugin whose readiness decodes a stored value it cannot read (mode 1)
+/// or encodes a command value that has no JSON form (mode 2). Mode 0
+/// refuses nothing.
 #[derive(Clone)]
 struct StateHook {
     mode: Arc<AtomicUsize>,
-    handle: Arc<StdMutex<Option<lash_core::PluginStateStore>>>,
+    handle: Arc<StdMutex<Option<lash_core::PluginStateView>>>,
 }
 impl PluginFactory for StateHook {
     fn id(&self) -> &'static str {
@@ -93,6 +96,14 @@ impl PluginFactory for StateHook {
 
     fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
         lash_core::plugin::PluginDeclaration::initial(PluginFactory::id(self))
+    }
+    fn initialize_state(
+        &self,
+        _: &lash_core::RuntimeOwner,
+        _: &lash_core::PluginConfig,
+    ) -> std::result::Result<std::collections::BTreeMap<String, serde_json::Value>, PluginError>
+    {
+        Ok([("k".into(), serde_json::json!("text"))].into())
     }
     fn build(
         &self,
@@ -110,36 +121,20 @@ impl SessionPlugin for StateHook {
         Ok(())
     }
     fn session_ready(&self, ctx: SessionReadyContext) -> std::result::Result<(), PluginError> {
-        let mode = self.mode.load(Ordering::SeqCst);
-        if mode == 0 {
-            return Ok(());
-        }
-        if mode == 3 {
-            for key in ["a", "b", "c"] {
-                ctx.state.set(key, serde_json::json!("x".repeat(32766)))?;
-            }
-        }
         let generation = ctx.state.generation();
-        let before = ctx.state.get("k");
-        let keys = ctx.state.keys();
-        let result = match mode {
-            1 => ctx.state.set("", serde_json::json!(true)),
-            2 => ctx.state.set("k", serde_json::json!("x".repeat(32768))),
-            3 => ctx.state.set("k", serde_json::json!("x".repeat(32766))),
-            4 => ctx.state.apply_guarded(
-                generation + 1,
-                vec![PluginStateEdit::Set {
-                    key: "k".into(),
-                    value: serde_json::json!(true),
-                }],
-            ),
+        match self.mode.load(Ordering::SeqCst) {
+            0 => return Ok(()),
+            1 => {
+                ctx.state.get_as::<u64>("k")?;
+            }
+            2 => {
+                let keyed = std::collections::BTreeMap::from([((1, 2), 3)]);
+                lash_core::plugin::StateCommands::new().set_as("k", &keyed)?;
+            }
             _ => unreachable!(),
-        };
+        }
         assert_eq!(ctx.state.generation(), generation);
-        assert_eq!(ctx.state.get("k"), before);
-        assert_eq!(ctx.state.keys(), keys);
-        result?;
-        panic!("hook edit should be refused")
+        panic!("the state codec should refuse")
     }
 }
 
@@ -169,22 +164,8 @@ fn assert_state_error(error: &PluginError, mode: usize) {
         .and_then(|e| e.downcast_ref::<PluginStateError>())
         .expect("typed state source");
     match (mode, state) {
-        (
-            1,
-            PluginStateError::InvalidKey {
-                key,
-                reason: lash_core::KeyRejection::Empty,
-            },
-        ) => assert!(key.is_empty()),
-        (2, PluginStateError::ValueTooLarge { key, bytes, limit }) => {
+        (1, PluginStateError::Decode { key, .. }) | (2, PluginStateError::Encode { key, .. }) => {
             assert_eq!(key, "k");
-            assert_eq!((*bytes, *limit), (32770, 32768));
-        }
-        (3, PluginStateError::StoreTooLarge { bytes, limit }) => {
-            assert_eq!((*bytes, *limit), (131093, 131072));
-        }
-        (4, PluginStateError::GenerationConflict { expected, actual }) => {
-            assert_eq!((*expected, *actual), (1, 0))
         }
         other => panic!("wrong state fields: {other:?}"),
     }
@@ -194,7 +175,7 @@ fn assert_state_error(error: &PluginError, mode: usize) {
 
 async fn state_law() -> Result<()> {
     let backend = double_backend_explicit_reconcile().await;
-    for mode in 1..=4 {
+    for mode in 1..=2 {
         for rematerialize in [false, true] {
             let id = format!("typed-state-{mode}-{rematerialize}");
             let mode_control = Arc::new(AtomicUsize::new(if rematerialize { 0 } else { mode }));

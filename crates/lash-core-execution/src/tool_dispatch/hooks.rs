@@ -121,12 +121,81 @@ pub async fn finalize_tool_result_with_execution_context(
         );
     }
     publish_check_evidence(context, "tool_result_check", &checks.record, after_kind).await;
+    if let Err(failure) = Box::pin(carry_result_check_state(
+        context,
+        prepared.call_id(),
+        occurrence,
+        checks.proposals,
+    ))
+    .await
+    {
+        return ToolOutcome::failure(*failure);
+    }
     let final_result = Arc::unwrap_or_clone(final_result);
     ToolOutcome::from_output(crate::plugin::after_resolution(
         final_result,
         control,
         &checks.record,
     ))
+}
+
+/// Hand the result checks' state commands to the attempt body that runs
+/// them, which publishes them with its recorded outcome. A cached success or
+/// a Deferred completion has no such body: a recorded step of its own
+/// carries them, once, before the call's result is exposed.
+async fn carry_result_check_state(
+    context: &ToolDispatchContext<'_>,
+    call_id: &crate::ToolCallId,
+    occurrence: ToolHookOccurrence,
+    proposals: Vec<crate::plugin::Proposal>,
+) -> Result<(), Box<crate::ToolFailure>> {
+    if proposals.is_empty() {
+        return Ok(());
+    }
+    if crate::plugin::records_state(&context.plugins) {
+        return crate::plugin::propose_all(&context.plugins, proposals)
+            .map_err(|error| unpublished_check_state(&error));
+    }
+    let plugins = Arc::clone(&context.plugins);
+    let step = format!("plugin-state:{call_id}:{}", occurrence_label(occurrence));
+    let recorded = crate::plugin::record_plugin_callbacks(
+        &context.effect_controller,
+        context.parentless_attribution(),
+        step,
+        crate::plugin::RecordedCallbackPhase::ToolResultChecks {
+            call_id: call_id.clone(),
+            occurrence,
+        },
+        Arc::clone(&plugins),
+        Box::pin(async move {
+            crate::plugin::propose_all(&plugins, proposals)?;
+            Ok(Vec::new())
+        }),
+    )
+    .await
+    .map_err(|error| unpublished_check_state(&error))?;
+    recorded
+        .map(drop)
+        .map_err(|error| unpublished_check_state(&error))
+}
+
+fn unpublished_check_state(error: &dyn std::fmt::Display) -> Box<crate::ToolFailure> {
+    let mut failure = crate::ToolFailure::runtime(
+        crate::ToolFailureClass::Internal,
+        "tool_result_check_state_unrecorded",
+        error.to_string(),
+    );
+    failure.source = crate::ToolFailureSource::Plugin;
+    Box::new(failure)
+}
+
+fn occurrence_label(occurrence: ToolHookOccurrence) -> String {
+    match occurrence {
+        ToolHookOccurrence::Admission => "admission".into(),
+        ToolHookOccurrence::Attempt { attempt } => format!("attempt:{}", attempt.get()),
+        ToolHookOccurrence::DeferredCompletion { attempt } => format!("deferred:{}", attempt.get()),
+        ToolHookOccurrence::Cached => "cached".into(),
+    }
 }
 
 /// The occurrence of a completed attempt's result.

@@ -48,27 +48,24 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
     )
     .await
     .unwrap();
-    support::callback(&hook_session, "failed-turn-hook", {
-        let hook_session = hook_session.clone();
-        let read_view = runtime.read_view();
-        let sessions = runtime.session_state_service().unwrap();
-        let handle = fixture.state(id);
-        async move {
-            let hook_error = hook_session
-                .dispatch(None)
-                .before_turn(crate::plugin::TurnHookContext {
-                    session_id: id.into(),
-                    state: read_view,
-                    sessions,
-                    turn_context: crate::TurnContext::default(),
-                    plugin_config: Default::default(),
-                })
-                .await
-                .expect_err("hook deliberately fails after its accepted write");
-            assert!(hook_error.to_string().contains("deliberate hook failure"));
-            handle.set("counter", serde_json::json!(11)).unwrap();
-        }
-    })
+    let hook_error = Box::pin(hook_session.dispatch(None).before_turn_decisions(
+        crate::plugin::TurnHookContext {
+            session_id: id.into(),
+            state: runtime.read_view(),
+            sessions: runtime.session_state_service().unwrap(),
+            turn_context: crate::TurnContext::default(),
+            plugin_config: Default::default(),
+        },
+    ))
+    .await
+    .expect_err("the hook deliberately fails");
+    assert!(hook_error.to_string().contains("deliberate hook failure"));
+    support::publish(
+        &hook_session,
+        MOCK,
+        "published-write",
+        StateCommands::new().set("counter", serde_json::json!(11)),
+    )
     .await;
     Box::pin(runtime.park()).await.unwrap();
     let state = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
@@ -77,19 +74,19 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
         .unwrap();
     let durable = state.plugin_state().unwrap();
     assert_eq!(
-        durable.plugins["mock-state"].values["counter"],
+        durable.plugins[MOCK].values["counter"],
         serde_json::json!(11)
     );
     assert_eq!(
-        durable.plugins["mock-state"].values["ready"],
+        durable.plugins[MOCK].values["ready"],
         serde_json::json!(true)
     );
     assert_eq!(
-        durable.plugins["mock-state"].values["failed-hook"],
-        serde_json::json!(true),
-        "a hook error does not roll back accepted writes before the next boundary"
+        durable.plugins[MOCK].values.len(),
+        2,
+        "a failed hook publishes nothing"
     );
-    let generation = durable.plugins["mock-state"].generation;
+    let generation = durable.plugins[MOCK].generation;
     let rebuilt = MockPlugin {
         writes_on_ready: true,
         ..Default::default()
@@ -135,11 +132,8 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
         .unwrap()
         .unwrap();
     assert_eq!(
-        final_state.plugin_state().unwrap().plugins["mock-state"].generation,
+        final_state.plugin_state().unwrap().plugins[MOCK].generation,
         generation,
         "an otherwise idle park preserves the recorded initialization"
     );
 }
-
-// Seed generation five durably, assert cold construction is read-only, then
-// exercise the registered handle inside an accepted recorded callback.

@@ -103,8 +103,10 @@ async fn build_runtime(parts: DriftParts, note: Option<&'static str>) -> crate::
     .expect("build the model-call drift conformance runtime")
 }
 
-/// A fixed plugin and callback whose optional note changes the model request
-/// without changing the recorded plugin composition.
+/// A fixed plugin and Prompt View transform whose optional note changes the
+/// model request without changing the recorded plugin composition. The
+/// transform runs again on a redrive, unlike a turn callback, whose recorded
+/// decision a replay serves.
 #[derive(Clone)]
 struct DriftNote(Option<&'static str>);
 
@@ -134,24 +136,40 @@ impl crate::plugin::SessionPlugin for DriftNote {
         &self,
         registrar: &mut crate::plugin::PluginRegistrar,
     ) -> Result<(), lash_core::PluginError> {
-        let note = self.0;
-        registrar.turn().before(
-            crate::hook_key!("drift-note"),
-            Arc::new(move |_| {
-                Box::pin(async move {
-                    Ok(lash_core::facade_support::TurnContributions {
-                        messages: note
-                            .map(|note| {
-                                lash_core::PluginMessage::text(lash_core::MessageRole::System, note)
-                            })
-                            .into_iter()
-                            .collect(),
-                        events: Vec::new(),
-                    })
-                })
-            }),
-        )?;
+        registrar
+            .context()
+            .prepare_turn(0, Arc::new(self.clone()))?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::facade_support::TurnContextTransform for DriftNote {
+    fn id(&self) -> &'static str {
+        "drift-note"
+    }
+
+    async fn transform(
+        &self,
+        _: &lash_core::facade_support::TurnTransformContext<'_>,
+        mut input: lash_core::facade_support::PreparedContext,
+    ) -> Result<lash_core::facade_support::PreparedContext, lash_core::facade_support::ContextError>
+    {
+        if let Some(note) = self.0 {
+            input.messages.make_mut().push(crate::Message {
+                id: "drift-note".to_string(),
+                role: crate::MessageRole::System,
+                parts: vec![crate::Part::text(
+                    "drift-note.p0".to_string(),
+                    note.to_string(),
+                    None,
+                )]
+                .into(),
+                origin: None,
+                reply_marker: None,
+            });
+        }
+        Ok(input)
     }
 }
 

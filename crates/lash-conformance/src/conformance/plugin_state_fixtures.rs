@@ -15,7 +15,7 @@ pub(super) struct MockPlugin {
     pub(super) registration: Registration,
     pub(super) ready_values:
         Arc<Mutex<std::collections::BTreeMap<String, Option<serde_json::Value>>>>,
-    pub(super) handles: Arc<Mutex<std::collections::BTreeMap<String, PluginStateStore>>>,
+    pub(super) handles: Arc<Mutex<std::collections::BTreeMap<String, PluginStateView>>>,
 }
 impl PluginFactory for MockPlugin {
     fn id(&self) -> &'static str {
@@ -47,28 +47,18 @@ impl SessionPlugin for MockPlugin {
     fn register(&self, registrar: &mut PluginRegistrar) -> Result<(), PluginError> {
         let state = registrar.state();
         if !matches!(self.registration, Registration::None) {
-            assert!(matches!(
-                state.remove("counter"),
-                Err(PluginStateError::WriteScopeRequired { .. })
-            ));
-            assert!(matches!(
-                state.set("accepted", serde_json::json!(true)),
-                Err(PluginStateError::WriteScopeRequired { .. })
-            ));
-            assert_eq!(state.generation(), 5, "registration is read-only");
+            assert_eq!(state.generation(), 5, "registration reads published state");
         }
         self.handles
             .lock_recover()
-            .insert(owner_key(state.owner()), state.clone());
+            .insert(owner_key(state.owner()), state);
         if self.writes_on_ready {
             registrar.turn().before(
                 crate::hook_key!("failing-writer"),
                 Arc::new(move |_| {
-                    let state = state.clone();
                     Box::pin(async move {
-                        state.set("failed-hook", serde_json::json!(true))?;
                         Err(PluginError::Session(
-                            "deliberate hook failure after accepted write".into(),
+                            "deliberate hook failure before any command".into(),
                         ))
                     })
                 }),
@@ -85,13 +75,9 @@ impl SessionPlugin for MockPlugin {
         assert_eq!(
             registered.get("counter"),
             context.state.get("counter"),
-            "ready must observe hydrated state through the captured registrar handle"
+            "ready must observe hydrated state through the captured registrar view"
         );
         if self.writes_on_ready {
-            assert!(matches!(
-                context.state.set("ready", serde_json::json!(true)),
-                Err(PluginStateError::WriteScopeRequired { .. })
-            ));
             assert_eq!(context.state.get("ready"), Some(serde_json::json!(true)));
         }
         Ok(())
@@ -103,7 +89,7 @@ impl MockPlugin {
         factories.push(Arc::new(self.clone()));
         crate::PluginHost::new(factories)
     }
-    pub(super) fn state(&self, id: &str) -> PluginStateStore {
+    pub(super) fn state(&self, id: &str) -> PluginStateView {
         self.handles.lock_recover()[id].clone()
     }
 }

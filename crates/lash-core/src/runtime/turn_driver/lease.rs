@@ -74,6 +74,10 @@ impl<'run> RuntimeTurnDriver<'run> {
             );
             let local_executor =
                 scoped_effect_controller.guard_local_executor(&envelope, local_executor)?;
+            let publication = lash_core_execution::core_internal::EffectPublication::begin(
+                Arc::clone(self.session.plugins()),
+                envelope.invocation.address().clone(),
+            );
             crate::runtime::effect::drive_effect_controller_task(
                 scoped_effect_controller.controller(),
                 scoped_effect_controller.execution_scope().clone(),
@@ -82,8 +86,8 @@ impl<'run> RuntimeTurnDriver<'run> {
                 task_requests,
             )
             .await
+            .and_then(|outcome| publication.publish(outcome))
         };
-        let outcome = self.session.plugins().restore_effect_state(outcome?)?;
-        decode(outcome)
+        decode(outcome?)
     }
 }

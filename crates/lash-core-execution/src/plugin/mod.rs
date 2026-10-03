@@ -27,6 +27,7 @@ pub(crate) mod history;
 mod hook_key;
 mod hooks;
 pub(crate) mod protocol;
+mod recorded_callbacks;
 mod registrar;
 mod registry;
 pub mod runtime_host;
@@ -36,7 +37,10 @@ pub mod session_obj;
 pub use session_obj::{ResolvedToolSurface, plugin_lifecycle_hook_issue};
 pub(crate) mod session_types;
 pub(crate) mod state;
+pub use recorded_callbacks::{PluginCallbackBody, RecordedCallbackPhase, record_plugin_callbacks};
+pub use state::EffectPublication;
 use state::PluginStateRegistry;
+pub(crate) use state::{Proposal, collect_proposals, propose, propose_all, records_state};
 mod tool_catalog;
 mod tool_hooks;
 mod trigger_registry;
@@ -127,12 +131,15 @@ pub use session_types::{
     SubagentSessionContext, UnstatedSessionConfig,
 };
 pub use state::{
-    KeyRejection, PluginNamespaceState, PluginState, PluginStateEdit, PluginStateEffect,
-    PluginStateError, PluginStateMutation, PluginStateStore,
+    FrontierRefusal, HookCause, HookOccurrence, KeyRejection, NamespaceFrontierRefusal,
+    PluginNamespaceState, PluginState, PluginStateEffect, PluginStateError, PluginStateView,
+    PublicationOrdinal, ResolvedStateChange, StateCommand, StateCommandOrigin, StateCommandRefusal,
+    StateCommands, StateReducer, StateReduction, StateResolution, StateResolutionOutcome,
 };
 pub use tool_catalog::{
     AfterTurnContributions, CheckpointApplication, PluginAbort, PluginRecordContribution,
-    PrepareTurnRequest, ToolCatalogContext, TurnContributions, TurnFinalization, TurnPreparation,
+    RecordedTurnContribution, ToolCatalogContext, TurnContributions, TurnFinalization,
+    TurnPreparation,
 };
 pub use tool_catalog::{observe_plugin_runtime_events, plugin_runtime_session_events};
 pub use tool_hooks::{

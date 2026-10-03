@@ -13,7 +13,29 @@ mod directives;
 mod tools;
 pub use tools::ResolvedToolSurface;
 
+/// What a sequential turn callback returns beside its decision: commands
+/// against its own plugin's namespace (K10).
+pub(super) trait ProposesState {
+    fn take_state(&mut self) -> StateCommands;
+}
+
+impl ProposesState for TurnContributions {
+    fn take_state(&mut self) -> StateCommands {
+        std::mem::take(&mut self.state)
+    }
+}
+
+impl ProposesState for AfterTurnContributions {
+    fn take_state(&mut self) -> StateCommands {
+        std::mem::take(&mut self.state)
+    }
+}
+
+/// Run a sequential turn callback slot in recorded registration order. Each
+/// callback's state commands go to the recorded body running it, attributed
+/// to the callback; its other contributions return in order.
 async fn collect_owned_async<C, O, H, F>(
+    session: &PluginSession,
     hooks: &[RegisteredHook<H>],
     ctx: C,
     hook_kind: &'static str,
@@ -22,6 +44,7 @@ async fn collect_owned_async<C, O, H, F>(
 ) -> Result<Vec<PluginOwned<O>>, PluginError>
 where
     C: Clone,
+    O: ProposesState,
     F: Fn(&H, C) -> PluginFuture<O>,
 {
     let mut out = Vec::new();
@@ -34,9 +57,18 @@ where
         if let Some(probe) = phase_probe {
             probe.end_named(&phase_name);
         }
+        let mut value = result?;
+        session.propose_callback_state(
+            &registered.identity,
+            StateCommandOrigin::TurnHook {
+                callback: registered.identity.clone(),
+                segment: session.state_segment(),
+            },
+            value.take_state(),
+        )?;
         out.push(PluginOwned {
             plugin_id: registered.identity.owner.plugin.clone(),
-            value: result?,
+            value,
         });
     }
     Ok(out)
@@ -212,9 +244,9 @@ pub struct PluginSession {
     pub(super) tool_catalog_overlay: ToolCatalogContribution,
     pub(super) authority: Arc<std::sync::RwLock<LiveSessionAuthority>>,
     pub(super) extensions: PluginExtensions,
-    /// Whether a plugin kept its state store past registration or
-    /// `session_ready`: such a plugin can read state and write it in an
-    /// engine-owned callback scope (FIG-3712).
+    /// Whether a plugin kept its state view past registration or
+    /// `session_ready`: such a plugin reads published state from any
+    /// callback (FIG-3712).
     pub(super) retains_state: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the session's plugins were seeded from a parent session's
     /// capture rather than built fresh or rematerialized from their own.
@@ -272,6 +304,7 @@ impl PluginDispatchContext<'_> {
     ) -> Result<Vec<PluginOwned<TurnContributions>>, PluginError> {
         self.session.validate_recorded_admission()?;
         collect_owned_async(
+            self.session,
             &self.session.capabilities().contributions.before_turn_hooks,
             ctx,
             "before_turn",
@@ -287,6 +320,7 @@ impl PluginDispatchContext<'_> {
     ) -> Result<Vec<PluginOwned<AfterTurnContributions>>, PluginError> {
         self.session.validate_recorded_admission()?;
         collect_owned_async(
+            self.session,
             &self.session.capabilities().contributions.after_turn_hooks,
             ctx,
             "after_turn",
@@ -896,6 +930,7 @@ impl PluginSession {
         let mut replies =
             Vec::with_capacity(self.capabilities().contributions.tool_result_checks.len());
         let mut contributions = Vec::new();
+        let mut proposals = Vec::new();
         for registered in &self.capabilities().contributions.tool_result_checks {
             let reply = (registered.hook)(ToolResultCheckInput {
                 context: context.clone(),
@@ -910,7 +945,22 @@ impl PluginSession {
                     verdict,
                     messages,
                     events,
+                    state,
                 }) => {
+                    if !state.is_empty() {
+                        proposals.push(super::Proposal::for_callback(
+                            &registered.identity,
+                            StateCommandOrigin::ToolHook {
+                                occurrence: Box::new(lash_core_store::tool_run::HookOccurrence {
+                                    call_id: context.call_id.clone(),
+                                    callback: registered.identity.clone(),
+                                    phase: ToolHookPhase::ResultCheck,
+                                    occurrence,
+                                }),
+                            },
+                            state,
+                        ));
+                    }
                     if !messages.is_empty() || !events.is_empty() {
                         contributions.push(AttributedContributions {
                             plugin_id: registered.identity.owner.plugin.clone(),
@@ -934,6 +984,7 @@ impl PluginSession {
         Ok(ResultChecks {
             record: CheckRecord::reduce(replies),
             contributions,
+            proposals,
         })
     }
 
@@ -943,6 +994,7 @@ impl PluginSession {
     ) -> Result<Vec<PluginOwned<TurnContributions>>, PluginError> {
         self.validate_recorded_admission()?;
         collect_owned_async(
+            self,
             &self.capabilities().contributions.checkpoint_hooks,
             ctx,
             "checkpoint",
@@ -1431,14 +1483,11 @@ impl lash_core_store::session_state::SessionPluginStateSource for PluginSession 
 
 #[cfg(feature = "testing")]
 impl PluginSession {
-    /// A state handle for `plugin_id` over this session's plugin-state
-    /// registry, bound to its owner the way the host binds the handle a
+    /// A read-only view of `plugin_id`'s namespace over this session's
+    /// published plugin state, bound the way the host binds the view a
     /// plugin receives.
-    pub(crate) fn plugin_state_store_for_testing(
-        &self,
-        plugin_id: &str,
-    ) -> super::PluginStateStore {
-        super::PluginStateStore::bind(&self.owner, plugin_id, Arc::clone(&self.state))
+    pub(crate) fn plugin_state_view_for_testing(&self, plugin_id: &str) -> super::PluginStateView {
+        super::PluginStateView::bind(&self.owner, plugin_id, Arc::clone(&self.state))
     }
 }
 

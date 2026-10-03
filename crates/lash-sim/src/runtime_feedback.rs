@@ -465,6 +465,7 @@ impl lash_core::plugin::PluginFactory for FeedbackPlugin {
                                 "checkpoint feedback nonce 2505",
                             )],
                             events: Vec::new(),
+                            state: Default::default(),
                         })
                     } else {
                         Ok(lash_core::plugin::TurnContributions::default())

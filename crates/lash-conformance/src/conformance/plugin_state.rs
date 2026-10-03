@@ -5,12 +5,15 @@ use crate::plugin::{
     SessionReadyContext,
 };
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::{PluginError, PluginStateEdit, PluginStateError, PluginStateStore};
+use lash_core::{PluginError, PluginStateError, PluginStateView, StateCommands};
 use lash_sansio::sync::MutexExt;
 use std::sync::Mutex;
 
 #[path = "plugin_state_support.rs"]
 mod support;
+
+/// The fixture plugin's id.
+const MOCK: &str = "mock-state";
 
 #[path = "plugin_state_boundary.rs"]
 mod boundary;

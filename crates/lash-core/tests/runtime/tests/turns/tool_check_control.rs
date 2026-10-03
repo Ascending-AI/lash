@@ -21,6 +21,7 @@ pub(super) fn tool_policy_plugin(
                                 "plugin preface",
                             )],
                             events: Vec::new(),
+                            state: Default::default(),
                         })
                     })
                 }),

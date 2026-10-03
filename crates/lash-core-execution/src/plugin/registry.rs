@@ -103,6 +103,9 @@ pub struct PluginSpec {
     pub turn_context_transforms: Vec<(i32, Arc<dyn TurnContextTransform>)>,
     pub context_compactors: Vec<(i32, Arc<dyn ContextCompactor>)>,
     pub context_pressure_hooks: Vec<(i32, Arc<dyn ContextPressureHook>)>,
+    /// The pure reducers a [`StateCommands::apply`](super::StateCommands::apply)
+    /// names, by name (K10).
+    pub state_reducers: Vec<(String, super::StateReducer)>,
 }
 
 impl PluginSpec {
@@ -414,6 +417,15 @@ impl PluginSpec {
         self.context_pressure_hooks.push((priority, hook));
         self
     }
+
+    pub fn with_state_reducer(
+        mut self,
+        name: impl Into<String>,
+        reducer: super::StateReducer,
+    ) -> Self {
+        self.state_reducers.push((name.into(), reducer));
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -520,7 +532,7 @@ impl PluginSessionContext {
 pub struct SessionReadyContext {
     pub tracing: crate::trace::TraceRuntime,
     pub trace: Option<lash_trace::DurableTraceScope>,
-    pub state: super::PluginStateStore,
+    pub state: super::PluginStateView,
     pub owner: crate::RuntimeOwner,
     pub host: PluginHost,
 }
@@ -1077,6 +1089,9 @@ impl SessionPlugin for SpecPlugin {
         }
         for (priority, hook) in &self.spec.context_pressure_hooks {
             reg.context().pressure(*priority, Arc::clone(hook))?;
+        }
+        for (name, reducer) in &self.spec.state_reducers {
+            reg.state_reducer(name.clone(), Arc::clone(reducer))?;
         }
         Ok(())
     }

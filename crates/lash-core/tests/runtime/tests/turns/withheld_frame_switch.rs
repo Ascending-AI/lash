@@ -107,6 +107,7 @@ pub(super) async fn work_withheld_before_a_frame_switch_waits_for_its_follow_on(
                                 "one more step before finishing",
                             )],
                             events: Vec::new(),
+                            state: Default::default(),
                         })
                     })
                 })),

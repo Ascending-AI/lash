@@ -2275,6 +2275,55 @@
       "minimum": 0,
       "type": "integer"
     },
+    "FrontierRefusal": {
+      "description": "Why a frontier refuses a resolution.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "found": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "owner": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "stale_publisher",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "owner",
+            "found"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "found": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "out_of_order",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "found"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GroupChildCapability": {
       "description": "A capability a deployment needs to execute an effect-group child, and\nwhose absence is a fact of the deployment's wiring rather than of one\nattempt (FIG-4550).",
       "oneOf": [
@@ -3349,6 +3398,23 @@
         }
       ]
     },
+    "NamespaceFrontierRefusal": {
+      "additionalProperties": false,
+      "description": "A frontier's refusal of a recorded resolution of one plugin's namespace.",
+      "properties": {
+        "plugin": {
+          "type": "string"
+        },
+        "refusal": {
+          "$ref": "#/$defs/FrontierRefusal"
+        }
+      },
+      "required": [
+        "plugin",
+        "refusal"
+      ],
+      "type": "object"
+    },
     "OpaqueStateRefusal": {
       "description": "Why opaque state failed a structural check.",
       "oneOf": [
@@ -3708,24 +3774,8 @@
       "type": "object"
     },
     "PluginStateError": {
-      "description": "Rejections are atomic: neither values nor generation change.",
+      "description": "A typed plugin-state failure.",
       "oneOf": [
-        {
-          "properties": {
-            "plugin": {
-              "type": "string"
-            },
-            "type": {
-              "const": "write_scope_required",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "plugin"
-          ],
-          "type": "object"
-        },
         {
           "properties": {
             "type": {
@@ -3739,12 +3789,51 @@
           "type": "object"
         },
         {
+          "description": "A recorded resolution does not follow its namespace's applied\nfrontier: it skips a publication, or a predecessor publishes after\nownership moved on.",
+          "properties": {
+            "plugin": {
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/FrontierRefusal"
+            },
+            "type": {
+              "const": "frontier",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "plugin",
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A reduced publication was abandoned before the engine returned it, so\nwhether it is durable is unknown: the namespace publishes nothing\nmore until it is rebuilt from durable state.",
           "properties": {
             "plugin": {
               "type": "string"
             },
             "type": {
-              "const": "effect_replay_mismatch",
+              "const": "publication_fenced",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "plugin"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A callback returned commands where no recorded body can carry their\nresolution.",
+          "properties": {
+            "plugin": {
+              "type": "string"
+            },
+            "type": {
+              "const": "unrecorded",
               "type": "string"
             }
           },
@@ -3863,30 +3952,6 @@
             "type",
             "key",
             "message"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "actual": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "generation_conflict",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "expected",
-            "actual"
           ],
           "type": "object"
         }
@@ -10994,10 +11059,10 @@
           "type": "object"
         },
         {
-          "description": "A retained state handle attempted a write outside an admitted callback.",
+          "description": "A callback returned state commands where no recorded body carries\ntheir resolution.",
           "properties": {
             "kind": {
-              "const": "plugin_state_write_scope_required",
+              "const": "plugin_state_unrecorded",
               "type": "string"
             },
             "plugin": {
@@ -11011,7 +11076,7 @@
           "type": "object"
         },
         {
-          "description": "A recorded callback's accepted state belongs to another owner.",
+          "description": "A recorded callback's published state belongs to another owner.",
           "properties": {
             "kind": {
               "const": "plugin_state_effect_owner_mismatch",
@@ -11024,10 +11089,27 @@
           "type": "object"
         },
         {
-          "description": "Replay cannot install an accepted batch over a different namespace.",
+          "description": "A recorded state resolution does not follow its namespace's applied\nfrontier.",
           "properties": {
             "kind": {
-              "const": "plugin_state_effect_replay_mismatch",
+              "const": "plugin_state_frontier",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/NamespaceFrontierRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A namespace holds a reduced publication of unknown durability; it\npublishes nothing more until the owner is rebuilt from durable state.\nThe attempt is not recorded: the invocation's recovery owns it.",
+          "properties": {
+            "kind": {
+              "const": "plugin_state_publication_fenced",
               "type": "string"
             },
             "plugin": {

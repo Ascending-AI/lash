@@ -28,6 +28,55 @@ pub struct FormatRefusal {
     pub readable: FormatVersion,
 }
 
+/// The largest encoded value a namespace key may hold.
+pub const PLUGIN_STATE_VALUE_LIMIT: usize = 32 * 1024;
+/// The largest encoded namespace a plugin may publish.
+pub const PLUGIN_STATE_NAMESPACE_LIMIT: usize = 128 * 1024;
+
+/// A deterministic rejection of a plugin-state key.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+pub enum KeyRejection {
+    #[error("empty key")]
+    Empty,
+    #[error("key exceeds 128 bytes")]
+    TooLong,
+    #[error("illegal byte {byte} at {at}")]
+    IllegalCharacter { at: usize, byte: u8 },
+}
+
+/// Whether `key` may name a namespace value: 1 to 128 bytes of ASCII
+/// alphanumerics, `.`, `_` and `-`.
+///
+/// # Errors
+///
+/// The first [`KeyRejection`] the key meets.
+pub fn validate_state_key(key: &str) -> Result<(), KeyRejection> {
+    if key.is_empty() {
+        return Err(KeyRejection::Empty);
+    }
+    if key.len() > 128 {
+        return Err(KeyRejection::TooLong);
+    }
+    match key
+        .bytes()
+        .enumerate()
+        .find(|(_, byte)| !byte.is_ascii_alphanumeric() && !b"._-".contains(byte))
+    {
+        Some((at, byte)) => Err(KeyRejection::IllegalCharacter { at, byte }),
+        None => Ok(()),
+    }
+}
+
 /// The format stamp travels with a config namespace through every carrier.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

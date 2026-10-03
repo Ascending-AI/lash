@@ -225,6 +225,71 @@ fn declaration_refused(tool_name: &str, refusal: crate::DeclarationRefusal) -> T
     )
 }
 
+/// The proposal of a body's state commands against its tool's owning
+/// plugin's namespace, or why they cannot publish; `None` when the body
+/// returned none. Boxed: it waits across the result phase.
+type BodyState = Option<Box<Result<crate::plugin::Proposal, String>>>;
+
+fn body_state(
+    context: &ToolDispatchContext<'_>,
+    authority: &AttemptAuthority<'_>,
+    tool_id: &crate::ToolId,
+    ids: &ToolCallIds,
+    attempt: u32,
+    state: crate::plugin::StateCommands,
+) -> BodyState {
+    if state.is_empty() {
+        return None;
+    }
+    let source = match authority {
+        AttemptAuthority::Catalog(_) => None,
+        AttemptAuthority::Granted(grant) => grant.source_id.as_deref(),
+    };
+    let proposal = context
+        .plugins
+        .tool_execution_owner(tool_id, source)
+        .map(|owner| {
+            crate::plugin::Proposal::for_tool(
+                owner,
+                crate::plugin::StateCommandOrigin::ToolAttempt {
+                    call_id: ids.call_id.clone(),
+                    attempt: lash_core_store::tool_run::AttemptOrdinal::new(attempt)
+                        .unwrap_or(lash_core_store::tool_run::AttemptOrdinal::FIRST),
+                },
+                state,
+            )
+        })
+        .map_err(|error| {
+            format!("tool `{tool_id}` returned state commands that cannot publish: {error}")
+        });
+    Some(Box::new(proposal))
+}
+
+/// Hand a body's state commands to the attempt's recorded body, which
+/// publishes them with its outcome. Only a call whose final result, after its
+/// result checks, is a success publishes them: a failure, a cancellation or
+/// a check's denial applies none (Q5 §8).
+fn carry_body_state(
+    context: &ToolDispatchContext<'_>,
+    state: BodyState,
+    result: ToolOutcome,
+) -> ToolOutcome {
+    let Some(proposal) = state else {
+        return result;
+    };
+    if !result.is_success() {
+        return result;
+    }
+    match (*proposal).and_then(|proposal| {
+        crate::plugin::propose(&context.plugins, proposal).map_err(|error| error.to_string())
+    }) {
+        Ok(()) => result,
+        Err(message) => {
+            runtime_failure(ToolFailureClass::Internal, "tool_state_unrecorded", message)
+        }
+    }
+}
+
 /// Launches one prepared tool attempt under whichever authority admitted it.
 ///
 /// Catalog calls and granted calls share this body: the authority is resolved
@@ -277,7 +342,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
         max_attempts,
     ))
     .await;
-    let (result, intents) = match attempt_result {
+    let (result, intents, state) = match attempt_result {
         crate::ToolAttemptOutcome::Done { result, intents } => {
             let kinds: Vec<_> = intents
                 .intents
@@ -285,12 +350,16 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                 .map(crate::ToolIntent::kind)
                 .collect();
             match declaration.admits(crate::OutcomeShape::Done { intents: &kinds }) {
-                Ok(()) => (ToolOutcome::from_output(result.into_output()), intents),
+                Ok(()) => {
+                    let (output, state) = result.into_parts();
+                    (ToolOutcome::from_output(output), intents, state)
+                }
                 // An undeclared intent is refused with the whole outcome, before
                 // the attempt is recorded: nothing it declared is realized.
                 Err(refusal) => (
                     declaration_refused(&tool_name, refusal),
                     crate::ToolIntents::default(),
+                    crate::plugin::StateCommands::default(),
                 ),
             }
         }
@@ -340,13 +409,15 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
         }
     };
 
-    let result = super::finalize_tool_result_with_execution_context(
+    let state = body_state(context, &authority, &prepared.tool_id, &ids, attempt, state);
+    let result = Box::pin(super::finalize_tool_result_with_execution_context(
         context,
         &crate::plugin::PreparedCallReadView::new(prepared),
         super::attempt_occurrence(attempt),
         result,
-    )
+    ))
     .await;
+    let result = carry_body_state(context, state, result);
 
     let mut outcome = normalized_outcome(context, &ids, tool_name, args, result).await;
     outcome.intents = intents;

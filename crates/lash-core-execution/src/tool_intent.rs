@@ -506,11 +506,38 @@ fn encode_owner(encoder: &mut crate::stable_identity::IdentityEncoder, owner: &R
 /// without making `Pending + intents` representable.
 /// **Integrator class 3: protocol and process-engine implementors.**
 #[derive(Clone, Debug, PartialEq)]
-pub struct ToolOutcomeDone(Box<crate::ToolCallOutput>);
+pub struct ToolOutcomeDone(Box<DoneParts>);
+
+/// The terminal output and the state commands returned with it, boxed
+/// together so a completed value stays one pointer wide.
+#[derive(Clone, Debug, PartialEq)]
+struct DoneParts {
+    output: crate::ToolCallOutput,
+    state: crate::plugin::StateCommands,
+}
 
 impl ToolOutcomeDone {
     pub fn from_output(output: crate::ToolCallOutput) -> Self {
-        Self(Box::new(output))
+        Self(Box::new(DoneParts {
+            output,
+            state: crate::plugin::StateCommands::default(),
+        }))
+    }
+
+    /// Return `commands` against the tool's owning plugin's namespace with
+    /// this result (K10). They publish with the attempt's recorded outcome,
+    /// and only when the call's final result, after its result checks, is a
+    /// success.
+    #[must_use]
+    pub fn with_state(mut self, commands: crate::plugin::StateCommands) -> Self {
+        self.0.state = commands;
+        self
+    }
+
+    /// The terminal output and the state commands returned with it.
+    pub(crate) fn into_parts(self) -> (crate::ToolCallOutput, crate::plugin::StateCommands) {
+        let DoneParts { output, state } = *self.0;
+        (output, state)
     }
 
     pub fn ok(result: serde_json::Value) -> Self {
@@ -523,7 +550,7 @@ impl ToolOutcomeDone {
 
     /// Recover the terminal output for protocol and process-engine implementors.
     pub fn into_output(self) -> crate::ToolCallOutput {
-        *self.0
+        self.0.output
     }
 }
 
@@ -574,7 +601,9 @@ impl ToolAttemptOutcome {
 impl From<crate::ToolOutcome> for ToolAttemptOutcome {
     fn from(result: crate::ToolOutcome) -> Self {
         match result {
-            crate::ToolOutcome::Done(output) => Self::done_without_intents(ToolOutcomeDone(output)),
+            crate::ToolOutcome::Done(output) => {
+                Self::done_without_intents(ToolOutcomeDone::from_output(*output))
+            }
             crate::ToolOutcome::Pending(pending) => Self::Pending(*pending),
         }
     }

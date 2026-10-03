@@ -311,16 +311,17 @@ cursor rereads an event or moves backwards.
 
 ## Phase 10 — Plugin value and generation survive replacement
 
-The worker creates an explicit `SessionSpec` with `max_tool_calls = 8`. Its plugin writes
-`replacement-value` through the bound `PluginStateStore` during the before-turn hook. The host
-calls `send()` and awaits a finished turn before recording the value and generation. Generation
-alone is an acceptance token; the normal runtime commit supplies durability, per ADR 0078.
+The worker creates an explicit `SessionSpec` with `max_tool_calls = 8`. Its before-turn hook
+returns a `set` of `replacement-value` with its recorded decision, and the bound
+`PluginStateView` reads the published value. The host calls `send()` and awaits a finished turn
+before recording the value and generation. Generation counts the namespace's recorded
+publications; the normal runtime commit supplies durability, per ADR 0078.
 
 Read `plugin_state_survived_replacement` in `08-replacement-recovered.jsonl`. The replacement
 opens the existing session before sending any new turn. Require `restored = before`, including
 the value `{"value":"survives replacement"}` and a positive generation. Registration and
-readiness only expose the store and never seed that value. A subsequent `send()` writes the same
-value and commits it; require `next.value = restored.value` and
+readiness only expose the read-only view and never seed that value. A subsequent `send()`
+publishes the same value and commits it; require `next.value = restored.value` and
 `next.generation > restored.generation`. All reads use recorded state, without a live config
 lookup. This pairs with FIG-4633's hydration and monotonic-generation ruling.
 

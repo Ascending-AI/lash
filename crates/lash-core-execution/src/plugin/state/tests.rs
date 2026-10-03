@@ -1,5 +1,4 @@
 use super::*;
-use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
 
 #[tokio::test]
@@ -428,7 +427,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     for stamp in [1_u32, 2] {
         for malformed in [
             serde_json::json!({"bad/key": 1}),
-            serde_json::json!({"wide": "x".repeat(VALUE_LIMIT + 1)}),
+            serde_json::json!({"wide": "x".repeat(lash_core_store::plugin_state::PLUGIN_STATE_VALUE_LIMIT + 1)}),
         ] {
             let snapshot: PluginState = serde_json::from_value(serde_json::json!({
                 "format-probe": {"generation": 7, "format_version": stamp, "values": malformed},
@@ -611,110 +610,93 @@ fn plugin_formats_convert_only_in_recorded_transition() {
 
 #[test]
 fn plugin_formats_stamp_every_state_write() {
-    let state = store();
-    super::effect::test_scope(&state, || {
-        state.set("value", serde_json::json!(17)).unwrap();
-        let encoded = serde_json::to_value(&state.state.lock_recover().data).unwrap();
-        assert_eq!(encoded["mock"]["format_version"], serde_json::json!(1));
-        let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(Arc::new(
-            std::sync::atomic::AtomicUsize::new(0),
-        )))]);
-        let native: PluginState = serde_json::from_value(serde_json::json!({
-            "format-probe": {"generation": 8, "format_version": 2, "values": {"native": 18}},
-            "inactive": {"generation": 7, "format_version": 99, "values": {"opaque": 5}}
-        }))
+    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(Arc::new(
+        std::sync::atomic::AtomicUsize::new(0),
+    )))]);
+    let native: PluginState = serde_json::from_value(serde_json::json!({
+        "format-probe": {"generation": 8, "format_version": 2, "values": {"native": 18}},
+        "inactive": {"generation": 7, "format_version": 99, "values": {"opaque": 5}}
+    }))
+    .unwrap();
+    let mut config = crate::PluginConfig::default();
+    config.insert_versioned(
+        "format-probe",
+        crate::FormatVersion::new(2).unwrap(),
+        serde_json::json!({"native": 18}),
+    );
+    config.insert_versioned(
+        "inactive",
+        crate::FormatVersion::new(99).unwrap(),
+        serde_json::json!({"opaque": 5}),
+    );
+    for version in [1, 2] {
+        let writer = crate::FormatVersion::new(version).unwrap();
+        let writers = BTreeMap::from([("format-probe".into(), writer)]);
+        let encoded_state = host.encode_state(&native, &writers).unwrap();
+        let encoded_config = host.encode_config(&config, &writers).unwrap();
+        let key = if version == 1 { "old" } else { "native" };
+        assert_eq!(
+            encoded_state.plugins["format-probe"].values[key],
+            serde_json::json!(18)
+        );
+        assert_eq!(encoded_state.plugins["format-probe"].format_version, writer);
+        assert_eq!(
+            encoded_state.plugins["inactive"],
+            native.plugins["inactive"]
+        );
+        assert_eq!(
+            encoded_config.get("format-probe").unwrap()[key],
+            serde_json::json!(18)
+        );
+        assert_eq!(
+            encoded_config
+                .namespace("format-probe")
+                .unwrap()
+                .format_version,
+            writer
+        );
+        assert_eq!(
+            encoded_config.namespace("inactive"),
+            config.namespace("inactive")
+        );
+        let init = crate::SessionPluginInit::captured(
+            encoded_state.clone(),
+            Default::default(),
+            Default::default(),
+        )
         .unwrap();
-        let mut config = crate::PluginConfig::default();
-        config.insert_versioned(
-            "format-probe",
-            crate::FormatVersion::new(2).unwrap(),
-            serde_json::json!({"native": 18}),
+        let init: crate::SessionPluginInit =
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(&init).unwrap()).unwrap();
+        assert_eq!(init.plugin_state, encoded_state);
+        let options = crate::PluginOptions {
+            plugins: encoded_config.namespaces().clone(),
+        };
+        let options: crate::PluginOptions =
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(&options).unwrap()).unwrap();
+        assert_eq!(options.plugins["format-probe"].format_version, writer);
+        let environment = crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::new(encoded_config, 3),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         );
-        config.insert_versioned(
-            "inactive",
-            crate::FormatVersion::new(99).unwrap(),
-            serde_json::json!({"opaque": 5}),
+        let environment: crate::ProcessExecutionEnvSpec =
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(&environment).unwrap()).unwrap();
+        assert_eq!(
+            environment
+                .plugin_config
+                .config
+                .namespace("format-probe")
+                .unwrap()
+                .format_version,
+            writer
         );
-        for version in [1, 2] {
-            let writer = crate::FormatVersion::new(version).unwrap();
-            let writers = BTreeMap::from([("format-probe".into(), writer)]);
-            let encoded_state = host.encode_state(&native, &writers).unwrap();
-            let encoded_config = host.encode_config(&config, &writers).unwrap();
-            let key = if version == 1 { "old" } else { "native" };
-            assert_eq!(
-                encoded_state.plugins["format-probe"].values[key],
-                serde_json::json!(18)
-            );
-            assert_eq!(encoded_state.plugins["format-probe"].format_version, writer);
-            assert_eq!(
-                encoded_state.plugins["inactive"],
-                native.plugins["inactive"]
-            );
-            assert_eq!(
-                encoded_config.get("format-probe").unwrap()[key],
-                serde_json::json!(18)
-            );
-            assert_eq!(
-                encoded_config
-                    .namespace("format-probe")
-                    .unwrap()
-                    .format_version,
-                writer
-            );
-            assert_eq!(
-                encoded_config.namespace("inactive"),
-                config.namespace("inactive")
-            );
-            let init = crate::SessionPluginInit::captured(
-                encoded_state.clone(),
-                Default::default(),
-                Default::default(),
-            )
-            .unwrap();
-            let init: crate::SessionPluginInit =
-                rmp_serde::from_slice(&rmp_serde::to_vec_named(&init).unwrap()).unwrap();
-            assert_eq!(init.plugin_state, encoded_state);
-            let options = crate::PluginOptions {
-                plugins: encoded_config.namespaces().clone(),
-            };
-            let options: crate::PluginOptions =
-                rmp_serde::from_slice(&rmp_serde::to_vec_named(&options).unwrap()).unwrap();
-            assert_eq!(options.plugins["format-probe"].format_version, writer);
-            let environment = crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::new(encoded_config, 3),
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                ),
-            );
-            let environment: crate::ProcessExecutionEnvSpec =
-                rmp_serde::from_slice(&rmp_serde::to_vec_named(&environment).unwrap()).unwrap();
-            assert_eq!(
-                environment
-                    .plugin_config
-                    .config
-                    .namespace("format-probe")
-                    .unwrap()
-                    .format_version,
-                writer
-            );
-        }
-        assert!(
-            host.encode_state(
-                &native,
-                &BTreeMap::from([("format-probe".into(), crate::FormatVersion::new(3).unwrap())])
-            )
-            .is_err()
-        );
-    });
-}
-
-fn store() -> PluginStateStore {
-    PluginStateStore::bind(
-        &crate::RuntimeOwner::Session(SessionId::from("session")),
-        "mock",
-        Arc::new(Mutex::new(PluginStateRegistry::default())),
-    )
+    }
+    assert!(
+        host.encode_state(
+            &native,
+            &BTreeMap::from([("format-probe".into(), crate::FormatVersion::new(3).unwrap())])
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -778,172 +760,6 @@ fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
 }
 
 #[test]
-fn state_keys_values_and_batches_are_atomic() {
-    let state = store();
-    super::effect::test_scope(&state, || {
-        fn assert_traits<T: Clone + Send + Sync + 'static>() {}
-        assert_traits::<PluginStateStore>();
-        assert_eq!(state.generation(), 0);
-        for (key, reason) in [
-            ("".to_string(), KeyRejection::Empty),
-            ("x".repeat(129), KeyRejection::TooLong),
-            (
-                "a/b".to_string(),
-                KeyRejection::IllegalCharacter { at: 1, byte: b'/' },
-            ),
-        ] {
-            assert!(
-                matches!(state.set(&key, Value::Null), Err(PluginStateError::InvalidKey { reason: found, .. }) if found == reason)
-            );
-            assert!(state.remove(&key).is_err());
-        }
-        assert_eq!(state.set(&"x".repeat(128), Value::Null).unwrap(), 1);
-        assert_eq!(state.set("a._-09AZ", Value::Null).unwrap(), 2);
-        assert_eq!(
-            state.set("a._-09AZ", Value::Null).unwrap(),
-            3,
-            "identical writes bump"
-        );
-        assert_eq!(state.remove("missing").unwrap(), 3);
-        assert_eq!(
-            state.apply(vec![]).unwrap(),
-            4,
-            "accepted batches bump exactly once"
-        );
-        let before = state.state.lock_recover().data.clone();
-        assert!(
-            state
-                .apply(vec![
-                    PluginStateEdit::Set {
-                        key: "valid".into(),
-                        value: Value::Bool(true)
-                    },
-                    PluginStateEdit::Set {
-                        key: "illegal/".into(),
-                        value: Value::Null
-                    }
-                ])
-                .is_err()
-        );
-        assert_eq!(state.state.lock_recover().data, before);
-        assert!(
-            matches!(state.set("huge", Value::String("x".repeat(VALUE_LIMIT - 1))), Err(PluginStateError::ValueTooLarge { bytes, limit: VALUE_LIMIT, .. }) if bytes == VALUE_LIMIT + 1)
-        );
-        assert_eq!(state.state.lock_recover().data, before);
-        assert!(matches!(
-            state.apply(
-                (0..5)
-                    .map(|i| PluginStateEdit::Set {
-                        key: format!("value{i}"),
-                        value: Value::String("x".repeat(VALUE_LIMIT - 2))
-                    })
-                    .collect()
-            ),
-            Err(PluginStateError::StoreTooLarge { .. })
-        ));
-        assert_eq!(state.state.lock_recover().data, before);
-        let generation = state
-            .apply_guarded(
-                4,
-                vec![
-                    PluginStateEdit::Remove {
-                        key: "a._-09AZ".into(),
-                    },
-                    PluginStateEdit::Set {
-                        key: "valid".into(),
-                        value: serde_json::json!([1, 2]),
-                    },
-                ],
-            )
-            .unwrap();
-        assert_eq!(generation, 5);
-        let mut copy = state.get("valid").unwrap();
-        copy.as_array_mut().unwrap().clear();
-        assert_eq!(
-            state.get("valid"),
-            Some(serde_json::json!([1, 2])),
-            "reads are owned"
-        );
-        assert!(matches!(
-            state.get_as::<String>("valid"),
-            Err(PluginStateError::Decode { .. })
-        ));
-        assert_eq!(state.get_as::<String>("missing").unwrap(), None);
-    });
-}
-
-#[test]
-fn state_encoding_errors_leave_generation_and_values_unchanged() {
-    struct Reject;
-    impl Serialize for Reject {
-        fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
-            Err(serde::ser::Error::custom("rejected"))
-        }
-    }
-    let state = store();
-    super::effect::test_scope(&state, || {
-        assert!(
-            matches!(state.set_as("bad", &Reject), Err(PluginStateError::Encode { key, .. }) if key == "bad")
-        );
-        assert_eq!(state.generation(), 0);
-        assert!(state.keys().is_empty());
-    });
-}
-
-#[test]
-fn guarded_state_winner_is_atomic() {
-    let state = store();
-    let barrier = Arc::new(std::sync::Barrier::new(8));
-    let workers = (0..8)
-        .map(|i| {
-            let state = state.clone();
-            let barrier = barrier.clone();
-            std::thread::spawn(move || {
-                barrier.wait();
-                super::effect::test_scope(&state, || {
-                    state.apply_guarded(
-                        0,
-                        vec![
-                            PluginStateEdit::Set {
-                                key: "winner".into(),
-                                value: serde_json::json!(i),
-                            },
-                            PluginStateEdit::Set {
-                                key: format!("worker{i}"),
-                                value: Value::Bool(true),
-                            },
-                        ],
-                    )
-                })
-            })
-        })
-        .collect::<Vec<_>>();
-    let results = workers
-        .into_iter()
-        .map(|w| w.join().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
-    assert_eq!(state.generation(), 1);
-    let winner = state.get_as::<u64>("winner").unwrap().unwrap();
-    assert_eq!(
-        state.keys(),
-        vec!["winner".to_string(), format!("worker{winner}")]
-    );
-    assert!(
-        results
-            .into_iter()
-            .filter_map(Result::err)
-            .all(|e| matches!(
-                e,
-                PluginStateError::GenerationConflict {
-                    expected: 0,
-                    actual: 1
-                }
-            ))
-    );
-}
-
-#[test]
 fn fork_preserves_absent_namespaces_and_canonical_order() {
     let mut values = BTreeMap::new();
     values.insert("v".into(), serde_json::json!({"nested": {"z": 1, "a": 2}}));
@@ -973,23 +789,33 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
         child.export_state().plugins["absent-plugin"],
         durable.plugins["absent-plugin"]
     );
-    let state = store();
-    super::effect::test_scope(&state, || {
-        state
-            .set("v", serde_json::json!({"z": {"b": 1, "a": 2}, "a": 3}))
-            .unwrap();
-        let first = rmp_serde::to_vec_named(&state.state.lock_recover().data).unwrap();
-        let other = store();
-        super::effect::test_scope(&other, || {
-            other
-                .set("v", serde_json::json!({"a": 3, "z": {"a": 2, "b": 1}}))
-                .unwrap()
-        });
-        assert_eq!(
-            first,
-            rmp_serde::to_vec_named(&other.state.lock_recover().data).unwrap()
-        );
-    });
+    let batch = |value| lash_core_store::tool_run::StateCommandBatch {
+        plugin: crate::store::plugin_writers::PluginRevision::new(
+            "canonical",
+            crate::plugin::BehaviorRevision::ONE,
+        ),
+        origin: StateCommandOrigin::ToolAttempt {
+            call_id: crate::ToolCallId::fixture("canonical"),
+            attempt: lash_core_store::tool_run::AttemptOrdinal::FIRST,
+        },
+        commands: vec![StateCommand::Set {
+            key: "v".into(),
+            value,
+        }],
+    };
+    let resolved = |value| {
+        let StateResolutionOutcome::Applied { changes } =
+            batch(value).reduce(&BTreeMap::new(), &mut |_, _, _, _| unreachable!())
+        else {
+            panic!("a valid set resolves");
+        };
+        rmp_serde::to_vec_named(&changes).unwrap()
+    };
+    assert_eq!(
+        resolved(serde_json::json!({"z": {"b": 1, "a": 2}, "a": 3})),
+        resolved(serde_json::json!({"a": 3, "z": {"a": 2, "b": 1}})),
+        "a resolved value is canonical, whatever order its object keys were written in"
+    );
 }
 
 /// A fleet record a law moves the way a finalize would.
@@ -1139,180 +965,6 @@ async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_final
     );
 }
 
-#[tokio::test]
-async fn recorded_effect_state_is_atomic_owner_checked_and_idempotent() {
-    let host = crate::PluginHost::empty();
-    let session = host
-        .isolated_registry()
-        .build_session(PluginSessionRequest::creation(
-            "effect-owner",
-            Default::default(),
-        ))
-        .unwrap();
-    let first = PluginStateStore::bind(&session.owner, "first", Arc::clone(&session.state));
-    let second = PluginStateStore::bind(&session.owner, "second", Arc::clone(&session.state));
-    let base = session.export_state();
-    let effect = super::effect::record_effect(
-        Arc::clone(&session),
-        crate::RuntimeEffectKind::LanguageRuntimeValue,
-        crate::EffectAddress::new(
-            crate::ExecutionScope::turn("effect-owner", "run"),
-            "state-effect",
-        )
-        .unwrap(),
-        async {
-            first.set("a", serde_json::json!(1)).unwrap();
-            first.set("b", serde_json::json!(2)).unwrap();
-            second.set("c", serde_json::json!(3)).unwrap();
-            assert!(first.set("invalid key", Value::Null).is_err());
-            Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
-        },
-    )
-    .await
-    .unwrap();
-    let after = session.export_state();
-    let bytes = rmp_serde::to_vec_named(&effect).unwrap();
-    let effect: crate::RuntimeEffectOutcome = rmp_serde::from_slice(&bytes).unwrap();
-    let cold = host
-        .isolated_registry()
-        .build_session(PluginSessionRequest::rematerialization(
-            "effect-owner",
-            &base,
-            Default::default(),
-        ))
-        .unwrap();
-    cold.restore_effect_state(effect.clone()).unwrap();
-    assert_eq!(cold.export_state(), after);
-    cold.restore_effect_state(effect.clone()).unwrap();
-    assert_eq!(
-        cold.export_state(),
-        after,
-        "duplicate delivery advances nothing"
-    );
-
-    let later = PluginStateStore::bind(&cold.owner, "first", Arc::clone(&cold.state));
-    super::effect::test_scope(&later, || later.set("later", Value::Bool(true)).unwrap());
-    let with_later = cold.export_state();
-    cold.restore_effect_state(effect.clone()).unwrap();
-    assert_eq!(
-        cold.export_state(),
-        with_later,
-        "duplicate delivery preserves subsequent writes"
-    );
-
-    let other = host
-        .isolated_registry()
-        .build_session(PluginSessionRequest::rematerialization(
-            "another-owner",
-            &base,
-            Default::default(),
-        ))
-        .unwrap();
-    let refusal = other.restore_effect_state(effect.clone()).unwrap_err();
-    assert_eq!(
-        refusal.cause,
-        Some(crate::RuntimeErrorCause::PluginStateEffectOwnerMismatch)
-    );
-    assert_eq!(other.export_state(), base);
-
-    let divergent = host
-        .isolated_registry()
-        .build_session(PluginSessionRequest::rematerialization(
-            "effect-owner",
-            &base,
-            Default::default(),
-        ))
-        .unwrap();
-    let other = PluginStateStore::bind(&divergent.owner, "second", Arc::clone(&divergent.state));
-    super::effect::test_scope(&other, || other.set("other", Value::Bool(true)).unwrap());
-    let before_refusal = divergent.export_state();
-    let refusal = divergent.restore_effect_state(effect).unwrap_err();
-    assert_eq!(
-        refusal.cause,
-        Some(crate::RuntimeErrorCause::PluginStateEffectReplayMismatch {
-            plugin: "second".into(),
-        })
-    );
-    assert_eq!(
-        divergent.export_state(),
-        before_refusal,
-        "first namespace must not publish alone"
-    );
-    let wire: crate::RuntimeError = rmp_serde::from_slice(
-        &rmp_serde::to_vec_named(&refusal.clone().into_runtime_error()).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(wire.cause, refusal.cause);
-}
-
-#[tokio::test]
-async fn recorded_effect_state_preserves_terminal_failure_and_excludes_nested_batches() {
-    let host = crate::PluginHost::empty();
-    let session = host
-        .isolated_registry()
-        .build_session(PluginSessionRequest::creation(
-            "effect-owner",
-            Default::default(),
-        ))
-        .unwrap();
-    let store = PluginStateStore::bind(&session.owner, "state", Arc::clone(&session.state));
-    let base = session.export_state();
-    let terminal =
-        crate::RuntimeEffectControllerError::new(crate::RuntimeErrorCode::Plugin, "refused");
-    let effect = super::effect::record_effect(
-        Arc::clone(&session),
-        crate::RuntimeEffectKind::LanguageRuntimeValue,
-        crate::EffectAddress::new(
-            crate::ExecutionScope::turn("effect-owner", "run"),
-            "terminal",
-        )
-        .unwrap(),
-        async {
-            store.set("accepted", Value::Bool(true)).unwrap();
-            Err(terminal.clone())
-        },
-    )
-    .await
-    .unwrap();
-    let after = session.export_state();
-    session.hydrate_state(&base).unwrap();
-    let result = session.restore_effect_state(effect).unwrap_err();
-    assert_eq!(result.code, terminal.code);
-    assert_eq!(result.message, terminal.message);
-    assert_eq!(session.export_state(), after);
-    let outer = super::effect::record_effect(
-        Arc::clone(&session),
-        crate::RuntimeEffectKind::LanguageRuntimeValue,
-        crate::EffectAddress::new(crate::ExecutionScope::turn("effect-owner", "run"), "outer")
-            .unwrap(),
-        async {
-            let inner = super::effect::record_effect(
-                Arc::clone(&session),
-                crate::RuntimeEffectKind::LanguageRuntimeValue,
-                crate::EffectAddress::new(
-                    crate::ExecutionScope::turn("effect-owner", "run"),
-                    "inner",
-                )
-                .unwrap(),
-                async {
-                    store.set("nested", Value::Bool(true)).unwrap();
-                    Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
-                },
-            )
-            .await
-            .unwrap();
-            session.restore_effect_state(inner).unwrap();
-            Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
-        },
-    )
-    .await
-    .unwrap();
-    assert!(matches!(
-        outer,
-        crate::RuntimeEffectOutcome::LanguageRuntimeValue { .. }
-    ));
-}
-
 #[test]
 fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
     #[derive(Clone)]
@@ -1442,60 +1094,6 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
     );
 }
 
-#[tokio::test]
-async fn abandoned_effect_state_drops_accepted_tail_and_invalidates_guards() {
-    let session = crate::PluginHost::empty()
-        .build_session(PluginSessionRequest::creation(
-            "effect-owner",
-            Default::default(),
-        ))
-        .unwrap();
-    let store = PluginStateStore::bind(&session.owner, "state", Arc::clone(&session.state));
-    let base = session.export_state();
-    let address = || {
-        crate::EffectAddress::new(
-            crate::ExecutionScope::turn("effect-owner", "run"),
-            "abandoned",
-        )
-        .unwrap()
-    };
-    let result = super::effect::record_effect(
-        Arc::clone(&session),
-        crate::RuntimeEffectKind::LanguageRuntimeValue,
-        address(),
-        async {
-            store.set("tail", Value::Bool(true)).unwrap();
-            Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::PluginSessionManager,
-                "lost owner",
-            )
-            .retryable_uncommitted_derivation())
-        },
-    )
-    .await;
-    assert!(result.is_err());
-    assert_eq!(session.export_state(), base);
-    assert!(store.generation() > 0);
-    let (written, receiver) = tokio::sync::oneshot::channel();
-    let mut body = Box::pin(super::effect::record_effect(
-        Arc::clone(&session),
-        crate::RuntimeEffectKind::LanguageRuntimeValue,
-        address(),
-        async {
-            store.set("tail", Value::Bool(true)).unwrap();
-            written.send(()).unwrap();
-            std::future::pending().await
-        },
-    ));
-    tokio::select! { _ = &mut body => panic!("body must suspend"), _ = receiver => {} }
-    drop(body);
-    assert_eq!(session.export_state(), base);
-    assert!(matches!(
-        store.apply_guarded(0, vec![]),
-        Err(PluginStateError::GenerationConflict { .. })
-    ));
-}
-
 fn transition_request(
     owner: &str,
     host: &crate::PluginHost,
@@ -1534,98 +1132,6 @@ fn transition_request(
 }
 
 #[tokio::test]
-async fn retained_handle_refuses_background_writes_with_typed_cause() {
-    let session = crate::PluginHost::empty()
-        .build_session(PluginSessionRequest::creation(
-            "scope-owner",
-            Default::default(),
-        ))
-        .unwrap();
-    let state = PluginStateStore::bind(&session.owner, "retained", Arc::clone(&session.state));
-    let before = session.export_state();
-    let effect = super::effect::record_effect(
-        session.clone(),
-        crate::RuntimeEffectKind::LanguageRuntimeValue,
-        crate::EffectAddress::new(
-            crate::ExecutionScope::turn("scope-owner", "run"),
-            "callback",
-        )
-        .unwrap(),
-        async {
-            let retained = state.clone();
-            let refusal =
-                crate::task::spawn(async move { retained.set("background", Value::Bool(true)) })
-                    .await
-                    .unwrap()
-                    .unwrap_err();
-            assert_eq!(
-                refusal,
-                PluginStateError::WriteScopeRequired {
-                    plugin: "retained".into()
-                }
-            );
-            let error =
-                crate::RuntimeEffectControllerError::from(crate::PluginError::State(refusal))
-                    .into_runtime_error();
-            assert_eq!(
-                error.cause,
-                Some(crate::RuntimeErrorCause::PluginStateWriteScopeRequired {
-                    plugin: "retained".into()
-                })
-            );
-            let wire: crate::RuntimeError =
-                rmp_serde::from_slice(&rmp_serde::to_vec_named(&error).unwrap()).unwrap();
-            assert_eq!(wire.cause, error.cause);
-            assert_eq!(session.export_state(), before);
-            state.set("accepted", Value::Bool(true)).unwrap();
-            Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
-        },
-    )
-    .await
-    .unwrap();
-    assert!(matches!(
-        effect,
-        crate::RuntimeEffectOutcome::PluginState { .. }
-    ));
-    assert_eq!(
-        state.remove("accepted"),
-        Err(PluginStateError::WriteScopeRequired {
-            plugin: "retained".into()
-        })
-    );
-}
-
-#[test]
-fn native_hydration_drops_the_tail_and_never_reuses_guard_tokens() {
-    let state = store();
-    super::effect::test_scope(&state, || {
-        state.set("value", serde_json::json!(1)).unwrap();
-        let head = state.state.lock_recover().data.clone();
-        let mut stale = Vec::new();
-        for _ in 0..5 {
-            let accepted = state.set("value", serde_json::json!(2)).unwrap();
-            stale.push(accepted);
-            state.state.lock_recover().hydrate_live(&head);
-            let adopted = state.generation();
-            assert!(adopted > accepted);
-            assert_eq!(state.get("value"), Some(serde_json::json!(1)));
-            assert_eq!(state.state.lock_recover().data, head);
-            for expected in &stale {
-                assert_eq!(
-                    state.apply_guarded(*expected, vec![]),
-                    Err(PluginStateError::GenerationConflict {
-                        expected: *expected,
-                        actual: adopted
-                    })
-                );
-            }
-            state.state.lock_recover().hydrate_live(&head);
-            assert_eq!(state.generation(), adopted);
-        }
-    });
-}
-
-#[tokio::test]
 async fn pure_initialization_precedes_read_only_registration_and_readiness() {
     #[derive(Clone)]
     struct ReadOnly(Arc<std::sync::atomic::AtomicUsize>);
@@ -1661,12 +1167,6 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
         ) -> Result<(), crate::PluginError> {
             let state = registrar.state();
             assert_eq!(state.get("initial"), Some(serde_json::json!(17)));
-            assert_eq!(
-                state.set("register", Value::Null),
-                Err(PluginStateError::WriteScopeRequired {
-                    plugin: "read-only".into()
-                })
-            );
             Ok(())
         }
         fn session_ready(
@@ -1674,12 +1174,6 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
             ctx: crate::plugin::SessionReadyContext,
         ) -> Result<(), crate::PluginError> {
             assert_eq!(ctx.state.get("initial"), Some(serde_json::json!(17)));
-            assert_eq!(
-                ctx.state.remove("initial"),
-                Err(PluginStateError::WriteScopeRequired {
-                    plugin: "read-only".into()
-                })
-            );
             Ok(())
         }
     }
@@ -1704,22 +1198,12 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
             ))
             .unwrap();
         session.adopt_native_view(&view).unwrap();
-        super::effect::record_effect(
-            session.clone(),
-            crate::RuntimeEffectKind::LanguageRuntimeValue,
-            crate::EffectAddress::new(
-                crate::ExecutionScope::turn("read-only-owner", "run"),
-                callback,
-            )
-            .unwrap(),
-            async {
-                session.materialize().unwrap();
-                Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
-            },
-        )
-        .await
-        .unwrap();
-        assert_eq!(session.export_state().plugins["read-only"].generation, 0);
+        session.materialize().unwrap();
+        assert_eq!(
+            session.export_state().plugins["read-only"].generation,
+            0,
+            "{callback}: construction publishes nothing"
+        );
     }
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 }

@@ -394,21 +394,52 @@ impl lash_core::plugin::SessionPlugin for StateDeriver {
         &self,
         registrar: &mut lash_core::plugin::PluginRegistrar,
     ) -> std::result::Result<(), lash_core::PluginError> {
-        let state = registrar.state();
+        registrar.state_reducer(
+            "add",
+            Arc::new(|reduction: lash_core::plugin::StateReduction<'_>| {
+                let current = reduction.current.and_then(serde_json::Value::as_u64);
+                let step = reduction.input.as_u64().unwrap_or(0);
+                Ok(Some(serde_json::json!(current.unwrap_or(0) + step)))
+            }),
+        )?;
+        let accepting = Arc::clone(&self.0);
+        registrar.turn().before(
+            crate::hook_key!("accept"),
+            Arc::new(move |_| {
+                accepting.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async {
+                    Ok(lash_core::plugin::TurnContributions {
+                        state: lash_core::plugin::StateCommands::new()
+                            .set("accepted", serde_json::json!(17))
+                            .apply("second", "add", serde_json::json!(23)),
+                        ..Default::default()
+                    })
+                })
+            }),
+        )?;
+        let refusing = Arc::clone(&self.0);
+        registrar.turn().before(
+            crate::hook_key!("refuse"),
+            Arc::new(move |_| {
+                refusing.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async {
+                    Ok(lash_core::plugin::TurnContributions {
+                        state: lash_core::plugin::StateCommands::new()
+                            .set("kept", serde_json::json!(1))
+                            .set("invalid key", serde_json::json!(1)),
+                        ..Default::default()
+                    })
+                })
+            }),
+        )?;
         let calls = Arc::clone(&self.0);
         registrar.output().response(
             crate::hook_key!("count"),
             None,
             Arc::new(move |context| {
-                let state = state.clone();
                 let calls = Arc::clone(&calls);
                 Box::pin(async move {
                     calls.fetch_add(1, Ordering::SeqCst);
-                    state.set("accepted", serde_json::json!(17))?;
-                    let before = state.generation();
-                    assert!(state.set("invalid key", serde_json::json!(1)).is_err());
-                    assert_eq!(state.generation(), before);
-                    state.set("second", serde_json::json!(23))?;
                     let mut response = context.response;
                     response.parts = vec![LlmOutputPart::Text {
                         text: DERIVED.to_owned(),
@@ -784,7 +815,11 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
             Some(&serde_json::json!(17))
         );
         assert_eq!(namespace.values.get("second"), Some(&serde_json::json!(23)));
-        assert_eq!(namespace.generation, 2, "each accepted edit appears once");
+        assert_eq!(
+            namespace.generation, 2,
+            "each recorded publication, the refused one included, applies once"
+        );
+        assert!(!namespace.values.contains_key("kept"));
         assert!(!namespace.values.contains_key("invalid key"));
     }
     drop(second);

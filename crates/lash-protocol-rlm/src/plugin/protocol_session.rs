@@ -118,6 +118,7 @@ impl RlmProtocolSession {
                     "{used} tokens used; warn at {threshold}; choose frame switch path"
                 )),
             }],
+            state: Default::default(),
         })
     }
 }

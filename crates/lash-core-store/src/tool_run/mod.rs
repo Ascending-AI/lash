@@ -60,9 +60,10 @@ pub use source_seal::{
     SourceSubscription,
 };
 pub use state_command::{
-    CallbackSlot, FrontierRefusal, FrontierStep, PublicationOrdinal, ResolvedStateChange,
-    StateAuthority, StateCommand, StateCommandBatch, StateCommandLimits, StateCommandOrigin,
-    StateCommandRefusal, StateFrontier, StateResolution, StateResolutionOutcome,
+    ApplyReducer, CallbackSlot, FrontierRefusal, FrontierStep, NamespaceFrontierRefusal,
+    PublicationOrdinal, ReducerRefusal, ResolvedStateChange, StateAuthority, StateCommand,
+    StateCommandBatch, StateCommandLimits, StateCommandOrigin, StateCommandRefusal, StateFrontier,
+    StateResolution, StateResolutionOutcome,
 };
 pub use tool_hooks::{
     AfterCheckVerdict, AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CheckRank,

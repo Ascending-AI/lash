@@ -1427,9 +1427,10 @@ impl RuntimeError {
             | RuntimeErrorCause::ConfigRefused { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
             | RuntimeErrorCause::StoreRefusal { .. }
-            | RuntimeErrorCause::PluginStateWriteScopeRequired { .. }
+            | RuntimeErrorCause::PluginStateUnrecorded { .. }
             | RuntimeErrorCause::PluginStateEffectOwnerMismatch
-            | RuntimeErrorCause::PluginStateEffectReplayMismatch { .. }
+            | RuntimeErrorCause::PluginStateFrontier { .. }
+            | RuntimeErrorCause::PluginStatePublicationFenced { .. }
             | RuntimeErrorCause::PluginExecution { .. }
             | RuntimeErrorCause::PluginFormat { .. }
             | RuntimeErrorCause::PluginOperation { .. }
@@ -1697,7 +1698,9 @@ impl RuntimeEffectControllerError {
     /// one more fault alone: the recorded model this worker could not bind
     /// before the call ([`Self::llm_profile_unavailable`], FIG-4404). A tool attempt
     /// also consumes local retry authority for a typed VM worker fault
-    /// encountered before its pure derivation returned (FIG-4707).
+    /// encountered before its pure derivation returned (FIG-4707). Any step
+    /// consumes it for a fenced plugin-state publication (FIG-4878): the
+    /// body's result was never refused, only left unpublishable here.
     pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalPolicy {
         // The public cause can be attached after retry authority was granted.
         // No effect kind may consume that authority for a terminal refusal.
@@ -1735,6 +1738,10 @@ impl RuntimeEffectControllerError {
                     RuntimeEffectKind::ToolAttempt,
                     Some(RuntimeErrorCause::VmWorker { .. })
                 )
+            )
+            || matches!(
+                self.cause,
+                Some(RuntimeErrorCause::PluginStatePublicationFenced { .. })
             )
         {
             self.journal_disposition

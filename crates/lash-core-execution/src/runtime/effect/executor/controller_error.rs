@@ -45,13 +45,14 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 error
             }
             PluginError::Format(refusal) => refusal.into(),
-            PluginError::State(crate::PluginStateError::WriteScopeRequired { plugin }) => {
+            PluginError::State(crate::PluginStateError::Unrecorded { plugin }) => {
                 let mut error = Self::new(
                     RuntimeErrorCode::Plugin,
-                    format!("plugin `{plugin}` writes require an engine-owned callback scope"),
+                    format!(
+                        "plugin `{plugin}` returned state commands outside a recorded callback"
+                    ),
                 );
-                error.cause =
-                    Some(crate::RuntimeErrorCause::PluginStateWriteScopeRequired { plugin });
+                error.cause = Some(crate::RuntimeErrorCause::PluginStateUnrecorded { plugin });
                 error
             }
             PluginError::State(crate::PluginStateError::EffectOwnerMismatch) => {
@@ -62,13 +63,17 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 error.cause = Some(crate::RuntimeErrorCause::PluginStateEffectOwnerMismatch);
                 error
             }
-            PluginError::State(crate::PluginStateError::EffectReplayMismatch { plugin }) => {
+            PluginError::State(crate::PluginStateError::Frontier { plugin, refusal }) => {
                 let mut error = Self::new(
                     RuntimeErrorCode::EffectReplayDivergence,
-                    format!("plugin `{plugin}` does not match the recorded callback state base"),
+                    format!("plugin `{plugin}` cannot apply a recorded publication: {refusal}"),
                 );
-                error.cause =
-                    Some(crate::RuntimeErrorCause::PluginStateEffectReplayMismatch { plugin });
+                error.cause = Some(crate::RuntimeErrorCause::PluginStateFrontier {
+                    refusal: Box::new(lash_core_store::tool_run::NamespaceFrontierRefusal {
+                        plugin,
+                        refusal,
+                    }),
+                });
                 error
             }
             PluginError::TriggerOperation(err) => {

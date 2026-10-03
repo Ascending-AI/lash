@@ -18,7 +18,9 @@ impl RuntimeErrorCause {
             Self::VmWorker { outcome } => {
                 !outcome.is_retryable() && outcome.deployment_fault().is_none()
             }
-            Self::LlmProfileUnavailable { .. } | Self::PluginExecution { .. } => false,
+            Self::LlmProfileUnavailable { .. }
+            | Self::PluginExecution { .. }
+            | Self::PluginStatePublicationFenced { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
             Self::MaterialRefused { .. }
             | Self::ProviderFailure { .. }
@@ -34,9 +36,9 @@ impl RuntimeErrorCause {
             | Self::RunShapeRefused { .. }
             | Self::ConfigRefused { .. }
             | Self::MaxToolCallsExceeded { .. }
-            | Self::PluginStateWriteScopeRequired { .. }
+            | Self::PluginStateUnrecorded { .. }
             | Self::PluginStateEffectOwnerMismatch
-            | Self::PluginStateEffectReplayMismatch { .. }
+            | Self::PluginStateFrontier { .. }
             | Self::PluginFormat { .. }
             | Self::ProcessParentEnded { .. }
             | Self::ProcessStartKeyConflict { .. }

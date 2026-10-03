@@ -1566,7 +1566,10 @@ fn only_sequential_turn_and_tool_result_check_callbacks_publish_state() {
                 max_encoded_bytes: 1024,
             }
         ),
-        Err(StateCommandRefusal::InvalidKey { index: 2 })
+        Err(StateCommandRefusal::InvalidKey {
+            index: 2,
+            reason: crate::plugin_state::KeyRejection::IllegalCharacter { at: 0, byte: b' ' },
+        })
     );
     assert_eq!(
         serde_json::to_value(&batch.commands[1]).unwrap(),

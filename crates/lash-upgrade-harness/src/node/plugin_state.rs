@@ -263,13 +263,22 @@ impl SessionPlugin for ProbePlugin {
         &self,
         registrar: &mut lash_core::plugin::PluginRegistrar,
     ) -> Result<(), PluginError> {
-        let state = registrar.state();
+        // The counter's read-modify-write is a pure reducer the after-turn
+        // callback names; its resolution is recorded with the callback.
+        registrar.state_reducer(
+            "increment",
+            Arc::new(|reduction: lash_core::plugin::StateReduction<'_>| {
+                let seed = reduction.input["seed"].as_u64().unwrap_or(0);
+                let step = reduction.input["step"].as_u64().unwrap_or(0);
+                let current = reduction.current.and_then(serde_json::Value::as_u64);
+                Ok(Some(serde_json::json!(current.unwrap_or(seed) + step)))
+            }),
+        )?;
         let key = self.native_key();
         let calls = Arc::clone(&self.calls);
         registrar.turn().after(
             lash_core::hook_key!("counter"),
             Arc::new(move |ctx| {
-                let state = state.clone();
                 let calls = Arc::clone(&calls);
                 Box::pin(async move {
                     let value = ctx.plugin_config.config.get(PLUGIN).ok_or_else(|| {
@@ -277,10 +286,15 @@ impl SessionPlugin for ProbePlugin {
                     })?;
                     let config: ProbeConfig = serde_json::from_value(value.clone())
                         .map_err(|error| PluginError::Session(error.to_string()))?;
-                    let next = state.get_as::<u64>(key)?.unwrap_or(config.seed) + config.step;
-                    state.set(key, serde_json::json!(next))?;
                     calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(lash_core::plugin::AfterTurnContributions::default())
+                    Ok(lash_core::plugin::AfterTurnContributions {
+                        state: lash_core::plugin::StateCommands::new().apply(
+                            key,
+                            "increment",
+                            serde_json::json!({"seed": config.seed, "step": config.step}),
+                        ),
+                        ..Default::default()
+                    })
                 })
             }),
         )?;

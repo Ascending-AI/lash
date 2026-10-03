@@ -73,12 +73,9 @@ fn plugin_operation_failure_reaches_the_facade_as_a_typed_settlement() -> Result
                 record_kind: "plugin checkpoint".into(),
                 message: "invalid bytes".into(),
             }),
-            PluginOperationFailure::from(PluginError::State(
-                PluginStateError::GenerationConflict {
-                    expected: 4,
-                    actual: 7,
-                },
-            )),
+            PluginOperationFailure::from(PluginError::State(PluginStateError::PublicationFenced {
+                plugin: "probe".into(),
+            })),
         ];
         for (kind, code, retryable) in [
             (

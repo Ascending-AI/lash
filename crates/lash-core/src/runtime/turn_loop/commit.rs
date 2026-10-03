@@ -740,23 +740,56 @@ impl LashRuntime {
         };
 
         self.mark_phase_begin(PreparedTurn::RUNTIME_PHASE);
-        let finalized = match plugins
+        // The after-turn callbacks run as one recorded step: their decisions
+        // and the resolutions of their state commands are served from the
+        // journal on replay, and no callback runs again (K10).
+        let recorded = if plugins.has_after_turn_hooks() {
+            let hook_context = crate::plugin::TurnResultHookContext {
+                session_id: assembled.state.session_id.clone(),
+                plugin_config: plugins.admitted_plugin_config(),
+                turn: Arc::new(crate::plugin::TurnHookReport::from_assembled(&assembled)),
+                sessions: manager.state_service(),
+                session_graph: manager.graph_service(),
+            };
+            let callbacks = Arc::clone(&plugins);
+            let probe = self.turn_phase_probe.clone();
+            let recorded = Box::pin(crate::plugin::record_plugin_callbacks(
+                scoped_effect_controller,
+                crate::RuntimeAttribution::for_session(assembled.state.session_id.clone()),
+                format!("plugin-callbacks:after-turn:{trace_turn_id}"),
+                crate::plugin::RecordedCallbackPhase::AfterTurn,
+                Arc::clone(&plugins),
+                Box::pin(async move {
+                    callbacks
+                        .dispatch(probe.as_ref())
+                        .after_turn_decisions(hook_context)
+                        .await
+                }),
+            ))
+            .await;
+            match recorded {
+                Ok(Ok(recorded)) => recorded,
+                Ok(Err(err)) => {
+                    self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
+                    return Err(err.into_turn_failure(RuntimeErrorCode::PluginFinalizeTurn));
+                }
+                Err(err) => {
+                    self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
+                    return Err(err.into_runtime_error());
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        let finalized = plugins
             .dispatch(self.turn_phase_probe.as_ref())
             .finalize_turn(
                 assembled,
-                manager.state_service(),
-                manager.graph_service(),
+                recorded,
                 &trace_turn_id,
                 self.services.clock.as_ref(),
             )
-            .await
-        {
-            Ok(finalized) => finalized,
-            Err(err) => {
-                self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
-                return Err(err.into_turn_failure(RuntimeErrorCode::PluginFinalizeTurn));
-            }
-        };
+            .await;
         let returned_turn = finalized.turn;
         let prepared = PreparedTurn {
             turn_pipeline,

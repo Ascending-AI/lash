@@ -9,15 +9,26 @@
 //! resolutions without running a body, hook, reducer or converter. One
 //! refusal rejects the whole batch.
 //!
+//! Publication is sequenced per namespace: a resolution's ordinal is the
+//! generation its namespace reaches when it applies, and its predecessor is
+//! the generation it was reduced against. A namespace checkpoint therefore
+//! carries its own applied frontier, and a resolution delivered again after
+//! a newer one applies nothing.
+//!
 //! Only the sequential before-turn, after-turn, checkpoint and after-tool
-//! (result-check) callbacks may return commands ([`CallbackSlot`]); every
-//! other callback is decision-only.
+//! (result-check) callbacks may return commands ([`CallbackSlot`]), beside a
+//! tool body's own result; every other callback is decision-only.
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use super::run_event::{AttemptOrdinal, SegmentOrdinal};
 use super::tool_hooks::{HookCause, HookOccurrence};
-use crate::plugin_state::FormatRefusal;
+use crate::plugin_state::{
+    FormatRefusal, KeyRejection, PLUGIN_STATE_NAMESPACE_LIMIT, PLUGIN_STATE_VALUE_LIMIT,
+    validate_state_key,
+};
 use crate::store::plugin_writers::{PluginCallbackIdentity, PluginRevision};
 
 /// Generates [`CallbackSlot`] from one table, so a slot cannot exist
@@ -132,7 +143,9 @@ pub enum StateCommand {
 }
 
 impl StateCommand {
-    fn key(&self) -> &str {
+    /// The namespace key the command addresses.
+    #[must_use]
+    pub fn key(&self) -> &str {
         match self {
             Self::Set { key, .. } | Self::Remove { key } | Self::Apply { key, .. } => key,
         }
@@ -170,6 +183,15 @@ pub struct StateCommandLimits {
     pub max_encoded_bytes: usize,
 }
 
+impl StateCommandLimits {
+    /// The bounds every published batch is held to: 64 commands, and one
+    /// namespace's worth of encoded input with room for its keys.
+    pub const PUBLISHED: Self = Self {
+        max_commands: 64,
+        max_encoded_bytes: PLUGIN_STATE_NAMESPACE_LIMIT + 16 * 1024,
+    };
+}
+
 /// A bounded, ordered command batch.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -192,13 +214,34 @@ pub enum StateCommandRefusal {
     TooManyCommands { count: usize },
     #[error("the batch encodes to {bytes} bytes, over the limit")]
     TooLarge { bytes: usize },
-    #[error("command {index} has an empty key")]
-    InvalidKey { index: usize },
+    #[error("command {index} names an invalid key: {reason}")]
+    InvalidKey { index: usize, reason: KeyRejection },
+    #[error("command {index} writes a {bytes}-byte value, limit {limit}")]
+    ValueTooLarge {
+        index: usize,
+        bytes: usize,
+        limit: usize,
+    },
+    #[error("the namespace would encode to {bytes} bytes, limit {limit}")]
+    NamespaceTooLarge { bytes: usize, limit: usize },
+    #[error("command {index} names reducer `{name}`, which its plugin does not register")]
+    UnknownReducer { index: usize, name: String },
     #[error(transparent)]
     IncompatibleWriter(FormatRefusal),
     #[error("the reducer refused command {index}")]
     Reducer { index: usize, cause: HookCause },
 }
+
+/// What [`StateCommandBatch::reduce`] calls for each [`StateCommand::Apply`]:
+/// the key, the reducer's name, the key's current candidate value and the
+/// command's input, to the key's next value or a refusal.
+pub type ApplyReducer<'a> = dyn FnMut(
+        &str,
+        &str,
+        Option<&serde_json::Value>,
+        &serde_json::Value,
+    ) -> Result<Option<serde_json::Value>, ReducerRefusal>
+    + 'a;
 
 impl StateCommandBatch {
     /// Check a batch before reduction: the proposing callback's authority,
@@ -220,6 +263,15 @@ impl StateCommandBatch {
         if proposer.owner != self.plugin {
             return Err(StateCommandRefusal::WrongOwner);
         }
+        self.check_bounds(limits)
+    }
+
+    /// Check a batch's limits and keys, whoever proposed it.
+    ///
+    /// # Errors
+    ///
+    /// The first [`StateCommandRefusal`]; nothing of the batch publishes.
+    pub fn check_bounds(&self, limits: StateCommandLimits) -> Result<(), StateCommandRefusal> {
         if self.commands.len() > limits.max_commands {
             return Err(StateCommandRefusal::TooManyCommands {
                 count: self.commands.len(),
@@ -229,18 +281,112 @@ impl StateCommandBatch {
         if bytes > limits.max_encoded_bytes {
             return Err(StateCommandRefusal::TooLarge { bytes });
         }
-        if let Some(index) = self
-            .commands
-            .iter()
-            .position(|command| command.key().trim().is_empty())
-        {
-            return Err(StateCommandRefusal::InvalidKey { index });
+        for (index, command) in self.commands.iter().enumerate() {
+            validate_state_key(command.key())
+                .map_err(|reason| StateCommandRefusal::InvalidKey { index, reason })?;
+            if let StateCommand::Set { value, .. } = command {
+                check_value(index, value)?;
+            }
         }
         Ok(())
     }
+
+    /// Reduce the batch against `published`, the namespace's last published
+    /// values: every command sees the changes of the commands before it.
+    /// `reducer` resolves an [`StateCommand::Apply`] from its key, its
+    /// reducer's name, the key's current candidate value and its input; it
+    /// must be pure.
+    ///
+    /// The outcome is all-or-none: the first refusal rejects every command.
+    pub fn reduce(
+        &self,
+        published: &BTreeMap<String, serde_json::Value>,
+        reducer: &mut ApplyReducer<'_>,
+    ) -> StateResolutionOutcome {
+        match self.resolve(published, reducer) {
+            Ok(changes) => StateResolutionOutcome::Applied { changes },
+            Err(refusal) => StateResolutionOutcome::Refused { refusal },
+        }
+    }
+
+    fn resolve(
+        &self,
+        published: &BTreeMap<String, serde_json::Value>,
+        reducer: &mut ApplyReducer<'_>,
+    ) -> Result<Vec<ResolvedStateChange>, StateCommandRefusal> {
+        let mut candidate = published.clone();
+        let mut changes = Vec::with_capacity(self.commands.len());
+        for (index, command) in self.commands.iter().enumerate() {
+            let change = match command {
+                StateCommand::Set { key, value } => ResolvedStateChange::Put {
+                    key: key.clone(),
+                    value: canonical(value.clone()),
+                },
+                StateCommand::Remove { key } => ResolvedStateChange::Delete { key: key.clone() },
+                StateCommand::Apply { key, name, input } => {
+                    match reducer(key, name, candidate.get(key), input) {
+                        Ok(Some(value)) => {
+                            check_value(index, &value)?;
+                            ResolvedStateChange::Put {
+                                key: key.clone(),
+                                value: canonical(value),
+                            }
+                        }
+                        Ok(None) => ResolvedStateChange::Delete { key: key.clone() },
+                        Err(ReducerRefusal::Unknown) => {
+                            return Err(StateCommandRefusal::UnknownReducer {
+                                index,
+                                name: name.clone(),
+                            });
+                        }
+                        Err(ReducerRefusal::Refused(cause)) => {
+                            return Err(StateCommandRefusal::Reducer { index, cause });
+                        }
+                    }
+                }
+            };
+            change.apply_to(&mut candidate);
+            changes.push(change);
+        }
+        let bytes = serde_json::to_vec(&candidate).map_or(usize::MAX, |bytes| bytes.len());
+        if bytes > PLUGIN_STATE_NAMESPACE_LIMIT {
+            return Err(StateCommandRefusal::NamespaceTooLarge {
+                bytes,
+                limit: PLUGIN_STATE_NAMESPACE_LIMIT,
+            });
+        }
+        Ok(changes)
+    }
 }
 
-/// The ordinal of one durable publication in its owner's sequence, from 1.
+/// Why a reducer resolved no value for an [`StateCommand::Apply`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReducerRefusal {
+    /// The plugin registers no reducer by the command's name.
+    Unknown,
+    /// The reducer refused the command, with its typed cause.
+    Refused(HookCause),
+}
+
+fn check_value(index: usize, value: &serde_json::Value) -> Result<(), StateCommandRefusal> {
+    let bytes = serde_json::to_vec(value).map_or(usize::MAX, |bytes| bytes.len());
+    if bytes > PLUGIN_STATE_VALUE_LIMIT {
+        return Err(StateCommandRefusal::ValueTooLarge {
+            index,
+            bytes,
+            limit: PLUGIN_STATE_VALUE_LIMIT,
+        });
+    }
+    Ok(())
+}
+
+fn canonical(mut value: serde_json::Value) -> serde_json::Value {
+    value.sort_all_objects();
+    value
+}
+
+/// The ordinal of one durable publication in its namespace's sequence, from
+/// 1: the namespace generation it publishes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PublicationOrdinal(pub u64);
@@ -258,6 +404,20 @@ pub enum ResolvedStateChange {
     },
 }
 
+impl ResolvedStateChange {
+    /// Install the change in `values`.
+    pub fn apply_to(&self, values: &mut BTreeMap<String, serde_json::Value>) {
+        match self {
+            Self::Put { key, value } => {
+                values.insert(key.clone(), value.clone());
+            }
+            Self::Delete { key } => {
+                values.remove(key);
+            }
+        }
+    }
+}
+
 /// What a reduction resolved to.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "resolution", rename_all = "snake_case", deny_unknown_fields)]
@@ -266,7 +426,9 @@ pub enum StateResolutionOutcome {
     Refused { refusal: StateCommandRefusal },
 }
 
-/// The recorded resolution of one batch: what replay installs.
+/// The recorded resolution of one batch: what replay installs. A refusal is
+/// a publication too: it advances its namespace's sequence and changes no
+/// value, so every recorded resolution has one place in it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StateResolution {
@@ -280,7 +442,7 @@ pub struct StateResolution {
     pub outcome: StateResolutionOutcome,
 }
 
-/// The applied frontier a checkpoint or handover carries with the state.
+/// The applied frontier a checkpoint or handover carries with a namespace.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StateFrontier {
@@ -288,6 +450,26 @@ pub struct StateFrontier {
     pub applied: Option<PublicationOrdinal>,
     /// The segment that owns publication.
     pub owner_segment: SegmentOrdinal,
+}
+
+impl StateFrontier {
+    /// The frontier of a namespace at `generation`, owned by `owner_segment`.
+    #[must_use]
+    pub fn at_generation(generation: u64, owner_segment: SegmentOrdinal) -> Self {
+        Self {
+            applied: (generation > 0).then_some(PublicationOrdinal(generation)),
+            owner_segment,
+        }
+    }
+
+    /// The publication the next resolution reduced now takes.
+    #[must_use]
+    pub fn next(&self) -> PublicationOrdinal {
+        PublicationOrdinal(
+            self.applied
+                .map_or(1, |applied| applied.0.saturating_add(1)),
+        )
+    }
 }
 
 /// What the frontier does with a resolution.
@@ -299,8 +481,18 @@ pub enum FrontierStep {
     AlreadyApplied,
 }
 
+/// A frontier's refusal of a recorded resolution of one plugin's namespace.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NamespaceFrontierRefusal {
+    pub plugin: String,
+    pub refusal: FrontierRefusal,
+}
+
 /// Why a frontier refuses a resolution.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error, schemars::JsonSchema,
+)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FrontierRefusal {
     #[error("segment {found} publishes after segment {owner} took ownership")]
@@ -310,27 +502,27 @@ pub enum FrontierRefusal {
 }
 
 impl StateFrontier {
-    /// Decide what to do with `resolution`.
+    /// Decide what to do with `resolution`. A delivery of an applied
+    /// publication applies nothing, whoever delivers it.
     ///
     /// # Errors
     ///
     /// [`FrontierRefusal`] for a stale publisher or a publication that
     /// skips or reorders the recorded sequence.
     pub fn step(&self, resolution: &StateResolution) -> Result<FrontierStep, FrontierRefusal> {
-        if resolution.segment < self.owner_segment {
-            return Err(FrontierRefusal::StalePublisher {
-                owner: self.owner_segment.0,
-                found: resolution.segment.0,
-            });
-        }
         if self
             .applied
             .is_some_and(|applied| resolution.ordinal <= applied)
         {
             return Ok(FrontierStep::AlreadyApplied);
         }
-        let expected = PublicationOrdinal(self.applied.map_or(1, |applied| applied.0 + 1));
-        if resolution.ordinal != expected || resolution.predecessor != self.applied {
+        if resolution.segment < self.owner_segment {
+            return Err(FrontierRefusal::StalePublisher {
+                owner: self.owner_segment.0,
+                found: resolution.segment.0,
+            });
+        }
+        if resolution.ordinal != self.next() || resolution.predecessor != self.applied {
             return Err(FrontierRefusal::OutOfOrder {
                 found: resolution.ordinal.0,
             });

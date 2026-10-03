@@ -865,12 +865,12 @@ pub mod plugins {
         CheckpointApplication, CheckpointComponentKey, CodeExecutionOutcome, CodeExecutorPlugin,
         ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState, InvalidExecutionLeafName,
         LeafChange, PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
-        PluginSessionRequest, PluginState, PluginStateEffect, PluginStateMutation,
-        PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
-        PrepareTurnRequest, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
-        ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
-        ProtocolSessionRestoreView, SessionAuthorityContext, SystemPromptContext,
-        SystemPromptPurpose, TurnFinalization, TurnPreparation,
+        PluginSessionRequest, PluginState, PluginStateEffect, PluginTransitionBase,
+        PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
+        ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
+        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext,
+        SystemPromptContext, SystemPromptPurpose, TurnFinalization, TurnPreparation,
     };
     /// The registration groups [`PluginRegistrar`]'s accessors return
     /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take
@@ -881,10 +881,17 @@ pub mod plugins {
         ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations,
         ToolResultRegistrations, TriggerEventRegistrations, TurnRegistrations,
     };
-    /// Host-mediated JSON state, accepted in memory and persisted at boundary commits.
+    /// Host-mediated JSON state: a plugin reads its namespace through a
+    /// read-only [`PluginStateView`] and changes it only by returning
+    /// [`StateCommands`] from a tool body or a before-turn, after-turn,
+    /// checkpoint or after-tool callback. Their recorded resolution is
+    /// published once durable and persisted at boundary commits.
     pub use lash_core::plugin::{
-        FormatNamespace, FormatRefusal, KeyRejection, PluginConfigNamespace, PluginStateEdit,
-        PluginStateError, PluginStateStore, SessionReadyContext,
+        FormatNamespace, FormatRefusal, FrontierRefusal, HookCause, HookOccurrence, KeyRejection,
+        NamespaceFrontierRefusal, PluginConfigNamespace, PluginStateError, PluginStateView,
+        PublicationOrdinal, ResolvedStateChange, SessionReadyContext, StateCommand,
+        StateCommandOrigin, StateCommandRefusal, StateCommands, StateReducer, StateReduction,
+        StateResolution, StateResolutionOutcome,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus

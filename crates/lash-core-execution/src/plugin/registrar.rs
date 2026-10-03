@@ -121,8 +121,10 @@ fn register_singleton_hook<H>(
 
 #[derive(Clone, Default)]
 pub(crate) struct PluginContributions {
-    /// Plugins that kept their state store past registration (FIG-3712).
+    /// Plugins that kept their state view past registration (FIG-3712).
     pub(crate) state_retaining_plugins: Vec<String>,
+    /// Each plugin's pure state reducers, by name (K10).
+    pub(crate) state_reducers: BTreeMap<String, BTreeMap<String, super::StateReducer>>,
     pub(crate) tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
     pub(crate) triggers: Vec<crate::TriggerEvent>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
@@ -158,7 +160,7 @@ pub(crate) struct PluginContributions {
 }
 
 pub struct PluginRegistrar {
-    pub(super) state: Option<super::PluginStateStore>,
+    pub(super) state: Option<super::PluginStateView>,
     pub(crate) contributions: PluginContributions,
     pub(crate) owner: PluginRevision,
     pub(super) tool_names: BTreeSet<String>,
@@ -715,15 +717,41 @@ impl ExecutionRegistrations<'_> {
 }
 
 impl PluginRegistrar {
-    /// The host-owned namespace bound to the registering plugin.
+    /// A read-only view of the host-owned namespace bound to the registering
+    /// plugin. A plugin changes its namespace only by returning
+    /// [`StateCommands`](super::StateCommands) from a tool body or a
+    /// before-turn, after-turn, checkpoint or after-tool callback.
     #[expect(
         clippy::expect_used,
         reason = "`PluginRegistrar::new` is private and every registrar reaching a plugin is bound by `bind_state` first"
     )]
-    pub fn state(&self) -> super::PluginStateStore {
+    pub fn state(&self) -> super::PluginStateView {
         self.state
             .clone()
             .expect("registrar is bound during registration")
+    }
+
+    /// Register the pure reducer [`StateCommands::apply`](super::StateCommands::apply)
+    /// names `name` by, for this plugin's namespace.
+    pub fn state_reducer(
+        &mut self,
+        name: impl Into<String>,
+        reducer: super::StateReducer,
+    ) -> Result<(), PluginError> {
+        let name = name.into();
+        let reducers = self
+            .contributions
+            .state_reducers
+            .entry(self.owner.plugin.clone())
+            .or_default();
+        if reducers.contains_key(&name) {
+            return Err(PluginError::Registration(format!(
+                "duplicate state reducer `{name}` for plugin `{}`",
+                self.owner.plugin
+            )));
+        }
+        reducers.insert(name, reducer);
+        Ok(())
     }
 
     pub(crate) fn new(owner: PluginRevision) -> Self {

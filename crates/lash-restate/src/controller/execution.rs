@@ -259,6 +259,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::AdmitRun { .. }
         | RuntimeEffectCommand::InspectAdmittedHead { .. }
         | RuntimeEffectCommand::ObserveDrainMark { .. }
+        | RuntimeEffectCommand::PluginCallbacks { .. }
         | RuntimeEffectCommand::RecoverFollowOn { .. }
         | RuntimeEffectCommand::ReadSessionCommandRun { .. }
         | RuntimeEffectCommand::IngestTriggerOccurrence { .. }

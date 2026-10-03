@@ -31,33 +31,23 @@ pub async fn plugin_state_boundary_trace(
             .expect("the live plugin state is captured");
         commit(&store, &mut state).await;
         let before = state.plugin_state_ref().cloned();
-        support::callback(&plugins, "first-write", {
-            let handle = handle.clone();
-            async move {
-                assert_eq!(handle.set("counter", serde_json::json!(1)).unwrap(), 1);
-                assert_eq!(
-                    handle.clone().get("counter"),
-                    Some(serde_json::json!(1)),
-                    "read your writes"
-                );
-                let rejected = handle.apply_guarded(
-                    0,
-                    vec![PluginStateEdit::Set {
-                        key: "counter".into(),
-                        value: serde_json::json!(99),
-                    }],
-                );
-                assert!(matches!(
-                    rejected,
-                    Err(PluginStateError::GenerationConflict {
-                        expected: 0,
-                        actual: 1
-                    })
-                ));
-                assert_eq!(handle.get("counter"), Some(serde_json::json!(1)));
-            }
-        })
+        let first = support::publish(
+            &plugins,
+            MOCK,
+            "first-write",
+            StateCommands::new().set("counter", serde_json::json!(1)),
+        )
         .await;
+        assert_eq!(handle.get("counter"), Some(serde_json::json!(1)));
+        assert_eq!(handle.generation(), 1);
+        plugins
+            .publish_effect_state(first)
+            .expect("a repeated delivery is accepted");
+        assert_eq!(
+            handle.generation(),
+            1,
+            "a repeated delivery applies nothing"
+        );
         let crash_state =
             crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(parent_id))
                 .await
@@ -75,7 +65,7 @@ pub async fn plugin_state_boundary_trace(
         assert_eq!(
             rebuilt_fixture.state(parent_id).get("counter"),
             None,
-            "uncommitted tail is lost on rebuild"
+            "a publication the head does not carry is not in a rebuild from it"
         );
         drop(rebuilt);
         state
@@ -117,7 +107,7 @@ pub async fn plugin_state_boundary_trace(
         assert_eq!(
             rebuilt_fixture.state(parent_id).get("counter"),
             Some(serde_json::json!(1)),
-            "committed write survives process reconstruction"
+            "committed publication survives process reconstruction"
         );
         assert_eq!(
             rebuilt_fixture.ready_values.lock_recover()[parent_id],
@@ -125,12 +115,12 @@ pub async fn plugin_state_boundary_trace(
             "session_ready itself must see the committed value"
         );
         assert_eq!(rebuilt.export_state(), plugins.export_state());
-        support::callback(&plugins, "parent-fork-write", {
-            let handle = handle.clone();
-            async move {
-                handle.set("counter", serde_json::json!(2)).unwrap();
-            }
-        })
+        support::publish(
+            &plugins,
+            MOCK,
+            "parent-fork-write",
+            StateCommands::new().set("counter", serde_json::json!(2)),
+        )
         .await;
         let child = plugins
             .fork_for_session(SessionId::fixture(child_id), Default::default())
@@ -140,23 +130,21 @@ pub async fn plugin_state_boundary_trace(
         assert_eq!(
             child_handle.get("counter"),
             Some(serde_json::json!(2)),
-            "fork includes uncommitted live parent state"
+            "fork includes the parent's published state"
         );
-        support::callback(&plugins, "parent-isolated-write", {
-            let handle = handle.clone();
-            async move {
-                handle.set("counter", serde_json::json!(3)).unwrap();
-            }
-        })
+        support::publish(
+            &plugins,
+            MOCK,
+            "parent-isolated-write",
+            StateCommands::new().set("counter", serde_json::json!(3)),
+        )
         .await;
-        support::callback(&child, "child-isolated-write", {
-            let child_handle = child_handle.clone();
-            async move {
-                child_handle
-                    .set("child-only", serde_json::json!(true))
-                    .unwrap();
-            }
-        })
+        support::publish(
+            &child,
+            MOCK,
+            "child-isolated-write",
+            StateCommands::new().set("child-only", serde_json::json!(true)),
+        )
         .await;
         assert_eq!(child_handle.get("counter"), Some(serde_json::json!(2)));
         assert_eq!(handle.get("child-only"), None);
@@ -187,6 +175,3 @@ pub async fn plugin_state_boundary_trace(
     })
     .await
 }
-
-// Publish the recorded initialization before runtime assembly, then exercise
-// production park without refreshing after the callback writes.

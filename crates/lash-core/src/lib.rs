@@ -247,7 +247,10 @@ pub mod facade_support {
         ToolArgsTransformInput, ToolHookContext, ToolHookOccurrence, ToolResultCandidate,
         ToolResultCheckInput, ToolResultTransformInput, TurnContributions,
     };
-    pub use crate::plugin::{KeyRejection, PluginStateEdit, PluginStateError, PluginStateStore};
+    pub use crate::plugin::{
+        HookCause, KeyRejection, PluginStateError, PluginStateView, StateCommand,
+        StateCommandRefusal, StateCommands, StateReducer, StateReduction,
+    };
     pub use crate::plugin::{
         PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginOperationFailure,
     };
@@ -646,15 +649,15 @@ pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
     AppendSessionNodesRequest, FormatNamespace, FormatRefusal, FormatVersion, FrameNodeId,
     FrameNodeIdError, KeyRejection, PluginConfigNamespace, PluginError, PluginErrorClass,
-    PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
-    PluginStateEffect, PluginStateError, PluginStateMutation, PluginStateStore,
-    PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
-    ProcessEngineContributionContext, ProtocolBeforeLlmCallContext, ProtocolLlmCallAction,
-    SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginInit,
-    SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
-    SessionStateService, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
-    UnstatedSessionConfig, durable_identity_conflict, is_durable_identity_conflict,
-    is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
+    PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEffect,
+    PluginStateError, PluginStateView, PluginTransitionBase, PluginTransitionId,
+    PluginTransitionRecord, PluginTransitionRequest, ProcessEngineContributionContext,
+    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionCreateRequest, SessionGraphService,
+    SessionLineage, SessionPluginInit, SessionPluginSource, SessionReadView, SessionRelation,
+    SessionSnapshot, SessionStartPoint, SessionStateService, SessionToolAccess,
+    SessionToolAccessError, StateCommands, SubagentSessionContext, UnstatedSessionConfig,
+    durable_identity_conflict, is_durable_identity_conflict, is_trigger_occurrence_reclaimed,
+    trigger_occurrence_reclaimed,
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 

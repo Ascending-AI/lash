@@ -478,8 +478,8 @@ define_plugin_errors! {
         => "state"
         => match source {
             super::PluginStateError::InvalidKey { .. } | super::PluginStateError::ValueTooLarge { .. } | super::PluginStateError::StoreTooLarge { .. } => crate::ToolFailureClass::InvalidRequest,
-            super::PluginStateError::WriteScopeRequired { .. } | super::PluginStateError::EffectOwnerMismatch | super::PluginStateError::EffectReplayMismatch { .. } | super::PluginStateError::Encode { .. } | super::PluginStateError::Decode { .. } => crate::ToolFailureClass::Internal,
-            super::PluginStateError::GenerationConflict { .. } => crate::ToolFailureClass::Unavailable,
+            super::PluginStateError::Unrecorded { .. } | super::PluginStateError::EffectOwnerMismatch | super::PluginStateError::Frontier { .. } | super::PluginStateError::Encode { .. } | super::PluginStateError::Decode { .. } => crate::ToolFailureClass::Internal,
+            super::PluginStateError::PublicationFenced { .. } => crate::ToolFailureClass::Unavailable,
         };
 /// A factory's [`super::PluginDeclaration`] failed the composition's owner
     /// and format checks (FIG-4732): a session cannot materialize under a

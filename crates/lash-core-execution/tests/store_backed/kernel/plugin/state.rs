@@ -37,15 +37,31 @@ mod tests {
             .state
     }
 
+    /// Publish `value` to the `mock` namespace from the recorded body `step`.
+    async fn publish(plugins: &Arc<crate::PluginSession>, step: &str, value: serde_json::Value) {
+        crate::publish_plugin_state(
+            plugins,
+            "mock",
+            crate::EffectAddress::new(crate::ExecutionScope::turn("capture-race", "run"), step)
+                .unwrap(),
+            crate::StateCommands::new().set("value", value),
+        )
+        .await
+        .expect("the publication applies");
+    }
+
     #[tokio::test]
-    async fn write_after_capture_survives_commit_receipt_adoption() {
-        let plugins = crate::support::plugin_host(Vec::new())
+    async fn publication_after_capture_survives_commit_receipt_adoption() {
+        let plugins =
+            crate::support::plugin_host(vec![Arc::new(crate::plugin::StaticPluginFactory::new(
+                crate::plugin::PluginDeclaration::initial("mock"),
+                crate::plugin::PluginSpec::new(),
+            ))])
             .build_session(PluginSessionRequest::creation(
                 "capture-race",
                 Default::default(),
             ))
             .unwrap();
-        let handle = crate::plugin_state_store(&plugins, "mock");
         let store = session_store("capture-race").await;
         let mut state = crate::RuntimeSessionState {
             session_id: "capture-race".into(),
@@ -54,12 +70,12 @@ mod tests {
                 crate::MaxToolCalls::new(1024),
             ))
         };
-        handle.set("value", serde_json::json!(1)).unwrap();
+        publish(&plugins, "first", serde_json::json!(1)).await;
         state
             .refresh_plugin_states(&plugins)
             .expect("the live plugin state is captured");
         let captured = crate::RuntimeCommit::persisted_state_for_test(&state);
-        handle.set("value", serde_json::json!(2)).unwrap();
+        publish(&plugins, "second", serde_json::json!(2)).await;
         let receipt = crate::testing::store_fixtures::commit_runtime_state_for_test(
             &store,
             captured,

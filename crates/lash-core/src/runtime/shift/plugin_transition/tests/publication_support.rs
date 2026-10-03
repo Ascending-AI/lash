@@ -114,10 +114,6 @@ impl crate::SessionPlugin for Probe {
         };
         assert_eq!(context.state.get(key), Some(serde_json::json!(17)));
         assert_eq!(context.state.generation(), if self.convert { 8 } else { 0 });
-        assert!(matches!(
-            context.state.set("forbidden", serde_json::json!(true)),
-            Err(crate::PluginStateError::WriteScopeRequired { .. })
-        ));
         Ok(())
     }
 }

@@ -107,11 +107,16 @@ impl EffectControllerTaskRequest {
                         ),
                     ))
                 } else {
-                    let plugins = local_executor.plugin_state_session();
+                    let publication = local_executor.plugin_state_session().map(|plugins| {
+                        crate::plugin::EffectPublication::begin(
+                            plugins,
+                            envelope.invocation.address().clone(),
+                        )
+                    });
                     let result = controller.execute_effect(*envelope, *local_executor).await;
-                    match plugins {
-                        Some(plugins) => {
-                            result.and_then(|outcome| plugins.restore_effect_state(outcome))
+                    match publication {
+                        Some(publication) => {
+                            result.and_then(|outcome| publication.publish(outcome))
                         }
                         None => result,
                     }

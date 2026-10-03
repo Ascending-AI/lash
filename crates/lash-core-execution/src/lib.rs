@@ -241,7 +241,10 @@ pub mod facade_support {
         ToolArgsTransformInput, ToolHookContext, ToolHookOccurrence, ToolResultCandidate,
         ToolResultCheckInput, ToolResultTransformInput, TurnContributions,
     };
-    pub use crate::plugin::{KeyRejection, PluginStateEdit, PluginStateError, PluginStateStore};
+    pub use crate::plugin::{
+        HookCause, KeyRejection, PluginStateError, PluginStateView, StateCommand,
+        StateCommandRefusal, StateCommands, StateReducer, StateReduction,
+    };
     pub use crate::plugin::{
         PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginOperationFailure,
     };
@@ -723,13 +726,13 @@ pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
     AppendSessionNodesRequest, FormatNamespace, FormatRefusal, FormatVersion, FrameNodeId,
     FrameNodeIdError, KeyRejection, PluginConfigNamespace, PluginError, PluginErrorClass,
-    PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
-    PluginStateEffect, PluginStateError, PluginStateMutation, PluginStateStore,
-    PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
-    ProcessEngineContributionContext, ProtocolBeforeLlmCallContext, ProtocolLlmCallAction,
-    SESSION_PLUGIN_INIT_MAX_BYTES, SessionCreateRequest, SessionGraphService, SessionLineage,
-    SessionPluginInit, SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot,
-    SessionStartPoint, SessionStateService, SessionToolAccess, SessionToolAccessError,
+    PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEffect,
+    PluginStateError, PluginStateView, PluginTransitionBase, PluginTransitionId,
+    PluginTransitionRecord, PluginTransitionRequest, ProcessEngineContributionContext,
+    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SESSION_PLUGIN_INIT_MAX_BYTES,
+    SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginInit,
+    SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
+    SessionStateService, SessionToolAccess, SessionToolAccessError, StateCommands,
     SubagentSessionContext, UnstatedSessionConfig, durable_identity_conflict,
     is_durable_identity_conflict, is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
 };
@@ -939,6 +942,7 @@ pub mod core_internal {
     pub use crate::direct_completion_client::{
         DirectCompletionService, DirectExecutionPosition, runtime_direct_completion_client,
     };
+    pub use crate::plugin::EffectPublication;
     pub use crate::runtime::effect::executor::{RuntimeEffectLocalRunner, owned_runner_executor};
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
     pub use crate::runtime::effect::tool_child_runtime_ops::ToolChildHostRuntimeOps;

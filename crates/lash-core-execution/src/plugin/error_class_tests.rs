@@ -274,9 +274,8 @@ fn samples() -> Vec<PluginError> {
         ));
     }
     samples.push(PluginError::State(
-        crate::PluginStateError::GenerationConflict {
-            expected: 1,
-            actual: 2,
+        crate::PluginStateError::PublicationFenced {
+            plugin: "sample".into(),
         },
     ));
     for class in [

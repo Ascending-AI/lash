@@ -48,6 +48,12 @@ pub enum RuntimeEffectKind {
     /// (ADR 0099 §6): which ranks the opener applied before an externally
     /// effective step, so replay restores exactly that mapping.
     IncorporateGroupSettlements,
+    /// The recorded decisions of a sequential callback slot with the
+    /// resolutions of the state commands it returned (K10, FIG-4878): a
+    /// turn's before-turn or after-turn callbacks, or the result checks of a
+    /// call whose attempt body does not carry them. Replay serves the
+    /// decisions and publishes the resolutions; no callback or reducer runs.
+    PluginCallbacks,
     /// The recorded presentation boundary of one settled tool result
     /// (ADR 0099 §6, FIG-3420): the ordered presentation steps folded once,
     /// journaled so replay serves the recorded return and retained artifacts
@@ -156,6 +162,7 @@ impl RuntimeEffectKind {
             Self::AdmitRun => "admit_run",
             Self::InspectAdmittedHead => "inspect_admitted_head",
             Self::ObserveDrainMark => "observe_drain_mark",
+            Self::PluginCallbacks => "plugin_callbacks",
             Self::RecoverFollowOn => "recover_follow_on",
             Self::AdmitShift => "admit_shift",
             Self::TraceBoundary => "trace_boundary",

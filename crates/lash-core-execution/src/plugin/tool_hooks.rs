@@ -250,21 +250,23 @@ impl RankedVerdict for AfterToolDecision {
 }
 
 /// An after-check's reply: its verdict, plus the checkpoint messages and
-/// runtime events it declares. The runtime applies those once the check
-/// phase completes, whatever the verdict.
+/// runtime events it declares and the commands it returns against its own
+/// plugin state namespace. The runtime applies those once the check phase
+/// completes, whatever the verdict; the commands publish with the check's
+/// recorded decision (K10).
 #[derive(Clone, Debug, Default)]
 pub struct AfterToolContributions {
     pub verdict: AfterToolDecision,
     pub messages: Vec<PluginMessage>,
     pub events: Vec<PluginRuntimeEvent>,
+    pub state: super::StateCommands,
 }
 
 impl From<AfterToolDecision> for AfterToolContributions {
     fn from(verdict: AfterToolDecision) -> Self {
         Self {
             verdict,
-            messages: Vec::new(),
-            events: Vec::new(),
+            ..Self::default()
         }
     }
 }
@@ -285,11 +287,13 @@ pub(crate) struct AttributedContributions {
     pub(crate) events: Vec<PluginRuntimeEvent>,
 }
 
-/// Every after-check reply of one occurrence: the reduced verdicts and the
-/// contributions they declared, in recorded callback order.
+/// Every after-check reply of one occurrence: the reduced verdicts, the
+/// contributions they declared, and the state commands they proposed, in
+/// recorded callback order.
 pub(crate) struct ResultChecks {
     pub(crate) record: CheckRecord<AfterToolDecision>,
     pub(crate) contributions: Vec<AttributedContributions>,
+    pub(crate) proposals: Vec<super::Proposal>,
 }
 
 /// The failure a check's own error becomes: restrictive, never an Allow.
