@@ -97,6 +97,9 @@ use serde::{Deserialize, Serialize};
 /// by digest. Replay rebuilds the dictionary from journal entries, including
 /// within the same entry, before validating the canonical envelope.
 /// A scope close records its acknowledgement without the terminal's answer.
+/// Generation 16 changes in place for FIG-4876: references carry K2 owner,
+/// role, location and integrity, and canonical material has one owner record.
+/// JOURNAL_LOGIC_EPOCH moves every affected handler lane in the same landing.
 ///
 /// version_guard(
 ///     shapes(path = "crates/lash-restate/src/controller/journal_payload.rs", cover(PayloadEntry, PayloadReference)),

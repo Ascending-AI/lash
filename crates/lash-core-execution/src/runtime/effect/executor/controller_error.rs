@@ -380,4 +380,42 @@ mod tests {
             Some(summary)
         );
     }
+    #[test]
+    fn retained_material_refusal_keeps_its_cause_through_plugin_and_host_errors() {
+        use lash_core_store::tool_run::{
+            MaterialLocation, MaterialOwner, MaterialPayload, MaterialRefusal, MaterialRole,
+        };
+        let owner = MaterialOwner::Run {
+            opener: lash_core_store::effect_opener::EffectOpener::turn("s", "r"),
+        };
+        let reference = MaterialPayload::new(
+            owner,
+            MaterialRole::AttemptOutput,
+            None,
+            "recorded output".into(),
+        )
+        .reference(MaterialLocation::JournalLocal)
+        .unwrap();
+        for refusal in [
+            MaterialRefusal::Missing {
+                reference: Box::new(reference.clone()),
+            },
+            MaterialRefusal::Retired {
+                reference: Box::new(reference),
+            },
+        ] {
+            let controller = RuntimeEffectControllerError::from(refusal.clone());
+            assert!(controller.journaled);
+            let plugin = PluginError::RuntimeEffectController(controller);
+            let host = RuntimeEffectControllerError::from(plugin).into_runtime_error();
+            assert_eq!(host.code, RuntimeErrorCode::RetainedResultRefused);
+            assert!(host.is_terminal());
+            assert!(!host.is_retryable());
+            let wire = serde_json::to_vec(&host).unwrap();
+            let reopened: RuntimeError = serde_json::from_slice(&wire).unwrap();
+            assert!(
+                matches!(reopened.cause, Some(crate::RuntimeErrorCause::MaterialRefused { refusal: found }) if *found == refusal)
+            );
+        }
+    }
 }

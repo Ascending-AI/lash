@@ -1,5 +1,21 @@
 {
   "$defs": {
+    "ArtifactName": {
+      "description": "One artifact, by the store that holds it and its reference there.",
+      "properties": {
+        "artifact_ref": {
+          "type": "string"
+        },
+        "store": {
+          "$ref": "#/$defs/ArtifactStoreId"
+        }
+      },
+      "required": [
+        "store",
+        "artifact_ref"
+      ],
+      "type": "object"
+    },
     "ArtifactReferrer": {
       "properties": {
         "id": {
@@ -29,6 +45,65 @@
         "upload"
       ],
       "type": "string"
+    },
+    "ArtifactStoreId": {
+      "description": "The store that holds an artifact.",
+      "oneOf": [
+        {
+          "properties": {
+            "store": {
+              "const": "process_env",
+              "type": "string"
+            }
+          },
+          "required": [
+            "store"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "store": {
+              "const": "lashlang_module",
+              "type": "string"
+            }
+          },
+          "required": [
+            "store"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A process engine's own store, by engine kind.",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "store": {
+              "const": "engine",
+              "type": "string"
+            }
+          },
+          "required": [
+            "store",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The immutable process-definition descriptors, keyed by their\n`ProcessDefinitionId` (ADR 0113 \u00a73.6). A collectible artifact like the\nothers: a descriptor lives exactly as long as some referrer holds it.",
+          "properties": {
+            "store": {
+              "const": "process_definition",
+              "type": "string"
+            }
+          },
+          "required": [
+            "store"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "AttachmentRef": {
       "properties": {
@@ -512,6 +587,144 @@
                 "integer",
                 "null"
               ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AwaitEventKey": {
+      "properties": {
+        "key_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ExecutionScope"
+        },
+        "signature": {
+          "type": "string"
+        },
+        "wait": {
+          "$ref": "#/$defs/AwaitEventWaitIdentity"
+        }
+      },
+      "required": [
+        "scope",
+        "wait",
+        "key_id",
+        "signature"
+      ],
+      "type": "object"
+    },
+    "AwaitEventWaitIdentity": {
+      "oneOf": [
+        {
+          "description": "The completion of one tool call, named by its lash identity within\nthe wait's execution scope: two calls that share a provider id never\nshare a completion (ADR 0117 \u00a76).",
+          "properties": {
+            "tool_call_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_completion",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "tool_call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "ordinal": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "process_id": {
+              "type": "string"
+            },
+            "signal_name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "process_signal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "process_id",
+            "signal_name",
+            "ordinal"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reserved first-writer-wins cancellation-versus-completion gate for a\nforeground turn.",
+          "properties": {
+            "type": {
+              "const": "turn_cancel_gate",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reserved terminal publication promise for a foreground turn.",
+          "properties": {
+            "type": {
+              "const": "turn_terminal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "type": {
+              "const": "custom",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "key"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reserved first-writer-wins escalation promise for a foreground turn:\nwritten only by an immediate request that found the cancellation gate\nalready holding an after-step request.",
+          "properties": {
+            "type": {
+              "const": "turn_cancel_escalation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reserved cancel signal of a host plugin task a session command runs\n(FIG-4391), under the command's own session-operation scope. Only a host's\ncancel resolves it, cancelled; how the command ended is its\nsettlement, never this signal (FIG-4453).",
+          "properties": {
+            "type": {
+              "const": "session_command_cancel_signal",
+              "type": "string"
             }
           },
           "required": [
@@ -2287,6 +2500,314 @@
         "unknown"
       ],
       "type": "string"
+    },
+    "MaterialDigest": {
+      "description": "The integrity digest of the material's canonical bytes: 64 lowercase\nhexadecimal digits of a BLAKE3 hash. The hashing domain belongs to the\nmaterial codec (FIG-4876), not to this reference.",
+      "type": "string"
+    },
+    "MaterialLocation": {
+      "description": "Where the bytes live.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "In the owning Run's opener journal: resolvable within the same\nsegment only.",
+          "properties": {
+            "location": {
+              "const": "journal_local",
+              "type": "string"
+            }
+          },
+          "required": [
+            "location"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "In a retained artifact store, held by a dependency lease: resolvable\nacross segments and deployments.",
+          "properties": {
+            "artifact": {
+              "$ref": "#/$defs/ArtifactName"
+            },
+            "location": {
+              "const": "retained_artifact",
+              "type": "string"
+            }
+          },
+          "required": [
+            "location",
+            "artifact"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MaterialOwner": {
+      "description": "Who owns a payload: the logical Run that admitted it, the process that\nproduced it, or the Deferred source whose seal resolved to it.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The logical Run, named by its opener.",
+          "properties": {
+            "opener": {
+              "$ref": "#/$defs/EffectOpener"
+            },
+            "owner": {
+              "const": "run",
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "opener"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One process.",
+          "properties": {
+            "owner": {
+              "const": "process",
+              "type": "string"
+            },
+            "process_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "process_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One Deferred source, named by its durable wait key.",
+          "properties": {
+            "owner": {
+              "const": "source",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/AwaitEventKey"
+            }
+          },
+          "required": [
+            "owner",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MaterialRef": {
+      "additionalProperties": false,
+      "description": "A typed reference to one canonical payload.",
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/MaterialDigest"
+        },
+        "location": {
+          "$ref": "#/$defs/MaterialLocation"
+        },
+        "owner": {
+          "$ref": "#/$defs/MaterialOwner"
+        },
+        "role": {
+          "$ref": "#/$defs/MaterialRole"
+        }
+      },
+      "required": [
+        "owner",
+        "role",
+        "location",
+        "digest"
+      ],
+      "type": "object"
+    },
+    "MaterialRefusal": {
+      "description": "Why recorded material cannot be served: a typed retained-result failure.\nNone of these re-executes the body that produced the material. FIG-4876\ncarries it through the runtime error framework.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "No payload exists at the reference's location.",
+          "properties": {
+            "reference": {
+              "$ref": "#/$defs/MaterialRef"
+            },
+            "refusal": {
+              "const": "missing",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "reference"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The payload's retention ended; an expired reference cannot restart\nwork.",
+          "properties": {
+            "reference": {
+              "$ref": "#/$defs/MaterialRef"
+            },
+            "refusal": {
+              "const": "retired",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "reference"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The bytes found do not hash to the recorded digest.",
+          "properties": {
+            "found": {
+              "$ref": "#/$defs/MaterialDigest"
+            },
+            "reference": {
+              "$ref": "#/$defs/MaterialRef"
+            },
+            "refusal": {
+              "const": "corrupt",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "reference",
+            "found"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The reader's owner is not the reference's owner.",
+          "properties": {
+            "expected": {
+              "$ref": "#/$defs/MaterialOwner"
+            },
+            "reference": {
+              "$ref": "#/$defs/MaterialRef"
+            },
+            "refusal": {
+              "const": "wrong_owner",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "reference",
+            "expected"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The material's codec belongs to a plugin revision this build cannot\nread.",
+          "properties": {
+            "available": {
+              "items": {
+                "$ref": "#/$defs/PluginRevision"
+              },
+              "type": "array"
+            },
+            "recorded": {
+              "$ref": "#/$defs/PluginRevision"
+            },
+            "reference": {
+              "$ref": "#/$defs/MaterialRef"
+            },
+            "refusal": {
+              "const": "revision_mismatch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "reference",
+            "recorded",
+            "available"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expected": {
+              "$ref": "#/$defs/MaterialRole"
+            },
+            "found": {
+              "$ref": "#/$defs/MaterialRole"
+            },
+            "reference": {
+              "$ref": "#/$defs/MaterialRef"
+            },
+            "refusal": {
+              "const": "role_mismatch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "reference",
+            "expected",
+            "found"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "found": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "reference": {
+              "$ref": "#/$defs/MaterialRef"
+            },
+            "refusal": {
+              "const": "format_mismatch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "reference",
+            "found"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MaterialRole": {
+      "description": "The record that produced a payload, which is also its sole canonical\nowner record: A owns the prepared request, X the attempt output and its\ncaptures, V only presentation bytes distinct from the output.",
+      "oneOf": [
+        {
+          "const": "prepared_request",
+          "description": "The final prepared request admission recorded (A).",
+          "type": "string"
+        },
+        {
+          "const": "attempt_output",
+          "description": "One attempt's output and captures (X), or a cached success a\nbefore-check supplied in its place.",
+          "type": "string"
+        },
+        {
+          "const": "presentation",
+          "description": "Presentation bytes distinct from the output (V).",
+          "type": "string"
+        }
+      ]
     },
     "MaxToolCalls": {
       "description": "The number of tool calls one execution may make: the host's required\ndecision, with no default and no built-in ceiling (FIG-4546).\n\nWhat it counts depends on the execution. A cell \u2014 one code cell of a turn,\nor one tool step of a protocol without cells \u2014 may make at most this many\ntool calls in total. A process may hold at most this many at once: a call\ncounts from its acceptance until the process no longer depends on it, so\na long-running process is bounded in what it retains, never in what it\ndoes over its life. The call that passes the limit fails with\n[`ToolCallLimitExceeded`]; every call under it runs untouched. The limit\npaces nothing: rate limits and throttling are the host's own.",
@@ -10310,6 +10831,23 @@
     "RuntimeErrorCause": {
       "description": "Typed cause retained when a controller-owned runtime effect must abort\nthrough the generic runtime error boundary.\n\nAttachment retention and worker causes keep their source's retry class.\nOther causes are terminal except for an unavailable recorded model.",
       "oneOf": [
+        {
+          "description": "Recorded material could not be read. This cause grants no body retry.",
+          "properties": {
+            "kind": {
+              "const": "material_refused",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/MaterialRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
+        },
         {
           "description": "A recorded callback's accepted state belongs to another owner.",
           "properties": {

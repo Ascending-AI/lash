@@ -1447,6 +1447,8 @@ pub mod runtime {
     pub use lash_core::runtime::{
         RuntimeNamedPhase, RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot,
     };
+    /// Canonical material references and the refusals carried by runtime errors.
+    pub use lash_core::tool_run::material;
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
     /// wall-clock default; tests open a backend on their own to make expiry

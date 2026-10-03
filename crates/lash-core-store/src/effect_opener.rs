@@ -85,7 +85,9 @@ impl IncorporationLedger {
 /// request (FIG-3408) records it, recovery validates it (FIG-3396 §1), and the
 /// Lashlang host bridges mint their identities under it (FIG-3394). One type so
 /// the three cannot disagree about what an opener is.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EffectOpener {
     /// A turn of a session.

@@ -56,6 +56,26 @@ body, route or identity is chosen.
 retained artifact) and a digest. Retention moves bytes, never identity. A
 failed read is a typed `MaterialRefusal` and never re-executes a body.
 
+FIG-4876 extends the existing opener dictionary with `MaterialEntry` and
+`MaterialPayload`. A canonical entry owns its text, format and optional
+plugin codec revision. Its BLAKE3 digest under `lash-tool-material/v1`
+covers all of those fields, including owner and role. Coordination stores
+the reference and its position in the original envelope. Cold replay restores
+the original JSON token order and checks owner, integrity, format and codec
+revision before exposing a recorded result. Native UTF-8 needs no plugin
+decoder. A distinct presentation creates material only when its bytes differ
+from bytes already recorded by A or X.
+
+The retained artifact uses the same `MaterialEntry` codec. Moving a reference
+to an artifact changes location alone and preserves its digest. A retired
+entry carries its reference without text. Missing, retired, corrupt,
+wrong-owner, wrong-role, unsupported-format and unavailable-revision reads
+carry `RuntimeErrorCause::MaterialRefused` with the original `MaterialRefusal`
+under terminal `retained_result_refused`; no refusal grants execution authority.
+Resolution stays inside the controller. FIG-4889 owns artifact I/O, dependency
+leases and atomic publication into source seals and continuations, including
+the measured handover copy. The status-only drive reply remains unchanged.
+
 **Operation (Q2).** A tool-bearing host operation is a Run with its own input
 kind, driven by the session's keyed turn service, over the existing
 session-operation opener. Its call ids and start keys keep their bytes.

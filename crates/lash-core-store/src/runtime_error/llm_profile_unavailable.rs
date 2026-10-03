@@ -20,7 +20,8 @@ impl RuntimeErrorCause {
             }
             Self::LlmProfileUnavailable { .. } | Self::PluginExecution { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
-            Self::ProviderFailure { .. }
+            Self::MaterialRefused { .. }
+            | Self::ProviderFailure { .. }
             | Self::IngressReservedSourceKey { .. }
             | Self::Compat { .. }
             | Self::StoreRefusal { .. }

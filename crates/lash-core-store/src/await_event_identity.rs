@@ -2,7 +2,9 @@
 
 use crate::{ExecutionScope, ProcessId, RuntimeError};
 use serde::{Deserialize, Serialize};
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AwaitEventWaitIdentity {
     /// The completion of one tool call, named by its lash identity within
@@ -83,7 +85,9 @@ impl AwaitEventWaitIdentity {
         )
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct AwaitEventKey {
     pub scope: ExecutionScope,
     pub wait: AwaitEventWaitIdentity,

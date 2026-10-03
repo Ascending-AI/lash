@@ -214,6 +214,7 @@ impl RuntimeErrorCode {
             // the attachment store refused or faulted; a healthy store retains the output.
             Self::OutputRetentionFailed => Retryable,
             Self::OutputRetentionRefused => Terminal,
+            Self::RetainedResultRefused => Terminal,
             // a registered definition refuses the same context the same way.
             Self::RunShapeRefused => Terminal,
             // the same spec differs from the same running turn's again.

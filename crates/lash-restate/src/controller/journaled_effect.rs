@@ -496,7 +496,7 @@ where
             == Some(u64::from(EFFECT_JOURNAL_VERSION))
         {
             self.payloads
-                .decode(entry)
+                .decode(entry, envelope.json())
                 .map_err(RestateEffectError::Refused)?
         } else {
             // Generation dispatch precedes reference resolution and shape decoding.

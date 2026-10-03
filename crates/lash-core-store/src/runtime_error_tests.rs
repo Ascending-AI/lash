@@ -105,6 +105,7 @@ first_party_codes! {
         Self::RecordedRendererUnavailable,
         Self::OutputRetentionFailed,
         Self::OutputRetentionRefused,
+        Self::RetainedResultRefused,
         Self::RunShapeRefused,
         Self::RunSpecMismatch,
         Self::TurnAddressUnknown,

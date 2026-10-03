@@ -9,7 +9,9 @@ use crate::{ProcessId, SessionId, TurnId};
 /// This is the scope admitted by the host boundary before nondeterministic
 /// work begins. Its journal encoding is an existing durable contract; effect
 /// addresses compose it with a replay key without changing those bytes.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExecutionScope {
     Turn {

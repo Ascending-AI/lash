@@ -785,7 +785,16 @@ impl ReferrerClaim {
 
 /// The store that holds an artifact.
 #[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(tag = "store", content = "kind", rename_all = "snake_case")]
 pub enum ArtifactStoreId {
@@ -809,7 +818,16 @@ impl ArtifactStoreId {
 
 /// One artifact, by the store that holds it and its reference there.
 #[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 pub struct ArtifactName {
     pub store: ArtifactStoreId,

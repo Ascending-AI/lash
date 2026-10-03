@@ -42,8 +42,8 @@ pub use admission::{
 };
 pub use continuation::{ContinuationRefusal, Cut, CutPhase, RunTransfer};
 pub use material::{
-    InvalidMaterialDigest, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef,
-    MaterialRefusal, MaterialRole,
+    InvalidMaterialDigest, MaterialDigest, MaterialEntry, MaterialLocation, MaterialOwner,
+    MaterialPayload, MaterialRef, MaterialRefusal, MaterialRole,
 };
 pub use operation::{OperationRun, RunInputKind};
 pub use receipt::{BusinessReceipt, LogicalTerminal, ObservationPermit, ObservedFact};

@@ -14,6 +14,10 @@ use crate::SessionId;
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
+    /// Recorded material could not be read. This cause grants no body retry.
+    MaterialRefused {
+        refusal: Box<crate::tool_run::MaterialRefusal>,
+    },
     /// A recorded callback's accepted state belongs to another owner.
     PluginStateEffectOwnerMismatch,
     /// Replay cannot install an accepted batch over a different namespace.

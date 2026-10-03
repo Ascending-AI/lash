@@ -406,3 +406,173 @@ async fn a_deterministic_assistant_hook_failure_is_the_steps_recorded_outcome() 
         "the journaled failure: {error}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn canonical_material_bytes_and_partial_proposal_replay_on_the_double() {
+    use lash_restate_test::{CrashPoint, CrashRule, ServerConfig};
+    for width in [1, 2, 16] {
+        let mut totals = Vec::new();
+        for bytes in [8192, 262144, 1048576] {
+            let payload = "x".repeat(bytes);
+            // Lose an unfinished result proposal, then separately lose only
+            // coordination after every result is durable.
+            for cut in [0, width] {
+                let backend = lash_restate_test::backend(0x4876, ServerConfig::default())
+                    .await
+                    .unwrap();
+                backend
+                    .server()
+                    .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
+                        name: Some(format!("lash:k2-{cut}")),
+                    }));
+                let executions: Arc<Vec<AtomicUsize>> =
+                    Arc::new((0..=width).map(|_| AtomicUsize::new(0)).collect());
+                let attempt: lash_restate_test::HandlerAttempt = {
+                    let executions = executions.clone();
+                    let payload = payload.clone();
+                    Arc::new(move |scoped| {
+                        let executions = executions.clone();
+                        let payload = payload.clone();
+                        Box::pin(async move {
+                            for ordinal in 0..=width {
+                                let response = lash_core::LlmResponse {
+                                    parts: vec![lash_core::LlmOutputPart::Text {
+                                        text: payload.clone(),
+                                        response_meta: None,
+                                    }],
+                                    ..Default::default()
+                                };
+                                let key = format!("k2-{ordinal}");
+                                let envelope = RuntimeEffectEnvelope::new(
+                                    lash_core::RuntimeEffectInvocation::new(
+                                        lash_core::EffectAddress::new(
+                                            durable_turn_scope("session", "turn"),
+                                            &key,
+                                        )
+                                        .unwrap(),
+                                        lash_core::RuntimeAttribution::for_turn(
+                                            "session", "turn", 1, 0,
+                                        ),
+                                        &key,
+                                    ),
+                                    RuntimeEffectCommand::AssistantResponseHooks {
+                                        response: Box::new(response.clone()),
+                                        plan: Default::default(),
+                                        stream_hook_states: Vec::new(),
+                                    },
+                                );
+                                let executions = executions.clone();
+                                let result = scoped
+                                    .execute_effect(
+                                        envelope,
+                                        RuntimeEffectLocalExecutor::testing(move |_| {
+                                            executions[ordinal].fetch_add(1, Ordering::SeqCst);
+                                            let response = response.clone();
+                                            async move {
+                                                Ok(RuntimeEffectOutcome::AssistantResponseHooks {
+                                                    response: Box::new(response),
+                                                    events: Vec::new(),
+                                                })
+                                            }
+                                        }),
+                                    )
+                                    .await
+                                    .unwrap();
+                                let RuntimeEffectOutcome::AssistantResponseHooks {
+                                    response, ..
+                                } = result
+                                else {
+                                    panic!("response hooks outcome");
+                                };
+                                assert!(
+                                    matches!(&response.parts[0], lash_core::LlmOutputPart::Text { text, .. } if text == &payload)
+                                );
+                            }
+                        })
+                    })
+                };
+                let started = std::time::Instant::now();
+                tokio::time::timeout(
+                    Duration::from_secs(60),
+                    backend
+                        .run_in_handler(lash_core::AdmittedScope::turn("session", "turn"), attempt),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                backend.server().settle().await;
+                for ordinal in 0..=width {
+                    assert_eq!(
+                        executions[ordinal].load(Ordering::SeqCst),
+                        if ordinal == cut { 2 } else { 1 },
+                        "durable results never run again"
+                    );
+                }
+                let mut journal_bytes = 0;
+                let mut material_bytes = 0;
+                let mut canonical_records = 0;
+                let mut raw_records = 0;
+                let mut source_records = 0;
+                let mut rpcs = 0;
+                let mut coordination_bytes = 0;
+                for view in backend.server().invocations() {
+                    let journal = backend.server().journal(&view.id).unwrap();
+                    raw_records += journal.len();
+                    for entry in journal {
+                        journal_bytes += entry.payload.len();
+                        source_records += usize::from(entry.ty == MessageType::RunCommand);
+                        rpcs += usize::from(matches!(
+                            entry.ty,
+                            MessageType::CallCommand | MessageType::OneWayCallCommand
+                        ));
+                        if let Some(Ok(completion)) = entry.run_completion() {
+                            let mut encoded: serde_json::Value =
+                                serde_json::from_slice(&completion).unwrap();
+                            if let Some(materials) = encoded
+                                .get("materials")
+                                .and_then(serde_json::Value::as_array)
+                            {
+                                canonical_records += materials.len();
+                                material_bytes += materials
+                                    .iter()
+                                    .map(|entry| {
+                                        entry
+                                            .pointer("/payload/text")
+                                            .and_then(serde_json::Value::as_str)
+                                            .unwrap()
+                                            .len()
+                                    })
+                                    .sum::<usize>();
+                            }
+                            encoded.as_object_mut().unwrap().remove("materials");
+                            coordination_bytes += serde_json::to_vec(&encoded).unwrap().len();
+                        }
+                    }
+                }
+                assert_eq!(canonical_records, 1);
+                assert_eq!(material_bytes, bytes);
+                assert_eq!(source_records, width + 1);
+                assert_eq!(rpcs, 0);
+                eprintln!(
+                    "K2-double width={width} bytes={bytes} cut={cut} source_records={source_records} raw_engine_records={raw_records} journal_rpc_commands={rpcs} ingress_calls=1 journal_bytes={journal_bytes} canonical_bytes={material_bytes} coordination_bytes={coordination_bytes} application_transactions=0 serial_effect_waits={} elapsed_us={}",
+                    width + 1,
+                    started.elapsed().as_micros()
+                );
+                totals.push((bytes, cut, journal_bytes, coordination_bytes, raw_records));
+            }
+        }
+        for cut in [0, width] {
+            let selected: Vec<_> = totals.iter().filter(|row| row.1 == cut).collect();
+            for pair in selected.windows(2) {
+                assert_eq!(pair[1].3, pair[0].3, "coordination stays fixed-size");
+                assert_eq!(pair[1].4, pair[0].4, "payload size adds no commands");
+                // Protobuf length prefixes add bounded framing bytes.
+                let overhead = pair[1].2 - pair[0].2 - (pair[1].0 - pair[0].0);
+                assert!(
+                    overhead <= 16,
+                    "journal growth copies only canonical bytes: {overhead}"
+                );
+            }
+        }
+    }
+}

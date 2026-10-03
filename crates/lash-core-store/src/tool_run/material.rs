@@ -17,9 +17,15 @@ use crate::await_event_identity::AwaitEventKey;
 use crate::effect_opener::EffectOpener;
 use crate::store::plugin_writers::PluginRevision;
 
+/// version_surface = "coexist"
+/// version_guard(items(MATERIAL_DOMAIN, reference), roots(MaterialPayload))
+const MATERIAL_DOMAIN: &str = "lash-tool-material/v1";
+
 /// Who owns a payload: the logical Run that admitted it, the process that
 /// produced it, or the Deferred source whose seal resolved to it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "owner", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MaterialOwner {
     /// The logical Run, named by its opener.
@@ -33,7 +39,19 @@ pub enum MaterialOwner {
 /// The record that produced a payload, which is also its sole canonical
 /// owner record: A owns the prepared request, X the attempt output and its
 /// captures, V only presentation bytes distinct from the output.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MaterialRole {
     /// The final prepared request admission recorded (A).
@@ -46,7 +64,9 @@ pub enum MaterialRole {
 }
 
 /// Where the bytes live.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "location", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MaterialLocation {
     /// In the owning Run's opener journal: resolvable within the same
@@ -60,7 +80,7 @@ pub enum MaterialLocation {
 /// The integrity digest of the material's canonical bytes: 64 lowercase
 /// hexadecimal digits of a BLAKE3 hash. The hashing domain belongs to the
 /// material codec (FIG-4876), not to this reference.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct MaterialDigest(String);
 
@@ -106,7 +126,9 @@ impl fmt::Display for MaterialDigest {
 }
 
 /// A typed reference to one canonical payload.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct MaterialRef {
     pub owner: MaterialOwner,
@@ -166,7 +188,9 @@ impl MaterialRef {
 /// Why recorded material cannot be served: a typed retained-result failure.
 /// None of these re-executes the body that produced the material. FIG-4876
 /// carries it through the runtime error framework.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error, schemars::JsonSchema,
+)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MaterialRefusal {
     /// No payload exists at the reference's location.
@@ -196,6 +220,17 @@ pub enum MaterialRefusal {
         recorded: PluginRevision,
         available: Vec<PluginRevision>,
     },
+    #[error("recorded material {} has role {found:?}, expected {expected:?}", reference.digest)]
+    RoleMismatch {
+        reference: Box<MaterialRef>,
+        expected: MaterialRole,
+        found: MaterialRole,
+    },
+    #[error("recorded material {} has unsupported format {found}", reference.digest)]
+    FormatMismatch {
+        reference: Box<MaterialRef>,
+        found: u16,
+    },
 }
 
 impl MaterialRefusal {
@@ -208,6 +243,137 @@ impl MaterialRefusal {
             Self::Corrupt { .. } => "material_corrupt",
             Self::WrongOwner { .. } => "material_wrong_owner",
             Self::RevisionMismatch { .. } => "material_revision_mismatch",
+            Self::RoleMismatch { .. } => "material_role_mismatch",
+            Self::FormatMismatch { .. } => "material_format_mismatch",
         }
+    }
+}
+
+/// Canonical material bytes and their codec binding. The same wire value is
+/// used in an opener journal and in a retained handover artifact. Location is
+/// deliberately absent: moving bytes does not change their integrity digest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MaterialPayload {
+    pub owner: MaterialOwner,
+    pub role: MaterialRole,
+    pub format: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<PluginRevision>,
+    pub text: String,
+}
+
+/// The retained artifact codec, also used for canonical journal material.
+/// A tombstone records retirement without bytes; reading it cannot restart work.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MaterialEntry {
+    Available {
+        reference: MaterialRef,
+        payload: Box<MaterialPayload>,
+    },
+    Retired {
+        reference: MaterialRef,
+    },
+}
+
+impl MaterialPayload {
+    pub fn new(
+        owner: MaterialOwner,
+        role: MaterialRole,
+        revision: Option<PluginRevision>,
+        text: String,
+    ) -> Self {
+        Self {
+            owner,
+            role,
+            format: 1,
+            revision,
+            text,
+        }
+    }
+
+    /// Mint the reference to these canonical bytes, including owner, role,
+    /// format and revision in its integrity preimage.
+    pub fn reference(
+        &self,
+        location: MaterialLocation,
+    ) -> Result<MaterialRef, crate::runtime_error::RuntimeEffectControllerError> {
+        let bytes = serde_json::to_vec(self).map_err(|error| {
+            crate::runtime_error::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RecordEncodingFailed,
+                error.to_string(),
+            )
+        })?;
+        Ok(MaterialRef {
+            owner: self.owner.clone(),
+            role: self.role,
+            location,
+            digest: MaterialDigest(lash_sansio::core_support::blake3_domain_hash_hex(
+                MATERIAL_DOMAIN,
+                &bytes,
+            )),
+        })
+    }
+
+    /// Validate a read without granting any execution or resolution authority.
+    /// Readers use this before exposing bytes from a journal or artifact.
+    pub fn verify(
+        &self,
+        reference: &MaterialRef,
+        owner: &MaterialOwner,
+        available: &[PluginRevision],
+    ) -> Result<(), crate::runtime_error::RuntimeEffectControllerError> {
+        reference.verify(owner, &reference.digest)?;
+        if &self.owner != owner {
+            return Err(MaterialRefusal::WrongOwner {
+                reference: Box::new(reference.clone()),
+                expected: Box::new(owner.clone()),
+            }
+            .into());
+        }
+        if self.role != reference.role {
+            return Err(MaterialRefusal::RoleMismatch {
+                reference: Box::new(reference.clone()),
+                expected: reference.role,
+                found: self.role,
+            }
+            .into());
+        }
+        if self.format != 1 {
+            return Err(MaterialRefusal::FormatMismatch {
+                reference: Box::new(reference.clone()),
+                found: self.format,
+            }
+            .into());
+        }
+        let found = self.reference(reference.location.clone())?;
+        reference.verify(owner, &found.digest)?;
+        if let Some(recorded) = &self.revision
+            && !available.contains(recorded)
+        {
+            return Err(MaterialRefusal::RevisionMismatch {
+                reference: Box::new(reference.clone()),
+                recorded: recorded.clone(),
+                available: available.to_vec(),
+            }
+            .into());
+        }
+        Ok(())
+    }
+}
+
+impl From<MaterialRefusal> for crate::runtime_error::RuntimeEffectControllerError {
+    fn from(refusal: MaterialRefusal) -> Self {
+        let mut error = Self::new(
+            crate::RuntimeErrorCode::RetainedResultRefused,
+            refusal.to_string(),
+        );
+        error.cause = Some(crate::RuntimeErrorCause::MaterialRefused {
+            refusal: Box::new(refusal),
+        });
+        // A failed read of recorded work must never grant a fresh body retry.
+        error.journaled = true;
+        error
     }
 }

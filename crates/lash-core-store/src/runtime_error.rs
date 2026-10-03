@@ -264,6 +264,8 @@ pub enum RuntimeErrorCode {
     OutputRetentionFailed,
     /// A required output retention was permanently refused by its attachment store.
     OutputRetentionRefused,
+    /// A canonical recorded result is unavailable or fails its material binding.
+    RetainedResultRefused,
     /// A registered run definition refused the spec's context (FIG-3838):
     /// deterministic, so it is recorded as the run's failure.
     RunShapeRefused,
@@ -679,6 +681,7 @@ impl RuntimeErrorCode {
             Self::RecordedRendererUnavailable => "recorded_renderer_unavailable",
             Self::OutputRetentionFailed => "output_retention_failed",
             Self::OutputRetentionRefused => "output_retention_refused",
+            Self::RetainedResultRefused => "retained_result_refused",
             Self::RunShapeRefused => "run_shape_refused",
             Self::RunSpecMismatch => "run_spec_mismatch",
             Self::TurnAddressUnknown => "turn_address_unknown",
@@ -972,6 +975,7 @@ impl RuntimeErrorCode {
             "recorded_renderer_unavailable" => Self::RecordedRendererUnavailable,
             "output_retention_failed" => Self::OutputRetentionFailed,
             "output_retention_refused" => Self::OutputRetentionRefused,
+            "retained_result_refused" => Self::RetainedResultRefused,
             "run_shape_refused" => Self::RunShapeRefused,
             "run_spec_mismatch" => Self::RunSpecMismatch,
             "turn_address_unknown" => Self::TurnAddressUnknown,
@@ -1407,7 +1411,8 @@ impl RuntimeError {
     pub fn deleted_session_id(&self) -> Option<&crate::SessionId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
-            RuntimeErrorCause::ProviderFailure { .. }
+            RuntimeErrorCause::MaterialRefused { .. }
+            | RuntimeErrorCause::ProviderFailure { .. }
             | RuntimeErrorCause::VmWorker { .. }
             | RuntimeErrorCause::ArtifactReferrerEnded { .. }
             | RuntimeErrorCause::Compat { .. }
