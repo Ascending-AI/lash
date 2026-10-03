@@ -92,6 +92,7 @@ preparation or execution; it is not a store-dependent start-admission verdict.
 ## Implementation
 
 - [Opaque provider and attempt context](../../crates/lash-core-execution/src/tool_provider.rs) and [exclusive outcome variants](../../crates/lash-core-execution/src/tool_intent.rs).
+- [Prepared atomic attempt runner](../../crates/lash-core-execution/src/tool_dispatch/atomic_attempt.rs). Direct and group-child callers share validation, attempt-local completion and capture buffers, and body execution. The runner requires no child request or reconstruction and issues no coordination commands.
 - [Pending declarations](../../crates/lash-core-execution/src/tool_result.rs) and [pending launch](../../crates/lash-core-execution/src/tool_dispatch/pending_resolver.rs).
 - [Final recording and intent drain](../../crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs).
 - [Durable child arbitration](../../crates/lash-restate/src/effect_group/state_record.rs).

@@ -30,55 +30,37 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
                 "prepared tool attempt executor requires a tool_attempt command",
             ));
         };
-        let mut dispatch = (*self.dispatch).clone();
-        dispatch.parent_invocation = Some(envelope.invocation.clone().into_runtime_invocation());
-        // The attempt's invocation is now the observation base; an inherited
-        // per-call key would key every retry of it under the caller's lane.
-        dispatch.observation_call_key = None;
-        dispatch.direct_completions = dispatch
-            .direct_completions
-            .with_tool_attempt_parent_invocation(
-                envelope.invocation.clone().into_runtime_invocation(),
-            )
-            .with_effect_attempt(effect_attempt);
-        dispatch.trigger_outcomes = crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
-        // Attempt-local buffers: what this attempt commits is drained into the
-        // journaled capture, never read out of a buffer it shares with
-        // anything else.
-        dispatch.checkpoint_messages = crate::tool_dispatch::CheckpointMessageBuffer::default();
-        let dispatch = Arc::new(dispatch);
-        let tool_context = self.tool_context.with_attempt_dispatch(
-            Arc::clone(&dispatch),
-            envelope.invocation.into_runtime_invocation(),
-        );
-        tool_context.install_prederived_completion_key(self.completion_key);
         // A group child's attempt watches its child's cancel inside the
         // recorded body (ADR 0105 §4, FIG-3904): the watch fires the attempt's
         // stop and drops the body, and the typed cancel is the attempt's
         // recorded outcome, so a replay serves it and never re-runs the tool.
         let call_id = call.call_id.clone();
-        let cancel_watch = dispatch
+        let cancel_watch = self
+            .dispatch
             .effect_controller
             .controller()
             .group_child_cancel_watch();
         let (stop, tool_context) = match &cancel_watch {
-            None => (None, tool_context),
+            None => (None, self.tool_context),
             Some(_) => {
-                let stop = tool_context
+                let stop = self
+                    .tool_context
                     .cancellation_token()
                     .map(tokio_util::sync::CancellationToken::child_token)
                     .unwrap_or_default();
-                (Some(stop.clone()), tool_context.with_step_stop(stop))
+                (Some(stop.clone()), self.tool_context.with_step_stop(stop))
             }
         };
-        let body = Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
-            dispatch.as_ref(),
-            *call,
-            execution_grant,
-            attempt,
-            max_attempts,
-            tool_context,
-        ));
+        let body = Box::pin(
+            crate::tool_dispatch::AtomicToolAttempt::new(
+                self.dispatch.as_ref(),
+                tool_context,
+                envelope.invocation.into_runtime_invocation(),
+                self.completion_key,
+                effect_attempt,
+            )
+            .execute(*call, execution_grant, attempt, max_attempts),
+        );
         let outcome = match (cancel_watch, stop) {
             (Some(watch), Some(stop)) => {
                 crate::runtime::run_step_body_until_cancelled(

@@ -1,3 +1,4 @@
+mod atomic_attempt;
 mod attempt_coordinator;
 mod context;
 mod directives;
@@ -17,6 +18,7 @@ pub use pending_resolver::{
     model_visible_intent_outcomes,
 };
 
+pub(crate) use atomic_attempt::AtomicToolAttempt;
 pub(crate) use attempt_coordinator::{
     CommittedToolDispatch, commit_deferred_group_child, commit_unarmed_tool_child,
     drain_committed_group_child, group_child_cancelled,
@@ -34,7 +36,6 @@ pub use context::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
-pub(crate) use execution::execute_prepared_tool_attempt_effect;
 pub use execution::finalize_tool_result_with_execution_context;
 #[cfg(feature = "testing")]
 pub use intent_executor::execute_final_tool_intents;

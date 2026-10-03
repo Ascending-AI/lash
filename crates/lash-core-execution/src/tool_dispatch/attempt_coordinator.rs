@@ -266,6 +266,14 @@ pub async fn coordinate_tool_invocation<'run>(
             .and_then(crate::RuntimeEffectOutcome::into_tool_attempt_effect);
         let outcome = match outcome {
             Ok(outcome) => outcome,
+            // A runner bound to another call or owner is a host refusal,
+            // including on replay. It cannot become a tool result.
+            Err(err) if err.code == crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch => {
+                abandon_to_open_buffers(context, triggers, captures);
+                return CoordinatedToolInvocation {
+                    launch: ToolCallLaunch::ControllerAborted(err),
+                };
+            }
             // A group child's attempt its cancel ended, live or recorded, ends
             // the child's shift as that cancel: the attempt's body was dropped,
             // and nothing it did is a result.

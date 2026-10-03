@@ -4,8 +4,8 @@ use crate::{
 use futures_util::FutureExt as _;
 use lash_sansio::core_support::*;
 
+use super::atomic_attempt::AttemptAuthority;
 use super::context::{ToolDispatchContext, ToolDispatchOutcome};
-use super::execution::AttemptAuthority;
 
 pub(crate) fn resolve_retry_policy(
     context: &ToolDispatchContext<'_>,

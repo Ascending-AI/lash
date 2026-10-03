@@ -6,6 +6,168 @@ use super::*;
 const SEED: u64 = 0x5_2d2c;
 
 #[tokio::test]
+async fn an_attempt_refuses_a_context_from_another_logical_call_before_the_body() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let context = retry_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        ToolRetryPolicy::Never,
+        Arc::clone(&attempts),
+        1,
+        false,
+        Arc::clone(&observed),
+    )
+    .await;
+    let prepared = crate::PreparedToolCall {
+        call_id: crate::ToolCallId::fixture("admitted-call"),
+        provider_call_id: Some("provider-call".into()),
+        tool_id: crate::ToolId::from("tool:retry_probe"),
+        tool_name: "retry_probe".into(),
+        args: json!({ "value": "ok" }),
+        replay: None,
+        prepared_payload: serde_json::Value::Null,
+    };
+    let stale_context = tool_context_for_prepared(&context, &prepared)
+        .call_id(crate::ToolCallId::fixture("another-call"));
+    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
+        &context,
+        prepared,
+        None,
+        stale_context,
+    )
+    .await;
+    assert_eq!(attempts.load(Ordering::SeqCst), 0);
+    assert!(observed.lock_recover().is_empty());
+    let ToolCallLaunch::ControllerAborted(error) = launch else {
+        panic!("a mismatched attempt context must refuse before producing a result");
+    };
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch
+    );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
+}
+
+#[tokio::test]
+async fn direct_and_prepared_runners_keep_the_call_and_attempt_ordinal() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let context = Arc::new(
+        retry_dispatch_context(
+            crate::support::double_dispatch_ports(&double, &handler),
+            ToolRetryPolicy::safe(3, 0, 0),
+            Arc::clone(&attempts),
+            1,
+            false,
+            Arc::clone(&observed),
+        )
+        .await,
+    );
+    let prepared = crate::PreparedToolCall {
+        call_id: crate::ToolCallId::fixture("runner-call"),
+        provider_call_id: Some("provider-correlation".into()),
+        tool_id: crate::ToolId::from("tool:retry_probe"),
+        tool_name: "retry_probe".into(),
+        args: json!({ "value": "ok" }),
+        replay: None,
+        prepared_payload: json!({ "frozen": true }),
+    };
+    let execution = crate::RuntimeExecutionContext::new(
+        Arc::clone(&context),
+        double.lash_backend().process_env_store(),
+        Arc::clone(&context.attachment_store),
+        Arc::new(crate::ChronologicalProjection::default()),
+        crate::TurnContext::default(),
+        context.execution_env_spec.clone(),
+    );
+    for (index, label) in ["direct", "prepared"].into_iter().enumerate() {
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(context.effect_controller.execution_scope().clone(), label)
+                .expect("valid attempt address"),
+            crate::RuntimeAttribution::for_session("session"),
+            label,
+        );
+        let envelope = crate::RuntimeEffectEnvelope::new(
+            invocation.clone(),
+            crate::RuntimeEffectCommand::ToolAttempt {
+                call: Box::new(prepared.clone()),
+                execution_grant: None,
+                attempt: 2,
+                max_attempts: 3,
+            },
+        );
+        let executor = if label == "direct" {
+            let execution = execution.clone();
+            let prepared = prepared.clone();
+            crate::RuntimeEffectLocalExecutor::testing(move |_| async move {
+                let outcome = execution
+                    .execute_prepared_tool_attempt_effect(
+                        prepared,
+                        None,
+                        2,
+                        3,
+                        invocation.into_runtime_invocation(),
+                        None,
+                        None,
+                        None,
+                    )
+                    .await?;
+                Ok(crate::RuntimeEffectOutcome::ToolAttempt {
+                    launch: Box::new(outcome.launch),
+                    triggers: outcome.triggers,
+                    capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
+                })
+            })
+        } else {
+            crate::prepared_tool_attempt(
+                Arc::clone(&context),
+                tool_context_for_prepared(context.as_ref(), &prepared),
+                None,
+            )
+        };
+        let outcome = context
+            .effect_controller
+            .execute_effect(envelope, executor)
+            .await
+            .expect("record the attempt");
+        let crate::RuntimeEffectOutcome::ToolAttempt {
+            launch,
+            triggers,
+            capture,
+        } = outcome
+        else {
+            panic!("an attempt result");
+        };
+        let crate::ToolAttemptLaunch::Done { record, intents } = *launch else {
+            panic!("the probe completes inline");
+        };
+        assert_eq!(record.call_id, prepared.call_id);
+        assert_eq!(record.provider_call_id, prepared.provider_call_id);
+        assert_eq!(record.args, prepared.args);
+        assert_eq!(
+            record.output.outcome,
+            crate::ToolCallOutcome::Success(crate::ToolValue::untrusted_json(
+                json!({ "attempt": index + 1 })
+            ))
+        );
+        assert!(intents.is_empty());
+        assert!(capture.is_none());
+        assert!(triggers.is_empty());
+    }
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        *observed.lock_recover(),
+        vec![(2, 3, prepared.call_id.to_string()); 2]
+    );
+    drop(execution);
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
+}
+
+#[tokio::test]
 async fn default_retry_policy_never_retries_safe_failures() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));

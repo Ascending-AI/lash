@@ -996,6 +996,9 @@ impl<'run> ToolContext<'run> {
     ) -> Self {
         self.effect_controller = dispatch.effect_controller.clone();
         self.direct_completions = dispatch.direct_completions.clone();
+        self.runtime_execution_context = self.runtime_execution_context.map(|context| {
+            context.for_tool_attempt(Arc::clone(&dispatch), parent_invocation.clone())
+        });
         self.runtime_dispatch = Some(dispatch);
         self.parent_invocation = Some(parent_invocation);
         self

@@ -3,7 +3,7 @@
 
 use super::execution_context::RuntimeExecutionContext;
 
-impl RuntimeExecutionContext<'_> {
+impl<'run> RuntimeExecutionContext<'run> {
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_prepared_tool_attempt_effect(
         &self,
@@ -16,26 +16,6 @@ impl RuntimeExecutionContext<'_> {
         completion_key: Option<crate::AwaitEventKey>,
         effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
-        let mut attempt_dispatch = (*self.dispatch).clone();
-        attempt_dispatch.parent_invocation = Some(attempt_invocation.clone());
-        // The attempt's invocation is now the observation base; an inherited
-        // per-call key would key every retry of it under the caller's lane.
-        attempt_dispatch.observation_call_key = None;
-        attempt_dispatch.direct_completions = attempt_dispatch
-            .direct_completions
-            .with_tool_attempt_parent_invocation(attempt_invocation.clone())
-            .with_effect_attempt(effect_attempt);
-        attempt_dispatch.trigger_outcomes =
-            crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
-        // Attempt-local: what this attempt commits is journaled on its
-        // outcome's capture rather than read out of the shared buffer.
-        attempt_dispatch.checkpoint_messages =
-            crate::tool_dispatch::CheckpointMessageBuffer::default();
-        let attempt_dispatch = std::sync::Arc::new(attempt_dispatch);
-        let mut attempt_context = self.clone();
-        attempt_context.dispatch = std::sync::Arc::clone(&attempt_dispatch);
-        attempt_context.parent_invocation = Some(attempt_invocation.clone());
-
         // The attempt is a recorded step its engine cannot select away: its
         // body watches the turn's gate itself and gets the stop as its token,
         // so the recorded outcome says whether the stop won (FIG-3672 P9).
@@ -48,8 +28,7 @@ impl RuntimeExecutionContext<'_> {
                 attempt_invocation,
                 child_execution_trace_hook,
                 completion_key,
-                attempt_dispatch,
-                attempt_context,
+                effect_attempt,
                 stop,
             )
         }))
@@ -66,16 +45,15 @@ impl RuntimeExecutionContext<'_> {
         attempt_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
         completion_key: Option<crate::AwaitEventKey>,
-        attempt_dispatch: std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'_>>,
-        attempt_context: Self,
+        effect_attempt: Option<crate::EffectAttempt>,
         stop: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
         let mut tool_context =
-            crate::ToolContext::from_dispatch(std::sync::Arc::clone(&attempt_dispatch), &prepared)
-                .runtime_execution_context(attempt_context.clone())
+            crate::ToolContext::from_dispatch(std::sync::Arc::clone(&self.dispatch), &prepared)
+                .runtime_execution_context(self.clone())
                 .cancellation_token(stop)
                 .enclosing_process(self.process_id().cloned())
-                .parent_invocation(Some(attempt_invocation))
+                .parent_invocation(Some(attempt_invocation.clone()))
                 .child_execution_trace_hook(child_execution_trace_hook);
         if let Some(process_id) = self.process_id()
             && let Some(process_events) = self.process_event_context()
@@ -91,16 +69,26 @@ impl RuntimeExecutionContext<'_> {
                 std::sync::Arc::clone(&process_events.clock),
             ));
         }
-        let tool_context = tool_context.build();
-        tool_context.install_prederived_completion_key(completion_key);
-        Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
-            attempt_dispatch.as_ref(),
-            prepared,
-            execution_grant,
-            attempt,
-            max_attempts,
-            tool_context,
-        ))
+        Box::pin(
+            crate::tool_dispatch::AtomicToolAttempt::new(
+                self.dispatch.as_ref(),
+                tool_context.build(),
+                attempt_invocation,
+                completion_key,
+                effect_attempt,
+            )
+            .execute(prepared, execution_grant, attempt, max_attempts),
+        )
         .await
+    }
+
+    pub(crate) fn for_tool_attempt(
+        mut self,
+        dispatch: std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
+        invocation: crate::RuntimeInvocation,
+    ) -> Self {
+        self.dispatch = dispatch;
+        self.parent_invocation = Some(invocation);
+        self
     }
 }
