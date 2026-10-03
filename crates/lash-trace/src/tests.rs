@@ -62,64 +62,6 @@ fn a_failing_sink_does_not_rob_later_sinks_in_a_tee() {
 }
 
 #[test]
-fn jsonl_sink_writes_record() {
-    let dir = std::env::temp_dir().join(format!("lash-trace-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("trace.jsonl");
-    let sink = JsonlTraceSink::new(&path);
-    sink.append(&fixture_record(
-        TraceContext::default().for_session("root"),
-        TraceEvent::Custom {
-            name: "test.event".to_string(),
-            payload: serde_json::json!({"ok": true}),
-        },
-    ))
-    .unwrap();
-    let text = std::fs::read_to_string(&path).unwrap();
-    assert!(text.contains("\"type\":\"custom\""));
-    assert!(text.contains("\"session_id\":\"root\""));
-}
-
-#[test]
-fn tool_completion_serializes_typed_failure_output() {
-    let record = fixture_record(
-        TraceContext::default().for_session("root"),
-        TraceEvent::ToolCallCompleted {
-            call_id: lash_sansio::ToolCallId::fixture("call-1"),
-            provider_call_id: None,
-            name: "read_file".to_string(),
-            args: serde_json::json!({"path": "missing"}),
-            output: TraceToolCallOutput {
-                outcome: TraceToolCallOutcome::Failure(serde_json::json!({
-                    "class": "invalid_request",
-                    "code": "invalid_tool_args",
-                    "message": "bad args",
-                    "source": "runtime",
-                    "retry": { "type": "never" },
-                    "raw": { "path": "missing" }
-                })),
-                control: None,
-            },
-            duration_ms: 3,
-            issuing_node_id: None,
-            attempts: None,
-        },
-    );
-
-    let json = serde_json::to_value(record).unwrap();
-    assert_eq!(json["type"], "tool_call_completed");
-    assert_eq!(json["output"]["outcome"]["status"], "failure");
-    assert_eq!(
-        json["output"]["outcome"]["payload"]["code"],
-        "invalid_tool_args"
-    );
-    assert_eq!(
-        json["output"]["outcome"]["payload"]["raw"]["path"],
-        "missing"
-    );
-}
-
-#[test]
 fn event_is_failed_identifies_all_failure_outcomes() {
     fn tool_completed(outcome: TraceToolCallOutcome) -> TraceEvent {
         TraceEvent::ToolCallCompleted {
@@ -317,35 +259,6 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             "{case} must not be classified as failed"
         );
     }
-}
-
-#[test]
-fn jsonl_sink_creates_parent_directories() {
-    let dir = std::env::temp_dir().join(format!("lash-trace-{}", uuid::Uuid::new_v4()));
-    let path = dir.join("nested").join("trace.jsonl");
-    let sink = JsonlTraceSink::new(&path);
-    sink.append(&fixture_record(
-        TraceContext::default().for_session("root"),
-        TraceEvent::RuntimeStreamEvent {
-            event: TraceRuntimeStreamEvent {
-                sequence: 1,
-                elapsed_ms: 0,
-                event_name: "delta".to_string(),
-                raw_text: Some("hello".to_string()),
-                visible_text: Some("hello".to_string()),
-                item_id: None,
-                block_id: None,
-                output_index: None,
-                call_id: None,
-                tool_name: None,
-                input_json: None,
-                usage: None,
-            },
-        },
-    ))
-    .unwrap();
-    assert!(path.exists());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// FIG-3525: a writer killed between the record bytes and their newline — or

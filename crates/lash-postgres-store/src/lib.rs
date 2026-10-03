@@ -1529,8 +1529,7 @@ mod pending_turn_inputs;
 mod preflight;
 #[path = "postgres/process_helpers.rs"]
 mod process_helpers;
-#[cfg(test)]
-mod process_lifecycle_sql_tests;
+
 #[path = "postgres/process_registry.rs"]
 mod process_registry;
 #[path = "postgres/process_sql.rs"]

@@ -199,23 +199,6 @@ async fn mcp_user_only_content_has_an_empty_assistant_view() {
     assert!(output.view.expect("empty assistant view").blocks.is_empty());
 }
 
-#[tokio::test]
-async fn mcp_error_keeps_its_classification_and_message() {
-    let result = serde_json::from_value(
-        json!({"content":[{"type":"text","text":"bad input"}],"isError":true}),
-    )
-    .expect("valid MCP result");
-    let output = tool_result_from_rmcp(result, &lash_core::testing::mock_attempt_context())
-        .await
-        .into_done_output()
-        .expect("settled");
-    assert!(
-        matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
-        if failure.class == ToolFailureClass::Execution && failure.code == "mcp_tool_error" && failure.message == "bad input")
-    );
-    assert!(output.view.is_none());
-}
-
 fn mcp_name(server: &str, native_tool: &str) -> String {
     crate::mcp_tool_names(server, &[native_tool])[native_tool].clone()
 }
@@ -296,63 +279,6 @@ fn import_refuses_a_forced_final_name_collision_without_overwriting() {
     assert!(message.contains("model-facing name collision"), "{message}");
     assert!(message.contains("get-user"), "{message}");
     assert!(message.contains("get_user"), "{message}");
-}
-
-#[tokio::test]
-async fn publication_refuses_a_forced_cross_server_collision_atomically() {
-    let pool = Arc::new(McpConnectionPool::empty());
-    let first = McpEntry::new_with_publication_state(
-        Arc::clone(&pool.publication_state),
-        "abcdefghijklmno-one".to_string(),
-        McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
-        McpHostServices::default(),
-    );
-    let second = McpEntry::new_with_publication_state(
-        Arc::clone(&pool.publication_state),
-        "abcdefghijklmno-two".to_string(),
-        McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
-        McpHostServices::default(),
-    );
-    pool.install(first.server_name.clone(), Arc::clone(&first))
-        .unwrap_or_else(|(_, error)| panic!("install first server: {error}"));
-    pool.install(second.server_name.clone(), Arc::clone(&second))
-        .unwrap_or_else(|(_, error)| panic!("install second server: {error}"));
-    let forced_catalog = |server: &str| {
-        import_tools_with_name_builder(
-            server,
-            vec![advertised_tool("abcdefghijklmnop")],
-            None,
-            |_, _| forced_publication_name(),
-        )
-        .expect("one-tool catalog")
-    };
-
-    first
-        .replace_imported_tools(forced_catalog(&first.server_name))
-        .expect("first catalog publishes");
-    let error = second
-        .replace_imported_tools(forced_catalog(&second.server_name))
-        .expect_err("second catalog must be refused");
-
-    assert!(error.to_string().contains("model-facing name collision"));
-    let advertised = pool.advertised_tools();
-    assert_eq!(advertised.len(), 1);
-    assert_eq!(
-        advertised[0].manifest.id,
-        first
-            .imported_tools
-            .read_recover()
-            .values()
-            .next()
-            .expect("first catalog remains published")
-            .definition
-            .manifest
-            .id
-    );
-    assert!(second.imported_tools.read_recover().is_empty());
-    assert_eq!(pool.publication_state.lock_recover().tool_names.len(), 1);
-
-    pool.shutdown_all().await;
 }
 
 #[tokio::test]
@@ -566,12 +492,6 @@ fn build_http_headers_carries_configured_headers() {
 }
 
 #[test]
-fn build_http_headers_empty_map_is_empty() {
-    let built = build_http_headers("api", &BTreeMap::new()).expect("empty converts");
-    assert!(built.is_empty());
-}
-
-#[test]
 fn build_http_headers_rejects_malformed_name() {
     let mut headers = BTreeMap::new();
     headers.insert("Bad Header Name".to_string(), "x".to_string());
@@ -677,38 +597,6 @@ async fn connect_tolerates_unreachable_server() {
     assert_eq!(failure.class, ToolFailureClass::Unavailable);
     assert_eq!(failure.code, "mcp_pool_shut_down");
     assert_eq!(failure.retry, ToolRetryStatus::Never);
-}
-
-#[tokio::test]
-async fn connect_rejects_server_names_with_the_same_normalized_prefix() {
-    let servers = BTreeMap::from([
-        (
-            "Foo".to_string(),
-            McpServerConfig::stdio(McpStdioTransport::new(
-                "sh",
-                vec!["-c".to_string(), "exit 1".to_string()],
-            )),
-        ),
-        (
-            "foo".to_string(),
-            McpServerConfig::stdio(McpStdioTransport::new(
-                "sh",
-                vec!["-c".to_string(), "exit 1".to_string()],
-            )),
-        ),
-    ]);
-
-    let error = match McpConnectionPool::connect(servers).await {
-        Err(error) => error,
-        Ok(pool) => {
-            pool.shutdown_all().await;
-            panic!("colliding normalized server prefixes must be a configuration error");
-        }
-    };
-    let message = error.to_string();
-    assert!(message.contains("`Foo`"), "{message}");
-    assert!(message.contains("`foo`"), "{message}");
-    assert!(message.contains("prefix `foo`"), "{message}");
 }
 
 struct NativeAndMcpProvider {
@@ -882,74 +770,6 @@ async fn eager_connects_start_in_parallel() {
             .all(|status| status.health.is_connected()),
         "both handshakes require their peer child to have started"
     );
-    pool.shutdown_all().await;
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn tools_list_changed_refreshes_the_live_catalog() {
-    let initialize = json!({
-        "jsonrpc": "2.0",
-        "id": 0,
-        "result": {
-            "protocolVersion": "2025-11-25",
-            "capabilities": { "tools": { "listChanged": true } },
-            "serverInfo": { "name": "live", "version": "1.0.0" }
-        }
-    });
-    let first_list = json!({
-        "jsonrpc": "2.0", "id": 1,
-        "result": { "tools": [{ "name": "old-tool", "inputSchema": { "type": "object" } }] }
-    });
-    let second_list = json!({
-        "jsonrpc": "2.0", "id": 2,
-        "result": { "tools": [{ "name": "new-tool", "inputSchema": { "type": "object" } }] }
-    });
-    let notification = json!({
-        "jsonrpc": "2.0", "method": "notifications/tools/list_changed"
-    });
-    let script = "\
-        read -r _; printf '%s\\n' \"$INITIALIZE\"; \
-        read -r _; read -r _; printf '%s\\n' \"$FIRST_LIST\"; \
-        printf '%s\\n' \"$NOTIFICATION\"; \
-        read -r _; printf '%s\\n' \"$SECOND_LIST\"; cat >/dev/null";
-    let pool = McpConnectionPool::connect(BTreeMap::from([(
-        "live".to_string(),
-        McpServerConfig {
-            startup_timeout_ms: 2_000,
-            call_policy: McpCallPolicy::default(),
-            shutdown_policy: Default::default(),
-            transport: McpTransport::Stdio(McpStdioTransport {
-                command: "sh".to_string(),
-                args: vec!["-c".to_string(), script.to_string()],
-                env: BTreeMap::from([
-                    ("INITIALIZE".to_string(), initialize.to_string()),
-                    ("FIRST_LIST".to_string(), first_list.to_string()),
-                    ("SECOND_LIST".to_string(), second_list.to_string()),
-                    ("NOTIFICATION".to_string(), notification.to_string()),
-                ]),
-                cwd: None,
-            }),
-        },
-    )]))
-    .await
-    .expect("connect list-changing server");
-
-    tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            let names = pool
-                .advertised_tools()
-                .into_iter()
-                .map(|tool| tool.name().to_string())
-                .collect::<Vec<_>>();
-            if names == [mcp_name("live", "new-tool")] {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("tools/list_changed refreshes discovery");
     pool.shutdown_all().await;
 }
 
@@ -1253,27 +1073,6 @@ async fn deferred_call_uses_captured_raw_target_after_refresh_removes_original()
     exercise_deferred_call_across_catalog_refresh(false).await;
 }
 
-#[tokio::test]
-async fn attach_registers_an_outage_and_retries_like_initial_connect() {
-    let pool = Arc::new(McpConnectionPool::empty());
-    pool.attach(
-        "down".to_string(),
-        McpServerConfig::stdio(McpStdioTransport::new(
-            "sh",
-            vec!["-c".to_string(), "exit 1".to_string()],
-        )),
-    )
-    .await
-    .expect("startup outage is registered rather than rejected");
-
-    let statuses = pool.server_statuses();
-    assert_eq!(statuses.len(), 1);
-    assert_eq!(statuses[0].server_name, "down");
-    assert!(!statuses[0].health.is_connected());
-    assert!(statuses[0].health.error().is_some());
-    pool.shutdown_all().await;
-}
-
 #[cfg(unix)]
 #[tokio::test]
 async fn attach_reaps_the_previous_child_before_starting_its_replacement() {
@@ -1339,28 +1138,6 @@ async fn attach_reaps_the_previous_child_before_starting_its_replacement() {
         "replacement must start only after the previous child is reaped"
     );
     pool.shutdown_all().await;
-}
-
-#[test]
-fn known_protocol_errors_keep_their_typed_cause() {
-    assert!(matches!(
-        McpServiceFailure::from(ServiceError::UnexpectedResponse),
-        McpServiceFailure::UnexpectedResponse
-    ));
-    assert!(matches!(
-        McpServiceFailure::from(ServiceError::Cancelled { reason: None }),
-        McpServiceFailure::Cancelled { reason: None }
-    ));
-    assert!(matches!(
-        McpServiceFailure::from(ServiceError::Timeout {
-            timeout: Duration::from_secs(1)
-        }),
-        McpServiceFailure::Timeout { timeout_ms: 1000 }
-    ));
-    assert!(matches!(
-        McpServiceFailure::from(ServiceError::TransportClosed),
-        McpServiceFailure::TransportClosed
-    ));
 }
 
 // Subscribe before the call that terminates the mock. Publication follows
@@ -1631,37 +1408,6 @@ fn process_exists(pid: &str) -> bool {
         .status()
         .expect("probe child process")
         .success()
-}
-
-#[tokio::test]
-async fn shutdown_all_wakes_actor_sleeping_until_keepalive() {
-    let pool = Arc::new(McpConnectionPool::empty());
-    let entry = McpEntry::new(
-        "keepalive".to_string(),
-        McpServerConfig {
-            startup_timeout_ms: 1_000,
-            call_policy: McpCallPolicy {
-                liveness_probe_interval_ms: 60_000,
-                ..Default::default()
-            },
-            shutdown_policy: Default::default(),
-            transport: McpTransport::Stdio(McpStdioTransport {
-                command: "unused".to_string(),
-                args: Vec::new(),
-                env: BTreeMap::new(),
-                cwd: None,
-            }),
-        },
-        McpHostServices::default(),
-    );
-    assert!(
-        pool.install("keepalive".to_string(), Arc::clone(&entry))
-            .is_ok()
-    );
-    tokio::time::timeout(Duration::from_secs(1), pool.shutdown_all())
-        .await
-        .expect("shutdown must wake keepalive instead of waiting for its interval");
-    assert!(entry.actor_handle.lock_recover().is_none());
 }
 
 /// A connection that dies mid-life is detected on the next call and

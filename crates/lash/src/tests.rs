@@ -3,10 +3,9 @@ use crate::support::SessionSpec;
 use crate::support::SessionWorkEngine;
 use crate::support::{
     Arc, CancellationToken, DeploymentStore, EmbedError, LashCore, PluginFactory, ProcessRegistry,
-    Result, RunActivityCollector, RuntimeSessionState, SessionError,
-    SessionObservationSubscription, SessionResume, StaticPluginFactory, StdMutex, ToolProvider,
-    TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport,
-    async_trait, message_text,
+    Result, RuntimeSessionState, SessionError, SessionObservationSubscription, SessionResume,
+    StaticPluginFactory, StdMutex, ToolProvider, TurnActivity, TurnActivitySink, TurnEvent,
+    TurnInput, TurnOutcome, TurnReport, async_trait, message_text,
 };
 use lash_core::ProcessExecutionEnvStore;
 use lash_core::facade_support::ProviderHandle;
@@ -122,14 +121,6 @@ pub(crate) async fn durable_history(
     durable: &crate::DurableSession,
 ) -> Result<Vec<lash_core::store::HistoryNode>> {
     paged_history(|anchor, budget| durable.history(anchor, budget)).await
-}
-
-/// Every node of `store`'s session ancestry from its head, newest first.
-pub(crate) async fn store_history(
-    store: &lash_core::store::SessionStore,
-) -> Result<Vec<lash_core::store::HistoryNode>> {
-    paged_history(|anchor, budget| async move { Ok(store.load_ancestors(anchor, budget).await?) })
-        .await
 }
 
 /// The agent frames `history` records, oldest first: the durable frames a
@@ -298,10 +289,6 @@ impl TurnActivitySink for RecordingEvents {
     }
 }
 
-fn test_activity(correlation_id: &str, event: TurnEvent) -> TurnActivity {
-    TurnActivity::new(TurnActivityId::new(correlation_id.to_string()), event)
-}
-
 fn assistant_prose(events: &[TurnActivity]) -> String {
     events
         .iter()
@@ -396,13 +383,6 @@ impl ToolProvider for PendingAppTools {
 }
 
 #[cfg(feature = "rlm")]
-struct DurableInputTools {
-    key_tx:
-        StdMutex<Option<oneshot::Sender<std::result::Result<lash_core::AwaitEventKey, String>>>>,
-    attempt_count: Arc<AtomicUsize>,
-}
-
-#[cfg(feature = "rlm")]
 struct RetryingDirectTools;
 
 #[cfg(feature = "rlm")]
@@ -463,110 +443,6 @@ fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
         .expect("valid declared tool schemas")
         .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 0, 0)),
         "retrying_direct",
-    )
-}
-
-#[cfg(feature = "rlm")]
-impl DurableInputTools {
-    fn new(key_tx: oneshot::Sender<std::result::Result<lash_core::AwaitEventKey, String>>) -> Self {
-        Self {
-            key_tx: StdMutex::new(Some(key_tx)),
-            attempt_count: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-
-    fn attempt_count(&self) -> usize {
-        self.attempt_count.load(Ordering::SeqCst)
-    }
-
-    fn send_key_result(&self, result: std::result::Result<lash_core::AwaitEventKey, String>) {
-        if let Some(tx) = self.key_tx.lock_recover().take() {
-            let _ = tx.send(result);
-        }
-    }
-}
-
-#[cfg(feature = "rlm")]
-#[async_trait]
-impl ToolProvider for DurableInputTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![durable_input_tool_definition().manifest()]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "mock_input_request").then(|| Arc::new(durable_input_tool_definition().contract()))
-    }
-
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == durable_input_tool_definition().id()
-    }
-
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        (async {
-            assert_eq!(call.name(), "mock_input_request");
-            let question = call
-                .args
-                .get("question")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("answer")
-                .to_string();
-            let key = match call.context.completion_key() {
-                Ok(key) => key,
-                Err(err) => {
-                    self.send_key_result(Err(err.to_string()));
-                    return lash_core::ToolOutcome::err_fmt(err);
-                }
-            };
-            self.attempt_count.fetch_add(1, Ordering::SeqCst);
-            // The attempt body cannot append process events. It declares the
-            // announcement instead, and the runtime appends it when the call parks.
-            let announcement = lash_core::PendingAnnouncement::new(
-                "process.yield",
-                serde_json::json!({
-                    "type": "work.input_request.opened",
-                    "request_id": "request-1",
-                    "question": question,
-                    "await_key_id": key.key_id,
-                }),
-                "mock-input-request:request-1",
-            );
-            self.send_key_result(Ok(key));
-            lash_core::ToolOutcome::pending(
-                lash_core::PendingCompletion::new().announcing(announcement),
-            )
-        })
-        .await
-        .into()
-    }
-}
-
-#[cfg(feature = "rlm")]
-fn durable_input_tool_definition() -> lash_core::ToolDefinition {
-    test_tool_definition_with_tool_binding(
-        lash_core::ToolDefinition::raw(
-            "tool:mock_input_request",
-            "mock_input_request",
-            "Open a durable input request and wait for the answer.",
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "question": { "type": "string" }
-                },
-                "required": ["question"],
-                "additionalProperties": false
-            }),
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "request_id": { "type": "string" },
-                    "answer": {}
-                },
-                "required": ["request_id", "answer"],
-                "additionalProperties": true
-            }),
-        )
-        .expect("valid declared tool schemas"),
-        "mock_input_request",
     )
 }
 
@@ -1197,7 +1073,6 @@ mod discovery_execution;
 mod drain_hand_over;
 mod failure_settlement;
 mod finalize_fault;
-mod obligation_relays;
 mod output_retention;
 mod plugin_generation;
 mod plugin_reopen;

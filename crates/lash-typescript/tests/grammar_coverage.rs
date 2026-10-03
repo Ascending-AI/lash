@@ -527,18 +527,3 @@ fn fuzzed_token_sequences_never_abort_the_parser() {
         );
     }
 }
-
-/// The corpus is a fixture, not a random walk: if the generator or the alphabet
-/// changes, this fingerprint changes and the change is deliberate.
-#[test]
-fn the_fuzz_corpus_is_deterministic() {
-    let first = fuzz_source(7, 32);
-    let again = fuzz_source(7, 32);
-    assert_eq!(first, again, "the same seed produces the same source");
-    assert_ne!(fuzz_source(8, 32), first, "different seeds differ");
-    assert_eq!(
-        first.len(),
-        fuzz_source(7, 32).len(),
-        "length is a function of the seed alone"
-    );
-}

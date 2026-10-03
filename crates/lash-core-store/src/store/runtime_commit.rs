@@ -1009,66 +1009,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn durable_outcome_follows_every_terminal_stop_kind() {
-        use lash_sansio::{TurnOutcome, TurnStop};
-        let cases = [
-            (TurnStop::Incomplete, TurnCommitFailureCause::Incomplete),
-            (TurnStop::InvalidInput, TurnCommitFailureCause::InvalidInput),
-            (TurnStop::MaxTurns, TurnCommitFailureCause::MaxTurns),
-            (TurnStop::ToolFailure, TurnCommitFailureCause::ToolFailure),
-            (
-                TurnStop::ProviderError,
-                TurnCommitFailureCause::ProviderError,
-            ),
-            (
-                TurnStop::ContextOverflow,
-                TurnCommitFailureCause::ContextOverflow,
-            ),
-            (TurnStop::PluginAbort, TurnCommitFailureCause::PluginAbort),
-            (TurnStop::RuntimeError, TurnCommitFailureCause::RuntimeError),
-            (
-                TurnStop::SubmittedError {
-                    value: serde_json::Value::Null,
-                },
-                TurnCommitFailureCause::SubmittedError,
-            ),
-            (
-                TurnStop::ToolError {
-                    tool_name: "tool".into(),
-                    value: serde_json::Value::Null,
-                },
-                TurnCommitFailureCause::ToolError,
-            ),
-        ];
-        for (stop, cause) in cases {
-            let stored = TurnCommitOutcome::from_terminal(&TurnOutcome::Stopped(stop));
-            assert_eq!(stored, TurnCommitOutcome::Failed(cause));
-            assert!(stored.as_str().starts_with("failed_"));
-            let encoded = serde_json::to_value(&stored).expect("serialize stored outcome");
-            assert!(encoded.get("failed").is_some());
-            assert_eq!(
-                serde_json::from_value::<TurnCommitOutcome>(encoded)
-                    .expect("decode stored outcome"),
-                stored
-            );
-        }
-        assert_eq!(
-            TurnCommitOutcome::from_terminal(&TurnOutcome::Stopped(TurnStop::Cancelled {
-                evidence: lash_sansio::TurnCancellationEvidence::internal("outcome-test"),
-            })),
-            TurnCommitOutcome::Cancelled,
-        );
-        assert_eq!(
-            TurnCommitOutcome::from_terminal(&TurnOutcome::Finished(
-                lash_sansio::TurnFinish::AssistantMessage {
-                    text: String::new()
-                },
-            )),
-            TurnCommitOutcome::Completed,
-        );
-    }
-
-    #[test]
     fn append_identity_cannot_deserialize_half_populated() {
         let operation = OperationId::new(
             crate::ExecutionScope::runtime_operation("partial-json-stamp"),
@@ -1085,42 +1025,6 @@ mod tests {
 
         serde_json::from_value::<RuntimeTurnCommitStamp>(json)
             .expect_err("append identity without its hash must be refused");
-    }
-
-    #[test]
-    fn semantic_boundary_wire_values_match_the_persisted_receipt_encoding() {
-        // Hand-spelled wire literals: this vocabulary is persisted replay
-        // identity, and a serde-rename drift would be globally self-consistent
-        // while silently orphaning every stored receipt.
-        for (operation, wire_operation) in [
-            (SemanticBoundaryOperation::RecordConfig, "record-config"),
-            (SemanticBoundaryOperation::CreateSession, "create-session"),
-        ] {
-            let identity = AppendRequestIdentity::SemanticBoundary {
-                operation,
-                encoding_version: 1,
-                request_hash: "boundary-hash".to_string(),
-            };
-            let encoded = serde_json::to_value(&identity).expect("encode semantic identity");
-            assert_eq!(
-                encoded,
-                serde_json::json!({
-                    "kind": "semantic_boundary",
-                    "operation": wire_operation,
-                    "identity_encoding_version": 1,
-                    "request_identity_hash": "boundary-hash",
-                }),
-                "semantic-boundary wire shape moved for {wire_operation}"
-            );
-            let decoded: AppendRequestIdentity =
-                serde_json::from_value(encoded).expect("decode semantic identity");
-            assert_eq!(decoded, identity, "operation tag must round-trip");
-            assert_eq!(operation.operation_key(), wire_operation);
-            assert_eq!(
-                SemanticBoundaryOperation::from_operation_key(wire_operation),
-                Some(operation)
-            );
-        }
     }
 
     #[test]

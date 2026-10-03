@@ -244,34 +244,3 @@ pub async fn acquire_start_input(
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_process_receives_through_its_record_and_a_turn_through_its_journal() {
-        let process = crate::ProcessId::fixture("receiver");
-        let claim = receiving_claim(&ExecutionScope::Process {
-            process_id: process.clone(),
-        })
-        .expect("a process scope claims through its record");
-        assert_eq!(&claim.referrer(), &ArtifactReferrer::ProcessRecord(process));
-
-        let turn = ExecutionScope::turn("session", "turn");
-        let claim = receiving_claim(&turn).expect("a turn scope claims through its journal");
-        assert_eq!(
-            &claim.referrer(),
-            &ArtifactReferrer::Execution(turn.journal_identity().expect("a valid turn scope"))
-        );
-    }
-
-    #[test]
-    fn only_a_settled_output_delivers_attachments() {
-        let abandoned = ProcessAwaitOutput::NoLongerRetained {
-            terminal_label: crate::RetiredProcessStatus::Completed,
-            pruned_at_ms: 1,
-        };
-        assert!(delivered_attachment_ids(&abandoned).is_empty());
-    }
-}

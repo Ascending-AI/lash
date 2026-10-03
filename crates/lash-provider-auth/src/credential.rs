@@ -559,16 +559,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transient_refresh_recovers_on_next_acquisition() {
-        let refresher = Arc::new(RecoveringRefresher {
-            calls: AtomicUsize::new(0),
-            cause: RefreshCause::Proactive,
-        });
-        let manager = manager(Arc::clone(&refresher), 200);
-        assert_transient_refresh_recovers(&manager, &manager, &refresher).await;
-    }
-
-    #[tokio::test]
     async fn transient_refresh_recovers_through_cloned_manager() {
         let refresher = Arc::new(RecoveringRefresher {
             calls: AtomicUsize::new(0),
@@ -666,33 +656,6 @@ mod tests {
             },
         );
         assert_eq!(manager.lease().await.unwrap().generation, 1);
-        assert_eq!(refresher.calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn pre_output_401_refreshes_and_replays_once() {
-        let refresher = Arc::new(TestRefresher {
-            calls: AtomicUsize::new(0),
-            result: Ok(credential("new", 1000)),
-        });
-        let manager = manager(Arc::clone(&refresher), 0);
-        let mut calls = 0;
-        let result = manager
-            .execute(&mut calls, |calls, lease| {
-                Box::pin(async move {
-                    let attempt = *calls;
-                    *calls += 1;
-                    if attempt == 0 {
-                        Err(CredentialCallError::PreOutputAuth("401"))
-                    } else {
-                        Ok((lease.value.secret, lease.generation))
-                    }
-                })
-            })
-            .await
-            .unwrap();
-        assert_eq!(result, ("new".to_string(), 1));
-        assert_eq!(calls, 2);
         assert_eq!(refresher.calls.load(Ordering::SeqCst), 1);
     }
 

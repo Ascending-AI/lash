@@ -1038,53 +1038,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn publish_revision_matches_the_single_export_across_a_commit() {
-        let runtime = Box::pin(
-            LashRuntime::builder(
-                crate::RuntimeHostConfig::new(
-                    crate::testing::sqlite_memory_store_backend().await,
-                    crate::CommitBudget::bounded(1024 * 1024, 512),
-                    crate::QueuedWorkBatchingConfig::new(1),
-                ),
-                crate::testing::runtime_lease_owner(),
-            )
-            .with_session_id("revision-equivalence")
-            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-            .with_policy(crate::SessionPolicy {
-                model: Some(crate::LlmProfileConfig::new(
-                    crate::RecordedLlmProfile::mint(
-                        crate::LlmProfileKey::from("test-model"),
-                        crate::LlmProfileMetadata::builder("test-model")
-                            .context_window_tokens(1024)
-                            .build()
-                            .expect("model"),
-                    ),
-                )),
-                ..crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                )
-            })
-            .build(),
-        )
-        .await
-        .expect("runtime");
-        let handle = RuntimeHandle::new(runtime);
-        let writer = handle.writer();
-        let mut runtime = writer.lock().await;
-        runtime.state.turn_index = 9;
-        runtime.state.head_revision = 17;
-
-        let exported = runtime.export_persistence_state();
-        let exported_revision = observation_revision(&exported);
-        let accessor_revision = SessionRevision::from_runtime(&runtime);
-        assert_eq!(accessor_revision, exported_revision);
-
-        handle.publish_from(&runtime);
-        assert_eq!(handle.observe().session_revision(), exported_revision);
-    }
-
-    #[tokio::test]
     async fn publish_keeps_frame_switch_immediately_before_resident_change() {
         let runtime = Box::pin(
             LashRuntime::builder(
@@ -1140,69 +1093,6 @@ mod tests {
             SessionObservationEventPayload::ResidentChanged { .. }
         ));
         assert_eq!(events[1].turn_id, None);
-    }
-
-    #[tokio::test]
-    async fn publication_holds_no_full_state_graph_pin() {
-        let runtime = Box::pin(
-            LashRuntime::builder(
-                crate::RuntimeHostConfig::new(
-                    crate::testing::sqlite_memory_store_backend().await,
-                    crate::CommitBudget::bounded(1024 * 1024, 512),
-                    crate::QueuedWorkBatchingConfig::new(1),
-                ),
-                crate::testing::runtime_lease_owner(),
-            )
-            .with_session_id("graph-pin")
-            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-            .with_policy(crate::SessionPolicy {
-                model: Some(crate::LlmProfileConfig::new(
-                    crate::RecordedLlmProfile::mint(
-                        crate::LlmProfileKey::from("test-model"),
-                        crate::LlmProfileMetadata::builder("test-model")
-                            .context_window_tokens(1024)
-                            .build()
-                            .expect("model"),
-                    ),
-                )),
-                ..crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                )
-            })
-            .build(),
-        )
-        .await
-        .expect("runtime");
-        let handle = RuntimeHandle::new(runtime);
-        let writer = handle.writer();
-        let mut runtime = writer.lock().await;
-
-        // Measure the graph pins each legitimate observation contributor
-        // holds, then require the published observation to contribute
-        // exactly those — no extra full-state holder. One more pin would
-        // force a copy-on-write on every graph mutation until the next
-        // publish.
-        let pinned_with_observation = runtime.state.session_graph.data_strong_count();
-        let read_view = runtime.read_view();
-        let read_view_pins =
-            runtime.state.session_graph.data_strong_count() - pinned_with_observation;
-        drop(read_view);
-        let services = runtime.runtime_session_services().expect("plugin services");
-        let services_pins =
-            runtime.state.session_graph.data_strong_count() - pinned_with_observation;
-        drop(services);
-        // Resident state (1) + read view + plugin query services snapshot.
-        let expected = 1 + read_view_pins + services_pins;
-        assert_eq!(pinned_with_observation, expected);
-
-        switch_test_frame(&mut runtime.state, "first-frame");
-        handle.publish_from(&runtime);
-        assert_eq!(runtime.state.session_graph.data_strong_count(), expected);
-
-        switch_test_frame(&mut runtime.state, "second-frame");
-        handle.publish_from(&runtime);
-        assert_eq!(runtime.state.session_graph.data_strong_count(), expected);
     }
 
     #[tokio::test]

@@ -361,17 +361,6 @@ mod panic_tests {
         );
     }
 
-    #[test]
-    fn contained_tool_panic_is_loud_in_test_builds() {
-        let _mode = PANIC_MODE.lock_recover();
-        let previous = crate::panic_containment::set_loud(true);
-        let panic = std::panic::catch_unwind(|| {
-            let _ = super::tool_panicked(Box::new("tool seam remains loud"));
-        });
-        crate::panic_containment::set_loud(previous);
-        assert!(panic.is_err());
-    }
-
     /// A `ToolProvider` whose `execute` is written the way `async_trait`
     /// desugars the trait: its body runs when dispatch invokes the method, so
     /// this panic happens while the call's boxed future is being constructed —

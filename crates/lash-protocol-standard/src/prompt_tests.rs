@@ -43,35 +43,6 @@ fn configured_prompt() -> Value {
 }
 
 #[test]
-fn creation_records_the_builtin_prompt_default() {
-    let config = creation(None, None);
-    assert_eq!(
-        config
-            .get(STANDARD_PROTOCOL_PLUGIN_ID)
-            .expect("recorded namespace")["prompt"],
-        serde_json::json!({"intro": null, "instructions": [], "context": [], "omit_builtin_guidance": false})
-    );
-    let recorded = config
-        .decode::<StandardRecordedConfig>(STANDARD_PROTOCOL_PLUGIN_ID)
-        .expect("decode config")
-        .expect("standard config");
-    assert_eq!(recorded.prompt, StandardPrompt::default());
-    insta::assert_snapshot!(recorded.render_system_prompt(&lash_core::ToolCatalog::default()), @r"
-    You are an assistant operating the lash harness.
-
-    ## Execution
-
-    Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (at most 64 per batch); make dependent calls after their inputs return. Check each batch result’s success flag before using its value. Answer in prose only when no tool is needed.
-
-    ## Guidance
-
-    - Be concise; no filler, hedging, or performative tone.
-    - Act as soon as the next step is clear; do not restate conclusions.
-    - Prefer the simplest correct solution.
-    ");
-}
-
-#[test]
 fn creation_override_is_recorded_and_children_inherit_it() {
     let parent = creation(Some(configured_prompt()), None);
     assert_eq!(

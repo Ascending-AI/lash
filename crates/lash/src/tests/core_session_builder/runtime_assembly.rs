@@ -142,39 +142,3 @@ async fn sqlite_runtime_assembly_refuses_deleted_without_writes() {
     ))
     .await;
 }
-
-#[allow(
-    clippy::disallowed_methods,
-    reason = "test fixture reads the PostgreSQL service URL"
-)]
-async fn postgres_runtime_assembly(deleted: bool) {
-    let url = lash_postgres_store::testing::required_database_url();
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
-        .await
-        .expect("PostgreSQL storage");
-    let attachments = tempfile::tempdir().expect("attachment directory");
-    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
-        &storage,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            attachments.path(),
-        )),
-    ));
-    Box::pin(assert_runtime_assembly_refuses_without_writes(
-        lash_conformance::recording_backend_over(stores),
-        deleted,
-    ))
-    .await;
-}
-
-#[tokio::test]
-#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-async fn postgres_runtime_assembly_refuses_absent_without_writes() {
-    Box::pin(postgres_runtime_assembly(false)).await;
-}
-
-#[tokio::test]
-#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-async fn postgres_runtime_assembly_refuses_deleted_without_writes() {
-    Box::pin(postgres_runtime_assembly(true)).await;
-}

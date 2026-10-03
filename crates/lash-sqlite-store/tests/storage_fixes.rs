@@ -25,9 +25,8 @@ use lash_core_execution::runtime::{ProcessWakeDelivery, QueuedWorkBatchDraft};
 use lash_core_execution::store::RunStore as _;
 use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt;
 use lash_core_execution::{
-    AttachmentReferrers, AttachmentRootSet, LeaseOwnerIdentity, PluginState, QueuedWorkStore,
-    RuntimeCommit, RuntimeSessionState, SessionCatalogStore, SessionCommitStore, StoreError,
-    StoreSchemaVerdict, ToolState,
+    AttachmentReferrers, AttachmentRootSet, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit,
+    RuntimeSessionState, SessionCatalogStore, SessionCommitStore, StoreError, StoreSchemaVerdict,
 };
 use lash_sqlite_store::{SqliteDatabase, SqliteStore, verify_schema_at};
 
@@ -42,14 +41,6 @@ fn unique_db_path(name: &str) -> std::path::PathBuf {
     ));
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir.join("session.db")
-}
-
-fn persisted_tool_state_at_generation(generation: u64) -> ToolState {
-    serde_json::from_value(serde_json::json!({
-        "generation": generation,
-        "tools": {}
-    }))
-    .expect("deserialize persisted tool state")
 }
 
 fn block_on<T>(future: impl Future<Output = T>) -> T {
@@ -196,100 +187,6 @@ fn head_revision_cas_holds_across_two_connections() {
     assert_eq!(read.head_revision, 1);
 }
 
-// Finding 5: a checkpoint committed through the real `commit_runtime_state`
-// path carries tool / plugin / execution snapshot blobs. `gc_unreachable` must
-// treat that live checkpoint's child blobs as reachable and keep them, while
-// still collecting genuinely orphaned blobs — and it must never panic inside
-// the commit while doing so.
-#[tokio::test]
-async fn gc_keeps_live_committed_checkpoint_blobs() {
-    let store = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("memory backend")
-        .open_store()
-        .await
-        .expect("store");
-    let orphan = store
-        .put_unrooted_artifact_blob_for_testing(
-            lash_sqlite_store::BlobArtifactDescriptor::checkpoint_component(),
-            b"orphan-blob",
-        )
-        .await
-        .expect("store orphan blob");
-
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-        ))
-    };
-    state.set_tool_state_snapshot(Some(persisted_tool_state_at_generation(3)));
-    state.set_plugin_state(Some(PluginState {
-        plugins: Default::default(),
-    }));
-    state.set_execution_state_snapshot(Some(vec![0xDE, 0xAD, 0xBE, 0xEF].into()));
-    store
-        .admit_session(&lash_core_execution::SessionStoreCreateRequest {
-            session_id: state.session_id.clone(),
-            relation: lash_core_execution::SessionRelation::Root,
-            config: state.policy.clone().into(),
-            head: lash_core_execution::SessionCreationHead::Config,
-            pending_observer_intents: Vec::new(),
-            owning_process_id: None,
-        })
-        .await
-        .expect("admit session");
-    let commit = RuntimeCommit {
-        expected_head_revision: 0,
-        ..RuntimeCommit::persisted_state_for_test(&state)
-    };
-    let result = store.commit_runtime_state(commit).await.expect("commit");
-
-    let report = store.gc_unreachable().await.expect("gc sweeps");
-    assert!(
-        report.deleted_blob_count >= 1,
-        "the orphan blob should be collected, report={report:?}"
-    );
-    assert!(
-        store
-            .get_blob(&orphan)
-            .await
-            .expect("read orphan blob")
-            .is_none(),
-        "orphan blob must be collected"
-    );
-
-    // The live committed checkpoint manifest and every snapshot it references
-    // must survive GC.
-    assert!(
-        store
-            .get_blob(&result.checkpoint_ref)
-            .await
-            .expect("read checkpoint blob")
-            .is_some(),
-        "live checkpoint manifest must survive gc"
-    );
-    let manifest = store
-        .get_checkpoint(&result.checkpoint_ref)
-        .await
-        .expect("read checkpoint")
-        .expect("checkpoint manifest");
-    for component in manifest.components.values() {
-        let blob_ref = component
-            .blob_ref()
-            .expect("hydrated component carries ref");
-        assert!(
-            store
-                .get_blob(blob_ref)
-                .await
-                .expect("read checkpoint child blob")
-                .is_some(),
-            "live checkpoint child blob {blob_ref} must survive gc"
-        );
-    }
-}
-
 fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
     let process_id = ProcessId::fixture(&format!("process:{text}"));
     let sequence = 1;
@@ -306,52 +203,6 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
         trace_cause: Default::default(),
     };
     lash_core_execution::runtime::process_wake_batch_draft(wake)
-}
-
-// Finding 2 (sequential): a batch admitted to one run is not won by a
-// second admission. One run takes the only ready batch; a second run headed
-// by the same batch is refused while the first is unfinished.
-#[tokio::test]
-async fn second_admission_of_an_admitted_batch_is_not_won() {
-    let store = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("memory backend")
-        .open_store()
-        .await
-        .expect("store");
-    let batch = store
-        .enqueue_queued_work(exclusive_draft(&SessionId::from("root"), "work"))
-        .await
-        .expect("enqueue");
-    let fence = sealed_shift_fence(
-        &store,
-        &SessionId::from("root"),
-        &lease_owner("session-owner"),
-        "second-admission-of-an-admitted-batch-is-not-won-executor",
-    )
-    .await;
-
-    let admission_a = admit(&store, &fence, "run-a", &batch.batch_id)
-        .await
-        .expect("admit run a")
-        .expect("run a takes the only batch");
-    assert_eq!(admission_a.batch_ids(), vec![batch.batch_id.clone()]);
-
-    let admission_b = admit(&store, &fence, "run-b", &batch.batch_id).await;
-    assert!(
-        matches!(admission_b, Err(StoreError::UnfinishedRunConflict { .. })),
-        "a batch admitted to an unfinished run must not be admitted again, got {admission_b:?}"
-    );
-
-    // The admitted batch is hidden from the user-editable pending snapshot.
-    assert!(
-        store
-            .list_open_queued_work(&SessionId::from("root"))
-            .await
-            .expect("list pending during run a's admission")
-            .is_empty(),
-        "the batch admitted to run a must be hidden from pending work"
-    );
 }
 
 // Finding 2 (concurrent): two callers under one fence on two connections

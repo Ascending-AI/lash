@@ -442,7 +442,6 @@ pub(crate) struct RlmProtocolScenario {
     pub(crate) name: &'static str,
     pub(crate) user_message: &'static str,
     pub(crate) termination: RlmTermination,
-    pub(crate) protocol_turn_options: Option<lash_core::ProtocolTurnOptions>,
     pub(crate) max_turns: Option<usize>,
     pub(crate) plugin_factories: Vec<Arc<dyn PluginFactory>>,
     pub(crate) steps: Vec<RlmProtocolStep>,
@@ -455,7 +454,6 @@ impl RlmProtocolScenario {
             name,
             user_message: "perform one step",
             termination: RlmTermination::default(),
-            protocol_turn_options: None,
             max_turns: None,
             plugin_factories: Vec::new(),
             steps: Vec::new(),
@@ -470,11 +468,6 @@ impl RlmProtocolScenario {
 
     pub(crate) fn termination(mut self, termination: RlmTermination) -> Self {
         self.termination = termination;
-        self
-    }
-
-    pub(crate) fn protocol_turn_options(mut self, options: lash_core::ProtocolTurnOptions) -> Self {
-        self.protocol_turn_options = Some(options);
         self
     }
 
@@ -549,11 +542,7 @@ impl RlmProtocolScenario {
     )]
     pub(crate) fn run(self) -> RlmProtocolRun {
         let build_config = || {
-            let mut config = if let Some(options) = self.protocol_turn_options.clone() {
-                test_config_with_protocol_turn_options(options)
-            } else {
-                test_config_with_termination(self.termination.clone())
-            };
+            let mut config = test_config_with_termination(self.termination.clone());
             config.turn_budget = self
                 .max_turns
                 .map(lash_core::TurnBudget::bounded)

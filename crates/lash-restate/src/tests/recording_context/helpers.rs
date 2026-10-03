@@ -55,21 +55,6 @@ pub(in crate::tests) fn runtime_invocation(
     )
 }
 
-pub(in crate::tests) fn test_turn_cancel_wait_request(
-    session_id: &SessionId,
-    turn_id: &TurnId,
-) -> RestateDurableWaitAwaitRequest {
-    let key = restate_await_event_key(
-        &durable_turn_scope(session_id, turn_id),
-        AwaitEventWaitIdentity::TurnCancelGate,
-    )
-    .expect("test turn cancellation gate key");
-    RestateDurableWaitAwaitRequest {
-        key,
-        deadline: None,
-    }
-}
-
 pub(super) fn llm_spec_for_profile(key: &str) -> Box<lash_core::LlmRequestSpec> {
     let mut request = Box::new(llm_spec());
     request.model.model = lash_sansio::llm_profile::RecordedLlmProfile::mint(

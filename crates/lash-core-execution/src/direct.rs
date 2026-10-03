@@ -227,14 +227,6 @@ impl DirectLlmClient {
         self
     }
 
-    pub fn provider(&self) -> &ProviderHandle {
-        &self.provider
-    }
-
-    pub fn provider_mut(&mut self) -> &mut ProviderHandle {
-        &mut self.provider
-    }
-
     pub async fn complete(
         &mut self,
         request: DirectRequest,
@@ -495,7 +487,6 @@ fn profile(wire_model: &str) -> crate::LlmProfileConfig {
 mod tests {
     use super::*;
     use crate::llm::types::{LlmOutputPart, LlmTerminalReason, LlmUsage};
-    use crate::provider::{ProviderOptions, ProviderReliability};
     use crate::testing::TestProvider;
     use lash_sansio::sync::MutexExt;
     use serde_json::json;
@@ -531,18 +522,6 @@ mod tests {
         async fn sleep(&self, _duration: Duration) {}
 
         async fn sleep_until(&self, _deadline: Instant) {}
-    }
-
-    #[test]
-    fn frozen_clock_wall_clock_faces_agree() {
-        let clock = FrozenClock::new();
-        let clock: &dyn crate::Clock = &clock;
-        let milliseconds = clock.timestamp_ms();
-        let datetime = clock.timestamp_datetime();
-        let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-            .expect("clock emits RFC 3339");
-        assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-        assert_eq!(text.timestamp_millis() as u64, milliseconds);
     }
 
     #[derive(Default)]
@@ -590,50 +569,6 @@ mod tests {
         )
         .with_trace_sink(Some(trace_sink))
         .with_clock(clock)
-    }
-
-    #[test]
-    fn json_schema_request_preserves_output_schema() {
-        let schema = DirectJsonSchema {
-            name: "answer_shape".to_string(),
-            schema: lash_sansio::SchemaContract::admit(json!({
-                "type": "object",
-                "properties": {
-                    "answer": { "type": "string" }
-                },
-                "required": ["answer"]
-            }))
-            .expect("valid declared schema"),
-            strict: true,
-        };
-
-        let request = DirectRequest::json_schema("return json", schema.clone());
-
-        assert_eq!(
-            request.output,
-            DirectOutputSpec::JsonSchema(schema),
-            "DirectRequest::json_schema must carry the requested output schema"
-        );
-    }
-
-    #[test]
-    fn direct_client_provider_accessors_expose_owned_provider_handle() {
-        let provider = TestProvider::builder()
-            .kind("direct-accessor-provider")
-            .build()
-            .into_handle();
-        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
-
-        assert_eq!(client.provider().kind(), "direct-accessor-provider");
-
-        let options = ProviderOptions {
-            reliability: ProviderReliability::default().max_attempts(7),
-            response_body_bytes: Some(123),
-            ..Default::default()
-        };
-        client.provider_mut().set_options(options.clone());
-
-        assert_eq!(client.provider().options(), options);
     }
 
     #[tokio::test]
@@ -781,60 +716,6 @@ mod tests {
             &expected[4..],
             "stable direct trace records are the byte-level compatibility contract"
         );
-    }
-
-    #[tokio::test]
-    async fn direct_client_complete_delegates_to_provider_and_returns_response() {
-        let captured_request: Arc<Mutex<Option<LlmRequest>>> = Arc::new(Mutex::new(None));
-        let captured_for_provider = Arc::clone(&captured_request);
-        let provider = TestProvider::builder()
-            .kind("direct-complete-provider")
-            .complete(move |request| {
-                let captured_for_provider = Arc::clone(&captured_for_provider);
-                async move {
-                    *captured_for_provider.lock_recover() = Some(request);
-                    Ok(LlmResponse {
-                        parts: vec![LlmOutputPart::Text {
-                            text: "provider delegated response".to_string(),
-                            response_meta: None,
-                        }],
-                        usage: LlmUsage {
-                            input_tokens: 11,
-                            output_tokens: 3,
-                            ..Default::default()
-                        },
-                        terminal_reason: LlmTerminalReason::Stop,
-                        response_metadata: Default::default(),
-                        ..Default::default()
-                    })
-                }
-            })
-            .build()
-            .into_handle();
-        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
-        let mut request = DirectRequest::json("answer as json");
-        request.session_id = Some(SessionId::from("direct-session"));
-
-        let response = client
-            .complete(request)
-            .await
-            .expect("direct completion should delegate");
-
-        assert_eq!(response.full_text(), "provider delegated response");
-        assert_eq!(response.llm_call.attempts.len(), 1);
-        let captured = captured_request
-            .lock_recover()
-            .clone()
-            .expect("provider should receive a request");
-        assert_eq!(captured.model.wire_model(), "direct-model");
-        assert_eq!(captured.scope.session_id, "direct-session");
-        assert_eq!(captured.scope.agent_frame_id, "direct-session:frame:direct");
-        assert_eq!(captured.scope.request_id, "direct-session:direct");
-        assert!(matches!(
-            captured.output_spec,
-            Some(LlmOutputSpec::JsonObject)
-        ));
-        assert_eq!(captured.messages.len(), 1);
     }
 
     #[tokio::test]
@@ -1052,17 +933,6 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    #[test]
-    fn direct_request_rejects_legacy_dangling_attachment() {
-        let error = serde_json::from_value::<DirectRequest>(serde_json::json!({
-            "model": "input-model",
-            "messages": [{"role": "assistant", "parts": [{"Attachment": 2}]}],
-            "attachments": []
-        }))
-        .expect_err("legacy dangling source must fail decoding");
-        assert!(error.to_string().contains("invalid type"), "{error}");
     }
 
     #[test]

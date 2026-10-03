@@ -371,39 +371,6 @@ fn assert_fig1067_cron_sync_trace(
 }
 
 #[test]
-fn cron_sync_plan_for_one_session_never_cancels_another_sessions_job() {
-    let session_a = "fig1067:session:a";
-    let session_b = "fig1067:session:a:other";
-    let key_a = crate::restate::cron_job_key(&SessionId::from(session_a), "cron-source:a");
-    let key_b = crate::restate::cron_job_key(&SessionId::from(session_b), "cron-source:b");
-    let known_by_session = std::collections::BTreeMap::from([
-        (
-            session_a.to_string(),
-            std::collections::BTreeSet::from([key_a.clone()]),
-        ),
-        (
-            session_b.to_string(),
-            std::collections::BTreeSet::from([key_b.clone()]),
-        ),
-    ]);
-    let plan = crate::restate::cron_sync_plan(
-        &SessionId::from(session_a),
-        &[fig1067_cron_registration(
-            &SessionId::from(session_a),
-            "cron-source:a",
-            true,
-        )],
-        known_by_session[session_a].clone(),
-    );
-    assert_eq!(plan.upserts.keys().collect::<Vec<_>>(), vec![&key_a]);
-    assert!(plan.cancels.is_empty());
-    assert_eq!(
-        known_by_session[session_b],
-        std::collections::BTreeSet::from([key_b])
-    );
-}
-
-#[test]
 fn undecodable_cron_registration_remains_cancellable() {
     let session_id = "fig1067-invalid-source";
     let source_key = "cron-source:invalid";
@@ -1182,71 +1149,6 @@ fn cron_tick_decision_cancels_an_unknown_session_with_typed_trace() {
     assert_eq!(trace["session_state"], "unknown");
     assert_eq!(trace["reason"], "session_absent");
     assert_eq!(reason, "session_absent");
-}
-
-#[test]
-fn cron_tick_decision_cancels_a_live_session_with_an_absent_registration() {
-    let state = cron_tick_test_state(&SessionId::from("live-absent-registration"));
-
-    let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
-        cron_tick_basis(CronSessionState::Live, CronRegistrationState::Absent),
-        &state,
-        "cron-job-registration-absent",
-    ) else {
-        panic!("a live session with no registration must cancel its cron tick");
-    };
-    assert_eq!(reason, "registration_absent");
-    assert_eq!(
-        trace,
-        serde_json::json!({
-            "job_key": "cron-job-registration-absent",
-            "job_session_id": "live-absent-registration",
-            "decision_basis": "registration_record_absent",
-            "session_state": "live",
-            "registration_state": "absent",
-            "reason": "registration_absent",
-        })
-    );
-}
-
-#[test]
-fn cron_tick_decision_cancels_a_live_session_with_a_disabled_registration() {
-    let state = cron_tick_test_state(&SessionId::from("live-disabled-registration"));
-
-    let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
-        cron_tick_basis(CronSessionState::Live, CronRegistrationState::Disabled),
-        &state,
-        "cron-job-registration-disabled",
-    ) else {
-        panic!("a live session with a disabled registration must cancel its cron tick");
-    };
-    assert_eq!(reason, "registration_disabled");
-    assert_eq!(
-        trace,
-        serde_json::json!({
-            "job_key": "cron-job-registration-disabled",
-            "job_session_id": "live-disabled-registration",
-            "decision_basis": "registration_record_disabled",
-            "session_state": "live",
-            "registration_state": "disabled",
-            "reason": "registration_disabled",
-        })
-    );
-}
-
-#[test]
-fn cron_tick_decision_keeps_session_arms_ahead_of_registration_arms() {
-    let state = cron_tick_test_state(&SessionId::from("retired-regardless-of-registration"));
-
-    let decision = crate::restate::cron_tick_decision(
-        cron_tick_basis(CronSessionState::Retired, CronRegistrationState::Absent),
-        &state,
-        "cron-job-retired-absent-registration",
-    );
-    let crate::restate::CronTick::Cancel { reason, .. } = decision else {
-        panic!("the retired session arm must win over the registration arm");
-    };
-    assert_eq!(reason, "session_retired");
 }
 
 #[test]

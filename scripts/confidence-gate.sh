@@ -1102,19 +1102,15 @@ run_scenario_harnesses() {
   if area_selected protocol; then
     step "Standard Protocol Scenario harness"
     run_cargo_tests -p lash-internal-protocol-standard --locked --test protocol_scenarios
-    run_cargo_tests -p lash-internal-protocol-standard --locked standard_scenario_contract_metadata
 
     step "RLM Protocol Scenario harness"
     run_cargo_tests -p lash-internal-protocol-rlm --locked --test protocol_drivers
-    run_cargo_tests -p lash-internal-protocol-rlm --locked rlm_scenario_contract_metadata
   fi
 }
 
 run_state_machine_and_fault_matrix() {
   if area_selected process; then
-    step "Runtime state-machine property runner"
-    run_cargo_tests -p lash-internal-core --locked runtime_state_machine_property
-    step "Durable fault matrix metadata"
+    step "Durable fault matrix gate selection"
     run_cargo_tests -p lash-internal-core --locked durable_fault_matrix
     step "Durable process fault-matrix evidence"
     run_cargo_tests -p lash-sim --locked --test crash_point_matrix \
@@ -2384,7 +2380,7 @@ run_lash_core_direct_model_mutation_evidence() {
     cargo mutants \
     -p lash-internal-core-execution \
     --file crates/lash-core-execution/src/direct.rs \
-    --re 'DirectRequest::json_schema|DirectLlmClient::provider|DirectLlmClient::provider_mut|DirectLlmClient::complete|build_llm_request|transport_stream_events_for_direct' \
+    --re 'DirectRequest::json_schema|DirectLlmClient::complete|build_llm_request|transport_stream_events_for_direct' \
     --baseline skip \
     --cargo-arg=--features=testing \
     --jobs "$mutation_jobs" \

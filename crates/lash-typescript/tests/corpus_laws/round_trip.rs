@@ -170,57 +170,6 @@ fn allowlist() -> BTreeMap<String, (String, String)> {
     rows
 }
 
-/// Recaptures diagnostic names after the IR namespace rename. The row set,
-/// refusal outcome and reason are fixed; only the reserved prefix may differ.
-#[test]
-#[ignore = "regenerates crates/lash-typescript/tests/corpus_laws/refusals"]
-fn regenerate_neutral_intrinsic_refusal_names() {
-    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-    let programs = corpora::all()
-        .into_iter()
-        .map(|program| (program.id.clone(), program))
-        .collect::<BTreeMap<_, _>>();
-    let root = std::env::var("BUILD_WORKSPACE_DIRECTORY")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
-    for (shard, text) in refusal_shards() {
-        let mut changed = false;
-        let mut rendered = String::new();
-        for line in text.lines() {
-            if line.starts_with('#') || !line.contains("__typescript_") {
-                rendered.push_str(line);
-            } else {
-                let [id, refusal, reason] = line.split('\t').collect::<Vec<_>>()[..] else {
-                    panic!("malformed refusal row: {line}");
-                };
-                let program = programs
-                    .get(id)
-                    .expect("the refusal names a corpus program");
-                let Trip::Refused(actual) = round_trip(program).expect("the program admits") else {
-                    panic!("{id}: the recorded printer refusal must remain a refusal");
-                };
-                assert_eq!(
-                    actual,
-                    refusal.replace("__typescript_", "__lashlang_"),
-                    "{id}: only the intrinsic namespace may change"
-                );
-                rendered.push_str(&format!("{id}\t{actual}\t{reason}"));
-                changed = true;
-            }
-            rendered.push('\n');
-        }
-        if changed {
-            std::fs::write(
-                root.join(format!(
-                    "crates/lash-typescript/tests/corpus_laws/refusals/{shard}.tsv"
-                )),
-                rendered,
-            )
-            .expect("write the recaptured diagnostic names");
-        }
-    }
-}
-
 #[test]
 fn every_corpus_program_round_trips_or_is_an_allowlisted_refusal() {
     let mut allowlist = allowlist();

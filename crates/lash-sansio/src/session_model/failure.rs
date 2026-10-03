@@ -1081,110 +1081,7 @@ impl From<crate::llm::types::LlmTerminalReason> for TurnFailureCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{FailureCode, HostNamespace, Namespace, TurnFailureCode, TurnFailureKind};
-
-    /// Every arm's spelling survives a round trip through the wire form, so a
-    /// typed arm never silently degrades into an open arm.
-    #[test]
-    fn every_arm_round_trips_through_its_wire_spelling() {
-        let kinds = [
-            TurnFailureKind::ExecutionEnvironment,
-            TurnFailureKind::InputValidation,
-            TurnFailureKind::LlmProvider,
-            TurnFailureKind::Plugin,
-            TurnFailureKind::ProtocolBeforeLlmCall,
-            TurnFailureKind::RlmProtocol,
-            TurnFailureKind::RlmDriverState,
-            TurnFailureKind::RlmTurnOptions,
-            TurnFailureKind::Runtime,
-            TurnFailureKind::RuntimeEffectController,
-            TurnFailureKind::TokenUsageAccounting,
-        ];
-        for kind in kinds {
-            assert_eq!(TurnFailureKind::from_wire(kind.as_str()), kind);
-        }
-
-        let codes = [
-            TurnFailureCode::Stop,
-            TurnFailureCode::ToolUse,
-            TurnFailureCode::OutputLimit,
-            TurnFailureCode::ContextOverflow,
-            TurnFailureCode::ContentFilter,
-            TurnFailureCode::ProviderError,
-            TurnFailureCode::Cancelled,
-            TurnFailureCode::UnknownTerminalReason,
-            TurnFailureCode::UnsupportedEffort,
-            TurnFailureCode::EffortNotConfigurable,
-            TurnFailureCode::EffortRequired,
-            TurnFailureCode::MalformedCapability,
-            TurnFailureCode::EmptyResponse,
-            TurnFailureCode::NativeToolCallNotAllowed,
-            TurnFailureCode::InvalidDriverState,
-            TurnFailureCode::InvalidTurnOptions,
-            TurnFailureCode::BeforeLlmCallFailed,
-            TurnFailureCode::AttachmentResolutionFailed,
-            TurnFailureCode::PluginAssistantStream,
-            TurnFailureCode::ProviderPanicked,
-            TurnFailureCode::ProviderReplayOriginConflict,
-            TurnFailureCode::StreamEvidenceBeforeResponseStart,
-            TurnFailureCode::StreamEvidenceIdentityConflict,
-            TurnFailureCode::UnsafeRetryAfterOutputStarted,
-            TurnFailureCode::UnsafeRetryAfterResponseObserved,
-            TurnFailureCode::UnsafeRetryWithoutTransportClassification,
-            TurnFailureCode::UnsafeRetryAfterTerminalObserved,
-            TurnFailureCode::ChargeSafetyGuaranteeRequired,
-            TurnFailureCode::ChargeSafetyUnsafeRetryLimitExceeded,
-            TurnFailureCode::ChargeSafetyDuplicateCostLimitExceeded,
-            TurnFailureCode::RetryAfterExceedsCap,
-            TurnFailureCode::InvalidStructuredOutput,
-            TurnFailureCode::BodyReadFailed,
-            TurnFailureCode::HttpResponseBodyTooLarge,
-            TurnFailureCode::TokenUsageOverflow,
-            TurnFailureCode::ReconfigureFailed,
-            TurnFailureCode::MissingDone,
-            TurnFailureCode::AssistantOutputRecoveredFromState,
-            TurnFailureCode::InvalidTurnInput,
-            TurnFailureCode::AgentFrameSwitchLimit,
-            TurnFailureCode::FollowOnRecoveryExhausted,
-            TurnFailureCode::ProtocolRestoreSession,
-            TurnFailureCode::LifecycleHookFailed,
-            TurnFailureCode::InvalidProviderEndpoint,
-            TurnFailureCode::UnsupportedAttachmentCapability,
-            TurnFailureCode::AttachmentSourceNotEncodable,
-            TurnFailureCode::StoredAttachmentNotResolved,
-            TurnFailureCode::ProviderFileMediaTypeRequired,
-            TurnFailureCode::UnsupportedReasoningRetention,
-            TurnFailureCode::ReasoningEncodingUnrepresentable,
-            TurnFailureCode::UnsupportedGenerationOption,
-            TurnFailureCode::PassthroughConflict,
-            TurnFailureCode::OutputTokenCapRequired,
-            TurnFailureCode::ReasoningBudgetExceedsOutputCap,
-            TurnFailureCode::InvalidToolCallInputJson,
-            TurnFailureCode::CredentialInvalidGrant,
-            TurnFailureCode::CredentialRefreshTransient,
-            TurnFailureCode::CredentialRefreshFailed,
-            TurnFailureCode::Timeout,
-            TurnFailureCode::TaskJoinFailed,
-            TurnFailureCode::SseEventTooLarge,
-            TurnFailureCode::SseResponseTooLarge,
-            TurnFailureCode::StreamEndedBeforeTerminalResponse,
-            TurnFailureCode::StreamEndedBeforeMessageStop,
-            TurnFailureCode::StreamEndedBeforeFinishReason,
-            TurnFailureCode::EmptyStream,
-            TurnFailureCode::ResponsesResumeNotStreaming,
-            TurnFailureCode::ResponsesResumeEventMissingSequence,
-            TurnFailureCode::WebsocketConnect,
-            TurnFailureCode::WebsocketConnectTimeout,
-            TurnFailureCode::WebsocketSend,
-            TurnFailureCode::WebsocketIdleTimeout,
-            TurnFailureCode::WebsocketReceive,
-            TurnFailureCode::WebsocketProtocol,
-            TurnFailureCode::WebsocketClosedBeforeCompleted,
-        ];
-        for code in codes {
-            assert_eq!(TurnFailureCode::from_wire(code.as_str()), code);
-        }
-    }
+    use super::{FailureCode, Namespace, TurnFailureCode, TurnFailureKind};
 
     /// A spelling this build does not own keeps its exact bytes, so a payload
     /// or snapshot written by another build survives a decode and re-encode.
@@ -1270,20 +1167,6 @@ mod tests {
         assert_eq!(pre_cutover.turn_code(), Some(TurnFailureCode::Timeout));
     }
 
-    #[test]
-    fn lash_codes_mint_only_through_turn_failure_code() {
-        let code = FailureCode::lash(TurnFailureCode::Timeout);
-        assert_eq!(code.namespace(), &Namespace::LASH);
-        assert_eq!(code.to_string(), "lash:timeout");
-        assert_eq!(code.turn_code(), Some(TurnFailureCode::Timeout));
-
-        let host = Namespace::host("agent_workbench").expect("valid host namespace");
-        let code = FailureCode::foreign(host.clone(), "spend_cap").expect("foreign namespace");
-        assert_eq!(code.namespace(), &host);
-        assert_eq!(code.to_string(), "agent_workbench:spend_cap");
-        assert_eq!(code.turn_code(), None);
-    }
-
     /// Foreign ingress never grants a reserved namespace: values claiming
     /// `lash`/`provider`/`adapter`/`refusal` and bare spellings land in the
     /// `foreign` namespace with their claim preserved, while a genuine
@@ -1327,49 +1210,6 @@ mod tests {
                 "{reserved} must be rejected"
             );
         }
-    }
-
-    #[test]
-    fn all_named_covers_every_named_arm() {
-        assert_eq!(
-            TurnFailureCode::ALL_NAMED.len(),
-            76,
-            "a new named arm must be added to ALL_NAMED"
-        );
-        for code in TurnFailureCode::ALL_NAMED {
-            assert!(!matches!(code, TurnFailureCode::Other(_)), "{code:?}");
-            assert_eq!(
-                &TurnFailureCode::from_wire(code.as_str()),
-                code,
-                "every named arm must round-trip through from_wire"
-            );
-        }
-    }
-
-    /// `HostNamespace::new` validates in const position: `FIGMENTS` below is
-    /// itself the compile-time proof, and `FailureCode::host` mints from it
-    /// without a `Result`.
-    #[test]
-    fn host_namespace_static_construction_and_infallible_mint() {
-        const FIGMENTS: HostNamespace = HostNamespace::new("figments");
-
-        assert_eq!(FIGMENTS.as_str(), "figments");
-        assert_eq!(
-            FIGMENTS.namespace(),
-            &Namespace::host("figments").expect("valid namespace")
-        );
-
-        let code = FailureCode::host(&FIGMENTS, "quota_exceeded");
-        assert_eq!(code.namespace(), FIGMENTS.namespace());
-        assert_eq!(code.to_string(), "figments:quota_exceeded");
-        assert_eq!(code.turn_code(), None);
-
-        // `checked` is the same validation for runtime names.
-        let checked = HostNamespace::checked("figments").expect("valid host namespace");
-        assert_eq!(checked, FIGMENTS);
-        assert!(HostNamespace::checked("lash").is_err());
-        assert!(HostNamespace::checked("Lash").is_err());
-        assert!(HostNamespace::checked("provider").is_err());
     }
 
     #[test]

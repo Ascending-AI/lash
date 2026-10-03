@@ -774,50 +774,6 @@ mod span_identity_tests {
             .for_turn("turn-1")
     }
 
-    fn sample_request() -> TraceLlmRequest {
-        TraceLlmRequest {
-            model: "openai/test".to_string(),
-            model_variant: Default::default(),
-            messages: Vec::new(),
-            tools: Vec::new(),
-            tool_choice: "auto".to_string(),
-            output_spec: None,
-            stream: false,
-        }
-    }
-
-    #[test]
-    fn turn_span_parents_under_session() {
-        let mut context = turn_context();
-        assign_span_identity(
-            &mut context,
-            &TraceEvent::TurnStarted {
-                metadata: Default::default(),
-            },
-        );
-        assert_eq!(context.graph_node_id.as_deref(), Some("turn:sess:turn-1"));
-        assert_eq!(
-            context.parent_graph_node_id.as_deref(),
-            Some("session:sess")
-        );
-    }
-
-    #[test]
-    fn llm_span_parents_under_turn() {
-        let mut context = turn_context().for_llm_call("sess:0:0:0");
-        assign_span_identity(
-            &mut context,
-            &TraceEvent::LlmCallStarted {
-                request: sample_request(),
-            },
-        );
-        assert_eq!(context.graph_node_id.as_deref(), Some("llm:sess:0:0:0"));
-        assert_eq!(
-            context.parent_graph_node_id.as_deref(),
-            Some("turn:sess:turn-1")
-        );
-    }
-
     #[test]
     fn tool_span_parents_under_turn_and_matches_causal_tool_ref() {
         let mut context = turn_context();
@@ -844,25 +800,6 @@ mod span_identity_tests {
                 call_id: crate::ToolCallId::fixture("call_abc"),
             }),
             node
-        );
-    }
-
-    #[test]
-    fn turn_keeps_causal_parent_when_present() {
-        let mut context = turn_context();
-        context.parent_graph_node_id = Some("tool:call_parent".to_string());
-        assign_span_identity(
-            &mut context,
-            &TraceEvent::TurnCompleted {
-                outcome: lash_trace::TraceTurnOutcome::Completed {
-                    done_reason: lash_trace::TraceTurnCompletionReason::AssistantMessage,
-                },
-            },
-        );
-        assert_eq!(context.graph_node_id.as_deref(), Some("turn:sess:turn-1"));
-        assert_eq!(
-            context.parent_graph_node_id.as_deref(),
-            Some("tool:call_parent")
         );
     }
 

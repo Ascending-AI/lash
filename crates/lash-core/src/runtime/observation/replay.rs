@@ -466,14 +466,8 @@ type LiveReplayRecvResult = (
     broadcast::Receiver<ReplayNotification>,
 );
 
-#[cfg(test)]
-static LIVE_REPLAY_EVENT_CLONES: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
 #[inline]
 fn clone_event(event: &Arc<SessionObservationEvent>) -> Arc<SessionObservationEvent> {
-    #[cfg(test)]
-    LIVE_REPLAY_EVENT_CLONES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Arc::clone(event)
 }
 
@@ -513,10 +507,6 @@ async fn live_replay_recv(
     mut receiver: broadcast::Receiver<ReplayNotification>,
 ) -> LiveReplayRecvResult {
     let result = receiver.recv().await;
-    #[cfg(test)]
-    if result.is_ok() {
-        LIVE_REPLAY_EVENT_CLONES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
     (result, receiver)
 }
 

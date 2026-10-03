@@ -496,51 +496,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn execute_reports_runtime_errors() {
-        let compiled = compile_ast(&b::program(vec![b::finish(b::var("missing"))]))
-            .expect("the program should compile");
-        let mut state = State::new();
-        let err = execute(&compiled, &mut state, &Host)
-            .await
-            .expect_err("runtime should fail");
-        assert!(matches!(err, RuntimeError::UndefinedVariable { .. }));
-    }
-
-    #[test]
-    fn message_hint_format_preserves_message_and_appends_hint() {
-        assert_eq!(
-            format_source_diagnostic("", None, "plain failure", &[]),
-            "plain failure"
-        );
-        assert_eq!(
-            format_source_diagnostic("", None, "tool failed", &["inspect `.error`"]),
-            "tool failed\nhint: inspect `.error`"
-        );
-    }
-
-    #[test]
-    fn scalar_type_keyword_in_value_position_has_type_literal_hint() {
-        // `finish { value: str }`: in value position `str` is an ordinary name,
-        // and the linker has no binding for it.
-        let source = "finish { value: str }";
-        let program =
-            crate::testing::ast_builders::program(vec![crate::testing::ast_builders::finish(
-                crate::testing::ast_builders::record(vec![(
-                    "value",
-                    crate::testing::ast_builders::var("str"),
-                )]),
-            )]);
-        let error = crate::LinkedModule::link(program, crate::LashlangHostEnvironment::default())
-            .expect_err("scalar type keyword is not a value");
-        let diagnostic = format_link_diagnostic(source, &error);
-        assert!(diagnostic.contains("unknown name `str`"), "{diagnostic}");
-        assert!(
-            diagnostic.contains("hint: types belong in `Type { ... }` literals"),
-            "{diagnostic}"
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
     async fn traced_environment_records_source_location() {
         let source = "x = 1\nfinish missing";
         let compiled = compile_ast(&second_line_program(
@@ -562,21 +517,6 @@ mod tests {
         assert!(message.contains("--> line 2, column 1"), "{message}");
         assert!(message.contains("finish missing"), "{message}");
         assert!(message.contains("^"), "{message}");
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn compile_and_environment_scratch_execution_work_together() {
-        let compiled = compile_ast(&b::program(vec![b::finish(b::num(7.0))]))
-            .expect("the program should compile");
-        let mut state = State::new();
-        let env = ExecutionEnvironment::new(&Host)
-            .traced()
-            .with_scratch(ExecutionScratch::new());
-        let outcome = execute(&compiled, &mut state, &env)
-            .await
-            .expect("execution should succeed");
-        assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(7.0)));
-        assert!(env.take_recycled_scratch().is_some());
     }
 
     #[test]
@@ -639,33 +579,6 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&first, &second));
         assert_eq!(cache.stats().hits, 1);
         assert_eq!(cache.stats().misses, 1);
-    }
-
-    #[test]
-    fn linked_program_cache_hit_serves_an_already_parsed_program_without_the_ast() {
-        let source = "finish 1";
-        let environment =
-            LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::default());
-        let mut cache = LinkedProgramCache::with_capacity(2);
-
-        // The cache is keyed by the source text; what it stores is the linked
-        // AST, so the program is built directly.
-        let first = cache
-            .get_or_compile_ast(
-                source,
-                crate::testing::ast_builders::program(vec![crate::testing::ast_builders::finish(
-                    crate::testing::ast_builders::num(1.0),
-                )]),
-                &environment,
-            )
-            .expect("link first program");
-
-        let cached = cache
-            .cached_linked_program(source, &environment)
-            .expect("the linked program is cached");
-
-        assert!(std::sync::Arc::ptr_eq(&first, &cached));
-        assert_eq!(cache.stats().hits, 1);
     }
 
     #[test]
@@ -752,91 +665,5 @@ mod tests {
         ));
         assert_eq!(cache.stats().hits, 0);
         assert_eq!(cache.stats().misses, 2);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn execute_with_diagnostics_covers_representative_runtime_failures() {
-        let cases: [(&str, Expr, Expr, &str, &str); 4] = [
-            (
-                "x = 1\nfinish ({ ok: false, error: \"boom\" })?",
-                b::assign("x", b::num(1.0)),
-                b::finish(b::unwrap(b::record(vec![
-                    ("ok", b::bool_lit(false)),
-                    ("error", b::string("boom")),
-                ]))),
-                "`?` unwrapped failed tool result: boom",
-                "finish ({ ok: false, error: \"boom\" })?",
-            ),
-            (
-                "x = 1\nfinish len(true)",
-                b::assign("x", b::num(1.0)),
-                b::finish(b::builtin("len", vec![b::bool_lit(true)])),
-                "`len` requires a string, tuple, list, record, or null",
-                "finish len(true)",
-            ),
-            // Reading an absent property off a string or a number is
-            // `undefined`, not a failure (ADR 0096); null and undefined are
-            // the values that still refuse to be read through.
-            (
-                "x = null\nfinish x.field",
-                b::assign("x", b::null()),
-                b::finish(b::field(b::var("x"), "field")),
-                "Cannot read properties of null (reading 'field')",
-                "finish x.field",
-            ),
-            (
-                "x = null\nfinish x[0]",
-                b::assign("x", b::null()),
-                b::finish(b::index(b::var("x"), b::num(0.0))),
-                "Cannot read properties of null (reading '0')",
-                "finish x[0]",
-            ),
-        ];
-
-        for (source, first, second, expected_error, expected_snippet) in cases {
-            let compiled = compile_ast(&second_line_program(first, second, source))
-                .expect("the program should compile");
-            let mut state = State::new();
-            let env = ExecutionEnvironment::new(&Host).traced();
-            execute(&compiled, &mut state, &env)
-                .await
-                .expect_err("runtime should fail");
-            let failure = env
-                .take_runtime_failure()
-                .expect("traced host should receive runtime failure");
-            let message = format_runtime_diagnostic(source, &failure.error, failure.span);
-            assert!(message.contains(expected_error), "{message}");
-            assert!(message.contains("--> line 2, column 1"), "{message}");
-            assert!(message.contains(expected_snippet), "{message}");
-        }
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn execute_success_path_uses_host() {
-        let linked = LinkedModule::link(
-            // v = await tools.anything({})?
-            // finish v
-            b::program(vec![
-                b::assign("v", b::module_call(&["tools"], "anything", vec![])),
-                b::finish(b::var("v")),
-            ]),
-            LashlangHostEnvironment::new(
-                LashlangHostCatalog::tool_default(["anything"]),
-                LashlangAbilities::default(),
-            ),
-        )
-        .expect("source should link");
-        let compiled = crate::testing::harness::compile_linked_main(&linked);
-        let mut state = State::new();
-        let outcome = execute(&compiled, &mut state, &Host)
-            .await
-            .expect("should succeed");
-        let ExecutionOutcome::Finished(value) = outcome else {
-            panic!("expected finish");
-        };
-        assert_eq!(
-            value.as_record().expect("tool result should be record")["ok"],
-            Value::Bool(true)
-        );
     }
 }

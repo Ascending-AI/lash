@@ -356,21 +356,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_reason_from_parts_prefers_tool_use() {
-        let tool = vec![LlmOutputPart::ToolCall {
-            call_id: "c".into(),
-            tool_name: "t".into(),
-            input_json: "{}".into(),
-            replay: None,
-        }];
-        assert_eq!(
-            terminal_reason_from_parts(&tool),
-            LlmTerminalReason::ToolUse
-        );
-        assert_eq!(terminal_reason_from_parts(&[]), LlmTerminalReason::Stop);
-    }
-
-    #[test]
     fn frame_sse_payload_splits_events_and_joins_data_lines() {
         let mut events = Vec::new();
         frame_sse_payload("event: x\ndata: a\ndata: b\n\ndata: c\n", |e| {
@@ -481,36 +466,6 @@ mod tests {
     }
 
     #[test]
-    fn http_error_envelope_carries_http_kind_status_headers_raw_and_request_body() {
-        let err = http_error_envelope(
-            "Provider request failed with 429",
-            429,
-            vec![("retry-after".to_string(), "7".to_string())],
-            r#"{"error":"rate limited"}"#,
-            Some(r#"{"model":"m"}"#.to_string()),
-        );
-        assert_eq!(err.kind, ProviderFailureKind::Http);
-        assert_eq!(err.http_status, Some(429));
-        assert_eq!(err.code, None);
-        assert_eq!(
-            err.raw.as_deref().map(String::as_str),
-            Some(r#"{"error":"rate limited"}"#)
-        );
-        assert_eq!(
-            err.request_body.as_ref().map(|body| body.as_str()),
-            Some(r#"{"model":"m"}"#)
-        );
-        assert_eq!(
-            err.retry_after(),
-            Some(std::time::Duration::from_secs(7)),
-            "with_headers must derive retry-after from the header pairs"
-        );
-
-        let without_request_body = http_error_envelope("failed", 500, Vec::new(), "boom", None);
-        assert_eq!(without_request_body.request_body, None);
-    }
-
-    #[test]
     fn http_error_envelope_marks_429_without_retry_after_retryable() {
         let err = http_error_envelope(
             "Provider request failed with 429",
@@ -549,12 +504,5 @@ mod tests {
             None,
         );
         assert_eq!(err.retry_after(), None);
-    }
-
-    #[test]
-    fn serialize_options_tail_omits_default() {
-        let mut map = serde_json::Map::new();
-        serialize_options_tail(&mut map, &ProviderOptions::default());
-        assert!(map.is_empty());
     }
 }

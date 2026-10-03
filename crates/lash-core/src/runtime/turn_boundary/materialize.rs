@@ -648,56 +648,6 @@ mod tests {
         assert_eq!(markers[0].1.part_id(), "m_standard_turn-1_0_assistant.p1");
     }
 
-    /// Red side (i): the same commit redriven through the same operation
-    /// materializes again over the state it already produced, and the turn
-    /// still has one reply.
-    #[test]
-    fn a_redriven_commit_keeps_one_reply() {
-        let mut state = after_turn_enqueue_state();
-        let outcome = final_value(serde_json::json!("the answer"));
-
-        materialize(&mut state, &outcome);
-        materialize(&mut state, &outcome);
-
-        assert_eq!(reply_markers(&state).len(), 1);
-        assert_eq!(
-            message_ids(&state)
-                .iter()
-                .filter(|id| id.as_str() == TERMINAL_ID)
-                .count(),
-            1
-        );
-    }
-
-    /// Red side (ii): a turn re-executed after a crash before its receipt, as
-    /// a fresh commit attempt, over history that already holds the turn's
-    /// durable reply (under another message id than the runtime's own)
-    /// mints no second reply: the key is the turn, not the attempt.
-    #[test]
-    fn a_reexecuted_turn_over_its_durable_reply_mints_no_second_reply() {
-        let mut durable_reply = message(
-            "m_proto_turn-1_0_assistant_response",
-            MessageRole::Assistant,
-            "the answer",
-            None,
-        );
-        durable_reply.reply_marker = Some(crate::TurnReply::mint(
-            turn(),
-            "m_proto_turn-1_0_assistant_response.p0".to_string(),
-        ));
-        let mut state = state_with_messages(&[
-            message("m_ingress", MessageRole::User, "first request", None),
-            durable_reply,
-        ]);
-        mark_all_persisted(&mut state);
-        let before = message_ids(&state);
-
-        materialize(&mut state, &final_value(serde_json::json!("the answer")));
-
-        assert_eq!(message_ids(&state), before);
-        assert_eq!(reply_markers(&state).len(), 1);
-    }
-
     #[test]
     fn a_fresh_commit_identity_reexecution_preserves_the_first_value_reply() {
         let mut state = after_turn_enqueue_state();

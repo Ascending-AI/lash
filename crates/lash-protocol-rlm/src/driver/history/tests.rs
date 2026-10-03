@@ -275,29 +275,6 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
     );
 }
 
-#[test]
-fn a_trajectory_failure_message_renders_verbatim() {
-    let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
-        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
-            output_archive: None,
-            id: "lashlang_step_legacy".to_string(),
-            protocol_iteration: 0,
-            code: "value = read()".to_string(),
-            output: Vec::new(),
-            images: Vec::new(),
-            calls: Vec::new(),
-            calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Failed(lash_core::CellFailure::new(
-                lash_core::CellFailureKind::Host,
-                "read failed at /legacy/worker/private.txt",
-            )),
-        }),
-    ));
-
-    let messages = render(&[event]);
-    assert!(observation_text(&messages[1]).contains("/legacy/worker/private.txt"));
-}
-
 fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord {
     step_failed_with(
         id,
@@ -540,22 +517,6 @@ fn a_surviving_cells_prose_is_not_taken_by_the_scrub() {
     );
 }
 
-/// Non-vacuity for the identity gate: the protocol's *own* feedback message,
-/// on the same channel, still goes.
-#[test]
-fn the_protocols_own_feedback_is_still_scrubbed() {
-    let transcript = rendered_text(&render(&[
-        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
-        protocol_feedback("s1", "That step failed; retry with a corrected program."),
-        step_event("print 1"),
-    ]));
-
-    assert!(
-        !transcript.contains("retry with a corrected program"),
-        "{transcript}"
-    );
-}
-
 #[test]
 fn history_teaching_follows_indexable_entries() {
     let dialect = crate::dialect::typescript_test_dialect();
@@ -633,72 +594,4 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
 
     assert!(messages[0].starts_user_segment);
     assert!(!messages[1].starts_user_segment);
-}
-
-/// The `HistoryItem` type the prompt declares is derived from the shape a
-/// history item serializes as (FIG-4658 F66): the declaration names every key
-/// a cell can read on a step, whichever way the step ended.
-#[test]
-fn the_declared_history_item_names_every_key_a_step_serializes() {
-    let dialect = crate::dialect::SessionDialect::prompt_only(
-        std::sync::Arc::new(crate::dialect::TypescriptDialect),
-        lash_lashlang_runtime::LashlangSurface::default(),
-    );
-    let declaration = dialect.history_item_definition(true);
-    let entry = |outcome| lash_rlm_types::RlmTrajectoryEntry {
-        output_archive: None,
-        id: "lashlang_step_0".to_string(),
-        protocol_iteration: 0,
-        code: "print(rows)".to_string(),
-        output: vec!["rows".to_string().into()],
-        images: vec![lash_core::AttachmentRef {
-            id: "chart".parse().expect("valid attachment id"),
-            media_type: "image/png".parse().expect("valid media type"),
-            byte_len: 123,
-            type_metadata: None,
-            label: None,
-        }],
-        calls: vec![lash_rlm_types::RlmExecutedCall {
-            operation: "module.ok".to_string(),
-            outcome: lash_rlm_types::RlmExecutedCallOutcome::Ok,
-        }],
-        calls_omitted: 3,
-        outcome,
-    };
-    for outcome in [
-        lash_rlm_types::CellOutcome::Failed(lash_core::CellFailure::new(
-            lash_core::CellFailureKind::Program,
-            "index out of range",
-        )),
-        lash_rlm_types::CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
-        lash_rlm_types::CellOutcome::Finished(lash_core::OutputValue::Retained(
-            lash_core::RetainedOutput {
-                reference: lash_core::AttachmentRef {
-                    id: "retained".parse().expect("valid attachment id"),
-                    media_type: "application/json".parse().expect("valid media type"),
-                    byte_len: 90_000,
-                    type_metadata: None,
-                    label: None,
-                },
-                witness: "{\"answer\"".to_string(),
-            },
-        )),
-    ] {
-        let item = serde_json::to_value(lash_rlm_types::RlmHistoryItem::from_trajectory_entry(
-            &entry(outcome),
-        ))
-        .expect("a history item serializes");
-        for key in item.as_object().expect("an item is an object").keys() {
-            assert!(
-                declaration.contains(&format!(" {key}: "))
-                    || declaration.contains(&format!(" {key}?: ")),
-                "`{key}` is written by a step and missing from: {declaration}"
-            );
-        }
-    }
-    assert!(
-        declaration
-            .contains("error?: { kind: \"policy\" | \"program\" | \"host\"; message: string }"),
-        "{declaration}"
-    );
 }

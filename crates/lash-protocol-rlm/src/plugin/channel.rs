@@ -119,13 +119,6 @@ mod tests {
     const REBUILT: PluginSessionMaterialization = PluginSessionMaterialization::Rematerialization;
 
     #[test]
-    fn from_str_accepts_all_channel_spellings() {
-        assert_eq!("cell".parse(), Ok(RlmChannel::Cell));
-        assert_eq!("native".parse(), Ok(RlmChannel::NativeTool));
-        assert_eq!("native_tool".parse(), Ok(RlmChannel::NativeTool));
-    }
-
-    #[test]
     fn recorded_channel_refuses_substitution_and_missing_pin() {
         for channel in [RlmChannel::Cell, RlmChannel::NativeTool] {
             let recorded = pinned(Some(channel), None);

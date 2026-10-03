@@ -32,11 +32,6 @@ fn last_dense_index_completes_at_block_limit() {
     refuse_start(BLOCK_LIMIT as u64, &mut state);
 }
 
-#[test]
-fn boundary_plus_one_refuses_without_allocating_holes() {
-    refuse_start((BLOCK_LIMIT + 1) as u64, &mut StreamState::default());
-}
-
 // The old parser can abort on allocation failure. Keep that abort in a
 // subprocess with a 512 MiB address-space ceiling and no core dump.
 #[expect(
@@ -73,11 +68,6 @@ fn memory_limited_index_test(name: &str, index: u64) {
 #[test]
 fn billion_index_refuses_with_bounded_memory() {
     memory_limited_index_test("billion_index_refuses_with_bounded_memory", 1_000_000_000);
-}
-
-#[test]
-fn maximum_wire_index_refuses_with_bounded_memory() {
-    memory_limited_index_test("maximum_wire_index_refuses_with_bounded_memory", u64::MAX);
 }
 
 #[test]

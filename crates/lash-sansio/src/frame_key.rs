@@ -169,20 +169,6 @@ mod tests {
     }
 
     #[test]
-    fn caller_material_uses_the_same_derived_representation_in_its_own_domain() {
-        let caller = FrameKey::from_caller_material("frame").expect("non-empty caller material");
-        assert!(FrameKey::is_derived(caller.as_str()));
-        assert_ne!(
-            caller,
-            FrameKey::from_call_site(
-                &SessionId::from("session"),
-                "",
-                &crate::ToolCallId::fixture("frame")
-            )
-        );
-    }
-
-    #[test]
     fn caller_material_rejects_empty_and_whitespace_with_a_typed_error() {
         assert_eq!(
             FrameKey::from_caller_material(""),

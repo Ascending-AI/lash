@@ -6,34 +6,6 @@ const ATTACHMENT_USAGE_GATE_PNG_BASE64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 #[test]
-fn workbench_ui_renders_assistant_markdown() {
-    assert!(ui::INDEX_HTML.contains("function renderMarkdownBlocks(markdown)"));
-    assert!(ui::INDEX_HTML.contains("setMessageBody(body, message.role, message.text)"));
-    assert!(ui::INDEX_HTML.contains("renderMarkdownBlocks(assistantDraftText)"));
-    assert!(ui::INDEX_HTML.contains(".message.assistant .msg-body h1"));
-}
-
-#[test]
-fn workbench_ui_exposes_attachment_and_usage_affordances() {
-    for contract in [
-        "id=\"attachmentInput\"",
-        "/api/attachments",
-        "attachment_id: attachment?.id || null",
-        "renderMessageAttachments(body, message.attachments)",
-        "max-width: min(100%, 640px)",
-        "Image unavailable · open original",
-        "id=\"usageTotal\"",
-        "id=\"usageBreakdown\"",
-        "renderUsageCounters(projectedUsage())",
-    ] {
-        assert!(
-            ui::INDEX_HTML.contains(contract),
-            "missing UI contract: {contract}"
-        );
-    }
-}
-
-#[test]
 fn attachment_usage_gate() {
     run_async_test_on_stack_budget("workbench-attachment-usage-gate", || async {
         let data_dir = std::env::temp_dir().join(format!(

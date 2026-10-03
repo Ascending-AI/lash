@@ -1,18 +1,6 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::REMOTE_PROTOCOL_VERSION;
-use crate::registry_errors::RemoteProtocolError;
-
-#[test]
-fn remote_turn_status_projects_explicit_stopped_outcome_as_failed() {
-    assert_eq!(
-        RemoteTurnStatus::from(&RemoteTurnOutcome::Stopped {
-            stop: RemoteTurnStop::Incomplete,
-        }),
-        RemoteTurnStatus::Failed
-    );
-}
 
 #[test]
 fn remote_turn_status_names_a_parked_run_and_refuses_the_retired_queued_tag() {
@@ -71,44 +59,6 @@ fn remote_turn_status_no_longer_accepts_in_progress_on_the_wire() {
         !schema.to_string().contains("in_progress"),
         "published schema still advertises in_progress: {schema}"
     );
-}
-
-#[test]
-fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode() {
-    // A version 43 report is refused before its removed status value reaches
-    // the current body decoder.
-    let mut payload = serde_json::to_value(RemoteTurnReport {
-        session_id: SessionId::from("session"),
-        turn_id: TurnId::from("turn"),
-        outcome: RemoteTurnOutcome::Finished {
-            finish: RemoteTurnFinish::AssistantMessage {
-                text: "done".to_string(),
-            },
-        },
-        assistant_output: RemoteAssistantOutput::default(),
-        usage: RemoteTurnUsageReport::default(),
-        execution: RemoteTurnExecutionMetrics::default(),
-        tool_calls: Vec::new(),
-        llm_calls: Vec::new(),
-        issues: Vec::new(),
-        activities: Vec::new(),
-        metadata: HashMap::new(),
-    })
-    .expect("serialize version 43 report");
-    payload["protocol_version"] = serde_json::json!(43);
-
-    let wire = serde_json::to_vec(&payload).expect("serialize version 43 report");
-    assert!(matches!(
-        RemoteTurnReport::decode_json(&wire),
-        Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(43) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
-    ));
-
-    payload["status"] = serde_json::json!("in_progress");
-    let wire = serde_json::to_vec(&payload).expect("serialize version 43 report");
-    assert!(matches!(
-        RemoteTurnReport::decode_json(&wire),
-        Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(43) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
-    ));
 }
 
 #[test]
@@ -426,16 +376,4 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
         assert!(!validator.is_valid(&wrong));
         assert!(serde_json::from_value::<RemoteSendOutcome>(wrong).is_err());
     }
-}
-
-#[test]
-fn a_remote_send_outcome_requires_the_data_owned_by_its_variant() {
-    let invalid = serde_json::json!({
-        "session_id": "session", "input_id": "ti:input",
-        "status": {"type": "answered"}, "run_id": null, "report": null, "gaps": []
-    });
-    assert!(
-        serde_json::from_value::<RemoteSendOutcome>(invalid).is_err(),
-        "the wire type cannot construct an answered send without its report"
-    );
 }

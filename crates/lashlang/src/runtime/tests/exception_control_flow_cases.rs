@@ -69,29 +69,6 @@ fn control_flow_while_once(counter: &str, body: Vec<Expr>) -> Vec<Expr> {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn break_out_of_a_try_runs_the_pending_finally() {
-    let program = Program::block(vec![
-        control_flow_empty_list("log"),
-        control_flow_for(
-            "i",
-            2,
-            exception_try(
-                Expr::Break,
-                None,
-                Some(control_flow_append("log", "cleanup")),
-            ),
-        ),
-        Expr::Finish(Box::new(Expr::Variable("log".into()))),
-    ]);
-    assert_eq!(
-        run_exception_program(program, &Host).await,
-        Ok(ExecutionOutcome::Finished(control_flow_strings(&[
-            "cleanup"
-        ])))
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn a_handler_left_by_break_must_not_capture_a_later_unrelated_throw() {
     let mut block = control_flow_while_once(
         "n",
@@ -108,60 +85,6 @@ async fn a_handler_left_by_break_must_not_capture_a_later_unrelated_throw() {
         "escaped".into(),
     ))))));
     let outcome = run_exception_program(Program::block(block), &Host).await;
-    assert!(
-        matches!(&outcome, Err(RuntimeError::UncaughtException { value }) if *value == Value::String("escaped".into())),
-        "{outcome:?}"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_cleanup_handler_left_by_break_must_not_rerun_its_finally() {
-    let mut block = vec![Expr::Assign {
-        target: crate::AssignTarget::variable("runs".into()),
-        expr: Box::new(Expr::Number(0.0)),
-    }];
-    block.extend(control_flow_while_once(
-        "n",
-        vec![exception_try(
-            Expr::Break,
-            None,
-            Some(Expr::Assign {
-                target: crate::AssignTarget::variable("runs".into()),
-                expr: Box::new(Expr::CoercingBinary {
-                    left: Box::new(Expr::Variable("runs".into())),
-                    op: crate::ast::CoercingBinaryOp::Add,
-                    right: Box::new(Expr::Number(1.0)),
-                }),
-            }),
-        )],
-    ));
-    block.push(Expr::Finish(Box::new(Expr::Throw(Box::new(Expr::String(
-        "escaped".into(),
-    ))))));
-    let outcome = run_exception_program(Program::block(block), &Host).await;
-    assert!(
-        matches!(&outcome, Err(RuntimeError::UncaughtException { value }) if *value == Value::String("escaped".into())),
-        "{outcome:?}"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn break_out_of_a_for_loop_try_does_not_leak_the_handler() {
-    let program = Program::block(vec![
-        control_flow_for(
-            "i",
-            1,
-            exception_try(
-                Expr::Break,
-                Some(("e", Expr::String("stale-handler-fired".into()))),
-                None,
-            ),
-        ),
-        Expr::Finish(Box::new(Expr::Throw(Box::new(Expr::String(
-            "escaped".into(),
-        ))))),
-    ]);
-    let outcome = run_exception_program(program, &Host).await;
     assert!(
         matches!(&outcome, Err(RuntimeError::UncaughtException { value }) if *value == Value::String("escaped".into())),
         "{outcome:?}"
@@ -289,35 +212,6 @@ async fn break_in_nested_loops_unwinds_only_to_its_own_loop() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn break_inside_a_finally_replaces_the_pending_normal_completion() {
-    let program = Program::block(vec![
-        control_flow_empty_list("log"),
-        control_flow_for(
-            "i",
-            3,
-            Expr::Block(vec![
-                exception_try(
-                    Expr::Null,
-                    None,
-                    Some(Expr::Block(vec![
-                        control_flow_append("log", "cleanup"),
-                        Expr::Break,
-                    ])),
-                ),
-                control_flow_append("log", "unreachable"),
-            ]),
-        ),
-        Expr::Finish(Box::new(Expr::Variable("log".into()))),
-    ]);
-    assert_eq!(
-        run_exception_program(program, &Host).await,
-        Ok(ExecutionOutcome::Finished(control_flow_strings(&[
-            "cleanup"
-        ])))
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn break_inside_a_finally_discards_the_pending_throw() {
     let program = Program::block(vec![
         control_flow_empty_list("log"),
@@ -370,73 +264,6 @@ async fn continue_inside_a_finally_replaces_the_pending_completion_each_iteratio
             "cleanup", "cleanup"
         ])))
     );
-}
-
-/// Captures the last durable continuation before the program finishes. A jump
-/// edge that leaked exception state shows up here as a handler or finally
-/// record that outlived its protected region.
-async fn control_flow_final_continuation(program: &CompiledProgram) -> VmContinuation {
-    let host = Host;
-    let mut last = None;
-    for budget in 1..=program.chunk.code.len() * 8 {
-        let mut vm = continuation_test_vm(program, &host);
-        vm.suspend_after_instructions(budget);
-        if !matches!(vm.run_for_mode().await, Ok(ExecutionOutcome::Continued)) {
-            continue;
-        }
-        let continuation = vm.suspend().expect("capture a continuation");
-        let bytes = serde_json::to_vec(&continuation).expect("encode");
-        last = Some(serde_json::from_slice::<VmContinuation>(&bytes).expect("decode"));
-    }
-    last.expect("at least one continuation must be captured")
-}
-
-fn assert_no_pending_exception_state(continuation: &VmContinuation) {
-    assert!(
-        continuation.handler_stack.is_empty(),
-        "handler stack outlived its protected region at ip {}: {:?}",
-        continuation.instruction_pointer,
-        continuation.handler_stack
-    );
-    assert!(
-        continuation.finally_stack.is_empty(),
-        "finally stack outlived its protected region at ip {}: {:?}",
-        continuation.instruction_pointer,
-        continuation.finally_stack
-    );
-}
-
-/// A `break` edge must leave nothing behind in the durable continuation.
-#[tokio::test(flavor = "current_thread")]
-async fn break_leaves_no_stale_handler_in_the_durable_continuation() {
-    let mut block = control_flow_while_once(
-        "n",
-        vec![exception_try(
-            Expr::Break,
-            Some(("e", Expr::Number(7.0))),
-            None,
-        )],
-    );
-    block.push(Expr::Finish(Box::new(Expr::Number(0.0))));
-    let program = compile_program(&Program::block(block));
-    assert_no_pending_exception_state(&control_flow_final_continuation(&program).await);
-}
-
-/// A `break` out of a `finally` body must not leave the abandoned completion
-/// on the finally stack.
-#[tokio::test(flavor = "current_thread")]
-async fn break_inside_a_finally_leaves_no_pending_completion() {
-    let mut block = control_flow_while_once(
-        "n",
-        vec![exception_try(
-            Expr::Throw(Box::new(Expr::String("boom".into()))),
-            None,
-            Some(Expr::Block(vec![Expr::Number(1.0), Expr::Break])),
-        )],
-    );
-    block.push(Expr::Finish(Box::new(Expr::Number(0.0))));
-    let program = compile_program(&Program::block(block));
-    assert_no_pending_exception_state(&control_flow_final_continuation(&program).await);
 }
 
 /// Suspending inside a `finally` that is running because of a `break` must

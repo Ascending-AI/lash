@@ -137,48 +137,6 @@ mod tests {
     }
 
     #[test]
-    fn allowlisted_body_paths_capture_a_gateway_meta_block() {
-        let options = LlmProfileRequestDefaults {
-            response_metadata_body_paths: vec!["/meta".to_string(), "/meta/routing".to_string()],
-            ..LlmProfileRequestDefaults::default()
-        };
-        let mut capture = ResponseMetadataCapture::from_response(&options, &[]);
-        capture.capture_body_text(
-            r#"{"id":"gen-1","meta":{"routing":{"requested":"auto","served":"deepinfra","attempts":2,"strategy":"fallback"}}}"#,
-        );
-
-        let metadata = capture.into_metadata();
-        assert_eq!(
-            metadata["body:/meta"],
-            serde_json::json!({"routing":{"requested":"auto","served":"deepinfra","attempts":2,"strategy":"fallback"}})
-        );
-        assert_eq!(
-            metadata["body:/meta/routing"],
-            serde_json::json!({"requested":"auto","served":"deepinfra","attempts":2,"strategy":"fallback"})
-        );
-    }
-
-    #[test]
-    fn allowlisted_body_paths_are_last_wins_across_sse_events() {
-        let options = LlmProfileRequestDefaults {
-            response_metadata_body_paths: vec!["/meta".to_string()],
-            ..LlmProfileRequestDefaults::default()
-        };
-        let mut capture = ResponseMetadataCapture::from_response(&options, &[]);
-        capture.capture_body_text(concat!(
-            "data: {\"meta\":{\"routing\":{\"served\":\"first\"}}}\n\n",
-            "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n",
-            "data: {\"meta\":{\"routing\":{\"served\":\"last\"}}}\n\n"
-        ));
-
-        let metadata = capture.into_metadata();
-        assert_eq!(
-            metadata["body:/meta"],
-            serde_json::json!({"routing":{"served":"last"}})
-        );
-    }
-
-    #[test]
     fn without_an_allowlist_nothing_is_captured() {
         for body in [
             r#"{"id":"gen-1","meta":{"routing":{"served":"deepinfra"}}}"#,

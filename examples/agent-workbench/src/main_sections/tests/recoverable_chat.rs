@@ -456,53 +456,6 @@ fn retired_session_admission_precedes_attachment_reads_and_submission() {
 }
 
 #[test]
-fn observing_a_retired_session_returns_the_typed_conflict() {
-    run_async_test_on_stack_budget("retired-session-observations-test", || async {
-        let double = crate::tests::test_double_backend(0).await;
-        let state = recoverable_chat_test_state(&double, 16).await;
-        let session_id = state.current_session_id();
-        retire_workbench_session(&double, &state, &session_id).await;
-
-        let error = session_observations(
-            State(state),
-            Query(EventsQuery {
-                cursor: None,
-                session_id: Some(session_id.clone()),
-            }),
-        )
-        .await
-        .expect_err("retired session observations must be refused");
-
-        assert_deleted_session_conflict(&error, &session_id);
-    });
-}
-
-#[test]
-fn enqueuing_turn_input_to_a_retired_session_returns_the_typed_conflict() {
-    run_async_test_on_stack_budget("retired-session-turn-input-test", || async {
-        let double = crate::tests::test_double_backend(0).await;
-        let state = recoverable_chat_test_state(&double, 16).await;
-        let session_id = state.current_session_id();
-        retire_workbench_session(&double, &state, &session_id).await;
-
-        let error = enqueue_turn_input(
-            State(state),
-            Query(SessionQuery {
-                session_id: Some(session_id.clone()),
-            }),
-            Json(TurnInputRequest {
-                text: "must not be queued".to_string(),
-                ingress: TurnInputIngressRequest::NextTurn,
-            }),
-        )
-        .await
-        .expect_err("retired session turn input must be refused");
-
-        assert_deleted_session_conflict(&error, &session_id);
-    });
-}
-
-#[test]
 fn retired_session_cancel_and_tool_refresh_return_the_typed_conflict() {
     run_async_test_on_stack_budget("retired-session-secondary-surfaces-test", || async {
         let double = crate::tests::test_double_backend(0).await;

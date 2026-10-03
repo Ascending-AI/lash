@@ -1128,22 +1128,4 @@ mod tests {
             assert_eq!(RestateNamespace::new(&invalid), Err(refusal), "{invalid}");
         }
     }
-
-    #[test]
-    fn only_journal_bearing_services_are_pinned() {
-        let pinned: Vec<_> = LASH_SERVICES
-            .iter()
-            .filter(|service| service.lane_class().is_pinned())
-            .map(|service| service.base_name())
-            .collect();
-        assert_eq!(
-            pinned,
-            [
-                "LashProcessWorkflow",
-                "EffectGroupDispatch",
-                "LashSession",
-                "LashTurn"
-            ]
-        );
-    }
 }

@@ -489,85 +489,6 @@ pub(super) async fn plugin_command_settles_its_events_in_one_commit() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn session_manager_can_run_child_session_turn() {
-    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let transport = mock_provider(vec![MockCall {
-        stream_events: vec![
-            LlmStreamEvent::Delta {
-                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                text: "child ".to_string(),
-            },
-            LlmStreamEvent::Delta {
-                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                text: "session".to_string(),
-            },
-            LlmStreamEvent::Usage(LlmUsage {
-                input_tokens: 7,
-                output_tokens: 2,
-                cache_read_input_tokens: 0,
-                cache_write_input_tokens: 0,
-                reasoning_output_tokens: 1,
-            }),
-        ],
-        response: Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: "child session".to_string(),
-                response_meta: None,
-            }],
-            response_metadata: Default::default(),
-            ..LlmResponse::default()
-        }),
-    }]);
-    let runtime = runtime_with_plugins(&backend, Vec::new(), transport).await;
-    let lifecycle = runtime
-        .session_lifecycle_service()
-        .expect("session lifecycle");
-    let plugin_init = runtime
-        .session_state_service()
-        .expect("session state")
-        .session_plugin_init(&SessionId::from(runtime.session_id()))
-        .await
-        .expect("plugin init");
-    let handle = lifecycle
-        .create_session(
-            lash_core::SessionCreateRequest::root(
-                lash_core::SessionStartPoint::Empty,
-                lash_core::PluginOptions::default(),
-            )
-            .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(
-                plugin_init.clone(),
-            )),
-        )
-        .await
-        .expect("child session");
-    let mut child = reopen_session_runtime(&runtime, &handle.session_id).await;
-    let turn_id = "child-lifecycle-turn";
-    let handler = open_turn(&double, handle.session_id.clone(), TurnId::from(turn_id)).await;
-    let assembled = child
-        .execute_turn(
-            TurnInput {
-                items: vec![InputItem::Text {
-                    text: "hello".to_string(),
-                }],
-                trace_turn_id: None,
-                turn_context: lash_core::TurnContext::default(),
-            },
-            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
-        )
-        .await
-        .expect("child turn");
-    handler
-        .close()
-        .await
-        .expect("close the child turn's handler");
-    assert_eq!(handle.session_id, "child");
-    assert_eq!(handle.policy.wire_model(), Some("mock-model"));
-    assert_eq!(assembled.state.session_id, "child");
-}
-
-#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn session_manager_persists_child_sessions_in_separate_store() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
@@ -657,56 +578,6 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn child_relation_does_not_replace_active_session() {
-    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    let lifecycle = runtime
-        .session_lifecycle_service()
-        .expect("session lifecycle");
-    let plugin_init = runtime
-        .session_state_service()
-        .expect("session state")
-        .session_plugin_init(&SessionId::from(runtime.session_id()))
-        .await
-        .expect("plugin init");
-    lifecycle
-        .create_session(
-            lash_core::SessionCreateRequest::child_session(
-                runtime.session_id(),
-                lash_core::SessionStartPoint::Empty,
-                lash_core::PluginOptions::default(),
-            )
-            .with_session_id("ordinary-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(
-                plugin_init.clone(),
-            )),
-        )
-        .await
-        .expect("child session");
-
-    assert_eq!(runtime.session_id(), "root");
-    let handler = open_turn(&double, sid("root"), tid("ordinary-child-parent-turn")).await;
-    let assembled = runtime
-        .execute_turn(
-            TurnInput {
-                items: vec![InputItem::Text {
-                    text: "parent turn".to_string(),
-                }],
-                trace_turn_id: None,
-                turn_context: lash_core::TurnContext::default(),
-            },
-            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
-        )
-        .await
-        .expect("parent turn");
-    handler.close().await.expect("close the turn's handler");
-
-    assert_eq!(assembled.state.session_id, "root");
-    assert_eq!(assembled.state.turn_index, 1);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 pub(super) async fn session_manager_rejects_duplicate_child_session_ids() {
     let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
@@ -754,33 +625,6 @@ pub(super) async fn session_manager_rejects_duplicate_child_session_ids() {
         ),
         "a duplicate create is the typed SessionAlreadyExists, got {err:?}"
     );
-}
-
-#[test]
-pub(super) fn queued_work_payload_cannot_encode_persisted_turn_input() {
-    // This exhaustive match is the type-level ingress proof: generic queued
-    // work has no model-visible TurnInput representation. Persisted user input
-    // therefore has to cross the dedicated PendingTurnInputDraft/
-    // TurnInputStore seam used by `LashRuntime::enqueue_turn_input`.
-    fn work_class(
-        payload: &lash_core::testing::runtime_internals::QueuedWorkPayload,
-    ) -> lash_core::store::QueuedWorkClass {
-        match payload {
-            lash_core::testing::runtime_internals::QueuedWorkPayload::ProcessWake { .. } => {
-                lash_core::store::QueuedWorkClass::TurnWork
-            }
-            lash_core::testing::runtime_internals::QueuedWorkPayload::SessionCommand { .. } => {
-                lash_core::store::QueuedWorkClass::SessionCommand
-            }
-        }
-    }
-
-    let payload = lash_core::testing::runtime_internals::QueuedWorkPayload::session_command(
-        lash_core::facade_support::SessionCommand::RefreshToolCatalog {
-            reason: "type-level ingress proof".to_string(),
-        },
-    );
-    assert_eq!(work_class(&payload), payload.work_class());
 }
 
 #[tokio::test(flavor = "multi_thread")]

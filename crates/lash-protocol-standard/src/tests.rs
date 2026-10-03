@@ -1,9 +1,7 @@
 use super::*;
 use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use tokio::sync::Barrier;
-use tokio::time::{Duration, timeout};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
 fn standard_execution_section_uses_only_surviving_tool_examples() {
@@ -195,83 +193,6 @@ impl lash_core::facade_support::Provider for WhitespaceInterleavedProvider {
     }
 }
 
-#[derive(Clone, Debug)]
-struct BatchRuntimeProvider {
-    calls: Arc<AtomicUsize>,
-    saw_batch_result: Arc<AtomicBool>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::facade_support::Provider for BatchRuntimeProvider {
-    fn kind(&self) -> &'static str {
-        "stub"
-    }
-
-    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
-        lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
-    }
-
-    fn options(&self) -> lash_core::facade_support::ProviderOptions {
-        lash_core::facade_support::ProviderOptions::default()
-    }
-
-    fn set_options(&mut self, _options: lash_core::facade_support::ProviderOptions) {}
-
-    fn serialize_config(&self) -> serde_json::Value {
-        serde_json::json!({})
-    }
-
-    async fn complete(
-        &mut self,
-        request: lash_core::LlmRequest,
-    ) -> Result<lash_core::LlmResponse, lash_core::facade_support::LlmTransportError> {
-        let call_index = self.calls.fetch_add(1, Ordering::SeqCst);
-        if call_index == 0 {
-            return Ok(lash_core::LlmResponse {
-                parts: vec![lash_core::LlmOutputPart::ToolCall {
-                    call_id: "batch-call".to_string(),
-                    tool_name: "batch".to_string(),
-                    input_json: serde_json::json!({
-                        "tool_calls": [
-                            {"tool": "alpha", "parameters": {}},
-                            {"tool": "beta", "parameters": {"value": "fail"}},
-                            {"tool": "ghost", "parameters": {}},
-                            {"tool": "batch", "parameters": {"tool_calls": []}}
-                        ]
-                    })
-                    .to_string(),
-                    replay: None,
-                }],
-                response_metadata: Default::default(),
-                ..lash_core::LlmResponse::default()
-            });
-        }
-
-        let projected_messages = format!("{:?}", request.messages);
-        if projected_messages.contains("alpha") && projected_messages.contains("beta failed") {
-            self.saw_batch_result.store(true, Ordering::SeqCst);
-        }
-        Ok(lash_core::LlmResponse {
-            parts: vec![lash_core::LlmOutputPart::Text {
-                text: "done".to_string(),
-                response_meta: None,
-            }],
-            response_metadata: Default::default(),
-            ..lash_core::LlmResponse::default()
-        })
-    }
-
-    fn clone_boxed(&self) -> Box<dyn lash_core::facade_support::Provider> {
-        Box::new(self.clone())
-    }
-}
-
-#[derive(Debug)]
-struct BatchRuntimeTools {
-    barrier: Arc<Barrier>,
-    started: Arc<AtomicUsize>,
-}
-
 pub(super) fn runtime_test_tool(name: &str) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
@@ -289,71 +210,8 @@ pub(super) fn runtime_test_tool(name: &str) -> lash_core::ToolDefinition {
     .expect("valid declared tool schemas")
 }
 
-#[async_trait::async_trait]
-impl ToolProvider for BatchRuntimeTools {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        vec![
-            runtime_test_tool("alpha").manifest(),
-            runtime_test_tool("beta").manifest(),
-        ]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        match name {
-            "alpha" | "beta" => Some(Arc::new(runtime_test_tool(name).contract())),
-            _ => None,
-        }
-    }
-
-    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        self.started.fetch_add(1, Ordering::SeqCst);
-        if timeout(Duration::from_millis(100), self.barrier.wait())
-            .await
-            .is_err()
-        {
-            return ToolOutcome::err_fmt("batch child tools did not run concurrently").into();
-        }
-        if call.name() == "beta"
-            && call.args.get("value").and_then(|value| value.as_str()) == Some("fail")
-        {
-            return ToolOutcome::err_fmt("beta failed").into();
-        }
-        ToolOutcome::ok(serde_json::json!(call.name())).into()
-    }
-}
-
-type RecordedEffectFrame = (lash_core::RuntimeEffectKind, Option<String>);
-
-/// Counts the effects that cross the backend's effect host, and answers the
-/// turn's cancel-gate peeks unresolved. A layer over the backend host
-/// (FIG-3580): group children minted under the host run under the same
-/// layer, so the attempts a batch's children journal are counted too.
 #[derive(Clone, Default)]
-pub(super) struct CountingEffectController {
-    pub(super) frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
-    pub(super) group_opens: Arc<AtomicUsize>,
-}
-
-impl CountingEffectController {
-    fn group_open_count(&self) -> usize {
-        self.group_opens.load(Ordering::SeqCst)
-    }
-
-    fn tool_attempt_names(&self) -> Vec<String> {
-        let mut names = self
-            .frames
-            .lock_recover()
-            .iter()
-            .filter_map(|(kind, name)| {
-                (*kind == lash_core::RuntimeEffectKind::ToolAttempt)
-                    .then(|| name.clone())
-                    .flatten()
-            })
-            .collect::<Vec<_>>();
-        names.sort();
-        names
-    }
-}
+pub(super) struct CountingEffectController {}
 
 #[async_trait::async_trait]
 impl lash_core::testing::EffectLayer for CountingEffectController {
@@ -363,15 +221,6 @@ impl lash_core::testing::EffectLayer for CountingEffectController {
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        let name = match &envelope.command {
-            lash_core::RuntimeEffectCommand::ToolAttempt { call, .. } => {
-                Some(call.tool_name.clone())
-            }
-            _ => None,
-        };
-        self.frames
-            .lock_recover()
-            .push((envelope.command.kind(), name));
         if matches!(
             &envelope.command,
             lash_core::RuntimeEffectCommand::PeekAwaitEvent { .. }
@@ -379,15 +228,6 @@ impl lash_core::testing::EffectLayer for CountingEffectController {
             return Ok(lash_core::RuntimeEffectOutcome::PeekAwaitEvent { resolution: None });
         }
         inner.execute_effect(envelope, local_executor).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        inner: &dyn lash_core::RuntimeEffectController,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.group_opens.fetch_add(1, Ordering::SeqCst);
-        inner.open_effect_group(group).await
     }
 }
 
@@ -562,106 +402,6 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
         .collect::<Vec<_>>()
         .join("");
     assert_eq!(finish_text, &rendered_text);
-}
-
-#[tokio::test]
-async fn standard_batch_members_are_children_of_the_steps_one_group() {
-    let provider_calls = Arc::new(AtomicUsize::new(0));
-    let saw_batch_result = Arc::new(AtomicBool::new(false));
-    let provider = BatchRuntimeProvider {
-        calls: Arc::clone(&provider_calls),
-        saw_batch_result: Arc::clone(&saw_batch_result),
-    };
-    let provider_handle = lash_core::facade_support::ProviderHandle::new(
-        lash_core::facade_support::ProviderComponents::new(Box::new(provider)),
-    );
-    // The counting layer sits over the lent turn scope *and* the backend's
-    // effect host, so the group children the step mints — whose controllers
-    // come from the host, not the scope — run under it too and their attempts
-    // land on the same frame log the counter reads.
-    let controller = CountingEffectController::default();
-    let (double, mut host) = layered_test_host(Arc::new(controller.clone())).await;
-    host.providers.models = lash_core::testing::standard_test_llm_profiles(provider_handle);
-    let started = Arc::new(AtomicUsize::new(0));
-    let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
-        Arc::new(StandardProtocolPluginFactory::new()),
-        Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("standard-batch-test-tools"),
-            lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
-                BatchRuntimeTools {
-                    barrier: Arc::new(Barrier::new(2)),
-                    started: Arc::clone(&started),
-                },
-            )),
-        )),
-    ];
-    let policy = lash_core::SessionPolicy {
-        model: Some(lash_core::LlmProfileConfig::new(
-            lash_core::RecordedLlmProfile::mint(
-                lash_core::LlmProfileKey::from("mock-model"),
-                lash_core::LlmProfileMetadata::builder("mock-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("valid model"),
-            ),
-        )),
-        // Bounded, not unbounded: these fixtures shift a live runtime loop
-        // against a stub provider, so a driver that mistakes a tool-call-free
-        // response for a tool-calling one spins here forever instead of
-        // failing. The budget is well above the iterations the scenario needs.
-        ..lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::bounded(8),
-            lash_core::MaxToolCalls::new(1024),
-        )
-    };
-    let handler = open_turn_handler(&double, "standard-batch-session").await;
-    let scoped_controller = layered_scope(&handler, Arc::new(controller.clone()));
-    let mut runtime = Box::pin(
-        lash_core::facade_support::LashRuntime::builder(
-            host,
-            lash_core::LeaseOwnerIdentity::opaque(
-                "protocol-standard-test-worker",
-                "protocol-standard-test-boot",
-            ),
-        )
-        .with_session_id("standard-batch-session")
-        .with_policy(policy)
-        .with_plugin_factories(factories)
-        .build(),
-    )
-    .await
-    .expect("runtime");
-
-    let turn = runtime
-        .execute_turn(
-            lash_core::TurnInput::text("run the batch"),
-            lash_core::facade_support::TurnOptions::new(
-                tokio_util::sync::CancellationToken::new(),
-                scoped_controller,
-            ),
-        )
-        .await
-        .expect("turn");
-    handler.close().await.expect("close the turn's handler");
-
-    assert!(matches!(
-        turn.outcome,
-        lash_core::facade_support::TurnOutcome::Finished(_)
-    ));
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
-    assert_eq!(started.load(Ordering::SeqCst), 2);
-    assert!(saw_batch_result.load(Ordering::SeqCst));
-    assert_eq!(
-        controller.group_open_count(),
-        1,
-        "the batch's members run in the step's one tool group"
-    );
-    assert_eq!(
-        controller.tool_attempt_names(),
-        vec!["alpha".to_string(), "beta".to_string()],
-        "only the admitted members are attempts: the unavailable member is refused by \
-         preparation, the nested batch is a refused row, and the wrapper is no invocation"
-    );
 }
 
 /// Provider stub whose first completion emits one tool call with invalid

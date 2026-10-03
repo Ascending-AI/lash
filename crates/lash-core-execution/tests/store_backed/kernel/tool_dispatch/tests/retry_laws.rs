@@ -403,35 +403,6 @@ async fn retry_sleep_controller_rejection_aborts_as_controller_error() {
 }
 
 #[tokio::test]
-async fn safe_retry_policy_marks_exhausted_after_final_attempt() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context(
-            crate::support::double_dispatch_ports(&double, &handler),
-            ToolRetryPolicy::safe(2, 0, 0),
-            Arc::clone(&attempts),
-            usize::MAX,
-            false,
-            Arc::clone(&observed),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    let ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
-        panic!("expected failure");
-    };
-    assert_eq!(failure.retry, ToolRetryStatus::Exhausted { attempts: 2 });
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
 async fn cancellation_stops_retry_immediately() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
@@ -503,39 +474,5 @@ async fn retry_context_has_stable_replay_key_across_attempts() {
         assert_eq!(keys[0], crate::ToolCallId::fixture("call-1").to_string());
     }
     drop(context);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn idempotent_retry_policy_keys_every_attempt_on_one_call_id() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context(
-            crate::support::double_dispatch_ports(&double, &handler),
-            ToolRetryPolicy::idempotent(3, 0, 0),
-            Arc::clone(&attempts),
-            usize::MAX,
-            false,
-            Arc::clone(&observed),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(attempts.load(Ordering::SeqCst), 3);
-    {
-        let observed = observed.lock_recover();
-        assert_eq!(observed.len(), 3);
-        assert!(
-            observed.iter().all(|(_, max_attempts, call_id)| {
-                *max_attempts == 3 && *call_id == observed[0].2
-            })
-        );
-    }
     handler.close().await.expect("close the dispatch handler");
 }

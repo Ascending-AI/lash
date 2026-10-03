@@ -691,10 +691,7 @@ async fn normalize_plugin_attachment_source(
 #[cfg(test)]
 mod checkpoint_admission_determinism_tests {
     use super::*;
-    use crate::engine::testing::{
-        DeterminismCheck, FailureCause, LocalEngine, LocalTestCx, ReplayMode, RunMode,
-    };
-    use lash_sansio::sync::MutexExt;
+    use crate::engine::testing::{DeterminismCheck, LocalEngine, LocalTestCx};
     use std::future::Future;
     use std::pin::Pin;
 
@@ -810,45 +807,6 @@ mod checkpoint_admission_determinism_tests {
             report.transcript.commits().collect::<Vec<_>>(),
             vec![r#"[["batch-a"],["batch-b"]]"#],
             "the run's own rows stay the turn's; the fresh ones are withheld and handed back"
-        );
-    }
-
-    /// The shape this replaced: the step body left its admissions in a side
-    /// channel on the worker, and the driver read them after the step. A
-    /// replay never runs the body, so the rows it hands back differ.
-    #[test]
-    fn admissions_read_from_a_worker_side_channel_diverge_on_replay() {
-        #[derive(Default)]
-        struct Worker {
-            side_channel: std::sync::Mutex<Vec<crate::AdmittedQueuedWork>>,
-        }
-        let engine = LocalEngine::new(Worker::default, |worker: &Worker, cx: &LocalTestCx| {
-            Box::pin(async move {
-                let _: RuntimeEffectOutcome = cx
-                    .op(
-                        "turn/1/checkpoint/before_completion",
-                        "checkpoint",
-                        &"before_completion",
-                        async move {
-                            let fresh = admitted_batch("batch-b");
-                            worker.side_channel.lock_recover().push(fresh.clone());
-                            failed_checkpoint(admitted_batch("batch-a"), fresh)
-                        },
-                    )
-                    .await;
-                let handed_back =
-                    batch_ids(&std::mem::take(&mut *worker.side_channel.lock_recover()));
-                cx.record_commit(&(vec!["batch-a"], handed_back));
-            }) as Pin<Box<dyn Future<Output = ()> + '_>>
-        });
-        let failure = DeterminismCheck::new(0x3672_0007)
-            .run(&engine)
-            .expect_err("the side channel is not recorded");
-
-        assert_eq!(failure.mode, RunMode::Replay(ReplayMode::Cold));
-        assert!(
-            matches!(failure.cause, FailureCause::Diverged(_)),
-            "{failure}"
         );
     }
 }

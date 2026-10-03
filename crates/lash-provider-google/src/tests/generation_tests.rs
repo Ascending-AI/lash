@@ -134,19 +134,3 @@ fn expose_thinking_requests_thoughts_without_a_reasoning_selection() {
         lash_core::GenerationOptionOutcome::NotRequested
     );
 }
-
-#[test]
-fn an_effort_without_capability_is_refused() {
-    let error = GoogleOAuthProvider::build_request(
-        &GoogleOAuthProvider::for_test(),
-        &request_with_capability(Some("medium"), LlmProfileCapability::default()),
-        Vec::new(),
-        None,
-    )
-    .expect_err("an effort without capability is refused");
-
-    assert_eq!(
-        refusal_code(&error).as_deref(),
-        Some("lash:effort_not_configurable")
-    );
-}

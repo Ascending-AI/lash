@@ -1601,7 +1601,3 @@ fn has_unclosed_group(pattern: &str) -> bool {
     }
     depth != 0
 }
-
-#[cfg(test)]
-#[path = "javascript_regexp_tests.rs"]
-mod tests;

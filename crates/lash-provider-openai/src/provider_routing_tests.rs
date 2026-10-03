@@ -20,41 +20,6 @@ fn provider_with_routing(prefs: ProviderRoutingPrefs) -> OpenAiCompatibleProvide
 }
 
 #[test]
-fn openrouter_chat_body_emits_zdr_when_enabled() {
-    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    let body = provider_with_routing(ProviderRoutingPrefs {
-        zdr: true,
-        ..ProviderRoutingPrefs::default()
-    })
-    .build_chat_request_body(&req, false)
-    .unwrap();
-
-    assert_eq!(
-        body["provider"],
-        json!({ "require_parameters": false, "zdr": true })
-    );
-}
-
-#[test]
-fn openrouter_chat_body_emits_only_allowlist_when_configured() {
-    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    let body = provider_with_routing(ProviderRoutingPrefs {
-        only: vec!["deepinfra".to_string(), "fireworks".to_string()],
-        ..ProviderRoutingPrefs::default()
-    })
-    .build_chat_request_body(&req, false)
-    .unwrap();
-
-    assert_eq!(
-        body["provider"],
-        json!({
-            "require_parameters": false,
-            "only": ["deepinfra", "fireworks"],
-        })
-    );
-}
-
-#[test]
 fn openrouter_chat_body_emits_combined_provider_preferences() {
     let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
 

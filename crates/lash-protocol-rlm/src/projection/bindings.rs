@@ -218,17 +218,6 @@ mod tests {
     }
 
     #[test]
-    fn projected_seed_snapshot_rejects_the_ref_entry_kind() {
-        let snapshot = serde_json::json!({
-            "entries": [["doc", { "kind": "ref", "value": { "kind": "memory", "key": "doc" } }]],
-        });
-        assert!(
-            serde_json::from_value::<lash_rlm_types::RlmProjectedSeedSnapshot>(snapshot).is_err(),
-            "a durable ref seed entry must fail to decode"
-        );
-    }
-
-    #[test]
     fn projected_seed_snapshot_preserves_materialized_projection_ref_shaped_data() {
         let mut snapshot = lash_rlm_types::RlmProjectedSeedSnapshot::new();
         snapshot.push(

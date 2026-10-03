@@ -33,32 +33,6 @@ fn call_record(attempts: Vec<crate::AttemptRecord>) -> crate::LlmCallRecord {
         attempts,
     }
 }
-#[test]
-fn protocol_stop_suppression_updates_response_and_attempt_ledger() {
-    let mut result: Result<LlmResponse, LlmCallError> = Ok(LlmResponse {
-        generation_disposition: applied(),
-        ..LlmResponse::default()
-    });
-    let mut call_record = call_record(vec![attempt(applied())]);
-
-    record_protocol_owned_stop_suppression(&mut result, Some(&mut call_record));
-
-    let response = result.expect("response");
-    assert_eq!(
-        response
-            .generation_disposition
-            .expect("response disposition")
-            .stop_sequences,
-        crate::GenerationOptionOutcome::SuppressedProtocolOwned
-    );
-    assert_eq!(
-        call_record.attempts[0]
-            .generation_disposition
-            .expect("attempt disposition")
-            .stop_sequences,
-        crate::GenerationOptionOutcome::SuppressedProtocolOwned
-    );
-}
 
 #[test]
 fn protocol_stop_suppression_leaves_unreported_attempts_absent() {

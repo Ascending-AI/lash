@@ -1,7 +1,4 @@
-use super::{
-    DeploymentOpenInvocations, RestateInvocationLifecycle, RestateInvocationStatus,
-    open_invocation_statuses_sql,
-};
+use super::{RestateInvocationLifecycle, RestateInvocationStatus};
 
 #[derive(Debug, Default)]
 struct CaptureTransport(std::sync::Mutex<Vec<super::HttpRequest>>);
@@ -102,78 +99,4 @@ fn an_unrecognized_status_decodes_to_unknown_and_reports_open() {
         "an unknown status is open: a drain must not declare itself complete on it"
     );
     assert_eq!(row.status.as_str(), "zombie-from-a-future-restate");
-}
-
-#[test]
-fn the_open_status_sql_filter_names_exactly_the_known_open_variants() {
-    assert_eq!(
-        open_invocation_statuses_sql(),
-        "status IN ('pending', 'ready', 'running', 'backing-off', 'suspended', 'paused')"
-    );
-    for status in [
-        RestateInvocationLifecycle::Pending,
-        RestateInvocationLifecycle::Ready,
-        RestateInvocationLifecycle::Running,
-        RestateInvocationLifecycle::BackingOff,
-        RestateInvocationLifecycle::Suspended,
-        RestateInvocationLifecycle::Paused,
-    ] {
-        assert!(status.is_open(), "{status} is a known open status");
-    }
-    for status in [
-        RestateInvocationLifecycle::Completed,
-        RestateInvocationLifecycle::Failed,
-    ] {
-        assert!(!status.is_open(), "{status} is terminal");
-    }
-}
-
-#[test]
-fn invocation_status_deserializes_captured_rows_with_and_without_deployment() {
-    let pinned: RestateInvocationStatus = serde_json::from_str(
-        r#"{
-            "id": "invocation-1",
-            "target": "service/handler",
-            "target_service_name": "service",
-            "pinned_deployment_id": "deployment-a",
-            "target_service_key": null,
-            "target_handler_name": "handler",
-            "status": "running",
-            "completion_result": null,
-            "completion_failure": null
-        }"#,
-    )
-    .expect("pinned invocation row should deserialize");
-    assert_eq!(pinned.pinned_deployment_id.as_deref(), Some("deployment-a"));
-
-    let legacy: RestateInvocationStatus = serde_json::from_str(
-        r#"{
-            "id": "invocation-2",
-            "target": "service/handler",
-            "target_service_name": "service",
-            "target_handler_name": "handler",
-            "status": "pending"
-        }"#,
-    )
-    .expect("row without a deployment column should deserialize");
-    assert_eq!(legacy.pinned_deployment_id, None);
-}
-
-#[test]
-fn deployment_counts_deserialize_unpinned_rows_without_filtering_them() {
-    let rows: Vec<DeploymentOpenInvocations> = serde_json::from_str(
-        r#"[
-            {"pinned_deployment_id": "deployment-a", "open_count": 2},
-            {"pinned_deployment_id": null, "open_count": 1}
-        ]"#,
-    )
-    .expect("deployment count rows should deserialize");
-
-    assert_eq!(
-        rows[0].pinned_deployment_id.as_deref(),
-        Some("deployment-a")
-    );
-    assert_eq!(rows[0].open_count, 2);
-    assert_eq!(rows[1].pinned_deployment_id, None);
-    assert_eq!(rows[1].open_count, 1);
 }

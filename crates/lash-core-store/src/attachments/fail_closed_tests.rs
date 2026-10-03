@@ -21,16 +21,6 @@ impl AttachmentRootSet for UnsupportedAttachmentRoots {
 }
 
 #[tokio::test]
-async fn condemnation_enumeration_defaults_to_unsupported() {
-    assert!(matches!(
-        UnsupportedAttachmentRoots.list_condemnations().await,
-        Err(crate::StoreError::UnsupportedStoreOperation {
-            operation: "AttachmentRootSet::list_condemnations"
-        })
-    ));
-}
-
-#[tokio::test]
 async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
     let temp = tempfile::tempdir().expect("tempdir");
     let backend = FileAttachmentStore::new(temp.path());

@@ -40,6 +40,5 @@ serde_json = { workspace = true }
 # quietly compiling it out (FIG-1266).
 lash-provider-anthropic = { package = "lash-internal-provider-anthropic", path = ".", features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
-lash-llm-transport = { workspace = true, features = ["proptest-support", "testing"] }
-proptest = "1"
+lash-llm-transport = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["rt", "time"] }

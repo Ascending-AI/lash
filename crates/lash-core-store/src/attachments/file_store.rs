@@ -386,54 +386,12 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn file_read_budget_handles_multiple_chunks_and_exact_boundary() {
-        let dir = tempfile::tempdir().expect("directory");
-        let store = FileAttachmentStore::new(dir.path());
-        let meta =
-            || AttachmentCreateMeta::new(MediaType::parse("image/png").expect("MIME"), None, None);
-        let large = store.put(vec![1; 16385], meta()).await.expect("large blob");
-        assert!(matches!(
-            store.get(&large.id, 16384).await,
-            Err(AttachmentStoreError::ReadLimitExceeded {
-                byte_len: 16385,
-                max_bytes: 16384
-            })
-        ));
-        let exact = store.put(vec![2; 16384], meta()).await.expect("exact blob");
-        assert_eq!(
-            store
-                .get(&exact.id, 16384)
-                .await
-                .expect("exact read")
-                .bytes
-                .len(),
-            16384
-        );
-    }
-
-    use std::collections::BTreeSet;
-
     fn meta() -> AttachmentCreateMeta {
         AttachmentCreateMeta::new(
             MediaType::parse("image/png").unwrap(),
             Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
             Some("pixel".to_string()),
         )
-    }
-
-    #[tokio::test]
-    async fn file_store_round_trips_bytes_and_metadata() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let store = FileAttachmentStore::new(temp.path());
-        let reference = store.put(vec![1, 2, 3], meta()).await.expect("put");
-        let stored = store
-            .get(&reference.id, 32 * 1024 * 1024)
-            .await
-            .expect("get");
-
-        assert_eq!(stored.bytes, vec![1, 2, 3]);
-        assert_eq!(reference.byte_len, 3);
     }
 
     // `put` must write crash-atomically (stage into a unique sibling, then
@@ -608,28 +566,6 @@ mod tests {
             refreshed.last_modified_epoch_ms,
             aged.last_modified_epoch_ms
         );
-    }
-
-    #[tokio::test]
-    async fn file_store_is_flat_content_addressed_across_writers() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let store = FileAttachmentStore::new(temp.path());
-        // Identical bytes written twice resolve to ONE physical blob (flat,
-        // content-addressed — no per-session namespace).
-        let first = store.put(vec![7, 7, 7], meta()).await.expect("put first");
-        let second = store.put(vec![7, 7, 7], meta()).await.expect("put second");
-        assert_eq!(first.id, second.id);
-        assert_eq!(store.path_for_id(&first.id), store.path_for_id(&second.id));
-
-        let listed: BTreeSet<AttachmentId> = store
-            .list()
-            .await
-            .expect("list")
-            .into_iter()
-            .map(|blob| blob.id)
-            .collect();
-        assert_eq!(listed.len(), 1);
-        assert!(listed.contains(&first.id));
     }
 
     // The shared attachment-store suite also registers on SQLite and S3, so

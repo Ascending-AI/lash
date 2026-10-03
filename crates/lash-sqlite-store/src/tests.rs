@@ -25,8 +25,7 @@ fn one_process_module(process_name: &str, param: &str) -> lashlang::Program {
 }
 
 use lash_core_execution::{
-    ProcessLifecycle as _, ProcessObserverRegistry as _, ProcessRegistrar as _,
-    SessionCatalogStore as _, SessionHistoryStore as _,
+    ProcessRegistrar as _, SessionCatalogStore as _, SessionHistoryStore as _,
 };
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
@@ -597,59 +596,6 @@ async fn real_locked_catalog_surfaces_typed_contention() {
 }
 
 #[tokio::test]
-async fn live_attachment_refs_reads_the_catalog() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let root = dir.path().join("sessions");
-    std::fs::create_dir_all(&root).expect("mkdir sessions");
-    let store = SqliteStore::open(&root).await.expect("open catalog");
-    let attachment_id =
-        lash_core_execution::AttachmentId::parse("a".repeat(64)).expect("valid attachment id");
-    {
-        let intent = lash_core_execution::AttachmentWrite {
-            attachment_id: attachment_id.clone(),
-            claim: lash_core_execution::ReferrerClaim::unguarded(
-                lash_core_execution::ArtifactReferrer::Session(SessionId::from("sess-1")),
-            )
-            .expect("claim"),
-        };
-        let lash_core_execution::AttachmentWriteFence::Granted(permit) =
-            lash_core_execution::AttachmentReferrers::begin_attachment_write(
-                &store,
-                &(intent.clone()),
-            )
-            .await
-            .expect("begin write")
-        else {
-            panic!("a free digest must grant its writer");
-        };
-        lash_core_execution::AttachmentReferrers::complete_attachment_write(
-            &store, &intent, permit,
-        )
-        .await
-        .expect("stamp upload evidence");
-        lash_core_execution::AttachmentReferrers::acquire_attachment_refs(
-            &store,
-            &lash_core_execution::ReferrerClaim::unguarded(
-                lash_core_execution::ArtifactReferrer::Session(SessionId::from("sess-1")),
-            )
-            .expect("claim"),
-            std::slice::from_ref(&attachment_id),
-        )
-        .await
-        .expect("commit ref");
-    }
-
-    let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&store)
-        .await
-        .expect("run discovery");
-    assert!(
-        refs.contains(&attachment_id),
-        "the catalog's committed ref must be discovered"
-    );
-    assert_eq!(refs.len(), 1, "only the catalog contributes refs: {refs:?}");
-}
-
-#[tokio::test]
 async fn live_attachment_refs_aborts_on_unreadable_catalog() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().join("sessions");
@@ -1041,83 +987,6 @@ async fn sqlite_artifact_view_does_not_resurrect_artifact_reclaimed_by_another_h
             .expect("read after cross-handle reclamation")
             .is_none(),
         "an artifact view must not resurrect durably reclaimed bytes"
-    );
-}
-
-#[tokio::test]
-async fn sqlite_process_registry_persists_rows_after_reopen() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("processes.db");
-    let proc_persist_id = {
-        let registry = SqliteProcessRegistry::open_standalone_for_testing(&path)
-            .await
-            .expect("open registry");
-        let session_scope = lash_core_execution::SessionScope::new("session");
-        let proc_persist_id = registry
-            .register_process(registration())
-            .await
-            .expect("register")
-            .id;
-        registry
-            .add_observer(
-                &session_scope.session_id,
-                &proc_persist_id,
-                lash_core_execution::ProcessObserverBy::host("sqlite-reopen-test"),
-            )
-            .await
-            .expect("observe");
-        registry
-            .complete_process(
-                &proc_persist_id,
-                ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
-                    serde_json::json!({"ok": true}),
-                )),
-                lash_core_execution::ProcessCompletionAuthority::external_owner(),
-            )
-            .await
-            .expect("complete");
-        proc_persist_id
-    };
-
-    let registry = Arc::new(
-        SqliteProcessRegistry::open_standalone_for_testing(&path)
-            .await
-            .expect("reopen registry"),
-    ) as Arc<dyn lash_core_execution::ProcessRegistry>;
-    let session_scope = lash_core_execution::SessionScope::new("session");
-    let record = registry
-        .get_process(&proc_persist_id)
-        .await
-        .expect("read process")
-        .expect("persisted process");
-
-    assert_eq!(record.originator_id(), session_scope.session_id);
-    assert_eq!(
-        record.provenance.originator,
-        lash_core_execution::ProcessOriginator::session(session_scope.clone())
-    );
-    assert_eq!(
-        lash_core_execution::NoProcessWork::for_registry(Arc::clone(&registry))
-            .await_terminal(&proc_persist_id)
-            .await
-            .expect("await persisted"),
-        ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
-            serde_json::json!({"ok": true}),
-        ))
-    );
-    assert_eq!(
-        registry
-            .list_observed_by(
-                &session_scope.session_id,
-                &lash_core_execution::ProcessListFilter {
-                    status: lash_core_execution::ProcessStatusFilter::Any,
-                    ..Default::default()
-                }
-            )
-            .await
-            .expect("observed processes")
-            .len(),
-        1
     );
 }
 

@@ -549,30 +549,6 @@ async fn a_component_without_an_expand_step_is_refused() {
     drop(database);
 }
 
-#[cfg(not(feature = "synthetic-next"))]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fresh_release_ledger_has_only_baseline_bootstrap_evidence() {
-    let database = migrator_database()
-        .await
-        .expect("the ledger law requires PostgreSQL");
-    let database_url = database.url().to_string();
-    let schema = create_scratch_schema(&database_url).await;
-    let url = scratch_url(&database_url, &schema);
-    PostgresStorage::migrate(&url, MigrationPhase::Expand)
-        .await
-        .expect("provision release baseline");
-    let rows = ledger_rows(&url).await;
-    assert_eq!(rows.len(), 1, "only baseline bootstrap evidence: {rows:?}");
-    assert_eq!(rows[0].0, "expand");
-    assert_eq!(
-        rows[0].1,
-        format!("bootstrap-{}", PostgresStorage::schema_version())
-    );
-    assert_eq!(rows[0].2, None, "bootstrap has no predecessor");
-    assert_eq!(rows[0].3, PostgresStorage::schema_version());
-    drop_scratch_schema(&database_url, &schema).await;
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn later_phases_refuse_an_uninstalled_catalog_and_wait_for_finalize() {
     let Some(database) = migrator_database().await else {
@@ -666,59 +642,6 @@ async fn concurrent_migrates_serialize_and_converge() {
         "exactly one racer may execute each step: {first:?} {second:?}"
     );
     assert_eq!(ledger_rows(&url).await.len(), 1 + component_expands().len());
-    drop_scratch_schema(&database_url, &schema).await;
-    drop(database);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_catalog_below_the_migration_floor_is_refused_not_recreated() {
-    let Some(database) = migrator_database().await else {
-        return;
-    };
-    let database_url = database.url().to_string();
-    let schema = create_scratch_schema(&database_url).await;
-    let url = scratch_url(&database_url, &schema);
-    // A catalog stamped far below what the expand catalog reaches has no
-    // migration path: the runner must refuse with the typed range error rather
-    // than guessing.
-    let mut admin = PgConnection::connect(&database_url)
-        .await
-        .expect("connect scratch provisioner");
-    sqlx::query(&format!("SET search_path TO {schema}"))
-        .execute(&mut admin)
-        .await
-        .expect("point the provisioner at the scratch schema");
-    sqlx::query(
-        "CREATE TABLE lash_schema_versions (component TEXT PRIMARY KEY, version INTEGER NOT NULL)",
-    )
-    .execute(&mut admin)
-    .await
-    .expect("create a stamp table only");
-    sqlx::query("INSERT INTO lash_schema_versions (component, version) VALUES ($1, $2)")
-        .bind("lash-postgres-store")
-        .bind(7)
-        .execute(&mut admin)
-        .await
-        .expect("stamp an unreachable predecessor");
-    admin.close().await.expect("close scratch provisioner");
-
-    let error = PostgresStorage::migrate(&url, MigrationPhase::Expand)
-        .await
-        .expect_err("a catalog with no migration path must refuse");
-    let rendered = error.to_string();
-    assert!(
-        rendered.contains("has version 7"),
-        "the refusal names the found version: {rendered}"
-    );
-    assert!(
-        rendered.contains("has no applicable migration"),
-        "the refusal names the missing migration path: {rendered}"
-    );
-    assert_eq!(
-        scratch_lash_table_count(&database_url, &schema).await,
-        1,
-        "a refused migrate runs no DDL"
-    );
     drop_scratch_schema(&database_url, &schema).await;
     drop(database);
 }

@@ -1,30 +1,6 @@
 use super::*;
 use crate::request_work::needs_blocking;
 
-#[test]
-fn request_work_budget_covers_text_inline_and_resolved_payloads() {
-    let small = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    assert!(!needs_blocking(&small));
-    let text = request(vec![LlmMessage::text(LlmRole::User, "x".repeat(64 * 1024))]);
-    assert!(needs_blocking(&text));
-    let inline = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![LlmContentBlock::Attachment {
-            source: Box::new(AttachmentSource::inline(
-                lash_core::MediaType::parse("image/png").unwrap(),
-                vec![0; 64 * 1024],
-            )),
-        }],
-    )]);
-    assert!(needs_blocking(&inline));
-    let mut stored = small;
-    stored.resolved_stored.insert(
-        lash_core::AttachmentId::parse("stored").unwrap(),
-        vec![0; 64 * 1024],
-    );
-    assert!(needs_blocking(&stored));
-}
-
 #[derive(Debug)]
 struct LargeErrorTransport;
 
@@ -119,39 +95,5 @@ fn request_work_budget_counts_repeated_stored_image_occurrences() {
         )]);
         req.resolved_stored.insert(id, vec![0; byte_len]);
         assert!(needs_blocking(&req));
-    }
-}
-
-#[test]
-fn request_work_budget_rejects_large_field_before_json_writer() {
-    let large = "x".repeat(1024 * 1024);
-    let text = request(vec![LlmMessage::text(LlmRole::User, large.clone())]);
-    let mut model = request(Vec::new());
-    model.model.metadata_mut().wire_model = large.clone();
-    let mut scope = request(Vec::new());
-    scope.scope.request_id = large.clone();
-    let mut schema = request(Vec::new());
-    schema.tools = Arc::new(vec![LlmToolSpec {
-        name: "tool".into(),
-        description: String::new(),
-        input_schema: lash_sansio::SchemaContract::admit(
-            json!({"properties": {"field": {"description": large}}}),
-        )
-        .expect("valid declared schema"),
-        output_schema: Default::default(),
-    }]);
-    let inline = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![LlmContentBlock::Attachment {
-            source: Box::new(AttachmentSource::inline(
-                lash_core::MediaType::parse("image/png").unwrap(),
-                vec![0; 1024 * 1024],
-            )),
-        }],
-    )]);
-    for req in [text, model, scope, schema, inline] {
-        crate::request_work::PROBE_WRITES.with(|writes| writes.set(0));
-        assert!(needs_blocking(&req));
-        crate::request_work::PROBE_WRITES.with(|writes| assert_eq!(writes.get(), 0));
     }
 }

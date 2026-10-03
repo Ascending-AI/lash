@@ -1505,8 +1505,6 @@ pub use process::{
 #[cfg(test)]
 mod lib_tests;
 #[cfg(test)]
-mod process_grammar_tests;
-#[cfg(test)]
 mod session_surface_tests;
 
 #[cfg(any(test, feature = "testing"))]

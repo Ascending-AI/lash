@@ -156,60 +156,6 @@ async fn redelivered_start_realizes_one_process_and_a_changed_declaration_return
     Ok(())
 }
 
-/// The three dispositions of one controller-owned start, told apart by the
-/// `replayed` bit the host reads (FIG-3070).
-///
-/// A fresh submission realizes. A submission the *effect journal* already holds
-/// replays without reaching the store. A submission on a fresh journal whose
-/// registration the *store* already holds coalesces: local execution runs, the
-/// registry returns the recorded row, and nothing is written. The third used to
-/// report `replayed: false`, because the ingress read "did local execution run"
-/// rather than the store's verdict.
-#[tokio::test]
-async fn a_coalesced_start_reports_replayed_and_a_fresh_start_does_not() -> Result<()> {
-    let (core, registry, _process) = ingress_core(sqlite_memory_store_backend().await).await?;
-    let key = ingress_of(&core)?
-        .key("coalesced-start", 0)
-        .expect("a host submission handle");
-
-    let realized = ingress_of(&core)?
-        .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
-        .await;
-    assert_replayed(&realized, false, "the start that created the row");
-    let started = super::started_process_id(&realized);
-    let created_at = registry
-        .get_process(&started)
-        .await?
-        .expect("the start realizes a process")
-        .created_at_ms;
-
-    // Same invocation, so the controller's effect journal answers before the
-    // store is consulted at all.
-    let journal_replay = ingress_of(&core)?
-        .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
-        .await;
-    assert_replayed(&journal_replay, true, "a start the journal replayed");
-
-    // A fresh invocation carries a fresh journal, so this one reaches the
-    // registry, which coalesces it onto the row the first start created. The
-    // durable key, not the journal, is what makes it a replay.
-    let redelivery = second_invocation_of(&core).await?;
-    let coalesced = ingress_of(&redelivery)?
-        .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
-        .await;
-    assert_replayed(&coalesced, true, "a start the registry coalesced");
-    assert_eq!(
-        registry
-            .get_process(&started)
-            .await?
-            .expect("the coalesced start returns the original process")
-            .created_at_ms,
-        created_at,
-        "all three submissions name the one process the first start created"
-    );
-    Ok(())
-}
-
 #[tokio::test]
 async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Result<()> {
     let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;

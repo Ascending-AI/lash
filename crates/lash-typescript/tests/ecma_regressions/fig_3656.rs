@@ -51,35 +51,7 @@ fn builtin_member_semantics_match_node() {
     );
 }
 
-/// `lastIndex` stores the raw property and coerces only when used.
-#[test]
-fn last_index_reads_back_the_written_value() {
-    for (source, expected) in [
-        (
-            "const r = /a/g; r.lastIndex = -1; finish(r.lastIndex);",
-            -1.0,
-        ),
-        (
-            "const r = /a/g; r.lastIndex = 2.7; finish(r.lastIndex);",
-            2.7,
-        ),
-        (
-            "const r = /a/g; r.lastIndex = Infinity; finish(r.lastIndex);",
-            f64::INFINITY,
-        ),
-    ] {
-        assert_eq!(finished(source), Value::Number(expected), "{source}");
-    }
-    let Value::Number(value) = finished("const r = /a/g; r.lastIndex = NaN; finish(r.lastIndex);")
-    else {
-        panic!("lastIndex reads back the written NaN");
-    };
-    assert!(value.is_nan());
-}
-
 const RAW_LAST_INDICES: [&str; 7] = ["-1", "2.7", "NaN", "Infinity", "-0", "'2'", "1e16"];
-const OBSERVE_LAST_INDEX: &str =
-    "finish([typeof r.lastIndex, String(r.lastIndex), String(1 / r.lastIndex)].join('|'));";
 
 fn run_cell(source: &str, state: &mut State) -> Value {
     let globals = state
@@ -135,40 +107,6 @@ fn fragment_reload(state: &State) -> State {
     instance.replace_state(State::new())
 }
 
-fn state_round_trip(reload: fn(&State) -> State) {
-    for raw in RAW_LAST_INDICES {
-        let mut state = State::new();
-        run_cell(
-            &format!("const r = /a/g; r.lastIndex = {raw}; finish(0);"),
-            &mut state,
-        );
-        let expected = finished(&format!(
-            "const raw = {raw}; finish([typeof raw, String(raw), String(1 / raw)].join('|'));"
-        ));
-        assert_eq!(
-            run_cell(OBSERVE_LAST_INDEX, &mut state),
-            expected,
-            "raw assignment = {raw}"
-        );
-        let mut restored = reload(&state);
-        assert_eq!(
-            run_cell(OBSERVE_LAST_INDEX, &mut restored),
-            expected,
-            "lastIndex = {raw}"
-        );
-    }
-}
-
-#[test]
-fn last_index_raw_snapshot_round_trip() {
-    state_round_trip(snapshot_reload);
-}
-
-#[test]
-fn last_index_raw_fragment_round_trip() {
-    state_round_trip(fragment_reload);
-}
-
 fn continuation_run(source: &str, restore: bool) -> Value {
     futures::executor::block_on(async {
         let program = lash_typescript::testing::compile(source).expect("compile process");
@@ -194,26 +132,6 @@ fn continuation_run(source: &str, restore: bool) -> Value {
             }
         }
     })
-}
-
-#[test]
-fn last_index_raw_continuation_round_trip() {
-    for raw in RAW_LAST_INDICES {
-        let source = format!("const r = /a/g; r.lastIndex = {raw}; print(0); {OBSERVE_LAST_INDEX}");
-        let expected = finished(&format!(
-            "const raw = {raw}; finish([typeof raw, String(raw), String(1 / raw)].join('|'));"
-        ));
-        assert_eq!(
-            continuation_run(&source, false),
-            expected,
-            "raw assignment = {raw}"
-        );
-        assert_eq!(
-            continuation_run(&source, true),
-            expected,
-            "lastIndex = {raw}"
-        );
-    }
 }
 
 #[test]

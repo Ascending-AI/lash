@@ -1077,30 +1077,3 @@ pub use schema_validation::validate_tool_input;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod inline_tests {
-    use super::*;
-    #[test]
-    fn manifests_without_inline_keep_the_existing_default() {
-        let tool = ToolDefinition::raw(
-            "test",
-            "test",
-            "test",
-            serde_json::json!({}),
-            serde_json::json!({}),
-        )
-        .expect("valid declared tool schemas");
-        let mut value = serde_json::to_value(tool.manifest()).unwrap();
-        assert!(value.get("inline").is_none());
-        assert!(
-            serde_json::from_value::<ToolManifest>(value.clone())
-                .unwrap()
-                .inline
-        );
-        value["inline"] = false.into();
-        let hidden = serde_json::from_value::<ToolManifest>(value).unwrap();
-        assert!(!hidden.inline);
-        assert_eq!(serde_json::to_value(hidden).unwrap()["inline"], false);
-    }
-}

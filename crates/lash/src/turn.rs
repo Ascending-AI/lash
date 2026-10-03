@@ -410,27 +410,6 @@ impl TurnOutput {
     }
 }
 
-#[cfg(test)]
-#[derive(Default)]
-pub(crate) struct RunActivityCollector {
-    activities: Arc<StdMutex<Vec<TurnActivity>>>,
-}
-
-#[cfg(test)]
-impl RunActivityCollector {
-    pub(crate) fn snapshot(&self) -> Vec<TurnActivity> {
-        self.activities.lock_recover().clone()
-    }
-}
-
-#[cfg(test)]
-#[async_trait]
-impl TurnActivitySink for RunActivityCollector {
-    async fn emit(&self, activity: TurnActivity) {
-        self.activities.lock_recover().push(activity);
-    }
-}
-
 /// Fans a turn's activity stream out to multiple consumers.
 pub struct TurnActivityFanout {
     sinks: Vec<Arc<dyn TurnActivitySink>>,

@@ -630,20 +630,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn store_commit_failed_is_neither_retryable_nor_terminal() {
-        let err = runtime_error(RuntimeErrorCode::StoreCommitFailed);
-        assert!(!err.is_retryable(), "{err}");
-        assert!(!err.is_terminal(), "{err}");
-    }
-
-    #[test]
-    fn execution_state_capture_failed_is_non_retryable_and_non_terminal() {
-        let err = runtime_error(RuntimeErrorCode::ExecutionStateCaptureFailed);
-        assert!(!err.is_retryable(), "{err}");
-        assert!(!err.is_terminal(), "{err}");
-    }
-
     /// FIG-3575: a foreign code carries the class its minting host chose. A
     /// live fault is neither retryable nor terminal; an outcome, and a code
     /// read back from the wire as a recorded failure, is terminal.

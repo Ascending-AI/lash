@@ -50,7 +50,6 @@ uuid = { workspace = true, features = ["v4"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash.workspace = true
 lash-conformance = { workspace = true, features = ["lashlang"] }
-fastrand = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 # The process worker a turn runner lends the tier's process workflow.
 lash-core-worker = { workspace = true }
@@ -62,7 +61,6 @@ lash-postgres-store = { package = "lash-internal-postgres-store", path = ".", fe
 # shift through: lash-restate's engine on the in-process server double.
 lash-restate-test = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tracing-subscriber = { workspace = true }

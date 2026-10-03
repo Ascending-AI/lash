@@ -10,15 +10,11 @@ mod facade_support {
 mod embed_plugins;
 #[path = "integration/facade_inventory.rs"]
 mod facade_inventory;
-#[path = "integration/integrator_facade.rs"]
-mod integrator_facade;
 #[cfg(feature = "mcp")]
 #[path = "integration/mcp_catalog.rs"]
 mod mcp_catalog;
 #[path = "integration/one_home.rs"]
 mod one_home;
-#[path = "integration/process_controls.rs"]
-mod process_controls;
 #[path = "integration/stores_evidence.rs"]
 mod stores_evidence;
 #[path = "integration/support.rs"]

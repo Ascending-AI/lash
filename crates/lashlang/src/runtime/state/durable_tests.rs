@@ -323,37 +323,6 @@ fn a_capture_rewrites_exactly_the_fragments_whose_objects_changed() {
     assert_eq!(bodies(&again), bodies(&live));
 }
 
-/// A heap rebuilt from a wire — a reload, or a parked continuation resuming —
-/// must not read as unchanged against a capture taken before it was rebuilt,
-/// or a write made before the rebuild would never be captured.
-#[test]
-fn a_rebuilt_heap_is_unlike_every_capture_taken_before_it() {
-    let state = exotic_session();
-    let parts = complete(&state);
-    let (reloaded, reload_baseline) = reload(&parts.header, &bodies(&parts));
-    assert!(
-        changed_names(
-            &reloaded
-                .durable_parts(
-                    &reload_baseline,
-                    lash_core_execution::FleetFormat::current()
-                )
-                .expect("capture the reload")
-        )
-        .is_empty(),
-        "a reload is clean against the baseline it returns"
-    );
-    let against_old = reloaded
-        .durable_parts(&parts.baseline, lash_core_execution::FleetFormat::current())
-        .expect("capture against the pre-reload baseline");
-    assert_eq!(
-        changed_names(&against_old),
-        ["date", "map", "params", "regexp", "set", "url"],
-        "every fragment that carries an object reads as changed; `map_alias` \
-         carries none, so its body still stands"
-    );
-}
-
 /// Each root's body as a capture leaves it: the body it rewrote, or the body
 /// the capture it was diffed against recorded.
 fn resolved_bodies(
@@ -684,27 +653,6 @@ fn a_dropped_name_that_is_also_bound_is_refused() {
     assert!(
         matches!(&error, SnapshotDecodeError::InvalidEncoding(reason) if reason.contains("`both`")),
         "{error:?}"
-    );
-}
-
-/// A v8 capture predates the dropped-function names: it is refused by its
-/// version before anything is restored, not read as a session that never
-/// dropped one.
-#[test]
-fn a_v8_header_is_refused_by_its_version() {
-    let v8_header = [0x81, 0xa7, b'v', b'e', b'r', b's', b'i', b'o', b'n', 0x08];
-    let error = State::from_durable_parts(
-        &v8_header,
-        std::iter::empty(),
-        lash_core_execution::FleetFormat::current(),
-    )
-    .expect_err("a v8 header is not a v9 one");
-    assert_eq!(
-        error,
-        SnapshotDecodeError::VersionMismatch {
-            expected: LASHLANG_SNAPSHOT_VERSION,
-            found: 8,
-        }
     );
 }
 

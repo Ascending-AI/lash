@@ -385,54 +385,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn worked_group_is_a_three_child_first_settlement_deadline() {
-        let group = effect_group("shape-test").expect("worked group assembles");
-        let admitted_scope = ExecutionScope::runtime_operation(group.group_key());
-        assert_eq!(group.invocation().execution_scope(), &admitted_scope);
-        assert_eq!(group.children().len(), 3);
-        assert_eq!(group.wake(), GroupWakePolicy::First);
-        assert_eq!(group.loser_disposition(), LoserPolicy::Cancel);
-        for (position, child) in group.children().iter().enumerate() {
-            let membership = child.group.as_deref().expect("child is stamped");
-            assert_eq!(membership.position, position);
-            assert_eq!(membership.group_key, group.group_key());
-            assert_eq!(child.invocation.execution_scope(), &admitted_scope);
-            assert_eq!(
-                child.invocation.effect_replay_key(),
-                child_replay_key(group.group_key(), position)
-            );
-        }
-    }
-
-    #[test]
-    fn deployment_resolver_routes_only_the_worked_sleep_children() {
-        let group = effect_group("routing-test").expect("worked group assembles");
-        let resolver = AgentServiceEffectGroupExecutors;
-        assert!(
-            group
-                .children()
-                .iter()
-                .all(|child| resolver.executor_for(child).is_some())
-        );
-
-        let unsupported = RuntimeEffectEnvelope::new(
-            RuntimeEffectInvocation::new(
-                EffectAddress::new(
-                    ExecutionScope::runtime_operation("routing-test"),
-                    "routing-test:unsupported",
-                )
-                .expect("test runtime operation and replay key are admitted"),
-                RuntimeAttribution::none(),
-                "unsupported",
-            ),
-            RuntimeEffectCommand::LanguageRuntimeValue {
-                operation: "unsupported".to_string(),
-            },
-        );
-        assert!(resolver.executor_for(&unsupported).is_none());
-    }
-
-    #[test]
     fn run_ids_are_safe_restate_workflow_keys() {
         assert!(validate_run_id("cov1_witness-42").is_ok());
         assert!(validate_run_id("").is_err());

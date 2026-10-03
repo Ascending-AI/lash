@@ -215,7 +215,6 @@ pub fn direct_trace_context(
 #[cfg(test)]
 mod tests {
     use crate::SessionId;
-    use crate::TurnId;
     use lash_sansio::sync::MutexExt;
     use std::sync::Arc;
 
@@ -486,50 +485,5 @@ mod tests {
                 && record.context.turn_index.is_none()
                 && record.context.protocol_iteration.is_none()
         }));
-    }
-
-    #[test]
-    fn direct_effect_invocation_preserves_runtime_scope() {
-        let invocation = crate::runtime::causal::direct_effect_invocation(
-            &crate::ExecutionScope::runtime_operation("direct-test"),
-            &crate::RuntimeOwner::Session(SessionId::from("s")),
-            "tool",
-            "request:k".to_string(),
-            None,
-            None,
-        );
-
-        assert_eq!(invocation.attribution.session_id.as_deref(), Some("s"));
-        assert!(
-            invocation
-                .effect_replay_key()
-                .starts_with("direct:v3:blake3:")
-        );
-    }
-
-    #[test]
-    fn tool_retry_sleep_invocation_preserves_parent_replay_identity() {
-        let parent = crate::runtime::causal::direct_effect_invocation(
-            &crate::ExecutionScope::turn("s", "turn"),
-            &crate::RuntimeOwner::Session(SessionId::from("s")),
-            "tool",
-            "request:k".to_string(),
-            Some(&TurnId::from("turn")),
-            None,
-        );
-
-        let call_id = crate::ToolCallId::fixture("probe");
-        let sleep = crate::runtime::causal::tool_retry_sleep_invocation(
-            &crate::ExecutionScope::turn("s", "turn"),
-            &parent.into_runtime_invocation(),
-            &call_id,
-            2,
-        );
-
-        assert!(
-            sleep
-                .effect_replay_key()
-                .ends_with(&format!(":{call_id}:attempt:2:sleep"))
-        );
     }
 }

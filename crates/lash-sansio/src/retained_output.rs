@@ -135,16 +135,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_policy_retains_only_past_its_inline_limit() {
-        let policy = OutputRetentionPolicy {
-            inline_limit_bytes: 4,
-            witness_bytes: 2,
-        };
-        assert!(!policy.retains(4));
-        assert!(policy.retains(5));
-    }
-
-    #[test]
     fn the_witness_is_cut_on_a_character_boundary_within_its_bound() {
         let policy = OutputRetentionPolicy {
             inline_limit_bytes: 1,

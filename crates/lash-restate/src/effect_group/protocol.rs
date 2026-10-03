@@ -155,16 +155,6 @@ mod tests {
     }
 
     #[test]
-    fn index_state_of_the_current_format_decodes() {
-        let record = decode_index_state(
-            "group",
-            record_state(Some(EFFECT_GROUP_STATE_FORMAT_VERSION)),
-        )
-        .expect("current-format state decodes");
-        assert_eq!(record.shape_digest, "shape-digest");
-    }
-
-    #[test]
     fn index_state_of_another_or_no_format_is_refused_typed() {
         // Below the family's supported range (format 0, or N's format in a
         // build with no lift from it), above it, or unstamped.

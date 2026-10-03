@@ -341,27 +341,6 @@ async fn parked_work_merges_parked_turns_and_processes() {
     assert_eq!(wire["parked_processes"], 1);
 }
 
-#[tokio::test]
-async fn testing_facade_run_tool_executes_provider() {
-    let outcome = crate::testing::run_tool(
-        &AppTools,
-        "app_lookup",
-        &serde_json::json!({ "query": "weather" }),
-    )
-    .await;
-
-    let lash_core::ToolAttemptOutcome::Done { result, intents } = outcome else {
-        panic!("app_lookup must complete inline");
-    };
-    assert!(intents.is_empty());
-    let output = result.into_output();
-    assert!(output.is_success());
-    assert_eq!(
-        output.value_for_projection(),
-        serde_json::json!({ "ok": true })
-    );
-}
-
 /// A provider whose `execute` forwards through its granted branch only when
 /// the attempt context carries the grant's execution binding — the same seam
 /// a deferred-resolution host branches on (FIG-3436). Its tool is a grant

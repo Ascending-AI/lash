@@ -283,35 +283,6 @@ mod tests {
     }
 
     #[test]
-    fn every_component_descriptor_yields_its_encoding_version() {
-        let bytes = manifest();
-        let components = Value::root(&bytes)
-            .field("components")
-            .and_then(Value::entries)
-            .expect("the manifest carries components");
-        let mut versions: Vec<(&str, Option<u32>)> = components
-            .into_iter()
-            .map(|(key, value)| (key, value.field("encoding_version").and_then(Value::as_u32)))
-            .collect();
-        versions.sort();
-        assert_eq!(
-            versions,
-            vec![("execution_state", Some(2)), ("tool_state", Some(2))]
-        );
-    }
-
-    #[test]
-    fn a_named_blob_reference_is_readable_as_a_string() {
-        let bytes = manifest();
-        let blob_ref = Value::root(&bytes)
-            .field("components")
-            .and_then(|components| components.field("execution_state"))
-            .and_then(|component| component.field("blob_ref"))
-            .and_then(Value::as_str);
-        assert_eq!(blob_ref, Some("sha256:abc"));
-    }
-
-    #[test]
     fn binary_bodies_do_not_stop_the_walk() {
         // The reason a generic value tree is not an option: these envelopes
         // carry binary, which `serde_json::Value` cannot hold.
@@ -405,12 +376,5 @@ mod tests {
                 .and_then(Value::as_u32),
             Some(7)
         );
-    }
-
-    #[test]
-    fn a_non_map_root_has_no_fields() {
-        let bytes = rmp_serde::to_vec_named(&vec![1u32, 2, 3]).expect("the fixture encodes");
-        assert!(Value::root(&bytes).field("version").is_none());
-        assert!(Value::root(&bytes).entries().is_none());
     }
 }

@@ -676,13 +676,6 @@ mod tests {
         script.trace().iter().map(Call::to_string).collect()
     }
 
-    #[test]
-    fn a_fault_is_classified_from_the_error() {
-        assert_eq!(FaultKind::of(&transient()), FaultKind::Transient);
-        assert_eq!(FaultKind::of(&permanent()), FaultKind::Permanent);
-        assert_eq!(FaultKind::of(&corrupt()), FaultKind::Corrupt);
-    }
-
     #[tokio::test]
     async fn a_fail_rule_answers_its_typed_fault_on_the_nth_call_without_entering_the_store() {
         let script = Script::new();

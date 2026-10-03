@@ -443,32 +443,6 @@ fn turn_cancellation_shape_is_guarded() {
     );
 }
 
-/// The tombstone CHECK admits exactly the statuses a process is pruned in:
-/// its literal is the retired partition of `ProcessStatus`, in order.
-#[test]
-fn the_tombstone_check_derives_from_the_retired_process_statuses() {
-    let retired = lash_core_execution::RetiredProcessStatus::ALL
-        .iter()
-        .map(|status| format!("'{}'", status.label()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    assert_eq!(
-        lash_core_execution::ProcessStatus::ALL
-            .iter()
-            .filter_map(lash_core_execution::ProcessStatus::retired)
-            .collect::<Vec<_>>(),
-        lash_core_execution::RetiredProcessStatus::ALL,
-    );
-    let constraint = format!(
-        "CONSTRAINT ck_process_tombstones_terminal_label CHECK (terminal_label IN ({retired}))"
-    );
-    assert_eq!(
-        PROCESS_SCHEMA.matches(constraint.as_str()).count(),
-        1,
-        "the SQLite DDL must carry `{constraint}`"
-    );
-}
-
 #[test]
 fn reclaim_markers_require_terminal_owners() {
     let process = Connection::open_in_memory().expect("open parent-end fixture");

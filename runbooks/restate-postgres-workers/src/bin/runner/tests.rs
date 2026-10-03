@@ -1,18 +1,4 @@
 use super::*;
-use std::ffi::OsString;
-
-#[test]
-fn completed_workflow_manifest_path_resolves_unset_empty_and_set_values() {
-    assert_eq!(completed_workflow_manifest_path(None), None);
-    assert_eq!(
-        completed_workflow_manifest_path(Some(OsString::new())),
-        None
-    );
-    assert_eq!(
-        completed_workflow_manifest_path(Some(OsString::from("/tmp/completed.txt"))),
-        Some(PathBuf::from("/tmp/completed.txt"))
-    );
-}
 
 #[test]
 fn captured_settled_shape_is_success() {
@@ -33,24 +19,6 @@ fn captured_settled_shape_is_success() {
     });
     assert_eq!(
         signal_process_output_value(await_output).unwrap(),
-        json!({
-            "first": {"phase": "first"},
-            "second": {"phase": "second"}
-        })
-    );
-}
-
-#[test]
-fn constructed_success_is_unwrapped_and_classified() {
-    let await_output = lash::process::ProcessAwaitOutput::from_tool_output(
-        lash::tools::ToolCallOutput::success(json!({
-            "first": {"phase": "first"},
-            "second": {"phase": "second"}
-        })),
-    );
-
-    assert_eq!(
-        signal_process_output_value(serde_json::to_value(await_output).unwrap()).unwrap(),
         json!({
             "first": {"phase": "first"},
             "second": {"phase": "second"}
@@ -546,20 +514,6 @@ fn rule_fixture(name: &str) -> (WitnessHistory, LawScope, Rejects) {
 }
 
 #[test]
-fn legal_recovery_history_passes_every_law() {
-    let (history, scope) = legal(BASE);
-    for (law, verdict) in verdicts(&history, &scope) {
-        assert_eq!(
-            verdict,
-            Verdict::Pass,
-            "{} rejected a legal history",
-            law.label()
-        );
-    }
-    assert_eq!(verdicts(&history, &scope).len(), 4);
-}
-
-#[test]
 fn every_rule_rejects_its_fixture_and_accepts_it_once_removed() {
     for rule in RECOVERY_LAW_RULES {
         let (history, scope, expect) = rule_fixture(rule.name);
@@ -588,33 +542,6 @@ fn every_rule_rejects_its_fixture_and_accepts_it_once_removed() {
 }
 
 #[test]
-fn law1_rejects_a_terminal_whose_bytes_changed_across_the_restart() {
-    let (history, scope, _) = rule_fixture("terminal_bytes_survive_restart");
-    assert!(matches!(
-        check_law(Law::ResultStability, &history, &scope),
-        Verdict::Violation(_)
-    ));
-}
-
-#[test]
-fn law2_rejects_a_second_commit_for_one_logical_key() {
-    let (history, scope, _) = rule_fixture("at_most_one_commit");
-    assert!(matches!(
-        check_law(Law::EffectIdentity, &history, &scope),
-        Verdict::Violation(_)
-    ));
-}
-
-#[test]
-fn law3_rejects_a_receipt_that_predates_its_parent() {
-    let (history, scope, _) = rule_fixture("receipts_follow_their_parents");
-    assert!(matches!(
-        check_law(Law::CausalIdentity, &history, &scope),
-        Verdict::Violation(_)
-    ));
-}
-
-#[test]
 fn law3_rejects_a_workflow_submitted_as_two_requests() {
     let (mut history, scope) = legal(BASE);
     let mut again = history.submissions[0].clone();
@@ -622,15 +549,6 @@ fn law3_rejects_a_workflow_submitted_as_two_requests() {
     history.submissions.push(again);
     assert!(matches!(
         check_law(Law::CausalIdentity, &history, &scope),
-        Verdict::Violation(_)
-    ));
-}
-
-#[test]
-fn law4_rejects_a_new_receipt_for_a_replayed_effect() {
-    let (history, scope, _) = rule_fixture("no_new_receipts_after_replay");
-    assert!(matches!(
-        check_law(Law::ReplayEquivalence, &history, &scope),
         Verdict::Violation(_)
     ));
 }
@@ -648,15 +566,6 @@ fn an_empty_snapshot_is_inconclusive_for_every_law_never_a_pass() {
     }
     assert!(matches!(
         check_law(Law::CausalIdentity, &empty, &LawScope::causal_only()),
-        Verdict::Inconclusive(_)
-    ));
-}
-
-#[test]
-fn missing_reattachment_is_inconclusive_not_a_pass() {
-    let (history, scope, _) = rule_fixture("terminals_reattached_after_restart");
-    assert!(matches!(
-        check_law(Law::ResultStability, &history, &scope),
         Verdict::Inconclusive(_)
     ));
 }

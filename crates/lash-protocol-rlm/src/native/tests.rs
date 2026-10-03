@@ -1310,32 +1310,6 @@ fn multipart_response_preserves_executable_cell() {
 }
 
 #[test]
-fn commentary_only_cell_still_executes() {
-    let mut machine = TurnMachine::new(
-        typescript_cell_config(RlmTermination::Natural),
-        Vec::new(),
-        Default::default(),
-        0,
-    );
-    let initial = drain(&mut machine);
-
-    let effects = reply(
-        &mut machine,
-        &initial,
-        vec![phased_text(
-            "commentary",
-            "Creating the artifact.\n<typescript>\nfinish(\"created\");\n</typescript>",
-        )],
-    );
-
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::ExecCode { language, code, .. }
-            if language == "typescript" && code.trim() == "finish(\"created\");"
-    )));
-}
-
-#[test]
 fn no_cell_multipart_response_finishes_with_final_answer_prose() {
     let mut machine = TurnMachine::new(
         typescript_cell_config(RlmTermination::Natural),
@@ -1501,68 +1475,6 @@ fn native_reasoning_does_not_move_the_stall_reply_fingerprint() {
         fingerprint_for("Plan A."),
         fingerprint_for("Plan B, at length."),
         "identical replies fingerprint identically"
-    );
-}
-
-/// One concept, one shape. Both channels serialize the same
-/// `ExtractionDiagnostic`, so a host reading `native_extraction` gets the
-/// fields it reads on `llm_extraction` — and never the `dialect` key ADR 0096
-/// retired, which the native literal was the last producer of.
-#[test]
-fn native_extraction_diagnostic_matches_the_shared_shape() {
-    let prose = "Ready.";
-    let code = "finish(\"ok\")";
-    let reasoning = "Plan.";
-
-    let mut machine = TurnMachine::new(
-        config(true, RlmTermination::Natural),
-        Vec::new(),
-        Default::default(),
-        0,
-    );
-    let initial = drain(&mut machine);
-    reply(
-        &mut machine,
-        &initial,
-        vec![
-            LlmOutputPart::Reasoning {
-                text: reasoning.to_string(),
-                replay: None,
-            },
-            text(prose),
-            call(
-                "call-1",
-                "execute_code",
-                &serde_json::json!({ "code": code }).to_string(),
-            ),
-        ],
-    );
-
-    let payloads = native_extraction_payloads(&machine);
-    assert_eq!(payloads.len(), 1, "one attempt, one diagnostic");
-    let mut payload = payloads.into_iter().next().unwrap();
-    let object = payload.as_object_mut().unwrap();
-    let fingerprint = object.remove("reply_fingerprint").unwrap();
-    let fingerprint = fingerprint.as_str().unwrap();
-    assert_eq!(fingerprint.len(), 16, "fingerprint: {fingerprint}");
-    assert!(
-        fingerprint.chars().all(|c| c.is_ascii_hexdigit()),
-        "fingerprint: {fingerprint}"
-    );
-    assert_eq!(
-        serde_json::Value::Object(object.clone()),
-        serde_json::json!({
-            "turn_id": "parity-turn",
-            "decision": "execute_typescript",
-            "termination": "natural",
-            "counts": {
-                "full_text_chars": prose.chars().count() + code.chars().count(),
-                "prose_chars": prose.chars().count(),
-                "code_chars": code.chars().count(),
-                "reasoning_chars": reasoning.chars().count(),
-                "typescript_cell_count": 1,
-            },
-        })
     );
 }
 

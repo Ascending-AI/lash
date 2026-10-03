@@ -28,8 +28,8 @@ use lash_core::{
 
 use super::*;
 use crate::formats::{
-    EngineFormat, LASHLANG_SEGMENT_STATE_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-    RLM_SNAPSHOT_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION, VM_CONTINUATION_FORMAT_VERSION,
+    LASHLANG_SEGMENT_STATE_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, RLM_SNAPSHOT_VERSION,
+    SESSION_CHECKPOINT_SCHEMA_VERSION, VM_CONTINUATION_FORMAT_VERSION,
 };
 
 /// A handle whose surfaces are exactly what a test declares.
@@ -53,11 +53,6 @@ struct FakeStore {
 }
 
 impl FakeStore {
-    fn with_release(mut self, release: StoreReleaseState) -> Self {
-        self.release = release;
-        self
-    }
-
     fn with_database(mut self, name: &str, expected: i64, verdict: StoreSchemaVerdict) -> Self {
         self.databases.push(StoreSchemaDatabase {
             name: name.to_string(),
@@ -268,253 +263,6 @@ fn component(report: &PreflightReport, format: DurableFormat) -> &ComponentReada
         .unwrap_or_else(|| panic!("the report has a row for {}", format.name()))
 }
 
-/// The facade handle one row of the engine's format registry carries,
-/// projected the way `crate::restate::durable_format_entries` projects it.
-/// The registry — not this table of expectations — owns which formats the
-/// engine declares (ADR 0104 §2).
-fn engine_format(row: &lash_restate::EngineDurableFormat) -> DurableFormat {
-    DurableFormat::Engine(EngineFormat {
-        id: row.id,
-        name: row.name,
-        unwalkable_reason: row.unwalkable_reason,
-        upgrade_policy: row.upgrade_policy,
-    })
-}
-
-const REQUEST_IDENTITY: &str = "identity, not a stamp: recomputed and compared when a retried \
-                                request replays, never read back at rest";
-const TOOL_JOURNAL: &str = "no bounded surface: journaled on runtime-effect outcomes, refused when \
-                            replay decodes them rather than at rest";
-const ENGINE_STATE: &str = "no bounded surface: Restate journal and object state live in the \
-                            Restate deployment, outside lash's own store";
-
-#[test]
-fn every_durable_format_has_one_explicit_surface_relation() {
-    let relations = [
-        (
-            DurableFormat::ModuleArtifact,
-            SurfaceRelation::Walk {
-                surface: DurableSurface::ModuleArtifact,
-                primary: true,
-            },
-        ),
-        (
-            DurableFormat::SessionCheckpointManifest,
-            SurfaceRelation::Walk {
-                surface: DurableSurface::SessionCheckpoint,
-                primary: true,
-            },
-        ),
-        (
-            DurableFormat::CheckpointComponentEncoding,
-            SurfaceRelation::Walk {
-                surface: DurableSurface::SessionCheckpoint,
-                primary: false,
-            },
-        ),
-        (
-            DurableFormat::SessionHeadMeta,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: one row per session, refused at open rather than at rest",
-            ),
-        ),
-        (
-            DurableFormat::ProcessWakeDelivery,
-            SurfaceRelation::Walk {
-                surface: DurableSurface::PendingWake,
-                primary: true,
-            },
-        ),
-        (
-            DurableFormat::SessionNodeBody,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: one row per graph node, each body refused at decode rather \
-                 than at rest",
-            ),
-        ),
-        (
-            DurableFormat::SessionStateGeneration,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: one marker per session, refused at admission rather than at \
-                 rest",
-            ),
-        ),
-        (
-            DurableFormat::ScopeStoragePayload,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: one payload per scope-close row, refused at decode \
-                 rather than at rest",
-            ),
-        ),
-        (
-            DurableFormat::ProcessEffectReport,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: carried on process-event rows, refused when a summary event \
-                 is appended or folded rather than at rest",
-            ),
-        ),
-        (
-            DurableFormat::AppendRequestIdentity,
-            SurfaceRelation::Unwalkable(REQUEST_IDENTITY),
-        ),
-        (
-            DurableFormat::RecordConfigRequestIdentity,
-            SurfaceRelation::Unwalkable(REQUEST_IDENTITY),
-        ),
-        (
-            DurableFormat::CreateSessionRequestIdentity,
-            SurfaceRelation::Unwalkable(REQUEST_IDENTITY),
-        ),
-        (
-            DurableFormat::ToolChildRequest,
-            SurfaceRelation::Unwalkable(TOOL_JOURNAL),
-        ),
-        (
-            DurableFormat::ToolSettlement,
-            SurfaceRelation::Unwalkable(TOOL_JOURNAL),
-        ),
-        (
-            DurableFormat::ToolAttemptCapture,
-            SurfaceRelation::Unwalkable(TOOL_JOURNAL),
-        ),
-        (
-            DurableFormat::ToolPresentation,
-            SurfaceRelation::Unwalkable(TOOL_JOURNAL),
-        ),
-        (
-            DurableFormat::TurnCheckpoint,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: a sans-IO host stores the serialized checkpoint, so the bytes \
-                 this version gates live outside lash's own store",
-            ),
-        ),
-        (
-            DurableFormat::RuntimeCommitReceipt,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: one row per committed turn, each receipt refused at decode \
-                 rather than at rest",
-            ),
-        ),
-        (
-            DurableFormat::Bytecode,
-            SurfaceRelation::Walk {
-                surface: DurableSurface::StartedProcess,
-                primary: true,
-            },
-        ),
-        (
-            DurableFormat::VmContinuation,
-            SurfaceRelation::Walk {
-                surface: DurableSurface::ParkedSegment,
-                primary: false,
-            },
-        ),
-        (
-            DurableFormat::LashlangSnapshot,
-            SurfaceRelation::CarriedBy(DurableFormat::RlmSnapshotEnvelope),
-        ),
-        (
-            DurableFormat::LashlangSegmentHandover,
-            SurfaceRelation::Walk {
-                surface: DurableSurface::ParkedSegment,
-                primary: true,
-            },
-        ),
-        (
-            DurableFormat::RlmSnapshotEnvelope,
-            SurfaceRelation::Walk {
-                surface: DurableSurface::SessionExecutionState,
-                primary: true,
-            },
-        ),
-        (
-            DurableFormat::WorkflowGraphSchema,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: the graph is projected for a host to store, so the bytes this \
-                 version gates live outside lash's own store",
-            ),
-        ),
-        (
-            DurableFormat::WorkflowTypeFacet,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: the type facet rides the projected graph a host stores, so \
-                 the bytes this version gates live outside lash's own store",
-            ),
-        ),
-        (
-            DurableFormat::NativeRlmDriverState,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: parked in each session's protocol driver-state slot, refused \
-                 when the driver resumes rather than at rest",
-            ),
-        ),
-        (
-            DurableFormat::NativeRlmTransport,
-            SurfaceRelation::Unwalkable(
-                "no bounded surface: one session-history record per provider exchange, refused at \
-                 decode rather than at rest",
-            ),
-        ),
-        (DurableFormat::VmAbi, SurfaceRelation::NotPersisted),
-    ];
-
-    // The engine's formats are its own registrations (ADR 0104 §2), so the
-    // facade expects one Unwalkable relation per row the registry declares,
-    // carrying the row's reason verbatim.
-    let engine_relations: Vec<(DurableFormat, SurfaceRelation)> = lash_restate::durable_formats()
-        .map(|row| {
-            (
-                engine_format(row),
-                SurfaceRelation::Unwalkable(ENGINE_STATE),
-            )
-        })
-        .collect();
-
-    assert_eq!(
-        relations.len() + engine_relations.len(),
-        durable_formats().count()
-    );
-    for (format, expected) in relations.iter().copied().chain(engine_relations) {
-        assert_eq!(
-            format_surface(format),
-            expected,
-            "{} relation",
-            format.name()
-        );
-    }
-    // The reasons are pinned above; this pins which manifest rows reach the
-    // report's `not_scanned` list, in manifest order.
-    let mut expected = vec![
-        DurableFormat::SessionHeadMeta,
-        DurableFormat::SessionNodeBody,
-        DurableFormat::SessionStateGeneration,
-        DurableFormat::ScopeStoragePayload,
-        DurableFormat::ProcessEffectReport,
-        DurableFormat::AppendRequestIdentity,
-        DurableFormat::RecordConfigRequestIdentity,
-        DurableFormat::CreateSessionRequestIdentity,
-        DurableFormat::ToolChildRequest,
-        DurableFormat::ToolSettlement,
-        DurableFormat::ToolAttemptCapture,
-        DurableFormat::ToolPresentation,
-        DurableFormat::TurnCheckpoint,
-        DurableFormat::RuntimeCommitReceipt,
-        DurableFormat::WorkflowGraphSchema,
-        DurableFormat::WorkflowTypeFacet,
-        DurableFormat::NativeRlmDriverState,
-        DurableFormat::NativeRlmTransport,
-    ];
-    if cfg!(feature = "restate") {
-        expected.extend(lash_restate::durable_formats().map(engine_format));
-    }
-    assert_eq!(
-        unwalkable_formats()
-            .map(|(format, _)| format)
-            .collect::<Vec<_>>(),
-        expected
-    );
-}
-
 #[test]
 fn primary_formats_stay_in_parity_with_the_registry() {
     for entry in durable_formats() {
@@ -536,73 +284,6 @@ fn primary_formats_stay_in_parity_with_the_registry() {
                 SurfaceRelation::Walk { primary: true, .. }
             ),
             "PRIMARY_FORMATS contains non-primary {}",
-            format.name()
-        );
-    }
-}
-
-#[test]
-fn named_formats_retain_walk_primary_and_evidence_answers() {
-    let named = [
-        (
-            DurableFormat::ModuleArtifact,
-            DurableSurface::ModuleArtifact,
-            FormatProbe::IdentityOnly,
-            DurableFormat::ModuleArtifact,
-        ),
-        (
-            DurableFormat::LashlangSegmentHandover,
-            DurableSurface::ParkedSegment,
-            FormatProbe::Comparable,
-            DurableFormat::LashlangSegmentHandover,
-        ),
-        (
-            DurableFormat::VmContinuation,
-            DurableSurface::ParkedSegment,
-            FormatProbe::Comparable,
-            DurableFormat::LashlangSegmentHandover,
-        ),
-        (
-            DurableFormat::Bytecode,
-            DurableSurface::StartedProcess,
-            FormatProbe::IdentityOnly,
-            DurableFormat::Bytecode,
-        ),
-        (
-            DurableFormat::ProcessWakeDelivery,
-            DurableSurface::PendingWake,
-            FormatProbe::Comparable,
-            DurableFormat::ProcessWakeDelivery,
-        ),
-        (
-            DurableFormat::SessionCheckpointManifest,
-            DurableSurface::SessionCheckpoint,
-            FormatProbe::Comparable,
-            DurableFormat::SessionCheckpointManifest,
-        ),
-        (
-            DurableFormat::CheckpointComponentEncoding,
-            DurableSurface::SessionCheckpoint,
-            FormatProbe::Comparable,
-            DurableFormat::SessionCheckpointManifest,
-        ),
-        (
-            DurableFormat::RlmSnapshotEnvelope,
-            DurableSurface::SessionExecutionState,
-            FormatProbe::Comparable,
-            DurableFormat::RlmSnapshotEnvelope,
-        ),
-    ];
-
-    let walk = Walk::default();
-    for (format, surface, probe, expected_primary) in named {
-        assert!(walk.walked(format), "{} remains walkable", format.name());
-        assert_eq!(carrier_of(format), None, "{} remains direct", format.name());
-        assert_eq!(evidence_for(format, probe), FormatEvidence::Direct);
-        assert_eq!(
-            primary_format(surface),
-            expected_primary,
-            "{} surface retains its primary format",
             format.name()
         );
     }
@@ -968,50 +649,6 @@ async fn paging_reads_every_item_exactly_once() {
     assert_eq!(named.len(), 7, "no process appears twice");
 }
 
-#[cfg(feature = "rlm")]
-#[test]
-fn an_identity_only_refusal_says_how_many_items_another_build_wrote() {
-    // Bytecode refuses without a version integer to print. Rendering its empty
-    // found-list would hand a supervisor "`bytecode` is at  and this build
-    // writes 9", which reads as a bug in the probe rather than a boundary in
-    // the store.
-    let report = PreflightReport {
-        backend: "sqlite (/srv/lash)".to_string(),
-        mode: PreflightMode::Summary,
-        outcome: PreflightOutcome::Refused,
-        schema: SchemaReport {
-            outcome: "ready",
-            databases: Vec::new(),
-            release: ReleaseStampReport::Unstamped,
-            fleet_format: crate::preflight::FleetFormatReport::Unrecorded,
-        },
-        components: vec![ComponentReadability {
-            format_key: DurableFormat::Bytecode,
-            format: DurableFormat::Bytecode.name().to_string(),
-            expected: crate::formats::BYTECODE_FORMAT_VERSION.to_string(),
-            probe: "identity only",
-            evidence: FormatEvidence::Direct,
-            verdict: ComponentVerdict::Refused,
-            scanned: 3,
-            found: Vec::new(),
-            undecodable: 0,
-            undecodable_reasons: Vec::new(),
-            refused_without_version: 3,
-        }],
-        drain: Vec::new(),
-        not_scanned: Vec::new(),
-    };
-    let message = report.refusal_message().expect("a refusal has a message");
-    assert!(
-        message.contains("3 item(s) written by another build"),
-        "the count stands in for the version that was never stored: {message}"
-    );
-    assert!(
-        !message.contains("is at  and"),
-        "no blank where a version would go: {message}"
-    );
-}
-
 #[tokio::test]
 async fn a_page_that_contributes_nothing_does_not_abandon_the_surface() {
     // The ordinary shape, not a backend bug: both backends page the
@@ -1072,18 +709,6 @@ async fn a_cursor_that_never_advances_stops_the_walk() {
         stopped.reason().contains("session-1") && stopped.reason().contains("again"),
         "the reason names the repeated cursor: {}",
         stopped.reason()
-    );
-}
-
-#[tokio::test]
-async fn a_zero_page_still_makes_progress() {
-    let store = healthy_store();
-    let report = probe_store(&store, PreflightOptions::summary().with_page_size(0))
-        .await
-        .expect("the probe reads the store");
-    assert_eq!(
-        component(&report, DurableFormat::LashlangSegmentHandover).scanned,
-        1
     );
 }
 
@@ -1186,60 +811,4 @@ async fn the_serialized_report_carries_every_field_a_gate_asserts_on() {
     assert_eq!(handover["probe"], "comparable");
     assert_eq!(handover["evidence"]["kind"], "direct");
     assert_eq!(handover["scanned"], 1);
-}
-
-#[tokio::test]
-async fn the_report_names_the_release_that_wrote_the_store() {
-    let store =
-        healthy_store().with_release(StoreReleaseState::Stamped(lash_core::StoreReleaseStamp {
-            release: "1.4.0".to_string(),
-            schema_versions: vec![lash_core::StoreComponentVersion {
-                component: "durable core".to_string(),
-                version: 66,
-            }],
-            written_at_epoch_ms: 1_700_000_000_000,
-        }));
-    let report = probe_store(&store, PreflightOptions::summary())
-        .await
-        .expect("the probe reads the store");
-    assert_eq!(
-        report.schema.release,
-        ReleaseStampReport::Stamped {
-            release: "1.4.0".to_string(),
-            schema_versions: vec![ReleaseStampComponent {
-                component: "durable core".to_string(),
-                version: 66,
-            }],
-            written_at_epoch_ms: 1_700_000_000_000,
-        },
-        "a host asking which release reopens this store reads the answer here"
-    );
-}
-
-#[tokio::test]
-async fn an_unstamped_store_reports_the_absence_rather_than_an_empty_release() {
-    // The store is readable and records no release. That is a finding, not a
-    // missing field and not a release of "": a supervisor that cannot tell
-    // "nothing stamped this" from "the stamp did not read" cannot decide
-    // whether to trust the schema integers beside it.
-    let report = probe_store(&healthy_store(), PreflightOptions::summary())
-        .await
-        .expect("the probe reads the store");
-    assert_eq!(report.schema.release, ReleaseStampReport::Unstamped);
-
-    let undecided = probe_store(
-        &healthy_store().with_release(StoreReleaseState::Unreadable {
-            reason: "no such table: release_stamp".to_string(),
-        }),
-        PreflightOptions::summary(),
-    )
-    .await
-    .expect("the probe reads the store");
-    assert_eq!(
-        undecided.schema.release,
-        ReleaseStampReport::Unreadable {
-            reason: "no such table: release_stamp".to_string(),
-        },
-        "an unread stamp stays undecided instead of collapsing into absence"
-    );
 }

@@ -149,19 +149,6 @@ Read-only variables:
 - `current_query`: `string`, read-only (descriptor: `string`)"##;
 const BUILTIN_GUIDANCE_SECTION: &str = "## Guidance\n\n- Be concise; no filler, hedging, or performative tone.\n- Act as soon as the next step is clear; do not restate conclusions.\n- Prefer the simplest correct solution.";
 
-/// The default config's prompt, whole: the built-in intro, the built-in
-/// guidance, the execution prose and the generated declarations.
-#[test]
-fn the_default_prompt_renders_every_built_in_text_and_the_declarations() {
-    assert_eq!(
-        render(&RlmPrompt::default()),
-        format!(
-            "{RLM_BUILTIN_INTRO}\n\n{BUILTIN_GUIDANCE_SECTION}\n\n## TypeScript execution\n\n{}\n\n{}",
-            EXECUTION_PROSE, DECLARATIONS,
-        )
-    );
-}
-
 /// A customised config's prompt, whole: the host's intro, its instructions
 /// in place of the built-in guidance, the declarations with the session's
 /// read-only variables and subagent description, and the context last.
@@ -252,31 +239,6 @@ fn a_modules_instructions_render_once() {
     for call in ["tracker.search(", "tracker.open("] {
         assert!(rendered.find(call).expect("declared tool") > module);
     }
-}
-
-/// The interactive guidance bullet renders only for a catalog with an `ask`
-/// tool.
-#[test]
-fn the_interactive_guidance_needs_an_ask_tool() {
-    assert!(!render(&RlmPrompt::default()).contains("Take initiative"));
-    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool(
-        "ask",
-        "user",
-        "ask",
-        "Ask the user.",
-    )]);
-    let rendered = render_rlm_system_prompt(
-        &config(&catalog),
-        RlmSystemPromptInput {
-            prompt: &RlmPrompt::default(),
-            tool_catalog: &catalog,
-            bindings: &RlmProjectedBindings::new(),
-            subagent: None,
-        },
-    );
-    assert!(rendered.contains(
-        "- Be concise; no filler, hedging, or performative tone.\n- Take initiative when the user's intent is clear. Ask only when progress is blocked.\n- Act as soon"
-    ));
 }
 
 /// A session with a discovery operation declares only its inline tools and

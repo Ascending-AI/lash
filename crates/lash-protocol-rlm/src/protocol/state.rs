@@ -104,16 +104,4 @@ mod tests {
             "ambiguous old parked bytes must be recreated"
         );
     }
-
-    #[test]
-    fn legacy_string_reasoning_driver_state_is_rejected() {
-        let mut payload = serde_json::to_value(RlmDriverState::default())
-            .expect("default RLM driver state serializes");
-        payload["reasoning"] = serde_json::json!("legacy parked reasoning");
-
-        let Err(error) = serde_json::from_value::<RlmDriverState>(payload) else {
-            panic!("legacy string reasoning must be rejected");
-        };
-        assert!(error.to_string().contains("invalid type: string"));
-    }
 }

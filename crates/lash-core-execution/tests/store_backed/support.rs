@@ -68,7 +68,6 @@ pub mod prelude {
         ProcessEventLogTestSupport as _, ProcessExecutionEnvStore as _, ProcessLifecycle as _,
         ProcessObserverRegistry as _, ProcessQuery as _, ProcessRegistrar as _,
         ProcessRetention as _, ProcessWakeOutbox as _, RuntimeEffectController as _,
-        TestProcessRegistryWriteExt as _,
     };
 }
 

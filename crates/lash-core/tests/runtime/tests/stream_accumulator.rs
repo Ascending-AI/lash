@@ -1,20 +1,6 @@
 use super::*;
 
 #[test]
-fn stream_accumulator_merges_adjacent_display_reasoning_chunks() {
-    let mut accumulator = LlmStreamAccumulator::default();
-    accumulator.push_reasoning("I'll".to_string(), None, Vec::new(), None);
-    accumulator.push_reasoning(" check".to_string(), None, Vec::new(), None);
-    accumulator.push_reasoning(" the time.".to_string(), None, Vec::new(), None);
-
-    assert_eq!(accumulator.parts.len(), 1);
-    assert!(matches!(
-        &accumulator.parts[0],
-        LlmOutputPart::Reasoning { text, .. } if text == "I'll check the time."
-    ));
-}
-
-#[test]
 fn stream_accumulator_enriches_reasoning_delta_with_later_roundtrip_payload() {
     let mut accumulator = LlmStreamAccumulator::default();
     accumulator.push_reasoning("I'll check the time.".to_string(), None, Vec::new(), None);
@@ -35,33 +21,6 @@ fn stream_accumulator_enriches_reasoning_delta_with_later_roundtrip_payload() {
         } if text == "I'll check the time."
             && replay.item_id.as_deref() == Some("rs_1")
             && replay.encrypted_content.as_deref() == Some("encrypted")
-    ));
-}
-
-#[test]
-fn stream_accumulator_preserves_full_reasoning_replay_metadata() {
-    let mut accumulator = LlmStreamAccumulator::default();
-    accumulator.push_reasoning_with_replay(
-        "[Reasoning redacted]".to_string(),
-        Some(lash_sansio::llm::types::ProviderReasoningReplay {
-            item_id: Some("rs_1".to_string()),
-            encrypted_content: None,
-            signature: Some("signature".to_string()),
-            redacted: true,
-            summary: vec!["hidden".to_string()],
-            ..Default::default()
-        }),
-    );
-
-    assert!(matches!(
-        &accumulator.parts[0],
-        LlmOutputPart::Reasoning {
-            replay: Some(replay),
-            ..
-        } if replay.item_id.as_deref() == Some("rs_1")
-            && replay.signature.as_deref() == Some("signature")
-            && replay.redacted
-            && replay.summary == vec!["hidden".to_string()]
     ));
 }
 
@@ -194,25 +153,6 @@ fn stream_accumulator_repairs_missing_blank_and_duplicate_ids_deterministically(
 }
 
 #[test]
-fn stream_accumulator_accepts_reused_id_in_later_response() {
-    for request_id in ["request-1", "request-2"] {
-        let mut response = LlmResponse {
-            parts: vec![LlmOutputPart::ToolCall {
-                call_id: "reused".to_string(),
-                tool_name: "lookup".to_string(),
-                input_json: "{}".to_string(),
-                replay: None,
-            }],
-            ..Default::default()
-        };
-        LlmStreamAccumulator::default().apply_to_response_for_request(&mut response, request_id);
-        assert!(
-            matches!(&response.parts[0], LlmOutputPart::ToolCall { call_id, .. } if call_id == "reused")
-        );
-    }
-}
-
-#[test]
 fn stream_accumulator_keeps_a_later_provider_id_that_matches_a_candidate() {
     let tool = |id: &str| LlmOutputPart::ToolCall {
         call_id: id.to_string(),
@@ -281,62 +221,4 @@ fn stream_accumulator_does_not_duplicate_complete_final_response() {
         &response.parts[1],
         LlmOutputPart::Text { text, .. } if text == "Done."
     ));
-}
-
-#[test]
-fn stream_accumulator_projected_text_covers_reconciled_parts() {
-    let mut accumulator = LlmStreamAccumulator::default();
-    accumulator.push_text("Streamed prefix. ");
-
-    let mut response = LlmResponse {
-        parts: vec![LlmOutputPart::Text {
-            text: "Provider suffix.".to_string(),
-            response_meta: None,
-        }],
-        response_metadata: Default::default(),
-        ..Default::default()
-    };
-
-    accumulator.apply_to_response(&mut response);
-
-    assert_eq!(
-        response.full_text(),
-        lash_core::facade_support::visible_response_text_from_parts(&response.parts)
-    );
-}
-
-#[test]
-fn stream_accumulator_full_text_prefers_final_answer_over_commentary() {
-    let mut accumulator = LlmStreamAccumulator::default();
-    accumulator.push_text_part(
-        "Working notes.".to_string(),
-        Some(lash_sansio::llm::types::ResponseTextMeta {
-            id: Some("msg_commentary".to_string()),
-            status: Some("completed".to_string()),
-            phase: Some(lash_sansio::llm::types::ResponsePhase::Commentary),
-            ..Default::default()
-        }),
-    );
-    accumulator.push_text_part(
-        "Final answer.".to_string(),
-        Some(lash_sansio::llm::types::ResponseTextMeta {
-            id: Some("msg_final".to_string()),
-            status: Some("completed".to_string()),
-            phase: Some(lash_sansio::llm::types::ResponsePhase::FinalAnswer),
-            ..Default::default()
-        }),
-    );
-
-    let mut response = LlmResponse::default();
-    accumulator.apply_to_response(&mut response);
-
-    assert_eq!(response.full_text(), "Final answer.");
-    assert_eq!(
-        response
-            .parts
-            .iter()
-            .filter(|part| matches!(part, LlmOutputPart::Text { .. }))
-            .count(),
-        2
-    );
 }

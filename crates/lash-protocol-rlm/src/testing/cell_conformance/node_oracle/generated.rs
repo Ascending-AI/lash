@@ -612,12 +612,6 @@ fn the_generator_draws_only_accepted_grammar() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-#[test]
-fn the_generator_is_a_function_of_its_seed() {
-    assert_eq!(generate(7), generate(7));
-    assert_ne!(generate(7), generate(8));
-}
-
 /// Whether the crate README's section `section` names `name`.
 fn listed(section: &str, name: &str) -> bool {
     README

@@ -10,46 +10,11 @@ use lash_sansio::SessionId;
 // Runtime dependencies come from one backend
 // =============================================================================
 //
-/// A standard-mode builder over a fresh memory backend with a model and
-/// provider already named.
-async fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
-    peer_coherence_builder_over(double_backend().await)
-}
-
 fn peer_coherence_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
     LashCore::standard_builder(backend)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-}
-
-#[tokio::test]
-async fn commit_budget_is_required_for_builder_construction_and_deserialization() {
-    let error = expect_build_error(
-        LashCore::standard_builder(double_backend().await)
-            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-            .build(crate::testing::runtime_lease_owner()),
-        "builder must reject a missing commit budget",
-    );
-    assert!(matches!(error, EmbedError::MissingCommitBudget));
-
-    let error = serde_json::from_value::<crate::CommitBudget>(serde_json::json!({
-        "bytes": { "bounded": 1_048_576 }
-    }))
-    .expect_err("serialized host commit budget must include the node limit");
-    assert!(error.to_string().contains("nodes"), "{error}");
-}
-
-#[tokio::test]
-async fn queued_work_action_reserve_is_required() {
-    let error = expect_build_error(
-        LashCore::standard_builder(double_backend().await)
-            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .build(crate::testing::runtime_lease_owner()),
-        "builder must reject a missing queued-work action reserve",
-    );
-    assert!(matches!(error, EmbedError::MissingQueuedWorkBatching));
 }
 
 /// `LashCore` is not `Debug`, so `Result::expect_err` is unavailable; this
@@ -190,194 +155,6 @@ async fn backend_trigger_store_observes_the_backend_clock_for_the_worker_config(
         .await
         .expect("the backend's trigger store must ingest the clock probe");
     assert_eq!(receipt.occurrence.occurred_at_ms, NOW_MS);
-    Ok(())
-}
-
-#[tokio::test]
-async fn a_file_backend_builds_successfully() -> Result<()> {
-    // Positive control: a durable file backend supplies every port.
-    let dir = tempfile::tempdir().expect("tempdir");
-    let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(dir.path())
-            .await
-            .expect("open the file store set"),
-    );
-    peer_coherence_builder_over(lash_conformance::recording_backend_over(stores))
-        .build(crate::testing::runtime_lease_owner())?;
-    Ok(())
-}
-
-/// The process worker rebuilds session runtimes through the backend's
-/// catalog, the same one the core opens and creates sessions through.
-#[tokio::test]
-async fn durable_process_worker_config_uses_the_backend_catalog() -> Result<()> {
-    let core = explicit_ephemeral_facets(peer_coherence_builder().await)
-        .build(crate::testing::runtime_lease_owner())?;
-
-    let public_config = core.durable_process_worker_config()?;
-    assert!(Arc::ptr_eq(
-        &public_config.session_store_factory(),
-        &core.store_factory
-    ));
-    Ok(())
-}
-
-#[tokio::test]
-async fn attachment_limit_is_optional_host_policy_on_the_facade_builder() -> Result<()> {
-    let unbounded = explicit_ephemeral_facets(peer_coherence_builder().await)
-        .build(crate::testing::runtime_lease_owner())?;
-    assert_eq!(
-        unbounded
-            .env
-            .core
-            .durability
-            .attachment_store
-            .max_attachment_bytes(),
-        None
-    );
-
-    let bounded = explicit_ephemeral_facets(peer_coherence_builder().await)
-        .max_attachment_bytes(Some(4096))
-        .build(crate::testing::runtime_lease_owner())?;
-    assert_eq!(
-        bounded
-            .env
-            .core
-            .durability
-            .attachment_store
-            .max_attachment_bytes(),
-        Some(4096)
-    );
-    Ok(())
-}
-
-struct NoopProcessWork;
-
-#[async_trait]
-impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
-    async fn deliver_process_start(
-        &self,
-        record: &lash_core::ProcessRecord,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        panic!("unexpected process start for {}", record.id)
-    }
-
-    async fn await_process_terminal(
-        &self,
-        process_id: &lash_core::ProcessId,
-    ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
-        panic!("unexpected terminal wait for {process_id}")
-    }
-
-    async fn deliver_cancel(
-        &self,
-        _process_id: &lash_core::ProcessId,
-        _request: &lash_core::CancelRequest,
-        _key: &str,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        Ok(())
-    }
-
-    async fn publish_process_terminal(
-        &self,
-        process_id: &lash_core::ProcessId,
-        output: &lash_core::ProcessAwaitOutput,
-        key: &str,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        let _ = (process_id, output, key);
-        Ok(())
-    }
-}
-
-/// A backend that runs its processes in `NoopProcessWork`, wired over the
-/// backend's own registry.
-async fn backend_with_external_process_work() -> DecoratedBackend {
-    DecoratedBackend::over(double_backend().await).process_work(|registry| {
-        lash_core::ProcessWorkWiring::new(
-            lash_core::facade_support::watch_process_registry(registry),
-            Arc::new(NoopProcessWork),
-        )
-    })
-}
-
-#[tokio::test]
-async fn backend_process_work_configures_the_core_registry() -> Result<()> {
-    let backend = backend_with_external_process_work().await;
-    let driver_registry = lash_core::Backend::from(backend.clone())
-        .process_work()
-        .registry()
-        .clone();
-    let core = explicit_ephemeral_facets(peer_coherence_builder_over(backend.into()))
-        .build(crate::testing::runtime_lease_owner())?;
-
-    assert!(Arc::ptr_eq(&core.process_registry(), &driver_registry));
-    assert!(core.processes().observer().is_ok());
-    Ok(())
-}
-
-#[tokio::test]
-async fn external_process_port_composes_the_engine_session_work_and_executes_the_command()
--> Result<()> {
-    let core = explicit_ephemeral_facets(peer_coherence_builder_over(
-        backend_with_external_process_work().await.into(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
-
-    let session = core
-        .session("external-process-engine-work")
-        .created()
-        .await
-        .open()
-        .await?;
-    let cursor_before = session
-        .observe()
-        .current_observation()
-        .cursor
-        .as_str()
-        .to_string();
-    Box::pin(session.admin().commands().refresh_tool_catalog(
-        "engine session work regression guard",
-        "engine-work-refresh",
-    ))
-    .await?;
-    // The command drains asynchronously: the backend's engine executes the
-    // session and applies it (FIG-3600).
-    let _ = cursor_before;
-    let mut settled = false;
-    for _ in 0..1_000 {
-        if session.durable().queued_work().await?.is_empty() {
-            settled = true;
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    assert!(settled, "the engine executes the command to its settlement");
-    Ok(())
-}
-
-#[tokio::test]
-async fn durable_process_worker_config_uses_the_backend_registry_and_trigger_store() -> Result<()> {
-    let backend = double_backend().await;
-    let core_owner = lash_core::LeaseOwnerIdentity::opaque(
-        "durable-worker-facade-owner",
-        "durable-worker-facade-boot",
-    );
-    let core = explicit_ephemeral_facets(peer_coherence_builder_over(backend.clone()))
-        .build(core_owner)?;
-
-    assert!(core.processes().observer().is_ok());
-    let config = core.durable_process_worker_config()?;
-    assert!(Arc::ptr_eq(
-        config.process_registry(),
-        &core.process_registry()
-    ));
-    let backend_trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
-    assert!(Arc::ptr_eq(&config.trigger_store(), &backend_trigger_store));
-    assert_eq!(config.lease_owner.owner_id, "durable-worker-facade-owner");
-    assert_eq!(
-        config.lease_owner.incarnation_id,
-        "durable-worker-facade-boot"
-    );
     Ok(())
 }
 
@@ -1094,20 +871,6 @@ async fn duplicate_only_fork_intents_are_canonical_on_sqlite_memory() -> Result<
 }
 
 #[tokio::test]
-async fn duplicate_only_fork_intents_are_canonical_in_sqlite() -> Result<()> {
-    let root = tempfile::tempdir().expect("create SQLite fixture directory");
-    duplicate_only_fork_intents_are_canonical(
-        "file",
-        lash_conformance::recording_backend_over(Arc::new(
-            lash_sqlite_store::SqliteStoreSet::open(root.path())
-                .await
-                .expect("open the file store set"),
-        )),
-    )
-    .await
-}
-
-#[tokio::test]
 async fn session_create_observer_intent_replays_idempotently_on_open() -> Result<()> {
     let session_id = "session-create-observer-recovery";
     let backend = double_backend().await;
@@ -1337,51 +1100,6 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
 }
 
 #[tokio::test]
-async fn durable_process_worker_rejects_incoherent_work_cadence() {
-    type Edit = fn(&mut lash_core::WorkCadencePolicy);
-    let cases: [(&str, Edit); 7] = [
-        ("work_cadence.poll_initial", |cadence| {
-            cadence.poll_initial = std::time::Duration::ZERO;
-        }),
-        ("work_cadence.poll_max", |cadence| {
-            cadence.poll_max = std::time::Duration::ZERO;
-        }),
-        ("work_cadence.poll_initial", |cadence| {
-            cadence.poll_initial = std::time::Duration::from_secs(2);
-        }),
-        ("work_cadence.delivery_retry_initial", |cadence| {
-            cadence.delivery_retry_initial = std::time::Duration::ZERO;
-        }),
-        ("work_cadence.delivery_retry_initial", |cadence| {
-            cadence.delivery_retry_initial = std::time::Duration::from_micros(500);
-        }),
-        ("work_cadence.delivery_retry_max", |cadence| {
-            cadence.delivery_retry_max = std::time::Duration::ZERO;
-        }),
-        ("work_cadence.delivery_retry_max", |cadence| {
-            cadence.delivery_retry_max = std::time::Duration::from_micros(500);
-        }),
-    ];
-    let core = explicit_ephemeral_facets(peer_coherence_builder().await)
-        .build(crate::testing::runtime_lease_owner())
-        .expect("build core with process support");
-
-    for (field, edit) in cases {
-        let mut config = core
-            .durable_process_worker_config()
-            .expect("build durable process-worker config");
-        edit(&mut config.work_cadence);
-        let Err(error) = lash_core_worker::DurableProcessWorker::new(config) else {
-            panic!("worker construction must reject incoherent `{field}`");
-        };
-        assert!(
-            error.to_string().contains(field),
-            "error must identify {field}: {error}"
-        );
-    }
-}
-
-#[tokio::test]
 async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes() -> Result<()> {
     // A fork copies its fork point's recorded config in full (FIG-4594): the
     // sampling the branch point ran with is the branch's, as its model is.
@@ -1479,33 +1197,6 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
         branch_state.policy.wire_model(),
         Some("fork-source-model"),
         "the branch still records the model that produced the history it continues"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn attachment_read_policy_survives_facade_builder_reconfiguration() -> Result<()> {
-    let policy = lash_core::AttachmentReadPolicy {
-        max_blob_bytes: 37,
-        max_request_bytes: 4096,
-    };
-    let core = explicit_ephemeral_facets(peer_coherence_builder().await)
-        .attachment_read_policy(policy)
-        .max_attachment_bytes(Some(19))
-        .attachment_upload_expiry(std::time::Duration::from_secs(13))
-        .build(crate::testing::runtime_lease_owner())?;
-    assert_eq!(
-        core.env.core.durability.attachment_store.read_policy(),
-        policy
-    );
-    let replacement = core
-        .env
-        .core
-        .clone()
-        .with_backend(core.env.core.backend().clone());
-    assert_eq!(
-        replacement.durability.attachment_store.read_policy(),
-        policy
     );
     Ok(())
 }

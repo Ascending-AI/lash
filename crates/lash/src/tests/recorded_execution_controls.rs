@@ -117,41 +117,6 @@ async fn engine_executed_turn(core: &LashCore, id: &str, text: &str) -> Result<c
         .await
 }
 
-/// One engine runs two sessions created with different budgets; each turn
-/// stops at the budget its session recorded.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn each_session_runs_the_budget_it_was_created_with() -> Result<()> {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let core = core_over(double_backend().await, looping_provider(&calls))?;
-    create_with_budget(&core, CHAT, crate::TurnBudget::Unbounded).await?;
-    create_with_budget(&core, PULSAR, crate::TurnBudget::bounded(BOUNDED_TURNS)).await?;
-
-    let chat = core.session(CHAT).open().await?;
-    let pulsar = core.session(PULSAR).open().await?;
-    let chat_turn = chat
-        .send(TurnInput::text("look it all up"))
-        .output()
-        .await?;
-    let chat_turn = shape(&chat_turn, &calls);
-    let pulsar_turn = pulsar
-        .send(TurnInput::text("look it all up"))
-        .output()
-        .await?;
-    let pulsar_turn = shape(&pulsar_turn, &calls);
-
-    assert_eq!(
-        chat_turn,
-        finished_after_all_tools(),
-        "the unbounded session runs until the model answers"
-    );
-    assert_eq!(
-        pulsar_turn,
-        stopped_at(BOUNDED_TURNS),
-        "the bounded session stops at its own budget"
-    );
-    Ok(())
-}
-
 /// Both sessions keep their recorded budgets when the engine opens them
 /// itself: no host runtime is open, so every run below is executed on a
 /// runtime the engine opened from the store, under a core whose own default

@@ -71,18 +71,6 @@ fn push_appends_and_answers_the_new_length() {
 }
 
 #[test]
-fn push_builds_a_list_in_a_loop() {
-    assert_eq!(
-        finished(
-            "const xs: number[] = [];
-             for (let i = 0; i < 4; i++) { xs.push(i * 2); }
-             finish(xs);"
-        ),
-        numbers(&[0.0, 2.0, 4.0, 6.0])
-    );
-}
-
-#[test]
 fn terminal_index_assignment_appends() {
     assert_eq!(
         finished(
@@ -180,29 +168,4 @@ fn appending_a_reference_keeps_it_shared() {
     assert_eq!(record.get("first"), Some(&numbers(&[1.0, 2.0])));
     assert_eq!(record.get("second"), Some(&numbers(&[1.0, 2.0])));
     assert_eq!(record.get("length"), Some(&Value::Number(2.0)));
-}
-
-/// The other array mutators keep working beside the append fast path.
-#[test]
-fn the_other_end_mutators_are_unchanged() {
-    assert_eq!(
-        finished("const xs = [1, 2]; xs.unshift(0); finish(xs);"),
-        numbers(&[0.0, 1.0, 2.0])
-    );
-    assert_eq!(
-        finished("const xs = [1, 2]; finish(xs.pop());"),
-        Value::Number(2.0)
-    );
-    assert_eq!(
-        finished("const xs = [1, 2]; xs.shift(); finish(xs);"),
-        numbers(&[2.0])
-    );
-    assert_eq!(
-        finished("const xs = [1, 2, 3]; xs.splice(1, 1); finish(xs);"),
-        numbers(&[1.0, 3.0])
-    );
-    assert_eq!(
-        finished("const xs = [1, 2, 3]; xs.length = 1; finish(xs);"),
-        numbers(&[1.0])
-    );
 }

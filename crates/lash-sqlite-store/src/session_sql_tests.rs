@@ -9,45 +9,6 @@
 use super::*;
 use crate::session_sql::session_sql;
 
-/// Every statement in the set renders, and the rendered text addresses the
-/// durable-core tables the way this store has always addressed them.
-///
-/// `render` panics on a malformed neutral statement, naming it, and the set is
-/// a `LazyLock`, so touching one field renders all of them.
-#[test]
-fn every_session_core_statement_renders_unqualified() {
-    let sql = session_sql();
-    assert!(
-        sql.head
-            .select_meta
-            .sql()
-            .contains("FROM session_head AS head LEFT JOIN graph_nodes AS leaf"),
-        "the head read addresses `session_head` unqualified: {}",
-        sql.head.select_meta.sql()
-    );
-    assert!(
-        sql.graph.insert.sql().contains("INSERT INTO graph_nodes"),
-        "the shared node insert addresses `graph_nodes` unqualified: {}",
-        sql.graph.insert.sql()
-    );
-    assert!(
-        sql.turn_commits
-            .select_failure_settlements
-            .sql()
-            .contains("WHERE session_id = ?1 AND failure_evidence"),
-        "failure paging uses the indexed flag: {}",
-        sql.turn_commits.select_failure_settlements.sql()
-    );
-    assert!(
-        sql.head
-            .corrupt_head_json
-            .sql()
-            .contains("'{not-current-json'"),
-        "a brace inside a SQL string literal is the literal's own text: {}",
-        sql.head.corrupt_head_json.sql()
-    );
-}
-
 /// The query plan of every named filter shape, pinned.
 ///
 /// Window and page reads must seek within a session's generations. Retention

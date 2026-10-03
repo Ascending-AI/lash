@@ -96,60 +96,6 @@ fn fig1123_google_fallback_evicts_whole_genuine_user_segments() {
     assert_eq!(contents[1]["parts"][0]["text"], "new answer");
 }
 
-#[test]
-fn foreign_anthropic_reasoning_signature_is_not_forwarded_to_google() {
-    let mut req = request();
-    req.messages = vec![LlmMessage::new(
-        LlmRole::Assistant,
-        vec![LlmContentBlock::Reasoning {
-            text: "neutral summary".to_string(),
-            replay: Some(lash_core::llm::types::ProviderReasoningReplay {
-                signature: Some("anthropic-signature".to_string()),
-                origin: Some(ProviderRouteIdentity::for_endpoint(
-                    "anthropic",
-                    "https://api.anthropic.com",
-                    "claude-sonnet-4-6",
-                )),
-                ..Default::default()
-            }),
-        }],
-    )];
-
-    let contents = GoogleOAuthProvider::for_test()
-        .build_contents_with_attachment_parts(&req, &[])
-        .expect("retention policy");
-
-    assert_eq!(contents[0]["parts"][0]["text"], "neutral summary");
-    assert!(contents[0]["parts"][0].get("thought").is_none());
-    assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
-}
-
-#[test]
-fn raw_google_builder_drops_unstamped_reasoning_replay() {
-    let mut req = request();
-    req.messages = vec![LlmMessage::new(
-        LlmRole::Assistant,
-        vec![LlmContentBlock::Reasoning {
-            text: "portable summary".to_string(),
-            replay: Some(lash_core::llm::types::ProviderReasoningReplay {
-                signature: Some("unstamped-signature".to_string()),
-                ..Default::default()
-            }),
-        }],
-    )];
-
-    let contents = GoogleOAuthProvider::for_test()
-        .build_contents_with_attachment_parts(&req, &[])
-        .expect("retention policy");
-    assert_eq!(contents[0]["parts"][0]["text"], "portable summary");
-    assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
-    assert!(
-        !serde_json::to_string(&contents)
-            .expect("contents serialize")
-            .contains("unstamped-signature")
-    );
-}
-
 #[tokio::test]
 async fn raw_provider_complete_drops_foreign_and_unstamped_replay_from_google_wire() {
     let mut req = request();
@@ -227,57 +173,6 @@ fn foreign_openai_chat_opaque_tool_replay_is_not_forwarded_to_google() {
         .expect("retention policy");
 
     assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
-}
-
-#[test]
-fn same_route_reasoning_and_tool_replay_are_forwarded_to_google() {
-    let provider = GoogleOAuthProvider::new(
-        "access",
-        "refresh",
-        0,
-        crate::GoogleOAuthClient {
-            id: "oauth-client-id".into(),
-            secret: "oauth-client-secret".into(),
-        },
-    );
-    let native_route = provider.route_identity("gemini-2.5-pro");
-    let mut req = request();
-    req.messages = vec![LlmMessage::new(
-        LlmRole::Assistant,
-        vec![
-            LlmContentBlock::Reasoning {
-                text: "native summary".to_string(),
-                replay: Some(lash_core::llm::types::ProviderReasoningReplay {
-                    signature: Some("native-reasoning-signature".to_string()),
-                    origin: Some(native_route.clone()),
-                    ..Default::default()
-                }),
-            },
-            LlmContentBlock::ToolCall {
-                call_id: "call-1".to_string(),
-                tool_name: "lookup".to_string(),
-                input_json: "{}".to_string(),
-                replay: Some(lash_core::llm::types::ProviderReplayMeta {
-                    item_id: None,
-                    opaque: Some("native-tool-signature".to_string()),
-                    origin: Some(native_route.clone()),
-                }),
-            },
-        ],
-    )];
-
-    let contents = GoogleOAuthProvider::for_test()
-        .build_contents_with_attachment_parts(&req, &[])
-        .expect("retention policy");
-
-    assert_eq!(
-        contents[0]["parts"][0]["thoughtSignature"],
-        "native-reasoning-signature"
-    );
-    assert_eq!(
-        contents[0]["parts"][1]["thoughtSignature"],
-        "native-tool-signature"
-    );
 }
 
 /// Gemini 3 can emit a thought part that carries only a

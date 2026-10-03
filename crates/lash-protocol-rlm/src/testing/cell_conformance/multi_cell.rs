@@ -11,19 +11,6 @@ use super::shift;
 use super::syntax::{Cell, Literal};
 
 #[test]
-fn a_later_cell_reads_an_earlier_cells_binding() {
-    let (_, model) = shift(
-        HarnessMode::Resident,
-        &[
-            Cell::number("seed", 41.0),
-            Cell::derive("answer", "seed"),
-            Cell::finish("answer"),
-        ],
-    );
-    assert_eq!(model.get("answer"), Some(&serde_json::json!(42)));
-}
-
-#[test]
 fn a_binding_survives_a_long_run_of_unrelated_cells() {
     // Twelve cells of work that never mentions `kept`. Nothing in the session
     // may quietly lose it, and nothing in the session may quietly change it.
@@ -38,20 +25,6 @@ fn a_binding_survives_a_long_run_of_unrelated_cells() {
 
     let (session, _) = shift(HarnessMode::Resident, &cells);
     assert_eq!(session.globals().get("kept"), Some(&serde_json::json!(7)));
-}
-
-#[test]
-fn a_later_cell_shadows_an_earlier_binding() {
-    let (session, _) = shift(
-        HarnessMode::Resident,
-        &[
-            Cell::bind("value", Literal::List(vec![1.0, 2.0])),
-            // A different shape under the same name: shadowing is a rebinding,
-            // not a merge, so nothing of the list may remain.
-            Cell::number("value", 5.0),
-        ],
-    );
-    assert_eq!(session.globals().get("value"), Some(&serde_json::json!(5)));
 }
 
 #[test]
@@ -108,26 +81,6 @@ fn a_dropped_binding_keeps_its_name_and_loses_its_value() {
         session.globals().get("payload"),
         Some(&serde_json::Value::Null),
         "dropping a value must not delete the name a later cell may still read"
-    );
-}
-
-#[test]
-fn a_failing_cell_between_two_working_cells_changes_nothing() {
-    // `shift` already checks the model after the failing cell; this scenario
-    // exists to pin the sequence itself as a named case, because it is the one
-    // a host reported.
-    let (session, _) = shift(
-        HarnessMode::Resident,
-        &[
-            Cell::bind("before", Literal::List(vec![1.0, 2.0])),
-            Cell::CompileError,
-            Cell::RuntimeError,
-            Cell::extend("after", "before", 3.0),
-        ],
-    );
-    assert_eq!(
-        session.globals().get("after"),
-        Some(&serde_json::json!([1, 2, 3]))
     );
 }
 

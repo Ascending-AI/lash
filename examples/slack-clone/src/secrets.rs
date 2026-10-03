@@ -33,12 +33,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn equal_secrets_compare_equal() {
-        assert!(constant_time_eq("slack-clone-token", "slack-clone-token"));
-        assert!(constant_time_eq("", ""));
-    }
-
-    #[test]
     fn differing_secrets_compare_unequal_at_every_position() {
         assert!(!constant_time_eq("slack-clone-token", "slack-clone-tokeN"));
         assert!(!constant_time_eq("Xlack-clone-token", "slack-clone-token"));

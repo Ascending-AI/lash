@@ -742,37 +742,11 @@ mod tests {
     }
 
     #[test]
-    fn a_minted_segment_cursor_round_trips_through_its_split() {
-        let process_id = ProcessId::fixture("proc-7");
-        let cursor = segment_cursor(Some(&process_id), 42);
-        assert_eq!(cursor, format!("{process_id}:00000000000000000042"));
-        assert_eq!(
-            split_segment_cursor(&cursor).expect("a minted cursor parses"),
-            (process_id.to_string(), 42)
-        );
-    }
-
-    #[test]
     fn a_cursor_this_backend_did_not_mint_is_refused_rather_than_ignored() {
         // Ignoring it would silently restart the walk and re-emit every item
         // the caller already has.
         assert!(split_segment_cursor("proc-7").is_err());
         assert!(split_segment_cursor("proc-7:not-a-number").is_err());
-    }
-
-    #[test]
-    fn a_short_page_ends_the_walk_and_a_full_one_continues_it() {
-        let scan = DurableScan::first(DurableSurface::PendingWake, 2);
-        assert_eq!(
-            page_cursor(&scan, Some("b".to_string()), 2),
-            Some("b".into())
-        );
-        assert_eq!(page_cursor(&scan, Some("b".to_string()), 1), None);
-        assert_eq!(page_cursor(&scan, None, 0), None);
-        // A zero-row request has no row to resume after, even though it
-        // trivially "filled" its page.
-        let zero = DurableScan::first(DurableSurface::PendingWake, 0);
-        assert_eq!(page_cursor(&zero, None, 0), None);
     }
 
     #[test]

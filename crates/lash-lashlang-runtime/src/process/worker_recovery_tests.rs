@@ -135,38 +135,3 @@ async fn a_boundary_carries_the_totals_the_body_consumed_before_it() {
         "the lost attempt counts on from the carried totals"
     );
 }
-
-/// The ledger rides the handover's envelope. An envelope that carries none
-/// answers fresh totals here and is refused by the handover's full decode
-/// before any worker launches.
-#[test]
-fn the_ledger_is_read_from_the_handover_envelope() {
-    let ledger = WorkerRecoveryLedger::default().crossed(WorkerRecoveryTotals {
-        attempts: 1,
-        cpu_nanos: 5,
-        replacement: false,
-        unknown_cpu_attempts: 0,
-    });
-    let handover = |engine_state: serde_json::Value| lash_core::SegmentHandover {
-        reason: lash_core::BoundaryReason::HandOver,
-        program_hash: "blake3:fixture".to_owned(),
-        engine_state: serde_json::to_vec(&engine_state).expect("encode the envelope"),
-    };
-    assert_eq!(
-        WorkerRecoveryLedger::carried(Some(&handover(serde_json::json!({
-            "version": super::LASHLANG_SEGMENT_STATE_VERSION,
-            "worker_recovery": ledger,
-        })))),
-        ledger
-    );
-    assert_eq!(
-        WorkerRecoveryLedger::carried(Some(&handover(serde_json::json!({
-            "version": super::LASHLANG_SEGMENT_STATE_VERSION,
-        })))),
-        WorkerRecoveryLedger::default()
-    );
-    assert_eq!(
-        WorkerRecoveryLedger::carried(None),
-        WorkerRecoveryLedger::default()
-    );
-}

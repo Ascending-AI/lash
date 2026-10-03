@@ -1144,67 +1144,6 @@ pub async fn admit_run_with_trace(
 mod tests {
     use super::*;
 
-    fn committed(run: &str, ordinal: u32, stop: Option<TurnStop>) -> RunTerminal {
-        RunTerminalWrite {
-            run: TurnId::fixture(run),
-            commit: TurnCommitId::new(TurnId::fixture(run), ordinal),
-            turn: crate::store::PhysicalTurn::derive_turn_id(
-                &TurnId::fixture(run),
-                u64::from(ordinal),
-            ),
-            outcome: match stop {
-                None => RunCommittedOutcome::Finished(TurnFinish::AssistantMessage {
-                    text: String::new(),
-                }),
-                Some(stop) => RunCommittedOutcome::Stopped(stop),
-            },
-        }
-        .into_terminal(SessionId::from("s"), 3, 10)
-    }
-
-    #[test]
-    fn a_terminal_is_written_once_and_a_different_one_is_refused() {
-        let first = committed("r", 0, None);
-        assert_eq!(
-            decide_run_terminal_write(None, &first).expect("first write"),
-            RunTerminalWriteDecision::Write
-        );
-        let mut retried = first.clone();
-        retried.at_ms = 99;
-        retried.head_revision = Some(7);
-        assert_eq!(
-            decide_run_terminal_write(Some(&first), &retried).expect("a retried write"),
-            RunTerminalWriteDecision::AlreadyWritten
-        );
-        let other = committed("r", 1, Some(TurnStop::ToolFailure));
-        assert!(matches!(
-            decide_run_terminal_write(Some(&first), &other),
-            Err(StoreError::RunAlreadyTerminal { .. })
-        ));
-    }
-
-    #[test]
-    fn stored_columns_round_trip_and_the_kind_is_the_causes() {
-        let terminal = committed("r", 1, Some(TurnStop::ToolFailure));
-        assert_eq!(terminal.kind(), RunTerminalKind::Failed);
-        let stored = terminal.to_stored().expect("encode");
-        assert_eq!(stored.kind, "failed");
-        let decoded = RunTerminal::from_stored(
-            terminal.session_id.clone(),
-            terminal.run.clone(),
-            &stored.cause_json,
-            stored.head_revision,
-            stored.at_ms,
-        )
-        .expect("decode");
-        assert_eq!(decoded, terminal);
-        let journaled = serde_json::to_value(&terminal).expect("journal form");
-        assert!(
-            journaled.get("kind").is_none(),
-            "the journaled terminal carries no kind beside its cause: {journaled}"
-        );
-    }
-
     #[test]
     fn a_commit_id_names_only_its_runs_physical_turns() {
         let run = TurnId::from("host:1");

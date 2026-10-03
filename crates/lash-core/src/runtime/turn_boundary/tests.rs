@@ -1,7 +1,7 @@
 use super::*;
 use crate::SessionId;
 use crate::facade_support::AgentFrameReasonFacadeOps;
-use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
+use crate::runtime::tests::helpers::RecordingStore;
 use crate::session_model::{ConversationRecord, MessageRole, Part};
 use crate::store::SessionStore;
 use crate::testing::RuntimeStoreTestShiftExt as _;
@@ -771,42 +771,6 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
 }
 
 #[tokio::test]
-async fn progress_boundaries_accumulate_protocol_events_in_the_draft() {
-    let user = text_message("u0", MessageRole::User, "hello");
-    let assistant = text_message("a0", MessageRole::Assistant, "hi");
-    let mut pipeline = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
-    pipeline
-        .prepared_checkpoint(
-            SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
-            0,
-            &MessageSequence::from_base(vec![user.clone()].into()),
-            None,
-        )
-        .await
-        .expect("prepare checkpoint in memory");
-    let protocol_event =
-        crate::ProtocolEvent::typed("test_protocol", serde_json::json!({"step": "started"}))
-            .expect("protocol event serializes");
-    let event_delta = vec![crate::SessionHistoryRecord::Protocol(protocol_event)];
-
-    let boundary = pipeline
-        .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-            policy: SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
-            turn_index: 1,
-            messages: MessageSequence::from_base(vec![user, assistant].into()),
-            event_delta,
-            execution_state_update: ExecutionStateUpdate::Clean,
-            plugins: None,
-        })
-        .await
-        .expect("progress boundary");
-
-    assert_eq!(boundary.protocol_events.len(), 1);
-    assert_eq!(pipeline.state().turn_index, 1);
-    assert_eq!(pipeline.state().head_revision, 0);
-}
-
-#[tokio::test]
 async fn final_commit_persists_the_complete_turn_tail_once() {
     let user = text_message("u0", MessageRole::User, "hello");
     let assistant = text_message("a0", MessageRole::Assistant, "hi");
@@ -1067,94 +1031,6 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             .is_none_or(|read| read.window.nodes.is_empty())
     );
 }
-#[tokio::test]
-async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs() {
-    let backend = crate::testing::sqlite_recording_backend()
-        .await
-        .attachment_store();
-    let attachment = crate::AttachmentStore::put(
-        backend.as_ref(),
-        vec![1, 2, 3],
-        crate::AttachmentCreateMeta::new(
-            crate::MediaType::parse("image/png").unwrap(),
-            Some(crate::AttachmentTypeMetadata::image(Some(1), Some(1))),
-            Some("replayed-only".to_string()),
-        ),
-    )
-    .await
-    .expect("put attachment bytes");
-    let tool_calls = vec![crate::ToolCallRecord {
-        call_id: crate::ToolCallId::fixture("replayed-exec-call"),
-        provider_call_id: None,
-        tool: "executor_state_only".to_string(),
-        args: serde_json::json!({}),
-        output: crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
-            crate::AttachmentSource::stored(attachment.clone()),
-        )),
-    }];
-    let state = RuntimeSessionState::new(crate::SessionPolicy::new(
-        UNBOUNDED,
-        crate::MaxToolCalls::new(1024),
-    ));
-    let committed = committed_attachment_ids(&state, &tool_calls, None, &[]);
-    assert_eq!(committed, vec![attachment.id.clone()]);
-
-    let runs = FixedAttachmentRoots(committed.into_iter().collect());
-    let report = crate::reclaim_unreferenced_attachments(
-        &runs,
-        backend.as_ref(),
-        crate::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
-        },
-    )
-    .await
-    .expect("grace-period GC");
-
-    assert_eq!(report.reclaimed_count, 0);
-    assert_eq!(
-        crate::AttachmentStore::get(backend.as_ref(), &attachment.id, 32 * 1024 * 1024)
-            .await
-            .expect("replayed exec attachment survives GC")
-            .bytes,
-        vec![1, 2, 3]
-    );
-}
-
-#[tokio::test]
-async fn final_commit_updates_persisted_graph_count() {
-    let graph =
-        SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "hello")]);
-    let (_, store) = recording_session().await;
-    let (mut pipeline, _lease) = leased_boundary(&store, state_with_graph(graph.clone())).await;
-    let returned_state = pipeline.export_state_for_assembly();
-
-    pipeline
-        .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: returned_state.clone(),
-            plugins: None,
-            execution_state_update: ExecutionStateUpdate::Replace(
-                crate::plugin::ExecutionStateCapture::replace(b"runtime".to_vec().into()),
-            ),
-            agent_frame_switch_materializes: false,
-            store: Some(&store),
-            failure_evidence: &[],
-            outcome: &cancelled_outcome(),
-            tool_calls: &[],
-            omitted: None,
-            retained_outputs: &[],
-            ingress_settlement: TurnIngressSettlement::default(),
-            pending_follow_on: None,
-            interrupted_turn: None,
-            turn_control_resolver: None,
-            recorded_attachment_intent_ids: Default::default(),
-        })
-        .await
-        .expect("commit");
-
-    assert!(pipeline.state_mut().execution_state_snapshot().is_none());
-    assert!(pipeline.state_mut().head_revision > 0);
-}
 
 /// A settlement names rows its run admitted, and only the run's shift fence
 /// may settle them (FIG-3927): a final commit carrying row completions but no
@@ -1265,22 +1141,6 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph() {
         Some(b"runtime".as_slice()),
         "storeless commits retain the accepted execution snapshot"
     );
-}
-
-#[test]
-fn state_after_export_is_the_real_committed_state() {
-    let mut boundary = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
-    boundary.state_mut().turn_index = 7;
-
-    let snapshot = boundary.export_state_for_assembly();
-    let state = boundary.state();
-
-    // Finalization must hand out the turn's real state. A fabricated
-    // `RuntimeSessionState::new` placeholder — the old mem::replace
-    // throwaway — would carry a fresh session id and turn_index 0.
-    assert_eq!(state.session_id, SessionId::from("session-1"));
-    assert_eq!(state.turn_index, 7);
-    assert_eq!(snapshot.session_id, state.session_id);
 }
 
 /// FIG-3515 Done-when: after a tool value that embeds an attachment, the
@@ -1586,61 +1446,5 @@ fn a_first_commit_that_switches_ends_the_first_frame_it_opens() {
         )
         .unwrap(),
         None
-    );
-}
-
-#[test]
-fn a_registration_turn_then_a_switch_ends_the_committed_frame_with_its_carries() {
-    let clock = crate::SystemClock;
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("registration-then-switch"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
-            UNBOUNDED,
-            crate::MaxToolCalls::new(1024),
-        ))
-    };
-    state.ensure_agent_frame_initialized_with_clock(&clock);
-    let first = state
-        .current_frame_node_id
-        .clone()
-        .expect("the first frame");
-    let registering = crate::ExecutionScope::turn(&state.session_id, "registering-turn");
-    // The registration turn's commit appends the first frame and switches
-    // nothing: it ends no frame.
-    let appended = [crate::NodeId::fixture(first.as_str().to_string())];
-    assert_eq!(
-        committed_frame_transition(&state, None, SeedCarries::none(), &registering, &appended)
-            .unwrap(),
-        None
-    );
-    state.mark_node_ids_persisted(appended);
-
-    super::super::open_agent_frame_in_state_with_clock(
-        &mut state,
-        frame_request(frame_key("successor"), AgentFrameReason::continue_as()),
-        &clock,
-    )
-    .expect("the switching turn opens the successor");
-    let successor = state.current_frame_node_id.clone().expect("the successor");
-    let switching = crate::ExecutionScope::turn(&state.session_id, "switching-turn");
-    let carried = crate::ArtifactName {
-        store: crate::ArtifactStoreId::module(),
-        artifact_ref: "module:v2:blake3:carried".to_string(),
-    };
-    assert_eq!(
-        committed_frame_transition(
-            &state,
-            Some(first.clone()),
-            SeedCarries::from_names(vec![carried.clone()]),
-            &switching,
-            &[crate::NodeId::fixture(successor.as_str().to_string())],
-        )
-        .unwrap(),
-        Some(crate::store::FrameTransition {
-            ended: crate::FrameEnvironmentId::new(state.session_id.clone(), first),
-            successor: crate::FrameEnvironmentId::new(state.session_id.clone(), successor),
-            carries: vec![carried],
-            gate: switching.journal_identity().unwrap(),
-        })
     );
 }

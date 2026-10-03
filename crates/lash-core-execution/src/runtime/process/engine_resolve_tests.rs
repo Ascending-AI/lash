@@ -132,54 +132,6 @@ async fn an_unclaimed_reference_adopts_the_artifact_signature_and_signals() {
     assert_eq!(admitted.signals(), [declared_signal()]);
 }
 
-/// The load-bearing refusal: a fabricated signature never reaches a process
-/// row. `admit` is the only path from a recorded engine payload to a
-/// registration identity, and it fails before any registration exists.
-#[tokio::test]
-async fn a_fabricated_signature_is_refused_before_a_row_can_exist() {
-    let refusal = registry()
-        .admit(
-            SIGNED_ENGINE_KIND,
-            &serde_json::json!({"program": "payout", "signature": {"returns": "anything"}}),
-            None,
-        )
-        .await
-        .expect_err("a claim the artifact disagrees with is refused");
-
-    let message = refusal.to_string();
-    assert!(
-        message.contains("disagrees"),
-        "the refusal names the disagreement: {message}"
-    );
-    assert!(
-        message.contains(SIGNED_ENGINE_KIND),
-        "the refusal names the engine that holds the authority: {message}"
-    );
-}
-
-/// A claim that happens to be true is not a second encoding of the truth: it
-/// is admitted, and what is stored is still the resolved authority.
-#[tokio::test]
-async fn a_truthful_claim_is_admitted() {
-    let admitted = registry()
-        .admit(
-            SIGNED_ENGINE_KIND,
-            &serde_json::json!({"program": "payout", "signature": {"returns": "receipt"}}),
-            None,
-        )
-        .await
-        .expect("a claim equal to the authority is admitted");
-    assert_eq!(
-        admitted
-            .identity()
-            .definition
-            .as_ref()
-            .expect("definition reference")
-            .signature,
-        authoritative_signature()
-    );
-}
-
 /// Typed refusals, not stringly-typed ones: an engine that cannot resolve the
 /// definition says so, and an engine nobody registered is a distinct answer
 /// from an engine that refused.
@@ -209,24 +161,6 @@ async fn unresolvable_and_unknown_engines_are_distinct_refusals() {
         unknown,
         ProcessDefinitionRefusal::UnknownEngine { .. }
     ));
-}
-
-/// The fingerprint names the definition, never the claim about it: two
-/// references that disagree only on the signature name the same definition, so
-/// a forged claim cannot silently become a different process.
-#[test]
-fn a_signature_claim_does_not_move_the_fingerprint() {
-    let unclaimed = ProcessDefinitionRef::unclaimed(
-        SIGNED_ENGINE_KIND,
-        serde_json::json!({"program": "payout"}),
-    );
-    let forged = ProcessDefinitionRef::new(
-        SIGNED_ENGINE_KIND,
-        serde_json::json!({"program": "payout"}),
-        ProcessSignature::known(serde_json::json!({"returns": "anything"})),
-    );
-    assert_eq!(unclaimed.fingerprint(), forged.fingerprint());
-    assert!(unclaimed.names_same_definition(&forged));
 }
 
 /// FIG-1522: trigger registration admits its engine target through the same

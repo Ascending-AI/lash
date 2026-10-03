@@ -30,8 +30,6 @@ use registry_types::{
 mod rebind;
 mod registry_impl;
 mod restore_execute;
-#[cfg(test)]
-use rebind::insert_result_entry;
 use rebind::{
     ReconcileMode, export_tool_state_entries, insert_advertised_entry,
     manifest_with_compact_contract, reconcile_tool_state_entries, surfaces_publicly_equal,

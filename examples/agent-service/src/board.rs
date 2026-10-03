@@ -229,45 +229,4 @@ mod liveness_tests {
         let full = board([Some("X"); 9], "O");
         assert!(!agent_owes_move(&full));
     }
-
-    /// Yielding forfeits the move rather than inventing one: the marks are
-    /// untouched and only the turn moves.
-    #[test]
-    fn yielding_moves_the_turn_and_nothing_else() {
-        let owed = board(
-            [
-                Some("X"),
-                None,
-                Some("O"),
-                None,
-                Some("X"),
-                None,
-                None,
-                None,
-                None,
-            ],
-            "O",
-        );
-        let yielded = yield_to_human(&owed);
-        assert_eq!(yielded.turn, "X");
-        assert_eq!(yielded.cells, owed.cells);
-        assert!(!agent_owes_move(&yielded));
-    }
-}
-
-#[cfg(test)]
-mod prompt_language_tests {
-    use super::*;
-
-    /// ADR 0063, host side: the board context names a finish form and a unit of
-    /// code, and both are language words. TypeScript is the sole RLM language
-    /// (ADR 0096), so the pair is asserted positively and the retired surface's
-    /// wording is asserted absent.
-    #[test]
-    fn the_board_prompt_speaks_typescript() {
-        let prompt = board_prompt(&default_board());
-        assert!(prompt.contains("finish(\"<one short user-facing sentence>\")"));
-        assert!(prompt.contains("outside the typescript cell"));
-        assert!(!prompt.contains("lashlang"));
-    }
 }

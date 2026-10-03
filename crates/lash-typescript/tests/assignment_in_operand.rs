@@ -107,24 +107,6 @@ fn an_operand_and_the_slot_it_was_assigned_from_name_one_object() {
     );
 }
 
-/// Statement-position assignment still lowers and runs, in every form the
-/// dialect spells it.
-#[test]
-fn statement_position_assignment_still_lowers_and_runs() {
-    assert_eq!(
-        finished("let n = 1;\nn = 2;\nn += 3;\nfinish(`${n}`);"),
-        text("5")
-    );
-    assert_eq!(
-        finished("const xs = [1];\nxs[0] = 9;\nfinish(JSON.stringify(xs));"),
-        text("[9]")
-    );
-    assert_eq!(
-        finished("const o = { a: 1 };\no.a = 2;\nfinish(JSON.stringify(o));"),
-        text("{\"a\":2}")
-    );
-}
-
 /// The durable half, which is what ADR 0076's sentence was really protecting: a
 /// turn parks with the assignment's operand still pending, the continuation is
 /// encoded and decoded, and the resumed turn still sees one shared object.

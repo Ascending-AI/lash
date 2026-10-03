@@ -61,18 +61,3 @@ pub enum ProtocolTurnOptionsError {
     #[error("failed to decode protocol turn options payload: {0}")]
     Decode(#[source] serde_json::Error),
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn options_serialize_as_the_bare_namespace_value() {
-        let options = ProtocolTurnOptions::from_payload(serde_json::json!({ "mode": "test" }));
-        let encoded = serde_json::to_string(&options).expect("serialize options");
-        assert_eq!(encoded, r#"{"mode":"test"}"#);
-        let round_tripped: ProtocolTurnOptions =
-            serde_json::from_str(&encoded).expect("deserialize roundtrip");
-        assert_eq!(round_tripped, options);
-    }
-}

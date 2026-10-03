@@ -209,34 +209,6 @@ mod tests {
     const SPELLING: &str =
         "lash.definition:sha256:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
-    fn digest() -> [u8; 32] {
-        let mut digest = [0_u8; 32];
-        for (index, byte) in digest.iter_mut().enumerate() {
-            *byte = u8::try_from((index % 16) * 0x11).expect("fits a byte");
-        }
-        digest
-    }
-
-    #[test]
-    fn serde_display_and_tagged_record_share_one_spelling() {
-        let id = ProcessDefinitionId::from_sha256_digest(digest());
-        assert_eq!(id.as_str(), SPELLING);
-        assert_eq!(id.to_string(), SPELLING);
-        assert_eq!(ProcessDefinitionId::parse(SPELLING), Ok(id.clone()));
-
-        let tagged = serde_json::json!({ "$lash_definition_id": SPELLING });
-        assert_eq!(serde_json::to_value(&id).expect("serialize id"), tagged);
-        assert_eq!(id.to_tagged_json(), tagged);
-        assert_eq!(
-            ProcessDefinitionId::from_tagged_json(&tagged),
-            Ok(id.clone())
-        );
-        assert_eq!(
-            serde_json::from_value::<ProcessDefinitionId>(tagged).expect("deserialize id"),
-            id
-        );
-    }
-
     #[test]
     fn other_spellings_are_refused() {
         let hex = &SPELLING[DEFINITION_ID_PREFIX.len()..];

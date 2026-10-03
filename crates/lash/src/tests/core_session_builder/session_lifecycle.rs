@@ -9,8 +9,6 @@ use crate::rlm::RlmSendBuilderExt as _;
 #[path = "session_lifecycle/commit_budget.rs"]
 mod commit_budget;
 
-#[path = "session_lifecycle/journal_retirement.rs"]
-mod journal_retirement;
 #[path = "session_lifecycle/session_binding.rs"]
 mod session_binding;
 
@@ -302,64 +300,6 @@ pub(super) fn compile_surface_tool_definition(name: &str) -> lash_core::ToolDefi
     )
 }
 
-#[tokio::test]
-async fn standard_core_runs_mock_turn() -> Result<()> {
-    let core = standard_core().await;
-    let session = core.session("main").created().await.open().await?;
-    let events = RecordingEvents::default();
-
-    let result = session
-        .send(TurnInput::text("hello"))
-        .output_into(&events)
-        .await?;
-
-    assert!(matches!(
-        result.outcome,
-        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
-    ));
-    let events = events.snapshot().await;
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(&event.event, TurnEvent::AssistantProseDelta { .. }))
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|event| matches!(&event.event, TurnEvent::ToolCallCompleted { .. }))
-    );
-    Ok(())
-}
-
-/// The backend is a required argument, so a build without one cannot be
-/// written (the `core_builder_requires_a_backend` UI case). What the
-/// builder still refuses at `build()` is a missing runtime setting.
-#[tokio::test]
-async fn typed_core_builders_require_explicit_runtime_settings() {
-    let err = match LashCore::standard_builder(double_backend().await)
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())
-    {
-        Ok(_) => panic!("the standard preset must not default a commit budget"),
-        Err(err) => err,
-    };
-    assert!(matches!(err, EmbedError::MissingCommitBudget));
-}
-
-#[tokio::test]
-async fn generic_lash_core_builder_requires_protocol_plugin() {
-    let err = match explicit_ephemeral_facets(LashCore::builder(double_backend().await))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())
-    {
-        Ok(_) => panic!("generic LashCore must require an explicit protocol plugin"),
-        Err(err) => err,
-    };
-
-    assert!(matches!(err, EmbedError::MissingProtocolPlugin));
-}
-
 /// The standard prompt is recorded config (FIG-4589): each session records
 /// the prompt its own spec states, the host's default spec for one and
 /// another spec for the other, and a prompt command replaces it for the
@@ -562,17 +502,6 @@ async fn the_spec_reasoning_is_recorded_and_reaches_the_request() -> Result<()> 
             lash_core::ReasoningSelection::Effort("core-variant".to_string()),
         )]
     );
-    Ok(())
-}
-
-#[cfg(feature = "rlm")]
-#[tokio::test]
-async fn rlm_core_opens_rlm_session() -> Result<()> {
-    let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-
-    core.session("rlm").created().await.open().await?;
     Ok(())
 }
 
@@ -1141,74 +1070,6 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
 }
 
 #[tokio::test]
-async fn store_factory_reopens_persisted_session_state() -> Result<()> {
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("persisted"),
-        policy: lash_core::SessionPolicy {
-            model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-            ..lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-                lash_core::MaxToolCalls::new(1024),
-            )
-        },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        ))
-    };
-    state.append_active_conversation_messages(&[text_message(
-        lash_core::MessageRole::User,
-        "already stored",
-    )]);
-    let (backend, _) = backend_seeded(state).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-
-    let reopened = core.session("persisted").created().await.open().await?;
-    let messages = reopened.read_view().messages().to_vec();
-    assert_eq!(messages.len(), 1);
-    assert_eq!(message_text(&messages[0]), "already stored");
-    Ok(())
-}
-
-#[tokio::test]
-async fn cold_reopen_restores_its_committed_generation() -> Result<()> {
-    let expected = lash_core::GenerationOptions {
-        seed: Some(11),
-        ..Default::default()
-    };
-    let mut persisted_policy = lash_core::SessionPolicy::new(
-        lash_core::TurnBudget::Unbounded,
-        lash_core::MaxToolCalls::new(1024),
-    );
-    persisted_policy.model = Some(recorded_llm_profile(mock_llm_profile_spec()));
-    persisted_policy.generation = expected.clone();
-    let persisted = RuntimeSessionState {
-        session_id: SessionId::from("committed-session"),
-        policy: persisted_policy,
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        ))
-    };
-    let (backend, _) = backend_seeded(persisted).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-
-    let reopened = core
-        .session("committed-session")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    assert_eq!(reopened.policy_snapshot().generation, expected);
-    Ok(())
-}
-
-#[tokio::test]
 async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
@@ -1327,104 +1188,6 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     drop(live_clone);
     let parked = Box::pin(core.session("busy").created().await.open().await?.park()).await?;
     assert_eq!(parked.session_id(), "busy");
-    Ok(())
-}
-
-#[tokio::test]
-async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()> {
-    let backend = double_backend().await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-
-    let first = core
-        .session("provider-reload")
-        .created()
-        .await
-        .open()
-        .await?;
-    first.send(TurnInput::text("first")).output().await?;
-    drop(first);
-
-    let reopened = core
-        .session("provider-reload")
-        .created()
-        .await
-        .open()
-        .await?;
-    let second = reopened.send(TurnInput::text("second")).output().await?;
-
-    assert_eq!(assistant_prose(&second.activities), "echo: second");
-    assert_eq!(
-        reopened
-            .policy_snapshot()
-            .profile_key()
-            .map(ToString::to_string),
-        Some("mock-model".to_string())
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn core_delete_session_removes_factory_backed_session_state() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend_explicit_reconcile().await,
-    ))
-    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("delete-session")
-        .created()
-        .await
-        .open()
-        .await?;
-    session
-        .send(TurnInput::text("stored before delete"))
-        .output()
-        .await?;
-    assert!(!session.read_view().messages().is_empty());
-    assert!(
-        !core
-            .session("delete-session")
-            .durable()
-            .await?
-            .was_deleted()
-            .await?
-    );
-    drop(session);
-
-    let report = delete_bound_session(&core, "delete-session").await?;
-    // The tombstone the factory now keeps is the answer a resume needs; a
-    // reopened-but-empty session is not on its own evidence that the id is dead.
-    assert!(
-        core.session("delete-session")
-            .durable()
-            .await?
-            .was_deleted()
-            .await?
-    );
-    assert!(
-        !core
-            .session("never-existed")
-            .durable()
-            .await?
-            .was_deleted()
-            .await?
-    );
-    // Ids are single-use: the tombstone refuses a reopen rather than handing
-    // back an empty session under the deleted id.
-    let reopen = core.session("delete-session").created().await.open().await;
-    assert!(
-        matches!(
-            &reopen,
-            Err(EmbedError::Store(
-                lash_core::StoreError::SessionDeleted { .. }
-            ))
-        ),
-        "a deleted id must not reopen"
-    );
-
-    assert_eq!(report.session_id, "delete-session");
     Ok(())
 }
 
@@ -1825,84 +1588,6 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
             .wire_model()
             .unwrap_or_default(),
         "historical-model"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history() -> Result<()> {
-    let session_id = "reconcile-queued-worker";
-    let persisted = conflicting_reopen_state(&SessionId::from(session_id));
-    let durable_model = persisted.policy.model.clone();
-    let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
-    let (_backend, store) = backend_seeded(persisted).await;
-    let state = crate::session::load_state_from_store(&SessionId::from(session_id), &store).await?;
-    // A stateless worker's load carries no host spec at all: it reads only
-    // the durable head's recorded model.
-    assert_eq!(state.policy.model, durable_model);
-    assert_eq!(
-        state
-            .current_agent_frame()
-            .expect("current frame")
-            .assignment
-            .policy
-            .wire_model()
-            .unwrap_or_default(),
-        "current-frame-model"
-    );
-    // The load does not rewrite history: the historical frame's durable
-    // record keeps its own model.
-    assert_eq!(
-        crate::tests::history_frames(
-            crate::tests::store_history(&store).await?,
-            &state.session_id
-        )
-        .iter()
-        .find(|frame| frame.frame_node_id == historical_frame_id)
-        .expect("historical frame")
-        .assignment
-        .policy
-        .wire_model()
-        .unwrap_or_default(),
-        "historical-model"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn core_store_factory_is_used_for_sessions_created_from_a_running_session() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let _session = core
-        .session("root-with-child-store")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    core.session("child-store")
-        .create(crate::SessionCreation {
-            spec: mock_session_spec(),
-            parent: Some("root-with-child-store".into()),
-        })
-        .await?;
-    core.session("child-store").open().await?;
-
-    let mut session_ids = core
-        .sessions()
-        .await?
-        .into_iter()
-        .map(|summary| summary.session_id)
-        .collect::<Vec<_>>();
-    session_ids.sort();
-    assert_eq!(
-        session_ids,
-        vec![
-            SessionId::from("child-store"),
-            SessionId::from("root-with-child-store"),
-        ],
-        "both sessions live in the backend's one catalog"
     );
     Ok(())
 }

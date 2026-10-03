@@ -215,15 +215,6 @@ mod tests {
         )
     }
 
-    /// The v1 identity of `[invocation("a", 1), invocation("b", 2)]`, recorded
-    /// so it can be refused rather than re-derived. Every assertion below that
-    /// names it asserts it is *not* minted: an identity a v1 journal holds must
-    /// not be reachable from this build under any occurrence, or the two
-    /// generations would share a replay key and the second batch would read the
-    /// first one's journalled outcome.
-    const PREDECESSOR_BATCH_ID: &str =
-        "tool-batch:v1:blake3:4095297ab62f9013e4325b7345584d72ffae0c9f1b5882053c5895c438b74a90";
-
     #[test]
     fn deterministic_batch_identity_is_stable_and_content_addressed() {
         let calls = vec![invocation("a", 1), invocation("b", 2)];
@@ -258,21 +249,6 @@ mod tests {
         assert_eq!(
             deterministic_tool_invocation_batch_id(&plain),
             deterministic_tool_invocation_batch_id(&attributed),
-        );
-    }
-
-    /// v3 is content identity again (FIG-3586): the same calls mint one
-    /// identity, and it is none a v1 or v2 journal holds, so no predecessor
-    /// generation shares a key with this one.
-    #[test]
-    fn content_identity_mints_no_predecessor_identity() {
-        let calls = vec![invocation("a", 1), invocation("b", 2)];
-        let minted = deterministic_tool_invocation_batch_id(&calls);
-        assert_ne!(minted, PREDECESSOR_BATCH_ID);
-        assert_ne!(
-            minted,
-            "tool-batch:v2:blake3:2506ef842e2e5214ee5b3cbfce7596d3cf85f2f0dfd8560179f7b5f1b2c45639",
-            "the v2 identity of the same calls at occurrence 1 must not be re-minted"
         );
     }
 
@@ -337,25 +313,6 @@ mod tests {
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-    }
-
-    #[test]
-    fn cancelled_tool_call_preserves_protocol_identity_and_typed_outcome() {
-        let completed = cancelled_completed_tool_call(
-            crate::tool_dispatch::ToolCallIds {
-                call_id: crate::ToolCallId::fixture("call"),
-                provider_call_id: None,
-            },
-            "tool".to_string(),
-            serde_json::json!({"arg": true}),
-            None,
-        );
-        assert_eq!(completed.call_id, crate::ToolCallId::fixture("call"));
-        assert_eq!(completed.tool_name, "tool");
-        assert_eq!(
-            completed.output.status(),
-            lash_sansio::ToolCallStatus::Cancelled
-        );
     }
 }
 

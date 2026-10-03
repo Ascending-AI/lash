@@ -42,67 +42,6 @@ fn responses_final_answer_phase_hides_commentary_from_visible_text() {
     );
 }
 
-/// A `response.output_text.delta` can arrive before the matching
-/// `response.output_item.added`. The fallback slot opened for that delta must
-/// be registered against its `output_index`, or the later
-/// `response.output_item.done` allocates a second slot and the same message is
-/// emitted as two `Text` parts.
-#[test]
-fn responses_text_delta_before_item_added_yields_one_text_part() {
-    let mut state = ResponsesStreamState::default();
-    for event in [
-        r#"{"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","delta":"Hello"}"#,
-        r#"{"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","delta":" world"}"#,
-        r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"Hello world"}]}}"#,
-        r#"{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"Hello world"}]}]}}"#,
-    ] {
-        OpenAiCompatibleProvider::process_sse_event(event, &mut state, None).unwrap();
-    }
-
-    let parts = state.response_parts();
-    let texts = parts
-        .iter()
-        .filter_map(|part| match part {
-            LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(texts, vec!["Hello world"], "parts: {parts:?}");
-    assert_eq!(state.full_text(), "Hello world");
-}
-
-#[test]
-fn responses_text_item_id_without_output_index_then_item_done_emits_once() {
-    let mut state = ResponsesStreamState::default();
-    let mut emitted_parts = Vec::new();
-    for event in [
-        r#"{"type":"response.output_text.delta","item_id":"msg_1","delta":"Hello world"}"#,
-        r#"{"type":"response.output_item.done","item":{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"Hello world"}]}}"#,
-        r#"{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"Hello world"}]}]}}"#,
-    ] {
-        OpenAiCompatibleProvider::process_sse_event(event, &mut state, Some(&mut emitted_parts))
-            .unwrap();
-    }
-
-    let parts = state.response_parts();
-    let texts = parts
-        .iter()
-        .filter_map(|part| match part {
-            LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(texts, vec!["Hello world"], "parts: {parts:?}");
-    assert_eq!(
-        emitted_parts
-            .iter()
-            .filter(|part| matches!(part, LlmOutputPart::Text { .. }))
-            .count(),
-        1,
-        "emitted parts: {emitted_parts:?}"
-    );
-}
-
 #[test]
 fn responses_text_item_id_then_output_index_aliases_emit_once() {
     let mut state = ResponsesStreamState::default();

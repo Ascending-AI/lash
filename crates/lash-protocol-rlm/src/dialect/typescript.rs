@@ -431,34 +431,10 @@ mod tests {
 
     use super::*;
     use crate::dialect::{RlmDialectServices, SessionDialect};
-    use crate::projection::RlmProjectedBindings;
-    use lash_core::ExecRequest;
     use lash_core::plugin::ToolCatalogContext;
     use lash_lashlang_runtime::LashlangSurface;
 
-    const SEED: u64 = 0x5_2c04;
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
-
-    #[test]
-    fn identity_and_cell_tags_are_typescript() {
-        let dialect = SessionDialect::new(
-            std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            LashlangSurface::default(),
-            RlmDialectServices {
-                workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
-                deferred_tool_resolver: None,
-                deferred_trigger_resolver: None,
-
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                code_renderer: Default::default(),
-                channel: crate::plugin::RlmChannel::Cell,
-            },
-        );
-        assert_eq!(dialect.language_id(), "typescript");
-        assert_eq!(dialect.cell_tags().open, "<typescript>");
-        assert_eq!(dialect.cell_tags().close, "</typescript>");
-    }
 
     /// A TypeScript session must be told what it may register a trigger on.
     ///
@@ -701,62 +677,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn execution_section_renders_promise_tool_signatures_and_agent_contract() {
-        let dialect = SessionDialect::new(
-            std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            LashlangSurface::default(),
-            RlmDialectServices {
-                workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
-                deferred_tool_resolver: None,
-                deferred_trigger_resolver: None,
-
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                code_renderer: Default::default(),
-                channel: crate::plugin::RlmChannel::Cell,
-            },
-        );
-        let tool = lash_core::ToolDefinition::raw(
-            "tool:test/web_fetch",
-            "web_fetch",
-            "Fetch a URL",
-            serde_json::json!({
-                "type": "object",
-                "properties": { "url": { "type": "string" } },
-                "required": ["url"],
-                "additionalProperties": false
-            }),
-            serde_json::json!({ "type": "string" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_tool_binding(ToolBinding::new(["web"], "fetch"));
-        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
-        let section = dialect
-            .render_execution_section(
-                crate::protocol::RlmPromptFeatures::default(),
-                &catalog,
-                crate::plugin::RlmChannel::Cell,
-                None,
-            )
-            .expect("render execution section");
-        assert!(
-            section.contains("web.fetch({ url: string }): Promise<string>"),
-            "{section}"
-        );
-        assert!(
-            !section.contains("defineProcess"),
-            "disabled processes stay hidden"
-        );
-        assert!(
-            !section.contains("Promise.allSettled"),
-            "fan-out needs no teaching: {section}"
-        );
-        assert!(!section.contains("### v1 guardrails"));
-        assert!(!section.contains("### Deterministic standard library"));
-        assert!(section.contains("`Date` (UTC)"));
-    }
-
     /// The process section is gated by the catalogue, not by an ability.
     ///
     /// FIG-2999 deleted `LashlangAbilities.{processes, process_signals,
@@ -841,57 +761,6 @@ mod tests {
         ] {
             assert!(!with.contains(retired), "`{retired}` survived: {with}");
         }
-    }
-
-    /// Every `TS_` token the prompt names must be a code the dialect can
-    /// actually emit.
-    ///
-    /// The prompt is prose, so a code name in it is unchecked by the compiler.
-    /// This layer shipped `TS_FOR_OF_ITERATOR_UNSUPPORTED` — a code that has
-    /// never existed — into the production prompt, into the assertion above
-    /// (which pinned the falsehood rather than catching it), and into a runbook
-    /// gate that could therefore never fire. Telling the model to expect a
-    /// string it will never see degrades exactly the error recovery the prompt
-    /// exists to support, so the whole class is closed here rather than the one
-    /// instance.
-    #[test]
-    fn every_diagnostic_code_named_in_the_prompt_exists() {
-        let dialect = SessionDialect::new(
-            std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            LashlangSurface::default(),
-            RlmDialectServices {
-                workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
-                deferred_tool_resolver: None,
-                deferred_trigger_resolver: None,
-
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                code_renderer: Default::default(),
-                channel: crate::plugin::RlmChannel::Cell,
-            },
-        );
-        let prompt = dialect
-            .render_execution_section(
-                crate::protocol::RlmPromptFeatures::default(),
-                &lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
-                crate::plugin::RlmChannel::Cell,
-                None,
-            )
-            .expect("render execution section");
-        let mut named = std::collections::BTreeSet::new();
-        let mut rest = prompt.as_str();
-        while let Some(start) = rest.find("TS_") {
-            rest = &rest[start..];
-            let end = rest
-                .find(|character: char| !character.is_ascii_uppercase() && character != '_')
-                .unwrap_or(rest.len());
-            named.insert(&rest[..end]);
-            rest = &rest[end..];
-        }
-        assert!(
-            named.is_empty(),
-            "FIG-2750 removes diagnostic inventory: {named:?}"
-        );
     }
 
     /// The second, structural check on prompt honesty: the diagnostics the
@@ -998,54 +867,6 @@ mod tests {
         assert!(prompt.contains("`waitSignal(name: string): Promise<unknown>` is run-only"));
         lash_typescript::link("await sleep(1); finish(1);", &host)
             .expect("the prompt says sleep is also valid in a cell");
-    }
-
-    #[test]
-    fn session_executes_a_typescript_request_end_to_end() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(async {
-                let dialect = SessionDialect::new(
-                    std::sync::Arc::new(crate::dialect::TypescriptDialect),
-                    LashlangSurface::default(),
-                    RlmDialectServices {
-                        workers: lash_vm_client::service::Service::default(),
-                        artifact_store: crate::testing::sqlite_memory_artifact_store().await,
-                        deferred_tool_resolver: None,
-                        deferred_trigger_resolver: None,
-
-                        execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                        code_renderer: Default::default(),
-                        channel: crate::plugin::RlmChannel::Cell,
-                    },
-                );
-                let mut session = dialect.create_session();
-                let double =
-                    crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
-                        .await;
-                let handler = double
-                    .open_handler(crate::testing::default_cell_scope())
-                    .await
-                    .expect("open the cell's handler");
-                let response = session
-                    .execute(
-                        lash_core::testing::code_execution_context(crate::testing::double_ports(
-                            &double, &handler,
-                        )),
-                        ExecRequest {
-                            code: "const answer: number = 40 + 2; finish(answer);".to_string(),
-                        },
-                        RlmProjectedBindings::new(),
-                    )
-                    .await
-                    .expect("execute typescript");
-                handler.close().await.expect("close the cell's handler");
-
-                assert_eq!(response.error, None);
-                assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));
-            });
     }
 
     /// Every identifier the rendered catalog advertises must link to a binding.

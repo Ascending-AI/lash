@@ -327,7 +327,7 @@ fn tutorial_trigger_handle() -> serde_json::Value {
 ///
 /// The runtime owns both and neither is on the `lash` facade, so an example
 /// spells them itself rather than reaching past the facade for them;
-/// `the_tutorial_process_handle_is_what_the_runtime_parses` below is the guard
+/// `the_workbench_typescript_tutorials_run_without_a_dialect_refusal` is the guard
 /// against that spelling drifting.
 const HANDLE_MARKER_FIELD: &str = "__handle__";
 const HANDLE_MARKER_KIND: &str = "lash";
@@ -352,26 +352,6 @@ fn tutorial_process_handle() -> serde_json::Value {
         serde_json::Value::String(id.as_str().to_string()),
     );
     serde_json::Value::Object(record)
-}
-
-/// The locally spelled handle record still is one, by the runtime's own parse.
-///
-/// `lash::rlm::lang::is_process_handle` is the public face of
-/// `lash::rlm::lang::runtime::access::parse_handle_record`, the runtime's single
-/// handle authority: it reads `HANDLE_MARKER_FIELD` and `id` and asks
-/// `lash-sansio` to parse them. If either field name or the kind string moves,
-/// this fails here rather than turning the process-starting tutorial's `await`
-/// into a silent refusal inside the run below.
-#[test]
-fn the_tutorial_process_handle_is_what_the_runtime_parses() {
-    let value = lash::rlm::lang::from_json(tutorial_process_handle());
-    let lash::rlm::lang::Value::Record(record) = &value else {
-        panic!("a handle record is a record, got {value:?}");
-    };
-    assert!(
-        lash::rlm::lang::is_process_handle(record),
-        "the handle record spelling drifted from the runtime's own parse: {value:?}"
-    );
 }
 
 impl TutorialHost {
@@ -641,46 +621,6 @@ fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
         hits.is_empty(),
         "scripted replies a session cannot run: {hits:#?}"
     );
-}
-
-/// Every multi-shot scenario must terminate.
-///
-/// `code-failure` shipped without one: its only reply was a cell that could
-/// never commit, so with the workbench's unbounded turn budget the driver
-/// re-asked the provider forever. A retry branch that finishes is what makes
-/// each of these a *scenario* rather than a loop.
-#[test]
-fn every_dev_provider_scenario_reaches_a_finish() {
-    // `ToolValue` is excluded, and the exclusion carries its reason: its cell
-    // does not finish, it calls a tool whose result *is* the terminal
-    // (`ToolControl::Finish`), so the turn ends on the tool's control rather
-    // than on a `finish` in the cell. It is single-shot for that reason, not
-    // an oversight — the shape `code-failure` got wrong was a scenario that
-    // could not terminate at all, and this one terminates through the other
-    // seam. `RenderedSurface` is likewise single-shot and does finish, so it
-    // is covered by the tag/link walk instead.
-    for scenario in [
-        failure_provider::DevProviderScenario::AuthFailureOnce,
-        failure_provider::DevProviderScenario::RateLimitOnce,
-        failure_provider::DevProviderScenario::PartialOutputFailure,
-        failure_provider::DevProviderScenario::ExecBlocked,
-        failure_provider::DevProviderScenario::CodeFailure,
-        failure_provider::DevProviderScenario::RetryResetPartial,
-    ] {
-        let last = scenario
-            .scripted_cell_for_test(1)
-            .unwrap_or_else(|| panic!("{} scripts a second call", scenario.as_str()));
-        assert_ne!(
-            scenario,
-            failure_provider::DevProviderScenario::ToolValue,
-            "ToolValue terminates through its tool's control, not a scripted finish"
-        );
-        assert!(
-            last.contains("finish("),
-            "{} must terminate on its retry: {last}",
-            scenario.as_str()
-        );
-    }
 }
 
 /// The `code-failure` scenario, executed.

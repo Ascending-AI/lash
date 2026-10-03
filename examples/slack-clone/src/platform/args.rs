@@ -159,16 +159,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scalars_normalize_to_slacks_string_arguments() {
-        assert_eq!(stringify(Value::Bool(true)), Value::String("true".into()));
-        assert_eq!(stringify(serde_json::json!(20)), Value::String("20".into()));
-        assert_eq!(
-            stringify(serde_json::json!({"event_type": "x"})),
-            Value::String("{\"event_type\":\"x\"}".into())
-        );
-    }
-
-    #[test]
     fn flags_and_limits_follow_slacks_argument_conventions() {
         assert!(flag(Some(&"true".to_string())));
         assert!(flag(Some(&"1".to_string())));

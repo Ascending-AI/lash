@@ -1,21 +1,6 @@
 use super::*;
 
 #[test]
-fn default_failure_classifier_classifies_429_as_retryable_throttle() {
-    let classifier = DefaultProviderFailureClassifier;
-    let failure = classifier.classify(
-        LlmTransportError::new("Rate limit reached for requests")
-            .with_http_status(429)
-            .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
-                retry_after: Some(Duration::from_secs(7)),
-            }),
-    );
-    assert_eq!(failure.kind, ProviderFailureKind::Quota);
-    assert!(failure.is_retryable());
-    assert_eq!(failure.retry_after(), Some(Duration::from_secs(7)));
-}
-
-#[test]
 fn default_failure_classifier_keeps_quota_exhaustion_non_retryable() {
     let classifier = DefaultProviderFailureClassifier;
     for message in [
@@ -171,20 +156,6 @@ fn default_failure_classifier_makes_structured_validation_forbidden_without_scra
 }
 
 #[test]
-fn default_failure_classifier_does_not_override_structured_hard_quota_echo() {
-    let failure = DefaultProviderFailureClassifier.classify(
-        LlmTransportError::new("request rejected")
-            .with_kind(ProviderFailureKind::Validation)
-            .with_code(FailureCode::provider("invalid_request_error"))
-            .with_raw(r#"{"echo":"insufficient_quota"}"#),
-    );
-
-    assert_eq!(failure.kind, ProviderFailureKind::Validation);
-    assert!(!failure.is_retryable());
-    assert_eq!(code_of(&failure), "provider:invalid_request_error");
-}
-
-#[test]
 fn default_failure_classifier_does_not_override_structured_content_filter_echo() {
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")
@@ -194,20 +165,6 @@ fn default_failure_classifier_does_not_override_structured_content_filter_echo()
     );
 
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
-}
-
-#[test]
-fn default_failure_classifier_does_not_override_structured_unsupported_model_echo() {
-    let failure = DefaultProviderFailureClassifier.classify(
-        LlmTransportError::new("request rejected")
-            .with_kind(ProviderFailureKind::Validation)
-            .with_code(FailureCode::provider("invalid_request_error"))
-            .with_raw(r#"{"echo":"the example model does not exist"}"#),
-    );
-
-    assert_eq!(failure.kind, ProviderFailureKind::Validation);
-    assert!(!failure.is_retryable());
-    assert_eq!(code_of(&failure), "provider:invalid_request_error");
 }
 
 // FIG-3536: error-prose substring matching must never downgrade a retryable

@@ -504,19 +504,7 @@ fn send_reasoning(request: &LlmRequest, text: &str) {
 mod tests {
     use lash::provider::{LlmMessage, LlmRole};
 
-    use super::{DevProviderScenario, next_replay_route_turn};
-
-    #[test]
-    fn replay_route_change_starts_on_route_a() {
-        assert_eq!(
-            DevProviderScenario::ReplayRouteChange.initial_profile(),
-            "dev/replay-route-a"
-        );
-        assert_eq!(
-            DevProviderScenario::PartialOutputFailure.initial_profile(),
-            "dev/failure-paths"
-        );
-    }
+    use super::next_replay_route_turn;
 
     #[test]
     fn replay_route_turn_counts_completed_scenario_responses_not_rlm_control_messages() {

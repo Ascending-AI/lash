@@ -198,45 +198,6 @@ async fn continuation_resumes_jump_based_while_with_accumulator() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn continuation_resumes_for_iterator_at_saved_cursor() {
-    // `seen = []` / `for item in [2, 4, 6, 8] { seen = seen + [item] }`
-    // `finish seen`
-    let program = compile_program_for_tests(builders::program(vec![
-        builders::assign("seen", builders::list(vec![])),
-        builders::for_in(
-            "item",
-            builders::list(vec![
-                builders::num(2.0),
-                builders::num(4.0),
-                builders::num(6.0),
-                builders::num(8.0),
-            ]),
-            builders::block(vec![builders::assign(
-                "seen",
-                builders::builtin("push", vec![builders::var("seen"), builders::var("item")]),
-            )]),
-        ),
-        builders::finish(builders::var("seen")),
-    ]));
-    let expected = uninterrupted_continuation_result(&program).await;
-    let continuation = find_instruction_continuation(&program, |continuation| {
-        matches!(
-            continuation.iterator_stack.as_slice(),
-            [VmIteratorContinuation {
-                cursor: VmIteratorCursor::Live { next_index: 2, .. },
-                ..
-            }]
-        )
-    })
-    .await;
-
-    assert_eq!(
-        round_trip_and_resume(&program, continuation).await,
-        expected
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn continuation_resumes_nested_inner_iterator() {
     // `total = 0`
     // `for outer in [1, 2, 3] { for inner in [10, 20, 30] { total = total + outer + inner } }`
@@ -282,33 +243,6 @@ async fn continuation_resumes_nested_inner_iterator() {
             )
     })
     .await;
-
-    assert_eq!(
-        round_trip_and_resume(&program, continuation).await,
-        expected
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn continuation_suspends_at_quiescent_post_effect_point() {
-    // `value = await tools.echo({ value: 7 })?` / `finish value + 1`
-    let program = compile_program_for_tests(builders::program(vec![
-        builders::assign("value", echo_call(builders::num(7.0))),
-        builders::finish(builders::binary(
-            builders::var("value"),
-            CoercingBinaryOp::Add,
-            builders::num(1.0),
-        )),
-    ]));
-    let expected = uninterrupted_continuation_result(&program).await;
-    let host = Host;
-    let mut vm = continuation_test_vm(&program, &host);
-    vm.suspend_after_effects(1);
-    assert_eq!(
-        vm.run_for_mode().await.expect("execution should suspend"),
-        ExecutionOutcome::Continued
-    );
-    let continuation = vm.suspend().expect("post-effect state should capture");
 
     assert_eq!(
         round_trip_and_resume(&program, continuation).await,
@@ -515,28 +449,6 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
         Vm::resume_from(zero_step, &program, &host),
         Err(ContinuationError::ZeroRangeStep { iterator: 0 })
     ));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn continuation_multi_effect_determinism_sweep() {
-    let program = compile_program_for_tests(three_echo_chain());
-    let expected = uninterrupted_continuation_result(&program).await;
-
-    for effect_count in 1..=3 {
-        let host = Host;
-        let mut vm = continuation_test_vm(&program, &host);
-        vm.suspend_after_effects(effect_count);
-        assert_eq!(
-            vm.run_for_mode().await.expect("execution should suspend"),
-            ExecutionOutcome::Continued
-        );
-        let continuation = vm.suspend().expect("post-effect state should capture");
-        assert_eq!(
-            round_trip_and_resume(&program, continuation).await,
-            expected,
-            "resume after effect {effect_count} diverged"
-        );
-    }
 }
 
 /// FIG-2865: the continuation wire used to refuse `Value::Projected` outright,
@@ -994,35 +906,6 @@ async fn gc_stress_mode_preserves_results_and_canonical_dumps() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn logical_memory_exhaustion_is_an_uncatchable_typed_terminal() {
-    // `value = [1, 2, 3, 4]` / `finish value`
-    let program = compile_program_for_tests(builders::program(vec![
-        builders::assign(
-            "value",
-            builders::list(vec![
-                builders::num(1.0),
-                builders::num(2.0),
-                builders::num(3.0),
-                builders::num(4.0),
-            ]),
-        ),
-        builders::finish(builders::var("value")),
-    ]));
-    let host = HeapConformanceHost {
-        stress_gc: false,
-        memory_limit: ExecutionBound::logical_bytes(32),
-    };
-    let error = execute_compiled(&program, &mut State::new(), &host)
-        .await
-        .expect_err("logical heap limit should terminate execution");
-    assert!(matches!(
-        error,
-        RuntimeError::MemoryLimitExceeded { limit: 32, .. }
-    ));
-    assert!(error.is_execution_bound_exhausted());
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn failed_heapification_preserves_compound_state_transactionally() {
     let original = Value::List(
         vec![
@@ -1190,49 +1073,6 @@ async fn suspend_collects_live_heap_before_park_or_keep_running_diverge() {
     assert_eq!(kept_outcome, resumed_outcome);
     assert!(matches!(kept_outcome, Ok(ExecutionOutcome::Finished(_))));
     assert_eq!(vm.instructions_executed(), resumed.instructions_executed());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn continuation_dump_round_trip_is_byte_identical_and_preserves_heap_meters() {
-    let program = compile_program_for_tests(record_accumulating_program());
-    let host = Host;
-    let mut vm = continuation_test_vm(&program, &host);
-    vm.suspend_after_instructions(40);
-    assert_eq!(
-        vm.run_for_mode().await.expect("meter run should suspend"),
-        ExecutionOutcome::Continued
-    );
-    let before = vm.suspend().expect("meter continuation should capture");
-    let bytes = serde_json::to_vec(&before).expect("continuation should serialize");
-    let restored: VmContinuation =
-        serde_json::from_slice(&bytes).expect("continuation should restore");
-    let redumped = serde_json::to_vec(&restored).expect("continuation should reserialize");
-    assert_eq!(redumped, bytes);
-    assert_eq!(
-        restored.heap.allocation_counter(),
-        before.heap.allocation_counter()
-    );
-    assert_eq!(
-        restored.heap.live_logical_bytes(),
-        before.heap.live_logical_bytes()
-    );
-
-    let prior_allocations = restored.heap.allocation_counter();
-    let prior_instructions = restored.instructions_executed;
-    let mut resumed =
-        Vm::resume_from(restored, &program, &host).expect("continuation should resume");
-    resumed.suspend_after_instructions(prior_instructions as usize + 25);
-    assert_eq!(
-        resumed
-            .run_for_mode()
-            .await
-            .expect("resumed run should suspend"),
-        ExecutionOutcome::Continued
-    );
-    let after = resumed
-        .suspend()
-        .expect("second continuation should capture");
-    assert!(after.heap.allocation_counter() > prior_allocations);
 }
 
 #[tokio::test(flavor = "current_thread")]

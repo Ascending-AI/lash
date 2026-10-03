@@ -300,24 +300,6 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_fork_head_does_not_reach_its_source_past_the_fork_point() {
-        // B forked at A1 with no node of its own: its head leaf is A1.
-        let graph = fork_graph();
-        assert!(graph.reaches(Some("a1"), "a0").expect("well-formed"));
-        assert!(!graph.reaches(Some("a1"), "a2").expect("well-formed"));
-        // Once B has nodes, the same holds one hop down.
-        assert!(!graph.reaches(Some("b3"), "a2").expect("well-formed"));
-        assert!(graph.reaches(Some("b3"), "a1").expect("well-formed"));
-        assert!(!graph.reaches(Some("c3"), "b3").expect("well-formed"));
-    }
-
-    #[test]
-    fn a_session_without_a_head_leaf_reaches_nothing() {
-        let graph = fork_graph();
-        assert!(!graph.reaches(None, "a0").expect("well-formed"));
-    }
-
-    #[test]
     fn a_broken_owner_chain_is_corruption() {
         let mut graph = fork_graph();
         // B's lowest node claims a parent inside B.

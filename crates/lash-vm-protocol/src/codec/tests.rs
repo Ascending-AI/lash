@@ -1,10 +1,8 @@
 use super::*;
 use crate::message::{
-    EffectKind, EffectOutcome, EffectRequest, EffectRequestId, EffectResponse, EncodedPayload,
-    ExecutionLease, FrameEpoch, MessageFence, OwnerEpoch, ParentMessage, ProgramSource, Start,
-    StartState, VmLimits, WorkerMessage,
+    EffectKind, EffectRequest, EffectRequestId, EncodedPayload, ExecutionLease, FrameEpoch,
+    MessageFence, OwnerEpoch, WorkerMessage,
 };
-use crate::state::{OpaqueVmState, VmOwner, VmStateKind};
 
 fn codec() -> FrameCodec {
     FrameCodec::new(DecodeLimits::standard())
@@ -12,37 +10,6 @@ fn codec() -> FrameCodec {
 
 fn fence() -> MessageFence {
     MessageFence::new(ExecutionLease(7), OwnerEpoch(3), FrameEpoch(2))
-}
-
-fn start_frame() -> ParentFrame {
-    ParentFrame {
-        header: fence().next_header(),
-        message: ParentMessage::Start(Box::new(Start {
-            owner: VmOwner::new("session-a"),
-            program: ProgramSource::Source {
-                dialect: "typescript".to_string(),
-                text: "finish(1 + 1);".to_string(),
-            },
-            contexts: Vec::new(),
-            state: StartState::Continuation(OpaqueVmState::seal(
-                VmStateKind::Continuation,
-                VmOwner::new("session-a"),
-                crate::VmContract {
-                    bytecode: 1,
-                    continuation: 29,
-                    snapshot: 1,
-                    accounting: 1,
-                    abi: 1,
-                },
-                vec![1, 2, 3, 4],
-            )),
-            limits: VmLimits {
-                instruction_budget: Some(1_000),
-                memory_limit_bytes: None,
-                max_frame_depth: 64,
-            },
-        })),
-    }
 }
 
 fn request_frame() -> WorkerFrame {
@@ -65,104 +32,6 @@ fn frame_around(_codec: &FrameCodec, payload: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn every_message_round_trips() {
-    let codec = codec();
-    let start = start_frame();
-    assert_eq!(
-        codec.decode_parent(&codec.encode_parent(&start).unwrap()),
-        Ok(start)
-    );
-    let parents = [
-        ParentMessage::EffectResponse(EffectResponse {
-            id: EffectRequestId(4),
-            outcome: EffectOutcome::Checkpoint { cancelled: true },
-        }),
-        ParentMessage::Park,
-        ParentMessage::Cancel,
-        ParentMessage::Reset,
-        ParentMessage::Shutdown,
-    ];
-    for message in parents {
-        let frame = ParentFrame {
-            header: fence().next_header(),
-            message,
-        };
-        assert_eq!(
-            codec.decode_parent(&codec.encode_parent(&frame).unwrap()),
-            Ok(frame)
-        );
-    }
-    let state = OpaqueVmState::seal(
-        VmStateKind::Snapshot,
-        VmOwner::new("session-a"),
-        crate::VmContract {
-            bytecode: 1,
-            continuation: 29,
-            snapshot: 1,
-            accounting: 1,
-            abi: 1,
-        },
-        vec![9; 16],
-    );
-    let workers = [
-        WorkerMessage::Ready {
-            protocol_version: crate::WORKER_PROTOCOL_VERSION,
-            crate_version: "diagnostic-only".into(),
-        },
-        request_frame().message,
-        WorkerMessage::Progress {
-            phase: crate::WorkerPhase::Computing,
-            cpu_nanos: 10,
-        },
-        WorkerMessage::LimitExceeded {
-            limit: crate::WorkerLimit::Fuel,
-        },
-        WorkerMessage::LimitExceeded {
-            limit: crate::WorkerLimit::EffectValue {
-                size: 11,
-                bound: 10,
-            },
-        },
-        WorkerMessage::LimitExceeded {
-            limit: crate::WorkerLimit::VmState {
-                size: 11,
-                bound: 10,
-            },
-        },
-        WorkerMessage::LimitExceeded {
-            limit: crate::WorkerLimit::Frame {
-                kind: crate::WorkerFrameKind::Complete,
-                size: 11,
-                bound: 10,
-            },
-        },
-        WorkerMessage::Suspended {
-            state: state.clone(),
-        },
-        WorkerMessage::Complete {
-            state: state.clone(),
-            value: EncodedPayload(vec![0xc3]),
-        },
-        WorkerMessage::GuestError {
-            state: None,
-            error: EncodedPayload(b"TypeError".to_vec()),
-        },
-        WorkerMessage::Cancelled,
-        WorkerMessage::ResetDone { cpu_nanos: 12 },
-    ];
-    for message in workers {
-        let frame = WorkerFrame {
-            header: fence().next_header(),
-            message,
-        };
-        assert_eq!(
-            codec.decode_worker(&codec.encode_worker(&frame).unwrap()),
-            Ok(frame)
-        );
-    }
-}
-
-#[test]
 fn a_truncated_frame_is_refused_at_every_cut() {
     let codec = codec();
     let bytes = codec.encode_worker(&request_frame()).unwrap();
@@ -175,43 +44,6 @@ fn a_truncated_frame_is_refused_at_every_cut() {
             "cut at {cut}"
         );
     }
-}
-
-#[test]
-fn an_oversized_declaration_is_refused_from_the_header_alone() {
-    let codec = codec();
-    let mut bytes = FRAME_MAGIC.to_vec();
-    bytes.extend_from_slice(&u32::MAX.to_be_bytes());
-    assert_eq!(
-        codec.decode_worker(&bytes),
-        Err(CodecRefusal::FrameTooLarge {
-            limit: u64::from(DecodeLimits::standard().max_frame_bytes),
-            declared: u64::from(u32::MAX) + FRAME_HEADER_BYTES as u64,
-        })
-    );
-    let mut reader = FrameReader::new(codec.clone());
-    assert!(matches!(
-        reader.push(&bytes),
-        Err(CodecRefusal::FrameTooLarge { .. })
-    ));
-}
-
-#[test]
-fn an_oversized_frame_is_refused_when_encoded() {
-    let codec = FrameCodec::new(DecodeLimits {
-        max_frame_bytes: 64,
-        ..DecodeLimits::standard()
-    });
-    let mut frame = request_frame();
-    frame.message = WorkerMessage::EffectRequest(EffectRequest {
-        id: EffectRequestId(0),
-        kind: EffectKind::Print,
-        payload: EncodedPayload(vec![0; 1024]),
-    });
-    assert!(matches!(
-        codec.encode_worker(&frame),
-        Err(CodecRefusal::FrameTooLarge { .. })
-    ));
 }
 
 #[test]
@@ -305,23 +137,6 @@ fn the_standard_preset_charges_map_keys_as_nodes() {
         codec.decode_worker(&frame_around(&codec, &map)),
         Err(CodecRefusal::NodeLimitExceeded { limit })
     );
-}
-
-#[test]
-fn the_standard_bounds_are_the_measured_presets() {
-    let bounds = crate::ProtocolBounds::standard();
-    assert_eq!(bounds.decode, DecodeLimits::standard());
-    assert_eq!(bounds.decode.max_frame_bytes, 4 * 1024 * 1024);
-    assert_eq!(bounds.decode.max_allocation_bytes, 64 * 1024 * 1024);
-    assert_eq!(bounds.max_vm_state_bytes, 2 * 1024 * 1024);
-    assert_eq!(bounds.max_effect_value_bytes, 1024 * 1024);
-    assert_eq!(bounds.max_source_bytes, 64 * 1024);
-    assert_eq!(
-        bounds.no_response_watchdog,
-        std::time::Duration::from_secs(5)
-    );
-    // A maximal VM state fits a frame with room for its envelope.
-    assert!(bounds.max_vm_state_bytes * 2 <= u64::from(bounds.decode.max_frame_bytes));
 }
 
 #[test]

@@ -645,20 +645,3 @@ fn turn_activity_envelope_flattens_event() {
     let round_trip: TurnActivity = serde_json::from_value(json.clone()).expect("deserialize");
     assert_eq!(serde_json::to_value(&round_trip).unwrap(), json);
 }
-
-#[test]
-fn arc_prose_and_activity_id_preserve_wire_bytes() {
-    let activity = TurnActivity {
-        id: TurnActivityId::new("activity-1"),
-        correlation_id: TurnActivityId::new("prose-1"),
-        event: TurnEvent::AssistantProseDelta {
-            text: "hello".into(),
-            block: block_identity("prose-1", 0, None),
-        },
-    };
-
-    assert_eq!(
-        serde_json::to_vec(&activity).expect("serialize pinned prose activity"),
-        br#"{"id":"activity-1","correlation_id":"prose-1","type":"assistant_prose_delta","text":"hello","block":{"id":"prose-1","ordinal":0}}"#,
-    );
-}

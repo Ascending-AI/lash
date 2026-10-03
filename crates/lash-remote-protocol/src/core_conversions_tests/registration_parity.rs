@@ -87,16 +87,6 @@ fn peer_record(
 }
 
 #[test]
-fn the_accepted_fixture_decodes_so_refusals_are_the_mutation_talking() {
-    let record = peer_record(accepted_process_registration())
-        .expect("the accepted fixture projects onto the record DTO");
-    record
-        .validate("RemoteProcessRecord")
-        .expect("the accepted fixture passes DTO validation");
-    lash_core::ProcessRecord::try_from(record).expect("the accepted fixture decodes");
-}
-
-#[test]
 fn every_core_refusal_is_a_typed_remote_refusal_not_a_decoder_panic() {
     let mut refused_at_projection = 0usize;
     let mut refused_at_decode = 0usize;

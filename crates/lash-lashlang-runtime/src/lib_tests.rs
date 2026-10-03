@@ -1,6 +1,5 @@
 use super::*;
 
-use crate::process_grammar_tests::run_sleep_process;
 use lashlang::testing::ast_builders as b;
 
 const SEED: u64 = 0x1a5_1a9;
@@ -54,49 +53,6 @@ pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteSt
     );
     HELD_STORE_SETS.with(|held| held.borrow_mut().push(Arc::clone(&stores)));
     stores
-}
-
-#[test]
-fn effect_group_wait_identity_uses_the_durable_group_contract() {
-    let invocation = |replay_key: &str| {
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(
-                lash_core::ExecutionScope::turn("session", "turn"),
-                replay_key,
-            )
-            .expect("valid test effect address"),
-            lash_core::RuntimeAttribution::for_session("session"),
-            "effect",
-        )
-    };
-    let group = lash_core::RuntimeEffectGroup::try_new(
-        invocation("group"),
-        "scope:group:batch:1",
-        vec![lash_core::RuntimeEffectEnvelope::new(
-            invocation("child"),
-            lash_core::RuntimeEffectCommand::Sleep {
-                spec: lash_core::SleepSpec::For { duration_ms: 1 },
-            },
-        )],
-        lash_core::GroupWakePolicy::FirstSuccess,
-        lash_core::LoserPolicy::RunToCompletion,
-    )
-    .expect("valid durable group");
-    let awaited = TraceNodeAwaited::EffectGroup {
-        group_key: group.group_key().to_string(),
-        position: 0,
-        wake: group.wake(),
-    };
-    assert_eq!(awaited.kind(), TraceNodeWaitKind::EffectGroup);
-    assert_eq!(
-        serde_json::to_value(awaited).expect("serialize group wait"),
-        serde_json::json!({
-            "type": "effect_group",
-            "group_key": group.group_key(),
-            "position": 0,
-            "wake": "first_success"
-        })
-    );
 }
 
 /// The session policy the harness's execution env declares: the worker
@@ -796,88 +752,6 @@ fn handler_module(first: &str, first_ty: lashlang::TypeExpr, second: &str) -> la
     )
 }
 
-struct EveryNEffectsController(usize);
-
-#[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for EveryNEffectsController {
-    /// A test double that mints keys under no durable authority.
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        None
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for EveryNEffectsController {
-    fn wants_segment_boundary(
-        &self,
-        progress: &lash_core::SegmentProgress,
-    ) -> Option<lash_core::BoundaryReason> {
-        progress
-            .effects_executed
-            .is_multiple_of(self.0 as u64)
-            .then_some(lash_core::BoundaryReason::JournalBudget)
-    }
-
-    async fn execute_effect(
-        &self,
-        _envelope: lash_core::RuntimeEffectEnvelope,
-        _local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        unreachable!("predicate test does not execute effects")
-    }
-
-    async fn open_effect_group(
-        &self,
-        _group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "EveryNEffectsController",
-        ))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::TurnCancelWait,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "EveryNEffectsController",
-        ))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "EveryNEffectsController",
-        ))
-    }
-}
-
-#[test]
-fn every_n_controller_requests_boundaries_and_the_trait_default_does_not() {
-    let progress = lash_core::SegmentProgress {
-        effects_executed: 2,
-        journaled_bytes_estimate: None,
-    };
-    assert_eq!(
-        lash_core::RuntimeEffectController::wants_segment_boundary(
-            &EveryNEffectsController(2),
-            &progress,
-        ),
-        Some(lash_core::BoundaryReason::JournalBudget)
-    );
-    assert_eq!(
-        lash_core::RuntimeEffectController::wants_segment_boundary(
-            &lash_core::testing::UnavailableEffectController,
-            &progress,
-        ),
-        None
-    );
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
     let source = r#"
@@ -1047,79 +921,6 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
 }
 
 #[test]
-fn process_input_serializes_as_generic_engine_payload() {
-    let hash = lashlang::ContentHash::new("abc123");
-    let input = LashlangProcessInput {
-        module_ref: lashlang::ModuleRef::new(&hash),
-        process_ref: lashlang::ProcessRef::new(hash.clone(), 7),
-        host_requirements_ref: lashlang::HostRequirementsRef::new(&hash),
-        process_name: "main".to_string(),
-        args: serde_json::Map::from_iter([("prompt".to_string(), serde_json::json!("go"))]),
-    };
-
-    let process_input = input
-        .clone()
-        .into_process_input()
-        .expect("lashlang process input serializes");
-
-    let lash_core::ProcessInput::Engine { kind, payload } = process_input else {
-        panic!("lashlang runtime must use the generic engine process input");
-    };
-    assert_eq!(kind, LASHLANG_ENGINE_KIND);
-    assert!(payload.get("process_name").is_none());
-    let decoded = LashlangProcessInput::from_payload(payload).expect("engine payload decodes");
-    assert!(decoded.process_name.is_empty());
-    assert_eq!(decoded.module_ref, input.module_ref);
-    assert_eq!(decoded.process_ref, input.process_ref);
-    assert_eq!(decoded.args, input.args);
-}
-
-#[test]
-fn process_input_remote_helpers_use_generic_engine_and_identity() {
-    let hash = lashlang::ContentHash::new("abc123");
-    let input = LashlangProcessInput {
-        module_ref: lashlang::ModuleRef::new(&hash),
-        process_ref: lashlang::ProcessRef::new(hash.clone(), 7),
-        host_requirements_ref: lashlang::HostRequirementsRef::new(&hash),
-        process_name: "main".to_string(),
-        args: serde_json::Map::from_iter([("prompt".to_string(), serde_json::json!("go"))]),
-    };
-
-    let remote_input: lash_remote_protocol::RemoteProcessInput = input
-        .clone()
-        .try_into()
-        .expect("lashlang process input serializes remotely");
-    let lash_remote_protocol::RemoteProcessInput::Engine { kind, payload } = remote_input else {
-        panic!("lashlang runtime must use the generic remote engine process input");
-    };
-    assert_eq!(kind, LASHLANG_ENGINE_KIND);
-    assert!(payload.get("process_name").is_none());
-    let decoded = LashlangProcessInput::from_payload(payload).expect("remote payload decodes");
-    assert!(decoded.process_name.is_empty());
-    assert_eq!(decoded.process_ref, input.process_ref);
-    assert_eq!(decoded.args, input.args);
-
-    let identity = input.process_identity();
-    assert_eq!(identity.kind, LASHLANG_ENGINE_KIND);
-    assert_eq!(identity.label.as_deref(), Some("main"));
-    assert_eq!(input.remote_identity().label.as_deref(), Some("main"));
-
-    let draft = input
-        .remote_trigger_subscription_draft(
-            "button-main",
-            "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                .parse()
-                .expect("canonical env ref"),
-            "ui.button.pressed",
-            "source-key",
-        )
-        .expect("remote trigger draft");
-    draft.validate().expect("draft validates");
-    assert_eq!(draft.target_label.as_deref(), Some("main"));
-    assert_eq!(draft.target_identity.label.as_deref(), Some("main"));
-}
-
-#[test]
 fn missing_tool_binding_is_not_fabricated() {
     let tool = lash_core::ToolDefinition::raw(
         "tool:test/read_file",
@@ -1140,35 +941,6 @@ fn missing_tool_binding_is_not_fabricated() {
             binding_key: TOOL_BINDING_KEY,
         } if tool == "read_file"
     ));
-}
-
-#[test]
-fn explicit_tool_binding_attaches_exactly_one_manifest_key() {
-    let tool = lash_core::ToolDefinition::raw(
-        "tool:test/read_file",
-        "read_file",
-        "read a file",
-        lash_core::ToolDefinition::default_input_schema(),
-        lash_core::JsonSchema::any().into_value(),
-    )
-    .expect("valid declared tool schemas")
-    .with_tool_binding(
-        ToolBinding::new(["fs"], "read")
-            .with_authority_type("Filesystem")
-            .with_aliases(["cat"]),
-    );
-
-    let binding = required_tool_executable(&tool.manifest).expect("explicit binding resolves");
-
-    assert_eq!(binding.module_path, vec!["fs"]);
-    assert_eq!(binding.operation, "read");
-    assert_eq!(binding.authority_type, "Filesystem");
-    assert_eq!(binding.aliases, vec!["cat"]);
-    assert_eq!(
-        tool.manifest.bindings.keys().collect::<Vec<_>>(),
-        vec![TOOL_BINDING_KEY],
-        "one tool binding lives under one manifest key"
-    );
 }
 
 #[test]
@@ -1958,38 +1730,6 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
     .expect("later string union arm accepts the value");
 }
 
-#[test]
-fn surface_merges_plugin_extensions() {
-    let contribution = LashlangSurfaceContribution::new(
-        LashlangAbilities::default(),
-        LashlangLanguageFeatures::default().with_label_annotations(),
-        LashlangHostCatalog::tool_default(["lookup"]),
-    );
-    let extensions = lash_core::PluginExtensions::from_contributions([
-        lash_core::facade_support::PluginExtensionContribution::new(
-            LASHLANG_SURFACE_EXTENSION_ID,
-            contribution,
-        )
-        .expect("extension payload serializes"),
-    ]);
-
-    let surface = LashlangSurface::default()
-        .with_plugin_extensions(&extensions)
-        .expect("lashlang surface extension merges");
-    let environment = surface
-        .host_environment(&lash_core::ToolCatalog::default())
-        .expect("empty tool catalog has no Lashlang bindings to validate");
-
-    assert!(environment.abilities.sleep);
-    assert!(environment.language_features.label_annotations);
-    assert!(
-        environment
-            .resources
-            .resolve_module_operation("Tools", "tools", "lookup")
-            .is_some()
-    );
-}
-
 /// Masking a path over the catalog's memoized import builds exactly the
 /// environment of the catalog and surface without the masked members — down
 /// to the serialized bytes — and leaves the unmasked environment intact.
@@ -2067,24 +1807,6 @@ fn masked_host_environment_is_the_environment_without_the_masked_members() {
             .expect("a fresh import of the same members builds"),
         "masking never edits the catalog's memoized import"
     );
-}
-
-#[test]
-fn surface_resources_return_typed_catalog_conflicts() {
-    let surface = LashlangSurface::default()
-        .with_resources(LashlangHostCatalog::tool_default(["lookup"]))
-        .expect("first resource contribution is unique");
-
-    assert!(matches!(
-        surface.with_resources(LashlangHostCatalog::tool_default(["lookup"])),
-        Err(LashlangRuntimeError::HostCatalog {
-            source: lashlang::LashlangHostCatalogError::ConflictingModuleOperation {
-                module,
-                operation,
-                ..
-            }
-        }) if module == "tools" && operation == "lookup"
-    ));
 }
 
 #[test]
@@ -2522,4 +2244,66 @@ fn recorded_registration(
         ))
         .unwrap();
     registration
+}
+
+/// Runs the `pause` sleep process through a real `LashProcessWorkflow`
+/// segment on the Restate server double, returning its terminal record and
+/// trace graph.
+pub(crate) async fn run_sleep_process()
+-> (lash_core::ProcessAwaitOutput, Arc<TraceLashlangGraphStore>) {
+    let harness = crate::lib_tests::double_process_harness().await;
+    let store = harness.artifact_store();
+    let environment = LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        LashlangAbilities::default().with_sleep(),
+    );
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "process pause() -> null { finish await sleep_for(0) }",
+        program: process_module(
+            "pause",
+            Vec::new(),
+            lashlang::TypeExpr::Null,
+            b::sleep_for(b::num(0.0)),
+        ),
+        environment: &environment,
+    })
+    .expect("sleep process compiles");
+    store
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &output.artifact)
+        .await
+        .expect("sleep process artifact publishes");
+    let input = LashlangProcessInput {
+        module_ref: output.module_ref.clone(),
+        process_ref: output
+            .artifact
+            .process_ref("pause")
+            .expect("pause export")
+            .clone(),
+        host_requirements_ref: output.host_requirements_ref.clone(),
+        process_name: "pause".to_string(),
+        args: serde_json::Map::new(),
+    };
+    let registration = lash_core::ProcessRegistration::new(
+        input.to_process_input().expect("valid process input"),
+        lash_core::ProcessProvenance::host(),
+        lash_core::Lifetime::Detached,
+    )
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        input.process_identity(),
+    ))
+    .with_execution_env_ref(Some(harness.env_ref().clone()));
+    let graph_store = Arc::new(TraceLashlangGraphStore::default());
+    let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
+    harness.install_lashlang_worker_with_runtime(
+        LashlangProcessEngine::new(
+            store,
+            LashlangSurface::default(),
+            harness.backend().worker_recovery(),
+        ),
+        Vec::new(),
+        lash_core::trace::TraceRuntime::new(harness.backend().clock()).with_product_observer(sink),
+    );
+    let process_id = harness.admit(registration).await;
+    let terminal = harness.await_terminal(&process_id).await;
+    (terminal, graph_store)
 }

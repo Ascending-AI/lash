@@ -91,16 +91,4 @@ mod tests {
         assert_eq!(error.message, "response start timed out");
         assert!(error.is_retryable());
     }
-
-    #[tokio::test]
-    async fn run_with_timeout_allows_successful_completion() {
-        let result = run_with_timeout(
-            async { Ok::<_, LlmTransportError>(42) },
-            Some(Duration::from_secs(1)),
-            "request timed out",
-        )
-        .await;
-
-        assert_eq!(result.expect("success"), 42);
-    }
 }

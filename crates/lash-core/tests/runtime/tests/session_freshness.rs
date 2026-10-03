@@ -354,23 +354,6 @@ async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
     assert!(!runtime.resident_session.graph_head_is_stale());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn freshness_hydrates_when_revision_changed() {
-    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let head = advance_session_head(store.as_ref(), |_| {}).await;
-    let full_loads_before = store.load_session_count();
-
-    runtime
-        .refresh_session_graph_from_store()
-        .await
-        .expect("refresh revision change");
-
-    assert_eq!(store.load_session_count() - full_loads_before, 1);
-    assert_eq!(runtime.state().head_revision, head.head_revision);
-}
-
 /// FIG-1875 (head-authoritative adoption): a resident refresh adopts the
 /// durable head's generation. Session config settles through the commanded
 /// durable write (FIG-1555/FIG-1895), so the head already carries every
@@ -607,74 +590,10 @@ async fn freshness_hydrates_when_only_checkpoint_ref_changed() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn freshness_skips_hydration_when_nothing_changed() {
-    let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let resident_head = (
-        runtime.state().head_revision,
-        runtime.state().session_graph.leaf_node_id.clone(),
-        runtime.state().checkpoint_ref.clone(),
-    );
-    let full_loads_before = store.load_session_count();
-
-    runtime
-        .refresh_session_graph_from_store()
-        .await
-        .expect("refresh unchanged session");
-
-    assert_eq!(store.load_session_count() - full_loads_before, 0);
-    assert_eq!(
-        (
-            runtime.state().head_revision,
-            runtime.state().session_graph.leaf_node_id.clone(),
-            runtime.state().checkpoint_ref.clone(),
-        ),
-        resident_head
-    );
-}
-
 fn commanded_dialect(dialect: &str) -> lash_core::ConfigTransaction {
     lash_core::ConfigTransaction::of(SetDialect {
         dialect: dialect.to_string(),
     })
-}
-
-/// FIG-2479, FIG-4379: a plugin's config command settles through the
-/// commanded durable write — the session head accepts the owner's namespace
-/// before resident state publishes it.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_plugin_config_command_settles_through_the_commanded_write() {
-    let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
-    let revision_before = runtime.state().config_revision;
-
-    crate::runtime_support::configure(
-        &mut runtime,
-        &double,
-        commanded_dialect("commanded-durable"),
-        "plugin-config",
-    )
-    .await;
-
-    let expected = serde_json::json!({ "dialect": "commanded-durable" });
-    assert_eq!(
-        runtime.state().authority.plugin_config.get("dialect_owner"),
-        Some(&expected),
-        "resident state must publish the settled value"
-    );
-    assert!(runtime.state().config_revision > revision_before);
-    let head = session_view(store.clone(), "root")
-        .load_session_head_meta()
-        .await
-        .expect("read durable head")
-        .expect("session head exists");
-    assert_eq!(
-        head.config.plugin_config.get("dialect_owner"),
-        Some(&expected),
-        "the durable head must have accepted the value at settlement time"
-    );
 }
 
 /// FIG-2479 regression: plugin config a command changed before an

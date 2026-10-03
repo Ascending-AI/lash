@@ -888,23 +888,3 @@ pub use lash_core_execution::{EffectAttempt, RecordedEffectExecution};
 
 #[cfg(test)]
 mod attachments_tests;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn invalid_agent_frame_seed_is_rejected_at_the_serde_boundary() {
-        let frame_key =
-            FrameKey::from_caller_material("delegate").expect("non-empty caller material");
-        let err = serde_json::from_value::<ToolControl>(serde_json::json!({
-            "type": "switch_agent_frame",
-            "frame_key": frame_key,
-            "initial_nodes": [{ "not": "a session append node" }],
-            "task": "continue the work"
-        }))
-        .expect_err("invalid seed cannot construct a tool control");
-
-        assert!(err.to_string().contains("kind"), "unexpected error: {err}");
-    }
-}

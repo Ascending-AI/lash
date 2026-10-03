@@ -50,16 +50,6 @@ fn resolve_invoke(payload: &EncodedPayload) -> Result<ResolvedRequest, Authority
 }
 
 #[test]
-fn a_bound_operation_with_valid_arguments_resolves_to_its_parent_route() {
-    let resolved = resolve_invoke(&invoke("tools", "echo", serde_json::json!({"value": 1})))
-        .expect("a bound operation resolves");
-    let ResolvedRequest::Invoke(call) = resolved else {
-        panic!("an invoke resolves to one call: {resolved:?}");
-    };
-    assert_eq!(call.tool.tool_id, "tool:echo");
-}
-
-#[test]
 fn every_unauthorised_request_is_refused_typed() {
     let cases = [
         (

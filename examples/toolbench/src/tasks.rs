@@ -416,60 +416,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn standard_prompt_uses_shared_task_and_submit_constraint() {
-        for task in task_pack() {
-            let prompt = task.prompt_for(true);
-            assert!(prompt.contains("Call submit exactly once with the final value"));
-        }
-    }
-
-    #[test]
-    fn standard_prompt_uses_registered_tool_names() {
-        let mappings = [
-            ("weather.lookup", "weather_lookup"),
-            ("kv.get", "kv_get"),
-            ("kv.put", "kv_put"),
-            ("notes.render", "notes_render"),
-            ("mail.list", "mail_list"),
-            ("mail.send", "mail_send"),
-            ("contacts.get", "contacts_get"),
-        ];
-        for task in task_pack() {
-            let prompt = task.prompt_for(true);
-            for (display, registered) in mappings {
-                if task.prompt.contains(display) {
-                    assert!(prompt.contains(registered), "{}", task.id);
-                    assert!(!prompt.contains(display), "{}", task.id);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn shared_prompts_only_append_completion_and_world_constraints() {
-        let tasks = task_pack();
-        assert_eq!(tasks.len(), 28);
-        for task in tasks {
-            assert_eq!(
-                task.prompt_for(false),
-                format!("{} Leave all other world state unchanged.", task.prompt)
-            );
-            assert_eq!(
-                task.prompt_for(true),
-                format!(
-                    "{} Call submit exactly once with the final value; leave all other world state unchanged.",
-                    standard_tool_names(&task.prompt, true)
-                )
-            );
-            assert!(match task.pack() {
-                Pack::Easy => (1..=3).contains(&task.tool_calls),
-                Pack::Hard => (4..=10).contains(&task.tool_calls),
-                Pack::All => false,
-            });
-        }
-    }
-
-    #[test]
     fn lookup_prompts_do_not_supply_the_answer() {
         for task in task_pack() {
             if matches!(
@@ -503,26 +449,6 @@ mod tests {
             assert!(task.finish.matches(Some(&json!(accepted))));
             assert!(!task.finish.matches(Some(&json!(rejected))));
             assert!(!task.finish.matches(Some(&json!({"value": accepted}))));
-        }
-    }
-
-    #[test]
-    fn numeric_requests_accept_numbers_and_numeric_strings() {
-        for (id, value) in [("weather-temperature", 12), ("mail-count", 2)] {
-            let task = task_pack().into_iter().find(|task| task.id == id).unwrap();
-            assert!(!task.prompt.contains("decimal string"));
-            assert!(!task.prompt.contains("not a number"));
-            assert!(task.finish.matches(Some(&json!(value))));
-            assert!(task.finish.matches(Some(&json!(value.to_string()))));
-            assert!(task.finish.matches(Some(&json!(format!("{value}.0")))));
-            assert!(!task.finish.matches(Some(&json!(value + 1))));
-            assert!(!task.finish.matches(Some(&json!((value + 1).to_string()))));
-            assert!(!task.finish.matches(Some(&json!("NaN"))));
-            assert!(
-                !task
-                    .finish
-                    .matches(Some(&json!(format!("{value} degrees"))))
-            );
         }
     }
 

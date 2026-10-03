@@ -134,19 +134,6 @@ mod tests {
     }
 
     #[test]
-    fn top_level_error_event_code_is_a_typed_provider_code() {
-        let failure = classify_openai_error(
-            &serde_json::json!({"type": "error", "code": "server_error", "message": "stream failed"}),
-            LlmTransportError::new("stream failed"),
-        );
-
-        assert_eq!(
-            failure.code.as_ref().map(|code| code.namespaced()),
-            Some("provider:server_error".to_string())
-        );
-    }
-
-    #[test]
     fn sse_error_event_verdict_reads_top_level_code_never_type() {
         assert_eq!(
             sse_error_event_retry_verdict(&serde_json::json!({

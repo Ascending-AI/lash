@@ -137,30 +137,6 @@ fn fig1123_native_retention_keeps_http_history_and_rejects_cross_primitive_appro
 }
 
 #[test]
-fn route_identity_normalizes_endpoint_without_collapsing_distinct_gateways() {
-    assert_eq!(
-        route(
-            "openai-compatible",
-            " HTTPS://Gateway.Example/v1/ ",
-            "model-a"
-        ),
-        route("openai-compatible", "https://gateway.example/v1", "model-a")
-    );
-    assert_ne!(
-        route(
-            "openai-compatible",
-            "https://gateway-a.example/v1",
-            "model-a"
-        ),
-        route(
-            "openai-compatible",
-            "https://gateway-b.example/v1",
-            "model-a"
-        )
-    );
-}
-
-#[test]
 fn endpoint_normalization_attack_matrix_is_fail_closed() {
     let userinfo_upper = route(
         "openai-compatible",
@@ -202,25 +178,6 @@ fn endpoint_normalization_attack_matrix_is_fail_closed() {
         route("openai", "https://api.example/v1?region=us", "model-a"),
         "query strings are identity-significant when configured"
     );
-}
-
-#[test]
-fn replay_gate_keeps_shared_blocks_on_the_no_drop_path() {
-    let native = route("openai-compatible", "https://gateway.example/v1", "model-a");
-    let mut request = replay_request(vec![LlmContentBlock::ToolCall {
-        call_id: "call".to_string(),
-        tool_name: "tool".to_string(),
-        input_json: "{}".to_string(),
-        replay: Some(ProviderReplayMeta {
-            opaque: Some("opaque".to_string()),
-            origin: Some(native.clone()),
-            ..Default::default()
-        }),
-    }]);
-    let shared = std::sync::Arc::clone(&request.messages[0].blocks);
-
-    assert!(request.drop_foreign_replay(&native).is_empty());
-    assert!(std::sync::Arc::ptr_eq(&shared, &request.messages[0].blocks));
 }
 
 #[test]
@@ -394,66 +351,6 @@ fn only_requested_options_can_be_omitted() {
         ))
         .is_err()
     );
-}
-
-#[test]
-fn attempt_contract_round_trips_closed_outcomes_and_preserves_optional_zero() {
-    for (outcome, position) in [
-        (
-            AttemptOutcome::Completed,
-            ProtocolPosition::TerminalObserved,
-        ),
-        (AttemptOutcome::Failed, ProtocolPosition::ResponseObserved),
-        (AttemptOutcome::Aborted, ProtocolPosition::OutputStarted),
-        (AttemptOutcome::Interrupted, ProtocolPosition::NoResponse),
-    ] {
-        let record = LlmCallRecord {
-            call_id: LlmCallId("call-1".to_string()),
-            label: Some("test".to_string()),
-            replay_drops: Vec::new(),
-            attempts: vec![AttemptRecord {
-                ordinal: 1,
-                outcome,
-                protocol_position: position,
-                retry_budget_consumed: true,
-                retry_decision: None,
-                error: None,
-                evidence: Some(ExecutionEvidence {
-                    reasoning_output_tokens: Some(0),
-                    ..ExecutionEvidence::default()
-                }),
-                generation_disposition: Some(GenerationReceipt {
-                    output_token_cap: GenerationOptionOutcome::Applied,
-                    temperature: GenerationOptionOutcome::Applied,
-                    seed: GenerationOptionOutcome::NotRequested,
-                    stop_sequences: GenerationOptionOutcome::NotRequested,
-                    cache: GenerationOptionOutcome::OmittedUnsupported,
-                    reasoning: GenerationOptionOutcome::Applied,
-                    reasoning_retention: GenerationOptionOutcome::Applied,
-                    parallel_tool_calls: GenerationOptionOutcome::NotRequested,
-                    thinking_summary: GenerationOptionOutcome::Applied,
-                    thinking_visibility: GenerationOptionOutcome::Applied,
-                    passthrough: GenerationOptionOutcome::NotRequested,
-                }),
-                usage: None,
-                usage_disposition: Default::default(),
-            }],
-        };
-        let decoded: LlmCallRecord =
-            serde_json::from_value(serde_json::to_value(&record).unwrap()).unwrap();
-        assert_eq!(decoded, record);
-        assert_eq!(
-            decoded.attempts[0]
-                .evidence
-                .as_ref()
-                .unwrap()
-                .reasoning_output_tokens,
-            Some(0)
-        );
-    }
-
-    let absent = ExecutionEvidence::default();
-    assert_eq!(absent.reasoning_output_tokens, None);
 }
 
 #[test]

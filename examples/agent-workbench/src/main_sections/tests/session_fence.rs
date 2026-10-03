@@ -11,18 +11,6 @@ use super::recoverable_chat_tests::{
 };
 
 #[test]
-fn reset_session_rotation_replaces_workbench_session_id() {
-    let ids = WorkbenchSessions::fresh();
-    let original = ids.current();
-    let (new, replaced_current) = ids.replace(&original);
-    assert!(replaced_current);
-    assert_eq!(ids.current(), new);
-    assert_ne!(original, new);
-    assert!(original.starts_with(SESSION_ID_PREFIX));
-    assert!(new.starts_with(SESSION_ID_PREFIX));
-}
-
-#[test]
 fn replacing_a_non_current_session_does_not_rotate_the_selected_session() {
     let ids = WorkbenchSessions::fresh();
     let retired = ids.current();

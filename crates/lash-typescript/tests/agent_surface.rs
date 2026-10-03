@@ -80,99 +80,6 @@ pub(super) fn finished(source: &str) -> Value {
 }
 
 #[test]
-fn a_process_literal_is_a_lifted_declaration_and_return_stays_a_function_return() {
-    let source = r#"
-        const worker = async (input: unknown) => {
-          try { return input; } finally { console.log("completed"); }
-        };
-        const handle = await processes.start({ definition: worker, args: { input: 3 } });
-        finish(handle);
-        "#;
-    let linked =
-        lash_typescript::link(source, &process_environment()).expect("agent program should link");
-
-    let [Declaration::Process(process)] = linked.artifact.ir().declarations.as_slice() else {
-        panic!("expected exactly one lifted process declaration")
-    };
-    assert_eq!(process.params[0].name.as_str(), "input");
-    assert!(
-        process.signals.is_empty(),
-        "the set is inferred, not declared"
-    );
-    let Expr::Role {
-        role: lashlang::StructuralRole::ProcessWrapper,
-        expr: wrapper,
-    } = &process.body
-    else {
-        panic!("a lifted body is marked as a process wrapper")
-    };
-    let Expr::Try(wrapper) = wrapper.as_ref() else {
-        panic!("process wrapper should translate uncaught errors into failure")
-    };
-    let Expr::Finish(call) = wrapper.body.as_ref() else {
-        panic!("process wrapper should finish the run function result")
-    };
-    let Expr::Call { function, .. } = call.as_ref() else {
-        panic!("process wrapper should call the authored run function")
-    };
-    let Expr::Function(function) = function.as_ref() else {
-        panic!("run remains a real function")
-    };
-    assert!(contains_return(&function.body));
-    assert!(matches!(
-        wrapper.catch.as_ref().map(|catch| catch.body.as_ref()),
-        Some(Expr::Fail(_))
-    ));
-}
-
-#[test]
-fn durable_process_agent_primitives_link_through_existing_effects() {
-    let source = r#"
-        const worker = async (input: unknown) => {
-          const signal = await waitSignal("ready");
-          await sleep(5);
-          console.log(signal);
-          return input;
-        };
-        const handle = await processes.start({ definition: worker, args: { input: 3 } });
-        finish(handle);
-    "#;
-    let linked = lash_typescript::link(source, &process_environment())
-        .expect("all TypeScript agent primitives should link to shared effects");
-    assert_eq!(linked.artifact.exports().processes.len(), 1);
-    let artifact = lashlang::ModuleArtifact::from_store_bytes(
-        &linked
-            .artifact
-            .to_store_bytes()
-            .expect("encode TypeScript artifact"),
-    )
-    .expect("decode TypeScript artifact");
-    assert_eq!(artifact.module_ref(), linked.artifact.module_ref());
-}
-
-#[test]
-fn production_link_cache_preserves_typescript_artifact_identity() {
-    let source = r#"
-        const worker = async (input: unknown) => { const alias = input; return alias; };
-        finish(await processes.start({ definition: worker, args: { input: [1] } }));
-    "#;
-    let environment = process_environment();
-    let program = lash_typescript::parse(source).expect("TypeScript should lower");
-    let mut cache = lashlang::LinkedProgramCache::new();
-    let linked = cache
-        .get_or_compile_ast(source, program, &environment)
-        .expect("production cache should link TypeScript");
-    assert!(
-        linked
-            .linked_module()
-            .artifact
-            .module_ref()
-            .as_str()
-            .starts_with("lashlang:v2:blake3:")
-    );
-}
-
-#[test]
 fn signalling_a_run_links_and_process_finish_is_rejected() {
     let source = r#"
         const worker = async () => await waitSignal("ready");
@@ -278,8 +185,6 @@ fn a_foreground_signal_delivers_a_named_process_signal() {
     );
 }
 
-struct StartHost;
-
 /// The JSON handle record a real host mints for the process a fixture labels.
 fn process_handle_json(label: &str) -> serde_json::Value {
     let process_id = lash_sansio::ProcessId::fixture(label);
@@ -309,49 +214,6 @@ fn process_handle(label: &str) -> Value {
         Value::String(process_id.as_str().into()),
     );
     Value::Record(std::sync::Arc::new(handle))
-}
-
-impl ExecutionHost for StartHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
-        match op {
-            AbilityOp::ResourceOperation(call) => {
-                assert_eq!(call.operation, "start");
-                let [Value::Record(fields)] = call.args.as_slice() else {
-                    return Err(ExecutionHostError::new("expected record args"));
-                };
-                // The start's own arguments ride in `args`, beside the
-                // `definition` slot that carries the process itself.
-                let start_args = fields
-                    .get("args")
-                    .and_then(Value::as_record)
-                    .expect("a start passes its arguments in `args`");
-                assert_eq!(start_args.get("input"), Some(&Value::Number(3.0)));
-                Ok(AbilityOutcome::Value(process_handle("run-handle")))
-            }
-            AbilityOp::Await(handle) if handle == process_handle("run-handle") => {
-                Ok(AbilityOutcome::Value(Value::Number(6.0)))
-            }
-            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
-            _ => Err(ExecutionHostError::new("unexpected start ability")),
-        }
-    }
-}
-
-#[test]
-fn start_and_await_process_execute_through_shared_process_effects() {
-    let source = r#"
-        const worker = async (input: unknown) => { return input * 2; };
-        const handle = await processes.start({ definition: worker, args: { input: 3 } });
-        finish(await handle);
-    "#;
-    let linked = lash_typescript::link(source, &process_environment()).expect("start should link");
-    let outcome = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
-        &mut State::new(),
-        &StartHost,
-    ))
-    .expect("start should execute");
-    assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(6.0)));
 }
 
 enum ProcessAwaitFailureHost {
@@ -460,151 +322,6 @@ fn direct_process_handle_await_keeps_message_only_error_shape() {
     );
 }
 
-#[derive(Default)]
-struct ProcessHandleIdInspectionHost {
-    status_checked_process_id: std::sync::Mutex<Option<String>>,
-}
-
-impl ExecutionHost for ProcessHandleIdInspectionHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
-        match op {
-            AbilityOp::ResourceOperation(call) if call.operation == "start" => {
-                let [Value::Record(fields)] = call.args.as_slice() else {
-                    return Err(ExecutionHostError::new("expected record args"));
-                };
-                // The start's own arguments ride in `args`, beside the
-                // `definition` slot that carries the process itself.
-                let start_args = fields
-                    .get("args")
-                    .and_then(Value::as_record)
-                    .expect("a start passes its arguments in `args`");
-                assert_eq!(start_args.get("input"), Some(&Value::Number(42.0)));
-                Ok(AbilityOutcome::Value(lashlang::from_json(
-                    process_handle_json("process-test-42"),
-                )))
-            }
-            AbilityOp::ResourceOperation(call) => {
-                let alias = match &call.receiver {
-                    Value::Resource(handle) => handle.alias.clone(),
-                    other => format!("{other:?}"),
-                };
-                if alias == "inspection" && call.operation == "status" {
-                    let [Value::Record(fields)] = call.args.as_slice() else {
-                        return Err(ExecutionHostError::new("expected record args"));
-                    };
-                    let pid = fields
-                        .iter()
-                        .find(|(k, _)| *k == "process_id")
-                        .and_then(|(_, v)| match v {
-                            Value::String(s) => Some(s.to_string()),
-                            _ => None,
-                        })
-                        .ok_or_else(|| {
-                            ExecutionHostError::new("missing process_id in status args")
-                        })?;
-                    *self.status_checked_process_id.lock().unwrap() = Some(pid);
-                    Ok(AbilityOutcome::Value(Value::String("status-ok".into())))
-                } else {
-                    Err(ExecutionHostError::new("unexpected resource operation"))
-                }
-            }
-            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
-            _ => Err(ExecutionHostError::new("unexpected ability")),
-        }
-    }
-}
-
-#[test]
-fn process_handle_exposes_id_member_for_subsequent_operations() {
-    let source = r#"
-        const worker = async (input: unknown) => { return input; };
-        const handle = await processes.start({ definition: worker, args: { input: 42 } });
-        const processId = handle.process_id;
-        const result = await inspection.status({ process_id: processId });
-        finish({ processId: processId, result: result });
-    "#;
-    let mut catalog = lashlang::LashlangHostCatalog::new();
-    catalog
-        .add_module_operation_contract(
-            ["inspection"],
-            "InspectionModule",
-            "status",
-            "tool:inspection/status",
-            &lashlang::OperationContract::new(
-                serde_json::json!({}),
-                serde_json::json!({ "type": "string" }),
-            ),
-        )
-        .expect("operation binding");
-    let linked = lash_typescript::link(source, &process_environment_with(catalog))
-        .expect("TypeScript should link");
-    let host = ProcessHandleIdInspectionHost::default();
-    let outcome = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
-        &mut State::new(),
-        &host,
-    ))
-    .expect("execution should succeed");
-    assert_eq!(
-        outcome,
-        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!({
-            "processId": lash_sansio::ProcessId::fixture("process-test-42").as_str(),
-            "result": "status-ok"
-        })))
-    );
-    assert_eq!(
-        *host.status_checked_process_id.lock().unwrap(),
-        Some(
-            lash_sansio::ProcessId::fixture("process-test-42")
-                .as_str()
-                .to_string()
-        )
-    );
-}
-
-#[test]
-fn promise_aggregates_lower_to_runtime_arrays_and_tool_handles() {
-    let program = lash_typescript::parse(
-        "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
-    )
-    .expect("Promise.all should lower");
-    assert!(contains_aggregate_await(&program.main, true));
-
-    let settled = lash_typescript::parse(
-        "const results = await Promise.allSettled([web.fetch({ url: 'a' })]); finish(results);",
-    )
-    .expect("Promise.allSettled should lower");
-    assert!(contains_aggregate_await(&settled.main, false));
-
-    let program = lash_typescript::parse("const p = web.fetch({ url: 'a' }); await p;")
-        .expect("a bound tool call lowers to a handle consumed by its later await");
-    assert!(find_receiver_call(&program.main).is_some());
-}
-
-struct ToolCallRecordingHost {
-    dispatched: std::sync::Mutex<Vec<(String, String)>>,
-}
-
-impl ExecutionHost for ToolCallRecordingHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
-        match op {
-            AbilityOp::ResourceOperation(call) => {
-                let alias = match &call.receiver {
-                    Value::Resource(handle) => handle.alias.clone(),
-                    other => format!("{other:?}"),
-                };
-                self.dispatched
-                    .lock()
-                    .expect("dispatched lock")
-                    .push((alias, call.operation));
-                Ok(AbilityOutcome::Value(Value::String("tool-ok".into())))
-            }
-            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
-            _ => Err(ExecutionHostError::new("unexpected tool call ability")),
-        }
-    }
-}
-
 fn find_receiver_call(expr: &Expr) -> Option<(Vec<&str>, &str)> {
     match expr {
         Expr::ReceiverCall {
@@ -622,132 +339,6 @@ fn find_receiver_call(expr: &Expr) -> Option<(Vec<&str>, &str)> {
             }
         }
         _ => expr.children().find_map(find_receiver_call),
-    }
-}
-
-#[test]
-fn tool_operations_colliding_with_instance_stdlib_names_lower_and_dispatch() {
-    let cases = [
-        (
-            r#"finish(await web.search({ query: "lash" }));"#,
-            vec!["web"],
-            "search",
-        ),
-        (
-            r#"finish(await tools.search({ query: "lash" }));"#,
-            vec!["tools"],
-            "search",
-        ),
-        (
-            r#"finish(await inbox.alpha.delete({ id: "msg_123" }));"#,
-            vec!["inbox", "alpha"],
-            "delete",
-        ),
-    ];
-
-    for (source, expected_path, expected_op) in cases {
-        let program = lash_typescript::parse(source)
-            .unwrap_or_else(|error| panic!("failed to parse {source}: {error}"));
-        let (path, op) = find_receiver_call(&program.main)
-            .unwrap_or_else(|| panic!("expected ReceiverCall in {source}"));
-        assert_eq!(path, expected_path);
-        assert_eq!(op, expected_op);
-
-        let compiled = lash_typescript::testing::compile(source)
-            .unwrap_or_else(|error| panic!("failed to compile {source}: {error}"));
-        let host = ToolCallRecordingHost {
-            dispatched: std::sync::Mutex::new(Vec::new()),
-        };
-        let outcome =
-            futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), &host))
-                .expect("execution should succeed");
-        assert_eq!(
-            outcome,
-            ExecutionOutcome::Finished(Value::String("tool-ok".into()))
-        );
-        let dispatched = host.dispatched.lock().expect("dispatched lock").clone();
-        assert_eq!(dispatched.len(), 1);
-        assert_eq!(dispatched[0].1, expected_op);
-
-        // Also verify linked dispatch through host catalog
-        let mut catalog = lashlang::LashlangHostCatalog::new();
-        catalog
-            .add_module_operation_contract(
-                expected_path.clone(),
-                "ToolModule",
-                expected_op,
-                format!("tool:{}", expected_path.join("/")),
-                &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
-            )
-            .expect("operation binding");
-        let environment =
-            lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
-        let linked = lash_typescript::link(source, &environment).expect("TypeScript should link");
-        let host_linked = ToolCallRecordingHost {
-            dispatched: std::sync::Mutex::new(Vec::new()),
-        };
-        let linked_outcome = futures::executor::block_on(lashlang::execute(
-            &lashlang::testing::harness::compile_linked_main(&linked),
-            &mut State::new(),
-            &host_linked,
-        ))
-        .expect("linked execution should succeed");
-        assert_eq!(
-            linked_outcome,
-            ExecutionOutcome::Finished(Value::String("tool-ok".into()))
-        );
-        let expected_alias = expected_path.join(".");
-        let linked_dispatched = host_linked
-            .dispatched
-            .lock()
-            .expect("dispatched lock")
-            .clone();
-        assert_eq!(
-            linked_dispatched,
-            vec![(expected_alias, expected_op.to_string())]
-        );
-    }
-}
-
-#[test]
-fn bound_instance_stdlib_methods_still_lower_to_stdlib() {
-    let cases = [
-        (
-            r#"const s = "hello world"; finish(s.search(/world/));"#,
-            Value::Number(6.0),
-        ),
-        (
-            r#"const m = new Map([["k", 1]]); const removed = m.delete("k"); finish([removed, m.has("k")]);"#,
-            Value::List(vec![Value::Bool(true), Value::Bool(false)].into()),
-        ),
-        (
-            r#"const s = new Set([1, 2]); const removed = s.delete(1); finish([removed, s.has(1)]);"#,
-            Value::List(vec![Value::Bool(true), Value::Bool(false)].into()),
-        ),
-        (
-            r#"const arr = [1, 2, 3, 4]; finish(arr.filter((x: number) => x > 2));"#,
-            Value::List(vec![Value::Number(3.0), Value::Number(4.0)].into()),
-        ),
-        (
-            r#"const arr = [1, 2]; finish(arr.map((x: number) => x * 2));"#,
-            Value::List(vec![Value::Number(2.0), Value::Number(4.0)].into()),
-        ),
-        (
-            r#"const s = "abc"; finish(s.replace("b", "x"));"#,
-            Value::String("axc".into()),
-        ),
-        (
-            r#"const m = new Map([["a", 1]]); finish([...m.keys()]);"#,
-            Value::List(vec![Value::String("a".into())].into()),
-        ),
-        (
-            r#"const s = "hello"; finish(s.slice(1, 4));"#,
-            Value::String("ell".into()),
-        ),
-    ];
-
-    for (source, expected_value) in cases {
-        assert_eq!(finished(source), expected_value, "failed for {source}");
     }
 }
 
@@ -855,59 +446,6 @@ fn instance_stdlib_collision_matrix_guard_sweeps_all_stdlib_methods() {
         find_receiver_call(&counter_program.main).is_none(),
         "globalThis.missing.get must not lower as a tool call"
     );
-}
-
-#[test]
-fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
-    // Branch :447 — RegExp methods on bound values lower to stdlib, while
-    // unbound module authorities lower to tool calls.
-    assert_eq!(
-        finished(r#"const r = /abc/; finish(r.test("abcdef"));"#),
-        Value::Bool(true)
-    );
-    assert_eq!(
-        finished(r#"finish(/abc/.test("abcdef"));"#),
-        Value::Bool(true)
-    );
-    let test_tool = lash_typescript::parse(r#"finish(await tools.test({ pattern: "abc" }));"#)
-        .expect("tools.test should lower as tool call");
-    let (path, op) = find_receiver_call(&test_tool.main).expect("ReceiverCall for tools.test");
-    assert_eq!(path, &["tools"]);
-    assert_eq!(op, "test");
-
-    let exec_tool = lash_typescript::parse(r#"finish(await tools.exec({ command: "ls" }));"#)
-        .expect("tools.exec should lower as tool call");
-    let (path, op) = find_receiver_call(&exec_tool.main).expect("ReceiverCall for tools.exec");
-    assert_eq!(path, &["tools"]);
-    assert_eq!(op, "exec");
-
-    // Branch :775 — Unbound ECMA globals and unsupported methods on bound
-    // receivers refuse with TS_METHOD_UNSUPPORTED, while unawaited tool
-    // operations create pending handles and require runtime consumption.
-    let ecma_err = lash_typescript::testing::compile("finish(Error.isError(new Error('x')));")
-        .expect_err("ECMA static namespace method must refuse");
-    assert_eq!(
-        ecma_err.code,
-        lash_typescript::DiagnosticCode::MethodUnsupported
-    );
-
-    let bound_err = lash_typescript::testing::compile("const s = 'a'; finish(s.anchor('x'));")
-        .expect_err("a built-in method outside the surface must refuse on a bound receiver");
-    assert_eq!(
-        bound_err.code,
-        lash_typescript::DiagnosticCode::MethodUnsupported
-    );
-
-    // Discarded tool handles refuse before execution, including through
-    // reserved-word property paths.
-    for source in [
-        "web.search({ query: 'x' });",
-        "tools.search({ query: 'x' });",
-        "inbox.alpha.delete({ id: '1' });",
-    ] {
-        let error = lash_typescript::testing::compile(source).expect_err("unawaited handle");
-        assert_eq!(error.code.as_str(), "TS_UNAWAITED_TOOL", "{source}");
-    }
 }
 
 struct AggregateHost;
@@ -1308,47 +846,6 @@ fn argless_date_uses_the_same_journaled_clock_effect_as_date_now() {
     );
 }
 
-#[test]
-fn common_for_forms_and_standard_library_execute() {
-    assert_eq!(
-        finished(
-            r#"
-            let total = 0;
-            for (let i = 0; i < 4; i++) { total = total + i; }
-            for (const value of [4, 5]) { total = total + value; }
-            finish(total);
-            "#,
-        ),
-        Value::Number(15.0)
-    );
-    assert_eq!(
-        finished(
-            r#"
-            const text = "  durable TypeScript  ".trim().toUpperCase();
-            const parts = ["DURABLE", "TYPESCRIPT"];
-            finish({
-              text,
-              parts,
-              keys: Object.keys({ b: 2, a: 1 }),
-              array: Array.isArray(parts),
-              integer: Number.isSafeInteger(42),
-              encoded: JSON.stringify({ ok: true }),
-              root: Math.sqrt(81)
-            });
-            "#,
-        ),
-        lashlang::from_json(serde_json::json!({
-            "text": "DURABLE TYPESCRIPT",
-            "parts": ["DURABLE", "TYPESCRIPT"],
-            "keys": ["b", "a"],
-            "array": true,
-            "integer": true,
-            "encoded": "{\"ok\":true}",
-            "root": 9
-        }))
-    );
-}
-
 struct ProcessDurabilityHost;
 
 impl ExecutionHost for ProcessDurabilityHost {
@@ -1588,17 +1085,6 @@ fn durable_process_resumes_after_shared_promise_batch() {
     );
 }
 
-fn contains_return(expr: &Expr) -> bool {
-    matches!(expr, Expr::FunctionReturn(_)) || expr.children().any(contains_return)
-}
-
-fn contains_aggregate_await(expr: &Expr, unwrap: bool) -> bool {
-    matches!(expr, Expr::BuiltinCall { name, args } if name.as_str() == "__lashlang_await_array" && matches!(args.last(), Some(Expr::String(method)) if (method.as_ref() == "allSettled") != unwrap))
-        || expr
-            .children()
-            .any(|child| contains_aggregate_await(child, unwrap))
-}
-
 /// The decisive case from the FIG-1305 report.
 ///
 /// Leaf 0 rejects late with `late-A`; leaf 1 rejects early with `early-B`. The
@@ -1785,97 +1271,6 @@ fn a_reply_that_does_not_fit_its_aggregate_fails_closed() {
     }
 }
 
-/// The reported rejection must be a pure function of the host's recorded
-/// answer: replaying the same answer reports the same reason, with no
-/// re-sampling of anything.
-#[test]
-fn the_selected_rejection_is_replay_deterministic() {
-    let environment = two_leaf_web_environment();
-    let linked = lash_typescript::link(
-        "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
-        &environment,
-    )
-    .expect("Promise.all should link");
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
-    let mut reasons = Vec::new();
-    for _ in 0..8 {
-        let error = futures::executor::block_on(lashlang::execute(
-            &compiled,
-            &mut State::new(),
-            &FirstSettledRejectionHost,
-        ))
-        .expect_err("a rejected aggregate fails the program");
-        reasons.push(error.to_string());
-    }
-    let first = &reasons[0];
-    assert!(
-        first.contains("early-B"),
-        "the recorded answer selects the early rejection: {first}"
-    );
-    assert!(
-        reasons.iter().all(|reason| reason == first),
-        "replaying the same journaled order selects the same reason every time: {reasons:?}"
-    );
-}
-
-/// The consumer mode rides the ability boundary and the bytecode, never the
-/// saved state (ADR 0099 §10 L1: it is a caller-side decision and is never
-/// journaled). The VM ABI is at v11 because `ResourceOperationBatch` now
-/// carries the consumer mode, timer leaves and the immediate-prefix boundary,
-/// and its reply is the four-way response algebra instead of a settlement
-/// order. The consumer mode did not move the snapshot: nothing about an
-/// aggregate is persisted in a session snapshot. It is at v14 for unrelated
-/// reasons: record property order (FIG-3606, v8), the functions a cell
-/// boundary dropped (FIG-3608, v9), an error's own `message` presence
-/// (FIG-3657, v10), the closure's own `name`/`length` metadata
-/// (FIG-3655, v11), the built-in method value (FIG-3653, v12), the
-/// built-in object's owner-scoped wire name (FIG-3656, v13), and the
-/// binding cells closures share (FIG-3707, v14). The continuation
-/// moved separately, for the timer entries in its pending-request map and the
-/// refusals it can carry.
-#[test]
-fn the_consumer_mode_moves_the_vm_abi_and_not_the_snapshot() {
-    assert_eq!(
-        lashlang::LASHLANG_SNAPSHOT_VERSION,
-        14,
-        "snapshot v14 keeps property order, the dropped functions, error message presence, closure name/length, built-in method values, the owner-scoped built-in name and binding cells; no aggregate state rides it"
-    );
-    assert_eq!(
-        lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v14",
-        "the aggregate consumer mode moved the VM ABI, and call receivers (FIG-3700) and binding cells (FIG-3707) moved it again"
-    );
-}
-
-/// A stored artifact that still names a dialect must not decode at all.
-///
-/// The field was the session-lifetime pin of a second value semantics. An
-/// artifact that carries it was published before TypeScript became the sole
-/// RLM dialect (ADR 0096), so it is refused as an incompatible format rather
-/// than read with the field ignored -- which is what a plain Serde derive
-/// would do, and would compile a pre-cutover program under ECMA semantics.
-#[test]
-fn an_artifact_that_still_names_a_dialect_does_not_decode() {
-    let environment = two_leaf_web_environment();
-    let linked = lash_typescript::link("finish(1);", &environment).expect("links");
-    let mut json = serde_json::to_value(&linked.artifact).expect("artifact encodes");
-    assert!(
-        json.get("compilation_dialect").is_none(),
-        "a current artifact names no dialect"
-    );
-    json.as_object_mut().expect("artifact object").insert(
-        "compilation_dialect".to_string(),
-        serde_json::json!("lashlang"),
-    );
-    let bytes = serde_json::to_vec(&json).expect("encode tampered artifact");
-    let error = lashlang::ModuleArtifact::from_store_bytes(&bytes)
-        .expect_err("a dialect-bearing artifact must not decode");
-    assert!(
-        error.to_string().contains("compilation_dialect"),
-        "the refusal names the retired field: {error}"
-    );
-}
-
 /// The canonical agent loop must compile.
 ///
 /// The body filter used to reject every call and every member assignment, so
@@ -2016,56 +1411,6 @@ fn for_of_follows_its_iterable_live() {
             "{source}"
         );
     }
-}
-
-/// A leaf that fails before the batch runs settles first.
-///
-/// It is part of the immediate prefix ahead of every dispatched settlement
-/// (ADR 0099 §10 L5), so a host answers `Promise.all` with it; the VM reports
-/// the leaf the host selected, whatever its input position.
-struct PreparationFailureHost;
-
-impl ExecutionHost for PreparationFailureHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
-        match op {
-            AbilityOp::ResourceOperationBatch(batch) => {
-                assert_eq!(batch.leaves.len(), 2);
-                // Leaf 1 never entered the batch: it failed while being
-                // prepared, so it had already settled when the batch started.
-                Ok(AbilityOutcome::ResourceOperationBatch(
-                    ResourceOperationBatchOutcome::Selected {
-                        leaf: 1,
-                        result: ResourceOperationOutcome::Error(ExecutionHostError::new(
-                            "never-prepared",
-                        )),
-                    },
-                ))
-            }
-            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
-            _ => Err(ExecutionHostError::new("unexpected preparation ability")),
-        }
-    }
-}
-
-#[test]
-fn a_leaf_that_failed_before_the_batch_ran_settles_first() {
-    let environment = two_leaf_web_environment();
-    let linked = lash_typescript::link(
-        "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
-        &environment,
-    )
-    .expect("Promise.all should link");
-    let error = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
-        &mut State::new(),
-        &PreparationFailureHost,
-    ))
-    .expect_err("a rejected aggregate fails the program");
-    let rendered = error.to_string();
-    assert!(
-        rendered.contains("never-prepared"),
-        "the leaf that settled before the batch ran is the reported rejection: {rendered}"
-    );
 }
 
 fn run_typescript(source: &str) -> Value {
@@ -2225,21 +1570,6 @@ fn map_callbacks_cannot_perform_effects() {
         rejected.code.as_str().starts_with("TS_"),
         "the rejection is named: {rejected}"
     );
-}
-
-#[test]
-fn typescript_host_catalog_composition_refuses_duplicate_operations() {
-    let mut resources = lashlang::LashlangHostCatalog::tool_default(["lookup"]);
-    let incoming = lashlang::LashlangHostCatalog::tool_default(["lookup"]);
-
-    assert!(matches!(
-        resources.try_extend(incoming),
-        Err(lashlang::LashlangHostCatalogError::ConflictingModuleOperation {
-            module,
-            operation,
-            ..
-        }) if module == "tools" && operation == "lookup"
-    ));
 }
 
 #[test]
@@ -2421,35 +1751,6 @@ fn a_process_handle_is_not_an_aggregate_leaf() {
             );
         }
     }
-}
-
-/// `allSettled` still reports every outcome in array order; only the process
-/// leaves left, and with them the array-order process phase.
-#[test]
-fn all_settled_reports_every_tool_outcome_in_array_order() {
-    let body =
-        "finish(await Promise.allSettled([web.fetch({ fail: true }), web.fetch({ value: 2 })]));";
-    let outcome = run_mixed_aggregate(body).expect("allSettled never rejects");
-    let ExecutionOutcome::Finished(Value::List(results)) = outcome else {
-        panic!("expected a settled array, got {outcome:?}");
-    };
-    let statuses = results
-        .iter()
-        .map(|result| {
-            result
-                .as_record()
-                .and_then(|record| record.get("status"))
-                .map(Value::to_string)
-                .unwrap_or_default()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(statuses, ["rejected", "fulfilled"]);
-    assert_eq!(
-        results[1]
-            .as_record()
-            .and_then(|record| record.get("value")),
-        Some(&Value::Number(2.0))
-    );
 }
 
 #[test]

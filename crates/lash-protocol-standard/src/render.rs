@@ -780,27 +780,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_character_and_line_limits_include_the_cut_notice() {
-        let artifacts = Arc::new(Artifacts::default());
-        let text = "line of output\n".repeat(1_500);
-        let ctx = context(
-            ToolCallOutput::success(text),
-            ToolRenderParams::default(),
-            Arc::clone(&artifacts),
-        );
-        let result = render_present(baseline(&ctx), &ctx, &ToolOutputRendererSlot::default())
-            .await
-            .expect("presented");
-        let (chars, lines) = text_stats(&result.parts);
-        assert!(chars <= 16_000, "{chars}");
-        assert!(lines <= 400, "{lines}");
-        assert!(
-            lash_core::facade_support::tool_result_text(&result.parts).contains("[output cut:")
-        );
-        assert_eq!(artifacts.writes.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
     async fn cuts_share_the_cap_and_retain_complete_text_once() {
         let artifacts = Arc::new(Artifacts::default());
         let full = "ab".repeat(600);

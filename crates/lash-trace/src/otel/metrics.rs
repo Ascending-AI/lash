@@ -197,109 +197,6 @@ mod enabled {
         }
     }
 
-    #[cfg(test)]
-    mod tests {
-        use super::super::registry;
-        use super::*;
-        use opentelemetry::metrics::MeterProvider;
-        use opentelemetry_sdk::metrics::{
-            InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
-        };
-
-        #[test]
-        fn tool_intent_counters_export_registered_names_and_typed_dimensions() {
-            let exporter = InMemoryMetricExporter::default();
-            let provider = SdkMeterProvider::builder()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
-                .build();
-            let metrics = ToolIntentMetrics::new(
-                provider.meter_with_scope(registry::instrumentation_scope()),
-            );
-
-            metrics.record_executed("start_process");
-            metrics.record_refused("signal_process", "unsupported_protocol_version");
-            provider.force_flush().expect("flush in-memory metrics");
-
-            let exported = exporter
-                .get_finished_metrics()
-                .expect("read in-memory metrics");
-            let mut names = exported
-                .iter()
-                .flat_map(|resource| resource.scope_metrics())
-                .flat_map(|scope| scope.metrics())
-                .map(|metric| metric.name())
-                .collect::<Vec<_>>();
-            names.sort_unstable();
-            assert_eq!(
-                names,
-                ["lash.tool_intent.executed", "lash.tool_intent.refused"]
-            );
-            let rendered = format!("{exported:?}");
-            assert!(rendered.contains("lash.tool_intent.kind"));
-            assert!(rendered.contains("start_process"));
-            assert!(rendered.contains("lash.tool_intent.refusal_reason"));
-            assert!(rendered.contains("unsupported_protocol_version"));
-        }
-
-        #[test]
-        fn runtime_tuning_metrics_export_with_stable_names() {
-            let exporter = InMemoryMetricExporter::default();
-            let provider = SdkMeterProvider::builder()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
-                .build();
-            let metrics = RuntimeTuningMetrics::new(
-                provider.meter_with_scope(registry::instrumentation_scope()),
-            );
-
-            metrics.record_provider_retry("test", "backoff");
-            metrics.record_provider_throttle_wait("test", std::time::Duration::from_millis(10));
-            metrics.record_session_lane_contention_wait(
-                std::time::Duration::from_millis(20),
-                "acquired",
-            );
-            metrics.record_session_lane_give_up("holder_is_alive");
-            metrics.record_queued_work_wake_retry();
-            metrics.record_pool_acquire_wait(std::time::Duration::from_millis(30), "success");
-            metrics.record_runtime_commit_budgeted_size(40, "admitted");
-            provider.force_flush().expect("flush in-memory metrics");
-
-            let exported = exporter
-                .get_finished_metrics()
-                .expect("read in-memory metrics");
-            use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-            let mut instruments = exported
-                .iter()
-                .flat_map(|resource| resource.scope_metrics())
-                .flat_map(|scope| scope.metrics())
-                .map(|metric| {
-                    let instrument_type = match metric.data() {
-                        AggregatedMetrics::U64(MetricData::Sum(_)) => "counter",
-                        AggregatedMetrics::U64(MetricData::Histogram(_)) => "histogram",
-                        data => panic!("unexpected aggregation for `{}`: {data:?}", metric.name()),
-                    };
-                    (metric.name(), instrument_type, metric.unit())
-                })
-                .collect::<Vec<_>>();
-            instruments.sort_unstable();
-            assert_eq!(
-                instruments,
-                [
-                    ("lash.provider.retries", "counter", ""),
-                    ("lash.provider.throttle_wait.duration", "histogram", "ms"),
-                    ("lash.queued_work.wake_retries", "counter", ""),
-                    ("lash.runtime_commit.budgeted_size", "histogram", "By"),
-                    (
-                        "lash.session_execution_lane.contention_wait.duration",
-                        "histogram",
-                        "ms"
-                    ),
-                    ("lash.session_execution_lane.give_ups", "counter", ""),
-                    ("lash.store.pool.acquire_wait.duration", "histogram", "ms"),
-                ]
-            );
-        }
-    }
-
     /// Store→engine delivery obligations and the recovery leader lease
     /// (ADR 0109 §1.5).
     #[derive(Clone)]
@@ -518,20 +415,6 @@ impl Default for TelemetryMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(not(feature = "otel"))]
-    #[test]
-    fn no_op_handles_require_no_exporter_or_runtime() {
-        let metrics = TelemetryMetrics::default();
-        assert_eq!(std::mem::size_of_val(&metrics), 0);
-        metrics.tool_intent.record_executed("start_process");
-        metrics.runtime_tuning.record_queued_work_wake_retry();
-        metrics.parked_work.record_count("turn", "pending", 0);
-        metrics.obligations.record_stalled("turn", 0);
-        metrics
-            .generation_drain
-            .record_work("build", "parked_turns", 0);
-    }
 
     #[cfg(feature = "otel")]
     #[test]

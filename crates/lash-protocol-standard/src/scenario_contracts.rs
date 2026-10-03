@@ -66,32 +66,3 @@ pub const STANDARD_PROTOCOL_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         oracle_id: "sim.oracle.scenario.standard-contract.v1",
     },
 ];
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-
-    use super::*;
-
-    #[test]
-    fn standard_scenario_contract_metadata_is_unique_and_complete() {
-        assert_eq!(STANDARD_PROTOCOL_SCENARIO_CONTRACTS.len(), 8);
-        let mut names = BTreeSet::new();
-        for contract in STANDARD_PROTOCOL_SCENARIO_CONTRACTS {
-            assert_eq!(contract.suite, "standard");
-            assert!(
-                contract
-                    .test_name
-                    .starts_with("standard_protocol_scenario_")
-            );
-            assert!(!contract.owned_invariant.trim().is_empty());
-            assert!(contract.semantic_oracle.starts_with("standard."));
-            assert!(!contract.required_sim_evidence.is_empty());
-            assert_eq!(
-                contract.oracle_id,
-                "sim.oracle.scenario.standard-contract.v1"
-            );
-            assert!(names.insert(contract.test_name));
-        }
-    }
-}

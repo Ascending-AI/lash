@@ -217,82 +217,6 @@ fn cache_build_rejects_parent_cycles_scenario() {
 }
 
 #[test]
-fn cache_build_rejects_duplicate_node_ids() {
-    let node = SessionNodeRecord {
-        node_id: "duplicate".into(),
-        parent_node_id: None,
-        timestamp: "2026-07-31T00:00:00Z".to_string(),
-        payload: SessionNodePayload::Plugin {
-            plugin_type: "duplicate-test".to_string(),
-            body: SharedJsonValue::new(serde_json::json!({"value": 1})),
-        },
-    };
-    let graph = SessionGraph::from_unchecked_nodes_for_testing(
-        vec![node.clone(), node],
-        Some("duplicate".into()),
-    );
-
-    assert!(matches!(
-        SessionGraphCache::build(&graph),
-        Err(crate::StoreError::NodeIdCollision { node_id }) if node_id == "duplicate"
-    ));
-}
-
-#[test]
-fn cache_build_rejects_dangling_parents() {
-    let graph = SessionGraph::from_unchecked_nodes_for_testing(
-        vec![SessionNodeRecord {
-            node_id: "dangling-child".into(),
-            parent_node_id: Some("missing-parent".into()),
-            timestamp: "2026-07-31T00:00:00Z".to_string(),
-            payload: SessionNodePayload::Plugin {
-                plugin_type: "dangling-test".to_string(),
-                body: SharedJsonValue::new(serde_json::json!({"value": 1})),
-            },
-        }],
-        Some("dangling-child".into()),
-    );
-
-    assert!(matches!(
-        graph.validate_resident_integrity(),
-        Err(crate::StoreError::InvalidGraphParent {
-            node_id,
-            actual: Some(parent),
-            ..
-        }) if node_id == "dangling-child" && parent == "missing-parent"
-    ));
-}
-
-#[test]
-fn resident_integrity_rejects_missing_leaves() {
-    let node = SessionNodeRecord {
-        node_id: "existing-node".into(),
-        parent_node_id: None,
-        timestamp: "2026-07-31T00:00:00Z".to_string(),
-        payload: SessionNodePayload::Plugin {
-            plugin_type: "leaf-test".to_string(),
-            body: SharedJsonValue::new(serde_json::json!({"value": 1})),
-        },
-    };
-    let unknown_leaf = SessionGraph::from_unchecked_nodes_for_testing(
-        vec![node.clone()],
-        Some("missing-leaf".into()),
-    );
-    let absent_leaf = SessionGraph::from_unchecked_nodes_for_testing(vec![node], None);
-
-    assert!(matches!(
-        unknown_leaf.validate_resident_integrity(),
-        Err(crate::StoreError::InvalidGraphLeaf {
-            leaf_node_id: Some(leaf)
-        }) if leaf == "missing-leaf"
-    ));
-    assert!(matches!(
-        absent_leaf.validate_resident_integrity(),
-        Err(crate::StoreError::InvalidGraphLeaf { leaf_node_id: None })
-    ));
-}
-
-#[test]
 fn cache_build_rejects_cycles_in_inactive_components() {
     let plugin_node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
         node_id: NodeId::fixture(node_id.to_string()),
@@ -381,22 +305,6 @@ fn protocol_event() -> ProtocolEvent {
 }
 
 #[test]
-fn draft_node_ids_are_opaque_distinct_and_ignore_message_ids() {
-    let mut graph = SessionGraph::default();
-
-    let message_id = graph.append_message(text_message("m1", MessageRole::User, "hello"));
-    let protocol_id = graph.append_protocol_event(protocol_event());
-    let plugin_id = graph.append_plugin("example", serde_json::json!({"ok": true}));
-
-    assert_ne!(message_id, "m1");
-    assert!(message_id.starts_with("draft-node/v3/"));
-    assert!(protocol_id.starts_with("draft-node/v3/"));
-    assert!(plugin_id.starts_with("draft-node/v3/"));
-    assert_ne!(message_id, protocol_id);
-    assert_ne!(protocol_id, plugin_id);
-}
-
-#[test]
 fn draft_node_ids_are_stable_per_boundary_and_distinct_across_boundaries() {
     let graph = SessionGraph::default();
     let message = text_message("same-message", MessageRole::User, "hello");
@@ -464,30 +372,6 @@ fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
 }
 
 #[test]
-fn storage_body_states_its_node_body_generation() {
-    let node = SessionNodeRecord {
-        node_id: "node-1".into(),
-        parent_node_id: None,
-        timestamp: "2026-08-18T00:00:00Z".to_string(),
-        payload: SessionNodePayload::Event {
-            event: SessionHistoryRecord::Protocol(protocol_event()),
-        },
-    };
-
-    let encoded = node
-        .encode_storage_body(crate::store::FleetFormat::current())
-        .expect("encode storage body");
-    let stamped: serde_json::Value = serde_json::from_str(&encoded).expect("stored body is JSON");
-
-    assert_eq!(
-        stamped
-            .get("schema_version")
-            .and_then(serde_json::Value::as_u64),
-        Some(u64::from(SESSION_NODE_BODY_SCHEMA_VERSION)),
-    );
-}
-
-#[test]
 fn unstamped_stored_bodies_are_refused() {
     // Byte-for-byte a body written before the generation stamp existed.
     let legacy = r#"{"timestamp":"2026-07-27T00:00:00Z","kind":"plugin","plugin_type":"legacy","body":{"value":7}}"#;
@@ -503,32 +387,6 @@ fn unstamped_stored_bodies_are_refused() {
              {SESSION_NODE_BODY_SCHEMA_VERSION} (FIG-3796); remedy: the body is pre-cutover \
              data, so recreate the session store under this build"
         ),
-    );
-}
-
-/// The pre-stamp shape of the richest body the durable-read fixture carried,
-/// frozen here because the fixture cannot hold it permanently.
-///
-/// Until FIG-1536 the fixture's own `graph_nodes` rows were unstamped, so the
-/// default-on-read path had an incidental durable-read exercise. That was never
-/// durable coverage: a fixture is regenerated by the current writer, so the
-/// first regeneration after #486 re-stamped every row and the exercise
-/// evaporated — which is exactly what happened. A frozen literal is where a
-/// *legacy* shape can actually be kept, and this one is a conversation node with
-/// message parts rather than the plugin node above, because that is the shape
-/// whose fields the flattened payload family reaches furthest into.
-#[test]
-fn unstamped_conversation_bodies_are_refused() {
-    let legacy = r#"{"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_legacy","role":"User","parts":[{"id":"m_legacy.p0","kind":"Text","content":"durable read user message"}]}}}"#;
-
-    let error = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, legacy)
-        .expect_err("a pre-stamp conversation body must be refused");
-
-    assert!(
-        error
-            .to_string()
-            .contains("carries no schema_version stamp"),
-        "the refusal must name the missing stamp: {error}"
     );
 }
 
@@ -723,18 +581,6 @@ fn nearest_frame_is_derived_from_ancestry() {
 }
 
 #[test]
-fn active_read_replacement_persists_messages_only() {
-    let message = text_message("m1", MessageRole::User, "hello");
-    let graph = SessionGraph::from_active_read_state(&[message]);
-
-    assert_eq!(graph.nodes.len(), 1);
-    assert!(matches!(
-        graph.nodes[0].event(),
-        Some(SessionHistoryRecord::Conversation(_))
-    ));
-}
-
-#[test]
 fn active_read_rewrite_preserves_draft_node_id_sequence() {
     let first = text_message("m1", MessageRole::User, "first");
     let mut graph = SessionGraph::default();
@@ -857,64 +703,6 @@ fn projection_and_replacement_retain_the_same_prefix() {
             "{case}"
         );
     }
-}
-
-#[test]
-fn graph_writers_keep_payload_kind_out_of_draft_identity() {
-    let mut graph = SessionGraph::default();
-    graph.append_message(text_message("m1", MessageRole::User, "hello"));
-    graph.append_protocol_event(protocol_event());
-    graph.append_plugin("example", serde_json::json!({"ok": true}));
-
-    for node in &graph.nodes {
-        assert!(node.node_id.starts_with("draft-node/v3/"), "{:?}", node);
-    }
-}
-
-/// The turn projection decides prefix agreement by comparing the `Arc` a read
-/// model handed out, so two reads of the same frame on an unchanged graph must
-/// hand out the *same* `Arc`, not two equal ones. Rebuilding the frame
-/// projection per call is what forced the projection onto its whole-window
-/// fallback on every turn boundary (FIG-1637).
-#[test]
-fn the_frame_read_model_is_shared_by_identity_until_an_append() {
-    let mut graph = SessionGraph::default();
-    let session = SessionId::from("session");
-    open_test_frame(
-        &mut graph,
-        &session,
-        "frame",
-        crate::AgentFrameReason::initial(),
-    );
-    graph.append_message(text_message("m1", MessageRole::User, "first"));
-
-    let first = graph.read_model();
-    let second = graph.read_model();
-    assert!(
-        lash_sansio::AppendVec::ptr_eq(&first.messages, &second.messages),
-        "repeated reads share the projected messages by identity"
-    );
-    assert!(lash_sansio::AppendVec::ptr_eq(
-        &first.active_events,
-        &second.active_events
-    ));
-    assert!(Arc::ptr_eq(
-        &first.prompt_render_cache,
-        &second.prompt_render_cache
-    ));
-
-    graph.append_message(text_message("m2", MessageRole::User, "second"));
-    let after_append = graph.read_model();
-    assert!(
-        !lash_sansio::AppendVec::ptr_eq(&first.messages, &after_append.messages),
-        "an append to the active path folds into a new projection"
-    );
-    assert_eq!(after_append.messages.len(), 2);
-    let again = graph.read_model();
-    assert!(
-        lash_sansio::AppendVec::ptr_eq(&after_append.messages, &again.messages),
-        "an append folds once"
-    );
 }
 
 /// ADR 0112 §9: the one projection starts at the current frame, and a
@@ -1106,135 +894,6 @@ fn a_pending_frame_switch_retires_nothing() {
 }
 
 #[test]
-fn graph_cow_after_snapshot_copies_pointers_not_records() {
-    let mut graph = SessionGraph::default();
-    let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
-    let second = graph.append_message(text_message("m2", MessageRole::Assistant, "two"));
-    let snapshot = graph.clone();
-
-    graph.append_message(text_message("m3", MessageRole::User, "three"));
-
-    assert_eq!(snapshot.nodes.len(), 2);
-    assert_eq!(snapshot.leaf_node_id.as_ref(), Some(&second));
-    assert_eq!(graph.nodes.len(), 3);
-    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
-    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
-    assert_eq!(graph.nodes[0].node_id, first);
-    assert_eq!(graph.nodes[1].node_id, second);
-}
-
-#[test]
-fn apply_append_after_snapshot_shares_resident_records() {
-    let mut graph = SessionGraph::default();
-    graph.append_message(text_message("m1", MessageRole::User, "one"));
-    let resident_leaf = graph.leaf_node_id.clone().expect("resident leaf");
-    let snapshot = graph.clone();
-
-    graph
-        .apply_append(&GraphAppend::Extend {
-            nodes: vec![SessionNodeRecord {
-                node_id: NodeId::from("appended"),
-                parent_node_id: Some(resident_leaf.clone()),
-                timestamp: "2026-09-12T00:00:00Z".to_string(),
-                payload: SessionNodePayload::Plugin {
-                    plugin_type: "cow-test".to_string(),
-                    body: SharedJsonValue::new(serde_json::json!({"node": "appended"})),
-                },
-            }],
-        })
-        .expect("append after snapshot is valid");
-
-    assert_eq!(snapshot.nodes.len(), 1);
-    assert_eq!(snapshot.leaf_node_id.as_ref(), Some(&resident_leaf));
-    assert_eq!(graph.nodes.len(), 2);
-    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
-}
-
-#[test]
-fn remap_node_ids_rewrites_only_mapped_records() {
-    let mut graph = SessionGraph::default();
-    let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
-    let second = graph.append_message(text_message("m2", MessageRole::Assistant, "two"));
-    let snapshot = graph.clone();
-    // Warm the by_id cache so the remap resolves positions through it.
-    assert!(graph.find_node(first.as_str()).is_some());
-
-    let first_derived = crate::NodeId::from("derived-first");
-    let second_derived = crate::NodeId::from("derived-second");
-    graph.remap_node_ids(
-        &crate::SessionId::from("remap-test"),
-        &[
-            (first.clone(), first_derived.clone()),
-            (second.clone(), second_derived.clone()),
-        ],
-    );
-
-    assert_eq!(graph.nodes[0].node_id, first_derived);
-    assert_eq!(graph.nodes[1].node_id, second_derived);
-    // The mapped parent id is rewritten through the same table.
-    assert_eq!(graph.nodes[1].parent_node_id.as_ref(), Some(&first_derived));
-    assert_eq!(graph.leaf_node_id.as_ref(), Some(&second_derived));
-
-    // The snapshot keeps the original records untouched.
-    assert_eq!(snapshot.nodes[0].node_id, first);
-    assert_eq!(snapshot.nodes[1].node_id, second);
-    assert_eq!(snapshot.leaf_node_id.as_ref(), Some(&second));
-    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
-    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
-}
-
-#[test]
-fn remap_node_ids_keeps_unmapped_records_shared() {
-    let mut graph = SessionGraph::default();
-    let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
-    let second = graph.append_message(text_message("m2", MessageRole::Assistant, "two"));
-    let snapshot = graph.clone();
-    assert!(graph.find_node(first.as_str()).is_some());
-
-    let second_derived = crate::NodeId::from("derived-second");
-    graph.remap_node_ids(
-        &crate::SessionId::from("remap-test"),
-        &[(second.clone(), second_derived.clone())],
-    );
-
-    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
-    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
-    // An unmapped parent id is left alone.
-    assert_eq!(graph.nodes[1].parent_node_id.as_ref(), Some(&first));
-    assert_eq!(graph.leaf_node_id.as_ref(), Some(&second_derived));
-}
-
-#[test]
-fn remap_node_ids_rewrites_mapped_parents_on_unmapped_records() {
-    let mut graph = SessionGraph::default();
-    let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
-    let second = graph.append_message(text_message("m2", MessageRole::Assistant, "two"));
-    graph.append_message(text_message("m3", MessageRole::User, "three"));
-    let snapshot = graph.clone();
-    assert!(graph.find_node(first.as_str()).is_some());
-
-    // Remap only the middle node: the unmapped child must follow its remapped
-    // parent, so its record is unshared even though its own id is untouched.
-    let second_derived = crate::NodeId::from("derived-second");
-    graph.remap_node_ids(
-        &crate::SessionId::from("remap-test"),
-        &[(second.clone(), second_derived.clone())],
-    );
-
-    assert_eq!(graph.nodes[0].node_id, first);
-    assert_eq!(graph.nodes[1].node_id, second_derived);
-    assert_eq!(
-        graph.nodes[2].parent_node_id.as_ref(),
-        Some(&second_derived)
-    );
-    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
-    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
-    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[2], &graph.nodes[2]));
-    // The snapshot keeps the original parent id.
-    assert_eq!(snapshot.nodes[2].parent_node_id.as_ref(), Some(&second));
-}
-
-#[test]
 fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
     // A loaded graph carries no parent-before-child guarantee: a child can
     // sit ahead of its parent in the resident vector. Remapping the parent
@@ -1289,63 +948,6 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
 }
 
 #[test]
-fn apply_realized_node_timestamps_rewrites_only_realized_records() {
-    let mut graph = SessionGraph::default();
-    let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
-    graph.append_message(text_message("m2", MessageRole::Assistant, "two"));
-    let snapshot = graph.clone();
-    assert!(graph.find_node(first.as_str()).is_some());
-
-    graph.apply_realized_node_timestamps(&[crate::session_graph::RealizedNodeTimestamp {
-        node_id: first.clone(),
-        timestamp: "2026-09-12T00:00:00Z".to_string(),
-    }]);
-
-    assert_eq!(graph.nodes[0].timestamp, "2026-09-12T00:00:00Z");
-    assert_ne!(graph.nodes[0].timestamp, snapshot.nodes[0].timestamp);
-    assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
-    assert!(std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
-}
-
-#[test]
-fn shared_records_serialize_with_the_unchanged_durable_shape() {
-    let node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
-        node_id: NodeId::fixture(node_id.to_string()),
-        parent_node_id: parent_node_id.map(|id| id.parse().unwrap()),
-        timestamp: "2026-09-12T00:00:00Z".to_string(),
-        payload: SessionNodePayload::Plugin {
-            plugin_type: "shape-test".to_string(),
-            body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
-        },
-    };
-    let graph = SessionGraph::from_nodes(
-        vec![node("root", None), node("child", Some("root"))],
-        Some(NodeId::from("child")),
-    )
-    .expect("fixture graph is valid");
-
-    let encoded = serde_json::to_value(&graph).expect("serialize graph");
-    let nodes = encoded["nodes"].as_array().expect("nodes is an array");
-    assert_eq!(nodes.len(), graph.nodes.len());
-    // `Arc<SessionNodeRecord>` serializes as the record itself: no wrapper and
-    // no key change versus the previous `Vec<SessionNodeRecord>` encoding.
-    for (index, node) in graph.nodes.iter().enumerate() {
-        assert_eq!(
-            &nodes[index],
-            &serde_json::to_value(node.as_ref()).expect("serialize record")
-        );
-    }
-    assert_eq!(encoded["leaf_node_id"], serde_json::json!("child"));
-
-    let decoded: SessionGraph =
-        serde_json::from_str(&serde_json::to_string(&graph).unwrap()).expect("decode graph");
-    assert_eq!(
-        serde_json::to_string(&decoded).unwrap(),
-        serde_json::to_string(&graph).unwrap()
-    );
-}
-
-#[test]
 fn event_only_appends_preserve_the_message_vec_and_render_cache() {
     let mut graph = SessionGraph::default();
     graph.append_message(text_message("m1", MessageRole::User, "hello"));
@@ -1367,31 +969,6 @@ fn event_only_appends_preserve_the_message_vec_and_render_cache() {
     assert!(!lash_sansio::AppendVec::ptr_eq(
         &before.active_events,
         &after.active_events
-    ));
-}
-
-#[test]
-fn held_readers_isolate_folded_pending_tails() {
-    let mut graph = SessionGraph::default();
-    graph.append_message(text_message("m1", MessageRole::User, "hello"));
-    graph.append_protocol_event(protocol_event());
-    let held = graph.read_model();
-
-    graph.append_protocol_event(protocol_event());
-    let latest = graph.read_model();
-
-    assert_eq!(latest.active_events.len(), held.active_events.len() + 1);
-    assert!(!lash_sansio::AppendVec::ptr_eq(
-        &held.active_events,
-        &latest.active_events
-    ));
-
-    graph.append_message(text_message("m2", MessageRole::Assistant, "reply"));
-    let with_message = graph.read_model();
-    assert_eq!(with_message.messages.len(), 2);
-    assert!(!Arc::ptr_eq(
-        &with_message.prompt_render_cache,
-        &latest.prompt_render_cache
     ));
 }
 

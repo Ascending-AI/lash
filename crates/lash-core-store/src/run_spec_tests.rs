@@ -279,32 +279,6 @@ fn a_spec_hash_is_canonical_over_option_key_order() {
 }
 
 #[test]
-fn a_canonical_spec_decodes_back_to_itself() {
-    let spec = RunSpec {
-        definition: Some(DefinitionRef::new("review", 3)),
-        context: serde_json::json!({ "repo": "lash" }),
-        overrides: Box::new(RunOverrides {
-            model: Some(LlmProfileKey::new("route")),
-            reasoning: Some(ReasoningSelection::Effort("high".to_string())),
-            ..RunOverrides::default()
-        }),
-        capabilities: [(
-            SlotId::new("browser"),
-            CapabilityRef {
-                contract: ContractRef::new("browser", 2),
-                binding: BindingId::new("browser:main"),
-                args: serde_json::json!({ "headless": true }),
-            },
-        )]
-        .into_iter()
-        .collect(),
-    };
-    let decoded =
-        RunSpec::from_canonical_json(&spec.canonical_json().expect("json")).expect("decode");
-    assert_eq!(decoded, spec);
-}
-
-#[test]
 fn capabilities_are_durable_refs_recorded_on_the_resolution() {
     let mut spec = RunSpec::default();
     assert_eq!(

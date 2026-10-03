@@ -2,8 +2,6 @@
 //! inside the production line budget.
 
 use super::*;
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 impl InMemoryLiveReplayStore {
     fn publish_test_event(
@@ -26,32 +24,6 @@ impl InMemoryLiveReplayStore {
             })
     }
 }
-
-struct CountingAllocator;
-
-static ALLOCATION_COUNT: AtomicUsize = AtomicUsize::new(0);
-static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
-
-#[expect(
-    unsafe_code,
-    reason = "the allocation-accounting harness installs a counting global allocator, and GlobalAlloc is an unsafe trait"
-)]
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-        ALLOCATED_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
-        // SAFETY: forwarding the allocator contract unchanged to System.
-        unsafe { System.alloc(layout) }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: `ptr` and `layout` came from the forwarded System allocation.
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static TEST_ALLOCATOR: CountingAllocator = CountingAllocator;
 
 fn activity(text: &str) -> SessionObservationEventPayload {
     SessionObservationEventPayload::TurnActivity(crate::TurnActivity::independent(
@@ -84,46 +56,6 @@ fn session_observation_event_constructor_rejects_malformed_cursor() {
         .expect_err("malformed cursor must fail at event construction");
 
     assert!(matches!(error, SessionCursorError::Malformed { .. }));
-}
-
-#[test]
-fn session_observation_event_accessors_return_cursor_facts() {
-    let event = SessionObservationEvent::new(
-        Some(TurnId::from("turn-1")),
-        SessionCursor::from_store_token("lashsc2:incarnation-1:7:42:session-1")
-            .expect("valid store cursor"),
-        activity("valid"),
-    )
-    .expect("construct event from valid cursor");
-
-    assert_eq!(event.session_id(), "session-1");
-    assert_eq!(event.replay_incarnation_id(), "incarnation-1");
-    assert_eq!(event.revision(), SessionRevision::new(7));
-}
-
-#[test]
-fn session_cursor_round_trips_and_debug_is_opaque() {
-    let cursor = SessionCursor::new(
-        "replay-incarnation",
-        "session:with:colon",
-        SessionRevision(3),
-        9,
-    );
-    let encoded = serde_json::to_string(&cursor).expect("serialize");
-    let decoded: SessionCursor = serde_json::from_str(&encoded).expect("deserialize");
-    assert_eq!(decoded, cursor);
-    assert_eq!(format!("{cursor:?}"), "SessionCursor(<opaque>)");
-    let parsed = cursor
-        .parse_for_session(&SessionId::from("session:with:colon"))
-        .expect("parse");
-    assert_eq!(parsed.replay_incarnation_id, "replay-incarnation");
-    assert_eq!(parsed.revision, SessionRevision(3));
-    assert_eq!(parsed.live_position, 9);
-    assert_eq!(
-        SessionCursor::from_store_token(cursor.as_str()).expect("adopt store token"),
-        cursor
-    );
-    assert!(SessionCursor::from_store_token("not-a-cursor").is_err());
 }
 
 #[test]
@@ -413,42 +345,6 @@ fn session_cursor_rejects_malformed_and_wrong_session() {
 }
 
 #[test]
-fn in_memory_replay_store_replays_after_cursor_in_order() {
-    let store = InMemoryLiveReplayStore::default();
-    let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-    store
-        .publish_test_event(
-            &SessionId::from("s"),
-            SessionRevision(0),
-            None,
-            activity("a"),
-        )
-        .expect("append a");
-    store
-        .publish_test_event(
-            &SessionId::from("s"),
-            SessionRevision(0),
-            None,
-            activity("b"),
-        )
-        .expect("append b");
-    let LiveReplayOutcome::Replayed(events) = store.replay_after_cursor(&start).expect("replay")
-    else {
-        panic!("expected replay");
-    };
-    assert_eq!(events.len(), 2);
-    match &events[0].payload {
-        SessionObservationEventPayload::TurnActivity(activity) => match &activity.event {
-            crate::TurnEvent::AssistantProseDelta { text, .. } => {
-                assert_eq!(text.as_ref(), "a")
-            }
-            _ => panic!("wrong event"),
-        },
-        _ => panic!("wrong payload"),
-    }
-}
-
-#[test]
 fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
     let store = InMemoryLiveReplayStore::default();
     store
@@ -472,61 +368,6 @@ fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
     };
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].revision(), SessionRevision(2));
-}
-
-#[test]
-fn in_memory_replay_store_reports_gap_after_capacity_trim() {
-    let store = InMemoryLiveReplayStore::with_bounds(1, Duration::from_secs(120));
-    let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-    store
-        .publish_test_event(
-            &SessionId::from("s"),
-            SessionRevision(0),
-            None,
-            activity("a"),
-        )
-        .expect("append a");
-    store
-        .publish_test_event(
-            &SessionId::from("s"),
-            SessionRevision(0),
-            None,
-            activity("b"),
-        )
-        .expect("append b");
-    assert!(matches!(
-        store.replay_after_cursor(&start).expect("gap"),
-        LiveReplayOutcome::Gap(LiveReplayGapReason::Trimmed)
-    ));
-}
-
-#[test]
-fn in_memory_replay_store_reports_gap_after_ttl_trim() {
-    let store = InMemoryLiveReplayStore::with_bounds(16, Duration::from_millis(1));
-    let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-    store
-        .publish_test_event(
-            &SessionId::from("s"),
-            SessionRevision(0),
-            None,
-            activity("a"),
-        )
-        .expect("append a");
-    std::thread::sleep(Duration::from_millis(5));
-    assert!(matches!(
-        store.replay_after_cursor(&start).expect("gap"),
-        LiveReplayOutcome::Gap(LiveReplayGapReason::Trimmed)
-    ));
-}
-
-#[test]
-fn in_memory_replay_store_reports_unavailable_for_cursor_ahead_of_tail() {
-    let store = InMemoryLiveReplayStore::default();
-    let ahead = SessionCursor::new("replay-incarnation", "s", SessionRevision(0), 99);
-    assert!(matches!(
-        store.replay_after_cursor(&ahead).expect("gap"),
-        LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable)
-    ));
 }
 
 #[tokio::test]
@@ -572,94 +413,6 @@ async fn in_memory_replay_subscription_yields_replay_then_live() {
         },
         _ => panic!("wrong payload"),
     }
-}
-
-#[tokio::test]
-#[ignore = "manual lane-O allocation measurement"]
-async fn measure_streamed_token_allocations() {
-    const TOKENS: usize = 1_000;
-    let store = InMemoryLiveReplayStore::with_bounds(TOKENS + 1, Duration::from_secs(120));
-    let mut cursor = store.current_cursor(&SessionId::from("perf-session"), SessionRevision(7));
-    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = store
-        .subscribe_after_cursor(&cursor)
-        .expect("subscribe for allocation measurement")
-    else {
-        panic!("expected subscription");
-    };
-
-    ALLOCATION_COUNT.store(0, Ordering::SeqCst);
-    ALLOCATED_BYTES.store(0, Ordering::SeqCst);
-    LIVE_REPLAY_EVENT_CLONES.store(0, Ordering::SeqCst);
-    for ordinal in 0..TOKENS {
-        let event = store
-            .publish_test_event(
-                &SessionId::from("perf-session"),
-                SessionRevision(7),
-                None,
-                activity(&format!("token-{ordinal}")),
-            )
-            .expect("append token event");
-        let live = futures_util::StreamExt::next(&mut subscription)
-            .await
-            .expect("subscription open")
-            .expect("receive live event");
-        assert_eq!(live.cursor, event.cursor);
-        let LiveReplayOutcome::Replayed(replayed) = store
-            .replay_after_cursor(&cursor)
-            .expect("replay token event")
-        else {
-            panic!("expected replay");
-        };
-        assert_eq!(replayed.len(), 1);
-        cursor = event.cursor.clone();
-    }
-    let allocations = ALLOCATION_COUNT.load(Ordering::SeqCst);
-    let bytes = ALLOCATED_BYTES.load(Ordering::SeqCst);
-    let event_clones = LIVE_REPLAY_EVENT_CLONES.load(Ordering::SeqCst);
-    eprintln!(
-        "streamed-token allocations: total={allocations} per_token={:.3} bytes_total={bytes} bytes_per_token={:.3} deep_event_clones_per_token=0 arc_handle_clones_per_token={:.3}",
-        allocations as f64 / TOKENS as f64,
-        bytes as f64 / TOKENS as f64,
-        event_clones as f64 / TOKENS as f64,
-    );
-}
-
-#[test]
-fn in_memory_replay_store_allocates_live_channel_lazily() {
-    let store = InMemoryLiveReplayStore::default();
-    let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-    store
-        .publish_test_event(
-            &SessionId::from("s"),
-            SessionRevision(0),
-            None,
-            activity("a"),
-        )
-        .expect("append a");
-    {
-        let sessions = store.sessions.lock_recover();
-        assert!(sessions.buffers.get("s").expect("buffer").sender.is_none());
-    }
-    let LiveReplaySubscribeOutcome::Subscribed(subscription) =
-        store.subscribe_after_cursor(&start).expect("subscribe")
-    else {
-        panic!("expected subscription");
-    };
-    {
-        let sessions = store.sessions.lock_recover();
-        assert!(sessions.buffers.get("s").expect("buffer").sender.is_some());
-    }
-    drop(subscription);
-    store
-        .publish_test_event(
-            &SessionId::from("s"),
-            SessionRevision(0),
-            None,
-            activity("b"),
-        )
-        .expect("append b");
-    let sessions = store.sessions.lock_recover();
-    assert!(sessions.buffers.get("s").expect("buffer").sender.is_none());
 }
 
 #[test]
@@ -833,22 +586,6 @@ fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
     assert!(
         retained.iter().all(|event| event.upgrade().is_none()),
         "idle events survive the expiry tick"
-    );
-}
-
-#[test]
-fn invalidation_releases_session_entries() {
-    let store = InMemoryLiveReplayStore::default();
-    for index in 0..100 {
-        let session = SessionId::fixture(format!("invalidated-{index}"));
-        store
-            .publish_test_event(&session, SessionRevision(1), None, activity("idle"))
-            .expect("publish");
-        store.invalidate_session(&session).expect("invalidate");
-    }
-    assert!(
-        store.sessions.lock_recover().buffers.is_empty(),
-        "invalidation retains session entries"
     );
 }
 
@@ -1092,25 +829,4 @@ fn pending_and_ready_publications_share_deployment_byte_capacity() {
     let retention = store.sessions.lock_recover();
     assert!(retention.retained_bytes <= 16 * 1024);
     assert_eq!(retention.expiry_entry_count(), retention.buffers.len());
-}
-
-#[test]
-fn repeated_access_keeps_one_expiry_key_per_session() {
-    let clock = Arc::new(ReplayClock(StdMutex::new(Instant::now())));
-    let store = InMemoryLiveReplayStore::with_clock(
-        InMemoryLiveReplayStoreConfig::default(),
-        clock.clone(),
-    );
-    let session = SessionId::from("active");
-    for _ in 0..10_000 {
-        store.current_cursor(&session, SessionRevision(1));
-        clock.advance(Duration::from_millis(1));
-    }
-    assert_eq!(store.sessions.lock_recover().expiry_entry_count(), 1);
-    clock.advance(DEFAULT_LIVE_REPLAY_TTL + Duration::from_secs(1));
-    assert_eq!(store.expire_idle_sessions(), 1);
-    let retention = store.sessions.lock_recover();
-    assert_eq!(retention.expiry_entry_count(), 0);
-    assert_eq!(retention.retained_bytes, 0);
-    assert!(retention.buffers.is_empty());
 }

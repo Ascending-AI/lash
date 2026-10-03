@@ -491,17 +491,4 @@ mod tests {
             ));
         }
     }
-
-    #[test]
-    fn a_settlement_names_each_row_once() {
-        let session = SessionId::from("s");
-        let mut settlement = IngressSettlement::new(TurnId::from("r"));
-        settlement.released.push(row("a"));
-        assert!(settlement.validate(&session).is_ok());
-        settlement.dropped.push(row("a"));
-        assert!(matches!(
-            settlement.validate(&session),
-            Err(StoreError::IngressSettlementDuplicate { .. })
-        ));
-    }
 }

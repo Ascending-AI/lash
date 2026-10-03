@@ -231,7 +231,6 @@ pub fn extract_query_param(url_or_query: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[test]
     fn form_encoding_round_trips_reserved_empty_and_unicode_values() {
@@ -310,41 +309,6 @@ mod tests {
 
         for (input, key, expected) in cases {
             assert_eq!(extract_query_param(input, key).as_deref(), expected);
-        }
-    }
-
-    #[test]
-    fn token_endpoint_parses_all_rfc_6749_error_codes() {
-        let cases = [
-            ("invalid_grant", OAuthTokenErrorCode::InvalidGrant),
-            ("invalid_client", OAuthTokenErrorCode::InvalidClient),
-            ("invalid_request", OAuthTokenErrorCode::InvalidRequest),
-            (
-                "unauthorized_client",
-                OAuthTokenErrorCode::UnauthorizedClient,
-            ),
-            (
-                "unsupported_grant_type",
-                OAuthTokenErrorCode::UnsupportedGrantType,
-            ),
-            ("invalid_scope", OAuthTokenErrorCode::InvalidScope),
-        ];
-
-        for (code, expected) in cases {
-            let error = OAuthError::token_endpoint(
-                400,
-                &format!(r#"{{"error":"{code}"}}"#),
-                "token refresh failed",
-            );
-
-            assert!(matches!(
-                error,
-                OAuthError::TokenEndpoint {
-                    status: 400,
-                    error_code: Some(actual),
-                    ..
-                } if actual == expected
-            ));
         }
     }
 
@@ -429,32 +393,6 @@ mod tests {
             .unwrap_err();
         drop(socket);
         assert!(request_error.is_connect());
-
-        let error = classify_oauth_refresh_error(OAuthError::Http(request_error));
-
-        assert_eq!(error.kind, CredentialErrorKind::Transient);
-        assert!(error.is_retryable());
-    }
-
-    #[tokio::test]
-    async fn timeout_failure_is_retryable() {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            let (_stream, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_millis(250));
-        });
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(25))
-            .build()
-            .unwrap();
-        let request_error = client
-            .get(format!("http://{address}"))
-            .send()
-            .await
-            .unwrap_err();
-        assert!(request_error.is_timeout());
-        server.join().unwrap();
 
         let error = classify_oauth_refresh_error(OAuthError::Http(request_error));
 

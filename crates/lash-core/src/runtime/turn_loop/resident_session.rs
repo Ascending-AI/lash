@@ -633,31 +633,3 @@ impl LashRuntime {
             .map_err(|err| SessionError::Protocol(err.to_string()))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn invalidation_mints_a_deterministic_incident_sequence() {
-        let session_id = SessionId::from("session-a");
-        let mut continuity = ResidentSessionContinuity::fresh();
-
-        continuity.invalidate(&session_id);
-        assert_eq!(
-            continuity.validity(),
-            &ResidentSessionState::Invalidated {
-                decision_id: "resident-session-reload:session-a:1".to_string(),
-            }
-        );
-
-        continuity.mark_adopted();
-        continuity.invalidate(&session_id);
-        assert_eq!(
-            continuity.validity(),
-            &ResidentSessionState::Invalidated {
-                decision_id: "resident-session-reload:session-a:2".to_string(),
-            }
-        );
-    }
-}

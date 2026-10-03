@@ -47,13 +47,11 @@ fn server<'a>(frontend: &'a dyn crate::Frontend) -> (Server<'a>, UnixStream) {
     (server, parent)
 }
 
-fn starts(frontend: &dyn crate::Frontend, count: usize) -> (Duration, Vec<Vec<u8>>) {
+fn starts(frontend: &dyn crate::Frontend, count: usize) {
     let (mut server, _parent) = server(frontend);
     let limits =
         lash_vm_client::PoolConfig::standard(lash_vm_client::WorkerEntry::helper("unused"))
             .vm_limits;
-    let mut duration = Duration::ZERO;
-    let mut snapshots = Vec::new();
     for n in 0..count {
         server.instance.reset();
         let input = Start {
@@ -66,20 +64,9 @@ fn starts(frontend: &dyn crate::Frontend, count: usize) -> (Duration, Vec<Vec<u8
             contexts: Vec::new(),
             limits,
         };
-        let began = Instant::now();
         let step = server.start(input).expect("Start");
-        duration += began.elapsed();
         assert!(matches!(step, VmStep::Complete(_) | VmStep::Suspended(_)));
-        snapshots.push(
-            server
-                .instance
-                .state()
-                .snapshot()
-                .to_canonical_bytes()
-                .expect("snapshot"),
-        );
     }
-    (duration, snapshots)
 }
 
 #[test]
@@ -119,76 +106,6 @@ fn starts_reuse_one_parser_thread_per_worker() {
             "errors and a cap-sized source keep the same thread"
         );
     }
-}
-
-/// The pre-FIG-4565 frontend's source-sized thread on each parse. Valid cells
-/// use exactly this path on main; diagnostics do not enter this measurement.
-struct FreshThreadFrontend;
-impl crate::Frontend for FreshThreadFrontend {
-    fn language_id(&self) -> &'static str {
-        "typescript"
-    }
-    fn parse(
-        &self,
-        source: &str,
-        host: Option<&lashlang::LashlangHostEnvironment>,
-    ) -> Result<lashlang::Program, crate::FrontendRefusal> {
-        let parsed = match host {
-            Some(host) => lash_typescript::parse_cell(source, host),
-            None => lash_typescript::parse(source),
-        };
-        parsed.map_err(|error| crate::FrontendRefusal {
-            policy: error.is_dialect_refusal(),
-            error: lashlang::ModuleCompileError::parse_failure(
-                error.span.map(|span| lashlang::Span {
-                    start: span.start,
-                    end: span.end,
-                }),
-                error.message.clone(),
-                lash_typescript::format_diagnostic(source, &error),
-            ),
-        })
-    }
-}
-
-#[test]
-#[ignore = "Start latency measurement, run on the quiet host"]
-fn start_latency_benchmark() {
-    const STARTS: usize = 200;
-    let mut before = Vec::new();
-    let mut after = Vec::new();
-    for pair in 0..7 {
-        let frontend = TypeScriptFrontend::default();
-        let (old, new) = if pair % 2 == 0 {
-            (
-                starts(&FreshThreadFrontend, STARTS),
-                starts(&frontend, STARTS),
-            )
-        } else {
-            let new = starts(&frontend, STARTS);
-            (starts(&FreshThreadFrontend, STARTS), new)
-        };
-        assert_eq!(old.1, new.1, "every Start must produce identical VM state");
-        assert_eq!(
-            frontend.parser.lock().expect("parser").thread_spawn_count(),
-            1
-        );
-        let us = |duration: Duration| duration.as_secs_f64() * 1_000_000.0 / STARTS as f64;
-        before.push(us(old.0));
-        after.push(us(new.0));
-        println!(
-            "pair {}: before {:.3} us/Start, after {:.3} us/Start; parser spawns {STARTS} -> 1; {STARTS} identical snapshots",
-            pair + 1,
-            before[pair],
-            after[pair]
-        );
-    }
-    before.sort_by(f64::total_cmp);
-    after.sort_by(f64::total_cmp);
-    println!(
-        "median of 7 interleaved runs: before {:.3} us/Start, after {:.3} us/Start",
-        before[3], after[3]
-    );
 }
 
 #[test]

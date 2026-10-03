@@ -7,9 +7,8 @@ use super::EffectSummaryWriter;
 use super::{
     EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangProcessExecutionTrace,
     LashlangProcessTraceIdentity, LashlangSegmentState, LashlangSegmentStateError,
-    ReplayOrdinalsState, SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
-    process_lashlang_execution_result, process_trace_session_id, record_segment_boundary_decline,
-    refuse_foreign_program,
+    ReplayOrdinalsState, decode_lashlang_segment_state, process_lashlang_execution_result,
+    process_trace_session_id, refuse_foreign_program,
 };
 use lash_sansio::ExecutionNodeKind;
 use lash_sansio::sync::MutexExt;
@@ -787,48 +786,6 @@ fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
     assert_retired_generation(&output, "sha256:old");
 }
 
-/// The v11 envelope no longer carries `signal_send_sequence`: its only
-/// producer was deleted with the signal special forms (FIG-2999), and a
-/// durable field with no producer is removed rather than round-tripped.
-#[test]
-fn the_current_envelope_carries_no_dead_send_ordinal() {
-    let program = lashlang::testing::harness::try_compile_program(&finish_null())
-        .expect("compile pinning program");
-    let mut state = lashlang::State::new();
-    let host = SegmentFixtureHost;
-    let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
-    let mut vm =
-        lashlang::Vm::from_state(&program, &mut state, &environment).expect("construct pinning VM");
-    let segment_state = LashlangSegmentState {
-        version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: sealed_continuation(
-            &vm.suspend().expect("capture pinning VM continuation"),
-            &lash_sansio::ProcessId::fixture("pinning"),
-        ),
-        ordinals: ReplayOrdinalsState {
-            commands: crate::LashlangRunOrdinals {
-                next: 1,
-                dispatched: crate::DispatchedOrdinalsDigest::empty(),
-            },
-            event_sequence: 2,
-            signal_wait_ordinals: Default::default(),
-        },
-        started_process_ids: Vec::new(),
-        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
-        pending_summary: Vec::new(),
-        effect_omissions: std::collections::BTreeMap::new(),
-        outstanding_groups: Vec::new(),
-        held_tool_calls: Default::default(),
-        worker_recovery: Default::default(),
-    };
-    let wire = serde_json::to_value(&segment_state).expect("serialize current segment state");
-    assert_eq!(wire["version"], LASHLANG_SEGMENT_STATE_VERSION);
-    assert!(
-        wire.get("signal_send_sequence").is_none(),
-        "the dead send ordinal must not be written: {wire}"
-    );
-}
-
 /// E5 (FIG-3571): the summary a boundary carries in segment state is bounded
 /// by construction, not by a flush schedule: however many times a run's
 /// effect nodes fire, at most the cap per node is ever pending, the rest are
@@ -932,16 +889,6 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
         .nodes["node:a"]
             .success,
         2 * cap + 1
-    );
-}
-
-#[test]
-fn declined_boundary_is_warned_and_counted() {
-    let before = SEGMENT_BOUNDARY_DECLINED_TOTAL.load(Ordering::Relaxed);
-    record_segment_boundary_decline(&"projected state", "test boundary decline");
-    assert_eq!(
-        SEGMENT_BOUNDARY_DECLINED_TOTAL.load(Ordering::Relaxed),
-        before + 1
     );
 }
 

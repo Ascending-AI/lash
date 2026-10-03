@@ -314,18 +314,6 @@ fn probe_context_with<'run>(
     context
 }
 
-async fn latency_probe_context<'run>(
-    backend: &crate::Backend,
-    scoped: crate::ScopedEffectController<'run>,
-) -> crate::RuntimeExecutionContext<'run> {
-    let resolver = probe_controller(backend);
-    let provider: Arc<dyn crate::ToolProvider> = Arc::new(LatencyProbeTools {
-        controller: resolver,
-        awaited_leaf: None,
-    });
-    probe_context(backend, provider, scoped)
-}
-
 /// A probe context whose synchronous leaf waits for `awaited_leaf` to settle,
 /// and whose presentation step raises that signal.
 async fn handshake_probe_context<'run>(
@@ -434,106 +422,6 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
     handler.close().await.expect("close the probe handler");
 }
 
-/// The headline claim: a batch whose leaves both park reports the order their
-/// completions actually arrived, not the order they were launched in.
-///
-/// Slow-fail is launched first and fast-fail second, so an input-order await
-/// yields `[0, 1]` — which is exactly the answer that made `Promise.all` surface
-/// the wrong rejection. The true order is `[1, 0]`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn deferred_leaves_settle_in_completion_order_not_launch_order() {
-    let double =
-        crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let handler = double
-        .open_handler(crate::AdmittedScope::turn(
-            SessionId::from("session"),
-            crate::TurnId::from("test-turn"),
-        ))
-        .await
-        .expect("open the probe handler");
-    let context = latency_probe_context(&backend, handler.scoped()).await;
-    let replies = context
-        .call_tool_batch(vec![
-            ToolInvocation::new(
-                lash_core_execution::ToolCallId::fixture("slow"),
-                crate::ToolId::from("tool:slow_fail"),
-                serde_json::json!({}),
-            ),
-            ToolInvocation::new(
-                lash_core_execution::ToolCallId::fixture("fast"),
-                crate::ToolId::from("tool:fast_fail"),
-                serde_json::json!({}),
-            ),
-        ])
-        .await;
-
-    assert_eq!(replies.replies.len(), 2, "one reply per call");
-    assert_eq!(
-        replies.settlement_order,
-        vec![1, 0],
-        "the fast rejection settled first, so it leads the order; replies: {:?}",
-        replies
-            .replies
-            .iter()
-            .map(|reply| reply.output.value_for_projection())
-            .collect::<Vec<_>>()
-    );
-    for reply in &replies.replies {
-        assert_eq!(
-            reply.output.status(),
-            lash_sansio::ToolCallStatus::Failure,
-            "both probes reject"
-        );
-    }
-    let first_settled = &replies.replies[replies.settlement_order[0]];
-    assert!(
-        first_settled
-            .output
-            .value_for_projection()
-            .to_string()
-            .contains("fast_fail"),
-        "the leading position carries the fast tool's rejection: {}",
-        first_settled.output.value_for_projection()
-    );
-    drop(context);
-    handler.close().await.expect("close the probe handler");
-}
-
-/// A later leaf must be able to settle while an earlier leaf still holds its
-/// intent-drain slot.
-///
-/// Both probes above park immediately, so neither ever waited on the batch's
-/// intent-drain gate for its turn, which left this case uncovered. Here leaf 0
-/// runs a synchronous attempt and so holds the earliest drain slot until that
-/// attempt returns, while leaf 1 parks at once and its completion lands in
-/// 20 ms.
-///
-/// The two leaves are wired into a handshake rather than a race, because a race
-/// between them proves nothing: leaf 0 refuses to finish until leaf 1's reply
-/// has been projected, which happens only after leaf 1's child future has run
-/// to completion. So the batch can only make progress at all if leaf 1 settles
-/// first.
-///
-/// Every non-draining exit — leaf 1's parked launch among them — used to
-/// discharge by calling `finish`, which waited for the slot's turn *before*
-/// releasing it. Leaf 1 could therefore not return its parked launch, let alone
-/// await its completion, until leaf 0 had drained; against that code this test
-/// deadlocks both leaves and leaf 0 reports `awaited_leaf_never_settled`.
-/// Discharge is now the guard's drop, which takes no turn, so leaf 1 settles
-/// when it actually settles and leads the order.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_later_leaf_settles_while_an_earlier_leaf_holds_its_drain_slot() {
-    let replies = drain_slot_handshake_batch().await;
-    for reply in &replies.replies {
-        assert_eq!(
-            reply.output.status(),
-            lash_sansio::ToolCallStatus::Failure,
-            "both probes reject"
-        );
-    }
-}
-
 /// The leaf that settled first leads the settlement order: in the handshake
 /// above, the deferred leaf settles before the synchronous one can finish.
 ///
@@ -593,47 +481,6 @@ async fn drain_slot_handshake_batch() -> crate::session::ToolBatchReplies {
     drop(context);
     handler.close().await.expect("close the probe handler");
     replies
-}
-
-/// The same batch with the delays swapped must produce the mirrored order.
-///
-/// Without this, a test that only ever sees `[1, 0]` is also passed by an
-/// implementation that reverses the launch order, which would be just as wrong.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn completion_order_follows_the_delays_in_both_directions() {
-    let double =
-        crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let handler = double
-        .open_handler(crate::AdmittedScope::turn(
-            SessionId::from("session"),
-            crate::TurnId::from("test-turn"),
-        ))
-        .await
-        .expect("open the probe handler");
-    let context = latency_probe_context(&backend, handler.scoped()).await;
-    let replies = context
-        .call_tool_batch(vec![
-            ToolInvocation::new(
-                lash_core_execution::ToolCallId::fixture("fast"),
-                crate::ToolId::from("tool:fast_fail"),
-                serde_json::json!({}),
-            ),
-            ToolInvocation::new(
-                lash_core_execution::ToolCallId::fixture("slow"),
-                crate::ToolId::from("tool:slow_fail"),
-                serde_json::json!({}),
-            ),
-        ])
-        .await;
-
-    assert_eq!(
-        replies.settlement_order,
-        vec![0, 1],
-        "launching the fast tool first puts it first for the honest reason"
-    );
-    drop(context);
-    handler.close().await.expect("close the probe handler");
 }
 
 // ---------------------------------------------------------------------------

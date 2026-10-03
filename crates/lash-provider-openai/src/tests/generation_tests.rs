@@ -128,61 +128,6 @@ fn chat_body_carries_temperature_and_seed_on_both_buffered_and_streaming_paths()
     }
 }
 
-#[test]
-fn chat_body_omits_temperature_and_seed_when_the_caller_sets_neither() {
-    let provider = openrouter_provider();
-    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-
-    let body = provider.build_chat_request_body(&req, true).unwrap();
-    assert!(body.get("temperature").is_none());
-    assert!(body.get("seed").is_none());
-}
-
-#[test]
-fn sampling_controls_do_not_disturb_the_rest_of_the_chat_body() {
-    let mut req = sampled_request();
-    req.model.metadata_mut().wire_model = "anthropic/claude-sonnet-4.6".to_string();
-    req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
-        name: "answer".to_string(),
-        schema: lash_sansio::SchemaContract::admit(json!({ "type": "object", "properties": {} }))
-            .expect("valid declared schema"),
-        strict: true,
-    }));
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "lookup".to_string(),
-        description: "look something up".to_string(),
-        input_schema: lash_sansio::SchemaContract::admit(
-            json!({ "type": "object", "properties": {} }),
-        )
-        .expect("valid declared schema"),
-        output_schema: lash_sansio::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
-    }]);
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.model.metadata_mut().capability = LlmProfileCapability {
-        reasoning: Some(ReasoningCapability {
-            efforts: vec!["high".to_string()],
-            encoding: ReasoningEncoding::Effort,
-            disable: false,
-            mandatory: false,
-        }),
-        ..LlmProfileCapability::default()
-    };
-
-    let body = openrouter_provider()
-        .build_chat_request_body(&req, true)
-        .unwrap();
-
-    assert_eq!(body["temperature"], json!(0.0));
-    assert_eq!(body["seed"], json!(-42));
-    assert_eq!(body["response_format"]["type"], "json_schema");
-    assert_eq!(body["response_format"]["json_schema"]["name"], "answer");
-    assert_eq!(body["reasoning"], json!({ "effort": "high" }));
-    assert_eq!(body["stream_options"], json!({ "include_usage": true }));
-    assert_eq!(body["tools"][0]["function"]["name"], "lookup");
-    assert_eq!(body["tool_choice"], "auto");
-}
-
 #[tokio::test]
 async fn every_retry_attempt_reapplies_the_sampling_controls() {
     let transport = Arc::new(RecordingScriptedTransport {

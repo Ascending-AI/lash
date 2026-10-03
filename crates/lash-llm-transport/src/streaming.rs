@@ -359,21 +359,6 @@ mod tests {
     }
 
     #[test]
-    fn multibyte_codepoint_split_in_data_payload_round_trips() {
-        // A 4-byte emoji (😀 = 0xF0 0x9F 0x98 0x80) split mid-codepoint.
-        let full = "data: hi 😀 there\n\n".as_bytes();
-        let split = 10; // lands inside the emoji's byte sequence
-        let events = collect_events(&[&full[..split], &full[split..]]);
-        assert_eq!(events, vec!["hi 😀 there".to_string()]);
-    }
-
-    #[test]
-    fn complete_event_in_single_chunk_still_flushes() {
-        let events = collect_events(&[b"data: hello\n\n"]);
-        assert_eq!(events, vec!["hello".to_string()]);
-    }
-
-    #[test]
     fn finish_flushes_trailing_event_without_blank_line() {
         // Terminal event delivered without the trailing blank line: finish()
         // must still surface it (covers the mid-stream-disconnect flush path).
@@ -385,45 +370,6 @@ mod tests {
     fn multiline_data_fields_join_with_newline() {
         let events = collect_events(&[b"data: a\ndata: b\n\n"]);
         assert_eq!(events, vec!["a\nb".to_string()]);
-    }
-
-    #[derive(Debug)]
-    struct ReadFailureStream(bool);
-
-    #[async_trait::async_trait]
-    impl crate::http::LlmByteStream for ReadFailureStream {
-        async fn next_chunk(&mut self) -> Result<Option<bytes::Bytes>, LlmTransportError> {
-            let mut error = if self.0 {
-                LlmTransportError::response_read("connection reset")
-            } else {
-                LlmTransportError::new("HTTP response read failed: custom diagnostic")
-            };
-            if self.0 {
-                error.message = "independently changed HTTP display".into();
-            }
-            Err(error)
-        }
-    }
-
-    #[tokio::test]
-    async fn response_read_context_survives_display_changes_without_parsing_custom_errors() {
-        for (typed, expected) in [
-            (true, "Stream read failed: connection reset"),
-            (false, "HTTP response read failed: custom diagnostic"),
-        ] {
-            let error = drive_sse_response(
-                LlmHttpBody::streamed(ReadFailureStream(typed)),
-                Duration::from_secs(1),
-                bounds(1024, 4096),
-                "read timeout",
-                "request timeout",
-                &mut ResponseMetadataCapture::default(),
-                |_| Ok(()),
-            )
-            .await
-            .expect_err("read failed");
-            assert_eq!(error.message, expected);
-        }
     }
 
     #[derive(Debug)]

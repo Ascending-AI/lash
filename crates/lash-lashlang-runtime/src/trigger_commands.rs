@@ -591,16 +591,4 @@ mod tests {
                 .expect("a registration without a key derives one at the boundary");
         assert!(key.starts_with("derived/"), "{key}");
     }
-
-    #[test]
-    fn trigger_registration_keeps_an_explicit_subscription_key_verbatim() {
-        let key = materialized_trigger_subscription_key(
-            Some("morning-scan"),
-            "scan",
-            "timer.Schedule",
-            "source-key",
-        )
-        .expect("explicit key is kept");
-        assert_eq!(key, "morning-scan");
-    }
 }

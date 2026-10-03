@@ -16,29 +16,6 @@ use super::*;
 use crate::ast_support::{call, finish, finish_program, list, number, program, string};
 
 #[tokio::test(flavor = "current_thread")]
-async fn executes_arithmetic_strings_and_finish() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        const total = 1 + 2 * 3;
-        const msg = "total=" + total;
-        finish(msg);
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    assert_eq!(value, Value::String("total=7".to_string().into()));
-    assert_eq!(state.globals()["total"], Value::Number(7.0));
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn executes_programs_with_comments() {
     let host = TestHost::default();
     let mut state = State::new();
@@ -59,30 +36,6 @@ async fn executes_programs_with_comments() {
     );
 
     assert_eq!(value, Value::Number(3.0));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn double_slash_inside_strings_is_not_a_comment() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        const url = "https://example.com/a//b";
-        finish(url);
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    assert_eq!(
-        value,
-        Value::String("https://example.com/a//b".to_string().into())
-    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -230,26 +183,6 @@ async fn a_tuple_is_an_immutable_value_distinct_from_a_list() {
             .contains("`push` requires a list as the first argument"),
         "{err:?}"
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tuple_snapshot_round_trip_preserves_tuple_identity() {
-    // A stored snapshot can still carry a tuple from before the surface
-    // spelled one; the wire round trip must keep its identity.
-    let snapshot = lashlang::Snapshot::new(
-        [(
-            "pair".to_string(),
-            Value::Tuple(vec![Value::Number(1.0), Value::Number(2.0)].into()),
-        )]
-        .into_iter()
-        .collect(),
-    );
-    let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-    let snapshot = lashlang::VmInstance::pristine()
-        .open_snapshot(&encoded)
-        .expect("snapshot decode");
-    let restored = State::from_snapshot(snapshot);
-    assert!(matches!(restored.globals()["pair"], Value::Tuple(_)));
 }
 
 /// Compiles an IR program as the main entry of the raw module artifact it

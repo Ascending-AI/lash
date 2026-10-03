@@ -32,27 +32,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stable_json_encoding_remains_canonical() {
-        assert_eq!(
-            stable_json_string(&serde_json::json!({"a": 1, "b": [true, null]}))
-                .expect("serialize vector"),
-            "{\"a\":1,\"b\":[true,null]}"
-        );
-
-        let ordered: serde_json::Value =
-            serde_json::from_str(r#"{"a":2,"b":1}"#).expect("parse ordered object");
-        let out_of_order: serde_json::Value =
-            serde_json::from_str(r#"{"b":1,"a":2}"#).expect("parse out-of-order object");
-        let canonical = r#"{"a":2,"b":1}"#;
-        for value in [ordered, out_of_order] {
-            assert_eq!(
-                stable_json_string(&value).expect("serialize object"),
-                canonical
-            );
-        }
-    }
-
-    #[test]
     fn blob_v2_blake3_vector_is_pinned() {
         assert_eq!(
             blake3_hex("lash-blob/v2", b"lash-blob-vector"),

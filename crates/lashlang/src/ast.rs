@@ -897,7 +897,7 @@ impl Expr {
     /// rendered process body back into the literal it was lifted from, for
     /// one — walks with this instead of re-spelling the full `match`. The two
     /// walks are pinned to agree by
-    /// `children_mut_visits_the_same_nodes_as_children`.
+    /// `children_mut_walks_a_whole_program_in_the_same_order_as_children`.
     pub fn children_mut(&mut self) -> ExprChildrenMut<'_> {
         let mut buffer = SmallExprMutVec::new();
         match self {

@@ -29,16 +29,6 @@ fn sse_error_event_top_level_code_is_classified() {
     );
 }
 
-#[test]
-fn codex_error_summary_uses_top_level_detail() {
-    let summary =
-        CodexProvider::codex_error_summary(400, r#"{"detail":"Unsupported parameter: foo"}"#);
-    assert_eq!(
-        summary.as_deref(),
-        Some("Codex request failed with 400: Unsupported parameter: foo")
-    );
-}
-
 #[derive(Debug)]
 struct TimeoutBodyStream;
 

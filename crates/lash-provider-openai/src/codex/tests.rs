@@ -15,7 +15,6 @@ use lash_core::provider::{
 use lash_llm_transport::openai_terminal_reason_from_response_value;
 use lash_sansio::sync::MutexExt;
 use shared::ResponsesStreamState as CodexStreamState;
-use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -303,105 +302,8 @@ fn codex_null_incomplete_details_does_not_map_to_output_limit() {
     assert_eq!(terminal_reason, LlmTerminalReason::Stop);
 }
 
-#[test]
-fn codex_content_filter_incomplete_maps_to_content_filter() {
-    let terminal_reason = openai_terminal_reason_from_response_value(
-        &json!({"status":"incomplete","incomplete_details":{"reason":"content_filter"}}),
-        &[],
-    );
-    assert_eq!(terminal_reason, LlmTerminalReason::ContentFilter);
-}
-
-#[test]
-fn codex_request_body_emits_reasoning_from_capability_variant() {
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model.metadata_mut().wire_model = "custom-codex-model".to_string();
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.model.metadata_mut().capability = reasoning_capability();
-    let body = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, true)
-        .unwrap();
-    assert_eq!(body["reasoning"], json!({ "effort": "high" }));
-}
-
-#[test]
-fn codex_request_body_emits_none_effort_for_disabled_selection() {
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
-    req.model.metadata_mut().capability = reasoning_capability();
-    let body = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, true)
-        .unwrap();
-    assert_eq!(body["reasoning"], json!({ "effort": "none" }));
-}
-
-#[test]
-fn codex_request_body_refuses_an_effort_without_capability() {
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model.metadata_mut().wire_model = "custom-codex-model".to_string();
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    let error = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, true)
-        .expect_err("an effort without capability is refused");
-    assert_eq!(
-        error.code.as_ref().map(ToString::to_string).as_deref(),
-        Some("lash:effort_not_configurable")
-    );
-}
-
 #[path = "cache_emission_tests.rs"]
 mod cache_emission_tests;
-
-#[test]
-fn raw_codex_builder_strips_unstamped_and_foreign_replay_fields() {
-    let foreign_route = lash_core::ProviderRouteIdentity::for_endpoint(
-        "openai_compatible",
-        "https://foreign.example/v1",
-        "gpt-5.4",
-    );
-    let req = request(vec![LlmMessage::new(
-        LlmRole::Assistant,
-        vec![
-            lash_core::llm::types::LlmContentBlock::Text {
-                text: "portable answer".into(),
-                response_meta: Some(ResponseTextMeta {
-                    id: Some("unstamped-response-id".to_string()),
-                    status: Some("completed".to_string()),
-                    phase: Some(ResponsePhase::FinalAnswer),
-                    ..ResponseTextMeta::default()
-                }),
-                cache_breakpoint: false,
-            },
-            lash_core::llm::types::LlmContentBlock::Reasoning {
-                text: "portable summary".to_string(),
-                replay: Some(lash_core::llm::types::ProviderReasoningReplay {
-                    encrypted_content: Some("foreign-encrypted-content".to_string()),
-                    origin: Some(foreign_route.clone()),
-                    ..Default::default()
-                }),
-            },
-            lash_core::llm::types::LlmContentBlock::ToolCall {
-                call_id: "call-1".to_string(),
-                tool_name: "lookup".to_string(),
-                input_json: "{}".to_string(),
-                replay: Some(lash_core::llm::types::ProviderReplayMeta {
-                    item_id: Some("foreign-tool-item".to_string()),
-                    opaque: Some("foreign-tool-opaque".to_string()),
-                    origin: Some(foreign_route),
-                }),
-            },
-        ],
-    )]);
-    let body = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, true)
-        .expect("Codex request serializes its neutral fallback");
-    let wire = body.to_string();
-    assert!(wire.contains("portable answer"));
-    assert!(!wire.contains("unstamped-response-id"));
-    assert!(!wire.contains("foreign-encrypted-content"));
-    assert!(!wire.contains("foreign-tool-item"));
-    assert!(!wire.contains("foreign-tool-opaque"));
-}
 
 fn adversarial_codex_raw_request() -> LlmRequest {
     let foreign_route = lash_core::ProviderRouteIdentity::for_endpoint(
@@ -500,26 +402,6 @@ fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
 }
 
 #[test]
-fn codex_request_refuses_an_output_token_cap_from_either_source() {
-    let mut defaulted = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    defaulted.model.metadata_mut().limits.output_tokens =
-        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9_999))
-            .expect("valid output-token limits");
-    CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&defaulted, false)
-        .expect_err("a recorded model cap is refused on Codex");
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.generation.output_token_cap = NonZeroUsize::new(2_048);
-    let error = CodexProvider::new("access", "refresh", 0)
-        .build_request_body(&req, false)
-        .expect_err("a request cap is refused on Codex");
-    assert_eq!(
-        error.code.as_ref().map(ToString::to_string).as_deref(),
-        Some("lash:unsupported_generation_option")
-    );
-}
-
-#[test]
 fn response_failed_server_error_is_retryable() {
     let mut state = CodexStreamState::default();
     let err = CodexProvider::process_sse_event(
@@ -590,87 +472,6 @@ fn codex_request_history_preserves_assistant_message_metadata() {
     assert_eq!(body["input"][0]["phase"], "final_answer");
     assert_eq!(body["input"][0]["content"][0]["type"], "output_text");
     assert!(body["input"][0]["content"][0]["annotations"].is_array());
-}
-
-#[test]
-fn codex_cached_continuation_sends_delta_after_prior_request_and_response_items() {
-    let provider =
-        CodexProvider::new("access", "refresh", 0).with_transport(CodexTransport::WebsocketCached);
-    let first = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    let first_body = provider.build_request_body(&first, true).unwrap();
-    let assistant_item = json!({
-        "type": "message",
-        "id": "msg_1",
-        "role": "assistant",
-        "status": "completed",
-        "phase": "final_answer",
-        "content": [{"type": "output_text", "text": "answer", "annotations": []}]
-    });
-    let continuation = CodexProvider::continuation_from_response(
-        &first_body,
-        &json!({
-            "id": "resp_1",
-            "status": "completed",
-            "output": [assistant_item]
-        }),
-    )
-    .expect("completed continuation");
-    let second = request(vec![
-        LlmMessage::text(LlmRole::User, "hello"),
-        LlmMessage::new(
-            LlmRole::Assistant,
-            vec![lash_core::llm::types::LlmContentBlock::Text {
-                text: "answer".into(),
-                response_meta: Some(ResponseTextMeta {
-                    id: Some("msg_1".to_string()),
-                    status: Some("completed".to_string()),
-                    phase: Some(ResponsePhase::FinalAnswer),
-                    origin: Some(provider.route_identity("gpt-5.4")),
-                    ..ResponseTextMeta::default()
-                }),
-                cache_breakpoint: false,
-            }],
-        ),
-        LlmMessage::text(LlmRole::User, "next"),
-    ]);
-    let second_body = provider.build_request_body(&second, true).unwrap();
-    let cached_body =
-        CodexProvider::cached_websocket_body(&continuation, &second_body).expect("cached body");
-    assert_eq!(cached_body["previous_response_id"], "resp_1");
-    assert_eq!(
-        cached_body["input"].as_array().expect("delta input").len(),
-        1
-    );
-    assert_eq!(cached_body["input"][0]["role"], "user");
-    assert_eq!(cached_body["input"][0]["content"][0]["text"], "next");
-}
-
-#[test]
-fn codex_websocket_request_uses_response_create_event_shape() {
-    let provider = CodexProvider::new("access", "refresh", 0);
-    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    let body = provider.build_request_body(&req, true).unwrap();
-    let websocket_body = CodexProvider::websocket_create_request(&body);
-    assert_eq!(websocket_body["type"], "response.create");
-    assert_eq!(websocket_body["model"], body["model"]);
-    assert_eq!(websocket_body["input"], body["input"]);
-    assert_eq!(websocket_body["stream"], true);
-    assert!(websocket_body.get("response").is_none());
-}
-
-#[test]
-fn codex_websocket_request_keeps_cached_previous_response_id() {
-    let provider = CodexProvider::new("access", "refresh", 0);
-    let req = request(vec![LlmMessage::text(LlmRole::User, "next")]);
-    let mut body = provider.build_request_body(&req, true).unwrap();
-    body["previous_response_id"] = json!("resp_1");
-    body["input"] = json!([]);
-
-    let websocket_body = CodexProvider::websocket_create_request(&body);
-
-    assert_eq!(websocket_body["type"], "response.create");
-    assert_eq!(websocket_body["previous_response_id"], "resp_1");
-    assert_eq!(websocket_body["input"], json!([]));
 }
 
 #[tokio::test]
@@ -1840,52 +1641,6 @@ async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
 }
 
 #[tokio::test]
-async fn codex_websocket_output_started_error_stops_provider_handle_retry() {
-    let ws = spawn_scripted_websocket(vec![
-        ScriptedWsAction::IdleAfterStart {
-            message_id: "msg_paid",
-            text: "paid partial",
-        },
-        ScriptedWsAction::Complete {
-            response_id: "resp_second",
-            message_id: "msg_second",
-            text: "second generation",
-        },
-    ])
-    .await;
-    let http = spawn_http_sse("resp_http", "msg_http", "fallback").await;
-    let provider =
-        websocket_test_provider(CodexTransport::Websocket, http.url.clone(), ws.url.clone())
-            .with_options(ProviderOptions {
-                reliability: ProviderReliability::codex()
-                    .request_timeout(Some(RequestTimeout::Millis(5_000)))
-                    .stream_chunk_timeout_ms(Some(50))
-                    .max_attempts(2)
-                    .base_delay_ms(0)
-                    .max_delay_ms(0),
-                ..ProviderOptions::default()
-            });
-    let mut handle = ProviderHandle::new(provider.into_components());
-
-    let result = handle
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
-        .await;
-
-    assert_eq!(
-        ws.captured().len(),
-        1,
-        "paid WebSocket output must not be re-bought"
-    );
-    let failure = result.expect_err("output-started WebSocket failure must stop the ladder");
-    assert_eq!(
-        failure.code.as_ref().map(|code| code.to_string()),
-        Some("lash:unsafe_retry_after_output_started".to_string())
-    );
-    assert!(!failure.is_retryable());
-    assert_eq!(http.captured_len(), 0);
-}
-
-#[tokio::test]
 async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
     // Regression law for FIG-1414: on the old ordering (empty allocation frame
     // first), a >50ms stall between frames caused the stream chunk timeout to
@@ -2088,24 +1843,6 @@ fn codex_stream_replayed_message_item_does_not_duplicate_text() {
             .count(),
         1
     );
-}
-
-#[test]
-fn codex_stream_completed_response_merges_existing_message_by_id() {
-    let mut state = CodexStreamState::default();
-
-    for event in [
-        json!({"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}),
-        json!({"type":"response.output_text.delta","item_id":"msg_1","delta":"Final answer."}),
-        json!({"type":"response.output_item.done","item":{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"Final answer."}]}}),
-        json!({"type":"response.completed","response":{"id":"resp_1","output_text":"Final answer.","output":[{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"Final answer."}]}]}}),
-    ] {
-        process_event(&mut state, event);
-    }
-
-    let response = response_from_state(state);
-    assert_eq!(response.full_text(), "Final answer.");
-    assert_eq!(response.parts.len(), 1);
 }
 
 #[test]

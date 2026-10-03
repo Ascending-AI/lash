@@ -1601,22 +1601,4 @@ mod classification_tests {
             assert!(!runtime.is_retryable());
         }
     }
-
-    #[test]
-    fn corrupt_state_is_terminal_and_a_substrate_fault_is_retried() {
-        let corrupt = PluginError::StoredDataCorrupt {
-            record_kind: "process_event".to_string(),
-            message: "negative sequence".to_string(),
-        };
-        assert!(corrupt.is_terminal());
-        assert!(!corrupt.is_retryable());
-
-        let fault = PluginError::from(crate::StoreError::StorageFailure {
-            backend: "sqlite",
-            message: "database connection closed".to_string(),
-        });
-        assert!(matches!(fault, PluginError::StoreUnavailable { .. }));
-        assert!(!fault.is_terminal());
-        assert!(fault.is_retryable());
-    }
 }

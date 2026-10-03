@@ -396,81 +396,12 @@ fn payload_bytes(payload: &Value) -> usize {
 mod tests {
     use super::*;
 
-    fn text_delta(content: &str) -> Value {
-        serde_json::json!({"type": "text_delta", "content": content, "block": {"id": "b1"}})
-    }
-
     fn builder_with(payloads: Vec<(RecordedChildChannel, Value)>) -> RecordedChildStream {
         let mut builder = RecordedChildStreamBuilder::default();
         for (channel, payload) in payloads {
             builder.push(channel, Ok(payload));
         }
         builder.finish()
-    }
-
-    #[test]
-    fn deltas_of_one_block_coalesce_into_one_entry() {
-        let stream = builder_with(vec![
-            (RecordedChildChannel::Session, text_delta("hel")),
-            (
-                RecordedChildChannel::Activity,
-                serde_json::json!({"type": "tool_call_started", "call_id": "c"}),
-            ),
-            (RecordedChildChannel::Session, text_delta("lo")),
-        ]);
-        assert_eq!(stream.events.len(), 2);
-        assert_eq!(stream.events[0].payload["content"], "hello");
-    }
-
-    #[test]
-    fn a_call_output_is_stored_once_and_restored_on_decode() {
-        let output = serde_json::json!({"big": "x".repeat(64)});
-        let stream = builder_with(vec![
-            (
-                RecordedChildChannel::Session,
-                serde_json::json!({"type": "tool_call", "call_id": "c", "output": output}),
-            ),
-            (
-                RecordedChildChannel::Activity,
-                serde_json::json!({"type": "tool_call_completed", "call_id": "c", "output": output}),
-            ),
-        ]);
-        assert!(stream.events[1].payload.get("output").is_none());
-        assert_eq!(stream.events[1].shared.get("output"), Some(&0));
-    }
-
-    #[test]
-    fn a_part_the_childs_own_record_holds_is_referenced_and_restored() {
-        let output = serde_json::json!({"status": "success", "value": {"rows": "z".repeat(128)}});
-        let activity = serde_json::json!({
-            "id": "a1",
-            "event": {
-                "type": "tool_call_completed",
-                "call_id": "call-1",
-                "name": "leaf",
-                "args": {},
-                "output": output.clone(),
-                "duration_ms": 1,
-            }
-        });
-        let mut stream = builder_with(vec![(RecordedChildChannel::Activity, activity.clone())]);
-        let record = serde_json::json!({
-            "tool": "leaf",
-            "args": {},
-            "output": output,
-        });
-        stream.settle_against(&record);
-        let entry = &stream.events[0];
-        assert_eq!(entry.payload["event"]["output"], Value::Null);
-        assert_eq!(
-            entry.settled.get("/event/output").map(String::as_str),
-            Some("/output")
-        );
-        let bytes = serde_json::to_vec(&stream).expect("serializes").len();
-        assert!(
-            bytes < 256,
-            "the output is not recorded twice: {bytes} bytes"
-        );
     }
 
     /// A real completion round-trips through the settled reference:

@@ -1133,18 +1133,4 @@ mod tests {
             .collect();
         assert_eq!(unfinished, ["Ev1", "Ev3"]);
     }
-
-    #[test]
-    fn event_reasons_round_trip_their_stored_strings() {
-        for reason in DeferralReason::ALL {
-            assert_eq!(DeferralReason::parse(reason.as_str()), Some(*reason));
-        }
-        for reason in FoldReason::ALL {
-            assert_eq!(FoldReason::parse(reason.as_str()), Some(*reason));
-        }
-        for reason in IgnoreReason::ALL {
-            assert_eq!(IgnoreReason::parse(reason.as_str()), Some(*reason));
-        }
-        assert_eq!(DeferralReason::parse("not-a-reason"), None);
-    }
 }

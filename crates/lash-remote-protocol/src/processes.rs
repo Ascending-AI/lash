@@ -177,8 +177,6 @@ impl RemoteProcessProvenance {
         Ok(())
     }
 }
-#[cfg(all(test, feature = "core-conversions"))]
-mod core_process_status_label_tests;
 /// The typed definition reference a durable process row pins: the engine that
 /// owns the definition, the engine-owned definition value, and the signature
 /// claimed for it. The claim is never authority (ADR 0095) — a peer's claim is
@@ -390,25 +388,6 @@ pub enum RemoteRetiredProcessStatus {
 }
 
 impl RemoteProcessStatus {
-    /// The wire label for this status.
-    ///
-    /// Nothing on the encode path reads it: the derived `status_label` field
-    /// this used to validate is gone, and the label now lives only in
-    /// `lash_core::ProcessStatus`. It is kept so the agreement test below can
-    /// still prove the two vocabularies have not diverged.
-    #[cfg(test)]
-    fn label(self) -> &'static str {
-        match self {
-            Self::Running => "running",
-            Self::Waiting => "waiting",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Abandoned => "abandoned",
-            Self::CallerDeparted => "caller_departed",
-        }
-    }
-
     pub fn is_terminal(self) -> bool {
         matches!(
             self,

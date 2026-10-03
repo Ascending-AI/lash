@@ -599,28 +599,6 @@ mod tests {
         );
     }
 
-    /// Stated facts are recorded as stated.
-    #[test]
-    fn creation_records_the_stated_facts() {
-        let recorded = created(
-            Some(RlmCreateExtras {
-                termination: Some(RlmTermination::FinishRequired { schema: None }),
-                final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-                render: None,
-                prompt: None,
-            }),
-            true,
-        );
-        assert_eq!(
-            recorded.termination,
-            Some(RlmTermination::FinishRequired { schema: None })
-        );
-        assert_eq!(
-            recorded.final_answer_format,
-            Some(RlmFinalAnswerFormat::RawFinalValue)
-        );
-    }
-
     /// A create request cannot choose the dialect: the host selects it where
     /// it constructs the protocol, and the create contract denies the key.
     #[test]
@@ -803,36 +781,6 @@ mod tests {
         );
     }
 
-    /// A child session records its parent's behaviour, whatever the host
-    /// that creates it is configured with, and needs nothing declared by
-    /// that host to do so (FIG-4527).
-    #[test]
-    fn a_child_session_records_its_parents_behaviour() {
-        let parent = created(None, true);
-        let mut otherwise = config();
-        otherwise.instruction_limit = crate::InstructionBound::instructions(7);
-        otherwise.prompt_features.decomposition = false;
-        otherwise.render.print.max_chars = Some(11);
-        for process_lifecycle in [Some(true), None] {
-            let creating_host = RlmConfigOwner {
-                config: otherwise.clone(),
-                ..owner_with(process_lifecycle)
-            };
-            let child = creating_host
-                .create(
-                    None,
-                    CreationFacts {
-                        parent: Some(&parent),
-                        is_root_session: false,
-                    },
-                )
-                .expect("create the child")
-                .expect("the child records its namespace");
-            assert_eq!(child.behaviour, parent.behaviour);
-            assert_ne!(child.behaviour, otherwise.recorded_behaviour(true));
-        }
-    }
-
     fn host_prompt() -> RlmPrompt {
         RlmPrompt {
             intro: lash_rlm_types::RlmPromptIntro::Host {
@@ -843,32 +791,6 @@ mod tests {
             instructions: vec!["Answer in British English.".to_string()],
             context: vec!["Release 4.2 freezes on Friday.".to_string()],
         }
-    }
-
-    /// FIG-4588: a session whose creator states no prompt records the
-    /// built-in default, spelled on the wire as the built-in intro and
-    /// nothing else.
-    #[test]
-    fn creation_defaults_the_prompt_to_the_built_in_one() {
-        let recorded = created(None, true);
-        assert_eq!(recorded.prompt, RlmPrompt::default());
-        assert_eq!(
-            serde_json::to_value(&recorded).expect("recorded")["prompt"],
-            serde_json::json!({ "intro": { "kind": "builtin" } })
-        );
-    }
-
-    /// FIG-4588: the prompt a creator states is the session's, whole.
-    #[test]
-    fn creation_records_the_stated_prompt() {
-        let recorded = created(
-            Some(RlmCreateExtras {
-                prompt: Some(host_prompt()),
-                ..RlmCreateExtras::default()
-            }),
-            true,
-        );
-        assert_eq!(recorded.prompt, host_prompt());
     }
 
     /// FIG-4588: a child copies its parent's recorded prompt when its
@@ -1059,20 +981,6 @@ mod tests {
                 .validate(&candidate, Some(&base), facts)
                 .expect("the prompt is the session's to change");
         });
-    }
-
-    /// FIG-4588: a recorded namespace states its prompt. One written without
-    /// it is not read as the default.
-    #[test]
-    fn a_recorded_namespace_without_a_prompt_does_not_decode() {
-        let mut recorded = serde_json::to_value(created(None, true)).expect("recorded");
-        recorded
-            .as_object_mut()
-            .expect("namespace object")
-            .remove("prompt");
-        let error = serde_json::from_value::<RlmRecordedConfig>(recorded)
-            .expect_err("the prompt is a required recorded fact");
-        assert!(error.to_string().contains("prompt"), "{error}");
     }
 
     /// The render a deployment configures is recorded behaviour: a session

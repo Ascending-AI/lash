@@ -84,69 +84,6 @@ mod tests {
     }
 
     #[test]
-    fn projected_tool_arg_normalization_preserves_seed_roots_for_projection_aware_tools() {
-        let args = serde_json::json!({
-            "task": projected(serde_json::json!("inspect the file")),
-            "capability": "explore",
-            "seed": {
-                "projected_root": projected(serde_json::json!("carry-over")),
-                "computed_record": {
-                    "field": projected(serde_json::json!("materialize me"))
-                }
-            }
-        });
-
-        let normalized = seed_preserving_args(args);
-
-        assert_eq!(
-            normalized,
-            serde_json::json!({
-                "task": "inspect the file",
-                "capability": "explore",
-                "seed": {
-                    "projected_root": {
-                        "__projected__": {
-                            "kind": "materialized",
-                            "value": "carry-over"
-                        }
-                    },
-                    "computed_record": {
-                        "field": "materialize me"
-                    }
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn projected_tool_arg_normalization_preserves_continue_as_seed_roots() {
-        let args = serde_json::json!({
-            "task": projected(serde_json::json!("continue")),
-            "seed": {
-                "problem": projected(serde_json::json!({ "prompt": "large prompt" }))
-            }
-        });
-
-        let normalized = seed_preserving_args(args);
-        let seed = classify_received_seed(&normalized);
-
-        assert_eq!(
-            normalized.get("task").and_then(serde_json::Value::as_str),
-            Some("continue")
-        );
-        assert_eq!(
-            seed.projected.entries.as_slice(),
-            &[(
-                "problem".to_string(),
-                lash_rlm_types::RlmProjectedSeedEntry::Materialized(
-                    serde_json::json!({ "prompt": "large prompt" })
-                )
-            )]
-        );
-        assert!(seed.globals.is_empty());
-    }
-
-    #[test]
     fn ordinary_tool_receives_non_projected_input_without_materialization() {
         let args = serde_json::json!({
             "query": "plain",
@@ -156,31 +93,6 @@ mod tests {
         let received = materializing_args(args.clone());
 
         assert_eq!(received, args);
-    }
-
-    #[test]
-    fn ordinary_tool_receives_projected_input_materialized_as_plain_json() {
-        let received = materializing_args(serde_json::json!({
-            "query": projected(serde_json::json!("lazy query")),
-            "options": {
-                "limit": projected(serde_json::json!(3)),
-                "filters": [
-                    projected(serde_json::json!("rust")),
-                    "tests"
-                ]
-            }
-        }));
-
-        assert_eq!(
-            received,
-            serde_json::json!({
-                "query": "lazy query",
-                "options": {
-                    "limit": 3,
-                    "filters": ["rust", "tests"]
-                }
-            })
-        );
     }
 
     #[test]

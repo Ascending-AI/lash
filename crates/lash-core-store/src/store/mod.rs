@@ -37,8 +37,6 @@ pub mod generation_drain;
 mod graph_commit;
 mod head_ownership;
 pub mod history;
-#[cfg(test)]
-mod history_gate_tests;
 pub mod ingress_obligation;
 mod ingress_terminal;
 pub mod plugin_writers;

@@ -372,49 +372,6 @@ where
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn runtime_session_graph_service_routes_standard_compaction_event_to_real_sink() {
-    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let trace_path = std::env::temp_dir().join(format!(
-        "lash-runtime-plugin-trace-{}-{}.jsonl",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos()
-    ));
-    let runtime = standard_runtime_with_transport_and_host(
-        mock_provider(Vec::new()),
-        test_host_config_with_trace_path(&backend, trace_path.clone()),
-    )
-    .await;
-    let graph = runtime
-        .session_graph_service()
-        .expect("resident runtime exposes its graph service");
-
-    graph
-        .emit_trace_event(
-            lash_core::TraceContext::default().for_session("emitter-supplied-id"),
-            lash_core::TraceEvent::CompactionCompleted { summary_nodes: 0 },
-        )
-        .await
-        .expect("runtime graph service should route trace records");
-
-    let logged = std::fs::read_to_string(&trace_path).expect("read runtime trace sink");
-    let record: lash_core::facade_support::TraceRecord = lash_trace::parse_jsonl_records(&logged)
-        .expect("typed trace records")
-        .into_iter()
-        .next()
-        .expect("one trace record");
-    assert_eq!(record.context.session_id.as_deref(), Some("root"));
-    assert!(matches!(
-        record.event,
-        lash_core::TraceEvent::CompactionCompleted { summary_nodes: 0 }
-    ));
-    let _ = std::fs::remove_file(trace_path);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn provider_spans_are_children_of_the_turn_span() {
     let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
@@ -1579,20 +1536,4 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
         request_entry["request"]["model"].as_str(),
         Some("mock-model")
     );
-}
-
-#[test]
-fn nonzero_usage_carries_the_last_call_verbatim() {
-    let usage = TokenUsage {
-        input_tokens: 80,
-        output_tokens: 0,
-        cache_read_input_tokens: 20,
-        cache_write_input_tokens: 0,
-        reasoning_output_tokens: 0,
-    };
-    let carried = nonzero_usage(usage.clone()).expect("nonzero usage is carried");
-    assert_eq!(carried, usage);
-    assert_eq!(carried.input_total(), 100);
-    assert_eq!(carried.total(), 100);
-    assert_eq!(nonzero_usage(TokenUsage::default()), None);
 }

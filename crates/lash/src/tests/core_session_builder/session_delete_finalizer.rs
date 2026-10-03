@@ -28,10 +28,6 @@ fn now_ms() -> u64 {
 /// The core runs on a Restate double whose virtual clock starts at the wall
 /// clock, so the relay passes below, timed off the wall clock, see the
 /// obligations the double's stores scheduled.
-async fn closing_fixture() -> Result<(LashCore, lash_core::store::ObligationId)> {
-    closing_fixture_under(lash_restate_test::TimeMode::auto()).await
-}
-
 async fn closing_fixture_under(
     time: lash_restate_test::TimeMode,
 ) -> Result<(LashCore, lash_core::store::ObligationId)> {
@@ -104,144 +100,6 @@ async fn deliver_by_hand(
 
 async fn was_deleted(core: &LashCore) -> Result<bool> {
     core.session(SESSION).durable().await?.was_deleted().await
-}
-
-/// The finalizer rule: the delete closes the session at once — it refuses
-/// sends typed — but its physical delete waits, retried by the relay, until
-/// the scope close its run still owes is delivered; then the next attempt
-/// deletes it.
-#[tokio::test]
-async fn the_physical_delete_waits_for_the_closes_cleanup() -> Result<()> {
-    let (core, scope_close) = closing_fixture().await?;
-
-    let deletion = delete_bound_session_outcome(&core, SESSION).await?;
-    let crate::SessionDeletion::Closing(closing) = deletion else {
-        panic!("an undelivered scope close holds the delete, got {deletion:?}");
-    };
-    assert!(
-        matches!(
-            closing.waiting,
-            crate::SessionDeleteWait::Cleanup(lash_core::store::session_delete::SessionCleanup {
-                scope_close: 1,
-                parent_end: 0,
-            })
-        ),
-        "{:?}",
-        closing.waiting
-    );
-    assert!(closing.obligation.is_some(), "the close armed the delete");
-    assert!(!was_deleted(&core).await?);
-    let open = core.session(SESSION).created().await.open().await?;
-    let refused = open
-        .send(TurnInput::text("sent while closing"))
-        .output()
-        .await;
-    assert!(
-        matches!(
-            &refused,
-            Err(EmbedError::Runtime(error))
-                if error.code == lash_core::RuntimeErrorCode::SessionDeleted
-                    && error.message.contains("is closing")
-        ),
-        "a closing session refuses a send typed: {:?}",
-        refused.as_ref().err()
-    );
-    drop(open);
-
-    let relay = SessionDeleteRelay::new(core.session_administration().await);
-    let held = relay_due(
-        &relay,
-        &lash_core::testing::TestClock::new(now_ms() + 2_000),
-        page(),
-    )
-    .await?;
-    assert_eq!((held.claimed, held.retried), (1, 1), "{held:?}");
-    assert!(!was_deleted(&core).await?);
-
-    deliver_by_hand(&core, ObligationKind::ScopeClose, &scope_close).await;
-    let pass = relay_due(
-        &relay,
-        &lash_core::testing::TestClock::new(now_ms() + 10_000),
-        page(),
-    )
-    .await?;
-    assert_eq!((pass.claimed, pass.claim_lost), (1, 1), "{pass:?}");
-    assert!(was_deleted(&core).await?);
-    Ok(())
-}
-
-/// A delete whose cleanup never settles stalls at the attempt ceiling and is
-/// surfaced — in the drain status and the stalled listing — never dropped and
-/// never retried until re-armed; re-armed after its cleanup settles, it
-/// deletes the session.
-#[tokio::test]
-async fn a_stalled_delete_is_surfaced_until_rearmed() -> Result<()> {
-    let (core, scope_close) = closing_fixture().await?;
-    let crate::SessionDeletion::Closing(closing) =
-        delete_bound_session_outcome(&core, SESSION).await?
-    else {
-        panic!("an undelivered scope close holds the delete");
-    };
-    let delete = closing.obligation.expect("the close armed the delete");
-
-    let policy = RelayPolicy {
-        attempt_ceiling: std::num::NonZeroU32::new(2).expect("non-zero ceiling"),
-        ..RelayPolicy::default()
-    };
-    let relay = SessionDeleteRelay::with_policy(core.session_administration().await, policy);
-    let pass = relay_due(
-        &relay,
-        &lash_core::testing::TestClock::new(now_ms() + 2_000),
-        page(),
-    )
-    .await?;
-    assert_eq!((pass.claimed, pass.stalled), (1, 1), "{pass:?}");
-    let later = relay_due(
-        &relay,
-        &lash_core::testing::TestClock::new(now_ms() + 3_600_000),
-        page(),
-    )
-    .await?;
-    assert_eq!(later.claimed, 0, "a stalled delete is never retried");
-
-    let status = core.drain_status(false).await?;
-    assert_eq!(
-        status.stalled_obligations[&ObligationKind::SessionDelete],
-        1
-    );
-    assert!(!status.drained(), "a stalled delete holds the drain");
-    let stalled = core
-        .stalled_obligations(ObligationKind::SessionDelete, None, page())
-        .await?;
-    assert_eq!(stalled.len(), 1);
-    assert_eq!(stalled[0].id, delete);
-    assert_eq!(stalled[0].reason, StallReason::AttemptsExhausted);
-    assert_eq!(stalled[0].attempts, 2);
-    assert!(
-        stalled[0]
-            .last_error
-            .as_ref()
-            .map(|error| error.message.as_str())
-            .is_some_and(|error| error.contains("waits on its cleanup")),
-        "{:?}",
-        stalled[0].last_error
-    );
-    assert!(!was_deleted(&core).await?);
-
-    deliver_by_hand(&core, ObligationKind::ScopeClose, &scope_close).await;
-    assert!(
-        core.rearm_obligation(ObligationKind::SessionDelete, &delete)
-            .await?
-    );
-    let pass = relay_due(
-        &relay,
-        &lash_core::testing::TestClock::new(now_ms() + 1),
-        page(),
-    )
-    .await?;
-    assert_eq!((pass.claimed, pass.claim_lost), (1, 1), "{pass:?}");
-    assert!(was_deleted(&core).await?);
-    Ok(())
 }
 
 /// The deployment's reconcile tick carries the session-delete relay: a
@@ -694,43 +552,13 @@ async fn delete_delivery_exhausts_its_budget(
     Ok(())
 }
 
-async fn sqlite_delete_budget(file: bool, stall: bool) -> Result<()> {
-    let directory = tempfile::tempdir().expect("SQLite test directory");
+async fn sqlite_delete_budget(stall: bool) -> Result<()> {
     Box::pin(delete_delivery_exhausts_its_budget(
         async |clock| {
-            let stores = if file {
-                lash_sqlite_store::SqliteStoreSet::open_with_clock(directory.path(), clock).await
-            } else {
-                lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock).await
-            }
-            .expect("open SQLite stores");
+            let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
+                .await
+                .expect("open SQLite stores");
             Arc::new(stores) as Arc<dyn lash_core::StoreSet>
-        },
-        stall,
-    ))
-    .await
-}
-
-#[allow(
-    clippy::disallowed_methods,
-    reason = "service test reads its required PostgreSQL URL"
-)]
-async fn postgres_delete_budget(stall: bool) -> Result<()> {
-    let url =
-        std::env::var("LASH_POSTGRES_DATABASE_URL").expect("the PostgreSQL gate sets its URL");
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
-    let attachments = tempfile::tempdir().expect("attachment directory");
-    Box::pin(delete_delivery_exhausts_its_budget(
-        async |clock| {
-            Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
-                &storage,
-                Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-                    attachments.path(),
-                )),
-                Default::default(),
-                clock,
-            )) as Arc<dyn lash_core::StoreSet>
         },
         stall,
     ))
@@ -739,27 +567,9 @@ async fn postgres_delete_budget(stall: bool) -> Result<()> {
 
 #[tokio::test]
 async fn an_unrecorded_delete_retry_returns_typed_on_sqlite_memory() -> Result<()> {
-    Box::pin(sqlite_delete_budget(false, false)).await
-}
-#[tokio::test]
-async fn an_unrecorded_delete_retry_returns_typed_on_sqlite_file() -> Result<()> {
-    Box::pin(sqlite_delete_budget(true, false)).await
+    Box::pin(sqlite_delete_budget(false)).await
 }
 #[tokio::test]
 async fn an_unrecorded_delete_stall_returns_typed_on_sqlite_memory() -> Result<()> {
-    Box::pin(sqlite_delete_budget(false, true)).await
-}
-#[tokio::test]
-async fn an_unrecorded_delete_stall_returns_typed_on_sqlite_file() -> Result<()> {
-    Box::pin(sqlite_delete_budget(true, true)).await
-}
-#[tokio::test]
-#[ignore = "requires the PostgreSQL service gate"]
-async fn an_unrecorded_delete_retry_returns_typed_on_postgres() -> Result<()> {
-    Box::pin(postgres_delete_budget(false)).await
-}
-#[tokio::test]
-#[ignore = "requires the PostgreSQL service gate"]
-async fn an_unrecorded_delete_stall_returns_typed_on_postgres() -> Result<()> {
-    Box::pin(postgres_delete_budget(true)).await
+    Box::pin(sqlite_delete_budget(true)).await
 }

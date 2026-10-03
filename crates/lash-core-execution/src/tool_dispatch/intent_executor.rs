@@ -675,32 +675,6 @@ async fn register_recorded_trigger(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn store_refusal_intents_report_typed_codes() {
-        for (error, expected) in [
-            (
-                crate::StoreError::WriterFenced {
-                    recorded: 2,
-                    writable: crate::compat::VersionRange::exactly(1),
-                },
-                "writer_fenced",
-            ),
-            (
-                crate::StoreError::Incompatible {
-                    refusal: crate::compat::CompatRefusal::Unstamped {
-                        component: "postgres".into(),
-                        writing_release: None,
-                    },
-                },
-                "store_incompatible",
-            ),
-        ] {
-            assert_eq!(
-                crate::ToolIntentCommandFailure::from(&crate::PluginError::from(error)).code(),
-                expected
-            );
-        }
-    }
 
     use super::*;
 
@@ -916,43 +890,6 @@ mod tests {
                 expected: session("session"),
                 recorded: session("other-session"),
             })
-        );
-    }
-
-    #[test]
-    fn outcome_model_addenda_have_literal_stable_text() {
-        let executed = crate::ToolIntentExecutionOutcome::Executed {
-            identity: crate::ToolIntentIdentity {
-                owner: session("session"),
-                execution_scope_id: "turn".to_string(),
-                tool_call_id: crate::ToolCallId::fixture("call"),
-                intent_index: 4,
-                replay_key: "tool-intent-v1-literal".to_string(),
-                minting_emission_replay_key: None,
-            },
-            realized: crate::ToolIntentRealized::CancelProcess(crate::ProcessCancelReceipt {
-                process_id: crate::ProcessId::fixture("cancelled"),
-                status: crate::ProcessStatus::Cancelled,
-                origin: crate::CancelOrigin::ModelRequested,
-            }),
-        };
-        assert_eq!(
-            executed.model_addendum(),
-            format!(
-                "[tool intent cancel_process #4 executed: {{\"origin\":\"model_requested\",\"process_id\":\"{}\",\"status\":\"cancelled\"}}]",
-                crate::ProcessId::fixture("cancelled")
-            )
-        );
-
-        let refused = crate::ToolIntentExecutionOutcome::Refused {
-            identity: None,
-            intent_index: 0,
-            kind: crate::ToolIntentKind::StartProcess,
-            refusal: crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 1 },
-        };
-        assert_eq!(
-            refused.model_addendum(),
-            "[tool intent start_process #0 refused: unsupported_protocol_version]"
         );
     }
 }

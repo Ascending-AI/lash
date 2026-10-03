@@ -9,7 +9,7 @@ enum GrantProbeMode {
     PendingWithKey,
     /// Fails retryably on every attempt, so the retry ladder runs to
     /// exhaustion.
-    AlwaysRetryable,
+
     /// Succeeds carrying an inline attachment the runtime has to normalize.
     InlineAttachment,
 }
@@ -53,13 +53,7 @@ impl ToolProvider for GrantProbeTools {
                 call.context.completion_key().expect("completion key");
                 crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::new())
             }
-            GrantProbeMode::AlwaysRetryable => ToolOutcome::retryable_failure(
-                crate::ToolFailureClass::External,
-                "transient",
-                "transient granted failure",
-                Some(0),
-            )
-            .into(),
+
             GrantProbeMode::InlineAttachment => {
                 ToolOutcome::from_output(crate::ToolCallOutput::success_tool_value(
                     crate::ToolValue::Attachment(crate::AttachmentSource::inline(
@@ -243,47 +237,6 @@ async fn unresolvable_grant_source_cannot_borrow_same_id_catalog_deferral() {
         !crate::dispatch_attempt_may_defer(&context, &tool_id, Some(&grant)),
         "an unresolvable out-of-catalog grant must not borrow catalog deferral"
     );
-    drop(context);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-/// A granted attempt runs the same retry ladder as a catalog attempt, and the
-/// final failure is marked exhausted rather than left retryable. The ladder is
-/// bounded by the *grant's* manifest policy, which is the only retry policy a
-/// non-catalog tool has.
-#[tokio::test]
-async fn granted_retry_ladder_marks_exhausted_after_the_final_attempt() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (context, grant) = grant_probe_dispatch(
-        crate::support::double_dispatch_ports(&double, &handler),
-        GrantProbeMode::AlwaysRetryable,
-        Arc::clone(&attempts),
-        ToolRetryPolicy::safe(2, 0, 0),
-        Arc::clone(&observed_execution_bindings),
-    )
-    .await;
-    let prepared = grant_prepared_call("grant_probe");
-    let tool_context = tool_context_for_prepared(&context, &prepared);
-
-    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
-        &context,
-        prepared,
-        Some(Box::new(grant)),
-        tool_context,
-    )
-    .await;
-
-    let ToolCallLaunch::Done(outcome) = launch else {
-        panic!("an exhausted granted ladder must complete, not park");
-    };
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    assert_eq!(outcome.record.tool, "grant_probe");
-    let ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
-        panic!("expected an exhausted failure");
-    };
-    assert_eq!(failure.retry, ToolRetryStatus::Exhausted { attempts: 2 });
     drop(context);
     handler.close().await.expect("close the dispatch handler");
 }

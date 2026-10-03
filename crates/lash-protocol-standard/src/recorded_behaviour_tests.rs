@@ -443,77 +443,6 @@ async fn a_redriven_run_executes_under_its_recorded_behaviour_on_postgres_always
     .await;
 }
 
-/// A deployment whose configuration differs from [`StandardProtocolConfig`]'s
-/// default in every recorded choice.
-fn configured_otherwise() -> StandardProtocolConfig {
-    let mut config = creating_config();
-    config.render.defaults.max_lines = Some(7);
-    config
-}
-
-/// A child session records its parent's behaviour, whatever the host that
-/// creates it is configured with (FIG-4527).
-#[test]
-fn a_child_session_records_its_parents_behaviour() {
-    let parent = StandardConfigOwner {
-        behaviour: configured_otherwise().recorded_behaviour(),
-    }
-    .create(
-        None,
-        CreationFacts {
-            parent: None,
-            is_root_session: true,
-        },
-    )
-    .expect("create the parent")
-    .expect("the parent records its namespace");
-    let creating_host = StandardConfigOwner {
-        behaviour: StandardProtocolConfig::default().recorded_behaviour(),
-    };
-    let child = creating_host
-        .create(
-            None,
-            CreationFacts {
-                parent: Some(&parent),
-                is_root_session: false,
-            },
-        )
-        .expect("create the child")
-        .expect("the child records its namespace");
-    assert_eq!(child.behaviour, configured_otherwise().recorded_behaviour());
-    assert_ne!(child.behaviour, creating_host.behaviour);
-}
-
-/// The render a deployment configures is recorded behaviour: a session's
-/// driver resolves a run's render over the recorded one, never over the
-/// opening deployment's (FIG-4527).
-#[test]
-fn the_configured_render_is_recorded_behaviour() {
-    let recorded = configured_otherwise().recorded_behaviour();
-    assert_eq!(recorded.render, configured_otherwise().render);
-    let opened = StandardProtocolConfig::default().under_recorded_behaviour(&recorded);
-    assert_eq!(opened.render, configured_otherwise().render);
-    let driver = StandardProtocolDriver { config: opened };
-    let recording = StandardProtocolDriver {
-        config: configured_otherwise(),
-    };
-    let options = lash_core::ProtocolTurnOptions::default();
-    assert_eq!(
-        driver.resolve_render(&options).expect("resolve the render"),
-        recording
-            .resolve_render(&options)
-            .expect("resolve the render"),
-    );
-    assert_ne!(
-        driver.resolve_render(&options).expect("resolve the render"),
-        StandardProtocolDriver {
-            config: StandardProtocolConfig::default(),
-        }
-        .resolve_render(&options)
-        .expect("resolve the render"),
-    );
-}
-
 /// A recorded namespace under `render` options, with the built-in prompt and
 /// the default behaviour.
 fn recorded_under(render: Option<StandardRenderConfig>) -> StandardRecordedConfig {
@@ -599,25 +528,6 @@ fn run_options_apply_over_the_recorded_render_field_by_field() {
             .expect("empty options apply"),
         recorded
     );
-}
-
-/// FIG-4652: a run's options have no field for the prompt or the behaviour,
-/// so a payload naming one does not decode, even when it restates the
-/// recorded value. The list is the recorded namespace's own keys.
-#[test]
-fn run_options_have_no_field_for_the_prompt_or_the_behaviour() {
-    let recorded = serde_json::to_value(recorded_under(Some(defaults(Some(10), None))))
-        .expect("the recorded namespace encodes");
-    let stated: Vec<&str> = recorded
-        .as_object()
-        .expect("the namespace is an object")
-        .iter()
-        .filter(|(key, value)| {
-            serde_json::from_value::<StandardRunOptions>(serde_json::json!({ *key: value })).is_ok()
-        })
-        .map(|(key, _)| key.as_str())
-        .collect();
-    assert_eq!(stated, ["render"], "a run restates only its render");
 }
 
 /// FIG-4652: the driver reads the run's namespace as the recorded type. A

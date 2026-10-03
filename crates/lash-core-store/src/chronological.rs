@@ -223,30 +223,6 @@ mod tests {
         }
     }
 
-    fn tool_result_message(id: &str, call_id: &str) -> Message {
-        Message {
-            id: id.to_string(),
-            role: MessageRole::User,
-            parts: shared_parts(vec![Part::tool_result(
-                format!("{id}.p0"),
-                vec![lash_sansio::ModelToolReturnPart::text("tool result")],
-                lash_sansio::ToolCallId::fixture(call_id),
-                "tool".to_string(),
-            )]),
-            origin: None,
-            reply_marker: None,
-        }
-    }
-
-    fn transient_message(id: &str) -> Message {
-        let mut message = text_message(id, MessageRole::System, "transient");
-        message.origin = Some(MessageOrigin::Plugin {
-            plugin_id: "test".to_string(),
-            transient: true,
-        });
-        message
-    }
-
     fn protocol_event(value: &str) -> ProtocolEvent {
         ProtocolEvent {
             plugin_id: "test_protocol".to_string(),
@@ -333,21 +309,5 @@ mod tests {
             panic!("expected the rewritten live message");
         };
         assert_eq!(live_tail.parts[0].content(), "second");
-    }
-
-    #[test]
-    fn borrowed_turn_view_matches_owned_transcript_fallback_projection() {
-        let messages = MessageSequence::from_owned(vec![
-            tool_result_message("m1", "call-1"),
-            transient_message("transient"),
-            text_message("m2", MessageRole::Assistant, "second"),
-        ]);
-        let events = Vec::new();
-        let projection = ChronologicalProjection::from_turn_view(&events, &messages);
-
-        assert_eq!(
-            borrowed_summary(&events, &messages),
-            owned_summary(&projection)
-        );
     }
 }

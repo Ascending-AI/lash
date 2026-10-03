@@ -356,17 +356,15 @@ FEATURE_LANE_COMPILE_TARGETS = [
     "//crates/lash-protocol-standard:lash-protocol-standard__fv_be26e00d",
     "//crates/lash-protocol-standard:lash-protocol-standard__fv_f3a8c921",
     "//crates/lash-protocol-standard:lash-protocol-standard__fv_f56dbb82",
-    "//crates/lash-provider-anthropic:charge_safety__test__fv_83b4ea82",
+    "//crates/lash-provider-anthropic:charge_safety__test__fv_56bb3c8e",
     "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_12a449d0",
     "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_3370aa13",
     "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_56bb3c8e",
     "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_5d16a431",
     "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_72531190",
-    "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_83b4ea82",
     "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_a1fdd82f",
     "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_ec5a2ee8",
-    "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_83b4ea82",
-    "//crates/lash-provider-anthropic:property__test__fv_83b4ea82",
+    "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_56bb3c8e",
     "//crates/lash-provider-auth:lash-provider-auth__fv_0885cd57",
     "//crates/lash-provider-auth:lash-provider-auth__fv_409265f6",
     "//crates/lash-provider-auth:lash-provider-auth__fv_c6524dc5",
@@ -380,7 +378,6 @@ FEATURE_LANE_COMPILE_TARGETS = [
     "//crates/lash-provider-google:lash-provider-google__fv_9fd9733d",
     "//crates/lash-provider-google:lash-provider-google__fv_db78fbd4",
     "//crates/lash-provider-google:lash-provider-google__unit_test__fv_29bc688c",
-    "//crates/lash-provider-google:property__test__fv_29bc688c",
     "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_d0a6f756",
     "//crates/lash-provider-openai:lash-provider-openai__fv_286d8fac",
     "//crates/lash-provider-openai:lash-provider-openai__fv_2d22ffa8",
@@ -1076,7 +1073,7 @@ FEATURE_LANE_TEST_TARGETS = [
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_bb3d041e",
     "//crates/lash-protocol-rlm:protocol_drivers__test__fv_bb3d041e",
     "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_bb3d041e",
-    "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_83b4ea82",
+    "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_56bb3c8e",
     "//crates/lash-provider-google:lash-provider-google__unit_test__fv_29bc688c",
     "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_d0a6f756",
     "//crates/lash-regress:integration__test__fv_419bd085",
@@ -1134,7 +1131,7 @@ FEATURE_LANE_TEST_ARGS = {
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_116ee6b1": [
         "conformance"
     ],
-    "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_83b4ea82": [
+    "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_56bb3c8e": [
         "conformance"
     ],
     "//crates/lash-provider-google:lash-provider-google__unit_test__fv_29bc688c": [
@@ -1150,7 +1147,7 @@ FEATURE_LANE_TEST_ARGS = {
 
 FEATURE_LANE_TEST_FLOORS = {
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_116ee6b1": 1,
-    "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_83b4ea82": 1,
+    "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_56bb3c8e": 1,
     "//crates/lash-provider-google:lash-provider-google__unit_test__fv_29bc688c": 1,
     "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_d0a6f756": 1,
     "//crates/lash:lash__unit_test__fv_5b9f21e0": 130
@@ -1941,12 +1938,11 @@ FEATURE_LANES = {
         "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_d2838a9c",
         "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_12224c64",
         "//crates/lash-protocol-standard:lash-protocol-standard__fv_89448081",
-        "//crates/lash-provider-anthropic:charge_safety__test__fv_83b4ea82",
-        "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_83b4ea82",
+        "//crates/lash-provider-anthropic:charge_safety__test__fv_56bb3c8e",
+        "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_56bb3c8e",
         "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_a1fdd82f",
         "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_ec5a2ee8",
-        "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_83b4ea82",
-        "//crates/lash-provider-anthropic:property__test__fv_83b4ea82",
+        "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_56bb3c8e",
         "//crates/lash-provider-auth:lash-provider-auth__fv_0885cd57",
         "//crates/lash-provider-auth:lash-provider-auth__fv_f01c9e3c",
         "//crates/lash-provider-google:block_identity__test__fv_29bc688c",
@@ -1955,7 +1951,6 @@ FEATURE_LANES = {
         "//crates/lash-provider-google:lash-provider-google__fv_7a11d37a",
         "//crates/lash-provider-google:lash-provider-google__fv_9fd9733d",
         "//crates/lash-provider-google:lash-provider-google__unit_test__fv_29bc688c",
-        "//crates/lash-provider-google:property__test__fv_29bc688c",
         "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_d0a6f756",
         "//crates/lash-provider-openai:lash-provider-openai__fv_9a37a6b3",
         "//crates/lash-provider-openai:lash-provider-openai__fv_e58eab76",

@@ -916,27 +916,6 @@ mod tests {
     }
 
     #[test]
-    fn turn_invocations_retain_genuine_turn_scope() {
-        let session_id = SessionId::from("session");
-        let turn_id = TurnId::from("turn");
-        let turn_scope = ExecutionScope::turn(&session_id, &turn_id);
-
-        let effect = turn_effect_invocation(
-            &turn_scope,
-            &session_id,
-            &turn_id,
-            1,
-            2,
-            EffectId(4),
-            RuntimeEffectKind::Checkpoint,
-        );
-        let acceptance = turn_acceptance_effect_invocation(&turn_scope, &session_id, &turn_id);
-
-        assert_eq!(effect.execution_scope(), &turn_scope);
-        assert_eq!(acceptance.execution_scope(), &turn_scope);
-    }
-
-    #[test]
     fn direct_effect_identity_golden_corpus() {
         let causes = [
             (

@@ -9,8 +9,8 @@ use crate::durable_wait::RestateDurableWaitResolveResponse;
 use lash_core::ProcessEventLogTestSupport as _;
 
 mod helpers;
+pub(super) use helpers::runtime_invocation;
 use helpers::{TestTurnCancelWakeStep, test_turn_cancel_wake_step};
-pub(super) use helpers::{runtime_invocation, test_turn_cancel_wait_request};
 
 #[test]
 pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
@@ -223,8 +223,6 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
 #[macro_use]
 mod attempt;
 pub(crate) use attempt::{AttemptEnd, AttemptFailure, run_json_or_end_attempt};
-mod positional_replay;
-pub(super) use positional_replay::PositionalReplayContext;
 mod turn_cancel_gate;
 
 pub(super) use turn_cancel_gate::*;
@@ -1318,18 +1316,6 @@ impl lash_core::Clock for ToolIntentCorpusClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
-}
-
-#[test]
-pub(super) fn tool_intent_corpus_clock_wall_clock_faces_agree() {
-    let clock = ToolIntentCorpusClock;
-    let clock: &dyn lash_core::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 pub(super) async fn replay_tool_intent_corpus_fixture(

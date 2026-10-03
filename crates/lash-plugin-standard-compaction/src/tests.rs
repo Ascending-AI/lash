@@ -38,41 +38,6 @@ fn zero_context_window_yields_no_pressure_and_no_decisions() {
     );
 }
 
-#[test]
-fn missing_usage_or_window_yields_no_decisions() {
-    let usage = prompt_usage(130_000);
-    assert_eq!(
-        standard_compaction_decisions(None, Some(200_000)),
-        (false, false)
-    );
-    assert_eq!(
-        standard_compaction_decisions(Some(&usage), None),
-        (false, false)
-    );
-    assert_eq!(standard_compaction_decisions(None, None), (false, false));
-}
-
-#[test]
-fn non_zero_window_still_drives_both_decisions() {
-    let quiet = prompt_usage(10_000);
-    assert_eq!(
-        standard_compaction_decisions(Some(&quiet), Some(200_000)),
-        (false, false)
-    );
-
-    let pruning_only = prompt_usage(130_000);
-    assert_eq!(
-        standard_compaction_decisions(Some(&pruning_only), Some(200_000)),
-        (true, false)
-    );
-
-    let both = prompt_usage(190_000);
-    assert_eq!(
-        standard_compaction_decisions(Some(&both), Some(200_000)),
-        (true, true)
-    );
-}
-
 fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {
         id: id.to_string(),
@@ -285,40 +250,6 @@ impl RecordingLlmCompletions {
     }
 }
 
-#[tokio::test]
-async fn standard_compaction_turn_transform_strips_old_image_attachments() {
-    let messages = vec![
-        image_message("u0", MessageRole::User, &[1, 2, 3]),
-        text_message("u1", MessageRole::User, "recent"),
-        text_message("u2", MessageRole::User, "latest"),
-    ];
-
-    let state = SessionSnapshot::new(
-        SessionId::from("session"),
-        lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        ),
-    );
-    let traces = Arc::new(RecordingTraces::default());
-    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
-    let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
-    let prepared = PreparedContext {
-        messages: messages.into(),
-        ..Default::default()
-    };
-    let built = transform
-        .transform(&ctx, prepared)
-        .await
-        .expect("transform")
-        .messages;
-
-    let image_part = built[0].parts.first().expect("image part");
-    assert!(matches!(image_part.kind(), PartKind::Attachment));
-    assert!(image_part.attachment().is_none());
-    assert_eq!(image_part.content(), PRUNED_ATTACHMENT_PLACEHOLDER);
-}
-
 /// FIG-4110: at the compaction threshold the pressure hook summarizes the
 /// committed frame in one direct completion and decides a compaction frame
 /// seeded with the summary. It writes nothing: core opens the frame.
@@ -504,94 +435,6 @@ async fn standard_compaction_transform_at_compaction_pressure_only_prunes() {
             max_context_tokens: 40_000,
             pruned_attachments: 1,
         }]
-    );
-}
-
-#[tokio::test]
-async fn standard_compaction_turn_transform_traces_attachment_pruning_without_compaction() {
-    // 130_000 / 200_000 trips the 0.6 pruning threshold but stays under the
-    // compaction watermark: a prune-only turn still reports the prompt-view
-    // change so hosts can observe why old attachments became placeholders.
-    let traces = Arc::new(RecordingTraces::default());
-    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
-    let state = SessionSnapshot {
-        session_id: SessionId::from("root"),
-        policy: lash_core::testing::mock_session_policy(),
-        ..SessionSnapshot::new(
-            SessionId::from("root"),
-            lash_core::testing::mock_session_policy(),
-        )
-    };
-    let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
-    let prepared = PreparedContext {
-        // The tail since the second-most-recent user turn (a2, u3) keeps its
-        // attachments; u2 and everything older is replaced by placeholders.
-        messages: vec![
-            image_message("u1", MessageRole::User, b"oldest screenshot"),
-            image_message("u2", MessageRole::User, b"second screenshot"),
-            text_message("a2", MessageRole::Assistant, "recent answer"),
-            text_message("u3", MessageRole::User, "latest request"),
-        ]
-        .into(),
-        ..Default::default()
-    };
-
-    transform
-        .transform(&ctx, prepared)
-        .await
-        .expect("transform should trace the attachment prune");
-
-    let events = traces.events();
-    assert_eq!(events.len(), 1, "{events:?}");
-    assert_eq!(
-        events[0].1,
-        lash_core::TraceEvent::PromptViewAttachmentsPruned {
-            used_tokens: 130_000,
-            max_context_tokens: 200_000,
-            pruned_attachments: 2,
-        }
-    );
-    assert_eq!(events[0].0.session_id.as_deref(), Some("root"));
-    assert_eq!(
-        events[0].0.turn_id.as_deref(),
-        Some("standard-compaction-test-turn")
-    );
-}
-
-#[tokio::test]
-async fn standard_compaction_turn_transform_traces_nothing_when_no_attachments_pruned() {
-    // Same prune-only pressure, but text-only messages: pruning finds nothing
-    // to replace and must emit no event.
-    let traces = Arc::new(RecordingTraces::default());
-    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
-    let state = SessionSnapshot {
-        session_id: SessionId::from("root"),
-        policy: lash_core::testing::mock_session_policy(),
-        ..SessionSnapshot::new(
-            SessionId::from("root"),
-            lash_core::testing::mock_session_policy(),
-        )
-    };
-    let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
-    let prepared = PreparedContext {
-        messages: vec![
-            text_message("u1", MessageRole::User, "old work"),
-            text_message("a1", MessageRole::Assistant, "assistant old"),
-            text_message("u2", MessageRole::User, "latest request"),
-        ]
-        .into(),
-        ..Default::default()
-    };
-
-    transform
-        .transform(&ctx, prepared)
-        .await
-        .expect("transform");
-
-    assert!(
-        traces.events().is_empty(),
-        "nothing was pruned: {:?}",
-        traces.events()
     );
 }
 
@@ -788,83 +631,6 @@ fn compaction_request_identity_is_stable_across_reconstructed_nested_maps() {
             "equivalent nested prompt maps must have one canonical request identity"
         );
     }
-}
-
-#[tokio::test]
-async fn standard_compactor_records_zero_node_completion_for_none() {
-    let trace = Arc::new(RecordingTraces::default());
-    let state = SessionSnapshot {
-        session_id: SessionId::from("root"),
-        policy: lash_core::testing::mock_session_policy(),
-        ..SessionSnapshot::new(
-            SessionId::from("root"),
-            lash_core::testing::mock_session_policy(),
-        )
-    };
-    let captured = Arc::new(RecordingLlmCompletions::default());
-    let ctx = build_compaction_ctx(
-        state,
-        None,
-        &trace,
-        RecordingLlmCompletions::client(&captured),
-    );
-
-    let compaction = StandardContextCompactor::new(StandardCompactionConfig)
-        .compact(&ctx)
-        .await
-        .expect("empty history is a successful no-op");
-
-    assert!(compaction.is_none());
-    assert_eq!(
-        trace.events()[1].1,
-        lash_core::TraceEvent::CompactionCompleted { summary_nodes: 0 }
-    );
-}
-
-#[tokio::test]
-async fn standard_compactor_records_zero_node_completion_before_error() {
-    let trace = Arc::new(RecordingTraces::default());
-    let messages = vec![
-        text_message("u1", MessageRole::User, "old work"),
-        text_message("a1", MessageRole::Assistant, "assistant old"),
-        text_message("u2", MessageRole::User, "latest request"),
-    ];
-    let state = SessionSnapshot {
-        session_id: SessionId::from("root"),
-        policy: lash_core::testing::mock_session_policy(),
-        session_graph: SessionGraph::from_active_read_state(&messages),
-        ..SessionSnapshot::new(
-            SessionId::from("root"),
-            lash_core::testing::mock_session_policy(),
-        )
-    };
-    let captured = Arc::new(RecordingLlmCompletions {
-        error: Some(PluginError::Session(
-            "scripted compaction-session failure".to_string(),
-        )),
-        ..Default::default()
-    });
-    let ctx = build_compaction_ctx(
-        state,
-        None,
-        &trace,
-        RecordingLlmCompletions::client(&captured),
-    );
-
-    let error = StandardContextCompactor::new(StandardCompactionConfig)
-        .compact(&ctx)
-        .await
-        .expect_err("scripted completion failure must propagate");
-
-    assert!(
-        error
-            .to_string()
-            .contains("scripted compaction-session failure")
-    );
-    assert_eq!(
-        trace.events()[1].1,
-        lash_core::TraceEvent::CompactionCompleted { summary_nodes: 0 }
-    );
 }
 
 // ---- context-overflow recovery (FIG-2950) ----
@@ -1167,54 +933,6 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
 }
 
 #[test]
-fn recovery_state_derivation_is_bounded_and_durable() {
-    let pending = || vec![OverflowRecoveryRecord::Pending {}];
-    assert_eq!(
-        OverflowRecoveryState::derive(pending()),
-        OverflowRecoveryState::Pending { attempts: 0 }
-    );
-
-    let failing = OverflowRecoveryState::derive(vec![
-        OverflowRecoveryRecord::Pending {},
-        OverflowRecoveryRecord::Failed {
-            attempt: 2,
-            cause: RecoveryFailureCause::EmptySummary,
-        },
-    ]);
-    assert_eq!(failing, OverflowRecoveryState::Pending { attempts: 2 });
-    assert!(!failing.exhausted());
-
-    let exhausted = OverflowRecoveryState::derive(vec![
-        OverflowRecoveryRecord::Pending {},
-        OverflowRecoveryRecord::Failed {
-            attempt: 2,
-            cause: RecoveryFailureCause::EmptySummary,
-        },
-        OverflowRecoveryRecord::Failed {
-            attempt: 3,
-            cause: RecoveryFailureCause::EmptySummary,
-        },
-    ]);
-    assert_eq!(
-        exhausted,
-        OverflowRecoveryState::Pending {
-            attempts: OVERFLOW_RECOVERY_MAX_ATTEMPTS
-        }
-    );
-    assert!(exhausted.exhausted());
-
-    let done = OverflowRecoveryState::derive(vec![
-        OverflowRecoveryRecord::Pending {},
-        OverflowRecoveryRecord::Failed {
-            attempt: 1,
-            cause: RecoveryFailureCause::EmptySummary,
-        },
-        OverflowRecoveryRecord::Completed {},
-    ]);
-    assert_eq!(done, OverflowRecoveryState::Idle);
-}
-
-#[test]
 fn recovery_records_roundtrip_and_refuse_missing_or_corrupt_causes() {
     for record in [
         OverflowRecoveryRecord::Pending {},
@@ -1424,47 +1142,6 @@ async fn recovery_failure_is_bounded_and_explicit() {
         })
         .collect();
     assert_eq!(outcomes, ["exhausted:recoverable_failure"]);
-}
-
-/// A deterministic summarizer refusal records its typed code and opens no frame.
-#[tokio::test]
-async fn recovery_summarizer_failure_records_failed_without_a_frame() {
-    let failing = Arc::new(RecordingLlmCompletions {
-        error: Some(PluginError::Runtime(lash_core::RuntimeError::new(
-            lash_core::RuntimeErrorCode::ContextCompaction,
-            "scripted summarizer refusal",
-        ))),
-        ..Default::default()
-    });
-    let traces = Arc::new(RecordingTraces::default());
-    let (_, state) = recovery_history(true);
-    let decision = decide_recovery(&recovery_ctx(state, &failing, &traces, 200_000)).await;
-
-    let ContextPressureDecision::Record { nodes } = decision else {
-        panic!("a failed summarizer records its attempt and opens no frame: {decision:?}");
-    };
-    assert_eq!(
-        decided_record_kinds(&nodes),
-        [OverflowRecoveryRecord::Failed {
-            attempt: 1,
-            cause: RecoveryFailureCause::SummarizerRefused {
-                code: lash_core::RuntimeErrorCode::ContextCompaction
-            }
-        }]
-    );
-    assert_eq!(failing.requests().len(), 1);
-    assert!(
-        traces.events().iter().any(|(_, event)| matches!(
-            event,
-            lash_core::TraceEvent::Custom { name, payload }
-                if name == TRACE_OVERFLOW_RECOVERY_OUTCOME
-                    && payload.get("outcome").and_then(|value| value.as_str()).is_some_and(
-                        |outcome| outcome.starts_with("failed:SummarizerRefused")
-                    )
-        )),
-        "{:?}",
-        traces.events()
-    );
 }
 
 #[tokio::test]

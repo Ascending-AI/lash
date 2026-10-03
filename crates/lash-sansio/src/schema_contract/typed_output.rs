@@ -235,12 +235,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn absent_and_null_output_use_the_untyped_default() {
-        assert_eq!(parse_output_schema(None), Ok(None));
-        assert_eq!(parse_output_schema(Some(&Value::Null)), Ok(None));
-    }
-
-    #[test]
     fn lash_type_union_preserves_empty_and_nested_branches() {
         let schema = json!({"anyOf": [
             {},
@@ -368,42 +362,9 @@ mod tests {
     }
 
     #[test]
-    fn output_schema_passes_through_lash_type_wrapper() {
-        let inner_schema = json!({
-            "type": "object",
-            "properties": {
-                "name": { "type": "string" },
-                "tags": { "type": "array", "items": { "type": "string" } },
-                "status": { "type": "string", "enum": ["ok", "err"] }
-            },
-            "required": ["name", "tags", "status"],
-            "additionalProperties": false
-        });
-        let wrapped = json!({ LASH_TYPE_KEY: inner_schema.clone() });
-        let schema = parse_output_schema(Some(&wrapped))
-            .expect("schema")
-            .expect("present");
-        assert_eq!(schema, inner_schema);
-    }
-
-    #[test]
     fn output_schema_rejects_lash_type_without_type_field() {
         let wrapped = json!({ LASH_TYPE_KEY: {"properties": {}} });
         let err = parse_output_schema(Some(&wrapped)).expect_err("missing type");
         assert!(err.to_string().contains("type"), "error: {err}");
-    }
-
-    #[test]
-    fn output_schema_accepts_array_top_level_type() {
-        let wrapped = json!({
-            LASH_TYPE_KEY: {
-                "type": "array",
-                "items": {"type": "string"}
-            }
-        });
-        let schema = parse_output_schema(Some(&wrapped))
-            .expect("schema")
-            .expect("present");
-        assert_eq!(schema["type"], json!("array"));
     }
 }

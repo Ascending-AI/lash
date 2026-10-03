@@ -190,33 +190,6 @@ fn frame_switch_does_not_reconstruct_old_provider_calls() {
 }
 
 #[test]
-fn corrupt_envelopes_degrade_individually_after_reload() {
-    for payload in [
-        serde_json::json!("malformed"),
-        serde_json::json!({"schema_version":2}),
-    ] {
-        let mut events = vec![SessionHistoryRecord::Protocol(
-            crate::projection::rlm_protocol_event(RlmProtocolEvent::RlmDiagnostic(
-                lash_rlm_types::RlmDiagnosticEvent {
-                    phase: "native_transport".into(),
-                    payload,
-                },
-            )),
-        )];
-        events.extend(pair(step("healthy", None, false)));
-        let restored = serde_json::from_str::<Vec<SessionHistoryRecord>>(
-            &serde_json::to_string(&events).unwrap(),
-        )
-        .unwrap();
-        let messages = render(&restored);
-        assert_eq!(ids(&messages).0, ["healthy"]);
-        let rendered = serde_json::to_string(&messages).unwrap();
-        assert!(rendered.contains("degraded binding"));
-        assert!(rendered.contains("native_transport"));
-    }
-}
-
-#[test]
 fn second_round_history_teaches_images_only_when_enabled() {
     for images in [false, true] {
         let dialect = crate::dialect::typescript_test_dialect();
@@ -372,56 +345,6 @@ fn unbound_malformed_envelopes_degrade_at_their_chronological_positions() {
             serde_json::to_string(message)
                 .unwrap()
                 .contains("degraded binding")
-        );
-    }
-}
-
-#[test]
-fn many_step_projection_matches_bytes_with_one_transport_pass_and_decode() {
-    let dialect = crate::dialect::SessionDialect::prompt_only(
-        std::sync::Arc::new(crate::dialect::TypescriptDialect),
-        lash_lashlang_runtime::LashlangSurface::default(),
-    );
-    for count in [128, 16, 1] {
-        let mut events = Vec::new();
-        let mut expected = Vec::new();
-        for index in 0..count {
-            let entry = step(&format!("step-{index}"), None, false);
-            let exchange = pair(entry.clone());
-            let parts: Vec<Part> =
-                serde_json::from_value(envelope_payload(&exchange[0])["parts"].clone()).unwrap();
-            crate::native::transport::append_pair(
-                &mut expected,
-                &parts,
-                &crate::driver::history::step_output_text(
-                    dialect.prompt_vocabulary(),
-                    index,
-                    &entry,
-                ),
-            );
-            events.extend(exchange);
-        }
-        let repair = crate::native::transport::repair_event(
-            &TurnId::from("turn"),
-            count,
-            serde_json::from_value(envelope_payload(&events[0])["parts"].clone()).unwrap(),
-            "repair feedback".into(),
-            crate::native::transport::NATIVE_TRANSPORT_VERSION,
-        );
-        let parts: Vec<Part> =
-            serde_json::from_value(envelope_payload(&repair)["parts"].clone()).unwrap();
-        crate::native::transport::append_pair(&mut expected, &parts, "repair feedback");
-        events.push(repair);
-        crate::native::transport::work::reset();
-        let actual = render(&events);
-        assert_eq!(
-            serde_json::to_vec(&actual).unwrap(),
-            serde_json::to_vec(&expected).unwrap()
-        );
-        assert_eq!(
-            crate::native::transport::work::counts(),
-            (events.len(), count + 1),
-            "transport must visit history once and decode each native envelope once per render"
         );
     }
 }

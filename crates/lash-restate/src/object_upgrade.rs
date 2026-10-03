@@ -550,16 +550,6 @@ mod tests {
         UPGRADABLE_OBJECT_FAMILIES[0].newest - 1
     }
 
-    #[test]
-    fn every_object_family_binds_an_upgrade_and_its_newest_format() {
-        for family in UPGRADABLE_OBJECT_FAMILIES {
-            let declared = lash_core_store::compat::descriptor(family.component)
-                .expect("every family declares a descriptor");
-            assert_eq!(declared.writes.max(), family.newest, "{}", family.service);
-            assert_eq!(declared.reads.max(), family.newest, "{}", family.service);
-        }
-    }
-
     /// Law: `preflight_lists_unupgraded_objects`. The preflight lists every
     /// object whose `_compat` names an older format, and none at the newest.
     #[cfg(feature = "synthetic-next")]

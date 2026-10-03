@@ -44,24 +44,16 @@ mod fig_1413;
 mod fig_2823;
 #[path = "ecma_regressions/fig_3646.rs"]
 mod fig_3646;
-#[path = "ecma_regressions/fig_3652.rs"]
-mod fig_3652;
 #[path = "ecma_regressions/fig_3653_and_fig_3654.rs"]
 mod fig_3653_and_fig_3654;
-#[path = "ecma_regressions/fig_3655.rs"]
-mod fig_3655;
 #[path = "ecma_regressions/fig_3656.rs"]
 mod fig_3656;
-#[path = "ecma_regressions/fig_3657.rs"]
-mod fig_3657;
 #[path = "ecma_regressions/fig_3662.rs"]
 mod fig_3662;
 #[path = "ecma_regressions/fig_3700.rs"]
 mod fig_3700;
 #[path = "ecma_regressions/fig_3701.rs"]
 mod fig_3701;
-#[path = "ecma_regressions/fig_3703.rs"]
-mod fig_3703;
 #[path = "ecma_regressions/fig_3704.rs"]
 mod fig_3704;
 #[path = "ecma_regressions/fig_3706.rs"]
@@ -70,18 +62,12 @@ mod fig_3706;
 mod fig_3707;
 #[path = "ecma_regressions/fig_3708.rs"]
 mod fig_3708;
-#[path = "ecma_regressions/fig_3714.rs"]
-mod fig_3714;
 #[path = "ecma_regressions/fig_3720.rs"]
 mod fig_3720;
 #[path = "ecma_regressions/fig_3722.rs"]
 mod fig_3722;
-#[path = "ecma_regressions/fig_3728.rs"]
-mod fig_3728;
 #[path = "ecma_regressions/fig_3731.rs"]
 mod fig_3731;
-#[path = "ecma_regressions/fig_3732.rs"]
-mod fig_3732;
 #[path = "ecma_regressions/fig_3737.rs"]
 mod fig_3737;
 #[path = "ecma_regressions/fig_3745.rs"]

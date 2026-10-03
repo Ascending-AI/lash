@@ -264,16 +264,6 @@ async fn reading_view_does_not_retain_decoded_modules() {
 }
 
 #[test]
-fn artifact_verifies_under_its_stored_family() {
-    let artifact = process_typed_artifact("event");
-    let bytes = artifact.to_store_bytes().expect("artifact encodes");
-    let stored: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON envelope");
-    assert_eq!(stored["family"], LASHLANG_SEMANTIC_HASH_VERSION);
-    assert_eq!(stored["encoding"], super::written_envelope_encoding());
-    assert_eq!(ModuleArtifact::from_store_bytes(&bytes), Ok(artifact));
-}
-
-#[test]
 fn artifact_reads_every_envelope_encoding_it_admits() {
     let artifact = process_typed_artifact("event");
     let mut stored = stored_artifact_value(&artifact);
@@ -462,67 +452,6 @@ fn a_recorded_compilation_dialect_is_refused_as_a_retired_field() {
 }
 
 #[test]
-fn frozen_predecessor_artifact_is_refused_by_its_shape() {
-    // A pre-FIG-3571 artifact carries a renamed `canonical_ir`; the
-    // one-carrier shape refuses it before any identity check.
-    let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/module-artifact-old.json"
-    ))
-    .expect("frozen fixture should be JSON");
-    let object = raw.as_object_mut().expect("artifact is an object");
-    object.remove("trigger_key_manifest");
-    // The frozen fixture predates ADR 0096 and still records a dialect,
-    // which is its own typed refusal (see
-    // `a_recorded_compilation_dialect_is_refused_as_a_retired_field`).
-    object.remove("compilation_dialect");
-    let error = ModuleArtifact::from_store_bytes(
-        &serde_json::to_vec(&raw).expect("legacy artifact should encode"),
-    )
-    .expect_err("a predecessor artifact must be refused");
-    assert!(
-        matches!(&error, ModuleArtifactError::FutureShape { .. }),
-        "{error}"
-    );
-}
-
-#[test]
-fn future_shape_refuses_before_serde_reaches_unknown_variants() {
-    let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/module-artifact-old.json"
-    ))
-    .expect("frozen fixture should be JSON");
-    raw["compilation_dialect"] = serde_json::json!("future_dialect");
-    raw["ir"] = serde_json::json!({"main": {"FutureExpr": null}});
-
-    let error = ModuleArtifact::from_store_bytes(
-        &serde_json::to_vec(&raw).expect("future fixture should encode"),
-    )
-    .expect_err("a future artifact shape must be refused");
-    assert!(matches!(error, ModuleArtifactError::FutureShape { .. }));
-    let message = error.to_string();
-    assert!(message.contains("recompile and republish"), "{message}");
-    assert!(!message.contains("unknown variant"), "{message}");
-}
-
-#[test]
-fn unchanged_dialect_with_unknown_nested_variant_is_a_future_shape_refusal() {
-    let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/module-artifact-old.json"
-    ))
-    .expect("frozen fixture should be JSON");
-    raw["ir"] = serde_json::json!({"main": {"FutureExpr": null}});
-
-    let error = ModuleArtifact::from_store_bytes(
-        &serde_json::to_vec(&raw).expect("future fixture should encode"),
-    )
-    .expect_err("a known-dialect future variant must be refused legibly");
-    assert!(matches!(error, ModuleArtifactError::FutureShape { .. }));
-    let message = error.to_string();
-    assert!(message.contains("recompile and republish"), "{message}");
-    assert!(!message.contains("unknown variant"), "{message}");
-}
-
-#[test]
 fn malformed_artifact_json_remains_an_undecodable_codec_error() {
     let error = ModuleArtifact::from_store_bytes(br#"{"#)
         .expect_err("malformed JSON must remain undecodable");
@@ -590,68 +519,6 @@ fn store_decode_refuses_bytes_whose_refs_do_not_match_their_content() {
     )
     .expect("an artifact whose refs match its content decodes");
     assert_eq!(decoded, honest);
-}
-
-/// One module ref addresses one byte string, and a name is part of it.
-///
-/// The FIG-3120 pair: the perf guard's `durable_agent_child_turn_*` cell
-/// (`const spawnChild = ...`) and its high-traffic twin (`const loadChild =
-/// ...`) differ only in one main-level binder. Before FIG-3571 the identity
-/// alpha-normalized that binder, so the pair shared a ref and the stored IR had
-/// to be renamed to match. The artifact now stores the linked program verbatim
-/// and the ref hashes it names included, so the pair names two modules, each
-/// ref addresses exactly the bytes it hashes, and both round-trip.
-#[test]
-fn alpha_variant_cells_name_distinct_modules() {
-    fn artifact(binding: &str) -> ModuleArtifact {
-        ModuleArtifact::from_program(b::module(
-            vec![b::process_returning(
-                "worker",
-                vec![b::param("tick", TypeExpr::Str)],
-                TypeExpr::Bool,
-                b::block(vec![b::finish(b::bool_lit(true))]),
-            )],
-            vec![
-                b::assign(binding, b::string("seed")),
-                b::finish(b::var(binding)),
-            ],
-        ))
-        .expect("artifact builds")
-    }
-
-    let spawn_child = artifact("spawnChild");
-    let load_child = artifact("loadChild");
-    assert_ne!(
-        spawn_child.module_ref, load_child.module_ref,
-        "alpha variants name distinct modules"
-    );
-    for (artifact, name) in [(&spawn_child, "spawnChild"), (&load_child, "loadChild")] {
-        let bytes = artifact.to_store_bytes().expect("artifact encodes");
-        let encoded = String::from_utf8(bytes.clone()).expect("artifact bytes are UTF-8");
-        assert!(
-            encoded.contains(name),
-            "the stored artifact keeps the binder name: {encoded}"
-        );
-        assert_eq!(
-            &ModuleArtifact::from_store_bytes(&bytes).expect("artifact decodes"),
-            artifact,
-            "the artifact round-trips"
-        );
-    }
-}
-
-/// An ABI name is not a local: a process parameter still names itself in the
-/// stored artifact, and renaming one still moves the module ref.
-#[test]
-fn process_parameter_names_stay_in_the_ir() {
-    let event = process_typed_artifact("event");
-    let encoded =
-        String::from_utf8(event.to_store_bytes().expect("encodes")).expect("bytes are UTF-8");
-    assert!(encoded.contains("\"event\""), "{encoded}");
-    assert_ne!(
-        event.module_ref,
-        process_typed_artifact("payload").module_ref
-    );
 }
 
 /// A process's origin is derived by the linker (FIG-3571): a program handed

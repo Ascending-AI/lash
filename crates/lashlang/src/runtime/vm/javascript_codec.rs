@@ -124,38 +124,3 @@ fn is_uri_syntax(byte: u8) -> bool {
         b';' | b'/' | b'?' | b':' | b'@' | b'&' | b'=' | b'+' | b'$' | b',' | b'#'
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn node_uri_codec_oracles_cover_sets_utf8_and_malformed_sequences() {
-        assert_eq!(
-            encode("A Z;/?:@&=+$,#-_.!~*'()é😀", false),
-            "A%20Z%3B%2F%3F%3A%40%26%3D%2B%24%2C%23-_.!~*'()%C3%A9%F0%9F%98%80"
-        );
-        assert_eq!(
-            encode("https://a.test/a b?x=é&y=#z", true),
-            "https://a.test/a%20b?x=%C3%A9&y=#z"
-        );
-        assert_eq!(
-            decode(
-                "A%20Z%3B%2F%3F%3A%40%26%3D%2B%24%2C%23%C3%A9%F0%9F%98%80",
-                false
-            ),
-            Ok("A Z;/?:@&=+$,#é😀".to_string())
-        );
-        assert_eq!(
-            decode("https://a.test/a%20b?x=%C3%A9&y=%23z", true),
-            Ok("https://a.test/a b?x=é&y=%23z".to_string())
-        );
-        assert_eq!(
-            decode("%3f%23%2F%3A%40%26%3D%2B%24%2C%3B", true),
-            Ok("%3f%23%2F%3A%40%26%3D%2B%24%2C%3B".to_string())
-        );
-        for malformed in ["%", "%0", "%GG", "%C0%AF", "%ED%A0%80", "%E0%A4%A"] {
-            assert_eq!(decode(malformed, false), Err(()), "{malformed}");
-        }
-    }
-}

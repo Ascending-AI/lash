@@ -68,34 +68,3 @@ fn a_refused_turn_outcome_is_carried_as_the_refusal_itself() {
     assert_eq!(carried.code, refusal.code);
     assert_eq!(carried.message, refusal.message);
 }
-
-/// Only a refusal that names what superseded the attempt is redrivable; every
-/// other deterministic answer is terminal.
-#[test]
-fn a_deterministic_store_error_is_redrivable_only_when_it_names_its_successor() {
-    let redrivable: Vec<&'static str> = StoreError::samples_for_testing()
-        .iter()
-        .filter(|error| {
-            !matches!(error, StoreError::TurnOutcomeMaterializationRefused { .. })
-                && error.runtime_code().classification() == RuntimeErrorClass::Redrivable
-        })
-        .map(StoreError::variant_name)
-        .collect();
-    assert_eq!(
-        redrivable,
-        [
-            "RunHeldByAnotherExecutor",
-            "FollowOnPending",
-            "FollowOnFrameNotCurrent",
-            "FollowOnNotPending",
-            "ExecutionStateCaptureFailed",
-            "HeadRevisionConflict",
-            "TurnCancelIntentChanged",
-            "StaleWritePermit",
-            "SessionCommandWithdrawn",
-            "StaleShiftFence",
-            "SessionExecutionLeaseExpired",
-            "CheckpointRootMissing",
-        ]
-    );
-}

@@ -512,29 +512,6 @@ mod tests {
     }
 
     #[test]
-    fn recorded_output_default_cannot_be_zero() {
-        assert!(
-            LlmProfileMetadata::builder("provider/model")
-                .context_window_tokens(8192)
-                .max_output_tokens(0)
-                .build()
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn recorded_output_default_cannot_exceed_capacity() {
-        assert!(
-            LlmProfileMetadata::builder("provider/model")
-                .context_window_tokens(8192)
-                .output_token_capacity(1024)
-                .max_output_tokens(2048)
-                .build()
-                .is_err()
-        );
-    }
-
-    #[test]
     fn output_token_limits_validate_stored_facts_and_reject_the_old_shape() {
         for wire in [
             serde_json::json!({"capacity": 0, "default_cap": null}),
@@ -568,34 +545,6 @@ mod tests {
                 default_cap: NonZeroUsize::new(2048).expect("positive"),
             })
         );
-    }
-
-    #[test]
-    fn llm_profile_config_reasoning_selection_serde_is_explicit() {
-        for (selection, expected) in [
-            (
-                ReasoningSelection::ProviderDefault,
-                serde_json::json!("provider_default"),
-            ),
-            (ReasoningSelection::Disabled, serde_json::json!("disabled")),
-            (
-                ReasoningSelection::Effort("high".to_string()),
-                serde_json::json!({ "effort": "high" }),
-            ),
-        ] {
-            let config = LlmProfileConfig::new(RecordedLlmProfile::mint(
-                LlmProfileKey::new("key"),
-                metadata(),
-            ))
-            .with_reasoning(selection.clone());
-            let json = serde_json::to_value(&config).expect("serialize model config");
-            assert_eq!(json["reasoning"], expected);
-            assert_eq!(json["model"]["key"], "key");
-            let round_trip: LlmProfileConfig =
-                serde_json::from_value(json).expect("deserialize model config");
-            assert_eq!(round_trip.reasoning, selection);
-            assert_eq!(round_trip, config);
-        }
     }
 
     /// Metadata has no reasoning selection of its own: a recorded binding

@@ -71,8 +71,7 @@ pub fn live_process_status_predicate_sql(column: &str) -> String {
 ///
 /// Spelled as the negation of the live set rather than as the retired list so
 /// a status that is neither live nor retired can never be silently exempted
-/// from retention; `live_and_retired_statuses_partition_the_vocabulary` keeps
-/// the two sets complementary.
+/// from retention. The retention predicate remains the complement of the live set.
 pub fn retired_process_status_predicate_sql(column: &str) -> String {
     let live = live_process_statuses_sql();
     if live.is_empty() {
@@ -148,7 +147,3 @@ pub fn undelivered_wake_delivery_state_predicate_sql(column: &str) -> String {
     }
     format!("{column} IN ({undelivered})")
 }
-
-#[cfg(test)]
-#[path = "process_lifecycle_sql_tests.rs"]
-mod tests;

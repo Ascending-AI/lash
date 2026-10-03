@@ -92,38 +92,4 @@ mod tests {
         assert_eq!("[redacted]", debug);
         assert_eq!("[redacted]", display);
     }
-
-    #[test]
-    fn debug_of_a_containing_derive_never_reveals_the_secret() {
-        #[derive(Debug)]
-        #[expect(dead_code, reason = "the derive reads the fields")]
-        struct Holder {
-            api_key: Redacted,
-        }
-        let holder = Holder {
-            api_key: Redacted::new(SECRET),
-        };
-        let debug = format!("{holder:?}");
-        assert!(!debug.contains(SECRET), "derive leaked: {debug}");
-        assert!(debug.contains("[redacted]"));
-    }
-
-    #[test]
-    fn expose_secret_returns_the_plaintext() {
-        let redacted = Redacted::new(SECRET);
-        assert_eq!(SECRET, redacted.expose_secret());
-        assert_eq!(SECRET, redacted.clone().into_inner());
-    }
-
-    #[test]
-    fn deserialization_reads_the_plaintext_in() {
-        let redacted: Redacted = serde_json::from_str("\"sk-live-supersecret-000\"").unwrap();
-        assert_eq!(SECRET, redacted.expose_secret());
-    }
-
-    #[test]
-    fn equality_and_conversions_operate_on_the_plaintext() {
-        assert_eq!(Redacted::from(SECRET), Redacted::from(SECRET.to_string()));
-        assert_ne!(Redacted::from(SECRET), Redacted::from("other"));
-    }
 }

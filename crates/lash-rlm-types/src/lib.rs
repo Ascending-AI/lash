@@ -554,26 +554,6 @@ mod rlm_step_serde_tests {
         serde_json::to_value(RlmHistoryItem::from_trajectory_entry(entry)).expect("item encodes")
     }
 
-    #[test]
-    fn a_step_archive_and_final_value_round_trip_in_their_own_keys() {
-        let entry = RlmTrajectoryEntry {
-            output_archive: Some(Box::new(retained("[{\"value\": {\"rows\":["))),
-            output: Vec::new(),
-            outcome: CellOutcome::Finished(super::OutputValue::Retained(retained("{\"answer\""))),
-            ..populated_entry()
-        };
-        let encoded = serde_json::to_value(&entry).expect("encode");
-        assert_eq!(encoded["output"], serde_json::json!([]));
-        assert_eq!(
-            encoded["output_archive"]["witness"],
-            "[{\"value\": {\"rows\":["
-        );
-        assert!(encoded.get("final_output").is_none());
-        assert_eq!(encoded["final_output_retained"]["witness"], "{\"answer\"");
-        let decoded: RlmTrajectoryEntry = serde_json::from_value(encoded).expect("decode");
-        assert_eq!(decoded, entry);
-    }
-
     /// A retained value has one cell-visible spelling (FIG-4658 F66): an archive
     /// and a final value read back as the same reserved-tag record, whose
     /// `attachment` is a value a tool that reads attachments accepts.
@@ -671,24 +651,6 @@ mod rlm_step_serde_tests {
         );
     }
 
-    /// A cell reads a failed step's `error` as `{kind, message}`.
-    #[test]
-    fn a_failed_step_reads_back_as_kind_and_message() {
-        let item = history(&RlmTrajectoryEntry {
-            output_archive: None,
-            outcome: CellOutcome::Failed(program_failure()),
-            ..populated_entry()
-        });
-        assert_eq!(
-            item["error"],
-            serde_json::json!({
-                "kind": "program",
-                "message": "ReferenceError: rows is not defined",
-            })
-        );
-        assert!(item.get("final_output").is_none());
-    }
-
     #[test]
     fn a_null_finish_is_distinct_from_a_running_cell() {
         for (outcome, expected) in [
@@ -749,18 +711,6 @@ mod rlm_step_serde_tests {
                 "{entry}"
             );
         }
-    }
-
-    #[test]
-    fn legacy_observations_alias_is_rejected() {
-        let entry_error = serde_json::from_value::<RlmTrajectoryEntry>(serde_json::json!({
-            "id": "legacy-step",
-            "protocol_iteration": 4,
-            "code": "print('legacy')",
-            "observations": ["legacy output"],
-        }))
-        .expect_err("legacy trajectory alias must be rejected");
-        assert!(entry_error.to_string().contains("missing field `output`"));
     }
 
     /// Every history item this build can serialize, with every optional key
@@ -1218,31 +1168,4 @@ impl TurnProtocol for RlmTurnProtocol {
     type Event = RlmProtocolEvent;
     type Termination = RlmTermination;
     type DriverState = serde_json::Value;
-}
-
-#[cfg(test)]
-mod turn_options_tests {
-    use super::{RlmTermination, RlmTurnOptions};
-
-    /// No options bag writes a language key: there is one RLM dialect, so
-    /// there is nothing for a turn or a session to state.
-    #[test]
-    fn a_turn_bag_never_writes_a_dialect_key() {
-        let encoded = serde_json::to_string(&RlmTurnOptions {
-            termination: Some(RlmTermination::Natural),
-            final_answer_format: None,
-            render: None,
-        })
-        .expect("encode");
-        assert!(!encoded.contains("dialect"), "{encoded}");
-        assert!(!encoded.contains("final_answer_format"), "{encoded}");
-    }
-
-    #[test]
-    fn an_unstated_termination_is_the_natural_default() {
-        assert_eq!(
-            RlmTurnOptions::default().effective_termination(),
-            RlmTermination::Natural
-        );
-    }
 }

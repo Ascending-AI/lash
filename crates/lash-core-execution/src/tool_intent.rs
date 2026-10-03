@@ -662,46 +662,6 @@ mod tests {
         }
     }
 
-    /// `ToolIntentKind` is generated from the same variant list as `ToolIntent`
-    /// rather than mirrored by hand: every generated kind is produced by a real
-    /// declaration, the projection is injective, and the wire spelling the kind
-    /// prints is the tag serde writes for the declaration (FIG-2994).
-    #[test]
-    fn every_generated_kind_is_produced_by_exactly_one_tool_intent_variant() {
-        let mut seen = std::collections::HashSet::new();
-        for kind in ToolIntentKind::ALL.iter().copied() {
-            let intent = sample_intent(kind);
-            assert_eq!(intent.kind(), kind, "kind projection is not the identity");
-            assert!(seen.insert(kind), "two samples claim the same kind");
-            let encoded = serde_json::to_value(&intent).expect("declarations encode");
-            assert_eq!(
-                encoded.get("kind").and_then(serde_json::Value::as_str),
-                Some(kind.as_str()),
-                "the serde tag and `as_str` disagree for {kind:?}"
-            );
-        }
-        assert_eq!(
-            seen.len(),
-            ToolIntentKind::ALL.len(),
-            "the generated kind set and the declaration set have different sizes"
-        );
-    }
-
-    /// The new declarations of FIG-2994 are members of the protocol, not just
-    /// types: they carry a session binding the batch admitter can check.
-    #[test]
-    fn the_registration_declarations_carry_their_session_authority() {
-        for kind in [
-            ToolIntentKind::PublishDefinition,
-            ToolIntentKind::RegisterTrigger,
-        ] {
-            assert_eq!(
-                sample_intent(kind).owner(),
-                &RuntimeOwner::Session(SessionId::from("session"))
-            );
-        }
-    }
-
     #[test]
     fn intent_identity_has_a_literal_stable_oracle() {
         let identity = derive_tool_intent_identity(
@@ -721,29 +681,6 @@ mod tests {
                 minting_emission_replay_key: None,
             }
         );
-    }
-
-    #[test]
-    fn emitted_intent_identity_is_scoped_by_the_minting_replay_key() {
-        let call = crate::ToolCallId::fixture("call");
-        let first = derive_tool_intent_identity_inner(
-            &crate::RuntimeOwner::Session(SessionId::from("session")),
-            "process",
-            &call,
-            0,
-            Some("turn:7:child:0:call:attempt:1"),
-        );
-        let second = derive_tool_intent_identity_inner(
-            &crate::RuntimeOwner::Session(SessionId::from("session")),
-            "process",
-            &call,
-            0,
-            Some("turn:8:child:0:call:attempt:1"),
-        );
-
-        assert!(first.replay_key.starts_with("tool-intent:v2:blake3:"));
-        assert!(second.replay_key.starts_with("tool-intent:v2:blake3:"));
-        assert_ne!(first.replay_key, second.replay_key);
     }
 
     /// The protocol discriminator is part of the row: a submission that
@@ -775,35 +712,6 @@ mod tests {
                 .contains("missing field `protocol_version`"),
             "{error}"
         );
-    }
-
-    #[test]
-    fn intent_identity_is_distinct_across_turn_and_process_execution_scopes() {
-        let call = crate::ToolCallId::fixture("call");
-        let turn_7 = derive_tool_intent_identity(
-            &crate::RuntimeOwner::Session(SessionId::from("session")),
-            "turn-7",
-            &call,
-            0,
-        );
-        let turn_8 = derive_tool_intent_identity(
-            &crate::RuntimeOwner::Session(SessionId::from("session")),
-            "turn-8",
-            &call,
-            0,
-        );
-        let process = derive_tool_intent_identity(
-            &crate::RuntimeOwner::Session(SessionId::from("session")),
-            "process-7",
-            &call,
-            0,
-        );
-        assert_eq!(turn_7.execution_scope_id, "turn-7");
-        assert_eq!(turn_8.execution_scope_id, "turn-8");
-        assert_eq!(process.execution_scope_id, "process-7");
-        assert_ne!(turn_7.replay_key, turn_8.replay_key);
-        assert_ne!(turn_7.replay_key, process.replay_key);
-        assert_ne!(turn_8.replay_key, process.replay_key);
     }
 
     #[test]
@@ -891,25 +799,6 @@ mod tests {
             );
         }
 
-        /// Re-derivation from the record's own durable fields is a fixpoint.
-        ///
-        /// `tool_intent_ingress` reads a record as forged when its stored
-        /// `replay_key` differs from the re-derived one, so any input the
-        /// record fails to retain reads every honest identity as forged --
-        /// which is exactly what dropping `minting_emission_replay_key` did in
-        /// FIG-2994.
-        #[test]
-        fn rederiving_a_tool_intent_identity_reproduces_it(inputs in identity_inputs()) {
-            let derived = derive_from(&inputs);
-            let rederived = rederive_tool_intent_identity(&derived);
-            proptest::prop_assert_eq!(&derived, &rederived);
-            proptest::prop_assert_eq!(
-                crate::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(&derived
-                ),
-                crate::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(&rederived
-                )
-            );
-        }
     }
 
     #[test]

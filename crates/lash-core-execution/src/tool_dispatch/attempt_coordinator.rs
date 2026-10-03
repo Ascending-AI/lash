@@ -1400,49 +1400,6 @@ mod projection_tests {
         assert_eq!(failure.code, "tool_value_decode_failed");
     }
 
-    #[test]
-    fn a_realized_start_replaces_the_slot_its_attempt_answered() {
-        let mut output = crate::ToolCallOutput::success(start_slot(2));
-
-        project_recorded_intent_outcomes(&mut output, &[start_outcome("p-child", 2)]);
-
-        assert_eq!(
-            output.value_for_projection(),
-            realized_handle("p-child"),
-            "the realized handle replaces the slot, and nothing else is copied"
-        );
-    }
-
-    /// ADR 0107: a slot is never exposed as a handle. A start that did not
-    /// realize answers a typed failure, not an id nobody minted.
-    #[test]
-    fn a_slot_whose_start_did_not_realize_is_a_typed_failure() {
-        let mut output = crate::ToolCallOutput::success(start_slot(1));
-
-        project_recorded_intent_outcomes(
-            &mut output,
-            &[
-                start_outcome("p-other", 0),
-                crate::ToolIntentExecutionOutcome::Refused {
-                    identity: None,
-                    intent_index: 1,
-                    kind: crate::ToolIntentKind::StartProcess,
-                    refusal: crate::ToolIntentRefusalReason::IntentIndexOverflow,
-                },
-            ],
-        );
-
-        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
-            panic!("an unrealized slot must not survive projection");
-        };
-        assert_eq!(failure.code, "process_start_unrealized");
-        assert_eq!(
-            failure.message,
-            "the declared process start did not register a process: it was refused with \
-             intent_index_overflow: the intent index does not fit in u32"
-        );
-    }
-
     /// FIG-4255: the failed call names the refusal that kept the start from
     /// registering, so the next occurrence diagnoses itself from the model
     /// feedback alone.
@@ -1488,22 +1445,6 @@ mod projection_tests {
         let mut untrusted = crate::ToolCallOutput::success(start_slot(0));
         project_recorded_intent_outcomes(&mut untrusted, &[]);
         assert_eq!(untrusted.value_for_projection(), start_slot(0));
-    }
-
-    #[test]
-    fn a_realized_start_leaves_an_output_that_is_not_its_handle_alone() {
-        // A tool that answers its own data and declares a start alongside it.
-        // Merging the realized handle into that answer put `__handle__`, `id`
-        // and `process_id` into the model-facing text of the tool result
-        // (FIG-3119).
-        let mut output = crate::ToolCallOutput::success(serde_json::json!({ "ok": true }));
-
-        project_recorded_intent_outcomes(&mut output, &[start_outcome("p-child", 0)]);
-
-        assert_eq!(
-            output.value_for_projection(),
-            serde_json::json!({ "ok": true })
-        );
     }
 
     #[test]

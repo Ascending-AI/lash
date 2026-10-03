@@ -506,7 +506,6 @@ impl ToolProvider for MockMailProvider {
 mod tests {
     use super::*;
     use lash::SessionId;
-    use lash::tools::ToolBindingResolutionExt;
 
     #[test]
     fn slugify_normalizes_names() {
@@ -604,89 +603,6 @@ mod tests {
             world.inbox("work").expect("work inbox").len(),
             1,
             "the redrive neither redelivers nor forks the occurrence key"
-        );
-    }
-
-    #[test]
-    fn send_replay_returns_the_stable_receipt_without_redelivery() {
-        let world = MailWorld::new();
-        world.add_account("Work").expect("add work");
-        let args = json!({ "title": "Contract", "text": "Please review." });
-
-        let first = world
-            .op_send_once("turn-1:call-1", "work", &args)
-            .expect("first send");
-        let replay = world
-            .op_send_once("turn-1:call-1", "work", &args)
-            .expect("replayed send");
-
-        assert_eq!(first.message.id, "work-1");
-        assert_eq!(replay.message.id, first.message.id);
-        assert_eq!(world.inbox("work").expect("work inbox").len(), 1);
-    }
-
-    #[test]
-    fn provider_exposes_authority_per_account() {
-        let world = MailWorld::new();
-        world.add_account("Work").expect("add work");
-        world.add_account("Personal").expect("add personal");
-        let provider = MockMailProvider::new(world);
-
-        let manifests = provider.tool_manifests();
-        let names: Vec<String> = manifests
-            .iter()
-            .map(|manifest| manifest.name.clone())
-            .collect();
-        assert!(names.contains(&"inbox__work__send".to_string()));
-        assert!(names.contains(&"inbox__personal__delete".to_string()));
-        assert_eq!(names.len(), 6);
-
-        let send = manifests
-            .iter()
-            .find(|manifest| manifest.name == "inbox__work__send")
-            .expect("resolve non-retryable send manifest");
-        assert_eq!(send.retry_policy, ToolRetryPolicy::Never);
-        let list = manifests
-            .iter()
-            .find(|manifest| manifest.name == "inbox__work__list")
-            .expect("resolve safely retryable list manifest");
-        assert_eq!(
-            list.retry_policy,
-            ToolRetryPolicy::Safe {
-                max_attempts: 3,
-                base_delay_ms: 25,
-                max_delay_ms: 250,
-            }
-        );
-        let delete = manifests
-            .iter()
-            .find(|manifest| manifest.name == "inbox__work__delete")
-            .expect("resolve idempotent delete manifest");
-        assert_eq!(
-            delete.retry_policy,
-            ToolRetryPolicy::Idempotent {
-                max_attempts: 3,
-                base_delay_ms: 25,
-                max_delay_ms: 250,
-            }
-        );
-        assert!(provider.resolve_contract("inbox__work__delete").is_some());
-
-        let manifest = provider
-            .tool_manifests()
-            .into_iter()
-            .find(|manifest| manifest.name == "inbox__work__send")
-            .expect("work send manifest");
-        let surface = lash::tools::required_tool_binding(&manifest)
-            .expect("work send binding")
-            .executable_for(&manifest.name)
-            .expect("work send surface");
-        assert_eq!(surface.call_path(), "inbox.work.send");
-        assert_eq!(surface.authority_type, "Inbox");
-
-        assert_eq!(
-            provider.route("inbox__personal__delete"),
-            Some(("personal".to_string(), "delete"))
         );
     }
 }

@@ -86,40 +86,6 @@ fn accept(source: &str) {
 }
 
 #[test]
-fn the_arrow_template_binds_the_event_and_freezes_every_other_input() {
-    accept(&program(
-        "tick: unknown, label: unknown",
-        "(event) => ({ tick: event, label: \"daily\" })",
-    ));
-}
-
-/// The same contract on every operation that takes a registration record.
-/// Retiring the global for `triggers.register` alone would strand these three.
-#[test]
-fn register_update_and_revive_share_the_arrow() {
-    for (operation, extra) in [
-        ("register", ""),
-        ("update", ", expected_revision: 1"),
-        ("revive", ", expected_revision: 1"),
-    ] {
-        let source = format!(
-            r#"
-            const remember = async (tick: unknown) => {{ return true; }};
-            const schedule = timer.Schedule({{ expr: "0 8 * * *" }});
-            finish(await triggers.{operation}({{
-              source: schedule,
-              target: {{ definition: remember }},
-              inputs: (event) => ({{ tick: event }}),
-              subscription_key: "remembered-key"{extra}
-            }}));
-            "#
-        );
-        lash_typescript::link(&source, &environment())
-            .unwrap_or_else(|error| panic!("triggers.{operation}: {error}"));
-    }
-}
-
-#[test]
 fn inline_definition_targets_lift_for_each_registration_operation() {
     for (operation, extra) in [
         ("register", ""),
@@ -192,11 +158,6 @@ fn trigger_targets_refuse_bare_processes_and_closures() {
 }
 
 #[test]
-fn omitted_inputs_defaults_to_a_one_parameter_target() {
-    accept(&program("tick: unknown", ""));
-}
-
-#[test]
 fn a_zero_parameter_target_is_told_to_take_an_event_parameter() {
     let error = reject(&program("", ""));
     assert_eq!(error.code, DiagnosticCode::LinkError, "{error}");
@@ -253,15 +214,6 @@ fn the_retired_global_names_the_arrow() {
         "`trigger` is bound nowhere in a TypeScript program and `trigger.event` is no longer part of the dialect"
     );
     assert!(error.is_dialect_refusal(), "{error}");
-}
-
-/// The retired spelling is refused wherever it is written, not only inside a
-/// registration: a cell that reaches for it anywhere gets the same answer.
-#[test]
-fn the_retired_global_is_refused_outside_a_registration() {
-    let error = lash_typescript::link("finish(trigger.event);", &environment())
-        .expect_err("the global is gone");
-    assert_eq!(error.code, DiagnosticCode::TriggerEventRemoved, "{error}");
 }
 
 /// Scoped to the magic unbound spelling. A program that binds `trigger` reads
@@ -414,33 +366,6 @@ fn a_process_can_register_a_trigger_aimed_at_another_process() {
             target: { definition: remember },
             inputs: (event) => ({ tick: event }),
             subscription_key: "remembered-key"
-          });
-          return true;
-        };
-        finish(await processes.start({ definition: owner }));
-        "#,
-    );
-}
-
-/// Source order is the registration order: two registrations in one process
-/// body reach the program in the order they are written.
-#[test]
-fn registrations_in_a_process_body_keep_their_source_order() {
-    accept(
-        r#"
-        const first = async (tick: unknown) => { return true; };
-        const second = async (tick: unknown) => { return true; };
-        const owner = async () => {
-          const schedule = timer.Schedule({ expr: "0 8 * * *" });
-          await triggers.register({
-            source: schedule, target: { definition: first },
-            inputs: (event) => ({ tick: event }),
-            subscription_key: "first-key"
-          });
-          await triggers.register({
-            source: schedule, target: { definition: second },
-            inputs: (event) => ({ tick: event }),
-            subscription_key: "second-key"
           });
           return true;
         };

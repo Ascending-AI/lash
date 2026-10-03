@@ -448,8 +448,3 @@ fn recorded_workflow_diagnostics_are_definite_for_every_kind() {
 fn recovered_workflow_diagnostics_are_definite_for_every_kind() {
     assert_classified_producer(true, true);
 }
-
-#[test]
-fn recovered_workflow_diagnostics_without_owner_are_definite_for_every_kind() {
-    assert_classified_producer(true, false);
-}

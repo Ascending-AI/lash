@@ -51,6 +51,5 @@ lash-sqlite-store = { workspace = true }
 # PostgreSQL as well as SQLite memory.
 lash-postgres-store = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
-lash-plugin-process-controls = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true }

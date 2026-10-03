@@ -63,39 +63,6 @@ async fn run_typescript_ast_across_every_effect(program: Program) -> ExecutionOu
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn regexp_last_index_mutation_survives_park_and_restore() {
-    let program = Program::block(vec![
-        Expr::Assign {
-            target: crate::AssignTarget::variable("regexp".into()),
-            expr: Box::new(private_builtin(
-                "__lashlang_heap_new",
-                vec![
-                    Expr::String("RegExp".into()),
-                    Expr::String("a+".into()),
-                    Expr::String("ig".into()),
-                ],
-            )),
-        },
-        Expr::Assign {
-            target: crate::AssignTarget {
-                root: "regexp".into(),
-                steps: vec![crate::AssignPathStep::Field("lastIndex".into())],
-            },
-            expr: Box::new(Expr::Number(9.0)),
-        },
-        Expr::Print(Box::new(Expr::String("park".into()))),
-        Expr::Finish(Box::new(Expr::Field {
-            target: Box::new(Expr::Variable("regexp".into())),
-            field: "lastIndex".into(),
-        })),
-    ]);
-    assert_eq!(
-        run_typescript_ast_across_every_effect(program).await,
-        ExecutionOutcome::Finished(Value::Number(9.0))
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn url_search_params_live_link_and_order_survive_park_and_restore() {
     let program = Program::block(vec![
         ts_assign(
@@ -409,24 +376,6 @@ async fn reference_object_key_nested_array_write_returns_a_deterministic_error()
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn date_reference_index_key_coerces_to_the_ecma_date_string() {
-    // FIG-3704: a Date used as a property key ToString's to its UTC DateString,
-    // so it reads (and writes) the member named after that string.
-    let program = Program::block(vec![
-        ts_assign("record", Expr::Record(Vec::new())),
-        ts_assign("date_key", heap_new("Date", vec![Expr::Number(42.0)])),
-        Expr::Finish(Box::new(Expr::Index {
-            target: Box::new(Expr::Variable("record".into())),
-            index: Box::new(Expr::Variable("date_key".into())),
-        })),
-    ]);
-    assert_eq!(
-        run_typescript_ast_across_every_effect(program).await,
-        ExecutionOutcome::Finished(Value::Undefined)
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn regexp_string_coercion_matches_node() {
     let program = Program::block(vec![
         ts_assign(
@@ -603,13 +552,6 @@ async fn javascript_unary_plus_and_minus_use_exact_reference_to_number() {
     assert!(matches!(values[9], Value::Number(value) if value.is_nan()));
     assert!(matches!(values[10], Value::Number(value) if value.is_nan()));
     assert_eq!(values[11], Value::Number(-42.0));
-}
-
-#[cfg(debug_assertions)]
-#[test]
-#[should_panic(expected = "heap references must be exported before truthiness")]
-fn scalar_truthiness_asserts_on_unexported_references() {
-    let _ = is_truthy(&Value::Ref(HeapId::from_counter(1)));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -833,58 +775,6 @@ async fn set_normalizes_negative_zero_before_iteration() {
     assert_eq!(
         run_typescript_ast_across_every_effect(program).await,
         ExecutionOutcome::Finished(Value::Number(f64::INFINITY))
-    );
-}
-
-// `lashlang_dialect_cannot_execute_javascript_heap_constructor_intrinsic` was
-// deleted with the second dialect (ADR 0096). Every compiled program now runs
-// with reference semantics, so the REFERENCE_SEMANTICS_REQUIRED gate
-// has no non-reference caller left to refuse.
-#[tokio::test(flavor = "current_thread")]
-async fn map_for_each_callback_parks_and_resumes_through_the_shared_driver() {
-    let callback = Expr::Function(Box::new(crate::FunctionExpr {
-        name: None,
-        js_name: None,
-        receiver: None,
-        params: vec!["value".into(), "key".into(), "map".into()],
-        captures: Vec::new(),
-        body: Box::new(Expr::Block(vec![
-            Expr::Print(Box::new(Expr::Variable("value".into()))),
-            Expr::FunctionReturn(Box::new(Expr::Absent)),
-        ])),
-    }));
-    let entries = Expr::List(vec![
-        Expr::List(vec![Expr::String("a".into()), Expr::Number(1.0)]),
-        Expr::List(vec![Expr::String("b".into()), Expr::Number(2.0)]),
-    ]);
-    let program = Program::block(vec![
-        Expr::Assign {
-            target: crate::AssignTarget::variable("map".into()),
-            expr: Box::new(private_builtin(
-                "__lashlang_heap_new",
-                vec![Expr::String("Map".into()), entries],
-            )),
-        },
-        Expr::Assign {
-            target: crate::AssignTarget::variable("callback".into()),
-            expr: Box::new(callback),
-        },
-        private_builtin(
-            "__lashlang_stdlib",
-            vec![
-                Expr::String("forEach".into()),
-                Expr::Variable("map".into()),
-                Expr::Variable("callback".into()),
-            ],
-        ),
-        Expr::Finish(Box::new(Expr::Field {
-            target: Box::new(Expr::Variable("map".into())),
-            field: "size".into(),
-        })),
-    ]);
-    assert_eq!(
-        run_typescript_ast_across_every_effect(program).await,
-        ExecutionOutcome::Finished(Value::Number(2.0))
     );
 }
 

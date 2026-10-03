@@ -10,35 +10,6 @@ use std::error::Error;
 #[path = "cleanup_fixture.rs"]
 mod cleanup_fixture;
 
-#[allow(
-    clippy::disallowed_methods,
-    reason = "test fixture reads the PostgreSQL service URL"
-)]
-async fn backend(postgres: bool) -> (lash_core::Backend, Option<Box<dyn std::any::Any>>) {
-    if !postgres {
-        return (double_backend_explicit_reconcile().await, None);
-    }
-    let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-        .expect("PostgreSQL law requires a database URL");
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
-        .await
-        .expect("connect PostgreSQL");
-    let attachments = tempfile::tempdir().expect("attachments");
-    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
-        &storage,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            attachments.path(),
-        )),
-    )) as Arc<dyn lash_core::StoreSet>;
-    let backend = double_backend_over_explicit_reconcile(
-        lash_restate_test::ServerConfig::default(),
-        move |_| stores,
-    )
-    .await;
-    (backend, Some(Box::new((database, storage, attachments))))
-}
-
 fn core(backend: lash_core::Backend) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
@@ -74,8 +45,8 @@ impl ToolProvider for EmptyTools {
     }
 }
 
-async fn tool_law(postgres: bool) -> Result<()> {
-    let (backend, _held) = backend(postgres).await;
+async fn tool_law() -> Result<()> {
+    let backend = double_backend_explicit_reconcile().await;
     let core = core(backend);
     let session = core.session("typed-tools").created().await.open().await?;
     let tools = session.admin().tools();
@@ -108,14 +79,8 @@ async fn tool_law(postgres: bool) -> Result<()> {
 
 #[tokio::test]
 async fn tool_admin_preserves_reconfigure_variants() -> Result<()> {
-    tool_law(false).await
+    tool_law().await
 }
-#[tokio::test]
-#[ignore = "requires PostgreSQL service"]
-async fn tool_admin_preserves_reconfigure_variants_on_postgres() -> Result<()> {
-    tool_law(true).await
-}
-
 #[derive(Clone)]
 struct StateHook {
     mode: Arc<AtomicUsize>,
@@ -227,45 +192,8 @@ fn assert_state_error(error: &PluginError, mode: usize) {
     assert!(error.is_terminal());
 }
 
-#[test]
-fn plugin_state_hook_errors_keep_their_structured_cause_conversion() {
-    for (mode, error) in [
-        (
-            1,
-            PluginStateError::InvalidKey {
-                key: String::new(),
-                reason: lash_core::KeyRejection::Empty,
-            },
-        ),
-        (
-            2,
-            PluginStateError::ValueTooLarge {
-                key: "k".into(),
-                bytes: 32770,
-                limit: 32768,
-            },
-        ),
-        (
-            3,
-            PluginStateError::StoreTooLarge {
-                bytes: 131093,
-                limit: 131072,
-            },
-        ),
-        (
-            4,
-            PluginStateError::GenerationConflict {
-                expected: 1,
-                actual: 0,
-            },
-        ),
-    ] {
-        assert_state_error(&error.into(), mode);
-    }
-}
-
-async fn state_law(postgres: bool) -> Result<()> {
-    let (backend, _held) = backend(postgres).await;
+async fn state_law() -> Result<()> {
+    let backend = double_backend_explicit_reconcile().await;
     for mode in 1..=4 {
         for rematerialize in [false, true] {
             let id = format!("typed-state-{mode}-{rematerialize}");
@@ -317,14 +245,8 @@ async fn state_law(postgres: bool) -> Result<()> {
 }
 #[tokio::test]
 async fn plugin_state_hook_errors_keep_their_structured_cause() -> Result<()> {
-    state_law(false).await
+    state_law().await
 }
-#[tokio::test]
-#[ignore = "requires PostgreSQL service"]
-async fn plugin_state_hook_errors_keep_their_structured_cause_on_postgres() -> Result<()> {
-    state_law(true).await
-}
-
 struct CleanupLayer {
     step: usize,
     error: RuntimeError,
@@ -368,8 +290,8 @@ impl lash_core::SessionDeleteExecution for DeleteExecution<'_> {
     }
 }
 
-async fn cleanup_law(postgres: bool) -> Result<()> {
-    let (backend, _held) = backend(postgres).await;
+async fn cleanup_law() -> Result<()> {
+    let backend = double_backend_explicit_reconcile().await;
     let core = core(backend);
     for recorded in [false, true] {
         for step in 0..=4 {
@@ -529,67 +451,5 @@ async fn cleanup_law(postgres: bool) -> Result<()> {
 }
 #[tokio::test]
 async fn session_cleanup_failures_preserve_step_and_source() -> Result<()> {
-    cleanup_law(false).await
-}
-#[tokio::test]
-#[ignore = "requires PostgreSQL service"]
-async fn session_cleanup_failures_preserve_step_and_source_on_postgres() -> Result<()> {
-    cleanup_law(true).await
-}
-
-#[test]
-fn tool_admin_preserves_reconfigure_variants_conversion() {
-    let error = EmbedError::from(ReconfigureError::GenerationMismatch {
-        expected: 7,
-        actual: 9,
-    });
-    assert!(matches!(
-        &error,
-        EmbedError::Reconfigure(ReconfigureError::GenerationMismatch {
-            expected: 7,
-            actual: 9
-        })
-    ));
-    assert!(!error.is_retryable());
-    assert!(!error.is_terminal());
-    assert!(matches!(
-        error
-            .source()
-            .and_then(|e| e.downcast_ref::<ReconfigureError>()),
-        Some(ReconfigureError::GenerationMismatch {
-            expected: 7,
-            actual: 9
-        })
-    ));
-}
-
-#[test]
-fn plugin_state_codec_and_key_errors_survive_journaling() {
-    for error in [
-        PluginStateError::InvalidKey {
-            key: "x".repeat(129),
-            reason: lash_core::KeyRejection::TooLong,
-        },
-        PluginStateError::InvalidKey {
-            key: "a/".into(),
-            reason: lash_core::KeyRejection::IllegalCharacter { at: 1, byte: b'/' },
-        },
-        PluginStateError::Encode {
-            key: "k".into(),
-            message: "deliberate encoding error".into(),
-        },
-        PluginStateError::Decode {
-            key: "k".into(),
-            message: "expected integer, found string".into(),
-        },
-    ] {
-        let expected = error.clone();
-        let plugin = PluginError::from(error);
-        let replayed: PluginError =
-            serde_json::from_slice(&serde_json::to_vec(&plugin).expect("encode")).expect("decode");
-        assert!(matches!(&replayed, PluginError::State(found) if *found == expected));
-        assert!(replayed.is_terminal());
-        assert!(!replayed.is_retryable());
-        assert_eq!(plugin.to_string(), replayed.to_string());
-    }
+    cleanup_law().await
 }

@@ -68,8 +68,6 @@ mod runtime {
         pub(crate) use tokio_util::sync::CancellationToken;
 
         mod assembler;
-        mod core_contracts;
-        mod kernel_door;
         mod language_runtime_value;
         mod projection;
         mod replay_origin;

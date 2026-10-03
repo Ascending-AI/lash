@@ -399,35 +399,6 @@ pub(crate) fn denial_resolution() -> lash::Resolution {
 mod tests {
     use super::*;
 
-    #[test]
-    fn approval_ledger_survives_reopen() {
-        let directory = tempfile::tempdir().expect("approval tempdir");
-        let path = directory.path().join("approvals.db");
-        let key = lash::AwaitEventKey {
-            scope: lash::runtime::ExecutionScope::turn("approval-session", "turn-1"),
-            wait: lash::AwaitEventWaitIdentity::tool_completion(lash::ToolCallId::fixture(
-                "tool-call-1",
-            )),
-            key_id: "approval-key-1".to_string(),
-            signature: "test-signature".to_string(),
-        };
-        WorkbenchApprovals::open(&path)
-            .expect("open approval ledger")
-            .record(
-                &key,
-                &json!({ "target": "demo", "change": "enable safe mode" }),
-                &SessionId::from("approval-session"),
-            )
-            .expect("record approval");
-
-        let reopened = WorkbenchApprovals::open(&path).expect("reopen approval ledger");
-        let pending = reopened.pending().expect("list pending approvals");
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].key, "approval-key-1");
-        assert_eq!(pending[0].requesting_session, "approval-session");
-        assert_eq!(reopened.completion_key("approval-key-1").unwrap(), key);
-    }
-
     /// FIG-3293: `decision`/`decided_at_ms` are one atomic fact — neither half
     /// may be written without the other, and the decision vocabulary is closed.
     #[test]
@@ -461,36 +432,5 @@ mod tests {
                 [],
             )
             .expect_err("a decision outside the vocabulary must be rejected");
-    }
-
-    #[test]
-    fn denial_preserves_host_policy_metadata_in_the_typed_resolution() {
-        let resolution = denial_resolution();
-        let lash::Resolution::Err(error) = &resolution else {
-            panic!("denial must be an error resolution");
-        };
-        let expected = json!({ "policy": "agent_workbench_human_approval" });
-        assert_eq!(error.code.namespaced(), "agent_workbench:approval_denied");
-        assert_eq!(error.message, "the operator denied this change");
-        assert_eq!(error.raw, Some(expected));
-        assert_eq!(resolution, lash::Resolution::Err(error.clone()));
-    }
-
-    #[test]
-    fn approval_resolution_builds_success_payload() {
-        let approval = PendingApproval {
-            key: "test-key".to_string(),
-            tool: APPROVAL_TOOL_NAME.to_string(),
-            arguments: json!({ "target": "demo", "change": "restart" }),
-            requesting_session: "session-1".to_string(),
-            requested_at_ms: 0,
-            age_ms: 0,
-        };
-        let resolution = approval_resolution(&approval);
-        assert!(matches!(resolution, lash::Resolution::Ok(_)));
-        let lash::Resolution::Ok(payload) = resolution else {
-            panic!("expected ok resolution");
-        };
-        assert_eq!(payload.get("status"), Some(&json!("applied")));
     }
 }

@@ -211,18 +211,6 @@ impl LayeredBackend {
         self
     }
 
-    /// Replace the artifact-cleanup ledger with `layer` over it. This port
-    /// has cleanup verbs beyond the ordinary obligation ledger.
-    pub fn map_artifact_cleanup(
-        mut self,
-        layer: impl FnOnce(
-            Arc<dyn crate::store::ArtifactCleanupLedger>,
-        ) -> Arc<dyn crate::store::ArtifactCleanupLedger>,
-    ) -> Self {
-        self.artifact_cleanup = layer(self.artifact_cleanup);
-        self
-    }
-
     /// The decorated backend, as the handle a host config takes.
     pub fn into_backend(self) -> Backend {
         let inner_stores = self.inner.stores();

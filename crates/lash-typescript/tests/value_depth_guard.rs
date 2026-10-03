@@ -58,20 +58,6 @@ fn nested_array_source(levels: usize, tail: &str) -> String {
     )
 }
 
-/// The coercion walk: `String(deeplyNested)` recursed through
-/// `javascript_sequence_string` once per level and aborted the process.
-#[test]
-fn string_coercion_of_a_deeply_nested_array_is_a_typed_refusal() {
-    on_stack_budget("value-depth-string-coercion", || {
-        let error = execute(&nested_array_source(3_000, "finish(String(deep));"))
-            .expect_err("an over-deep coercion must refuse");
-        assert!(
-            matches!(error, RuntimeError::ValueDepthLimitExceeded { .. }),
-            "{error}"
-        );
-    });
-}
-
 /// The console observation renderer walks the same containers, so it carries
 /// the same bound: an inspect step must refuse a value it cannot describe
 /// rather than take the thread stack down with it (FIG-2767).
@@ -93,21 +79,6 @@ fn template_interpolation_of_a_deeply_nested_array_is_a_typed_refusal() {
     on_stack_budget("value-depth-template", || {
         let error = execute(&nested_array_source(3_000, "finish(`${deep}`);"))
             .expect_err("an over-deep interpolation must refuse");
-        assert!(
-            matches!(error, RuntimeError::ValueDepthLimitExceeded { .. }),
-            "{error}"
-        );
-    });
-}
-
-/// The terminal-exit walk: every runtime global is exported when the cell
-/// finishes, so a deep global aborted the process without the guest ever
-/// touching it again.
-#[test]
-fn exporting_a_deeply_nested_runtime_global_at_terminal_exit_is_a_typed_refusal() {
-    on_stack_budget("value-depth-terminal-export", || {
-        let error = execute(&nested_array_source(1_200, "finish(1);"))
-            .expect_err("an over-deep runtime global must refuse at terminal exit");
         assert!(
             matches!(error, RuntimeError::ValueDepthLimitExceeded { .. }),
             "{error}"

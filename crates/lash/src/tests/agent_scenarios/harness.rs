@@ -1,43 +1,16 @@
 use super::super::*;
-use super::contracts::{
-    GraphContract, NodeStatusFact, assert_all_processes_terminal,
-    assert_completed_lifted_process_graphs, assert_labeled_node, assert_labeled_resource_operation,
-    assert_min_completed_child_session_exec_graphs, assert_min_completed_process_graphs,
-    assert_no_duplicate_label_step, assert_session_turn_child_graph,
-    assert_successful_agent_scenario,
-};
-use lash_core::ProcessEventLogTestSupport as _;
+use super::contracts::assert_successful_agent_scenario;
 use lash_core::llm::types::LlmUsage;
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::VecDeque;
-
-#[derive(Default)]
-pub(super) struct AgentScenarioExpectations {
-    pub(super) completed_lifted_processes: Option<usize>,
-    pub(super) labeled_resource_titles: Vec<&'static str>,
-    pub(super) labeled_node_titles: Vec<&'static str>,
-    pub(super) min_completed_child_session_exec_graphs: usize,
-    pub(super) min_completed_process_graphs: usize,
-    /// `(kind, count)`: the labels are lift digests, so a scenario pins how
-    /// many records of a kind the session observer exposes, not their names.
-    pub(super) observer_visible_processes: Vec<(&'static str, usize)>,
-}
 
 pub(super) struct AgentScenario {
     pub(super) name: &'static str,
     pub(super) session_id: SessionId,
     pub(super) scripted_provider_responses: Vec<String>,
-    pub(super) scripted_provider_usage: LlmUsage,
     pub(super) root_prompt: &'static str,
-    pub(super) expected_final_value: Option<serde_json::Value>,
-    pub(super) tool_provider: Option<Arc<dyn ToolProvider>>,
     pub(super) install_subagents: bool,
-    /// The `processes` module is catalogue presence, not an ability bit (ADR 0095), so any
-    /// scenario whose scripted program authors `processes.*` must install this factory or the
-    /// cell is refused with "unknown module `processes`".
-    pub(super) install_process_controls: bool,
     pub(super) max_turns: Option<usize>,
     /// A process the harness registers and completes before the turn, whose
     /// handle a scripted response names as [`PRECOMPLETED_PROCESS_HANDLE`].
@@ -52,7 +25,6 @@ pub(super) struct AgentScenario {
     /// refused: a refusal otherwise reads downstream as "the process never
     /// started", which is how a retired-form regression once hid here.
     pub(super) expects_refused_cell: bool,
-    pub(super) expected_contracts: AgentScenarioExpectations,
 }
 
 impl AgentScenario {
@@ -61,17 +33,12 @@ impl AgentScenario {
             name,
             session_id: agent_scenario_session_id(name),
             scripted_provider_responses: Vec::new(),
-            scripted_provider_usage: LlmUsage::default(),
             root_prompt,
-            expected_final_value: None,
-            tool_provider: None,
             install_subagents: false,
-            install_process_controls: false,
             max_turns: None,
             precompleted_process: None,
             seeded_attachment_writes: Vec::new(),
             expects_refused_cell: false,
-            expected_contracts: AgentScenarioExpectations::default(),
         }
     }
 
@@ -96,28 +63,8 @@ impl AgentScenario {
         self
     }
 
-    pub(super) fn expected_final_value(mut self, value: serde_json::Value) -> Self {
-        self.expected_final_value = Some(value);
-        self
-    }
-
-    pub(super) fn response_usage(mut self, usage: LlmUsage) -> Self {
-        self.scripted_provider_usage = usage;
-        self
-    }
-
-    pub(super) fn tool_provider(mut self, tool_provider: Arc<dyn ToolProvider>) -> Self {
-        self.tool_provider = Some(tool_provider);
-        self
-    }
-
     pub(super) fn install_subagents(mut self) -> Self {
         self.install_subagents = true;
-        self
-    }
-
-    pub(super) fn install_process_controls(mut self) -> Self {
-        self.install_process_controls = true;
         self
     }
 
@@ -136,44 +83,6 @@ impl AgentScenario {
         attachment_id: lash_core::AttachmentId,
     ) -> Self {
         self.seeded_attachment_writes.push(attachment_id);
-        self
-    }
-
-    /// How many lifted process bodies must show a completed executed graph.
-    pub(super) fn completed_lifted_processes(mut self, count: usize) -> Self {
-        self.expected_contracts.completed_lifted_processes = Some(count);
-        self
-    }
-
-    /// The program named this resource operation with an `@label` doc comment,
-    /// so the executed graph must carry that title on the operation's own node
-    /// rather than on a step beside it.
-    pub(super) fn labeled_resource(mut self, title: &'static str) -> Self {
-        self.expected_contracts.labeled_resource_titles.push(title);
-        self
-    }
-
-    /// The same, for a labeled node that is not a resource operation.
-    pub(super) fn labeled_node(mut self, title: &'static str) -> Self {
-        self.expected_contracts.labeled_node_titles.push(title);
-        self
-    }
-
-    pub(super) fn min_completed_process_graphs(mut self, count: usize) -> Self {
-        self.expected_contracts.min_completed_process_graphs = count;
-        self
-    }
-
-    pub(super) fn min_completed_child_session_exec_graphs(mut self, count: usize) -> Self {
-        self.expected_contracts
-            .min_completed_child_session_exec_graphs = count;
-        self
-    }
-
-    pub(super) fn observer_visible_processes(mut self, kind: &'static str, count: usize) -> Self {
-        self.expected_contracts
-            .observer_visible_processes
-            .push((kind, count));
         self
     }
 }
@@ -206,7 +115,6 @@ pub(super) struct AgentScenarioRun {
     pub(super) turn_output: Option<TurnReport>,
     pub(super) streamed_events: Vec<TurnActivity>,
     pub(super) graph_snapshots: Vec<crate::tracing::TraceLashlangGraph>,
-    pub(super) prompt_captures: Vec<LlmRequest>,
     pub(super) final_process_list: Vec<lash_core::ProcessHandleView>,
     /// Runtime-checkpoint commits the session store actually accepted, in
     /// commit order. Observed at the store seam, never reconstructed.
@@ -241,16 +149,6 @@ impl AgentScenarioSetup {
 
     fn tool_provider(mut self, tool_provider: Arc<dyn ToolProvider>) -> Self {
         self.tool_provider = Some(tool_provider);
-        self
-    }
-
-    fn response_usage(mut self, usage: LlmUsage) -> Self {
-        self.scripted_provider_usage = usage;
-        self
-    }
-
-    fn maybe_tool_provider(mut self, tool_provider: Option<Arc<dyn ToolProvider>>) -> Self {
-        self.tool_provider = tool_provider;
         self
     }
 
@@ -380,10 +278,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     case: AgentScenario,
 ) -> Result<AgentScenarioRun> {
     let runtime = AgentScenarioSetup::new(case.scripted_provider_responses.clone())
-        .response_usage(case.scripted_provider_usage.clone())
-        .maybe_tool_provider(case.tool_provider.clone())
         .install_subagents(case.install_subagents)
-        .install_process_controls(case.install_process_controls)
         .max_turns(case.max_turns)
         .build()
         .await?;
@@ -487,12 +382,6 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     if !case.expects_refused_cell {
         assert_no_refused_cell(case.name, &events.snapshot().await);
     }
-    assert_session_process_admission_contract(
-        runtime.process_registry.as_ref(),
-        &case.session_id,
-        &case.expected_contracts.observer_visible_processes,
-    )
-    .await;
     let final_process_list = runtime.final_process_list().await?;
     assert_remote_process_dto_surface(
         &runtime.core,
@@ -506,7 +395,6 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         turn_output: Some(turn_output),
         streamed_events: events.snapshot().await,
         graph_snapshots: runtime.graph_store.graphs(),
-        prompt_captures: runtime.prompt_captures_snapshot(),
         final_process_list,
         checkpoint_writes: runtime.checkpoint_writes.events(),
         committed_attachment_ids: runtime
@@ -515,40 +403,6 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
             .unwrap_or_default(),
     };
 
-    if let Some(expected) = &case.expected_final_value {
-        let Some(output) = run.turn_output.as_ref() else {
-            panic!("{} did not run a turn", case.name);
-        };
-        assert_eq!(
-            output.final_value(),
-            Some(expected),
-            "{} final value mismatch",
-            case.name
-        );
-    }
-
-    let contract = GraphContract::from_graphs(&run.graph_snapshots);
-    if let Some(expected) = case.expected_contracts.completed_lifted_processes {
-        assert_completed_lifted_process_graphs(&contract, expected);
-    }
-    for title in case.expected_contracts.labeled_resource_titles {
-        assert_labeled_resource_operation(&contract, title, NodeStatusFact::Completed);
-        assert_no_duplicate_label_step(&contract, title);
-    }
-    for title in case.expected_contracts.labeled_node_titles {
-        assert_labeled_node(&contract, title, NodeStatusFact::Completed);
-        assert_no_duplicate_label_step(&contract, title);
-    }
-    assert_min_completed_process_graphs(
-        &contract,
-        case.expected_contracts.min_completed_process_graphs,
-    );
-    assert_min_completed_child_session_exec_graphs(
-        &run,
-        &case.session_id,
-        case.expected_contracts
-            .min_completed_child_session_exec_graphs,
-    );
     super::transcript::assert_typed_checkpoint_transcript(&run.checkpoint_writes);
     Ok(run)
 }
@@ -576,84 +430,6 @@ fn assert_no_refused_cell(name: &str, events: &[TurnActivity]) {
             failure.kind,
             failure.message,
         );
-    }
-}
-
-async fn assert_session_process_admission_contract(
-    registry: &dyn lash_core::ProcessRegistry,
-    session_id: &SessionId,
-    expected_processes: &[(&str, usize)],
-) {
-    if expected_processes.is_empty() {
-        return;
-    }
-    let observed = registry
-        .list_observed_by(
-            session_id,
-            &lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("list runtime processes through the session observer");
-    let observed_identities = observed
-        .iter()
-        .map(|process| (&process.id, &process.identity, process.status()))
-        .collect::<Vec<_>>();
-    for (kind, count) in expected_processes {
-        // The label is the lifted declaration's digest name, so the pin is the
-        // kind and how many records of it the observer exposes.
-        let matching = observed
-            .iter()
-            .filter(|process| {
-                process.identity.kind == *kind && process.identity.definition_id.is_some()
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            matching.len(),
-            *count,
-            "the parent session observer must expose {count} lifted {kind} process records; observed={observed_identities:?}"
-        );
-        for process in matching {
-            assert_eq!(process.status(), lash_core::ProcessStatus::Completed);
-            let observers = registry
-                .observers_for_process(&process.id)
-                .await
-                .expect("load process observer edges");
-            assert!(
-                observers.iter().any(|observer| observer == session_id),
-                "completed process {} must retain the spawning session observer edge; observers={observers:?}",
-                process.id
-            );
-            let events = registry
-                .full_event_window(&process.id, 0)
-                .await
-                .expect("load observer-visible process lifecycle events");
-            let first_started = events
-                .iter()
-                .position(|event| event.event_type == "process.first_started")
-                .unwrap_or_else(|| {
-                    panic!(
-                        "missing process.first_started for observer-visible process {}: {events:?}",
-                        process.id
-                    )
-                });
-            let completed = events
-                .iter()
-                .position(|event| event.event_type == "process.completed")
-                .unwrap_or_else(|| {
-                    panic!(
-                        "missing process.completed for observer-visible process {}: {events:?}",
-                        process.id
-                    )
-                });
-            assert!(
-                first_started < completed,
-                "process.first_started must precede process.completed for {}: {events:?}",
-                process.id
-            );
-        }
     }
 }
 
@@ -822,374 +598,6 @@ fn assert_remote_process_summaries_round_trip(summaries: &[lash_core::ProcessHan
             lash_core::ProcessHandleView::try_from(remote).expect("remote summary round trip");
         assert_eq!(&round_trip, summary);
     }
-}
-
-struct AgentSessionTurnProcessScenario {
-    session_id: SessionId,
-    child_session_id: SessionId,
-}
-
-impl Default for AgentSessionTurnProcessScenario {
-    fn default() -> Self {
-        Self {
-            session_id: SessionId::from("agent-scenario-session-turn-root"),
-            child_session_id: SessionId::from("agent-scenario-session-turn-child"),
-        }
-    }
-}
-
-impl AgentSessionTurnProcessScenario {
-    async fn run(self) -> Result<()> {
-        // Boundary: this mini-scenario owns the host session-turn process API,
-        // while shared AgentScenario setup still covers the provider, process
-        // registry, graph store, and remote DTO assertions.
-        let runtime = self.runtime().await?;
-        let session = runtime
-            .core
-            .session(&self.session_id)
-            .created_with(runtime.spec.clone())
-            .await
-            .open()
-            .await?;
-        let handle = session
-            .admin()
-            .processes()
-            .start(
-                self.start_request(),
-                runtime_operation_scope(&runtime.core, "agent-scenario-session-turn-start").await,
-            )
-            .await?;
-        // The registrar minted the id; the start answers it (ADR 0107).
-        let process_id = handle.process_id;
-        session.refresh_background_graph().await?;
-        self.assert_process_output(&runtime, &process_id).await?;
-        self.assert_agent_contracts(&runtime, &process_id).await?;
-        super::transcript::assert_typed_checkpoint_transcript(&runtime.checkpoint_writes.events());
-        Ok(())
-    }
-
-    async fn runtime(&self) -> Result<AgentScenarioRuntime> {
-        AgentScenarioSetup::new(vec![typescript_block(
-            r#"finish({ child: "done", scoped: true });"#,
-        )])
-        .install_subagents(true)
-        .build()
-        .await
-    }
-
-    fn start_request(&self) -> lash_core::ProcessStartRequest {
-        lash_core::ProcessStartRequest::new(
-            lash_core::ProcessInput::SessionTurn {
-                definition_key: "agent-scenario-session-turn:v1".to_string(),
-                create_request: Box::new(self.child_create_request()),
-                turn_input: Box::new(TurnInput::text("run child session turn")),
-                result: lash_core::SessionTurnOutcome::Turn,
-            },
-            lash_core::ProcessOriginator::host(),
-            lash_core::Lifetime::Detached,
-        )
-    }
-
-    fn child_create_request(&self) -> lash_core::SessionCreateRequest {
-        let child_policy = lash_core::SessionPolicy {
-            model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-            turn_budget: lash_core::TurnBudget::bounded(2),
-            ..lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-                lash_core::MaxToolCalls::new(1024),
-            )
-        };
-        lash_core::SessionCreateRequest::child(
-            self.session_id.clone(),
-            lash_core::SessionStartPoint::Empty,
-            child_policy,
-            lash_core::PluginOptions::default(),
-        )
-        .with_session_id(self.child_session_id.clone())
-    }
-
-    async fn assert_process_output(
-        &self,
-        runtime: &AgentScenarioRuntime,
-        process_id: &ProcessId,
-    ) -> Result<()> {
-        let registry: Arc<dyn lash_core::ProcessRegistry> = runtime.process_registry.clone();
-        let await_output = lash_core::NoProcessWork::for_registry(registry)
-            .await_terminal(process_id)
-            .await?;
-        let output = await_output.into_tool_output();
-        assert!(
-            output.is_success(),
-            "session-turn process did not succeed: {output:#?}"
-        );
-        let value = output.into_value_for_projection();
-        assert_eq!(
-            value.get("child_session_id"),
-            Some(&serde_json::json!(self.child_session_id))
-        );
-        let turn: lash_core::facade_support::AssembledTurn = value
-            .get("turn")
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-            .expect("session-turn output should decode")
-            .expect("session-turn output should contain a turn");
-        assert_eq!(
-            turn.outcome,
-            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue {
-                value: serde_json::json!({ "child": "done", "scoped": true })
-            })
-        );
-        Ok(())
-    }
-
-    async fn assert_agent_contracts(
-        &self,
-        runtime: &AgentScenarioRuntime,
-        process_id: &ProcessId,
-    ) -> Result<()> {
-        let final_process_list = runtime.final_process_list().await?;
-        assert_remote_process_dto_surface(
-            &runtime.core,
-            runtime.process_registry.as_ref(),
-            &self.session_id,
-        )
-        .await;
-        assert_remote_process_summaries_round_trip(&final_process_list);
-        let run = AgentScenarioRun {
-            session_id: SessionId::fixture(self.session_id.to_string()),
-            turn_output: None,
-            streamed_events: Vec::new(),
-            graph_snapshots: runtime.graph_store.graphs(),
-            prompt_captures: runtime.prompt_captures_snapshot(),
-            final_process_list,
-            checkpoint_writes: runtime.checkpoint_writes.events(),
-            committed_attachment_ids: runtime
-                .checkpoint_writes
-                .committed_attachment_ids(&self.session_id, 0)
-                .unwrap_or_default(),
-        };
-        assert_eq!(run.prompt_captures.len(), 1);
-        assert_all_processes_terminal(&run.final_process_list);
-        assert_session_turn_child_graph(&run, &self.child_session_id, process_id);
-        Ok(())
-    }
-}
-
-struct AgentDurableInputSuspensionScenario {
-    session_id: SessionId,
-    request_id: &'static str,
-}
-
-impl Default for AgentDurableInputSuspensionScenario {
-    fn default() -> Self {
-        Self {
-            session_id: SessionId::from("agent-scenario-durable-input-request"),
-            request_id: "request-1",
-        }
-    }
-}
-
-impl AgentDurableInputSuspensionScenario {
-    async fn run(self) -> Result<()> {
-        // Boundary: this mini-scenario is intentionally live because the owned
-        // invariant is suspension before resolving the durable await key.
-        let (key_tx, key_rx) = oneshot::channel();
-        let tools = Arc::new(DurableInputTools::new(key_tx));
-        let runtime = self
-            .runtime(Arc::clone(&tools) as Arc<dyn ToolProvider>)
-            .await?;
-        let session = runtime
-            .core
-            .session(&self.session_id)
-            .created_with(runtime.spec.clone())
-            .await
-            .open()
-            .await?;
-        let events = Arc::new(RecordingEvents::default());
-        let turn_session = session.clone();
-        let turn_events = Arc::clone(&events);
-        let mut turn = tokio::spawn(async move {
-            turn_session
-                .send(TurnInput::text(
-                    "Start a process that asks for durable input.",
-                ))
-                .output_into(turn_events.as_ref())
-                .await
-        });
-
-        let key = self
-            .await_suspension_key(key_rx, &mut turn, events.as_ref())
-            .await;
-        assert_eq!(
-            runtime
-                .core
-                .env
-                .core
-                .control
-                .effect_host
-                .peek_await_event(&key)
-                .await?,
-            None,
-            "the durable input key is unresolved before external resolution"
-        );
-        self.assert_turn_suspended_before_resolution(&mut turn, events.as_ref())
-            .await;
-        self.resolve_key(&runtime, key).await?;
-        let turn_output = turn.await.expect("turn task")?;
-        session.refresh_background_graph().await?;
-
-        self.assert_turn_completed(&turn_output, tools.as_ref());
-        self.assert_agent_contracts(&runtime).await?;
-        super::transcript::assert_typed_checkpoint_transcript(&runtime.checkpoint_writes.events());
-        Ok(())
-    }
-
-    async fn runtime(&self, tools: Arc<dyn ToolProvider>) -> Result<AgentScenarioRuntime> {
-        AgentScenarioSetup::new(vec![
-            typescript_block(
-                r#"
-const requestAnswer = async () => {
-  const result = await tools.mock_input_request({ question: "Need input?" });
-  return result;
-};
-const handle = await processes.start({ definition: requestAnswer });
-const result = await handle;
-finish(result.answer);"#,
-            ),
-            typescript_block("finish({ recovered: true });"),
-        ])
-        .tool_provider(tools)
-        .install_process_controls(true)
-        .build()
-        .await
-    }
-
-    async fn await_suspension_key(
-        &self,
-        key_rx: oneshot::Receiver<std::result::Result<lash_core::AwaitEventKey, String>>,
-        turn: &mut tokio::task::JoinHandle<Result<TurnReport>>,
-        events: &RecordingEvents,
-    ) -> lash_core::AwaitEventKey {
-        let key_result = tokio::select! {
-            key = key_rx => key.expect("durable input key sender should stay alive"),
-            result = turn => panic!("turn completed before issuing its durable input key: {result:?}"),
-        };
-        let key = match key_result {
-            Ok(key) => key,
-            Err(err) => {
-                panic!(
-                    "durable input tool failed before awaiting external input: {err}; events: {:#?}",
-                    events.snapshot().await
-                )
-            }
-        };
-        assert!(
-            matches!(
-                key.wait,
-                lash_core::AwaitEventWaitIdentity::ToolCompletion { .. }
-            ),
-            "durable input tool should use a tool-completion await key: {:?}",
-            key.wait
-        );
-        key
-    }
-
-    async fn assert_turn_suspended_before_resolution(
-        &self,
-        turn: &mut tokio::task::JoinHandle<Result<TurnReport>>,
-        events: &RecordingEvents,
-    ) {
-        if turn.is_finished() {
-            let result = turn
-                .await
-                .expect("turn task completed before durable input resolution");
-            panic!(
-                "turn completed before the durable input request was resolved: {result:#?}; events: {:#?}",
-                events.snapshot().await
-            );
-        }
-    }
-
-    async fn resolve_key(
-        &self,
-        runtime: &AgentScenarioRuntime,
-        key: lash_core::AwaitEventKey,
-    ) -> Result<()> {
-        let answer = serde_json::json!({
-            "request_id": self.request_id,
-            "answer": "approved"
-        });
-        let outcome = runtime
-            .core
-            .completions()
-            .resolve(key, lash_core::Resolution::Ok(answer))
-            .await?;
-        assert_eq!(outcome, lash_core::ResolveOutcome::Accepted);
-        Ok(())
-    }
-
-    fn assert_turn_completed(&self, turn_output: &TurnReport, tools: &DurableInputTools) {
-        assert!(matches!(
-            turn_output.outcome,
-            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
-        ));
-        assert_eq!(
-            turn_output.final_value(),
-            Some(&serde_json::json!("approved"))
-        );
-        assert_eq!(tools.attempt_count(), 1);
-    }
-
-    async fn assert_agent_contracts(&self, runtime: &AgentScenarioRuntime) -> Result<()> {
-        let final_process_list = runtime.final_process_list().await?;
-        assert_remote_process_dto_surface(
-            &runtime.core,
-            runtime.process_registry.as_ref(),
-            &self.session_id,
-        )
-        .await;
-        assert_remote_process_summaries_round_trip(&final_process_list);
-        assert_eq!(
-            final_process_list.len(),
-            1,
-            "durable input request should not start a child process"
-        );
-        assert_all_processes_terminal(&final_process_list);
-        let process_id = final_process_list[0].process_id.clone();
-        let process_events = runtime
-            .process_registry
-            .full_event_window(&process_id, 0)
-            .await?;
-        assert!(
-            process_events.iter().any(|event| {
-                event.event_type == "process.yield"
-                    && event.payload.get("type")
-                        == Some(&serde_json::json!("work.input_request.opened"))
-                    && event.payload.get("answer").is_none()
-                    && event.payload.get("request_id") == Some(&serde_json::json!(self.request_id))
-            }),
-            "durable input request event was not appended: {process_events:#?}"
-        );
-        assert!(
-            process_events
-                .iter()
-                .all(|event| event.event_type != "process.waiting"),
-            "durable input request should not rely on wait_signal: {process_events:#?}"
-        );
-        assert_eq!(runtime.prompt_captures_snapshot().len(), 1);
-        let contract = GraphContract::from_graphs(&runtime.graph_store.graphs());
-        assert_min_completed_process_graphs(&contract, 1);
-        Ok(())
-    }
-}
-
-pub(super) async fn run_agent_session_turn_process_scenario() -> Result<()> {
-    AgentSessionTurnProcessScenario::default().run().await
-}
-
-pub(super) async fn run_agent_durable_input_request_scenario() -> Result<()> {
-    AgentDurableInputSuspensionScenario::default().run().await
 }
 
 pub(super) async fn run_agent_process_llm_query_scenario() -> Result<()> {

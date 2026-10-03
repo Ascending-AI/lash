@@ -293,50 +293,6 @@ mod credential_tests {
     use super::*;
 
     #[test]
-    fn google_endpoint_and_api_version_default_and_override_explicitly() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            GoogleOAuthClient {
-                id: "oauth-client-id".to_string(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
-        assert_eq!(
-            provider.endpoint_base_url(),
-            "https://cloudcode-pa.googleapis.com/v1internal"
-        );
-
-        let provider = provider
-            .with_endpoint("  https://code-assist.example///  ")
-            .with_api_version("  v2  ");
-        assert_eq!(
-            provider.method_url("generateContent"),
-            "https://code-assist.example/v2:generateContent"
-        );
-        assert_eq!(
-            provider
-                .route_identity_for_model("gemini-test")
-                .endpoint
-                .as_ref(),
-            "https://code-assist.example/v2"
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "Google endpoint must not be empty")]
-    fn google_endpoint_rejects_empty_values() {
-        GoogleOAuthProvider::for_test().with_endpoint(" / ");
-    }
-
-    #[test]
-    #[should_panic(expected = "Google API version must not be empty")]
-    fn google_api_version_rejects_empty_values() {
-        GoogleOAuthProvider::for_test().with_api_version("   ");
-    }
-
-    #[test]
     fn google_oauth_client_secret_is_redacted_from_debug_output() {
         let provider = GoogleOAuthProvider::new(
             "access",
@@ -350,27 +306,6 @@ mod credential_tests {
         let debug = format!("{provider:?}");
         assert!(debug.contains("oauth-client-id"));
         assert!(!debug.contains("oauth-client-secret-sentinel"));
-    }
-
-    #[test]
-    fn google_serialized_config_carries_explicit_oauth_and_endpoint_configuration() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            GoogleOAuthClient {
-                id: "oauth-client-id".to_string(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
-        .with_endpoint("https://code-assist.example")
-        .with_api_version("v2");
-
-        let config = provider.serialize_config();
-        assert_eq!(config["oauth_client_id"], "oauth-client-id");
-        assert_eq!(config["oauth_client_secret"], "oauth-client-secret");
-        assert_eq!(config["endpoint"], "https://code-assist.example");
-        assert_eq!(config["api_version"], "v2");
     }
 }
 

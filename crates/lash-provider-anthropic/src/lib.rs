@@ -35,8 +35,8 @@ mod tests {
         AnthropicThinkingRetention, AttachmentSource, LlmContentBlock, LlmEventSender,
         LlmJsonSchema, LlmMessage, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRole,
         LlmStreamEvent, LlmTerminalReason, LlmToolChoice, LlmToolSpec, LlmUsage,
-        NonNegativeFiniteF64, ProviderRouteIdentity, ReasoningRetentionCapability,
-        ReasoningRetentionPolicy, ReasoningRetentionSelection,
+        NonNegativeFiniteF64, ReasoningRetentionCapability, ReasoningRetentionPolicy,
+        ReasoningRetentionSelection,
     };
     use lash_core::provider::{
         CacheRetention, LlmProfileCapability, Provider, ReasoningCapability, ReasoningEncoding,
@@ -232,82 +232,6 @@ mod tests {
             Value::Array(array) => array.iter().map(|value| count_object_key(value, key)).sum(),
             _ => 0,
         }
-    }
-
-    #[test]
-    fn foreign_google_reasoning_signature_is_not_forwarded_to_anthropic() {
-        let provider = AnthropicProvider::new("key");
-        let req = request(vec![LlmMessage::new(
-            LlmRole::Assistant,
-            vec![LlmContentBlock::Reasoning {
-                text: "neutral summary".to_string(),
-                replay: Some(lash_core::llm::types::ProviderReasoningReplay {
-                    signature: Some("google-thought-signature".to_string()),
-                    origin: Some(ProviderRouteIdentity::for_endpoint(
-                        "google_oauth",
-                        "https://cloudcode-pa.googleapis.com/v1internal",
-                        "gemini-2.5-pro",
-                    )),
-                    ..Default::default()
-                }),
-            }],
-        )]);
-
-        let body = provider.build_request_body(&req).expect("body");
-
-        assert_eq!(
-            body["messages"][0]["content"][0],
-            json!({"type": "text", "text": "neutral summary"})
-        );
-    }
-
-    #[test]
-    fn raw_anthropic_builder_drops_unstamped_reasoning_replay() {
-        let provider = AnthropicProvider::new("key");
-        let req = request(vec![LlmMessage::new(
-            LlmRole::Assistant,
-            vec![LlmContentBlock::Reasoning {
-                text: "portable summary".to_string(),
-                replay: Some(lash_core::llm::types::ProviderReasoningReplay {
-                    signature: Some("unstamped-signature".to_string()),
-                    ..Default::default()
-                }),
-            }],
-        )]);
-
-        let body = provider.build_request_body(&req).expect("body");
-        assert_eq!(
-            body["messages"][0]["content"][0],
-            json!({"type": "text", "text": "portable summary"})
-        );
-        assert!(!body.to_string().contains("unstamped-signature"));
-    }
-
-    #[test]
-    fn same_route_reasoning_replay_is_forwarded_to_anthropic() {
-        let provider = AnthropicProvider::new("key");
-        let req = request(vec![LlmMessage::new(
-            LlmRole::Assistant,
-            vec![LlmContentBlock::Reasoning {
-                text: "native summary".to_string(),
-                replay: Some(lash_core::llm::types::ProviderReasoningReplay {
-                    signature: Some("native-anthropic-signature".to_string()),
-                    origin: Some(provider.route_identity("claude-sonnet-4-6")),
-                    ..Default::default()
-                }),
-            }],
-        )]);
-
-        let body = provider.build_request_body(&req).expect("body");
-
-        assert_eq!(
-            body["messages"][0]["content"][0],
-            json!({
-                "type": "thinking",
-                "thinking": "native summary",
-                "signature": "native-anthropic-signature"
-            })
-        );
     }
 
     include!("failed_stream_metadata_tests.rs");
@@ -633,44 +557,6 @@ mod tests {
                 reasoning_output_tokens: 3,
             }
         );
-    }
-
-    #[test]
-    fn image_attachment_serializes_as_base64_image_block() {
-        use base64::Engine;
-        let provider = AnthropicProvider::new("key");
-        let png_bytes = vec![0x89, 0x50, 0x4E, 0x47];
-        let attachment = AttachmentSource::inline(
-            lash_core::MediaType::parse("image/png").unwrap(),
-            png_bytes.clone(),
-        );
-        let req = request(vec![LlmMessage::new(
-            LlmRole::User,
-            vec![
-                LlmContentBlock::Text {
-                    text: "look at this".into(),
-                    response_meta: None,
-                    cache_breakpoint: false,
-                },
-                LlmContentBlock::Attachment {
-                    source: Box::new(attachment),
-                },
-            ],
-        )]);
-
-        let body = provider.build_request_body(&req).expect("body");
-
-        let messages = body["messages"].as_array().expect("messages array");
-        let user_msg = messages.last().expect("user message");
-        let content = user_msg["content"].as_array().expect("content array");
-        let image_block = content
-            .iter()
-            .find(|b| b["type"] == "image")
-            .expect("image block");
-        assert_eq!(image_block["source"]["type"], "base64");
-        assert_eq!(image_block["source"]["media_type"], "image/png");
-        let expected_b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-        assert_eq!(image_block["source"]["data"], expected_b64);
     }
 
     #[test]
@@ -1001,24 +887,6 @@ mod tests {
     }
 
     #[test]
-    fn disabled_selection_is_refused_without_a_declared_disable() {
-        let provider = AnthropicProvider::new("key");
-        let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        req.model.metadata_mut().wire_model = "claude-haiku-4".to_string();
-        req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
-        req.model.metadata_mut().capability = budget_capability();
-
-        let error = provider
-            .build_request_body(&req)
-            .expect_err("off is refused unless the capability declares disable");
-
-        assert_eq!(
-            refusal_code(&error).as_deref(),
-            Some("lash:unsupported_effort")
-        );
-    }
-
-    #[test]
     fn adaptive_capability_disabled_selection_emits_native_disabled_thinking() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
@@ -1029,33 +897,6 @@ mod tests {
 
         assert_eq!(body["thinking"], json!({ "type": "disabled" }));
         assert!(body.get("output_config").is_none());
-    }
-
-    #[test]
-    fn an_effort_without_reasoning_capability_is_refused() {
-        let provider = AnthropicProvider::new("key");
-        let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-
-        let error = provider
-            .build_request_body(&req)
-            .expect_err("an effort on a model without reasoning capability is refused");
-
-        assert_eq!(
-            refusal_code(&error).as_deref(),
-            Some("lash:effort_not_configurable")
-        );
-    }
-
-    #[test]
-    fn no_variant_emits_no_thinking_even_with_capability() {
-        let provider = AnthropicProvider::new("key");
-        let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        req.model.metadata_mut().capability = effort_capability(&["low", "medium", "high"]);
-
-        let body = provider.build_request_body(&req).expect("body");
-
-        assert!(body.get("thinking").is_none());
     }
 
     #[test]

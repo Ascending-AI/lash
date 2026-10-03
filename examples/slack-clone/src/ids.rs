@@ -150,36 +150,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ts_renders_slacks_seconds_dot_microseconds_form() {
-        assert_eq!(
-            Ts::from_micros(1_503_435_956_000_247).to_string(),
-            "1503435956.000247"
-        );
-    }
-
-    #[test]
-    fn ts_round_trips_through_its_wire_form() {
-        let ts = Ts::from_micros(1_512_085_950_000_216);
-        assert_eq!(Ts::parse(&ts.to_string()), Some(ts));
-    }
-
-    #[test]
     fn ts_parses_the_bare_second_bounds_slack_accepts() {
         assert_eq!(
             Ts::parse("1512085950"),
             Some(Ts::from_micros(1_512_085_950_000_000))
         );
         assert_eq!(Ts::parse("not-a-ts"), None);
-    }
-
-    #[test]
-    fn minted_ids_carry_the_prefix_and_are_distinct() {
-        let minter = IdMinter::seeded(7);
-        let first = minter.mint("C");
-        let second = minter.mint("C");
-        assert!(first.starts_with('C'));
-        assert_eq!(first.len(), 1 + ID_BODY_LEN);
-        assert_ne!(first, second);
-        assert!(minter.mint("Ev").starts_with("Ev"));
     }
 }

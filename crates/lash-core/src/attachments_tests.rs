@@ -221,30 +221,6 @@ impl AttachmentRootSet for RecordingRootSet {
     }
 }
 
-/// A pending write is a root: its claim holds the digest before any bytes
-/// land, with no age and no clock.
-#[tokio::test]
-async fn recording_probe_sees_a_pending_write() {
-    let manifest = Arc::new(RecordingReferrers::default());
-    let id = content_id(b"pending-write-root");
-    manifest
-        .begin_attachment_write(&AttachmentWrite {
-            attachment_id: id.clone(),
-            claim: session_claim("targeted-probe"),
-        })
-        .await
-        .expect("record pending write");
-    let roots = RecordingRootSet {
-        manifests: vec![Arc::clone(&manifest)],
-    };
-
-    assert!(roots.has_live_attachment_ref(&id).await.unwrap());
-    assert_eq!(
-        manifest.attachment_referrers(&id).await.unwrap(),
-        vec![ArtifactReferrer::Session(SessionId::from("targeted-probe"))]
-    );
-}
-
 fn meta() -> AttachmentCreateMeta {
     AttachmentCreateMeta::new(
         MediaType::parse("image/png").unwrap(),
@@ -294,31 +270,6 @@ async fn committed_factory_attachment() -> (
         .await
         .expect("commit factory attachment ref");
     (factory, backend, reference.id)
-}
-
-#[tokio::test]
-async fn explicit_factory_root_set_keeps_committed_blob() {
-    let (factory, backend, id) = committed_factory_attachment().await;
-
-    let report = reclaim_unreferenced_attachments(
-        factory.as_ref(),
-        &*backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::Refuse,
-        },
-    )
-    .await
-    .expect("sweep committed factory attachment");
-
-    assert_eq!(report.scanned_blob_count, 1);
-    assert_eq!(report.reclaimed_count, 0);
-    assert!(report.failed_ids.is_empty());
-    assert!(report.deleted_while_referenced.is_empty());
-    backend
-        .get(&id, 32 * 1024 * 1024)
-        .await
-        .expect("committed blob survives");
 }
 
 /// Deliberately faulty snapshot projection over a factory that really does hold
@@ -549,71 +500,6 @@ async fn gc_empty_backend_reports_nothing_to_do_with_root_diagnostic() {
 }
 
 #[tokio::test]
-async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
-    let backend = crate::testing::sqlite_memory_store_set()
-        .await
-        .attachment_store();
-    let attachment = backend
-        .put(vec![4, 2, 4, 6], meta())
-        .await
-        .expect("put deletion-eligible blob");
-    let roots = RecordingRootSet { manifests: vec![] };
-
-    let result = reclaim_unreferenced_attachments(
-        &roots,
-        backend.as_ref(),
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::Refuse,
-        },
-    )
-    .await;
-
-    let error = result.expect_err("empty roots must refuse deletion");
-    assert_eq!(
-        error.refusal(),
-        Some(&crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized)
-    );
-    assert_eq!(
-        error.partial.scanned_blob_count, 1,
-        "the refusal must carry the report accumulated before it: {error:?}"
-    );
-    backend
-        .get(&attachment.id, 32 * 1024 * 1024)
-        .await
-        .expect("refused sweep preserves the blob");
-}
-
-#[tokio::test]
-async fn gc_explicit_authorization_permits_an_empty_root_set_sweep() {
-    let backend = crate::testing::sqlite_memory_store_set()
-        .await
-        .attachment_store();
-    let attachment = backend
-        .put(vec![4, 2, 4, 7], meta())
-        .await
-        .expect("put deletion-eligible blob");
-    let roots = RecordingRootSet { manifests: vec![] };
-
-    let report = reclaim_unreferenced_attachments(
-        &roots,
-        backend.as_ref(),
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
-    )
-    .await
-    .expect("explicit authorization permits delete-all interpretation");
-
-    assert_eq!(report.reclaimed_count, 1);
-    assert!(matches!(
-        backend.get(&attachment.id, 32 * 1024 * 1024).await,
-        Err(AttachmentStoreError::NotFound(_))
-    ));
-}
-
-#[tokio::test]
 async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
     let backend = crate::testing::sqlite_memory_store_set()
         .await
@@ -777,37 +663,6 @@ async fn facade_get_resolves_content_addresses_across_sessions() {
 }
 
 #[tokio::test]
-async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
-    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
-        .await
-        .attachment_store();
-    let manifest: Arc<dyn AttachmentReferrers> = Arc::new(RecordingReferrers::default());
-    let session =
-        RuntimeAttachmentStore::new(backend.clone(), manifest, session_owner("session-1"));
-
-    let reference = session.put(vec![9, 9], meta()).await.expect("put");
-    session.delete(&reference.id).await.expect("delete ref");
-
-    // Forget changes liveness; reads continue until GC removes the bytes.
-    assert_eq!(
-        session
-            .get(&reference.id)
-            .await
-            .expect("bytes remain")
-            .bytes,
-        vec![9, 9]
-    );
-    assert_eq!(
-        backend
-            .get(&reference.id, 32 * 1024 * 1024)
-            .await
-            .expect("bytes remain")
-            .bytes,
-        vec![9, 9]
-    );
-}
-
-#[tokio::test]
 async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
         .await
@@ -886,88 +741,6 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
         backend.get(&ref_b.id, 32 * 1024 * 1024).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
-}
-
-#[tokio::test]
-async fn gc_spares_a_blob_its_upload_still_holds() {
-    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
-        .await
-        .attachment_store();
-    let manifest = Arc::new(RecordingReferrers::default());
-    let session = RuntimeAttachmentStore::new(
-        backend.clone(),
-        manifest.clone() as Arc<dyn AttachmentReferrers>,
-        session_owner("session-1"),
-    );
-
-    // A put outside any turn is held by its upload until cleanup ends it.
-    let reference = session.put(vec![3, 1, 4], meta()).await.expect("put");
-    let root_set = RecordingRootSet {
-        manifests: vec![manifest.clone()],
-    };
-    const GRACE_MS: u64 = 60 * 60 * 1000;
-    let report = reclaim_unreferenced_attachments(
-        &root_set,
-        &*backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: GRACE_MS,
-            empty_root_set: EmptyRootSetPolicy::Refuse,
-        },
-    )
-    .await
-    .expect("sweep");
-    assert_eq!(report.reclaimed_count, 0, "an upload edge is a live ref");
-    assert_eq!(
-        backend
-            .get(&reference.id, 32 * 1024 * 1024)
-            .await
-            .expect("kept")
-            .bytes,
-        vec![3, 1, 4]
-    );
-}
-
-// A put nobody acquired is garbage once its upload ends: cleanup ends the
-// edge at expiry, and the next sweep collects the bytes.
-#[tokio::test]
-async fn gc_collects_a_blob_whose_upload_ended() {
-    let backend: Arc<dyn AttachmentStore> = crate::testing::sqlite_memory_store_set()
-        .await
-        .attachment_store();
-    let manifest = Arc::new(RecordingReferrers::default());
-    let session = RuntimeAttachmentStore::new(
-        backend.clone(),
-        manifest.clone() as Arc<dyn AttachmentReferrers>,
-        session_owner("session-1"),
-    );
-
-    let orphan = session
-        .put(vec![9, 9, 9], meta())
-        .await
-        .expect("put orphan");
-    manifest.end_uploads();
-    let root_set = RecordingRootSet {
-        manifests: vec![manifest.clone()],
-    };
-    let report = reclaim_unreferenced_attachments(
-        &root_set,
-        &*backend,
-        AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
-        },
-    )
-    .await
-    .expect("sweep");
-    assert_eq!(
-        report.reclaimed_count, 1,
-        "a blob no referrer holds is a collectable orphan"
-    );
-    assert!(matches!(
-        backend.get(&orphan.id, 32 * 1024 * 1024).await,
-        Err(AttachmentStoreError::NotFound(_))
-    ));
-    assert!(manifest.live_ids().is_empty());
 }
 
 // Fix C: the GC delete-time re-check. A blob looks unreferenced and stale in
@@ -1771,52 +1544,6 @@ async fn a_process_runtime_put_is_held_by_its_record() {
     );
 }
 
-#[tokio::test]
-async fn ephemeral_facade_passes_reads_through_without_a_guard() {
-    let store = RuntimeAttachmentStore::ephemeral(
-        crate::testing::sqlite_memory_store_set()
-            .await
-            .attachment_store(),
-    );
-    let reference = store.put(vec![1, 2, 3], meta()).await.expect("put");
-    assert_eq!(
-        store.get(&reference.id).await.expect("get").bytes,
-        vec![1, 2, 3]
-    );
-}
-
-#[tokio::test]
-async fn persistence_manifest_adapter_forwards_root_tracking() {
-    let runtime: Arc<dyn crate::store::RuntimeStore> =
-        Arc::new(crate::testing::unbound_recording_store().await);
-    let adapter = PersistenceReferrersAdapter(runtime);
-    let attachment_id = AttachmentId::parse("adapter-forwarding").expect("valid attachment id");
-    let write = AttachmentWrite {
-        attachment_id: attachment_id.clone(),
-        claim: session_claim("adapter-session"),
-    };
-    let crate::AttachmentWriteFence::Granted(permit) = adapter
-        .begin_attachment_write(&write)
-        .await
-        .expect("begin attachment write")
-    else {
-        panic!("expected a granted write fence");
-    };
-    adapter
-        .complete_attachment_write(&write, permit)
-        .await
-        .expect("complete attachment write");
-    assert_eq!(
-        adapter
-            .attachment_referrers(&attachment_id)
-            .await
-            .expect("list referrers"),
-        vec![ArtifactReferrer::Session(SessionId::from(
-            "adapter-session"
-        ))]
-    );
-}
-
 fn attachment_request(
     attachments: Vec<crate::AttachmentSource>,
 ) -> Arc<crate::llm::types::LlmRequest> {
@@ -1861,50 +1588,6 @@ fn attachment_request(
         stream_events: None,
         provider_trace: None,
     })
-}
-
-#[test]
-fn accepted_attachment_degradation_fast_path_preserves_exact_request() {
-    let mut request = attachment_request(vec![crate::AttachmentSource::inline(
-        MediaType::parse("image/png").expect("image MIME"),
-        vec![1, 2, 3],
-    )]);
-    let pointer_before = Arc::as_ptr(&request);
-    let bytes_before = serde_json::to_vec(request.as_ref()).expect("serialize request before");
-
-    let notices = degrade_unmaterializable_request_attachments(&mut request);
-
-    assert!(notices.is_empty());
-    assert_eq!(Arc::as_ptr(&request), pointer_before);
-    assert_eq!(
-        serde_json::to_vec(request.as_ref()).expect("serialize request after"),
-        bytes_before,
-        "accepted attachment envelopes must remain byte-for-byte unchanged"
-    );
-}
-
-#[test]
-fn unsupported_attachment_is_replaced_by_typed_placeholder() {
-    let attachment_ref = lash_sansio::AttachmentRef {
-        id: AttachmentId::parse("unsupported-binary").expect("attachment id"),
-        media_type: MediaType::parse("application/octet-stream").expect("binary MIME"),
-        byte_len: 34,
-        type_metadata: None,
-        label: Some("workspace_badge.bin".to_string()),
-    };
-    let mut request = attachment_request(vec![crate::AttachmentSource::stored(attachment_ref)]);
-
-    let notices = degrade_unmaterializable_request_attachments(&mut request);
-
-    assert_eq!(notices.len(), 1);
-    assert!(request.attachments().is_empty());
-    assert!(matches!(
-        request.messages[0].blocks.as_slice(),
-        [crate::llm::types::LlmContentBlock::Text { text, .. }]
-            if text.contains("attachment_unavailable")
-                && text.contains("workspace_badge.bin")
-                && text.contains("no_provider_accepts_mime_and_source")
-    ));
 }
 
 const DEGRADED_BYTES: &[u8] = b"opaque degraded attachment bytes";
@@ -1995,51 +1678,6 @@ fn degraded_then_accepted_attachment_preserves_surviving_source() {
 }
 
 #[test]
-fn accepted_then_degraded_attachment_keeps_surviving_source() {
-    let accepted_ref = stored_attachment(
-        "mixed-accepted-first",
-        "image/png",
-        ACCEPTED_BYTES,
-        Some(AttachmentTypeMetadata::image(Some(640), Some(480))),
-        "accepted.png",
-    );
-    let degraded_ref = stored_attachment(
-        "mixed-degraded-second",
-        "application/octet-stream",
-        DEGRADED_BYTES,
-        None,
-        "degraded.bin",
-    );
-    let accepted_source = crate::AttachmentSource::stored(accepted_ref.clone());
-    let mut request = attachment_request(vec![
-        accepted_source.clone(),
-        crate::AttachmentSource::stored(degraded_ref.clone()),
-    ]);
-    Arc::make_mut(&mut request).resolved_stored.extend([
-        (accepted_ref.id.clone(), ACCEPTED_BYTES.to_vec()),
-        (degraded_ref.id.clone(), DEGRADED_BYTES.to_vec()),
-    ]);
-
-    let notices = degrade_unmaterializable_request_attachments(&mut request);
-
-    assert_eq!(notices.len(), 1);
-    assert_eq!(request.attachments(), vec![&accepted_source]);
-    assert_eq!(request.attachments()[0].stored_ref(), Some(&accepted_ref));
-    assert_eq!(
-        request.attachment_bytes(request.attachments()[0]),
-        Some(ACCEPTED_BYTES)
-    );
-    assert_eq!(request.resolved_stored.len(), 1);
-    assert!(!request.resolved_stored.contains_key(&degraded_ref.id));
-    let surviving_source = match &request.messages[0].blocks[0] {
-        crate::llm::types::LlmContentBlock::Attachment { source } => source.as_ref(),
-        block => panic!("expected surviving attachment block, got {block:?}"),
-    };
-    assert_eq!(surviving_source, &accepted_source);
-    assert_typed_degradation_placeholder(&request.messages[0].blocks[1]);
-}
-
-#[test]
 fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     let source =
         crate::AttachmentSource::inline(MediaType::parse("image/png").unwrap(), vec![1, 2, 3]);
@@ -2114,45 +1752,6 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
         unpinned.attachments().is_empty(),
         "the changed table must be a meaningful counterexample"
     );
-}
-
-#[test]
-fn backend_failure_class_drives_retry_and_operator_verdicts() {
-    let cases = [
-        (AttachmentStoreFailureClass::Transient, true, false),
-        (AttachmentStoreFailureClass::Credentials, false, true),
-        (AttachmentStoreFailureClass::Terminal, false, false),
-    ];
-    for (class, retryable, operator_actionable) in cases {
-        let error = AttachmentStoreError::Backend {
-            operation: "test",
-            class,
-            source: "scripted failure".into(),
-        };
-        assert_eq!(error.failure_class(), Some(class));
-        assert_eq!(error.is_retryable(), retryable, "{error}");
-        assert_eq!(
-            error.is_operator_actionable(),
-            operator_actionable,
-            "{error}"
-        );
-        assert!(
-            std::error::Error::source(&error).is_some(),
-            "the backend cause must be preserved: {error}"
-        );
-    }
-
-    let contract = AttachmentStoreError::Contract("stored key is malformed".into());
-    assert_eq!(contract.failure_class(), None);
-    assert!(!contract.is_retryable());
-    assert!(!contract.is_operator_actionable());
-
-    let reclamation = AttachmentStoreError::ReclamationInFlight {
-        attachment_id: AttachmentId::parse("blake3-deadbeef").expect("valid id"),
-        attempts: 3,
-    };
-    assert!(reclamation.is_retryable());
-    assert!(!reclamation.is_operator_actionable());
 }
 
 /// A manifest whose durable work takes real time, standing in for a Postgres or

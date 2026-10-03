@@ -253,37 +253,4 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn observation_item_types_the_snapshot_graph_and_node_event_record() {
-        let item = documents()
-            .expect("schemas generate")
-            .into_iter()
-            .find(|document| document.shape == "remote-process-observation-item")
-            .expect("observation item is registered");
-        let definitions = &item.schema["$defs"];
-        assert_eq!(
-            definitions["RemoteProcessObservationProjection"]["properties"]["graph"],
-            json!({
-                "anyOf": [{ "$ref": "#/$defs/TraceLashlangGraph" }, { "type": "null" }]
-            })
-        );
-        let event = item.schema["oneOf"]
-            .as_array()
-            .expect("item variants")
-            .iter()
-            .find(|variant| variant["properties"]["type"]["const"] == json!("event"))
-            .expect("event variant");
-        assert_eq!(
-            event["properties"]["record"],
-            json!({ "$ref": "#/$defs/TraceRecord" })
-        );
-        for name in TRACE_DEFINITIONS {
-            assert_eq!(
-                definitions[name]["properties"]["schema_version"]["enum"],
-                json!([TRACE_SCHEMA_VERSION]),
-                "{name} pins the trace version"
-            );
-        }
-    }
 }

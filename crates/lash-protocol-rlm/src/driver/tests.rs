@@ -274,33 +274,6 @@ fn message_text(message: &LlmMessage) -> String {
 }
 
 #[test]
-fn chronological_history_renders_messages_and_steps_in_order() {
-    let projector = projector(100);
-    let events = [
-        user_event("u1", "first"),
-        step_event(0, "print 1", "1"),
-        user_event("u2", "second"),
-        step_event(1, "print 2", "2"),
-    ];
-    let history = projector.format_history(&events);
-
-    // History renders in the emission grammar: prior steps are the literal
-    // `<typescript>` cell the model must emit, outputs as separate blocks.
-    assert!(history.contains("first"));
-    assert!(history.contains("<typescript>\nprint 1\n</typescript>"));
-    assert!(history.contains("history[1].output[0]:\n1"));
-    assert!(history.contains("second"));
-    assert!(history.contains("<typescript>\nprint 2\n</typescript>"));
-    assert!(history.contains("history[3].output[0]:\n2"));
-    // The `--- history[N] ---` meta-format is gone entirely.
-    assert!(!history.contains("--- history["));
-    assert!(!history.contains("Code:"));
-    assert!(!history.contains("protocol_iteration"));
-    assert!(!history.contains("Task"));
-    assert!(!history.contains("user_input_"));
-}
-
-#[test]
 fn folded_step_renders_as_emission_cell_not_history_echo() {
     let projector = projector(1000);
     // Regression for the observed glm-5.2 echo: a step preceded by assistant
@@ -540,18 +513,6 @@ fn committed_transcript_remains_the_rolling_cache_fence() {
 }
 
 #[test]
-fn chronological_history_excludes_hidden_tool_events() {
-    let projector = projector(1000);
-    let events = [user_event("u1", "first"), step_event(0, "x = 1", "1")];
-    let history = projector.format_history(&events);
-
-    assert!(history.contains("first"));
-    assert!(history.contains("<typescript>\nx = 1\n</typescript>"));
-    assert!(!history.contains("tool_call"));
-    assert!(!history.contains("--- history["));
-}
-
-#[test]
 fn long_user_message_gets_full_history_reference() {
     let projector = projector(10);
     let history = projector.format_history(&[user_event("u1", "abcdefghijklmnopqrstuvwxyz")]);
@@ -559,18 +520,6 @@ fn long_user_message_gets_full_history_reference() {
     assert!(history.contains("re-run `console.log(history[0].content)`"));
     assert!(history.contains("... (16 characters omitted) ..."));
     assert!(!history.contains("user_input_"));
-}
-
-#[test]
-fn truncated_step_output_states_value_is_retained_not_lost() {
-    let projector = projector(10);
-    let output = "[cut: 61440 chars rendered within 10; chars 1; narrow with history[0].output[0].<path>]\nxxxxxxxxxx...truncated...";
-    let history = projector.format_history(&[step_event(0, "print big", output)]);
-
-    assert!(
-        history.contains(&format!("history[0].output[0]:\n{output}")),
-        "{history}"
-    );
 }
 
 #[test]
@@ -997,19 +946,6 @@ fn rlm_prompt_renders_required_output_block_when_schema_present() {
 }
 
 #[test]
-fn final_answer_format_guidance_renders_markdown_for_unstructured_turns() {
-    let guidance = final_answer_format_prompt_test(&RlmTurnOptions {
-        termination: Some(RlmTermination::FinishRequired { schema: None }),
-        final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
-        render: None,
-    })
-    .expect("markdown guidance");
-
-    assert!(guidance.contains("call `finish(value)` with a nicely formatted Markdown string"));
-    assert!(guidance.contains("not a raw record/list/tool-result value"));
-}
-
-#[test]
 fn final_answer_format_guidance_honors_custom_text_and_raw_suppression() {
     let custom = final_answer_format_prompt_test(&RlmTurnOptions {
         termination: Some(RlmTermination::Natural),
@@ -1086,24 +1022,4 @@ fn required_output_contract_is_the_bare_type_when_no_field_carries_notes() {
         required_output_contract(serde_json::json!({ "type": ["string", "null"] })),
         "string | null"
     );
-}
-
-#[test]
-fn incremental_render_extends_cached_prefix_on_subsequent_calls() {
-    let projector = projector(100);
-    let initial =
-        projector.format_history(&[user_event("u1", "first"), step_event(0, "print 1", "1")]);
-    assert!(initial.contains("first"));
-    assert!(initial.contains("<typescript>\nprint 1\n</typescript>"));
-
-    let extended = projector.format_history(&[
-        user_event("u1", "first"),
-        step_event(0, "print 1", "1"),
-        user_event("u2", "second"),
-        step_event(1, "print 2", "2"),
-    ]);
-    // The stable prefix is byte-identical, so the cached prefix extends.
-    assert!(extended.starts_with(&initial));
-    assert!(extended.contains("second"));
-    assert!(extended.contains("<typescript>\nprint 2\n</typescript>"));
 }

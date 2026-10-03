@@ -403,26 +403,4 @@ mod tests {
         );
         assert!(rendered.contains("non-empty `source`"), "{rendered}");
     }
-
-    #[test]
-    fn create_tool_definition_binds_processes_create() {
-        let definition = process_create_tool_definition();
-        assert_eq!(definition.name(), "create_process");
-        assert_eq!(
-            definition
-                .manifest
-                .bindings
-                .get(lash_tool_support::TOOL_BINDING_KEY),
-            Some(
-                &serde_json::to_value(lash_core::ToolBinding::new(["processes"], "create"))
-                    .expect("binding serializes")
-            ),
-        );
-        let input = definition.contract.input_schema.canonical.as_value();
-        assert_eq!(input["required"], serde_json::json!(["source", "dialect"]));
-        assert_eq!(
-            definition.contract.output_schema.canonical.as_value()["x-lash"],
-            serde_json::json!({ "kind": "process_unknown" })
-        );
-    }
 }

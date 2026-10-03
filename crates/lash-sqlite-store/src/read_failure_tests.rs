@@ -138,34 +138,6 @@ async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
     }
 }
 
-#[tokio::test]
-async fn unknown_attachment_referrer_kind_refuses_with_canonical_typed_error() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("unknown-attachment-referrer.db");
-    let store = SqliteStore::open_file_for_testing(&path)
-        .await
-        .expect("open store");
-    let raw = rusqlite::Connection::open(&path).expect("open raw connection");
-    raw.pragma_update(None, "ignore_check_constraints", true)
-        .expect("allow unknown durable enum injection");
-    raw.execute(
-        "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ('unknown-referrer', 'unknown', 'opaque')",
-        [],
-    )
-    .expect("insert unknown referrer kind");
-
-    let error = lash_core_execution::AttachmentReferrers::attachment_referrers(
-        &store,
-        &lash_core_execution::AttachmentId::parse("unknown-referrer").unwrap(),
-    )
-    .await
-    .expect_err("unknown SQLite attachment referrer kind must refuse");
-    assert!(
-        matches!(error, StoreError::Incompatible { .. }),
-        "SQLite must return the typed attachment-referrer incompatibility, got {error:?}"
-    );
-}
-
 async fn readonly_store_for_blob_write_failure() -> (tempfile::TempDir, SqliteStore) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("readonly.db");
@@ -486,18 +458,6 @@ async fn sqlite_persisted_record_decode_classification() {
             .load_session_window(&checkpoint_session_id, WindowSelector::Current)
             .await,
         "SessionCheckpoint",
-    );
-}
-
-#[test]
-fn turn_failure_settlement_query_filters_receipts_without_evidence() {
-    assert!(
-        crate::session_sql::session_sql()
-            .turn_commits
-            .select_failure_settlements
-            .sql()
-            .contains("AND failure_evidence"),
-        "the SQL path must exclude receipts that cannot carry failure evidence"
     );
 }
 

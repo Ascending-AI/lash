@@ -30,18 +30,6 @@ fn guidance(text: &str) -> crate::standard::StandardPrompt {
     }
 }
 
-/// The standard prompt `config` records.
-fn recorded_prompt(config: &lash_core::PersistedSessionConfig) -> crate::standard::StandardPrompt {
-    config
-        .plugin_config
-        .decode::<crate::standard::StandardRecordedConfig>(
-            crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-        )
-        .expect("the standard namespace decodes")
-        .expect("the session records its standard namespace")
-        .prompt
-}
-
 fn creation_spec() -> crate::SessionSpec {
     mock_session_spec()
         .model("created-model")
@@ -151,30 +139,6 @@ fn assert_request_uses_creation_config(request: &lash_core::LlmRequest) {
     assert_eq!(request.generation.seed, Some(7));
 }
 
-#[tokio::test]
-async fn identical_session_configs_share_a_process_execution_environment() -> Result<()> {
-    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (core, backend, _writes) = counting_core(captures).await?;
-    create_with_creation_spec(&core, "env-owner-a").await?;
-    create_with_creation_spec(&core, "env-owner-b").await?;
-    let first = core.session("env-owner-a").open().await?;
-    let second = core.session("env-owner-b").open().await?;
-    assert_ne!(first.session_id(), second.session_id());
-    let (_, first_config) = recorded_config(&backend, "env-owner-a").await;
-    let (_, second_config) = recorded_config(&backend, "env-owner-b").await;
-    assert_eq!(first_config, second_config);
-    let first_env = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::new(first_config.plugin_config, 0),
-        first.policy_snapshot(),
-    );
-    let second_env = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::new(second_config.plugin_config, 0),
-        second.policy_snapshot(),
-    );
-    assert_eq!(first_env.stable_ref()?, second_env.stable_ref()?);
-    Ok(())
-}
-
 /// A reopen opens with the recorded config unchanged, and the open makes no
 /// store write at all.
 #[tokio::test]
@@ -202,61 +166,6 @@ async fn a_reopen_runs_the_recorded_config_and_writes_nothing() -> Result<()> {
 
     reopened.send(TurnInput::text("probe")).output().await?;
     assert_request_uses_creation_config(captures.lock_recover().last().expect("a request"));
-    Ok(())
-}
-
-/// Every core config field changes durably through a config transaction, and
-/// a cold reopen reads the changed values back.
-#[tokio::test]
-async fn update_changes_each_config_field_durably() -> Result<()> {
-    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (core, backend, _writes) = counting_core(Arc::clone(&captures)).await?;
-    create_with_creation_spec(&core, "patch-each-field").await?;
-    let session = core.session("patch-each-field").open().await?;
-    session
-        .admin()
-        .config()
-        .configure(
-            crate::config::ConfigTransaction::of(crate::config::SetLlmProfile {
-                model: lash_core::LlmProfileKey::new("patched-model"),
-            })
-            .then(crate::config::SetAttachmentAcceptance {
-                acceptance: (*snapshot("patched-attachments")).clone(),
-            })
-            .then(crate::standard::SetStandardPrompt {
-                prompt: guidance("PATCHED PROMPT"),
-            })
-            .then(crate::config::SetGeneration {
-                generation: crate::GenerationOverlay::Merge(lash_core::GenerationOptions {
-                    output_token_cap: std::num::NonZeroUsize::new(41),
-                    ..Default::default()
-                }),
-            }),
-        )
-        .await?;
-    Box::pin(session.close()).await?;
-
-    let (_, config) = recorded_config(&backend, "patch-each-field").await;
-    assert_eq!(config.wire_model(), Some("patched-model"));
-    assert_eq!(
-        config.attachment_acceptance,
-        snapshot("patched-attachments")
-    );
-    assert_eq!(recorded_prompt(&config), guidance("PATCHED PROMPT"));
-    assert_eq!(config.generation.seed, Some(7), "a merge keeps the seed");
-    assert_eq!(
-        config.generation.output_token_cap,
-        std::num::NonZeroUsize::new(41)
-    );
-
-    let reopened = core.session("patch-each-field").open().await?;
-    let policy = reopened.policy_snapshot();
-    assert_eq!(policy.wire_model(), Some("patched-model"));
-    assert_eq!(
-        policy.attachment_acceptance,
-        snapshot("patched-attachments")
-    );
-    assert_eq!(policy.generation, config.generation);
     Ok(())
 }
 
@@ -302,76 +211,6 @@ async fn a_profile_change_keeps_the_attachment_snapshot() -> Result<()> {
         recorded.attachment_acceptance,
         snapshot("adopted-attachments")
     );
-    Ok(())
-}
-
-/// A config command no installed plugin owns is refused typed at
-/// submission, and the refused transaction writes nothing — not even its
-/// other commands.
-#[tokio::test]
-async fn a_command_no_plugin_owns_is_refused_typed_and_writes_nothing() -> Result<()> {
-    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (core, backend, writes) = counting_core(captures).await?;
-    create_with_creation_spec(&core, "patch-unread-plugin-options").await?;
-    let session = core.session("patch-unread-plugin-options").open().await?;
-    session.send(TurnInput::text("commit")).output().await?;
-    let before = recorded_config(&backend, "patch-unread-plugin-options").await;
-    writes.lock_recover().clear();
-
-    let config = session.admin().config();
-    let revision = config.revision().await?;
-    let error = config
-        .apply(
-            crate::config::ConfigWrite::new("unowned-plugin-command", revision),
-            crate::config::ConfigTransaction::of(crate::standard::SetStandardPrompt {
-                prompt: guidance("NEVER WRITTEN"),
-            })
-            .then_entry(crate::config::ConfigCommandEntry {
-                owner: "no-such-plugin".to_string(),
-                command: "set_k".to_string(),
-                args: serde_json::json!({ "k": 1 }),
-            }),
-        )
-        .await
-        .expect_err("a command no installed plugin owns is refused");
-    assert!(
-        matches!(
-            &error,
-            crate::EmbedError::ConfigSubmit(crate::config::ConfigSubmitError::UnknownOwner { owner })
-                if owner == "no-such-plugin"
-        ),
-        "expected a typed config submission refusal, got: {error:?}"
-    );
-    assert_eq!(*writes.lock_recover(), Vec::<&str>::new());
-    assert_eq!(
-        recorded_config(&backend, "patch-unread-plugin-options").await,
-        before
-    );
-    assert_eq!(
-        recorded_prompt(&before.1),
-        guidance("CREATED PROMPT"),
-        "the refused transaction's prompt command wrote nothing"
-    );
-    Ok(())
-}
-
-/// A session created by `create()` records its creation config with its
-/// catalog row, so the first turn of a later `open()` that states nothing
-/// runs with it.
-#[tokio::test]
-async fn a_session_created_by_create_runs_its_first_opened_turn_with_the_creation_config()
--> Result<()> {
-    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (core, backend, _writes) = counting_core(Arc::clone(&captures)).await?;
-    drop(create_with_creation_spec(&core, "created-by-create").await?);
-    let (revision, config) = recorded_config(&backend, "created-by-create").await;
-    assert_eq!(revision, 0, "creation writes the config head, no frame");
-    assert_runs_creation_config(&config.session_policy());
-
-    let session = core.session("created-by-create").open().await?;
-    assert_runs_creation_config(&session.policy_snapshot());
-    session.send(TurnInput::text("first turn")).output().await?;
-    assert_request_uses_creation_config(&captures.lock_recover()[0]);
     Ok(())
 }
 

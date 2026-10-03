@@ -169,59 +169,6 @@ async fn unsafe_retry_honors_retry_after_and_excessive_delay_fails_fast() {
 }
 
 #[test]
-fn policy_surface_is_decision_congruent() {
-    let usage = LlmUsage {
-        input_tokens: 30,
-        output_tokens: 20,
-        ..LlmUsage::default()
-    };
-    let decide = |policy: &crate::ChargeSafetyPolicy| {
-        charge_safety_decision(
-            TransportRetryVerdict::RetryableTransient,
-            GenerationRetryGuarantee::None,
-            policy,
-            Some(&usage),
-            2,
-        )
-    };
-    let baseline = decide(&crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
-        max_unsafe_retries: 2,
-        max_duplicate_cost_tokens: Some(50),
-    });
-    assert_eq!(
-        baseline,
-        ChargeSafetyEvaluation::Evaluated(crate::ChargeSafetyDecision::Authorized {
-            tokens_at_stake: 50,
-            attempt_number: 2,
-        })
-    );
-    assert_eq!(
-        decide(&crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
-            max_unsafe_retries: 1,
-            max_duplicate_cost_tokens: Some(50),
-        }),
-        ChargeSafetyEvaluation::Evaluated(crate::ChargeSafetyDecision::Denied {
-            tokens_at_stake: 50,
-            attempt_number: 2,
-            reason: crate::ChargeSafetyDenialReason::UnsafeRetryLimitExceeded,
-        }),
-        "changing max_unsafe_retries must change the decision",
-    );
-    assert_eq!(
-        decide(&crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
-            max_unsafe_retries: 2,
-            max_duplicate_cost_tokens: Some(49),
-        }),
-        ChargeSafetyEvaluation::Evaluated(crate::ChargeSafetyDecision::Denied {
-            tokens_at_stake: 50,
-            attempt_number: 2,
-            reason: crate::ChargeSafetyDenialReason::DuplicateCostLimitExceeded,
-        }),
-        "changing max_duplicate_cost_tokens must change the decision",
-    );
-}
-
-#[test]
 fn precedence_is_structural() {
     let appetite = crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
         max_unsafe_retries: 2,

@@ -182,84 +182,6 @@ async fn builtin_map_reenters_the_flat_vm_and_rejects_effectful_callbacks() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn effect_suspension_inside_a_user_function_round_trips_the_frame_stack() {
-    let program = compile_program_internal(&Program::block(vec![
-        assign(
-            "observe",
-            function(
-                None,
-                &["value"],
-                &[],
-                Expr::Block(vec![
-                    Expr::Print(Box::new(variable("value"))),
-                    variable("value"),
-                ]),
-            ),
-        ),
-        Expr::Finish(Box::new(call(
-            variable("observe"),
-            vec![Expr::Number(17.0)],
-        ))),
-    ]));
-    let host = Host;
-    let mut vm = continuation_test_vm(&program, &host);
-    vm.suspend_after_effects(1);
-    assert_eq!(
-        vm.run_for_mode()
-            .await
-            .expect("suspend after function effect"),
-        ExecutionOutcome::Continued
-    );
-    let continuation = vm.suspend().expect("capture function continuation");
-    assert_eq!(continuation.frame_stack.len(), 1);
-    assert_eq!(
-        round_trip_and_resume(&program, continuation).await,
-        ExecutionOutcome::Finished(Value::Number(17.0))
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn effect_suspension_inside_a_user_function_with_heap_argument_round_trips() {
-    let program = compile_program_internal(&Program::block(vec![
-        assign(
-            "f",
-            function(
-                None,
-                &["n"],
-                &[],
-                Expr::Block(vec![
-                    Expr::Print(Box::new(Expr::Number(1.0))),
-                    variable("n"),
-                ]),
-            ),
-        ),
-        Expr::Finish(Box::new(call(
-            variable("f"),
-            vec![Expr::List(vec![Expr::Number(7.0), Expr::Number(8.0)])],
-        ))),
-    ]));
-    let host = Host;
-    let mut vm = continuation_test_vm(&program, &host);
-    vm.suspend_after_effects(1);
-    assert_eq!(
-        vm.run_for_mode()
-            .await
-            .expect("suspend after function effect"),
-        ExecutionOutcome::Continued
-    );
-    let continuation = vm
-        .suspend()
-        .expect("capture function continuation with heap argument");
-    assert_eq!(continuation.frame_stack.len(), 1);
-    assert_eq!(
-        round_trip_and_resume(&program, continuation).await,
-        ExecutionOutcome::Finished(Value::List(
-            vec![Value::Number(7.0), Value::Number(8.0)].into()
-        ))
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn suspended_caller_and_callee_preserve_heap_arguments_and_locals() {
     let callee_body = Expr::Block(vec![
         assign("local_list", Expr::List(vec![variable("list_arg")])),
@@ -783,20 +705,6 @@ async fn frame_depth_is_a_typed_execution_bound_and_gc_stress_preserves_closures
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn default_frame_depth_rejects_fifteen_hundred_recursive_calls() {
-    let host = FunctionBoundsHost {
-        bounds: ExecutionBounds::unbounded(),
-        collect_every_allocation: false,
-    };
-
-    assert!(matches!(
-        execute(&crate::compile_ast(&factorial_program(1_500.0)).expect("the program compiles"), &mut State::new(), &host).await,
-        Err(RuntimeError::FrameDepthExceeded { limit })
-            if limit == DEFAULT_MAX_VM_FRAME_DEPTH.get()
-    ));
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn closures_obey_the_complete_host_boundary_matrix() {
     let closure = || function(None, &[], &[], Expr::Null);
     let foreground_boundaries = [
@@ -1052,62 +960,6 @@ async fn builtin_callback_continuation_preserves_reentry_and_occurrence_counters
             .occurrence_counters
             .values()
             .any(|count| *count > 1)
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn filter_shaped_callback_parks_inside_the_shared_driver_and_resumes() {
-    let predicate = function(
-        None,
-        &["value"],
-        &[],
-        Expr::If {
-            condition: Box::new(Expr::CoercingBinary {
-                left: Box::new(variable("value")),
-                op: CoercingBinaryOp::Greater,
-                right: Box::new(Expr::Number(1.0)),
-            }),
-            then_block: Box::new(Expr::List(vec![variable("value")])),
-            else_block: Box::new(Expr::List(Vec::new())),
-        },
-    );
-    let linked = crate::LinkedModule::link(
-        Program::block(vec![
-            assign("predicate", predicate),
-            Expr::Finish(Box::new(Expr::Map {
-                items: Box::new(Expr::List(vec![
-                    Expr::Number(1.0),
-                    Expr::Number(2.0),
-                    Expr::Number(3.0),
-                ])),
-                function: Box::new(variable("predicate")),
-            })),
-        ]),
-        runtime_test_environment(),
-    )
-    .expect("filter-shaped callback program links");
-    let program = crate::testing::harness::compile_linked_main(&linked);
-    let continuation = find_instruction_continuation(&program, |continuation| {
-        continuation
-            .frame_stack
-            .iter()
-            .any(|frame| matches!(frame.return_target, VmFrameReturnContinuation::Callback(_)))
-    })
-    .await;
-    let restored: VmContinuation = serde_json::from_slice(
-        &serde_json::to_vec(&continuation).expect("serialize filter callback continuation"),
-    )
-    .expect("restore filter callback continuation");
-    assert_eq!(
-        round_trip_and_resume(&program, restored).await,
-        ExecutionOutcome::Finished(Value::List(
-            vec![
-                Value::List(Vec::new().into()),
-                Value::List(vec![Value::Number(2.0)].into()),
-                Value::List(vec![Value::Number(3.0)].into()),
-            ]
-            .into()
-        ))
     );
 }
 

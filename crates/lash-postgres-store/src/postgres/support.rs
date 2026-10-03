@@ -252,33 +252,6 @@ fn encode_msgpack<T: serde::Serialize>(
     Ok(buf)
 }
 
-/// The test-only exact-version decode: production reads route through
-/// [`lash_core_execution::store::decode_versioned_msgpack_record_for_fleet`].
-#[cfg(test)]
-pub(crate) fn decode_versioned_msgpack_record<T>(
-    bytes: &[u8],
-    record_kind: &'static str,
-    expected: u32,
-) -> Result<T, StoreError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    let value: serde_json::Value =
-        rmp_serde::from_slice(bytes).map_err(|err| StoreError::StoredDataCorrupt {
-            record_kind,
-            message: format!("failed to decode {record_kind}: {err}"),
-        })?;
-    lash_core_execution::store::ensure_supported_record_schema_version(
-        record_kind,
-        &value,
-        expected,
-    )?;
-    rmp_serde::from_slice(bytes).map_err(|err| StoreError::StoredDataCorrupt {
-        record_kind,
-        message: format!("failed to decode {record_kind}: {err}"),
-    })
-}
-
 async fn put_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blobs: &std::collections::BTreeMap<String, std::sync::Arc<[u8]>>,

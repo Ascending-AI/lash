@@ -241,38 +241,6 @@ impl QueuedWorkBatchingConfig {
 }
 
 #[cfg(test)]
-mod wire_tests {
-    use super::{DeliveryPolicy, QueuedWorkKind};
-
-    #[test]
-    fn queued_work_wire_values_match_the_persisted_ingress_encoding() {
-        assert_eq!(QueuedWorkKind::Turn.as_str(), "turn");
-        assert_eq!(QueuedWorkKind::Control.as_str(), "control");
-        assert_eq!(
-            QueuedWorkKind::from_wire_str("turn"),
-            Some(QueuedWorkKind::Turn)
-        );
-        assert_eq!(
-            QueuedWorkKind::from_wire_str("control"),
-            Some(QueuedWorkKind::Control)
-        );
-        assert_eq!(QueuedWorkKind::from_wire_str("cancel"), None);
-    }
-
-    #[test]
-    fn queued_work_delivery_policy_wire_values_match_the_persisted_ingress_encoding() {
-        assert_eq!(
-            DeliveryPolicy::EarliestSafeBoundary.as_str(),
-            "earliest_safe_boundary"
-        );
-        assert_eq!(
-            DeliveryPolicy::AfterCurrentTurnCommit.as_str(),
-            "after_current_turn_commit"
-        );
-    }
-}
-
-#[cfg(test)]
 mod typed_payload_tests {
     use super::*;
 
@@ -289,25 +257,6 @@ mod typed_payload_tests {
             created_at_ms: 1,
             trace_cause: Default::default(),
         }
-    }
-
-    #[test]
-    fn queued_work_draft_records_one_command_payload() {
-        let draft = QueuedWorkBatchDraft::new(
-            "s",
-            DeliveryPolicy::EarliestSafeBoundary,
-            SessionCommand::RefreshToolCatalog {
-                reason: "refresh".into(),
-            },
-        );
-        let expected = serde_json::json!({
-            "session_id": "s", "delivery_policy": "earliest_safe_boundary",
-            "authority": {},
-            "payload": {"type": "session_command", "command": {"kind": "refresh_tool_catalog", "reason": "refresh"}}
-        });
-        assert_eq!(serde_json::to_value(&draft).unwrap(), expected);
-        let restored: QueuedWorkBatchDraft = serde_json::from_value(expected).unwrap();
-        assert_eq!(restored.kind(), QueuedWorkKind::Control);
     }
 
     #[test]

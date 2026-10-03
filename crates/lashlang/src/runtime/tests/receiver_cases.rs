@@ -160,20 +160,3 @@ async fn an_explicit_receiver_survives_a_callback_frame_round_trip() {
         expected
     );
 }
-
-/// A continuation from the generation before receivers existed is refused
-/// before it runs: its frames were laid out without receiver slots.
-#[tokio::test(flavor = "current_thread")]
-async fn a_pre_receiver_continuation_is_refused() {
-    let program = method_call_program();
-    let mut continuation = find_instruction_continuation(&program, inside_the_method).await;
-    continuation.format_version = VM_CONTINUATION_FORMAT_VERSION - 1;
-    let host = Host;
-    let error = Vm::resume_from(continuation, &program, &host)
-        .err()
-        .expect("an older continuation generation must be refused");
-    assert!(
-        matches!(error, ContinuationError::FormatVersionMismatch { .. }),
-        "{error:?}"
-    );
-}

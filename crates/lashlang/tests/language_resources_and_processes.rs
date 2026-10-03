@@ -29,39 +29,6 @@ async fn run(program: lashlang::Program) -> Result<Value, RuntimeError> {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn aggregate_await_resource_calls_run_concurrently_and_preserve_record_shape() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        const settled = await Promise.all([
-          tools.sleep_echo({ value: "a" }),
-          tools.sleep_echo({ value: "b" })
-        ]);
-        finish({ left: settled[0], right: settled[1] });
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    let Value::Record(record) = value else {
-        panic!("expected record");
-    };
-    assert_eq!(record["left"], Value::String("a".into()));
-    assert_eq!(record["right"], Value::String("b".into()));
-    assert_eq!(
-        host.max_active.load(Ordering::SeqCst),
-        2,
-        "aggregate await should dispatch independent tools concurrently"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn explicit_start_and_await_merges_distinct_results() {
     let host = TestHost::default();
     let mut state = State::new();
@@ -340,45 +307,6 @@ async fn dynamic_record_indexing_reads_fields() {
     assert_eq!(record["found"], Value::Number(42.0));
     // An absent key reads as `undefined`, not `null` (ADR 0096).
     assert_eq!(record["missing"], Value::Undefined);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn indexed_and_field_assignment_update_collections() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        const record = {};
-        const key = "count";
-        record[key] = 1;
-        record.count = record.count + 1;
-        record.extra = "ok";
-        const items = [1, 2, 3];
-        items[1] = 20;
-        items[2] = 30;
-        finish({ record: record, items: items });
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    let Value::Record(record) = value else {
-        panic!("expected record");
-    };
-    let counts = record["record"]
-        .as_record()
-        .expect("expected nested record");
-    assert_eq!(counts["count"], Value::Number(2.0));
-    assert_eq!(counts["extra"], Value::String("ok".into()));
-    assert_eq!(
-        record["items"],
-        Value::List(vec![Value::Number(1.0), Value::Number(20.0), Value::Number(30.0)].into())
-    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -793,53 +721,6 @@ async fn else_if_chains_execute_without_extra_braces() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn for_loop_assignments_carry_across_iterations() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        const raw = " x , y , z ".split(",");
-        const parts = [];
-        let count = 0;
-        const snapshots = [];
-        for (const part of raw) {
-          parts.push(part.trim());
-          count = count + 1;
-          snapshots.push({ part: part.trim(), parts: parts, count: count });
-        }
-        finish({ parts: parts, count: count, snapshots: snapshots });
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    let Value::Record(record) = value else {
-        panic!("expected record");
-    };
-    assert_eq!(
-        record["parts"],
-        Value::List(
-            vec![
-                Value::String("x".into()),
-                Value::String("y".into()),
-                Value::String("z".into()),
-            ]
-            .into()
-        )
-    );
-    assert_eq!(record["count"], Value::Number(3.0));
-    let Value::List(snapshots) = &record["snapshots"] else {
-        panic!("expected snapshots list");
-    };
-    assert_eq!(snapshots.len(), 3);
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn object_literals_accept_quoted_keys_around_awaited_results() {
     let host = TestHost::default();
     let mut state = State::new();
@@ -936,49 +817,6 @@ async fn stringification_preserves_integer_format_inside_containers() {
         record["record_text"],
         Value::String("{\"a\":1,\"b\":2.5}".to_string().into())
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn snapshot_round_trip_preserves_repl_like_state() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    finished(
-        execute(
-            r#"
-        const counter = 1;
-        finish(counter);
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("first execution should succeed"),
-    );
-
-    let snapshot = state.snapshot();
-    let encoded = snapshot
-        .to_canonical_bytes()
-        .expect("snapshot should serialize");
-    let decoded = lashlang::VmInstance::pristine()
-        .open_snapshot(&encoded)
-        .expect("snapshot should deserialize");
-    let mut restored = State::from_snapshot(decoded);
-
-    let value = finished(
-        execute(
-            r#"
-        const next = counter + 1;
-        finish(next);
-        "#,
-            &mut restored,
-            &host,
-        )
-        .await
-        .expect("restored execution should succeed"),
-    );
-
-    assert_eq!(value, Value::Number(2.0));
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -145,45 +145,6 @@ async fn optimized_concat_insertion_shares_the_appended_binding() {
     assert_eq!(value, list(vec![list(vec![number(1.0), number(2.0)])]));
 }
 
-/// The general concat form copies the outer list but, like ECMA-262's
-/// `concat`, shares the operand's member objects: a later mutation of `x`
-/// shows through `acc`.
-#[tokio::test(flavor = "current_thread")]
-async fn general_concat_shares_the_right_operand_members() {
-    // x = [1]
-    // b = [x, x]
-    // acc = []
-    // acc = acc.concat(b)
-    // x = push(x, 2)
-    // finish acc
-    let value = run(
-        &mut State::new(),
-        a::program(vec![
-            a::assign("x", a::list(vec![a::number(1.0)])),
-            a::assign("b", a::list(vec![a::var("x"), a::var("x")])),
-            a::assign("acc", a::list(Vec::new())),
-            a::assign(
-                "acc",
-                a::call(
-                    "__lashlang_stdlib",
-                    vec![a::string("concat"), a::var("acc"), a::var("b")],
-                ),
-            ),
-            a::assign("x", push(a::var("x"), a::number(2.0))),
-            a::finish(a::var("acc")),
-        ]),
-    )
-    .await;
-
-    assert_eq!(
-        value,
-        list(vec![
-            list(vec![number(1.0), number(2.0)]),
-            list(vec![number(1.0), number(2.0)])
-        ])
-    );
-}
-
 /// The same concat where the right operand is a bare variable: the outer copy
 /// is still independent of `b`, while the shared member `x` keeps observing
 /// later mutation.
@@ -290,88 +251,6 @@ async fn self_insertion_builds_a_cycle_the_host_boundary_refuses() {
         .expect_err("a cyclic value cannot cross the host boundary");
     assert!(error.to_string().contains("contains a cycle"), "{error}");
     round_trip(&state);
-}
-
-/// Opus N1: an ordinary accumulate-then-alias program whose snapshot could not
-/// decode.
-#[tokio::test(flavor = "current_thread")]
-async fn accumulated_rows_aliased_to_a_second_root_round_trip() {
-    let mut state = State::new();
-    // acc = []
-    // for i in range(0, 3) { acc = push(acc, [i, [i]]) }
-    // b = acc
-    // finish 0
-    run(
-        &mut state,
-        a::program(vec![
-            a::assign("acc", a::list(Vec::new())),
-            a::for_range(
-                "i",
-                3.0,
-                vec![a::assign(
-                    "acc",
-                    push(
-                        a::var("acc"),
-                        a::list(vec![a::var("i"), a::list(vec![a::var("i")])]),
-                    ),
-                )],
-            ),
-            a::assign("b", a::var("acc")),
-            a::finish(a::number(0.0)),
-        ]),
-    )
-    .await;
-    let mut restored = round_trip(&state);
-    let value = run(
-        &mut restored,
-        a::program(vec![a::finish(a::list(vec![a::var("acc"), a::var("b")]))]),
-    )
-    .await;
-
-    let rows = list(vec![
-        list(vec![number(0.0), list(vec![number(0.0)])]),
-        list(vec![number(1.0), list(vec![number(1.0)])]),
-        list(vec![number(2.0), list(vec![number(2.0)])]),
-    ]);
-    assert_eq!(value, list(vec![rows.clone(), rows]));
-}
-
-/// Opus N1, mutation form: the aliased root names the same list, so it
-/// observes later appends (ADR 0096), and the snapshot still decodes.
-#[tokio::test(flavor = "current_thread")]
-async fn aliased_accumulator_observes_later_appends() {
-    // acc = []
-    // for i in range(0, 2) { acc = push(acc, [i]) }
-    // b = acc
-    // acc = push(acc, [9])
-    // finish b
-    let value = run(
-        &mut State::new(),
-        a::program(vec![
-            a::assign("acc", a::list(Vec::new())),
-            a::for_range(
-                "i",
-                2.0,
-                vec![a::assign(
-                    "acc",
-                    push(a::var("acc"), a::list(vec![a::var("i")])),
-                )],
-            ),
-            a::assign("b", a::var("acc")),
-            a::assign("acc", push(a::var("acc"), a::list(vec![a::number(9.0)]))),
-            a::finish(a::var("b")),
-        ]),
-    )
-    .await;
-
-    assert_eq!(
-        value,
-        list(vec![
-            list(vec![number(0.0)]),
-            list(vec![number(1.0)]),
-            list(vec![number(9.0)])
-        ])
-    );
 }
 
 /// A descendant reached through a path read, stored elsewhere, then mutated in

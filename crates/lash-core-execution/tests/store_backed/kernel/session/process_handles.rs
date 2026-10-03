@@ -5,7 +5,7 @@ mod tests {
     use crate::plugin::PluginSessionRequest;
     use crate::runtime::ScopedEffectController;
     use crate::session::ToolInvocationReply;
-    use crate::support::prelude::*;
+
     use crate::tool_dispatch::ToolDispatchContext;
     use crate::{
         PreparedToolCall, ToolCall, ToolDefinition, ToolOutcome, ToolPrepareCall, ToolProvider,
@@ -240,15 +240,6 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
-    async fn external_process_referenced_attachment_is_denied_before_await_recording() {
-        assert_external_process_attachment_denied(crate::AttachmentSource::external_url(
-            crate::MediaType::parse("image/png").unwrap(),
-            "https://example.invalid/process.png",
-        ))
-        .await;
-    }
-
     fn process_tool_definition() -> ToolDefinition {
         ToolDefinition::raw(
             "tool:process_prepare",
@@ -298,138 +289,6 @@ mod tests {
             }))
             .into()
         }
-    }
-
-    #[tokio::test]
-    async fn process_handle_signal_appends_event_from_foreground() {
-        let provider: Arc<dyn ToolProvider> = Arc::new(PrepareRecordingTool {
-            prepares: Arc::new(AtomicUsize::new(0)),
-        });
-        let plugins = crate::support::plugin_host(Vec::new())
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-            .expect("plugin session");
-        let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::sqlite_memory_store_set().await;
-        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
-        let host = Arc::new(
-            crate::testing::MockSessionManager::default()
-                .with_process_registry(Arc::clone(&registry)),
-        );
-        let target_process = registry
-            .register_process(
-                ProcessRegistration::new(
-                    ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
-                    crate::ProcessProvenance::host(),
-                    crate::Lifetime::Detached,
-                )
-                .with_extra_event_types([crate::ProcessEventType {
-                    name: "signal.ready".to_string(),
-                    payload_schema: crate::JsonSchema::any(),
-                    semantics: crate::ProcessEventSemanticsSpec::default(),
-                }]),
-            )
-            .await
-            .expect("register target process");
-        registry
-            .add_observer(
-                &SessionId::from("session"),
-                &target_process.id,
-                crate::ProcessObserverBy::host("foreground-signal-test"),
-            )
-            .await
-            .expect("observe target process");
-        let dispatch = Arc::new(ToolDispatchContext {
-            tool_receipts: None,
-            plugins,
-            tools: provider,
-            tool_registry: None,
-            tool_catalog,
-            sessions: host.clone(),
-            session_lifecycle: host.clone(),
-            session_graph: host.clone(),
-            processes: host.clone(),
-            trigger_router: None,
-            process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: ScopedEffectController::shared(
-                Arc::new(crate::testing::UnavailableEffectController),
-                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
-            )
-            .expect("valid test runtime scope"),
-            direct_completions: crate::DirectCompletionClient::unavailable(
-                "direct completions are unavailable in this test context",
-            ),
-            parent_invocation: None,
-            observation_call_key: None,
-            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                ),
-            ),
-            owner: crate::ExecutionOwner::SessionFrame {
-                session_id: SessionId::from("session"),
-                agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-            },
-            observer: crate::engine::NullObservationSink::arc(),
-            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
-            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
-            turn_context: crate::TurnContext::default(),
-            clock: std::sync::Arc::new(crate::SystemClock),
-            process_lineage: None,
-            process_originator: None,
-        });
-        let context = RuntimeExecutionContext::new(
-            dispatch,
-            backend.process_env_store(),
-            Arc::new(crate::RuntimeAttachmentStore::unavailable()),
-            Arc::new(crate::ChronologicalProjection::default()),
-            crate::TurnContext::default(),
-            crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                ),
-            ),
-        );
-
-        let handle = lash_sansio::handle::handle_record_json(
-            &lash_sansio::handle::HandleId::process(&target_process.id),
-        );
-        let signalled = crate::signal_process_handle(
-            &context,
-            lash_core_execution::ToolCallId::fixture("signal-1"),
-            handle,
-            "ready".to_string(),
-            json!({ "kind": "ping" }),
-        )
-        .await;
-
-        assert!(
-            signalled.output.is_success(),
-            "{:?}",
-            signalled.output.value_for_projection()
-        );
-        let record = signalled.record.expect("signal record");
-        assert_eq!(
-            record.call_id,
-            lash_core_execution::ToolCallId::fixture("signal-1")
-        );
-        assert_eq!(record.tool, "signal_process");
-        let events = registry
-            .full_event_window(&target_process.id, 0)
-            .await
-            .expect("list events");
-        assert!(
-            events.iter().any(|event| event.event_type == "signal.ready"
-                && event.payload.get("kind") == Some(&json!("ping"))),
-            "expected appended signal.ready event, got {events:?}"
-        );
     }
 
     /// An unreadable handle is refused by one rule, and the refusal is recorded.

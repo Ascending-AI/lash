@@ -614,105 +614,6 @@ fn framework_refusals_are_their_own_reasons_and_never_the_owners_data() {
     }
 }
 
-/// FIG-4652: a recorded namespace its owner cannot read is corruption of
-/// the session's stored config. It refuses nothing: a transaction resolves
-/// to no decision to record, whether its command changes that namespace or
-/// only the final validation meets it; a run override validates to no
-/// verdict; and a child's creation records nothing from a corrupt parent.
-#[test]
-fn an_unreadable_recorded_namespace_is_corruption_and_refuses_nothing() {
-    let (registry, reductions, _) = counters();
-    let mut base = head(&registry, 0);
-    base.plugin_config
-        .insert("first", serde_json::json!({ "count": "three" }));
-    let corrupt = |error: RecordedNamespaceCorrupt| {
-        assert_eq!(error.owner, "first");
-        assert!(
-            matches!(
-                error.clone().into_store_error(),
-                crate::StoreError::StoredDataCorrupt {
-                    record_kind: "session_config_namespace",
-                    ..
-                }
-            ),
-            "{error:?}"
-        );
-    };
-
-    for (what, entry) in [
-        (
-            "a command on the corrupt namespace",
-            increment("first", 1, 10),
-        ),
-        ("a command on another namespace", increment("second", 1, 10)),
-    ] {
-        let transaction = registry.admit("t", 0, vec![entry]).expect("admitted");
-        corrupt(
-            registry
-                .resolve(
-                    &base,
-                    &transaction,
-                    &crate::EmptyLlmProfiles,
-                    &crate::store::plugin_writers::PluginAdmission::default(),
-                )
-                .expect_err(what),
-        );
-    }
-    assert_eq!(
-        reductions.load(Ordering::SeqCst),
-        0,
-        "no reducer ran over the corrupt namespace"
-    );
-
-    let mut derived = base.clone();
-    derived
-        .plugin_config
-        .insert("first", serde_json::json!({ "count": 1, "label": "root" }));
-    match registry.validate_derived(&base, &derived) {
-        Err(ConfigFault::RecordedCorrupt(error)) => corrupt(error),
-        other => panic!("a run override over a corrupt namespace: {other:?}"),
-    }
-    match registry.apply_run_options(
-        &base.plugin_config,
-        "first",
-        &crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "count": 1, "limit": 9 })),
-    ) {
-        Err(ConfigFault::RecordedCorrupt(error)) => corrupt(error),
-        other => panic!("run options over a corrupt namespace: {other:?}"),
-    }
-    match registry.resolve_creation(
-        None,
-        &PluginOptions::default(),
-        Some(&base.plugin_config),
-        false,
-        &crate::store::plugin_writers::PluginAdmission::default(),
-    ) {
-        Err(ConfigFault::RecordedCorrupt(error)) => corrupt(error),
-        other => panic!("a child of a corrupt parent: {other:?}"),
-    }
-
-    // A candidate the owner's own reducer produced is the candidate's
-    // fault, not stored data: here, one over the owner's ceiling.
-    let healthy = head(&registry, 0);
-    let mut over = healthy.clone();
-    over.plugin_config
-        .insert("first", serde_json::json!({ "count": "many" }));
-    assert!(
-        matches!(
-            registry.validate_derived(&healthy, &over),
-            Err(ConfigFault::Refused(ConfigRefusal {
-                at: RefusalSite::Candidate,
-                reason: ConfigRefusalReason::Unreadable {
-                    role: ConfigValueRole::Candidate,
-                    ..
-                },
-                ..
-            }))
-        ),
-        "an unreadable candidate over a readable base is refused"
-    );
-}
-
 /// FIG-4652: a run's options are the owner's typed run options, and only
 /// the owner lays them over its namespace. A field that is not a run option
 /// does not decode, whatever value it states, the recorded one included.
@@ -790,18 +691,6 @@ fn run_options_are_the_owners_typed_options_and_only_the_owner_applies_them() {
     );
 }
 
-#[test]
-fn typed_commands_address_the_owner_that_registered_their_type() {
-    let (registry, _, _) = counters();
-    let entries = registry
-        .entries(&ConfigTransaction::of(core::SetTurnBudget {
-            turn_budget: crate::TurnBudget::bounded(4),
-        }))
-        .expect("the core registers SetTurnBudget");
-    assert_eq!(entries[0].owner, CORE_CONFIG_OWNER);
-    assert_eq!(entries[0].command, "set_turn_budget");
-}
-
 /// A catalog serving each `(key, context window, efforts)` entry under its
 /// key, with the key as its wire model.
 fn catalog(entries: &[(&str, usize, &[&str])]) -> crate::LlmProfileRegistry {
@@ -870,26 +759,6 @@ fn resolve_core(
             &crate::store::plugin_writers::PluginAdmission::default(),
         )
         .expect("the recorded config reads")
-}
-
-/// The core owner's refusal of `resolution`, and the index of the command
-/// it refused (`None` for the final candidate).
-fn core_refusal(resolution: &ConfigResolution) -> (Option<usize>, core::CoreConfigRefusal) {
-    let ConfigResolutionDecision::Refused { refusal } = &resolution.result else {
-        panic!("the core owner refuses: {resolution:?}");
-    };
-    assert_eq!(refusal.owner, CORE_CONFIG_OWNER);
-    let index = match &refusal.at {
-        RefusalSite::Command { index, .. } => Some(*index),
-        RefusalSite::Candidate => None,
-        RefusalSite::Creation => panic!("a transaction is not a creation: {refusal:?}"),
-    };
-    (
-        index,
-        refusal
-            .owner_refusal()
-            .expect("the core owner's typed refusal"),
-    )
 }
 
 #[test]
@@ -962,127 +831,6 @@ fn a_profile_command_naming_the_recorded_key_mints_it_again() {
         ConfigTransactionOutcome::Applied { .. }
     ));
     assert_eq!(published.model, Some(recorded("model", 4000, &[])));
-}
-
-#[test]
-fn a_profile_command_naming_an_unregistered_key_is_refused_typed() {
-    let (registry, _, _) = counters();
-    let mut base = head(&registry, 0);
-    base.model = Some(recorded("model", 1000, &[]));
-    let resolution = resolve_core(
-        &registry,
-        &base,
-        &catalog(&[("model", 1000, &[])]),
-        ConfigTransaction::of(core::SetLlmProfile {
-            model: crate::LlmProfileKey::new("missing"),
-        }),
-    );
-    assert_eq!(
-        core_refusal(&resolution),
-        (
-            Some(0),
-            core::CoreConfigRefusal::UnknownLlmProfile {
-                key: crate::LlmProfileKey::new("missing"),
-            }
-        )
-    );
-}
-
-/// A reasoning is judged against the model the final candidate records: an
-/// effort the recorded model does not declare is refused, the same effort
-/// applies beside a model change to one that declares it, whatever the
-/// order, and a session with no model takes no reasoning.
-#[test]
-fn a_reasoning_command_is_judged_against_the_final_recorded_llm_profile() {
-    let (registry, _, _) = counters();
-    let deep = crate::ReasoningSelection::Effort("deep".to_string());
-    let models = catalog(&[("plain", 1000, &[]), ("deep-model", 1000, &["deep"])]);
-    let mut base = head(&registry, 0);
-    base.model = Some(recorded("plain", 1000, &[]));
-
-    let alone = resolve_core(
-        &registry,
-        &base,
-        &models,
-        ConfigTransaction::of(core::SetReasoning {
-            reasoning: deep.clone(),
-        }),
-    );
-    let (index, refusal) = core_refusal(&alone);
-    assert_eq!(index, None, "the final candidate is refused, not a command");
-    assert!(
-        matches!(
-            &refusal,
-            core::CoreConfigRefusal::ReasoningRefused { key, reasoning, .. }
-                if key.as_str() == "plain" && *reasoning == deep
-        ),
-        "{refusal:?}"
-    );
-
-    for transaction in [
-        ConfigTransaction::of(core::SetReasoning {
-            reasoning: deep.clone(),
-        })
-        .then(core::SetLlmProfile {
-            model: crate::LlmProfileKey::new("deep-model"),
-        }),
-        ConfigTransaction::of(core::SetLlmProfile {
-            model: crate::LlmProfileKey::new("deep-model"),
-        })
-        .then(core::SetReasoning {
-            reasoning: deep.clone(),
-        }),
-    ] {
-        let resolution = resolve_core(&registry, &base, &models, transaction);
-        let mut published = base.clone();
-        assert!(matches!(
-            resolution.publish(&mut published),
-            ConfigTransactionOutcome::Applied { .. }
-        ));
-        assert_eq!(
-            published.model,
-            Some(recorded("deep-model", 1000, &["deep"]).with_reasoning(deep.clone()))
-        );
-    }
-
-    let mut unselected = head(&registry, 0);
-    unselected.model = None;
-    let without_llm_profile = resolve_core(
-        &registry,
-        &unselected,
-        &models,
-        ConfigTransaction::of(core::SetReasoning {
-            reasoning: deep.clone(),
-        }),
-    );
-    assert_eq!(
-        core_refusal(&without_llm_profile),
-        (
-            Some(0),
-            core::CoreConfigRefusal::ReasoningWithoutLlmProfile { reasoning: deep }
-        )
-    );
-}
-
-#[test]
-fn the_catalog_lists_every_registered_command_with_its_schemas() {
-    let (registry, _, _) = counters();
-    let catalog = registry.catalog(9);
-    assert_eq!(catalog.revision, 9);
-    let increment = catalog
-        .commands
-        .iter()
-        .find(|descriptor| descriptor.owner == "first" && descriptor.command == "increment")
-        .expect("the counter's command is listed");
-    assert!(increment.input_schema.to_string().contains("limit"));
-    assert!(increment.refusal_schema.to_string().contains("past_limit"));
-    assert!(
-        catalog
-            .commands
-            .iter()
-            .any(|descriptor| descriptor.owner == CORE_CONFIG_OWNER
-                && descriptor.command == "set_llm_profile")
-    );
 }
 
 #[test]

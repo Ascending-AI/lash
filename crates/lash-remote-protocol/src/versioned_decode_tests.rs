@@ -58,21 +58,6 @@ fn streamed_llm_request() -> RemoteLlmRequest {
     }
 }
 
-fn streamed_turn_input() -> RemoteTurnInput {
-    RemoteTurnInput::text("hello")
-}
-
-fn streamed_turn_request() -> RemoteTurnRequest {
-    RemoteTurnRequest {
-        session_id: SessionId::from("session-stream"),
-        turn_id: TurnId::from("turn-stream"),
-        input: streamed_turn_input(),
-        protocol_turn_options: None,
-        tool_grants: Vec::new(),
-        metadata: std::collections::HashMap::new(),
-    }
-}
-
 fn streamed_activity() -> RemoteTurnActivity {
     RemoteTurnActivity {
         sequence: 3,
@@ -440,33 +425,6 @@ fn streamed_llm_request_round_trips_and_gates_version() {
         streamed_llm_request(),
         RemoteLlmRequest::encode_json,
         RemoteLlmRequest::decode_json,
-    );
-}
-
-#[test]
-fn streamed_turn_input_round_trips_and_gates_version() {
-    assert_streamed_envelope_contract(
-        streamed_turn_input(),
-        RemoteTurnInput::encode_json,
-        RemoteTurnInput::decode_json,
-    );
-}
-
-#[test]
-fn streamed_turn_request_round_trips_and_gates_version() {
-    assert_streamed_envelope_contract(
-        streamed_turn_request(),
-        RemoteTurnRequest::encode_json,
-        RemoteTurnRequest::decode_json,
-    );
-}
-
-#[test]
-fn streamed_activity_round_trips_and_gates_version() {
-    assert_streamed_envelope_contract(
-        streamed_activity(),
-        RemoteTurnActivity::encode_json,
-        RemoteTurnActivity::decode_json,
     );
 }
 

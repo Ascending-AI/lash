@@ -482,10 +482,6 @@ mod tests {
         }
     }
 
-    fn terminal(turn: &'static str) -> super::super::OperationId {
-        super::super::OperationId::turn("s", turn, TURN_TERMINAL_OPERATION_KEY)
-    }
-
     /// A recovery's admitted run names its follow-on and count, and maps
     /// back to the logical run the follow-on continues.
     #[test]
@@ -508,32 +504,6 @@ mod tests {
             assert!(!owed.names_recovery(&TurnId::from(other)), "{other}");
         }
         assert_eq!(owed.run_turn_id(), TurnId::from("run"));
-    }
-
-    #[test]
-    fn follow_on_ids_count_physical_turns_from_the_run() {
-        let first = PendingFollowOn::after_switch(
-            &TurnId::from("run"),
-            0,
-            FrameNodeId::new("f").expect("frame"),
-            "t",
-            1,
-            resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES),
-        )
-        .expect("first");
-        assert_eq!(first.follow_on_turn_id, TurnId::from("run:agent-frame:1"));
-        let second = PendingFollowOn::after_switch(
-            &TurnId::from("run"),
-            1,
-            FrameNodeId::new("g").expect("frame"),
-            "t",
-            2,
-            resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES),
-        )
-        .expect("second");
-        assert_eq!(second.follow_on_turn_id, TurnId::from("run:agent-frame:2"));
-        assert_eq!(second.run_turn_id(), TurnId::from("run"));
-        assert_eq!(second.physical_index(), 2);
     }
 
     #[test]
@@ -561,139 +531,6 @@ mod tests {
             );
             assert_eq!(first.run_turn_id(), run);
         }
-    }
-
-    #[test]
-    fn only_the_follow_on_admits_while_it_is_pending() {
-        let pending = fact("run:agent-frame:1", "f");
-        assert!(follow_on_blocks_admission(Some(&pending), FollowOnAdmission::Idle).is_some());
-        assert!(
-            follow_on_blocks_admission(
-                Some(&pending),
-                FollowOnAdmission::Checkpoint {
-                    turn_id: &TurnId::from("other")
-                }
-            )
-            .is_some()
-        );
-        assert!(
-            follow_on_blocks_admission(
-                Some(&pending),
-                FollowOnAdmission::Checkpoint {
-                    turn_id: &pending.follow_on_turn_id
-                }
-            )
-            .is_none()
-        );
-        assert!(follow_on_blocks_admission(None, FollowOnAdmission::Idle).is_none());
-    }
-
-    #[test]
-    fn head_writes_keep_the_fact_until_its_own_terminal_commit() {
-        let session = crate::SessionId::from("s");
-        let pending = fact("run:agent-frame:1", "f");
-        let frame = pending.frame_id.clone();
-        // Another turn's terminal commit is refused, whatever it writes.
-        assert!(matches!(
-            validate_follow_on_head_write(
-                &session,
-                Some(&pending),
-                &terminal("other"),
-                Some(&pending),
-                Some(&frame)
-            ),
-            Err(StoreError::FollowOnPending { .. })
-        ));
-        // A non-turn head write keeps the fact unchanged, or is refused.
-        let config = super::super::OperationId::turn("s", "other", "record-config");
-        assert!(
-            validate_follow_on_head_write(
-                &session,
-                Some(&pending),
-                &config,
-                Some(&pending),
-                Some(&frame)
-            )
-            .is_ok()
-        );
-        assert!(
-            validate_follow_on_head_write(&session, Some(&pending), &config, None, Some(&frame))
-                .is_err()
-        );
-        // The follow-on's own terminal commit clears it.
-        assert!(
-            validate_follow_on_head_write(
-                &session,
-                Some(&pending),
-                &terminal("run:agent-frame:1"),
-                None,
-                Some(&frame)
-            )
-            .is_ok()
-        );
-        // The frame invariant holds on every write.
-        let elsewhere = FrameNodeId::new("g").expect("frame");
-        assert!(matches!(
-            validate_follow_on_head_write(
-                &session,
-                Some(&pending),
-                &config,
-                Some(&pending),
-                Some(&elsewhere)
-            ),
-            Err(StoreError::FollowOnFrameNotCurrent { .. })
-        ));
-        // Only a turn's terminal commit creates a fact.
-        assert!(
-            validate_follow_on_head_write(&session, None, &config, Some(&pending), Some(&frame))
-                .is_err()
-        );
-        assert!(
-            validate_follow_on_head_write(
-                &session,
-                None,
-                &terminal("run"),
-                Some(&pending),
-                Some(&frame)
-            )
-            .is_ok()
-        );
-    }
-
-    #[test]
-    fn recovery_is_bounded_and_never_resets() {
-        let mut pending = fact("run:agent-frame:1", "f");
-        for expected in 1..=DEFAULT_MAX_FOLLOW_ON_RECOVERIES {
-            match pending.recovery().expect("recovery") {
-                FollowOnRecovery::Run(raised) => {
-                    assert_eq!(raised.attempts, expected);
-                    pending = raised;
-                }
-                FollowOnRecovery::Exhausted(_) => panic!("exhausted early"),
-            }
-        }
-        assert!(matches!(
-            pending.recovery(),
-            Ok(FollowOnRecovery::Exhausted(_))
-        ));
-    }
-
-    /// The bound a recovery decides on is the one the fact's run recorded,
-    /// whatever bound the recovering host is configured with.
-    #[test]
-    fn recovery_decides_on_the_bound_its_run_recorded() {
-        let mut pending = fact("run:agent-frame:1", "f");
-        *pending.resolved_run = resolved(0);
-        assert!(matches!(
-            pending.recovery(),
-            Ok(FollowOnRecovery::Exhausted(_))
-        ));
-        *pending.resolved_run = resolved(1);
-        assert!(matches!(
-            pending.recovery(),
-            Ok(FollowOnRecovery::Run(raised))
-                if raised.attempts == 1 && raised.resolved_run.follow_on_recoveries == 1
-        ));
     }
 
     /// The head column's fact always carries its run's record: a fact

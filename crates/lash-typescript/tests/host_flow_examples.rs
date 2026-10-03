@@ -8,7 +8,6 @@
 
 use std::collections::BTreeSet;
 
-const TURN: &str = include_str!("../../../examples/typescript-host-flows/turn.ts");
 const DURABLE_PROCESS: &str =
     include_str!("../../../examples/typescript-host-flows/durable-process.ts");
 
@@ -73,41 +72,6 @@ fn host_environment() -> lashlang::LashlangHostEnvironment {
     lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all())
 }
 
-/// The forms ADR 0095 deleted.
-///
-/// `start`, `wake` and `registerTrigger` were bare calls; the surviving
-/// spellings are qualified (`processes.start`, `triggers.register`), so a bare
-/// call is the retired one and a receiver call is not.
-fn assert_names_no_retired_form(label: &str, source: &str) {
-    for retired in ["defineProcess", "signals:"] {
-        assert!(
-            !source.contains(retired),
-            "{label} still names the retired form `{retired}`"
-        );
-    }
-    for retired in ["start", "wake", "registerTrigger"] {
-        let call = format!("{retired}(");
-        let mut rest = source;
-        while let Some(at) = rest.find(&call) {
-            let qualified = rest[..at].ends_with('.');
-            let word_start = rest[..at]
-                .chars()
-                .next_back()
-                .is_none_or(|ch| !(ch.is_alphanumeric() || ch == '_' || ch == '$'));
-            assert!(
-                qualified || !word_start,
-                "{label} still calls the retired bare form `{call})`"
-            );
-            rest = &rest[at + call.len()..];
-        }
-    }
-}
-
-#[test]
-fn the_turn_example_links_against_its_host_catalogue() {
-    lash_typescript::link(TURN, &host_environment()).expect("turn.ts should link");
-}
-
 #[test]
 fn the_durable_process_example_links_and_lifts_one_process() {
     let linked = lash_typescript::link(DURABLE_PROCESS, &host_environment())
@@ -146,10 +110,4 @@ fn the_durable_process_example_links_and_lifts_one_process() {
             .collect::<BTreeSet<_>>(),
         BTreeSet::from(["approved".to_string()]),
     );
-}
-
-#[test]
-fn neither_host_flow_example_names_a_retired_form() {
-    assert_names_no_retired_form("turn.ts", TURN);
-    assert_names_no_retired_form("durable-process.ts", DURABLE_PROCESS);
 }

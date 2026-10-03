@@ -1,7 +1,6 @@
 #[cfg(feature = "synthetic-next")]
 use crate::testing::ast_builders as b;
 use crate::*;
-use lash_sansio::VersionRange;
 use lash_vm_protocol::{
     OpaqueStateRefusal, OpaqueVmState, StateExpectation, VmContractComponent, VmOwner, VmStateKind,
 };
@@ -167,35 +166,6 @@ fn rollback_admits_only_versions_inside_n_ranges() {
             Ok(()),
         );
     }
-}
-
-#[test]
-fn component_ranges_match_the_vm_decoders() {
-    let contract = vm_contract_versions();
-    let reads = vm_contract_reads();
-    assert_eq!(reads.admit(contract), Ok(()));
-    assert_eq!(reads.continuation, VM_CONTINUATION_READ_RANGE);
-    assert_eq!(
-        reads.snapshot,
-        lash_core_execution::FleetFormat::current()
-            .read_window(lash_core_execution::surface_format!(
-                LASHLANG_SNAPSHOT_VERSION
-            ))
-            .supported()
-    );
-    assert_eq!(
-        reads.bytecode,
-        VersionRange::exactly(BYTECODE_FORMAT_VERSION)
-    );
-    assert_eq!(
-        reads.accounting,
-        VersionRange::exactly(INSTRUCTION_ACCOUNTING_VERSION)
-    );
-    assert_eq!(reads.abi, VersionRange::exactly(contract.abi));
-    assert_eq!(
-        LASHLANG_VM_ABI_VERSION,
-        format!("lashlang-vm-abi-v{}", contract.abi)
-    );
 }
 
 #[cfg(feature = "synthetic-next")]

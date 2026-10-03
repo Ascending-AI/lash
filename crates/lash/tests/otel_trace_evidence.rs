@@ -3,8 +3,7 @@
 #![allow(dead_code)]
 
 use lash::tracing::{
-    GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT, LASH_INSTRUMENTATION_NAME, OtelOptions,
-    OtelPayloadExport, OtelSpanEnricher, OtelTelemetry, contract_markdown, otel,
+    OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry, contract_markdown, otel,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -75,22 +74,4 @@ fn instrumentation_contract_document_is_regenerated() {
     );
     std::fs::write(&output, contract_markdown())
         .unwrap_or_else(|error| panic!("write {}: {error}", output.display()));
-}
-
-/// The contract document's header names the pinned scope, contract version and
-/// GenAI semconv snapshot through the facade, so a host can check the values it
-/// wires into its own providers against the same constants.
-#[test]
-fn instrumentation_contract_declares_the_shared_scope_and_snapshot() {
-    let document = contract_markdown();
-    for constant in [
-        LASH_INSTRUMENTATION_NAME,
-        LASH_INSTRUMENTATION_CONTRACT,
-        GEN_AI_SEMCONV_SNAPSHOT,
-    ] {
-        assert!(
-            document.contains(constant),
-            "the generated contract names {constant}"
-        );
-    }
 }

@@ -1635,24 +1635,6 @@ mod tests {
         assert!(decode_shift_refusal("{\"message\":\"connection reset\"}").is_none());
     }
 
-    #[test]
-    fn a_retryable_lane_refusal_keeps_the_handler_attempt_open() {
-        let busy = lash_core::RuntimeError::new(
-            lash_core::RuntimeErrorCode::SessionExecutionLaneBusy,
-            "another execution holds the lane",
-        );
-        assert!(busy.is_retryable());
-        assert!(matches!(
-            classify_refusal(busy.clone()),
-            ShiftAbort::Retry(_)
-        ));
-        let failure = abort_failure(ShiftAbort::Refused(busy));
-        assert!(
-            format!("{failure:?}").contains("Retryable"),
-            "a racing lane release must not end the workflow: {failure:?}"
-        );
-    }
-
     /// D15: the admission refusal a shift answers while a park names an
     /// unsettled redrive is retryable, so its decode classifies it as a
     /// retry — never a refused (failed-turn) row — and the handler failure

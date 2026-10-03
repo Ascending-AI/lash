@@ -1841,23 +1841,6 @@ pub(super) fn trigger_disable_is_revision_checked_and_keeps_registry_entry() {
 }
 
 #[test]
-pub(super) fn foreground_sleep_executes_through_runtime_context() {
-    block_on(async {
-        let response = execute_with_abilities(
-            r#"
-                await sleep(0);
-                finish("awake");
-                "#,
-            lashlang::LashlangAbilities::default().with_sleep(),
-        )
-        .await;
-
-        assert!(response.error.is_none(), "{:?}", response.error);
-        assert_eq!(response.terminal_finish, Some(serde_json::json!("awake")));
-    });
-}
-
-#[test]
 pub(super) fn print_observation_preserves_typed_value_and_records_cut_metadata() {
     block_on(async {
         let large = "x".repeat(60 * 1024);

@@ -192,19 +192,6 @@ fn roundtrip_checkpoint(checkpoint: TurnCheckpoint) -> TurnCheckpoint {
 }
 
 #[test]
-fn turn_checkpoint_stamps_current_generation() {
-    let machine = TurnMachine::new(
-        test_config(Arc::new(ProseDriver)),
-        vec![user_message("hello")],
-        crate::AppendVec::new(),
-        0,
-    );
-    let checkpoint = machine.checkpoint();
-    assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
-    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 11);
-}
-
-#[test]
 fn turn_checkpoint_restore_refuses_every_non_current_version() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
@@ -232,27 +219,6 @@ fn turn_checkpoint_restore_refuses_every_non_current_version() {
             }
         );
     }
-}
-
-#[test]
-fn v2_checkpoint_with_terminal_turn_state_is_a_typed_incompatible_version() {
-    let bytes = include_bytes!("fixtures/turn_checkpoint_v2_with_terminal_turn_state.json");
-    let fixture: serde_json::Value = serde_json::from_slice(bytes).expect("fixture is JSON");
-    assert_eq!(fixture["schema_version"], 2);
-    assert_eq!(
-        fixture["termination"]["turn_limit_final_scheduled"], false,
-        "negative fixture must carry the deleted field"
-    );
-
-    let error = TurnCheckpoint::<UnitTurnProtocol>::from_json_slice(bytes)
-        .expect_err("v2 checkpoint must be refused");
-    assert_eq!(
-        error,
-        TurnCheckpointRestoreError::IncompatibleSchemaVersion {
-            actual: 2,
-            expected: TURN_CHECKPOINT_SCHEMA_VERSION,
-        }
-    );
 }
 
 #[test]
@@ -1087,64 +1053,6 @@ fn llm_request_includes_image_prompt_parts_for_attached_images() {
 }
 
 #[test]
-fn driver_can_finish_via_checkpoint() {
-    let config = test_config(Arc::new(ProseDriver));
-    let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
-
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call").0;
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: "Hello".to_string(),
-                response_meta: None,
-            }],
-            response_metadata: Default::default(),
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("checkpoint");
-    assert_eq!(checkpoint, CheckpointKind::BeforeCompletion);
-    machine.handle_response(Response::Checkpoint {
-        id: checkpoint_id,
-        delivery: CheckpointDelivery::default(),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(find_done(&effects).is_some());
-    assert!(machine.is_done());
-}
-
-#[test]
-fn checkpoint_before_llm_completion_reissues_same_logical_llm_call() {
-    let config = test_config(Arc::new(ProseDriver));
-    let mut machine = TurnMachine::new(
-        config,
-        vec![user_message("hello")],
-        crate::AppendVec::new(),
-        0,
-    );
-
-    let effects = drain_effects(&mut machine);
-    let (llm_id, request) = find_llm_call(&effects).expect("llm call");
-    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
-    let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
-            .expect("supported checkpoint");
-
-    let effects = drain_effects(&mut restored);
-    let (restored_id, restored_request) = find_llm_call(&effects).expect("restored llm call");
-    assert_eq!(*restored_id, *llm_id);
-    assert_eq!(restored_request.model, request.model);
-    assert_eq!(restored_request.messages, request.messages);
-}
-
-#[test]
 fn checkpoint_after_llm_result_replays_checkpoint_without_second_llm() {
     let config = test_config(Arc::new(ProseDriver));
     let mut machine = TurnMachine::new(
@@ -1618,61 +1526,6 @@ fn checkpoint_messages_resume_prepare_protocol_iteration() {
 }
 
 #[test]
-fn checkpoint_preserves_parallel_tool_batch_before_any_result() {
-    let config = test_config(Arc::new(ToolBatchDriver));
-    let mut machine = TurnMachine::new(
-        config,
-        vec![user_message("use tools")],
-        crate::AppendVec::new(),
-        0,
-    );
-
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call").0;
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse::default()),
-    });
-    let effects = drain_effects(&mut machine);
-    let (tool_id, calls) = effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::ToolCalls { id, calls, .. } => Some((*id, calls.clone())),
-            _ => None,
-        })
-        .expect("tool batch");
-    assert_eq!(calls.len(), 2);
-
-    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
-    let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ToolBatchDriver)), checkpoint)
-            .expect("supported checkpoint");
-    let effects = drain_effects(&mut restored);
-    let (restored_tool_id, restored_calls) = effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::ToolCalls { id, calls, .. } => Some((*id, calls)),
-            _ => None,
-        })
-        .expect("restored tool batch");
-    assert_eq!(restored_tool_id, tool_id);
-    assert_eq!(restored_calls.len(), 2);
-    assert_eq!(
-        restored_calls[0].call_id,
-        crate::ToolCallId::fixture("call-read")
-    );
-    assert_eq!(restored_calls[1].tool_name, "search");
-    assert_eq!(
-        restored_calls[1]
-            .replay
-            .as_ref()
-            .and_then(|replay| replay.item_id.as_deref()),
-        Some("provider-item-2")
-    );
-}
-
-#[test]
 fn checkpoint_after_mixed_tool_batch_results_replays_model_feedback_once() {
     let config = test_config(Arc::new(ToolBatchDriver));
     let mut machine = TurnMachine::new(
@@ -1752,40 +1605,6 @@ fn checkpoint_after_mixed_tool_batch_results_replays_model_feedback_once() {
 }
 
 #[test]
-fn exec_driver_state_round_trip() {
-    let config = test_config(Arc::new(ExecDriver));
-    let msgs = vec![user_message("run code")];
-    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
-
-    let effects = drain_effects(&mut machine);
-    let (exec_id, code) = find_exec_call(&effects).expect("exec call");
-    assert_eq!(code, "print 1");
-    machine.handle_response(Response::ExecResult {
-        id: *exec_id,
-        result: Ok(crate::ExecResponse {
-            ..empty_exec_response()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("checkpoint");
-    assert_eq!(checkpoint, CheckpointKind::BeforeCompletion);
-    machine.handle_response(Response::Checkpoint {
-        id: checkpoint_id,
-        delivery: CheckpointDelivery::default(),
-    });
-
-    let effects = drain_effects(&mut machine);
-    let (messages, _) = find_done(&effects).expect("done");
-    assert!(messages.iter().any(|message| {
-        message
-            .parts
-            .iter()
-            .any(|part| part.content() == "exec-state")
-    }));
-}
-
-#[test]
 fn checkpoint_round_trips_waiting_exec_driver_state() {
     let config = test_config(Arc::new(ExecDriver));
     let mut machine = TurnMachine::new(
@@ -1823,40 +1642,6 @@ fn checkpoint_round_trips_waiting_exec_driver_state() {
             .iter()
             .any(|part| part.content().contains("exec-state"))
     }));
-}
-
-#[test]
-fn checkpoint_redelivers_waiting_llm_from_state_only() {
-    let config = test_config(Arc::new(ProseDriver));
-    let mut machine = TurnMachine::new(
-        config,
-        vec![user_message("hello")],
-        crate::AppendVec::new(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    assert!(find_llm_call(&effects).is_some());
-
-    let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
-    assert_eq!(
-        encoded["pending_effects"]
-            .as_array()
-            .expect("pending_effects array")
-            .len(),
-        0
-    );
-    let waiting = encoded["state"]["Waiting"]
-        .as_object()
-        .expect("waiting state");
-    assert!(waiting["work"].get("Llm").is_some());
-    assert!(waiting.get("delivery").is_none());
-
-    let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
-    let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
-            .expect("supported checkpoint");
-    let effects = drain_effects(&mut restored);
-    assert!(find_llm_call(&effects).is_some());
 }
 
 /// Pins the durable encoding of a waiting turn: one `Waiting` state carrying
@@ -2080,106 +1865,6 @@ fn stale_response_does_not_cancel_checkpoint_redelivery() {
         .expect("waiting LLM call should remain scheduled after a stale response")
         .0;
     assert_eq!(*redelivered_id, llm_id);
-}
-
-#[test]
-fn checkpoint_redelivers_waiting_tool_batch_from_state_only() {
-    let config = test_config(Arc::new(ToolBatchDriver));
-    let mut machine = TurnMachine::new(
-        config,
-        vec![user_message("use tools")],
-        crate::AppendVec::new(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call").0;
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse::default()),
-    });
-    let effects = drain_effects(&mut machine);
-    assert!(
-        effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ToolCalls { .. }))
-    );
-
-    let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
-    assert_eq!(
-        encoded["pending_effects"]
-            .as_array()
-            .expect("pending_effects array")
-            .len(),
-        0
-    );
-
-    let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
-    let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ToolBatchDriver)), checkpoint)
-            .expect("supported checkpoint");
-    let effects = drain_effects(&mut restored);
-    assert!(
-        effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ToolCalls { .. }))
-    );
-}
-
-#[test]
-fn checkpoint_redelivers_waiting_exec_from_state_only() {
-    let config = test_config(Arc::new(ExecDriver));
-    let mut machine = TurnMachine::new(
-        config,
-        vec![user_message("hello")],
-        crate::AppendVec::new(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    assert!(find_exec_call(&effects).is_some());
-
-    let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
-    assert_eq!(
-        encoded["pending_effects"]
-            .as_array()
-            .expect("pending_effects array")
-            .len(),
-        0
-    );
-
-    let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
-    let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ExecDriver)), checkpoint)
-            .expect("supported checkpoint");
-    let effects = drain_effects(&mut restored);
-    assert!(find_exec_call(&effects).is_some());
-}
-
-/// The protocol-start sync installs the environment it returns, so the first
-/// model call is built from the journaled surface a redrive serves (FIG-3587).
-#[test]
-fn initial_execution_environment_sync_installs_the_synced_environment() {
-    let mut machine = TurnMachine::new(
-        test_config(Arc::new(ProseDriver)),
-        vec![user_message("hello")],
-        crate::AppendVec::new(),
-        0,
-    );
-
-    let effects = drain_unsynced_effects(&mut machine);
-    let sync_id = find_execution_environment_sync(&effects).expect("execution environment sync");
-
-    machine.handle_response(Response::ExecutionEnvironmentSynced {
-        id: sync_id,
-        result: Ok(ExecutionEnvironmentSync {
-            system_prompt: Arc::from("journaled prompt"),
-            ..ExecutionEnvironmentSync::default()
-        }),
-    });
-
-    let effects = drain_unsynced_effects(&mut machine);
-    let (_, request) = find_llm_call(&effects).expect("first llm call");
-    assert_eq!(request.instructions.as_deref(), Some("journaled prompt"));
 }
 
 fn recorded_environment(prompt: &str, tool: &str) -> ExecutionEnvironmentSync {

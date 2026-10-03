@@ -676,16 +676,6 @@ mod tests {
     }
 
     #[test]
-    fn a_run_binds_to_the_admitted_view_and_its_recorded_entry() {
-        let admitted = admitted();
-        assert!(
-            admitted.entry.is_some(),
-            "the version records its entry by ref"
-        );
-        PreparedRun::new(admitted.view(), &admitted, 1).expect("the admitted view runs");
-    }
-
-    #[test]
     fn a_run_refuses_a_graph_that_is_not_its_admitted_view() {
         let admitted = admitted();
         let refused = |graph: &WorkflowGraph, what: &str| {

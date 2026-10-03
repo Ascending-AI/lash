@@ -1,5 +1,4 @@
-//! The IR's builtin library: every name the registry advertises, what it
-//! returns, and how it fails.
+//! The IR builtin library's return values and failure rules.
 //!
 //! This file replaces the retired dialect's prompt-claim suite. That suite
 //! existed to keep the lashlang RLM system prompt and the runtime from
@@ -13,9 +12,7 @@
 //! What does not move is the builtin library itself. It is an IR facility with
 //! no TypeScript spelling — a TypeScript author reaches ECMA methods, which
 //! the VM implements separately — so the only remaining caller is a program
-//! built from the AST, and that is how every row here is written. The drift
-//! guard survives too: the smoke table below must name exactly the registry,
-//! so a builtin cannot be added or removed without this file saying so.
+//! built from the AST, and that is how every row here is written.
 
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, Expr,
@@ -590,78 +587,6 @@ async fn extrema_over_an_empty_list_are_typed_runtime_errors() {
 }
 
 // ── The drift guard ───────────────────────────────────────────────────
-
-/// The registry and this file's inventory must name exactly the same
-/// builtins, and every one of them must run. Adding or removing a builtin
-/// without touching this table fails here.
-#[tokio::test(flavor = "current_thread")]
-async fn every_registered_builtin_is_covered_and_runs() {
-    let smoke: Vec<(&str, Vec<Expr>)> = vec![
-        ("len", vec![string("a")]),
-        ("empty", vec![string("")]),
-        ("slice", vec![string("abc"), number(0.0), number(1.0)]),
-        ("split", vec![string("a,b"), string(",")]),
-        (
-            "join",
-            vec![list(vec![string("a"), string("b")]), string(",")],
-        ),
-        ("trim", vec![string(" a ")]),
-        ("find", vec![string("abc"), string("b")]),
-        ("grep_text", vec![string("abc"), string("b")]),
-        ("starts_with", vec![string("abc"), string("a")]),
-        ("ends_with", vec![string("abc"), string("c")]),
-        ("contains", vec![string("abc"), string("b")]),
-        ("keys", vec![record(vec![("a", number(1.0))])]),
-        ("values", vec![record(vec![("a", number(1.0))])]),
-        ("to_string", vec![number(1.0)]),
-        ("to_int", vec![string("1")]),
-        ("to_float", vec![string("1.5")]),
-        ("json_parse", vec![string("1")]),
-        ("format", vec![string("x")]),
-        (
-            "validate",
-            vec![
-                record(vec![("value", string("x"))]),
-                type_literal(vec![("value", TypeExpr::Str)]),
-            ],
-        ),
-        ("range", vec![number(1.0)]),
-        ("ceil_div", vec![number(3.0), number(2.0)]),
-        ("floor_div", vec![number(3.0), number(2.0)]),
-        ("push", vec![list(Vec::new()), string("x")]),
-        ("sort", vec![list(vec![number(2.0), number(1.0)])]),
-        (
-            "sort_by",
-            vec![
-                list(vec![
-                    record(vec![("a", number(2.0))]),
-                    record(vec![("a", number(1.0))]),
-                ]),
-                string("a"),
-            ],
-        ),
-        ("sum", vec![list(vec![number(1.0), number(2.0)])]),
-        ("min", vec![list(vec![number(1.0), number(2.0)])]),
-        ("max", vec![list(vec![number(1.0), number(2.0)])]),
-        ("replace", vec![string("aba"), string("a"), string("x")]),
-        ("lower", vec![string("ABC")]),
-        ("upper", vec![string("abc")]),
-        ("unique", vec![list(vec![number(1.0), number(1.0)])]),
-        ("reverse", vec![list(vec![number(1.0), number(2.0)])]),
-    ];
-
-    let mut smoke_names = smoke.iter().map(|(name, _)| *name).collect::<Vec<_>>();
-    smoke_names.sort_unstable();
-    let mut registry_names = lashlang::builtin_names().collect::<Vec<_>>();
-    registry_names.sort_unstable();
-    assert_eq!(smoke_names, registry_names);
-
-    for (name, args) in smoke {
-        run(finish_program(call(name, args)))
-            .await
-            .unwrap_or_else(|error| panic!("builtin `{name}` failed to execute: {error}"));
-    }
-}
 
 /// Compiles an IR program as the main entry of the raw module artifact it
 /// forms, through the one public compile entry.

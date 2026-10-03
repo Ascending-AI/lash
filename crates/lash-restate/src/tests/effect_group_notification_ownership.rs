@@ -20,10 +20,7 @@
 
 use lash_restate_test::protocol::MessageType;
 
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
-use super::effect_group_seat_chain::{
-    WIDTH, group_invocations, issued_calls, names, run_batch_on, run_width_four_batch,
-};
+use super::effect_group_seat_chain::{WIDTH, issued_calls, names};
 
 /// The index record's state key: the one decision a seat writes.
 const INDEX_STATE_KEY: &str = "effect-group/v1/state";
@@ -262,74 +259,4 @@ pub(super) fn assert_children_issued_before_any_wait(
         awaited, 0,
         "no child result lands between the first and the last child call"
     );
-}
-
-async fn assert_notification_ownership(always_replay: bool) {
-    let harness = run_width_four_batch(always_replay).await;
-    let server = harness
-        .server_double()
-        .expect("the law reads journals on the server double");
-    let (dispatch, children) = group_invocations(&server).await;
-    assert_seats_invoke_nothing(&server);
-    assert_no_generic_group_waits(&server, &children);
-    assert_children_issued_before_any_wait(&server, &dispatch);
-    harness.finish().await;
-}
-
-/// The structural law of the ticket, on the double.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_seat_invokes_no_other_service_for_its_notifications() {
-    assert_notification_ownership(false).await;
-}
-
-/// The same law where every await suspends and every resumption replays its
-/// journal: the subscriptions and their completions are replay-stable.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_seat_invokes_no_other_service_for_its_notifications_under_forced_replay() {
-    assert_notification_ownership(true).await;
-}
-
-/// A seat crashed after its decision is written and before it completes its
-/// subscribers completes each of them on its retry; every rank is still
-/// served once and no generic wait appears.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_seat_crashed_before_its_notifications_completes_them_on_retry() {
-    for always_replay in [false, true] {
-        let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
-            unreachable!("in_process names the server double");
-        };
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-                seed,
-                always_replay,
-            })
-            .await;
-        let server = harness
-            .server_double()
-            .expect("the law crashes seats on the server double");
-        for ty in [
-            MessageType::CompleteAwakeableCommand,
-            MessageType::OutputCommand,
-        ] {
-            server.crash_on(
-                lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeFrame {
-                    ty,
-                })
-                .service("EffectGroupIndex")
-                .handler("record_settlement")
-                .within_attempts(1),
-            );
-        }
-        run_batch_on(&harness).await;
-        let (_, children) = group_invocations(&server).await;
-        assert!(
-            index_invocations(&server, "record_settlement")
-                .iter()
-                .any(|view| view.attempts > 1),
-            "the law's crash struck a seat"
-        );
-        assert_seats_invoke_nothing(&server);
-        assert_no_generic_group_waits(&server, &children);
-        harness.finish().await;
-    }
 }

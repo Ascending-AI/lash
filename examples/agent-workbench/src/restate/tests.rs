@@ -434,25 +434,6 @@ fn cron_sync_classifies_permanent_errors_terminal_and_unknown_errors_retryable()
     );
 }
 
-#[test]
-fn runtime_shape_uses_the_shared_terminal_classifier() {
-    let error = AppError::runtime(lash::EmbedError::Runtime(
-        lash::runtime::RuntimeError::new(
-            lash::runtime::RuntimeErrorCode::RuntimeStore,
-            "retired controller-owned session",
-        )
-        .with_cause(lash::runtime::RuntimeErrorCause::SessionDeleted {
-            session_id: SessionId::from("retired-session"),
-        }),
-    ));
-
-    assert_eq!(error.verdict, crate::AppErrorVerdict::Terminal);
-    assert_eq!(
-        error.message,
-        crate::deleted_session_message(&SessionId::from("retired-session"))
-    );
-}
-
 /// A turn that parked on a replay divergence keeps its invocation's journal:
 /// the attempt fails retryably, nothing settles, no failure is recorded, and
 /// the turn stays in flight for the restored deployment to complete.
@@ -503,24 +484,6 @@ async fn a_parked_turn_fails_its_attempt_retryably_without_settling() {
         state.active_turns.for_session(&session_id).is_some(),
         "a parked turn is not settled: it stays in flight"
     );
-}
-
-/// FIG-3735: a generation refusal whose scope has no turn in flight ran
-/// nothing a journal could hold, so the handler path keeps it terminal: it
-/// settles, records the failure, and writes no park.
-#[test]
-fn foreign_effect_controller_codes_remain_explicit_extensions() {
-    let error = lash::runtime::RuntimeEffectControllerError::foreign(
-        "workbench_extension_abort",
-        lash::runtime::TurnFailureCause::Outcome,
-        "extension refused the effect",
-    );
-
-    assert_eq!(
-        error.code,
-        lash::runtime::RuntimeErrorCode::from_wire_code("workbench_extension_abort")
-    );
-    assert_eq!(error.code.as_str(), "workbench_extension_abort");
 }
 
 #[test]

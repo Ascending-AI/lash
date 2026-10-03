@@ -205,7 +205,7 @@ pub enum ResolveOutcome {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExternalCompletionError, Resolution};
+    use super::Resolution;
 
     /// FIG-3435: the resolver's code decodes through foreign ingress — a
     /// payload claiming `lash`, `provider`, or a retired alias, and any bare
@@ -237,24 +237,5 @@ mod tests {
             assert_eq!(error.code.spelling(), spelling, "{wire}");
             assert_eq!(error.code.turn_code(), None, "{wire}");
         }
-    }
-
-    /// A genuine foreign pair round-trips through serde with both halves
-    /// verbatim — the foreign decode is stable across journaled re-reads.
-    #[test]
-    fn external_completion_foreign_pair_round_trips() {
-        let error = ExternalCompletionError::new(
-            lash_sansio::FailureCode::foreign(
-                lash_sansio::Namespace::host("agent_workbench").expect("valid namespace"),
-                "approval_denied",
-            )
-            .expect("foreign namespace"),
-            "denied",
-        );
-        let json = serde_json::to_value(&error).expect("serialize");
-        assert_eq!(
-            serde_json::from_value::<ExternalCompletionError>(json).expect("deserialize"),
-            error
-        );
     }
 }

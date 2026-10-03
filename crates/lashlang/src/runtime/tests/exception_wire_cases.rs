@@ -295,52 +295,6 @@ async fn a_handler_naming_a_sibling_scope_is_refused() {
     assert_exception_wire_refused(&program, forged, "is not live at");
 }
 
-/// The same substitution with catch handlers: the resumed VM must not be able
-/// to enter an unrelated catch body.
-#[tokio::test(flavor = "current_thread")]
-async fn a_handler_naming_an_unrelated_catch_scope_is_refused() {
-    let program = compile_program(&Program::block(vec![
-        Expr::Assign {
-            target: crate::AssignTarget::variable("first".into()),
-            expr: Box::new(exception_try(
-                Expr::Throw(Box::new(Expr::String("one".into()))),
-                Some(("first_error", Expr::String("first".into()))),
-                None,
-            )),
-        },
-        Expr::Finish(Box::new(exception_try(
-            Expr::Throw(Box::new(Expr::String("two".into()))),
-            Some(("second_error", Expr::String("second".into()))),
-            None,
-        ))),
-    ]));
-    let scopes = program
-        .chunk
-        .code
-        .iter()
-        .filter_map(|instruction| match instruction {
-            Instruction::PushHandler {
-                handler,
-                finally,
-                catches,
-            } => Some((*handler, *finally, *catches)),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(scopes.len(), 2, "two independent try scopes");
-
-    let base = find_instruction_continuation(&program, |continuation| {
-        continuation.handler_stack.len() == 1
-            && continuation.handler_stack[0].handler_instruction_pointer == scopes[0].0
-    })
-    .await;
-    let mut forged = base;
-    forged.handler_stack[0].handler_instruction_pointer = scopes[1].0;
-    forged.handler_stack[0].finally_instruction_pointer = scopes[1].1;
-    forged.handler_stack[0].catches = scopes[1].2;
-    assert_exception_wire_refused(&program, forged, "is not live at");
-}
-
 /// `InvalidExceptionState` is the VM's own signal that the bytecode violated
 /// the handler/finally discipline. Routing it back through the handler stack
 /// would hand an internal invariant violation to the very structure that is

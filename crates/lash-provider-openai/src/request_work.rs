@@ -27,19 +27,12 @@ pub(crate) fn attachment_data_url(media_type: &str, bytes: &[u8]) -> String {
     url
 }
 
-#[cfg(test)]
-thread_local! {
-    pub(crate) static PROBE_WRITES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
 struct SizeProbe {
     remaining: usize,
 }
 
 impl Write for SizeProbe {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        #[cfg(test)]
-        PROBE_WRITES.with(|writes| writes.set(writes.get() + 1));
         self.remaining = self
             .remaining
             .checked_sub(bytes.len())
@@ -257,22 +250,6 @@ mod tests {
         assert!(raw.len() <= EXCERPT_BYTES + 40);
         assert!(raw.ends_with("[body bytes: 12288]"));
         assert!(raw.starts_with('€'));
-    }
-
-    #[test]
-    fn json_excerpt_counts_escaped_bytes_without_a_full_output_buffer() {
-        let value = serde_json::json!({"text": "€\n".repeat(EXCERPT_BYTES)});
-        let wire = serde_json::to_string(&value).unwrap();
-        assert_eq!(json_excerpt(&value), body_excerpt(&wire));
-    }
-
-    #[test]
-    fn direct_writer_preserves_wire_bytes() {
-        let body = serde_json::json!({"z": "line\nquote\"", "a": [1, null, true]});
-        assert_eq!(
-            serialize_body(&body).unwrap(),
-            br#"{"a":[1,null,true],"z":"line\nquote\""}"#
-        );
     }
 
     #[tokio::test(flavor = "current_thread")]

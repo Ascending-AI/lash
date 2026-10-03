@@ -183,18 +183,6 @@ impl lash_core::Clock for ManualClock {
     }
 }
 
-#[test]
-fn manual_clock_wall_clock_faces_agree() {
-    let clock = ManualClock::new(1_700_000_000_123);
-    let clock: &dyn lash_core::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;

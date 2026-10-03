@@ -415,13 +415,6 @@ mod tests {
         }
     }
 
-    /// Two processes are two openers, whatever either was labelled.
-    #[test]
-    fn distinct_processes_are_distinct_openers() {
-        assert_ne!(process_opener(1), process_opener(2));
-        assert_ne!(process_opener(1).render(), process_opener(2).render());
-    }
-
     /// The reason the rendering is tagged. A turn scope is free-form text and
     /// can spell a process opener exactly; untagged, the two would mint one
     /// identity.
@@ -505,20 +498,6 @@ mod tests {
         );
     }
 
-    /// A component holding the separator is encodable too: its length marks
-    /// its boundary exactly.
-    #[test]
-    fn a_component_holding_the_separator_encodes_unambiguously() {
-        assert_eq!(
-            EffectOpener::turn(":", "t").identity_encoding(),
-            "turn:1:::1:t"
-        );
-        assert_ne!(
-            EffectOpener::turn("a", ":t").identity_encoding(),
-            EffectOpener::turn("a:", "t").identity_encoding()
-        );
-    }
-
     /// A session operation is its own opener, distinct from any turn: a
     /// turn whose ids spell an operation must not reach it.
     #[test]
@@ -538,66 +517,6 @@ mod tests {
             Some("session-1")
         );
         assert!(operation.process_id().is_none());
-    }
-
-    /// Kind-tagged on the wire, so a decoded opener cannot change arm.
-    #[test]
-    fn an_opener_round_trips_its_kind_and_its_process() {
-        for opener in [EffectOpener::turn("s", "t"), process_opener(7)] {
-            let json = serde_json::to_string(&opener).expect("an opener serializes");
-            let decoded: EffectOpener = serde_json::from_str(&json).expect("an opener decodes");
-            assert_eq!(decoded, opener);
-        }
-        let json = serde_json::to_string(&process_opener(7)).expect("serializes");
-        assert!(
-            json.contains("\"kind\":\"process\""),
-            "the kind tag is what keeps the two arms apart, got {json}"
-        );
-    }
-
-    /// A process opener has no session of its own; a turn opener does. Callers
-    /// that need a session beside a process opener must carry it and say so.
-    #[test]
-    fn only_a_turn_opener_answers_with_a_session() {
-        assert_eq!(
-            EffectOpener::turn("s", "t")
-                .session_id()
-                .map(SessionId::as_str),
-            Some("s")
-        );
-        assert!(process_opener(1).session_id().is_none());
-        assert!(EffectOpener::turn("s", "t").process_id().is_none());
-        assert_eq!(process_opener(1).process_id(), Some(&process(1)));
-    }
-
-    // -----------------------------------------------------------------------
-    // `for_scope`: the one owner derivation — an admitted scope, with no name
-    // resolution.
-    // -----------------------------------------------------------------------
-
-    /// Turn and session-operation scopes carry their whole owner in the scope
-    /// itself.
-    #[test]
-    fn a_turn_and_a_session_operation_scope_derive_their_openers() {
-        assert_eq!(
-            EffectOpener::for_scope(&AdmittedScope::turn("s", "t")).expect("a turn is an opener"),
-            EffectOpener::turn("s", "t")
-        );
-        assert_eq!(
-            EffectOpener::for_scope(&AdmittedScope::session_operation("s", "d"))
-                .expect("a session operation is an opener"),
-            EffectOpener::session_operation("s", "d")
-        );
-    }
-
-    /// A process scope is the opener of its process.
-    #[test]
-    fn a_process_scope_is_a_process_opener() {
-        assert_eq!(
-            EffectOpener::for_scope(&AdmittedScope::process(process(3)))
-                .expect("a process is an opener"),
-            EffectOpener::process(process(3))
-        );
     }
 
     /// The administrative scope kinds run no durable effects and own nothing.

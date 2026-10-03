@@ -264,10 +264,6 @@ impl SessionModel {
         &self.bindings
     }
 
-    pub(crate) fn get(&self, name: &str) -> Option<&serde_json::Value> {
-        self.bindings.get(name)
-    }
-
     /// Advances the model over `cell` and returns what the cell must do.
     pub(crate) fn apply(&mut self, cell: &Cell) -> Expectation {
         match cell {

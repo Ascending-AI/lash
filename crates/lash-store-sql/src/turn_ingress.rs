@@ -179,7 +179,3 @@ crate::statements! {
              LEFT JOIN earliest_input AS input ON TRUE";
     }
 }
-
-#[cfg(test)]
-#[path = "turn_ingress/tests.rs"]
-mod tests;

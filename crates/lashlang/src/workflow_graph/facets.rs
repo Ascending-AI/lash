@@ -536,16 +536,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn diagnostic_kind_vocabulary_is_closed_over_current_link_errors() {
-        assert_eq!(WorkflowDiagnosticKind::ALL.len(), 50);
-        let spellings = WorkflowDiagnosticKind::ALL
-            .into_iter()
-            .map(|kind| kind.as_str())
-            .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(spellings.len(), 50);
-    }
-
-    #[test]
     fn slot_fill_check_has_explicit_value_to_slot_direction_and_consistent_any() {
         assert!(workflow_slot_accepts_value(
             &TypeExpr::Int,

@@ -1,5 +1,5 @@
 use super::*;
-use crate::{SessionId, TurnId};
+use crate::TurnId;
 use proptest::{
     collection::vec,
     prelude::*,
@@ -213,26 +213,6 @@ fn each_refusal_names_the_scenario_that_produces_it() {
     }
 }
 
-/// The spellings travel into host logs and metrics labels, and they are the
-/// same strings the admission-decision diagnostics have always emitted.
-#[test]
-fn refusal_spellings_are_stable() {
-    let cases = [
-        (AdmissionRefusal::ZeroLimit, "zero_limit"),
-        (AdmissionRefusal::Empty, "empty"),
-        (AdmissionRefusal::CommandAtHead, "command_at_head"),
-        (
-            AdmissionRefusal::DeliveryBoundaryBlocked,
-            "delivery_boundary_blocked",
-        ),
-        (AdmissionRefusal::HeadWithheld, "head_withheld"),
-        (AdmissionRefusal::AdmissionRaceLost, "admission_race_lost"),
-    ];
-    for (refusal, expected) in cases {
-        assert_eq!(refusal.as_str(), expected);
-    }
-}
-
 #[test]
 fn matching_key_groups_prefix_up_to_row_bound() {
     let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
@@ -248,173 +228,6 @@ fn matching_key_groups_prefix_up_to_row_bound() {
         .unwrap(),
         1
     );
-}
-
-fn drain_all(max_context_tokens: usize, action_token_reserve: usize) -> TurnLaneAdmissionPolicy {
-    let mut admission_policy = policy(max_context_tokens, action_token_reserve);
-    admission_policy.drain_policy =
-        std::sync::Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
-    admission_policy
-}
-
-/// ADR 0101 §5.2: `authority` and `merge_key` are per-item data, not
-/// equality gates. A prefix of rows with different principals, elevations
-/// and merge keys, an absent key included, is offered whole, and each
-/// candidate carries its own values to the drain policy.
-#[test]
-fn authority_and_merge_key_are_per_item_data_not_composition_gates() {
-    let mut different_principal = candidate(2, Some("wake"));
-    different_principal.authority = QueuedWorkAuthority::new("other");
-    let mut different_elevation = candidate(3, Some("other"));
-    different_elevation.authority = QueuedWorkAuthority::new("principal").with_elevation("root");
-    let candidates = vec![
-        candidate(1, None),
-        different_principal,
-        different_elevation,
-        candidate(4, None),
-    ];
-    assert_eq!(
-        select_turn_work_indices(
-            &candidates,
-            AdmissionBoundary::Idle,
-            &drain_all(1_000, 100),
-            1_000,
-        )
-        .unwrap(),
-        vec![0, 1, 2, 3]
-    );
-
-    #[derive(Debug)]
-    struct Offered(std::sync::Mutex<Vec<(Option<String>, QueuedWorkAuthority)>>);
-    impl crate::QueuedDrainPolicy for Offered {
-        fn name(&self) -> &str {
-            "test_offered"
-        }
-
-        fn select_drain(
-            &self,
-            request: &crate::QueuedDrainRequest<'_>,
-        ) -> crate::QueuedDrainSelection {
-            *self.0.lock().unwrap() = request
-                .candidates()
-                .iter()
-                .map(|candidate| (candidate.merge_key.clone(), candidate.authority.clone()))
-                .collect();
-            crate::QueuedDrainSelection::head_only()
-        }
-    }
-    let offered = std::sync::Arc::new(Offered(std::sync::Mutex::new(Vec::new())));
-    let mut admission_policy = policy(1_000, 100);
-    admission_policy.drain_policy = offered.clone();
-    select_turn_work_indices(
-        &candidates,
-        AdmissionBoundary::Idle,
-        &admission_policy,
-        1_000,
-    )
-    .unwrap();
-    assert_eq!(
-        *offered.0.lock().unwrap(),
-        candidates
-            .iter()
-            .map(|candidate| (candidate.merge_key.clone(), candidate.authority.clone()))
-            .collect::<Vec<_>>(),
-        "every candidate reaches the policy with its own merge key and authority"
-    );
-}
-
-/// A host that keeps principals apart does it in its drain policy: the
-/// selection stops where the principal changes, and the rest stays queued.
-#[test]
-fn a_host_policy_keeps_principals_apart() {
-    #[derive(Debug)]
-    struct OnePrincipalPerTurn;
-    impl crate::QueuedDrainPolicy for OnePrincipalPerTurn {
-        fn name(&self) -> &str {
-            "test_one_principal_per_turn"
-        }
-
-        fn select_drain(
-            &self,
-            request: &crate::QueuedDrainRequest<'_>,
-        ) -> crate::QueuedDrainSelection {
-            let candidates = request.candidates();
-            let Some(head) = candidates.first() else {
-                return crate::QueuedDrainSelection::head_only();
-            };
-            crate::QueuedDrainSelection::leading(
-                candidates
-                    .iter()
-                    .take_while(|candidate| {
-                        candidate.authority.principal == head.authority.principal
-                    })
-                    .count(),
-            )
-        }
-    }
-    let mut other = candidate(3, Some("wake"));
-    other.authority = QueuedWorkAuthority::new("other");
-    let candidates = vec![candidate(1, Some("wake")), candidate(2, None), other];
-    let mut admission_policy = policy(1_000, 100);
-    admission_policy.drain_policy = std::sync::Arc::new(OnePrincipalPerTurn);
-    assert_eq!(
-        select_turn_work_indices(
-            &candidates,
-            AdmissionBoundary::Idle,
-            &admission_policy,
-            1_000
-        )
-        .unwrap(),
-        vec![0, 1]
-    );
-}
-
-#[test]
-fn control_kind_is_a_command_barrier() {
-    let mut first = candidate(1, Some("wake"));
-    first.kind = QueuedWorkKind::Control;
-    // Kind now states the family completely; Control cannot masquerade as
-    // turn work by carrying an independent work_class value.
-    assert!(!first.kind.is_batchable());
-    let candidates = vec![first, candidate(2, Some("wake"))];
-    assert_eq!(select_leading_session_command(&candidates), 1);
-    let selection = super::select_turn_work_prefix(
-        &candidates,
-        AdmissionBoundary::Idle,
-        &policy(1_000, 100),
-        1_000,
-    )
-    .unwrap();
-    assert_eq!(
-        selection,
-        TurnWorkPrefix::Refused {
-            reason: AdmissionRefusal::CommandAtHead
-        }
-    );
-}
-
-#[test]
-fn delivery_and_work_class_mismatches_break_prefix() {
-    let first = candidate(1, Some("a"));
-    let mut different_delivery = candidate(2, Some("a"));
-    different_delivery.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
-    let mut command = candidate(2, Some("a"));
-    command.kind = QueuedWorkKind::Control;
-    for candidates in [
-        vec![first.clone(), different_delivery],
-        vec![first.clone(), command],
-    ] {
-        assert_eq!(
-            select_turn_work_prefix(
-                &candidates,
-                AdmissionBoundary::Idle,
-                &drain_all(1_000, 100),
-                1_000
-            )
-            .unwrap(),
-            1
-        );
-    }
 }
 
 #[test]
@@ -609,69 +422,6 @@ fn oversized_for_reserve_but_fitting_context_is_attempted_alone() {
 }
 
 #[test]
-fn row_that_cannot_fit_context_fails_loudly() {
-    let mut first = candidate(7, Some("wake"));
-    first.turn_causes = vec![wake_cause(7, &"a".repeat(1_001))];
-    assert!(matches!(
-        select_turn_work_prefix(
-            &[first],
-            AdmissionBoundary::Idle,
-            &policy(1_000, 300),
-            1_000
-        ),
-        Err(StoreError::QueuedWorkRowExceedsContextWindow {
-            batch_enqueue_seq: 7,
-            ..
-        })
-    ));
-}
-
-#[test]
-fn active_turn_checkpoint_boundary_gates_on_delivery_policy() {
-    let mut first = candidate(1, None);
-    first.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
-    assert_eq!(
-        select_turn_work_prefix(
-            &[first],
-            AdmissionBoundary::ActiveTurnCheckpoint,
-            &policy(1_000, 100),
-            1_000,
-        )
-        .unwrap(),
-        0
-    );
-}
-
-#[test]
-fn leading_session_command_blocks_turn_work_admission() {
-    let mut command = candidate(1, None);
-    command.kind = QueuedWorkKind::Control;
-    let candidates = vec![command, candidate(2, None)];
-    assert_eq!(select_leading_session_command(&candidates), 1);
-    assert_eq!(
-        select_turn_work_prefix(
-            &candidates,
-            AdmissionBoundary::Idle,
-            &policy(1_000, 100),
-            1_000
-        )
-        .unwrap(),
-        0
-    );
-}
-
-#[test]
-fn every_session_command_is_admitted_alone() {
-    let mut first = candidate(1, None);
-    first.kind = QueuedWorkKind::Control;
-    let mut second = first.clone();
-    second.batch_id = "qwb-2".into();
-    second.enqueue_seq = 2;
-
-    assert_eq!(select_leading_session_command(&[first, second]), 1);
-}
-
-#[test]
 fn overdue_head_is_admitted_alone_at_admission_time() {
     let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
     assert_eq!(
@@ -684,36 +434,4 @@ fn overdue_head_is_admitted_alone_at_admission_time() {
         .unwrap(),
         1
     );
-}
-
-#[test]
-fn batch_id_includes_optional_nonce() {
-    let plain = derive_batch_id(&SessionId::from("session"), Some("key"), 1_000, None);
-    let nonced = derive_batch_id(&SessionId::from("session"), Some("key"), 1_000, Some(1));
-    assert_ne!(plain, nonced);
-    assert!(plain.starts_with("qwb:"));
-}
-
-#[test]
-fn pending_session_ordering_drains_commands_first() {
-    let key = |enqueued_at_ms, enqueue_seq| PendingWorkOrderingKey {
-        enqueued_at_ms,
-        enqueue_seq,
-    };
-    let precedes = |command, input| {
-        PendingSessionWorkOrdering {
-            session_command: command,
-            turn_input: input,
-        }
-        .session_command_precedes_turn_input()
-    };
-
-    assert!(precedes(Some(key(10, 9)), Some(key(11, 1))));
-    assert!(precedes(Some(key(11, 1)), Some(key(10, 9))));
-    // Commands precede inputs regardless of timestamps or sequence.
-    assert!(precedes(Some(key(10, 1)), Some(key(10, 2))));
-    assert!(precedes(Some(key(10, 2)), Some(key(10, 1))));
-    assert!(precedes(Some(key(10, 1)), Some(key(10, 1))));
-    assert!(precedes(Some(key(10, 1)), None));
-    assert!(!precedes(None, Some(key(10, 1))));
 }

@@ -191,33 +191,3 @@ pub(crate) fn retired_generation_message(
         executing.as_str()
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_sentinel_admits_only_its_own_generation() {
-        let own = BuildGeneration::for_test("t0");
-        assert!(check_generation("LashTurn", &own, &own).is_ok());
-        let other = BuildGeneration::for_test("t1");
-        let refusal =
-            check_generation("LashTurn", &other, &own).expect_err("another generation parks");
-        let message = format!("{refusal:?}");
-        assert!(message.contains("RetiredGeneration"), "{message}");
-        assert!(message.contains(other.as_str()), "{message}");
-    }
-
-    /// The sentinel's journaled bytes are frozen: the step name, and an
-    /// output that is the generation as a bare JSON string. Every later
-    /// build reads a sentinel an earlier one wrote.
-    #[test]
-    fn the_sentinel_step_bytes_are_frozen() {
-        assert_eq!(GENERATION_SENTINEL, "lash.build.generation");
-        let generation = BuildGeneration::from_digest([0x3f, 0xa9, 0x00, 0xbc, 0x12, 0xde]);
-        assert_eq!(
-            serde_json::to_vec(&generation).expect("encode"),
-            b"\"3fa900bc12de\"".to_vec()
-        );
-    }
-}

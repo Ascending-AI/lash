@@ -80,12 +80,6 @@ impl BoundSession {
         self
     }
 
-    /// Whether this binding keeps a tool-child context source alive.
-    #[cfg(test)]
-    pub(crate) fn holds_tool_child_context_source(&self) -> bool {
-        self.tool_child_context_source.is_some()
-    }
-
     pub(crate) fn store(&self) -> lash_core::store::SessionStore {
         self.store.clone()
     }

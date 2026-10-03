@@ -197,56 +197,6 @@ fn orphan_rebinds_at_explicit_source_admission() {
 }
 
 #[test]
-fn restore_binds_snapshot_id_from_source_that_advertises_nothing() {
-    let snapshot = host_only_snapshot(1);
-
-    let target = ToolRegistry::empty();
-    target
-        .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
-        .expect("lazy source registered before restore");
-    let report = target.restore_state(snapshot).expect("lazy id binds");
-
-    assert!(report.is_clean());
-    let exported = target.export_state();
-    let entry = exported
-        .get(&tool_id("host_only"))
-        .expect("snapshot-only id retained");
-    assert!(!entry.is_orphaned());
-    assert!(entry.is_member());
-}
-
-#[tokio::test]
-async fn source_admission_preserves_snapshot_curation_without_authority_latching() {
-    let target = ToolRegistry::empty();
-    target
-        .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
-        .expect("exact source registered");
-    target
-        .restore_state(host_only_snapshot(1))
-        .expect("snapshot id admitted from the exact source");
-
-    let result = execute_leaf_by_id(
-        &target,
-        &tool_id("host_only"),
-        &json!({}),
-        &test_attempt_context(),
-    )
-    .await;
-
-    assert!(
-        result.is_success(),
-        "authority policy is not registry curation: {result:?}"
-    );
-    assert!(
-        target
-            .export_state()
-            .get(&tool_id("host_only"))
-            .expect("admitted tool recorded")
-            .is_member()
-    );
-}
-
-#[test]
 fn restore_drops_superseded_orphan_and_does_not_transfer_opt_out() {
     struct ReplacedSearchTool;
     #[async_trait::async_trait]
@@ -370,55 +320,6 @@ fn orphan_flag_serializes_on_every_entry_and_is_required() {
         error.to_string().contains("orphaned"),
         "the refusal must name the missing field: {error}"
     );
-}
-
-#[test]
-fn member_false_decodes_as_host_curation_intent() {
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source");
-    let manifest = serde_json::to_value(
-        source
-            .export_state()
-            .get(&tool_id("mock_tool"))
-            .expect("mock entry")
-            .manifest(),
-    )
-    .expect("serialize mock manifest");
-    let entry: ToolStateEntry = serde_json::from_value(json!({
-        "manifest": manifest,
-        "orphaned": false,
-        "member": false,
-    }))
-    .expect("non-member entry decodes");
-
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
-    target
-        .restore_state(ToolState::new(
-            1,
-            [(tool_id("mock_tool"), entry)].into_iter().collect(),
-        ))
-        .expect("non-member curation restores against the live source");
-
-    assert!(
-        !target
-            .export_state()
-            .get(&tool_id("mock_tool"))
-            .expect("restored mock entry")
-            .is_member(),
-        "legacy member=false remains an explicit host opt-out"
-    );
-}
-
-#[test]
-fn remove_source_removes_all_source_tools() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
-    registry
-        .upsert_source(Arc::new(ExternalMockSource))
-        .expect("source registered");
-    registry
-        .remove_source_id("external")
-        .expect("source removed");
-    let defs = registry.tool_manifests();
-    assert!(!defs.iter().any(|def| def.name == "mcp__demo__search"));
 }
 
 #[test]

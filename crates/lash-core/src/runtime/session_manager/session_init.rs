@@ -1707,22 +1707,6 @@ mod tests {
         );
     }
 
-    /// FIG-4631: a recorded session whose head selects no model is refused
-    /// typed and terminal when its runtime is assembled. Nothing on that
-    /// path binds a model, so no session error there is `LlmProfileUnavailable`.
-    #[test]
-    fn a_recorded_session_with_no_profile_is_terminal_llm_profile_unconfigured() {
-        let refused = recorded_session_error(crate::SessionError::LlmProfileUnconfigured {
-            session_id: SessionId::from("recorded-without-model"),
-        });
-        assert_eq!(
-            runtime_code(&refused),
-            Some(&crate::RuntimeErrorCode::LlmProfileUnconfigured),
-            "{refused:?}"
-        );
-        assert!(refused.is_terminal() && !refused.is_retryable());
-    }
-
     /// FIG-4594: a request that states its whole config (a host session-turn
     /// start's spec) records exactly that: its policy's turn budget, and its
     /// key minted with the reasoning it states. A starter's recorded policy

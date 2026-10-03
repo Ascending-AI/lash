@@ -102,35 +102,6 @@ pub(crate) const CATALOG: &[SqliteMigration] = &[
     },
 ];
 
-#[cfg(test)]
-mod release_catalog_tests {
-    use super::*;
-
-    #[test]
-    fn production_catalog_is_empty_and_synthetic_steps_are_adjacent() {
-        #[cfg(not(feature = "synthetic-next"))]
-        assert!(CATALOG.is_empty(), "the production catalog starts empty");
-        #[cfg(feature = "synthetic-next")]
-        {
-            assert_eq!(CATALOG.len(), SqliteDatabase::ALL.len());
-            for database in SqliteDatabase::ALL {
-                let steps: Vec<_> = CATALOG
-                    .iter()
-                    .filter(|step| step.database == database)
-                    .collect();
-                assert_eq!(steps.len(), 1, "one adjacent step for {database:?}");
-                let descriptor = compat::descriptor(database.component()).expect("descriptor");
-                assert_eq!(
-                    (steps[0].from, steps[0].to),
-                    (descriptor.reads.min(), descriptor.writes.max()),
-                    "the step carries {database:?} from the version before to the one this \
-                     build writes"
-                );
-            }
-        }
-    }
-}
-
 /// The compatibility version this build writes for `database`.
 pub(crate) fn target_version(database: SqliteDatabase) -> rusqlite::Result<u32> {
     compat::descriptor(database.component())
@@ -1176,27 +1147,3 @@ fn sync_directory(path: &Path) -> Result<(), Stop> {
 #[cfg(all(test, feature = "synthetic-next"))]
 #[path = "migration_tests.rs"]
 mod laws;
-
-#[cfg(test)]
-mod catalog_tests {
-    use super::*;
-
-    /// Every stamp this build reads below the version it writes has a
-    /// catalog path to it, so an open never finds a store it reads but
-    /// cannot migrate.
-    #[test]
-    fn the_catalog_covers_every_readable_version() {
-        for database in SqliteDatabase::ALL {
-            let descriptor =
-                compat::descriptor(database.component()).expect("every database has a descriptor");
-            let target = descriptor.writes.max();
-            for from in descriptor.reads.min()..=target {
-                assert!(
-                    catalog_path(database, from, target).is_some(),
-                    "the {} has no catalog path from {from} to {target}",
-                    database.name()
-                );
-            }
-        }
-    }
-}

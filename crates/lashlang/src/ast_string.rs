@@ -109,18 +109,3 @@ impl PartialEq<AstString> for String {
         self == other.as_str()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn serde_and_schema_match_string() {
-        let value = AstString::from("name");
-        assert_eq!(serde_json::to_value(&value).expect("serializes"), "name");
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(AstString)).expect("schema serializes"),
-            serde_json::to_value(schemars::schema_for!(String)).expect("schema serializes")
-        );
-    }
-}

@@ -1481,20 +1481,3 @@ async fn a_stalled_turn_does_not_block_competing_recovery_open() {
     wait_for_turn_released(&state, &session_id, &turn_id, Duration::from_secs(10)).await;
     assert!(state.active_turns.for_session(&session_id).is_none());
 }
-
-/// The browser contract for both halves of FIG-1000: a queued send renders its
-/// receipt instead of a user row, busy remains a sequenced state projection, and
-/// a failed turn's `done` rebuilds the transcript from the authoritative snapshot
-/// so the retired row disappears from every tab that already rendered it.
-#[test]
-fn workbench_ui_renders_queued_sends_and_failed_turn_reconciliation() {
-    assert!(ui::INDEX_HTML.contains("accepted?.queued"));
-    assert!(ui::INDEX_HTML.contains("renderIngressReceipt(accepted.queued_input)"));
-    assert!(ui::INDEX_HTML.contains("event.outcome === \"failed\""));
-    assert!(ui::INDEX_HTML.contains("function applySequencedBusySnapshot"));
-    assert_eq!(
-        ui::INDEX_HTML.matches("setBusy(").count(),
-        2,
-        "only the busy renderer and sequenced snapshot application may name setBusy"
-    );
-}

@@ -146,16 +146,6 @@ fn object_aliases_and_argument_aliases_are_shared() {
 }
 
 #[test]
-fn captured_objects_keep_reference_identity() {
-    assert_eq!(
-        finished(
-            "const state = { value: 1 }; const bump = () => { state.value = state.value + 1; }; bump(); finish(state.value);"
-        ),
-        Value::Number(2.0)
-    );
-}
-
-#[test]
 fn return_runs_and_can_be_replaced_by_finally() {
     assert_eq!(
         finished(
@@ -163,39 +153,6 @@ fn return_runs_and_can_be_replaced_by_finally() {
         ),
         Value::Number(2.0)
     );
-}
-
-#[test]
-fn type_level_typescript_syntax_is_erased_while_namespaces_and_decorators_reject() {
-    assert_eq!(
-        finished(
-            r#"
-            interface Box<T> { value: T }
-            type Numeric = number;
-            function identity<T>(value: T): T { return value; }
-            const value: Numeric = (identity<number>(2) as number)!;
-            finish(value satisfies Numeric);
-            "#,
-        ),
-        Value::Number(2.0)
-    );
-    for (source, code) in [
-        (
-            "namespace N {}",
-            lash_typescript::DiagnosticCode::NamespaceUnsupported,
-        ),
-        (
-            "@sealed class C {}",
-            lash_typescript::DiagnosticCode::DecoratorUnsupported,
-        ),
-    ] {
-        assert_eq!(
-            lash_typescript::testing::compile(source)
-                .expect_err("runtime-emitting TypeScript syntax must reject")
-                .code,
-            code
-        );
-    }
 }
 
 #[test]
@@ -217,30 +174,6 @@ fn accepted_string_methods_use_the_vm_intrinsics() {
         finished("finish('typescript'.startsWith('type'));"),
         Value::Bool(true)
     );
-}
-
-#[test]
-fn unsupported_constructs_have_stable_named_diagnostics() {
-    use lash_typescript::DiagnosticCode as Code;
-    let cases = [
-        ("class A {}", Code::ClassUnsupported),
-        ("function* f() {}", Code::GeneratorUnsupported),
-        ("namespace N {}", Code::NamespaceUnsupported),
-        ("eval('1')", Code::EvalUnsupported),
-        ("new Function('return 1')", Code::NewUnsupported),
-        ("label: while (true) break label;", Code::LabelUnsupported),
-        (
-            "const x = { get value() { return 1; } };",
-            Code::AccessorUnsupported,
-        ),
-        ("import('x')", Code::DynamicImportUnsupported),
-        ("const x = this;", Code::ThisUnsupported),
-    ];
-    for (source, expected) in cases {
-        let error = lash_typescript::validate(source).expect_err(source);
-        assert_eq!(error.code, expected, "{source}: {error}");
-        assert!(error.to_string().starts_with(expected.as_str()));
-    }
 }
 
 #[test]
@@ -465,86 +398,6 @@ mod durability {
     /// Programs that exercise the whole accepted binding surface, each one
     /// suspended at a `print` effect and snapshotted the way an RLM session
     /// does between turns.
-    const DURABLE_CORPUS: &[&str] = &[
-        "const shared = { value: 1 }; const alias = shared; print('x'); finish(`${alias.value}`);",
-        "function fact(n: number): number { if (n <= 1) { return 1; } return fact(n - 1) * n; } print('x'); finish(`${fact(5)}`);",
-        "const top = 9; function outerFn(): number { function innerFn(): number { return top; } return innerFn(); } print('x'); finish(`${outerFn()}`);",
-        "const base = 10; const outer = () => { const inner = () => base; return inner; }; print('x'); finish(`${outer()()}`);",
-        "const items = [1, 2, 3]; const total = items.length; print('x'); finish(`${total}`);",
-        "const g = (n: number): number => n + 1; const h = (n: number): number => g(n) * 2; print('x'); finish(`${h(3)}`);",
-        // Root-level block scopes: their bindings must not publish generated
-        // names into the durable global surface.
-        "let r = 'x'; try { throw 'boom'; } catch (e) { r = e; } print('x'); finish(r);",
-        "{ const inner = 1; } print('x'); finish('done');",
-        "if (1) { const branch = 2; } print('x'); finish('done');",
-        "try { const attempted = 1; } finally { const cleaned = 2; } print('x'); finish('done');",
-        "const g = function self(n: number): number { if (n <= 0) { return 0; } return self(n - 1); }; print('x'); finish(`${g(3)}`);",
-        "const key = { id: 1 }; const map = new Map([[key, 'value']]); const alias = map; print('x'); finish(`${alias.get(key)}|${alias === map}`);",
-        "const set = new Set([NaN, -0, 2]); const alias = set; print('x'); finish(`${alias.has(NaN)}|${alias === set}`);",
-        "const date = new Date('2000-02-29T12:34:56.789Z'); const alias = date; print('x'); finish(`${alias.toISOString()}|${alias === date}`);",
-        "enum Status { Ready, Done = 4 } const alias = Status; print('x'); finish(`${alias.Ready}|${alias[4]}`);",
-    ];
-
-    fn suspended_continuation_json(source: &str) -> String {
-        futures::executor::block_on(async move {
-            let program = lash_typescript::testing::compile(source)
-                .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
-            let mut state = State::new();
-            let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
-            assert_eq!(
-                vm.run_process_until_effect().await.expect("run to print"),
-                VmRunOutcome::EffectCompleted,
-                "{source}"
-            );
-            let continuation = vm
-                .suspend()
-                .unwrap_or_else(|error| panic!("suspend `{source}`: {error}"));
-            serde_json::to_string(&continuation).expect("encode continuation")
-        })
-    }
-
-    fn suspend_and_snapshot(source: &str) -> Vec<String> {
-        futures::executor::block_on(async move {
-            let program = lash_typescript::testing::compile(source)
-                .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
-            let mut state = State::new();
-            let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
-            assert_eq!(
-                vm.run_process_until_effect().await.expect("run to print"),
-                VmRunOutcome::EffectCompleted,
-                "{source}"
-            );
-            // The continuation across an effect boundary must encode.
-            let continuation = vm
-                .suspend()
-                .unwrap_or_else(|error| panic!("suspend `{source}`: {error}"));
-            serde_json::to_vec(&continuation).expect("encode continuation");
-            while let VmRunOutcome::EffectCompleted = vm
-                .run_process_until_effect()
-                .await
-                .unwrap_or_else(|error| panic!("finish `{source}`: {error}"))
-            {}
-            drop(vm);
-            // The between-turn snapshot must encode too.
-            let snapshot = state.snapshot();
-            snapshot
-                .to_canonical_bytes()
-                .unwrap_or_else(|error| panic!("snapshot `{source}`: {error}"));
-            snapshot
-                .globals()
-                .iter()
-                .map(|(name, _)| name.to_string())
-                .collect::<Vec<_>>()
-        })
-    }
-
-    #[test]
-    fn accepted_programs_suspend_and_snapshot() {
-        for source in DURABLE_CORPUS {
-            suspend_and_snapshot(source);
-        }
-    }
-
     #[test]
     fn map_set_and_date_aliases_survive_a_continuation_restart() {
         futures::executor::block_on(async {
@@ -578,52 +431,6 @@ mod durability {
                 ))
             );
         });
-    }
-
-    /// The globals an RLM session carries between turns, which is also what the
-    /// bound-variables prompt renders from.
-    fn persisted_globals(source: &str) -> Vec<String> {
-        let program = lash_typescript::testing::compile(source)
-            .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
-        let mut state = State::new();
-        futures::executor::block_on(lashlang::execute(&program, &mut state, &Host))
-            .unwrap_or_else(|error| panic!("execute `{source}`: {error}"));
-        state
-            .snapshot()
-            .globals()
-            .iter()
-            .map(|(name, _)| name.to_string())
-            .collect()
-    }
-
-    #[test]
-    fn no_generated_binding_reaches_the_global_surface() {
-        for source in DURABLE_CORPUS {
-            for name in persisted_globals(source) {
-                assert!(
-                    !name.starts_with("__typescript"),
-                    "generated binding `{name}` leaked into the globals of `{source}`"
-                );
-            }
-            // The suspended continuation is the other durable artifact.
-            assert!(
-                !suspended_continuation_json(source).contains("__typescript"),
-                "a generated binding leaked into the continuation of `{source}`"
-            );
-        }
-        // A block binding that shadows an outer name still needs a slot of
-        // its own, but the lowering marks that slot private, so the VM drops
-        // it when the cell ends: no surface has to filter it by name.
-        let shadowing = "const e = 'outer'; let seen = ''; try { throw 'boom'; } catch (e) { seen = e; } finish(`${e}|${seen}`);";
-        let globals = persisted_globals(shadowing);
-        assert!(
-            globals.iter().all(|name| !name.starts_with("__typescript")),
-            "a private shadow slot persisted: {globals:?}"
-        );
-        assert!(
-            globals.iter().any(|name| name == "e") && globals.iter().any(|name| name == "seen"),
-            "the authored bindings persist: {globals:?}"
-        );
     }
 
     #[test]

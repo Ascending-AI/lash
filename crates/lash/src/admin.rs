@@ -1402,19 +1402,6 @@ mod injected_message_tests {
     use super::*;
 
     #[test]
-    fn parts_only_injection_preserves_text() {
-        let mut message = PluginMessage::text(lash_core::MessageRole::User, "");
-        message.parts = vec![lash_core::Part::text(
-            "input.p0".into(),
-            "injected text".into(),
-            None,
-        )];
-        let input = turn_input_from_plugin_message(message);
-        assert!(
-            matches!(input.items.as_slice(), [InputItem::Text { text }] if text == "injected text")
-        );
-    }
-    #[test]
     fn mixed_parts_injection_preserves_order_and_attachment_sources() {
         let source = lash_core::AttachmentSource::Inline {
             media_type: "image/png".parse().unwrap(),

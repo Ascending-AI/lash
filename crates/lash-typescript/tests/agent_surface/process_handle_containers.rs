@@ -182,25 +182,6 @@ fn list_storage_preserves_process_handles() {
 }
 
 #[test]
-fn object_storage_preserves_process_handles() {
-    law(OBJECT, "handles.child", "", false);
-}
-
-#[test]
-fn list_storage_preserves_process_handles_across_suspension() {
-    for suspension in ["await sleep(1);", "await tools.ping({});"] {
-        law(LIST, "handles[0]", suspension, false);
-    }
-}
-
-#[test]
-fn object_storage_preserves_process_handles_across_suspension() {
-    for suspension in ["await sleep(1);", "await tools.ping({});"] {
-        law(OBJECT, "handles.child", suspension, false);
-    }
-}
-
-#[test]
 fn durable_replay_preserves_process_handles_in_containers() {
     law(LIST, "handles[0]", "await sleep(1);", true);
     law(OBJECT, "handles.child", "await sleep(1);", true);

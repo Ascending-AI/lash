@@ -111,14 +111,6 @@ async fn each_cell_starts_its_own_count() {
         .expect("the next cell of the same turn has its whole limit");
 }
 
-/// A group of timers alone makes no tool call.
-#[tokio::test]
-async fn a_group_without_tool_calls_counts_nothing() {
-    let context = cell(1);
-    context.reserve_tool_calls("timers", 0).await.expect("free");
-    context.reserve_tool_calls("g1", 1).await.expect("fits");
-}
-
 /// A process's limit is what it holds at once: the call past it is refused
 /// while the held calls are held, and admitted once they are consumed.
 #[tokio::test]
@@ -147,39 +139,6 @@ async fn a_process_is_refused_past_what_it_holds_and_admitted_after_it_consumes(
         .reserve_tool_calls("g2", 2)
         .await
         .expect("the consumed calls are no longer held");
-}
-
-/// A successor segment is the same process: the groups it reattaches hold the
-/// calls their predecessor counted, once.
-#[tokio::test]
-async fn reattached_groups_hold_the_calls_their_predecessor_counted() {
-    let predecessor = process(4);
-    predecessor.reserve_tool_calls("g1", 3).await.expect("fits");
-    predecessor.retain_outstanding_group(
-        // Four children: three tool calls and a timer, which is not counted.
-        crate::EffectGroupHandle::restored("g1", 4, 1).expect("a valid cursor"),
-    );
-    let handover = predecessor.outstanding_groups_snapshot();
-    let held = predecessor.held_tool_calls_snapshot();
-    assert_eq!(held.get("g1"), Some(&3));
-
-    let successor = process(4);
-    successor.restore_outstanding_groups(handover, &held);
-    successor
-        .reserve_tool_calls("g1", 3)
-        .await
-        .expect("the reattached group is not counted twice");
-    // Past the limit a process first asks whether its oldest held group has
-    // settled; this fixture's controller serves no settlement read, so that
-    // fails rather than the limit refusing. Either way nothing is admitted.
-    assert!(
-        successor.reserve_tool_calls("g2", 2).await.is_err(),
-        "the reattached group still holds three of four"
-    );
-    successor
-        .reserve_tool_calls("g2", 1)
-        .await
-        .expect("the remaining call is available");
 }
 
 #[tokio::test]

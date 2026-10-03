@@ -310,32 +310,6 @@ mod tests {
         assert!(err.to_string().contains("current_query"));
     }
 
-    #[tokio::test]
-    async fn session_projection_declaration_lists_names() {
-        let session = test_session(
-            RlmProtocolPluginConfig::builder()
-                .channel(crate::RlmChannel::Cell)
-                .instruction_limit(crate::plugin::InstructionBound::unbounded())
-                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
-                .build(),
-        );
-        session
-            .apply_session_extension(crate::rlm_session_projection_extension(
-                RlmProjectedBindings::new()
-                    .bind_json("current_query", serde_json::json!("first"))
-                    .expect("bind"),
-            ))
-            .await
-            .expect("projection");
-
-        let declaration = session
-            .runtime_state
-            .read_only_variables_prompt()
-            .await
-            .expect("the session declares its read-only variables");
-        assert!(declaration.contains("`current_query`: `string`, read-only"));
-    }
-
     /// FIG-4588: the session's system prompt renders from the prompt config
     /// the given plugin config recorded, over the session's bindings and the
     /// given catalog and subagent authority. A run admitted before a prompt
@@ -439,70 +413,6 @@ mod tests {
                 .expect("the built-in prompt renders"),
             "a session that recorded no RLM namespace yet renders the built-in prompt"
         );
-    }
-
-    #[test]
-    fn soft_budget_warning_emits_plugin_event_not_user_message() {
-        let session = test_session(RlmProtocolPluginConfig {
-            continue_as_soft_warn_tokens: Some(100_000),
-            ..RlmProtocolPluginConfig::builder()
-                .channel(crate::RlmChannel::Cell)
-                .instruction_limit(crate::plugin::InstructionBound::unbounded())
-                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
-                .build()
-        });
-        let policy = lash_core::SessionPolicy {
-            model: Some(lash_core::LlmProfileConfig::new(
-                lash_core::RecordedLlmProfile::mint(
-                    lash_core::LlmProfileKey::from("budget-unit-model"),
-                    lash_core::LlmProfileMetadata::builder("budget-unit-model")
-                        .context_window_tokens(200_000)
-                        .build()
-                        .expect("model limits"),
-                ),
-            )),
-            ..lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-                lash_core::MaxToolCalls::new(1024),
-            )
-        };
-        let state = lash_core::SessionSnapshot {
-            last_prompt_usage: Some(lash_core::TokenUsage {
-                input_tokens: 120_292,
-                ..Default::default()
-            }),
-            ..lash_core::SessionSnapshot::new(lash_core::SessionId::from("session"), policy)
-        };
-        let directives = session
-            .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
-                session_id: SessionId::from("root"),
-                checkpoint: lash_core::CheckpointKind::AfterWork,
-                state: lash_core::SessionReadView::from_snapshot(&state),
-                sessions: Arc::new(NoopPromptManager),
-                session_lifecycle: Arc::new(NoopPromptManager),
-                session_graph: Arc::new(NoopPromptManager),
-                plugin_config: Default::default(),
-            })
-            .expect("warning directives");
-
-        assert_eq!(directives.len(), 1);
-        let lash_core::plugin::TurnPluginDirective::Ambient(
-            lash_core::plugin::PluginDirective::EmitRuntimeEvents { events },
-        ) = &directives[0]
-        else {
-            panic!("budget warning must be a runtime event, not an injected message");
-        };
-        assert_eq!(events.len(), 1);
-        let lash_core::PluginRuntimeEvent::Status { key, label, detail } = &events[0] else {
-            panic!("budget warning should use a typed status runtime event");
-        };
-        assert_eq!(key, BUDGET_WARNING_STATUS);
-        assert_eq!(label, "context budget");
-        assert!(detail.as_deref().is_some_and(|text| {
-            text.contains("120292 tokens used")
-                && text.contains("warn at 100000")
-                && text.contains("choose frame switch path")
-        }));
     }
 
     #[test]

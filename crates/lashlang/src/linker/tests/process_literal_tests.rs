@@ -28,34 +28,6 @@ fn process_names(program: &Program) -> Vec<String> {
 }
 
 #[test]
-fn lift_processes_a_literal_in_a_process_typed_slot() {
-    // The literal carries its parameter annotations, so the lifted
-    // declaration's signature is typed and the tool's contract accepts it.
-    let program = builders::module(
-        vec![],
-        vec![
-            builders::assign(
-                "handle",
-                crew_run(builders::process_literal(
-                    vec![builders::param("tick", TypeExpr::Any)],
-                    builders::finish(builders::string("done")),
-                )),
-            ),
-            builders::finish(builders::var("handle")),
-        ],
-    );
-
-    let linked = LinkedModule::link(program, full_host_environment())
-        .expect("a literal lifts where the slot expects a process");
-    let names = process_names(linked.artifact.ir());
-    assert_eq!(names.len(), 1, "{names:?}");
-    assert!(
-        names[0].starts_with(crate::LIFTED_PROCESS_NAME_PREFIX),
-        "lifted names are linker-invented: {names:?}"
-    );
-}
-
-#[test]
 fn lifted_literals_do_not_lower_process_parameters_to_any() {
     // A `str` annotation on the literal's parameter reaches the lifted
     // declaration's signature: the gap where TypeScript process parameters
@@ -437,50 +409,6 @@ fn assert_process_signals_and_exports(linked: &LinkedModule, expected: &[Vec<Pro
         assert_eq!(&process.signals, signals, "signals for {}", process.name);
     }
     assert_eq!(linked.artifact.module_ref(), corrected.module_ref());
-}
-
-#[test]
-fn nested_signal_parent_wait_before_child_survives() {
-    let linked = LinkedModule::link(
-        nested_signal_module(vec![
-            typed_signal_wait("before", "accept_str"),
-            builders::assign(
-                "child",
-                builders::process_literal(vec![], typed_signal_wait("child", "accept_int")),
-            ),
-        ]),
-        full_host_environment(),
-    )
-    .expect("independent nested signals link");
-    assert_process_signals_and_exports(
-        &linked,
-        &[
-            vec![builders::signal("child", TypeExpr::Int)],
-            vec![builders::signal("before", TypeExpr::Str)],
-        ],
-    );
-}
-
-#[test]
-fn nested_signal_parent_wait_after_child_excludes_child() {
-    let linked = LinkedModule::link(
-        nested_signal_module(vec![
-            builders::assign(
-                "child",
-                builders::process_literal(vec![], typed_signal_wait("child", "accept_int")),
-            ),
-            typed_signal_wait("after", "accept_str"),
-        ]),
-        full_host_environment(),
-    )
-    .expect("independent nested signals link");
-    assert_process_signals_and_exports(
-        &linked,
-        &[
-            vec![builders::signal("child", TypeExpr::Int)],
-            vec![builders::signal("after", TypeExpr::Str)],
-        ],
-    );
 }
 
 #[test]

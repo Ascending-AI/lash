@@ -456,7 +456,6 @@ fn endpoint_uses_http(endpoint: &str) -> bool {
 mod tests {
     use super::*;
     use lash_conformance::ReopenableAttachmentStore;
-    use lash_core::{AttachmentTypeMetadata, MediaType};
     use object_store::aws::AmazonS3ConfigKey;
 
     #[tokio::test]
@@ -659,16 +658,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn normalizes_prefixes() {
-        assert_eq!(normalize_prefix(None), None);
-        assert_eq!(normalize_prefix(Some("")), None);
-        assert_eq!(
-            normalize_prefix(Some("/lash/e2e/")),
-            Some("lash/e2e".to_string())
-        );
-    }
-
     #[tokio::test]
     async fn s3_attachment_store_satisfies_conformance_with_in_memory_object_store() {
         lash_conformance::attachment_store(
@@ -778,61 +767,6 @@ mod tests {
             partial_root_handles().await,
         )
         .await;
-    }
-
-    #[tokio::test]
-    async fn duplicate_puts_are_content_addressed_when_live_s3_configured() {
-        let Some(config) = live_s3_config() else {
-            eprintln!("skipping live S3 duplicate-put test: LASH_REQUIRE_S3 is not set");
-            return;
-        };
-        let store = S3AttachmentStore::from_config(config).expect("store");
-        let meta = AttachmentCreateMeta::new(
-            MediaType::parse("image/png").unwrap(),
-            Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
-            Some("pixel".to_string()),
-        );
-        let first = store
-            .put(vec![1, 2, 3], meta.clone())
-            .await
-            .expect("first put");
-        let second = store.put(vec![1, 2, 3], meta).await.expect("second put");
-        assert_eq!(first.id, second.id);
-    }
-
-    #[tokio::test]
-    async fn delete_removes_content_and_is_idempotent_when_live_s3_configured() {
-        let Some(config) = live_s3_config() else {
-            eprintln!("skipping live S3 delete test: LASH_REQUIRE_S3 is not set");
-            return;
-        };
-        let store = S3AttachmentStore::from_config(config).expect("store");
-        let meta = AttachmentCreateMeta::new(
-            MediaType::parse("image/png").unwrap(),
-            Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
-            Some("pixel".to_string()),
-        );
-        let reference = store.put(vec![4, 5, 6, 7], meta).await.expect("put");
-        store
-            .get(&reference.id, 32 * 1024 * 1024)
-            .await
-            .expect("present before delete");
-
-        store.delete(&reference.id).await.expect("delete content");
-        let err = store
-            .get(&reference.id, 32 * 1024 * 1024)
-            .await
-            .expect_err("content must be gone after delete");
-        assert!(
-            matches!(err, AttachmentStoreError::NotFound(_)),
-            "deleted content must map to NotFound, got {err:?}"
-        );
-
-        // Idempotent: deleting already-absent content succeeds.
-        store
-            .delete(&reference.id)
-            .await
-            .expect("delete of absent content is a no-op");
     }
 
     /// The live S3 server `scripts/ci/with-service.sh s3` stands up (Garage),

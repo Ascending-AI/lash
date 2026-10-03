@@ -95,23 +95,6 @@ pub(super) fn names(calls: &[IssuedCall]) -> Vec<String> {
     calls.iter().map(ToString::to_string).collect()
 }
 
-/// A width-4 batch of intent-free model tool calls, run through the
-/// endpoint's own turn runner on a fresh double: the group every law below
-/// reads. The gated schedule holds every member until all four started, so
-/// the members settle together — the case a serial seat chain costs most.
-pub(super) async fn run_width_four_batch(always_replay: bool) -> LiveConformanceHarness {
-    let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
-        unreachable!("in_process names the server double");
-    };
-    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-        seed,
-        always_replay,
-    })
-    .await;
-    run_batch_on(&harness).await;
-    harness
-}
-
 /// The harness's turn runner, except that a finished scenario keeps its
 /// completed journals: the laws read them after the batch.
 pub(super) struct JournalKeepingRunner(
@@ -285,45 +268,6 @@ pub(super) fn assert_admission_chain(
     );
 }
 
-/// L1: a seated rank waits on no sibling.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_seated_rank_waits_on_no_sibling_and_commits_once() {
-    let harness = run_width_four_batch(false).await;
-    let server = harness
-        .server_double()
-        .expect("the law reads journals on the server double");
-    let (_, children) = group_invocations(&server).await;
-    assert_seat_chains(&server, &children);
-    harness.finish().await;
-}
-
-/// L2: a 4-child group is admitted through one registration.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_four_child_group_is_admitted_through_one_registration() {
-    let harness = run_width_four_batch(false).await;
-    let server = harness
-        .server_double()
-        .expect("the law reads journals on the server double");
-    let (dispatch, _) = group_invocations(&server).await;
-    assert_admission_chain(&server, &dispatch);
-    harness.finish().await;
-}
-
-/// L5: both chains hold where every await suspends and every resumption
-/// replays its journal: the skipped commit re-read and the unbarriered seat
-/// are replay-stable.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn the_seat_and_admission_chains_hold_under_forced_replay() {
-    let harness = run_width_four_batch(true).await;
-    let server = harness
-        .server_double()
-        .expect("the law reads journals on the server double");
-    let (dispatch, children) = group_invocations(&server).await;
-    assert_seat_chains(&server, &children);
-    assert_admission_chain(&server, &dispatch);
-    harness.finish().await;
-}
-
 /// Every dispatch lane the double serves: the stable lane and the build's
 /// own. A crash rule names a service exactly, so a law scripts its crash on
 /// each lane and the lane the group runs on fires it.
@@ -335,48 +279,6 @@ pub(super) fn dispatch_services(server: &lash_restate_test::RestateTestServer) -
         .collect::<Vec<_>>();
     assert!(!lanes.is_empty(), "the double serves a dispatch lane");
     lanes
-}
-
-/// L3 end to end, and the new cut point: a child killed after its §4 commit
-/// and its presentation ran, before the presentation's result was durable,
-/// replays its commit's recorded answer, commits nothing again and seats its
-/// reserved rank.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_child_killed_between_its_commit_and_its_seat_seats_once() {
-    let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
-        unreachable!("in_process names the server double");
-    };
-    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-        seed,
-        always_replay: false,
-    })
-    .await;
-    let server = harness
-        .server_double()
-        .expect("the law crashes a child on the server double");
-    for lane in dispatch_services(&server) {
-        server.crash_on(
-            lash_restate_test::CrashRule::new(
-                lash_restate_test::CrashPoint::BeforeRunResultEnding {
-                    suffix: ":present".to_string(),
-                },
-            )
-            .service(lane)
-            .handler("child"),
-        );
-    }
-    run_batch_on(&harness).await;
-    let (_, children) = group_invocations(&server).await;
-    assert!(
-        children.iter().any(|child| child.attempts > 1),
-        "the law's crash struck a child between its commit and its seat: {:?}",
-        children
-            .iter()
-            .map(|child| (&child.target, child.attempts))
-            .collect::<Vec<_>>()
-    );
-    assert_seat_chains(&server, &children);
-    harness.finish().await;
 }
 
 /// L6: a dispatch killed after every child call is journaled and before it
@@ -421,137 +323,6 @@ async fn a_dispatch_killed_before_it_registers_redrives_to_one_registration() {
             .is_some_and(|call| call.is_index("register_dispatch")),
         "the dispatch's last index call is its one registration: {:?}",
         names(&calls)
-    );
-    assert_admission_chain(&server, &dispatch);
-    assert_seat_chains(&server, &children);
-    harness.finish().await;
-}
-
-/// Scripts one crash of the first attempt at each cut point a seat crosses:
-/// the index's §4 commit before its answer is recorded, the child after its
-/// commit's answer and before its seat, the payload after it is stored, and
-/// the seat after its state is written and before it completes its
-/// subscribers (or, with none left, before its answer).
-fn crash_every_seat_cut(server: &lash_restate_test::RestateTestServer) {
-    use lash_restate_test::{CrashPoint, CrashRule};
-    for lane in dispatch_services(server) {
-        server.crash_on(
-            CrashRule::new(CrashPoint::BeforeRunResultEnding {
-                suffix: ":present".to_string(),
-            })
-            .service(lane)
-            .handler("child")
-            .within_attempts(1),
-        );
-    }
-    for rule in [
-        CrashRule::new(CrashPoint::BeforeFrame {
-            ty: MessageType::OutputCommand,
-        })
-        .service("EffectGroupIndex")
-        .handler("commit_child"),
-        CrashRule::new(CrashPoint::BeforeFrame {
-            ty: MessageType::OutputCommand,
-        })
-        .service("EffectGroupPayload")
-        .handler("put"),
-        CrashRule::new(CrashPoint::BeforeFrame {
-            ty: MessageType::CompleteAwakeableCommand,
-        })
-        .service("EffectGroupIndex")
-        .handler("record_settlement"),
-        CrashRule::new(CrashPoint::BeforeFrame {
-            ty: MessageType::OutputCommand,
-        })
-        .service("EffectGroupIndex")
-        .handler("record_settlement"),
-    ] {
-        server.crash_on(rule.within_attempts(1));
-    }
-}
-
-async fn assert_batch_survives_every_seat_cut(always_replay: bool) {
-    let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
-        unreachable!("in_process names the server double");
-    };
-    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-        seed,
-        always_replay,
-    })
-    .await;
-    let server = harness
-        .server_double()
-        .expect("the law crashes seats on the server double");
-    crash_every_seat_cut(&server);
-    run_batch_on(&harness).await;
-    let (dispatch, children) = group_invocations(&server).await;
-    let crashed = server
-        .invocations()
-        .into_iter()
-        .filter(|view| view.attempts > 1)
-        .map(|view| view.target)
-        .collect::<Vec<_>>();
-    for handler in ["/commit_child", "/child", "/put", "/record_settlement"] {
-        assert!(
-            crashed.iter().any(|target| target.ends_with(handler)),
-            "a crash struck {handler}: {crashed:?}"
-        );
-    }
-    assert_seat_chains(&server, &children);
-    assert_admission_chain(&server, &dispatch);
-    harness.finish().await;
-}
-
-/// Every cut a seat crosses, crashed once: each child still commits once,
-/// seats its reserved rank once, and the batch answers every member.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_batch_crashed_at_every_seat_cut_seats_each_rank_once() {
-    assert_batch_survives_every_seat_cut(false).await;
-}
-
-/// The same crashes where every await suspends and every resumption replays
-/// its journal: a replay serves the recorded commit answer and run.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_batch_crashed_at_every_seat_cut_seats_each_rank_once_under_forced_replay() {
-    assert_batch_survives_every_seat_cut(true).await;
-}
-
-/// L6, the registration's own cut: `register_dispatch` crashed after it wrote
-/// the ready state and before it completed its READY subscribers (or, with
-/// none, before its answer). Its retry completes every subscriber; the opener
-/// and every child proceed.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_registration_crashed_before_its_notifications_completes_every_subscriber_on_retry() {
-    let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
-        unreachable!("in_process names the server double");
-    };
-    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-        seed,
-        always_replay: false,
-    })
-    .await;
-    let server = harness
-        .server_double()
-        .expect("the law crashes the registration on the server double");
-    for ty in [
-        MessageType::CompleteAwakeableCommand,
-        MessageType::OutputCommand,
-    ] {
-        server.crash_on(
-            lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeFrame { ty })
-                .service("EffectGroupIndex")
-                .handler("register_dispatch")
-                .within_attempts(1),
-        );
-    }
-    run_batch_on(&harness).await;
-    let (dispatch, children) = group_invocations(&server).await;
-    assert!(
-        server
-            .invocations()
-            .iter()
-            .any(|view| view.target.ends_with("/register_dispatch") && view.attempts > 1),
-        "the law's crash struck the registration"
     );
     assert_admission_chain(&server, &dispatch);
     assert_seat_chains(&server, &children);

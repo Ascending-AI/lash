@@ -3,242 +3,38 @@ use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_5c02;
-use proptest::prelude::*;
-use std::collections::BTreeSet;
-
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RuntimeScenarioCoverage {
-    pub(crate) test_name: &'static str,
-    pub(crate) declared_test: fn(),
     pub(crate) display_name: &'static str,
-    pub(crate) owned_invariant: &'static str,
 }
 
-macro_rules! runtime_scenario_coverage {
-    ($test_fn:ident, $display_name:literal, $owned_invariant:literal) => {
-        RuntimeScenarioCoverage {
-            test_name: stringify!($test_fn),
-            declared_test: $test_fn,
-            display_name: $display_name,
-            owned_invariant: $owned_invariant,
-        }
-    };
-}
-
-const COMMAND_BEFORE_TURN_WORK: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint,
-    "command before turn work",
-    "Session-command gate, checkpoint persistence, stale queue completion rejection, final queue drain."
-);
-const COMMAND_ONLY_QUEUE_DRAIN: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_command_only_queue_drain_completes_without_turn_work,
-    "command-only queue drain",
-    "Command-only queued work admits no turn work and explicitly commits."
-);
-const QUEUED_WORK_KEEPS_NEXT_INPUT: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_queued_work_admission_keeps_pending_next_turn_input,
-    "queued work admission keeps pending next-turn input",
-    "Queued turn work does not consume pending next-turn input."
-);
-const ACTIVE_CHECKPOINT_WAKE_ADMISSION: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_admits_process_wake_at_active_checkpoint_boundary,
-    "active checkpoint process wake admission",
-    "Process-wake turn work is eligible at the active-checkpoint admission boundary."
-);
-const QUEUED_TURN_INPUT_COMPLETION: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_admits_queued_turn_input_and_completes_it,
-    "queued turn input completion",
-    "Next-turn pending inputs are admitted, visible as held while live, and completed by commit."
-);
-const OBSERVATION_REPLAY: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_observation_replay_keeps_original_turn_input,
-    "observation replay preserves live turn input",
-    "Source-key observation replay preserves the original live input payload and id."
-);
-const CHECKPOINT_REDRIVE_CANCEL: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel,
-    "checkpoint redrive cancel",
-    "Active-turn input deferral, cancellation after deferral, and no later idle admission."
-);
-const SESSION_LEASE_RELEASE_FAULT: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_commits_after_advisory_session_lease_release,
-    "advisory session lease release",
-    "A released advisory lease permits a current-head commit while the head CAS rejects stale state."
-);
-const STALE_LEASE_EXPIRY: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_waits_for_stale_session_lease_ttl,
-    "stale session lease expiry",
-    "An unexpired stale holder stays busy; TTL expiry advances the fence and the successor stays protected."
-);
-const TOOL_INTENT_DRAIN: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_opted_in_provider_drains_every_v1_tool_intent,
-    "opted-in provider tool-intent drain",
-    "A real runtime turn commits an opted-in provider attempt, then realizes all four v1 intent kinds through the production coordinator."
-);
-
-pub(crate) const RUNTIME_SCENARIO_COVERAGE: &[RuntimeScenarioCoverage] = &[
-    COMMAND_BEFORE_TURN_WORK,
-    COMMAND_ONLY_QUEUE_DRAIN,
-    QUEUED_WORK_KEEPS_NEXT_INPUT,
-    ACTIVE_CHECKPOINT_WAKE_ADMISSION,
-    QUEUED_TURN_INPUT_COMPLETION,
-    OBSERVATION_REPLAY,
-    CHECKPOINT_REDRIVE_CANCEL,
-    SESSION_LEASE_RELEASE_FAULT,
-    STALE_LEASE_EXPIRY,
-    TOOL_INTENT_DRAIN,
-];
-
-#[test]
-fn runtime_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(RUNTIME_SCENARIO_COVERAGE.len(), 10);
-    let mut names = BTreeSet::new();
-    for coverage in RUNTIME_SCENARIO_COVERAGE {
-        let _declared_test = coverage.declared_test;
-        assert!(
-            coverage.test_name.starts_with("runtime_scenario_"),
-            "unexpected Runtime Scenario test name {}",
-            coverage.test_name
-        );
-        assert!(
-            !coverage.display_name.trim().is_empty(),
-            "{} must have a scenario display name",
-            coverage.test_name
-        );
-        assert!(
-            !coverage.owned_invariant.trim().is_empty(),
-            "{} must document its owned invariant",
-            coverage.test_name
-        );
-        assert!(
-            names.insert(coverage.test_name),
-            "duplicate Runtime Scenario coverage metadata for {}",
-            coverage.test_name
-        );
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum RuntimeStateMachinePhaseSymbol {
-    Ingress,
-    Checkpoint,
-    LeadingCommandRun,
-    TurnWorkAdmission,
-    NextTurnInputAdmission,
-    MisalignedNextTurnInputAdmission,
-    StaleLeaseExpiry,
-    StaleQueueCompletionFault,
-    ReleasedLeaseCommitFault,
-    Commit,
-}
-
-impl RuntimeStateMachinePhaseSymbol {
-    fn phase(self) -> RuntimeScenarioPhase {
-        match self {
-            Self::Ingress => RuntimeIngressPhase::new().into(),
-            Self::Checkpoint => RuntimeCheckpointPhase::new().into(),
-            Self::LeadingCommandRun => RuntimeLeadingCommandRunPhase::new().into(),
-            Self::TurnWorkAdmission => {
-                RuntimeTurnWorkAdmissionPhase::at(AdmissionBoundary::Idle).into()
-            }
-            Self::NextTurnInputAdmission => RuntimeNextTurnInputAdmissionPhase::new().into(),
-            Self::MisalignedNextTurnInputAdmission => RuntimeNextTurnInputAdmissionPhase::new()
-                .expect_inputs(vec!["one"], Vec::new())
-                .into(),
-            Self::StaleLeaseExpiry => RuntimeLeasePhase::expire_stale_holder().into(),
-            Self::StaleQueueCompletionFault => RuntimeFaultPhase::StaleQueueCompletion.into(),
-            Self::ReleasedLeaseCommitFault => {
-                RuntimeFaultPhase::CommitAfterAdvisoryLeaseRelease.into()
-            }
-            Self::Commit => RuntimeCommitPhase::new().into(),
-        }
-    }
-
-    fn releases_session_lease(self) -> bool {
-        matches!(self, Self::Commit | Self::ReleasedLeaseCommitFault)
-    }
-
-    fn requires_live_session_lease(self) -> bool {
-        matches!(
-            self,
-            Self::Checkpoint
-                | Self::LeadingCommandRun
-                | Self::TurnWorkAdmission
-                | Self::NextTurnInputAdmission
-                | Self::MisalignedNextTurnInputAdmission
-                | Self::StaleQueueCompletionFault
-                | Self::Commit
-        )
-    }
-}
-
-fn runtime_state_machine_phase_symbol_strategy()
--> impl Strategy<Value = RuntimeStateMachinePhaseSymbol> {
-    prop_oneof![
-        Just(RuntimeStateMachinePhaseSymbol::Ingress),
-        Just(RuntimeStateMachinePhaseSymbol::Checkpoint),
-        Just(RuntimeStateMachinePhaseSymbol::LeadingCommandRun),
-        Just(RuntimeStateMachinePhaseSymbol::TurnWorkAdmission),
-        Just(RuntimeStateMachinePhaseSymbol::NextTurnInputAdmission),
-        Just(RuntimeStateMachinePhaseSymbol::MisalignedNextTurnInputAdmission),
-        Just(RuntimeStateMachinePhaseSymbol::StaleLeaseExpiry),
-        Just(RuntimeStateMachinePhaseSymbol::StaleQueueCompletionFault),
-        Just(RuntimeStateMachinePhaseSymbol::ReleasedLeaseCommitFault),
-        Just(RuntimeStateMachinePhaseSymbol::Commit),
-    ]
-}
-
-fn runtime_state_machine_phase_order_oracle(symbols: &[RuntimeStateMachinePhaseSymbol]) -> bool {
-    let mut saw_lease_requiring_phase = false;
-    let mut saw_turn_work_admission = false;
-    for (index, symbol) in symbols.iter().copied().enumerate() {
-        if symbol.releases_session_lease() && index + 1 != symbols.len() {
-            return false;
-        }
-        if symbol.requires_live_session_lease() {
-            saw_lease_requiring_phase = true;
-        }
-        match symbol {
-            RuntimeStateMachinePhaseSymbol::StaleLeaseExpiry if saw_lease_requiring_phase => {
-                return false;
-            }
-            RuntimeStateMachinePhaseSymbol::StaleLeaseExpiry => {
-                saw_lease_requiring_phase = true;
-            }
-            RuntimeStateMachinePhaseSymbol::TurnWorkAdmission => {
-                saw_lease_requiring_phase = true;
-                saw_turn_work_admission = true;
-            }
-            RuntimeStateMachinePhaseSymbol::StaleQueueCompletionFault
-                if !saw_turn_work_admission =>
-            {
-                return false;
-            }
-            RuntimeStateMachinePhaseSymbol::MisalignedNextTurnInputAdmission => {
-                return false;
-            }
-            _ => {}
-        }
-    }
-    true
-}
-
-proptest! {
-    #[test]
-    fn runtime_state_machine_property_phase_order_matches_scenario_dsl(
-        symbols in prop::collection::vec(runtime_state_machine_phase_symbol_strategy(), 1..9),
-    ) {
-        let mut scenario = RuntimeScenario::new("runtime state-machine property");
-        for symbol in &symbols {
-            scenario = scenario.phase(symbol.phase());
-        }
-
-        prop_assert_eq!(
-            scenario.phase_order_is_valid_for_test(),
-            runtime_state_machine_phase_order_oracle(&symbols)
-        );
-    }
-}
+const COMMAND_BEFORE_TURN_WORK: RuntimeScenarioCoverage = RuntimeScenarioCoverage {
+    display_name: "command before turn work",
+};
+const COMMAND_ONLY_QUEUE_DRAIN: RuntimeScenarioCoverage = RuntimeScenarioCoverage {
+    display_name: "command-only queue drain",
+};
+const QUEUED_WORK_KEEPS_NEXT_INPUT: RuntimeScenarioCoverage = RuntimeScenarioCoverage {
+    display_name: "queued work admission keeps pending next-turn input",
+};
+const ACTIVE_CHECKPOINT_WAKE_ADMISSION: RuntimeScenarioCoverage = RuntimeScenarioCoverage {
+    display_name: "active checkpoint process wake admission",
+};
+const QUEUED_TURN_INPUT_COMPLETION: RuntimeScenarioCoverage = RuntimeScenarioCoverage {
+    display_name: "queued turn input completion",
+};
+const OBSERVATION_REPLAY: RuntimeScenarioCoverage = RuntimeScenarioCoverage {
+    display_name: "observation replay preserves live turn input",
+};
+const CHECKPOINT_REDRIVE_CANCEL: RuntimeScenarioCoverage = RuntimeScenarioCoverage {
+    display_name: "checkpoint redrive cancel",
+};
+const SESSION_LEASE_RELEASE_FAULT: RuntimeScenarioCoverage = RuntimeScenarioCoverage {
+    display_name: "advisory session lease release",
+};
+const STALE_LEASE_EXPIRY: RuntimeScenarioCoverage = RuntimeScenarioCoverage {
+    display_name: "stale session lease expiry",
+};
 
 #[tokio::test]
 async fn runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint() {

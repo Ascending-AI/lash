@@ -14,6 +14,8 @@ pub(crate) use lash_core::{
 };
 pub(crate) use tokio_util::sync::CancellationToken;
 
+#[cfg(test)]
+pub(crate) use lash_core::TurnEvent;
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{
     DeploymentStore, LlmCallRecord, LocalTurnStop, Message, PluginMessage, ProcessRegistry,
@@ -27,12 +29,10 @@ pub(crate) use lash_core::{
 };
 pub(crate) use lash_core::{InputItem, TokenUsage};
 pub(crate) use lash_core::{TurnActivity, TurnInput};
-#[cfg(test)]
-pub(crate) use lash_core::{TurnActivityId, TurnEvent};
 
 pub(crate) use crate::admin::{PluginOperations, SessionAdmin};
 pub(crate) use crate::core::{LashCore, build_plugin_host};
 pub(crate) use crate::error::{EmbedError, Result};
 pub(crate) use crate::session::{LashSession, ParkedSession, SessionBuilder};
 #[cfg(test)]
-pub(crate) use crate::turn::{RunActivityCollector, TurnReport, message_text};
+pub(crate) use crate::turn::{TurnReport, message_text};

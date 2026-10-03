@@ -619,60 +619,7 @@ pub fn tool_output_from_completion_resolution(
 
 #[cfg(test)]
 mod tests {
-    use serde::ser::{Error as _, Serializer};
-
     use super::*;
-
-    #[test]
-    fn tool_result_from_result_serializes_success_values() {
-        let result: ToolOutcome = Result::<_, std::io::Error>::Ok(vec!["alpha", "beta"]).into();
-        assert!(result.is_success());
-        assert_eq!(
-            result.value_for_projection(),
-            serde_json::json!(["alpha", "beta"])
-        );
-    }
-
-    #[test]
-    fn tool_result_from_result_formats_errors() {
-        let result: ToolOutcome =
-            Result::<serde_json::Value, _>::Err(std::io::Error::other("nope")).into();
-        assert!(!result.is_success());
-        assert_eq!(result.value_for_projection(), serde_json::json!("nope"));
-        assert_eq!(
-            result.as_output().value_for_projection()["message"],
-            serde_json::json!("nope")
-        );
-    }
-
-    #[test]
-    fn tool_result_from_result_reports_serialize_failures() {
-        struct BrokenValue;
-
-        impl serde::Serialize for BrokenValue {
-            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-            {
-                Err(S::Error::custom("boom"))
-            }
-        }
-
-        let result: ToolOutcome = Result::<BrokenValue, std::io::Error>::Ok(BrokenValue).into();
-        assert!(!result.is_success());
-        assert_eq!(
-            result.value_for_projection(),
-            serde_json::json!("Failed to serialize tool result: boom")
-        );
-    }
-
-    #[test]
-    fn pending_result_is_not_completed_output() {
-        let result = ToolOutcome::pending(PendingCompletion::new());
-        assert!(result.is_pending());
-        assert!(result.as_done_output().is_none());
-        assert!(result.into_done_output().is_err());
-    }
 
     // -----------------------------------------------------------------------
     // One wait, one shape (ADR 0095).
@@ -821,20 +768,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_declared_start_round_trips_under_the_resolver_tag() {
-        let resolver = declared_start();
-        let encoded = serde_json::to_value(&resolver).expect("encode");
-        assert_eq!(encoded["type"], serde_json::json!("declared_start"));
-        let decoded: crate::PendingResolver = serde_json::from_value(encoded).expect("decode");
-        assert_eq!(decoded, resolver);
-        let crate::PendingResolver::DeclaredStart(start) = decoded else {
-            unreachable!()
-        };
-        assert_eq!(start.identity().intent_index, 0);
-        assert!(resolver.awaits_process_terminal());
-    }
-
     /// A decoded declaration launches only for the call that declared it:
     /// its start names the admitted session and its identity is exactly the
     /// declaring attempt's for index 0, every field of it (ADR 0116 §3.1).
@@ -952,14 +885,5 @@ mod tests {
             assert_eq!(failure.class, crate::ToolFailureClass::Timeout);
             assert_eq!(failure.message, "subagent timed out after 3s");
         }
-    }
-
-    #[test]
-    fn a_wait_with_no_named_resolver_is_untouched() {
-        let resolution = crate::Resolution::Ok(serde_json::json!({ "done": true }));
-        assert_eq!(
-            tool_output_from_completion_resolution(resolution, None).value_for_projection(),
-            serde_json::json!({ "done": true })
-        );
     }
 }

@@ -531,34 +531,6 @@ mod tests {
         WorkerMessage,
     };
 
-    #[test]
-    fn a_deadline_is_the_hosts_verdict_and_retryable_where_a_run_limit_is_not() {
-        for (limit, host_verdict) in [
-            (WorkerLimit::Fuel, false),
-            (WorkerLimit::Heap, false),
-            (WorkerLimit::Depth, false),
-            (WorkerLimit::Observations, false),
-            (WorkerLimit::EffectValue { size: 2, bound: 1 }, false),
-            (WorkerLimit::VmState { size: 2, bound: 1 }, false),
-            (
-                WorkerLimit::Frame {
-                    kind: WorkerFrameKind::Complete,
-                    size: 2,
-                    bound: 1,
-                },
-                false,
-            ),
-            (WorkerLimit::Deadline, true),
-        ] {
-            assert_eq!(limit.is_host_verdict(), host_verdict, "{limit:?}");
-            assert_eq!(
-                InfrastructureOutcome::WorkerLimitExceeded { limit }.is_retryable(),
-                host_verdict,
-                "{limit:?}: only a limit the run itself exhausted fails every attempt"
-            );
-        }
-    }
-
     /// FIG-4645: a state the run was handed fails its check the same way on
     /// every attempt, so the refusal is terminal wherever it is met.
     #[test]

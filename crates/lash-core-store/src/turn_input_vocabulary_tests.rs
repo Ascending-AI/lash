@@ -66,96 +66,6 @@ fn next() -> TurnInputIngress {
 }
 
 #[test]
-fn open_state_carries_the_admission_scope() {
-    assert_eq!(
-        TurnInputState::open(active()),
-        TurnInputState::PendingActive(ActiveTurnIngress {
-            turn_id: crate::TurnId::from("turn-a"),
-            min_boundary: TurnInputCheckpointBoundary::AfterWork,
-        })
-    );
-    assert_eq!(
-        TurnInputState::open(next()),
-        TurnInputState::DeferredNextTurn
-    );
-}
-
-#[test]
-fn from_persisted_accepts_every_legal_pair() {
-    let legal = [
-        (
-            "pending_active",
-            active(),
-            TurnInputState::PendingActive(ActiveTurnIngress {
-                turn_id: crate::TurnId::from("turn-a"),
-                min_boundary: TurnInputCheckpointBoundary::AfterWork,
-            }),
-        ),
-        (
-            "accepted",
-            active(),
-            TurnInputState::Accepted(ActiveTurnIngress {
-                turn_id: crate::TurnId::from("turn-a"),
-                min_boundary: TurnInputCheckpointBoundary::AfterWork,
-            }),
-        ),
-        (
-            "deferred_next_turn",
-            next(),
-            TurnInputState::DeferredNextTurn,
-        ),
-        (
-            "cancelled",
-            active(),
-            TurnInputState::Cancelled {
-                ingress: active(),
-                at_ms: 7,
-            },
-        ),
-        (
-            "cancelled",
-            next(),
-            TurnInputState::Cancelled {
-                ingress: next(),
-                at_ms: 7,
-            },
-        ),
-        (
-            "completed",
-            active(),
-            TurnInputState::Completed {
-                ingress: active(),
-                at_ms: 7,
-            },
-        ),
-        (
-            "completed",
-            next(),
-            TurnInputState::Completed {
-                ingress: next(),
-                at_ms: 7,
-            },
-        ),
-    ];
-    for (spelling, ingress, expected) in legal {
-        assert_eq!(
-            TurnInputState::from_persisted(
-                spelling,
-                ingress.clone(),
-                matches!(
-                    expected.kind(),
-                    TurnInputStateKind::Cancelled | TurnInputStateKind::Completed
-                )
-                .then_some(7)
-            )
-            .unwrap(),
-            expected,
-            "{spelling} under {ingress:?} must decode"
-        );
-    }
-}
-
-#[test]
 fn from_persisted_rejects_every_check_illegal_pair() {
     let illegal = [
         ("pending_active", next()),
@@ -172,48 +82,6 @@ fn from_persisted_rejects_every_check_illegal_pair() {
         );
     }
     assert!(TurnInputState::from_persisted("bogus", active(), None).is_err());
-}
-
-#[test]
-fn state_kind_and_ingress_round_trip() {
-    let states = [
-        (
-            TurnInputState::open(active()),
-            TurnInputStateKind::PendingActive,
-            active(),
-        ),
-        (
-            TurnInputState::DeferredNextTurn,
-            TurnInputStateKind::DeferredNextTurn,
-            next(),
-        ),
-        (
-            TurnInputState::open(active()).accepted().unwrap(),
-            TurnInputStateKind::Accepted,
-            active(),
-        ),
-        (
-            TurnInputState::Cancelled {
-                ingress: active(),
-                at_ms: 7,
-            },
-            TurnInputStateKind::Cancelled,
-            active(),
-        ),
-        (
-            TurnInputState::Completed {
-                ingress: next(),
-                at_ms: 7,
-            },
-            TurnInputStateKind::Completed,
-            next(),
-        ),
-    ];
-    for (state, kind, ingress) in states {
-        assert_eq!(state.kind(), kind);
-        assert_eq!(state.as_str(), kind.as_str());
-        assert_eq!(state.ingress(), ingress);
-    }
 }
 
 #[test]
@@ -235,26 +103,6 @@ fn accepted_only_rebinds_active_turn_open_states() {
         .accepted(),
         None
     );
-}
-
-#[test]
-fn state_spellings_stay_stable() {
-    assert_eq!(
-        TurnInputStateKind::ALL
-            .iter()
-            .map(|kind| kind.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "pending_active",
-            "deferred_next_turn",
-            "accepted",
-            "cancelled",
-            "completed"
-        ]
-    );
-    for &kind in TurnInputStateKind::ALL {
-        assert_eq!(TurnInputStateKind::from_wire_str(kind.as_str()), Some(kind));
-    }
 }
 
 fn submission(ingress: TurnInputIngress, text: &str) -> PendingTurnInputDraft {

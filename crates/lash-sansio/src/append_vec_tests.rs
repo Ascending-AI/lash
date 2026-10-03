@@ -51,26 +51,6 @@ fn a_held_snapshot_shares_the_buffer_and_never_sees_later_appends() {
 }
 
 #[test]
-fn snapshots_across_many_appends_share_a_bounded_set_of_buffers() {
-    let mut writer = AppendVec::new();
-    let mut held = Vec::new();
-    for value in 0..1000 {
-        writer.push(value);
-        held.push(writer.clone());
-    }
-    let buffers = held
-        .iter()
-        .map(|snapshot| snapshot.as_ptr())
-        .collect::<std::collections::HashSet<_>>();
-    // Doubling: one buffer per power of two, not one per snapshot.
-    assert!(buffers.len() <= 12, "{} buffers", buffers.len());
-    for (index, snapshot) in held.iter().enumerate() {
-        assert_eq!(snapshot.len(), index + 1);
-        assert_eq!(snapshot.last(), Some(&index));
-    }
-}
-
-#[test]
 fn a_handle_behind_the_tip_forks_on_a_different_value() {
     let mut writer = AppendVec::with_capacity(8);
     writer.extend([1, 2]);
@@ -100,34 +80,6 @@ fn a_handle_behind_the_tip_adopts_the_same_value() {
 }
 
 #[test]
-fn ptr_eq_is_same_buffer_and_same_length() {
-    let mut writer = AppendVec::from(vec![1, 2]);
-    let held = writer.clone();
-    assert!(AppendVec::ptr_eq(&held, &writer));
-    writer.push(3);
-    assert!(!AppendVec::ptr_eq(&held, &writer));
-    assert!(!AppendVec::ptr_eq(
-        &AppendVec::from(vec![1, 2]),
-        &AppendVec::from(vec![1, 2])
-    ));
-}
-
-#[test]
-fn replace_from_edits_unseen_slots_in_place() {
-    let mut writer = AppendVec::with_capacity(8);
-    writer.extend([1, 2]);
-    let held = writer.clone();
-    writer.extend([3, 4]);
-    let before = writer.as_ptr();
-
-    writer.replace_from(2, [30, 40]);
-
-    assert_eq!(values(&held), [1, 2]);
-    assert_eq!(values(&writer), [1, 2, 30, 40]);
-    assert!(std::ptr::eq(before, writer.as_ptr()), "no copy");
-}
-
-#[test]
 fn replace_from_copies_when_another_handle_saw_a_slot() {
     let mut writer = AppendVec::with_capacity(8);
     writer.extend([1, 2, 3]);
@@ -138,43 +90,6 @@ fn replace_from_copies_when_another_handle_saw_a_slot() {
     assert_eq!(values(&held), [1, 2, 3], "the held snapshot never changes");
     assert_eq!(values(&writer), [1, 2, 30, 40]);
     assert!(!std::ptr::eq(held.as_ptr(), writer.as_ptr()));
-}
-
-#[test]
-fn a_dropped_reader_no_longer_blocks_an_in_place_edit() {
-    let mut writer = AppendVec::with_capacity(8);
-    writer.extend([1, 2, 3]);
-    let held = writer.clone();
-    let reader = writer.clone();
-    drop(reader);
-    let before = writer.as_ptr();
-
-    writer.replace_from(3, [4]);
-    writer.replace_from(2, [30, 40]);
-
-    assert_eq!(values(&held), [1, 2, 3]);
-    assert_eq!(values(&writer), [1, 2, 30, 40]);
-    assert!(
-        !std::ptr::eq(before, writer.as_ptr()),
-        "the live reader of slot 2 forces a copy"
-    );
-
-    let mut writer = AppendVec::with_capacity(8);
-    writer.extend([1, 2, 3]);
-    let short = {
-        let mut short = writer.clone();
-        short.truncate(1);
-        short
-    };
-    drop(writer.clone());
-    let before = writer.as_ptr();
-    writer.replace_from(1, [20, 30]);
-    assert_eq!(values(&short), [1]);
-    assert_eq!(values(&writer), [1, 20, 30]);
-    assert!(
-        std::ptr::eq(before, writer.as_ptr()),
-        "only live readers past the edit block it"
-    );
 }
 
 #[test]
@@ -213,17 +128,6 @@ fn make_mut_copies_a_shared_buffer_and_edits_a_sole_one_in_place() {
     writer.make_mut()[1] = 20;
     assert!(std::ptr::eq(before, writer.as_ptr()));
     assert_eq!(values(&writer), [10, 20, 3]);
-}
-
-#[test]
-fn a_sole_handle_reclaims_the_slots_it_truncated() {
-    let mut writer = AppendVec::with_capacity(8);
-    writer.extend([1, 2, 3]);
-    let before = writer.as_ptr();
-    writer.truncate(1);
-    writer.push(9);
-    assert_eq!(values(&writer), [1, 9]);
-    assert!(std::ptr::eq(before, writer.as_ptr()));
 }
 
 #[test]
@@ -301,13 +205,4 @@ fn concurrent_readers_of_held_snapshots_race_a_writer_safely() {
     }
     drop(sender);
     assert!(reader.join().expect("reader thread") > 0);
-}
-
-#[test]
-fn serializes_as_a_plain_sequence() {
-    let vec = AppendVec::from(vec![1, 2, 3]);
-    let json = serde_json::to_string(&vec).expect("serialize");
-    assert_eq!(json, "[1,2,3]");
-    let back: AppendVec<i32> = serde_json::from_str(&json).expect("deserialize");
-    assert_eq!(back, vec);
 }

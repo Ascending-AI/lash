@@ -204,24 +204,6 @@ mod tests {
         );
     }
 
-    /// Documents the exact bytes sent to Google for production-shaped inputs.
-    /// The only encoding difference from the pre-percent_encoding
-    /// implementation is `+` (form-encoded space) instead of `%20` as the
-    /// scope/prompt separator, which RFC 6749 §3.1 sanctions.
-    #[test]
-    fn authorization_url_matches_production_shaped_literal() {
-        let url = build_authorize_url(
-            "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-            "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
-        );
-
-        assert_eq!(
-            url,
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id=681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com&response_type=code&redirect_uri=https%3A%2F%2Fcodeassist.google.com%2Fauthcode&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile&access_type=offline&prompt=consent+select_account&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&state=3f2504e0-4f89-41d3-9a0c-0305e82c3301"
-        );
-    }
-
     #[test]
     fn pasted_redirect_url_extracts_code_without_fragment_or_parameter_confusion() {
         assert_eq!(

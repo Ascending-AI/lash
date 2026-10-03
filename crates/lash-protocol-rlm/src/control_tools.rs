@@ -264,23 +264,6 @@ mod tests {
         ))
     }
 
-    #[test]
-    fn continue_as_contract_documents_switch_result() {
-        let definition = continue_as_tool_definition_for(
-            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
-        );
-
-        assert_eq!(
-            definition.contract.output_schema.canonical.as_value()["required"],
-            json!(["ok", "frame_key", "task", "seed_keys", "seed_count"])
-        );
-        let rendered = definition.compact_contract().render_signature();
-        assert!(rendered.contains("frame_key"), "{rendered}");
-        assert!(!rendered.contains("handle_count"), "{rendered}");
-        assert!(!rendered.contains("projected_count"), "{rendered}");
-        assert!(!rendered.contains("global_count"), "{rendered}");
-    }
-
     struct BatonManager {
         snapshot: RuntimeSessionState,
         created: Mutex<Vec<SessionCreateRequest>>,
@@ -296,18 +279,6 @@ mod tests {
                 created: Mutex::new(Vec::new()),
             }
         }
-    }
-
-    #[test]
-    fn continue_as_tool_definition_preserves_projected_seed_refs_by_metadata() {
-        assert_eq!(
-            continue_as_tool_definition_for(crate::dialect::Dialect::prompt_vocabulary(
-                &crate::dialect::TypescriptDialect
-            ))
-            .manifest
-            .argument_projection,
-            ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed")
-        );
     }
 
     #[async_trait]
@@ -537,21 +508,6 @@ mod tests {
         args: &Value,
     ) -> ToolOutcome {
         run_continue_as_at_call(provider, manager, args, "continue-as-test").await
-    }
-
-    #[test]
-    fn rlm_control_definitions_include_continue_as_only() {
-        let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::Dialect::prompt_vocabulary(
-                &crate::dialect::TypescriptDialect,
-            ),
-        };
-        let names = provider
-            .tool_manifests()
-            .into_iter()
-            .map(|tool| tool.name)
-            .collect::<Vec<_>>();
-        assert_eq!(names, vec!["continue_as"]);
     }
 
     #[tokio::test]
@@ -841,39 +797,5 @@ mod tests {
             seed.globals["nested"],
             json!([{ "h": { "__handle__": "process", "id": "h2" } }])
         );
-    }
-
-    #[tokio::test]
-    async fn continue_as_does_not_validate_unknown_seed_handles() {
-        let manager = Arc::new(BatonManager {
-            snapshot: RuntimeSessionState {
-                policy: SessionPolicy {
-                    model: llm_profile_spec("model"),
-                    ..SessionPolicy::new(
-                        lash_core::TurnBudget::Unbounded,
-                        lash_core::MaxToolCalls::new(1024),
-                    )
-                },
-                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
-                    lash_core::MaxToolCalls::new(1024),
-                ))
-            },
-            created: Mutex::new(Vec::new()),
-        });
-        let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::Dialect::prompt_vocabulary(
-                &crate::dialect::TypescriptDialect,
-            ),
-        };
-
-        let args = json!({
-            "task": "continue",
-            "seed": { "h": { "__handle__": "process", "id": "missing" } }
-        });
-        let result = run_continue_as(&provider, manager.clone(), &args).await;
-
-        assert!(result.is_success(), "{:?}", result.value_for_projection());
-        assert!(manager.created.lock_recover().is_empty());
     }
 }

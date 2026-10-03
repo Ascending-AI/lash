@@ -71,20 +71,6 @@ impl RemoteTurnActivity {
         Ok(activity)
     }
 
-    #[cfg(test)]
-    pub(crate) fn decode_json_expecting_protocol_version(
-        bytes: &[u8],
-        expected_version: u32,
-    ) -> Result<Self, RemoteProtocolError> {
-        let activity = crate::Envelope::<Self>::decode_json_expecting_protocol_version(
-            bytes,
-            expected_version,
-        )?
-        .into_body();
-        activity.validate()?;
-        Ok(activity)
-    }
-
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteTurnActivity", "id", &self.id)?;
         require_non_empty("RemoteTurnActivity", "correlation_id", &self.correlation_id)?;

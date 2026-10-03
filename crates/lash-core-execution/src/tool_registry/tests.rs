@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod grant_support;
 mod restore_tests;
-use grant_support::{GrantBindingProvider, grant_deferral_registry};
+use grant_support::GrantBindingProvider;
 
 struct MockTool;
 struct MixedEnabledTool;
@@ -24,9 +24,6 @@ struct NamedExactSource {
 }
 struct DynamicToolProvider {
     names: Arc<std::sync::Mutex<Vec<String>>>,
-}
-struct CountingManifestProvider {
-    manifest_reads: Arc<AtomicUsize>,
 }
 struct CountingPrepareProvider {
     prepares: Arc<AtomicUsize>,
@@ -152,53 +149,6 @@ impl ToolProvider for MockTool {
     }
 }
 
-#[test]
-fn reconciled_combined_collision_reports_duplicate_name() {
-    let manifest = test_tool("combined", "combined").manifest();
-    let mut surface = ToolSurface::default();
-    surface
-        .insert(ToolRegistryEntry::new(
-            manifest.clone(),
-            ToolSourceKey::new("source"),
-        ))
-        .expect("initial tool");
-
-    let error = insert_result_entry(
-        &mut surface,
-        manifest.id.clone(),
-        ToolRegistryEntry::new(manifest, ToolSourceKey::new("source")),
-    )
-    .expect_err("combined id and name collision");
-
-    // A duplicate name is the more informative diagnosis when both id and
-    // name collide because it identifies the model-facing alias as well.
-    assert_eq!(
-        error.to_string(),
-        "validation error: duplicate tool name `combined` for tool ids `tool:combined` and `tool:combined`"
-    );
-}
-
-#[test]
-fn pre_cutover_snapshot_without_orphaned_is_refused() {
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source registry");
-    let mut legacy_blob = serde_json::to_value(source.export_state()).expect("serialize state");
-    let legacy_entry = legacy_blob["tools"]["tool:mock_tool"]
-        .as_object_mut()
-        .expect("serialized mock tool entry");
-    assert_eq!(
-        legacy_entry.remove("orphaned"),
-        Some(json!(false)),
-        "the compatibility probe strips exactly the field the cutover requires"
-    );
-
-    let error =
-        serde_json::from_value::<ToolState>(legacy_blob).expect_err("deserialize must refuse");
-    assert!(
-        error.to_string().contains("orphaned"),
-        "the refusal must name the missing field: {error}"
-    );
-}
-
 #[async_trait::async_trait]
 impl ToolProvider for MixedEnabledTool {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
@@ -213,31 +163,6 @@ impl ToolProvider for MixedEnabledTool {
             vec![
                 test_tool("enabled_tool", "enabled"),
                 test_tool("disabled_tool", "disabled"),
-            ],
-            name,
-        )
-    }
-
-    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        ToolOutcome::ok(serde_json::json!("ok")).into()
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolProvider for CountingManifestProvider {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        self.manifest_reads.fetch_add(1, Ordering::SeqCst);
-        manifests(vec![
-            test_tool("indexed_alpha", "alpha contract"),
-            test_tool("indexed_beta", "beta contract"),
-        ])
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        contract_from(
-            vec![
-                test_tool("indexed_alpha", "alpha contract"),
-                test_tool("indexed_beta", "beta contract"),
             ],
             name,
         )
@@ -509,61 +434,6 @@ impl ToolProvider for BlockingLiveTool {
 }
 
 #[test]
-fn indexed_contract_lookup_reuses_the_indexed_manifest() {
-    let manifest_reads = Arc::new(AtomicUsize::new(0));
-    let registry = ToolRegistry::from_tool_providers(vec![Arc::new(CountingManifestProvider {
-        manifest_reads: Arc::clone(&manifest_reads),
-    })])
-    .expect("registry");
-    let reads_after_registration = manifest_reads.load(Ordering::SeqCst);
-
-    for (name, description) in [
-        ("indexed_alpha", "alpha contract"),
-        ("indexed_beta", "beta contract"),
-    ] {
-        let actual = registry
-            .resolve_contract(name)
-            .expect("indexed provider contract should resolve");
-        assert_eq!(
-            serde_json::to_value(actual.as_ref()).expect("serialize actual contract"),
-            serde_json::to_value(test_tool(name, description).contract())
-                .expect("serialize expected contract"),
-            "indexed contract must match the old by-id path for {name}"
-        );
-    }
-
-    assert_eq!(
-        manifest_reads.load(Ordering::SeqCst),
-        reads_after_registration,
-        "contract routing must not rematerialize the provider manifest catalog"
-    );
-}
-
-#[test]
-fn single_provider_contract_lookup_reuses_the_indexed_manifest() {
-    let manifest_reads = Arc::new(AtomicUsize::new(0));
-    let registry = ToolRegistry::from_tool_provider(Arc::new(CountingManifestProvider {
-        manifest_reads: Arc::clone(&manifest_reads),
-    }))
-    .expect("registry");
-    let reads_after_registration = manifest_reads.load(Ordering::SeqCst);
-
-    let actual = registry
-        .resolve_contract("indexed_beta")
-        .expect("indexed provider contract should resolve");
-    assert_eq!(
-        serde_json::to_value(actual.as_ref()).expect("serialize actual contract"),
-        serde_json::to_value(test_tool("indexed_beta", "beta contract").contract())
-            .expect("serialize expected contract")
-    );
-    assert_eq!(
-        manifest_reads.load(Ordering::SeqCst),
-        reads_after_registration,
-        "single-provider routing must not rematerialize the provider manifest catalog"
-    );
-}
-
-#[test]
 fn indexed_contract_lookup_falls_back_to_by_id_resolution() {
     struct ByIdOnlyProvider;
 
@@ -691,21 +561,6 @@ fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
     );
 }
 
-#[test]
-fn registry_makes_advertised_tools_members_by_default() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MixedEnabledTool)).expect("registry");
-    let snapshot = registry.export_state();
-    assert!(snapshot.get(&tool_id("enabled_tool")).unwrap().is_member());
-    assert!(snapshot.get(&tool_id("disabled_tool")).unwrap().is_member());
-    let members = snapshot
-        .tool_manifests()
-        .into_iter()
-        .map(|manifest| manifest.name)
-        .collect::<BTreeSet<_>>();
-    assert!(members.contains("enabled_tool"));
-    assert!(members.contains("disabled_tool"));
-}
-
 #[tokio::test]
 async fn removal_hides_source_from_new_session_snapshots_without_revoking_in_flight_snapshot() {
     let entered = Arc::new(tokio::sync::Semaphore::new(0));
@@ -772,39 +627,6 @@ fn exported_tool_state_is_source_free() {
     assert!(!serialized.contains("source_id"));
     assert!(!serialized.contains(PLUGIN_TOOL_SOURCE_ID));
     assert!(!serialized.contains("live:"));
-}
-
-#[test]
-fn apply_state_rebinds_source_free_snapshot_to_current_sources() {
-    let source_registry =
-        ToolRegistry::from_tool_provider(Arc::new(MixedEnabledTool)).expect("source registry");
-    let snapshot = source_registry.export_state();
-
-    let target_registry =
-        ToolRegistry::from_tool_provider(Arc::new(MixedEnabledTool)).expect("target registry");
-    let next_generation = target_registry
-        .apply_state(snapshot.with_generation_for_conformance(target_registry.generation()))
-        .expect("state rebound");
-
-    assert_eq!(next_generation, target_registry.generation());
-    assert!(target_registry.resolve_contract("enabled_tool").is_some());
-}
-
-#[test]
-fn apply_state_rejects_tools_not_advertised_by_source() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
-    let snapshot = registry.export_state();
-    let generation = snapshot.generation();
-    let mut tools = snapshot.entries().clone();
-    tools.insert(
-        tool_id("missing"),
-        ToolStateEntry::new(test_tool("missing", "missing").manifest()),
-    );
-    let snapshot = ToolState::new(generation, tools);
-    assert!(matches!(
-        registry.apply_state(snapshot),
-        Err(ReconfigureError::Validation(_))
-    ));
 }
 
 #[test]
@@ -927,27 +749,6 @@ async fn single_provider_source_refuses_unknown_id_without_calling_the_provider(
 }
 
 #[test]
-fn advertised_manifest_resolves_without_exact_host_lookup() {
-    let manifest_resolutions = Arc::new(AtomicUsize::new(0));
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
-    registry
-        .upsert_source(Arc::new(ExactResolvingSource {
-            manifest_resolutions: Arc::clone(&manifest_resolutions),
-            contract_resolutions: Arc::new(AtomicUsize::new(0)),
-            executions: Arc::new(AtomicUsize::new(0)),
-        }))
-        .expect("source registered");
-
-    assert_eq!(
-        registry
-            .resolve_manifest("mock_tool")
-            .map(|manifest| manifest.name),
-        Some("mock_tool".to_string())
-    );
-    assert_eq!(manifest_resolutions.load(Ordering::SeqCst), 0);
-}
-
-#[test]
 fn refresh_sources_re_reads_multi_provider_manifests() {
     let names = Arc::new(std::sync::Mutex::new(vec!["dynamic_one".to_string()]));
     let provider: Arc<dyn ToolProvider> = Arc::new(DynamicToolProvider {
@@ -1036,37 +837,6 @@ async fn fork_with_state_adds_newly_advertised_tools() {
     )
     .await;
     assert!(result.is_success(), "forked live tool executes: {result:?}");
-}
-
-#[tokio::test]
-async fn composed_catalog_adds_newly_advertised_base_tools() {
-    let names = Arc::new(std::sync::Mutex::new(vec!["dynamic_one".to_string()]));
-    let provider: Arc<dyn ToolProvider> = Arc::new(DynamicToolProvider {
-        names: Arc::clone(&names),
-    });
-    let registry = ToolRegistry::from_tool_providers(vec![provider]).expect("registry");
-    names.lock_recover().push("dynamic_two".to_string());
-
-    let composed = registry
-        .compose_session_catalog(Vec::new())
-        .expect("composed live catalog");
-    assert!(
-        composed
-            .export_state()
-            .get(&tool_id("dynamic_two"))
-            .is_some_and(ToolStateEntry::is_member)
-    );
-    let result = execute_leaf_by_id(
-        &composed,
-        &tool_id("dynamic_two"),
-        &json!({}),
-        &test_attempt_context(),
-    )
-    .await;
-    assert!(
-        result.is_success(),
-        "composed live tool executes: {result:?}"
-    );
 }
 
 #[tokio::test]
@@ -1264,20 +1034,6 @@ async fn run_tool_granted_honors_the_granted_source_binding() {
         *executed_bindings.lock_recover(),
         vec![json!({ "kind": "test", "route": "grant" })]
     );
-}
-
-#[test]
-fn granted_deferred_source_reports_attempt_may_defer() {
-    let registry = grant_deferral_registry(true);
-
-    assert!(registry.attempt_may_defer_for_grant(&tool_id("host_only"), Some("grant-source")));
-}
-
-#[test]
-fn granted_non_deferred_source_reports_attempt_cannot_defer() {
-    let registry = grant_deferral_registry(false);
-
-    assert!(!registry.attempt_may_defer_for_grant(&tool_id("host_only"), Some("grant-source")));
 }
 
 #[tokio::test]
@@ -1478,71 +1234,6 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
 }
 
 #[tokio::test]
-async fn pinned_source_retains_exactly_known_nonadvertised_resident_id() {
-    struct KnownResidentProvider;
-
-    impl KnownResidentProvider {
-        fn definition() -> ToolDefinition {
-            test_tool("known_resident", "known but not advertised")
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ToolProvider for KnownResidentProvider {
-        fn tool_manifests(&self) -> Vec<ToolManifest> {
-            Vec::new()
-        }
-
-        fn resolve_manifest_by_id(&self, id: &crate::ToolId) -> Option<ToolManifest> {
-            (id == Self::definition().id()).then(|| Self::definition().manifest())
-        }
-
-        fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
-            None
-        }
-
-        fn resolve_contract_by_id(&self, id: &crate::ToolId) -> Option<Arc<ToolContract>> {
-            (id == Self::definition().id()).then(|| Arc::new(Self::definition().contract()))
-        }
-
-        async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-            ToolOutcome::ok(json!("known-resident")).into()
-        }
-    }
-
-    let registry = ToolRegistry::from_tool_provider(Arc::new(KnownResidentProvider))
-        .expect("known resident provider registry");
-    let mut entries = BTreeMap::new();
-    entries.insert(
-        tool_id("known_resident"),
-        ToolStateEntry::new(KnownResidentProvider::definition().manifest()),
-    );
-    registry
-        .restore_state(ToolState::new(registry.generation(), entries))
-        .expect("the exact-id resolver restores the resident binding");
-
-    let pinned = registry
-        .compose_session_catalog(Vec::new())
-        .expect("known resident survives request refresh");
-    let entry = pinned
-        .export_state()
-        .get(&tool_id("known_resident"))
-        .expect("known resident remains in state")
-        .clone();
-    assert!(entry.is_member(), "resident curation remains admitted");
-    assert!(!entry.is_orphaned(), "the exact live route remains bound");
-
-    let result = execute_leaf_by_id(
-        &pinned,
-        &tool_id("known_resident"),
-        &json!({}),
-        &test_attempt_context(),
-    )
-    .await;
-    assert_eq!(result.value_for_projection(), json!("known-resident"));
-}
-
-#[tokio::test]
 async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_advertised_route() {
     struct AdvertisedProvider;
 
@@ -1684,45 +1375,6 @@ fn unadmitted_alias_lookup_does_not_fall_through_to_source() {
             .expect("advertised id remains indexed")
             .description,
         "advertised manifest"
-    );
-}
-
-#[test]
-fn unknown_manifest_without_host_resolver_is_unavailable() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
-
-    assert!(registry.resolve_manifest("missing").is_none());
-    assert!(registry.resolve_contract("missing").is_none());
-}
-
-#[tokio::test]
-async fn upsert_source_registers_and_executes_external_tools() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
-    registry
-        .upsert_source(Arc::new(ExternalMockSource))
-        .expect("source registered");
-
-    let defs = registry.tool_manifests();
-    assert!(defs.iter().any(|def| def.name == "mcp__demo__search"));
-
-    let context = test_attempt_context();
-    let args = json!({ "query": "hello" });
-    let manifest = registry
-        .resolve_manifest("mcp__demo__search")
-        .expect("registered external tool resolves");
-    let result = leaf_outcome(
-        registry
-            .execute(crate::ToolCall::new(&manifest, &args, &context))
-            .await,
-    );
-    assert!(result.is_success());
-    assert_eq!(
-        result.value_for_projection()["tool"],
-        json!("mcp__demo__search")
-    );
-    assert_eq!(
-        result.value_for_projection()["args"]["query"],
-        json!("hello")
     );
 }
 

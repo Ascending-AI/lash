@@ -116,8 +116,6 @@ fn decode(event: &lash_core::ProtocolEvent) -> Result<Option<Transport>, DecodeE
 }
 
 pub(crate) fn decode_payload(payload: serde_json::Value) -> Result<Transport, DecodeError> {
-    #[cfg(test)]
-    work::decoded();
     #[derive(serde::Deserialize)]
     struct Version {
         #[serde(default)]
@@ -163,8 +161,6 @@ impl NativeTransportIndex {
             executions: HashMap::new(),
         };
         for entry in chronological.entries() {
-            #[cfg(test)]
-            work::visited();
             let lash_core::facade_support::ChronologicalPayload::ProtocolEvent(event) =
                 &entry.payload
             else {
@@ -327,27 +323,5 @@ mod tests {
             .unwrap()
             .is_some()
         );
-    }
-}
-
-#[cfg(test)]
-pub(super) mod work {
-    use std::cell::Cell;
-    std::thread_local! {
-        static COUNTS: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
-    }
-    pub(in crate::native) fn reset() {
-        COUNTS.set((0, 0));
-    }
-    pub(in crate::native) fn counts() -> (usize, usize) {
-        COUNTS.get()
-    }
-    pub(super) fn visited() {
-        let (visits, decodes) = COUNTS.get();
-        COUNTS.set((visits + 1, decodes));
-    }
-    pub(super) fn decoded() {
-        let (visits, decodes) = COUNTS.get();
-        COUNTS.set((visits, decodes + 1));
     }
 }

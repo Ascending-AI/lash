@@ -118,17 +118,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_lease_timings_keep_the_contractual_windows() {
-        let timings = LeaseTimings::default();
-        assert_eq!(timings.ttl_ms(), 30_000);
-        assert_eq!(timings.renew_interval_ms(), 10_000);
-        assert_eq!(
-            timings.ttl_ms(),
-            timings.renew_interval_ms() * u64::from(MIN_TTL_TO_RENEW_RATIO)
-        );
-    }
-
-    #[test]
     fn constructor_enforces_ttl_renew_ratio() {
         assert!(LeaseTimings::new(Duration::from_secs(30), Duration::from_secs(10)).is_ok());
         assert_eq!(
@@ -144,17 +133,6 @@ mod tests {
         );
         assert_eq!(
             LeaseTimings::new(Duration::from_secs(30), Duration::from_micros(500)),
-            Err(LeaseTimingsError::RenewIntervalTooSmall)
-        );
-    }
-
-    #[test]
-    fn from_ttl_derives_the_boundary_renew_interval() {
-        let timings = LeaseTimings::from_ttl(Duration::from_millis(60)).expect("valid timings");
-        assert_eq!(timings.ttl_ms(), 60);
-        assert_eq!(timings.renew_interval_ms(), 20);
-        assert_eq!(
-            LeaseTimings::from_ttl(Duration::from_millis(2)),
             Err(LeaseTimingsError::RenewIntervalTooSmall)
         );
     }

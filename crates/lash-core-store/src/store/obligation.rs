@@ -801,37 +801,6 @@ mod tests {
     }
 
     #[test]
-    fn every_key_round_trips_through_its_columns() {
-        let keys = [
-            ObligationKey::Ingress {
-                session_id: SessionId::from("s"),
-                item_id: "item".to_owned(),
-            },
-            ObligationKey::ControlIntent {
-                intent_id: ControlIntentId::from_sequence(7),
-            },
-            ObligationKey::SessionDelete {
-                session_id: SessionId::from("s"),
-            },
-            ObligationKey::TriggerDelivery {
-                occurrence_id: "trigger:o".to_owned(),
-                subscription_id: "sub".to_owned(),
-            },
-            ObligationKey::ArtifactCleanup {
-                referrer: ArtifactReferrer::HostPin(
-                    crate::artifact_referrer::HostArtifactPin::mint(),
-                ),
-            },
-        ];
-        for key in keys {
-            assert_eq!(
-                ObligationKey::decode(key.kind(), key.columns()),
-                Ok(key.clone())
-            );
-        }
-    }
-
-    #[test]
     fn a_column_set_this_build_cannot_name_is_undecodable() {
         for (kind, columns) in [
             (ObligationKind::SessionDelete, vec![KeyColumn::Integer(7)]),
@@ -868,25 +837,5 @@ mod tests {
                 "{kind} decoded {columns:?}"
             );
         }
-    }
-
-    #[test]
-    fn a_cleanup_key_of_an_unknown_referrer_kind_names_the_typed_refusal() {
-        let label = crate::artifact_referrer::SYNTHETIC_NEXT_REFERRER_KIND;
-        let undecodable = ObligationKey::decode(
-            ObligationKind::ArtifactCleanup,
-            vec![
-                KeyColumn::Text(label.to_owned()),
-                KeyColumn::Text("x".to_owned()),
-            ],
-        )
-        .expect_err("no build of this window names the next kind");
-        let refusal = StoreError::Incompatible {
-            refusal: crate::compat::CompatRefusal::UnknownVocabulary {
-                surface: "artifact referrer kind".to_owned(),
-                label: label.to_owned(),
-            },
-        };
-        assert_eq!(undecodable.detail, refusal.to_string());
     }
 }

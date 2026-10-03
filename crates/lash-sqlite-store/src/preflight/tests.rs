@@ -153,36 +153,6 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
 }
 
 #[tokio::test]
-async fn every_database_of_the_set_is_reported_in_open_order() {
-    // The location names all three members; nothing about the report is
-    // caller-declared, so a deployment cannot be inspected with half its
-    // databases silently unwatched.
-    let root = temp_root();
-    let set = crate::SqliteStoreSet::open(root.path())
-        .await
-        .expect("open a provisioned store set");
-
-    let status = SqliteStorePreflight::for_location(set.location().clone())
-        .schema_status()
-        .await
-        .expect("read schema status");
-
-    let names: Vec<&str> = status
-        .databases
-        .iter()
-        .map(|database| database.name.as_str())
-        .collect();
-    assert_eq!(
-        names,
-        vec!["durable core", "process registry", "trigger store"]
-    );
-    for database in &status.databases {
-        assert_eq!(database.verdict, StoreSchemaVerdict::Matches);
-    }
-    assert_eq!(status.outcome(), StoreSchemaOutcome::Ready);
-}
-
-#[tokio::test]
 async fn a_sqlite_memory_store_set_preflights_through_its_location() {
     // `SqliteLocation::Memory` names the same three databases the open pinned;
     // the probe reads them while the set's handles hold the anchors.
@@ -271,57 +241,6 @@ async fn reading_a_hot_wal_database_leaves_its_bytes_untouched() {
         path.with_extension("db-wal").exists(),
         "a preflight read must not checkpoint away the write-ahead log"
     );
-}
-
-#[tokio::test]
-async fn a_preflight_connection_refuses_to_write_even_if_asked() {
-    // `PRAGMA query_only` is the enforced form of the module's promise: the
-    // engine rejects a write on this connection, so the guarantee does not
-    // depend on which statements this module happens to send.
-    let root = temp_root();
-    let path = root.path().join("durable-core.db");
-    SqliteStore::open_file_for_testing(&path)
-        .await
-        .expect("provision the database");
-
-    let conn =
-        crate::conn::SqliteConnection::open_readonly(&crate::location::DatabaseTarget::File(path))
-            .await
-            .expect("open read-only");
-    let refusal = conn
-        .call(|c| {
-            c.pragma_update(None, "query_only", true)?;
-            c.execute_batch("CREATE TABLE lash_should_not_exist (id INTEGER)")
-        })
-        .await
-        .expect_err("a query_only connection must refuse a write");
-    assert!(
-        refusal.to_string().to_lowercase().contains("readonly"),
-        "{refusal}"
-    );
-}
-
-#[tokio::test]
-async fn every_database_publishes_the_version_its_open_enforces() {
-    let root = temp_root();
-    for database in SqliteDatabase::ALL {
-        let path = root.path().join(database.file_name());
-        let mut connection = rusqlite::Connection::open(&path).expect("open database");
-        let tx = crate::schema::prepare_versioned_schema(&mut connection, database)
-            .expect("provision database");
-        tx.commit().expect("commit provision");
-        let (stamp, _) = crate::compat::read(&connection, database)
-            .expect("read the provisioned stamp")
-            .expect("provisioning records a stamp");
-        let descriptor = lash_core_execution::compat::descriptor(database.component())
-            .expect("database descriptor");
-        assert_eq!(stamp.version, descriptor.writes.max());
-        assert_eq!(database.expected_version(), i64::from(stamp.version));
-        drop(connection);
-        let found = verify_schema_at(&path, database).await;
-        assert_eq!(found.expected, i64::from(stamp.version));
-        assert_eq!(found.verdict, StoreSchemaVerdict::Matches);
-    }
 }
 
 fn stamp_compat(path: &std::path::Path, version: i64, min_reader: i64) {

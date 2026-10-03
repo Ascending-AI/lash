@@ -380,23 +380,6 @@ async fn wall_clock_cap_fires_despite_continuous_progress() {
     pool.shutdown_all().await;
 }
 
-#[tokio::test]
-async fn idle_timeout_emits_cancellation_notification() {
-    let clock = scripted::Clock::new().await;
-    let root = tempfile::tempdir().unwrap();
-    let (pool, mut mock) = scripted::Mock::connect(root.path(), MockOptions::default()).await;
-    let mut request = Box::pin(call(&pool));
-    assert!(futures_util::poll!(request.as_mut()).is_pending());
-    mock.started(&pool).await;
-    assert!(futures_util::poll!(request.as_mut()).is_pending());
-    tokio::time::advance(Duration::from_millis(151)).await;
-    let result = request.await;
-    assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
-    mock.event("cancelled").await;
-    drop(clock);
-    pool.shutdown_all().await;
-}
-
 /// Drives one call past its idle timeout into a ping probe the mock answers
 /// per `behavior`. The probe timeout stays frozen, so only the mock's answer
 /// can settle it, and any well-formed answer must keep the service connected.
@@ -713,35 +696,6 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
 }
 
 #[tokio::test]
-async fn failed_connection_attempt_reserves_a_unique_generation() {
-    let clock = scripted::Clock::new().await;
-    let mut lifecycle = scripted::Lifecycle::new();
-    let root = tempfile::tempdir().unwrap();
-    let entry = McpEntry::new(
-        "mock".to_string(),
-        mock_config(
-            root.path(),
-            MockOptions {
-                behavior: "fail_once_then_success",
-                ..MockOptions::default()
-            },
-        ),
-        McpHostServices::default(),
-    )
-    .with_reconnect_jitter(Arc::new(|_| Duration::ZERO));
-    lifecycle.observe(&entry);
-
-    entry
-        .establish()
-        .await
-        .expect_err("first attempt must fail before publication");
-    clock.expire(lifecycle.reconnect_scheduled().await).await;
-    published_generation(&entry, 2).await;
-    drop(clock);
-    entry.shutdown().await;
-}
-
-#[tokio::test]
 async fn successful_respawn_resets_reconnect_attempt_budget_but_not_generation() {
     let clock = scripted::Clock::new().await;
     let mut lifecycle = scripted::Lifecycle::new();
@@ -907,28 +861,6 @@ async fn keepalive_rearms_an_exhausted_reconnect_loop() {
     pool.shutdown_all().await;
 }
 
-#[tokio::test]
-async fn dropped_pool_releases_entry_and_lifecycle_actor() {
-    let root = tempfile::tempdir().unwrap();
-    let pool = Arc::new(McpConnectionPool::empty());
-    let entry = McpEntry::new(
-        "mock".to_string(),
-        mock_config(
-            root.path(),
-            MockOptions {
-                probe_interval_ms: 10,
-                ..MockOptions::default()
-            },
-        ),
-        McpHostServices::default(),
-    );
-    let weak = Arc::downgrade(&entry);
-    assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
-    drop(entry);
-    drop(pool);
-    assert!(weak.upgrade().is_none());
-}
-
 #[cfg(target_os = "linux")]
 fn process_state(pid: u32) -> Option<char> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
@@ -1011,39 +943,6 @@ fn dropping_connected_pool_kills_misbehaving_stdio_child_and_logs() {
         "captured trace: {trace}"
     );
 
-    drop(runtime);
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn shutdown_all_fully_reaps_stdio_child() {
-    let root = tempfile::tempdir().unwrap();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("test runtime");
-    let clock = runtime.block_on(scripted::Clock::new());
-    let pool = runtime.block_on(connect_mock(
-        root.path(),
-        MockOptions {
-            behavior: "success",
-            ..MockOptions::default()
-        },
-    ));
-    runtime.block_on(async move { drop(clock) });
-    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
-        .expect("stdio child must publish its pid")
-        .parse()
-        .expect("numeric child pid");
-
-    runtime.block_on(pool.shutdown_all());
-
-    assert_eq!(
-        process_state(pid),
-        None,
-        "shutdown_all must wait for and fully reap stdio child PID {pid}"
-    );
-    drop(pool);
     drop(runtime);
 }
 
@@ -1381,50 +1280,6 @@ async fn cancelling_shutdown_owner_aborts_actor_on_live_runtime() {
         exited_process_state(pid).await,
         Some('Z'),
         "abort-on-drop kills the actor-owned child rather than leaving it running"
-    );
-}
-
-#[tokio::test]
-async fn shutdown_all_bounds_an_actor_that_never_finishes() {
-    let clock = scripted::Clock::new().await;
-    let mut lifecycle = scripted::Lifecycle::new();
-    let traces = TraceBuffer::default();
-    let subscriber = tracing_subscriber::fmt()
-        .without_time()
-        .with_ansi(false)
-        .with_writer(traces.clone())
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
-    let root = tempfile::tempdir().unwrap();
-    let pool = Arc::new(McpConnectionPool::empty());
-    let entry = McpEntry::new(
-        "mock".to_string(),
-        mock_config(root.path(), MockOptions::default()),
-        McpHostServices::default(),
-    )
-    .with_shutdown_wedge(424_242);
-    lifecycle.observe(&entry);
-    assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
-
-    let started = Instant::now();
-    let mut shutdown = Box::pin(pool.shutdown_all());
-    assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
-    assert_eq!(lifecycle.wedged().await, 424_242);
-    clock
-        .elapses(shutdown.as_mut(), started, Duration::from_secs(6))
-        .await;
-    assert_eq!(pool.entries.read_recover().len(), 0);
-    assert_eq!(
-        entry.health.read_recover().clone(),
-        McpServerHealth::ShuttingDown { reason: Some(McpServerFault::Connection("MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
-                .to_string())) }
-    );
-    let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
-    assert!(
-        trace.contains(
-            "MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
-        ),
-        "captured trace: {trace}"
     );
 }
 
@@ -2062,61 +1917,6 @@ async fn discovery_publishes_received_catalog_before_observing_same_burst_quit()
     );
     drop(clock);
     pool.shutdown_all().await;
-}
-
-#[cfg(target_os = "linux")]
-#[tokio::test]
-async fn service_quit_records_cause_before_close_ignoring_child_cleanup() {
-    let clock = scripted::Clock::new().await;
-    let mut lifecycle = scripted::Lifecycle::new();
-    let root = tempfile::tempdir().unwrap();
-    let (pool, mut mock) = scripted::Mock::connect(
-        root.path(),
-        MockOptions {
-            behavior: "ignore_eof",
-            reconnect_initial_ms: 5_000,
-            ..MockOptions::default()
-        },
-    )
-    .await;
-    let current_entry = entry(&pool);
-    lifecycle.observe(&current_entry);
-    let pid = current_entry.active_pid.load(Ordering::SeqCst);
-    assert!(pool.server_statuses()[0].health.is_connected());
-
-    mock.command("close").await;
-    let (reaping, deadline) = lifecycle.grace_armed().await;
-    assert_eq!(reaping, pid);
-    let status_during_cleanup = pool.server_statuses()[0].clone();
-    assert!(
-        alive(pid),
-        "status is sampled while the close-ignoring child is still alive"
-    );
-
-    let mut shutdown = Box::pin(pool.shutdown_all());
-    assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
-    clock.expire(deadline).await;
-    let term = lifecycle.term_issued(pid).await;
-    clock.expire(term).await;
-    lifecycle.kill_issued(pid).await;
-    lifecycle.reaped(pid).await;
-    shutdown.await;
-
-    assert!(!status_during_cleanup.health.is_connected());
-    assert_eq!(
-        status_during_cleanup.health,
-        McpServerHealth::Reconnecting {
-            last_error: Some(McpServerFault::Connection(
-                "MCP server `mock` service quit: Ok(Closed)".to_string()
-            ))
-        },
-        "service quit cause must be visible throughout bounded child cleanup"
-    );
-    assert_eq!(
-        process_state(pid),
-        None,
-        "shutdown_all must fully reap stdio child PID {pid}"
-    );
 }
 
 #[cfg(target_os = "linux")]

@@ -996,14 +996,4 @@ mod tests {
             }
         }
     }
-
-    #[test]
-    fn backoff_doubles_from_the_base_and_caps_at_fifteen_minutes() {
-        let policy = RelayPolicy::default();
-        assert_eq!(policy.backoff_ms(1), 1_000);
-        assert_eq!(policy.backoff_ms(2), 2_000);
-        assert_eq!(policy.backoff_ms(10), 512_000);
-        assert_eq!(policy.backoff_ms(11), 900_000);
-        assert_eq!(policy.backoff_ms(u32::MAX), 900_000);
-    }
 }

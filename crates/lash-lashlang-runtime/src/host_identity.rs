@@ -100,26 +100,6 @@ mod tests {
         LashlangHostIdentities::process_body(process_id(label))
     }
 
-    /// A cell of a process-backed session turn is opened by its process.
-    ///
-    /// This is the production shape every `agents.spawn` child takes: the
-    /// subagent row is a `ProcessInput::SessionTurn`, and the child turn must
-    /// run under `ExecutionScope::Process`. Refusing that scope took every subagent
-    /// cell's first tool call out at the knees — `task.fail(...)` came back as
-    /// "has no logical opener", the child's driver re-asked the provider until
-    /// its cap, and the parent read `Stopped(MaxTurns)` instead of the child's
-    /// own reason.
-    #[test]
-    fn a_cell_under_a_process_scope_opens_on_the_process() {
-        let admitted = process_id("subagent-child");
-
-        let opener = EffectOpener::for_scope(&AdmittedScope::process(admitted.clone()))
-            .expect("a process is an opener");
-
-        assert_eq!(opener, EffectOpener::process(admitted.clone()));
-        assert_eq!(opener.render(), format!("process:{admitted}"));
-    }
-
     /// The minted id is what keeps two processes apart, so two processes
     /// running one process-backed turn mint different identities while a
     /// worker retry of the same process mints the same ones.

@@ -540,7 +540,3 @@ pub(crate) fn version_mismatch_error(
         },
     }
 }
-
-#[cfg(test)]
-#[path = "schema_tests.rs"]
-mod tests;

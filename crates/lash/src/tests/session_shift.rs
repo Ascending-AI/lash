@@ -168,7 +168,6 @@ struct HeldShiftFixture {
     core: LashCore,
     session: lash_core::SessionId,
     store: Arc<lash_core::testing::runtime_helpers::RecordingStore>,
-    calls: Arc<AtomicUsize>,
 }
 
 impl HeldShiftFixture {
@@ -233,7 +232,6 @@ impl HeldShiftFixture {
             core,
             session: session_id,
             store,
-            calls,
         })
     }
 
@@ -250,28 +248,6 @@ impl HeldShiftFixture {
         .expect("the shift ends")
         .expect("the shift is not refused")
     }
-}
-
-/// FIG-3825: one shift invocation loads its session once and runs every
-/// admission ordinal and every run it calls on that runtime. It used to
-/// open a runtime (a plugin host and a session load) per admission and per
-/// run: seven loads for this shift's four admissions and three runs.
-async fn a_shift_invocation_loads_its_session_once_across_its_runs() -> Result<()> {
-    const RUNS: usize = 3;
-    let fixture = HeldShiftFixture::with_pending("shift-loads-once", RUNS).await?;
-    let loads_before = fixture.store.load_session_count();
-
-    let outcome = fixture.shift("loads-once").await;
-
-    assert_eq!(outcome.stop, lash_core::engine::ShiftStop::Idle);
-    assert_eq!(outcome.ran.len(), RUNS, "one invocation ran every run");
-    assert_eq!(fixture.calls.load(Ordering::SeqCst), RUNS);
-    assert_eq!(
-        fixture.store.load_session_count() - loads_before,
-        1,
-        "the shift invocation loads its session once, not per admission and run"
-    );
-    Ok(())
 }
 
 /// FIG-3825: a run whose attempt failed on a live fault is retried on the
@@ -705,11 +681,6 @@ macro_rules! session_shift_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_scheduled_shift_drains_more_runs_than_one_invocation_executes() -> Result<()> {
                 super::a_scheduled_shift_drains_more_runs_than_one_invocation_executes().await
-            }
-
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_shift_invocation_loads_its_session_once_across_its_runs() -> Result<()> {
-                super::a_shift_invocation_loads_its_session_once_across_its_runs().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

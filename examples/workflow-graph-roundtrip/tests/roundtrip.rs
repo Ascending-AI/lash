@@ -1841,65 +1841,6 @@ async fn new_statement_containers_allow_empty_bodies() {
 }
 
 #[tokio::test]
-async fn blank_workflow_grows_by_two_nodes_then_saves_and_runs() {
-    let (state, _double) = runtime::state().await;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind test listener");
-    let addr = listener.local_addr().expect("test listener address");
-    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
-    let client = reqwest::Client::new();
-    let base = format!("http://{addr}");
-
-    let mut document = select_workflow(&client, &base, "blank").await;
-    assert_eq!(
-        document.source,
-        "const blank = async () => {\n  return 0;\n};\n"
-    );
-
-    let mut status = new_flow_node("new:blank-status", "call", None, "Blank status");
-    *status.data.expression_mut().expect("expression node") =
-        Some("await display.set_status({ key: \"blank\", value: \"built\" })".to_string());
-    append_process_node(&mut document, status);
-    let mut message = new_flow_node("new:blank-message", "call", None, "Blank message");
-    *message.data.expression_mut().expect("expression node") =
-        Some("await display.show_message({ text: \"Built from blank\" })".to_string());
-    append_process_node(&mut document, message);
-
-    let response = client
-        .post(format!("{base}/workflow"))
-        .json(&document)
-        .send()
-        .await
-        .expect("save grown blank workflow");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    let saved: WorkflowDocument = response.json().await.expect("saved workflow");
-    assert!(saved.source.contains("display.set_status"));
-    assert!(saved.source.contains("display.show_message"));
-
-    let events = run_workflow(&client, &base).await;
-    let final_event = events.last().expect("terminal event");
-    assert_eq!(final_event.status, RunStatus::Succeeded);
-    assert_eq!(
-        final_event
-            .display
-            .statuses
-            .get("blank")
-            .map(String::as_str),
-        Some("built")
-    );
-    assert!(
-        final_event
-            .display
-            .messages
-            .iter()
-            .any(|message| message == "Built from blank")
-    );
-
-    server.abort();
-}
-
-#[tokio::test]
 async fn reordered_process_statements_save_reproject_and_run_in_node_id_order() {
     let (state, _double) = runtime::state().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

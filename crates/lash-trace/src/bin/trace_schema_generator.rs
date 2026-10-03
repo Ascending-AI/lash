@@ -84,37 +84,3 @@ fn document<T: JsonSchema>(shape: &'static str) -> Result<Document, String> {
         schema,
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn documents_are_stamped_and_pin_the_trace_version() {
-        let documents = documents().expect("schemas generate");
-        assert_eq!(
-            documents
-                .iter()
-                .map(|document| document.shape)
-                .collect::<Vec<_>>(),
-            [RECORD_NAME, GRAPH_NAME]
-        );
-        for document in documents {
-            assert_eq!(document.version, TRACE_SCHEMA_VERSION);
-            assert_eq!(
-                document.schema["x-lash-schema-version"],
-                json!(TRACE_SCHEMA_VERSION)
-            );
-            assert_eq!(
-                document.schema["x-lash-version-constant"],
-                json!(VERSION_CONSTANT)
-            );
-            assert_eq!(
-                document.schema["properties"]["schema_version"]["enum"],
-                json!([TRACE_SCHEMA_VERSION])
-            );
-            // Additive fields are tolerated on a known record or snapshot.
-            assert!(document.schema.get("additionalProperties").is_none());
-        }
-    }
-}

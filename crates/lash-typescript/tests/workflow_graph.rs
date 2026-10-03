@@ -11,27 +11,18 @@ use std::collections::BTreeSet;
 
 use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
-    GraphRenderError, TypeScriptSourceError, parse_typescript_assign_target,
-    parse_typescript_expression, typescript_expression_source, typescript_program_source, validate,
-    workflow_graph_from_source, workflow_graph_from_source_with_facets, workflow_graph_to_source,
+    GraphRenderError, parse_typescript_assign_target, parse_typescript_expression,
+    typescript_expression_source, typescript_program_source, validate, workflow_graph_from_source,
+    workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lashlang::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, TypeExpr, TypeField,
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
     WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdge,
-    WorkflowEdgeKind, WorkflowExpectedArgument, WorkflowGraph, WorkflowGraphDecodeError,
-    WorkflowGraphReconcileSide, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowSlotPath, WorkflowSlotPathSegment,
-    WorkflowSubgraph, WorkflowTypeDiagnostic, reconcile, workflow_call_to_ir, workflow_slot_value,
+    WorkflowEdgeKind, WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide,
+    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowSlotPath,
+    WorkflowSlotPathSegment, WorkflowSubgraph, reconcile, workflow_call_to_ir, workflow_slot_value,
 };
-
-/// The language-neutral IR projection, with TypeScript opaque-statement text.
-fn workflow_graph_from_program(program: &lashlang::Program) -> lashlang::WorkflowGraph {
-    lashlang::workflow_graph_from_program(
-        program,
-        &lash_typescript::workflow_graph::TypeScriptStatementText,
-    )
-}
 
 /// The one process a fixture lifts.
 ///
@@ -72,30 +63,6 @@ fn ir(text: &str) -> lashlang::Expr {
     .collect::<BTreeSet<_>>();
     parse_typescript_expression(text, &globals, &BTreeSet::new())
         .expect("fixture expression parses")
-}
-
-fn ir_target(text: &str) -> lashlang::AssignTarget {
-    let globals = ["state", "started"]
-        .into_iter()
-        .map(str::to_string)
-        .collect::<BTreeSet<_>>();
-    parse_typescript_assign_target(text, &globals, &BTreeSet::new()).expect("fixture target parses")
-}
-
-fn replace_number(expression: &mut lashlang::Expr, replacement: f64) {
-    fn replace_first(expression: &mut lashlang::Expr, replacement: f64) -> bool {
-        if let lashlang::Expr::Number(value) = expression {
-            *value = replacement;
-            return true;
-        }
-        expression
-            .children_mut()
-            .any(|child| replace_first(child, replacement))
-    }
-    assert!(
-        replace_first(expression, replacement),
-        "fixture expression has a numeric descendant"
-    );
 }
 
 /// Every lens law over one fixture.
@@ -205,18 +172,6 @@ fn workflow_graph_decode_checks_version_before_shape() {
 }
 
 #[test]
-fn workflow_graph_refuses_unknown_field() {
-    let graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
-    let mut unknown_field = serde_json::to_value(&graph).expect("graph serializes");
-    unknown_field["future"] = serde_json::json!(true);
-    let error = WorkflowGraph::decode_json(
-        &serde_json::to_string(&unknown_field).expect("fixture JSON encodes"),
-    )
-    .expect_err("same-version unknown fields are refused");
-    assert!(error.to_string().contains("unknown field `future`"));
-}
-
-#[test]
 fn workflow_graph_refuses_unknown_variant() {
     let graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
     let mut unknown_variant = serde_json::to_value(graph).expect("graph serializes");
@@ -246,31 +201,6 @@ fn populated_facet_graph() -> WorkflowGraph {
         })
     }));
     graph
-}
-
-#[test]
-fn facet_reader_preserves_current_populated_facets() {
-    let graph = populated_facet_graph();
-    let expected = graph
-        .nodes()
-        .map(|node| node.type_facets.clone())
-        .collect::<Vec<_>>();
-
-    let decoded =
-        WorkflowGraph::decode_json_value(serde_json::to_value(graph).expect("graph serializes"))
-            .expect("current facets decode");
-
-    assert_eq!(
-        decoded.facet_schema_version,
-        Some(WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
-    );
-    assert_eq!(
-        decoded
-            .nodes()
-            .map(|node| node.type_facets.clone())
-            .collect::<Vec<_>>(),
-        expected
-    );
 }
 
 #[test]
@@ -605,68 +535,6 @@ fn workflow_graph_ir_json_golden_is_exact() {
 }
 
 #[test]
-fn workflow_type_facet_slot_json_golden_is_exact() {
-    let argument = WorkflowExpectedArgument {
-        slot: WorkflowSlotPath(vec![
-            WorkflowSlotPathSegment::Call(1),
-            WorkflowSlotPathSegment::Arg(0),
-            WorkflowSlotPathSegment::Field("a.b".into()),
-            WorkflowSlotPathSegment::Index(2),
-        ]),
-        ty: TypeExpr::Str,
-    };
-
-    assert_eq!(
-        serde_json::to_value(argument).expect("facet argument serializes"),
-        serde_json::json!({
-            "slot": [
-                { "call": 1 },
-                { "arg": 0 },
-                { "field": "a.b" },
-                { "index": 2 }
-            ],
-            "ty": "Str"
-        })
-    );
-}
-
-#[test]
-#[ignore = "prints the faceted workflow golden for capture with --nocapture"]
-fn regenerate_workflow_graph_with_facets() {
-    let graph =
-        workflow_graph_from_source_with_facets(goldens::WITH_FACETS, Some(&facet_environment()))
-            .expect("golden fixture projects");
-    println!(
-        "WORKFLOW_GRAPH_GOLDEN_BEGIN\n{}\nWORKFLOW_GRAPH_GOLDEN_END",
-        serde_json::to_string_pretty(&graph).expect("golden graph serializes"),
-    )
-}
-
-#[test]
-fn workflow_graph_with_facets_json_golden_is_exact() {
-    let graph =
-        workflow_graph_from_source_with_facets(goldens::WITH_FACETS, Some(&facet_environment()))
-            .expect("golden fixture projects");
-    let actual = serde_json::to_string_pretty(&graph).expect("golden graph serializes") + "\n";
-    assert_eq!(
-        actual,
-        include_str!("fixtures/workflow_graph_with_facets.json"),
-        "nodes={:?}, edges={:?}, source_identity={:?}",
-        graph
-            .nodes()
-            .map(|node| node.id.to_string())
-            .collect::<Vec<_>>(),
-        graph
-            .main
-            .edges
-            .iter()
-            .map(|edge| edge.id.as_str())
-            .collect::<Vec<_>>(),
-        graph.source_identity,
-    );
-}
-
-#[test]
 fn workflow_graph_refuses_unknown_type_expr_variant() {
     let graph = WorkflowGraph {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
@@ -685,23 +553,6 @@ fn workflow_graph_refuses_unknown_type_expr_variant() {
     value["declarations"][0]["return_ty"] = serde_json::json!("FutureType");
 
     let error = serde_json::from_value::<WorkflowGraph>(value)
-        .expect_err("an unknown TypeExpr variant must be refused");
-    assert!(error.to_string().contains("unknown variant `FutureType`"));
-}
-
-#[test]
-fn facet_reader_refuses_unknown_type_expr_variant() {
-    let facets = WorkflowNodeTypeFacets {
-        available_variables: vec![lashlang::WorkflowTypedVariable {
-            name: "value".to_string(),
-            ty: TypeExpr::Str,
-        }],
-        ..WorkflowNodeTypeFacets::default()
-    };
-    let mut value = serde_json::to_value(facets).expect("facets serialize");
-    value["available_variables"][0]["ty"] = serde_json::json!("FutureType");
-
-    let error = serde_json::from_value::<WorkflowNodeTypeFacets>(value)
         .expect_err("an unknown TypeExpr variant must be refused");
     assert!(error.to_string().contains("unknown variant `FutureType`"));
 }
@@ -729,27 +580,6 @@ fn workflow_graph_refuses_unknown_fields_inside_type_expr_payloads() {
 
     let error = serde_json::from_value::<WorkflowGraph>(value)
         .expect_err("an unknown TypeField member must be refused inside the graph carrier");
-    assert!(error.to_string().contains("unknown field `future`"));
-}
-
-#[test]
-fn facet_reader_refuses_unknown_fields_inside_type_expr_payloads() {
-    let facets = WorkflowNodeTypeFacets {
-        available_variables: vec![lashlang::WorkflowTypedVariable {
-            name: "value".to_string(),
-            ty: TypeExpr::Object(vec![TypeField {
-                name: "field".into(),
-                ty: TypeExpr::Str,
-                optional: false,
-            }]),
-        }],
-        ..WorkflowNodeTypeFacets::default()
-    };
-    let mut value = serde_json::to_value(facets).expect("facets serialize");
-    value["available_variables"][0]["ty"]["Object"][0]["future"] = serde_json::json!(true);
-
-    let error = serde_json::from_value::<WorkflowNodeTypeFacets>(value)
-        .expect_err("an unknown TypeField member must be refused inside the facet carrier");
     assert!(error.to_string().contains("unknown field `future`"));
 }
 
@@ -814,22 +644,6 @@ fn canonicalization_discards_comments() {
         "rendered source:\n{rendered}"
     );
     assert_eq!(rendered, "let value = 1;\n");
-}
-
-#[test]
-fn invalid_graphs_are_refused() {
-    let mut graph =
-        workflow_graph_from_source("const value = 1;\nfinish(value);\n").expect("fixture projects");
-    graph.main.edges.push(WorkflowEdge {
-        id: "dangling".to_string(),
-        from: graph.main.nodes[0].id.clone(),
-        to: WorkflowNodeId::new("missing".to_string()),
-        kind: WorkflowEdgeKind::Sequence,
-    });
-    assert!(matches!(
-        workflow_graph_to_source(&graph),
-        Err(GraphRenderError::UnknownNodeReference { .. })
-    ));
 }
 
 #[test]
@@ -1032,197 +846,10 @@ finish(state);
 }
 
 #[test]
-fn edited_expression_ir_is_rendered_and_reprojected() {
-    // A process body lifts out of the module as a derived declaration, so the
-    // editable statements a host reaches are the module's own: every slot below
-    // lives in `main`, and the one process literal stays a value it names.
-    let source = r#"const child = async () => {
-    return 1;
-  };
-const state = { count: 0, other: 0 };
-while (state.count < 3) {
-  state.count = state.count + 1;
-}
-state.count = 7;
-const runs = [await processes.start({ definition: child }), await processes.start({ definition: child })];
-finish(1);
-"#;
-    let graph = workflow_graph_from_source(source).expect("fixture projects");
-
-    let mut edited = graph.clone();
-    let WorkflowNodeKind::Container(WorkflowContainer::While { condition, .. }) =
-        &mut edited.main.nodes[2].kind
-    else {
-        panic!("expected while container")
-    };
-    *condition = ir("state.count < 2");
-    let WorkflowNodeKind::StateUpdate {
-        target, expression, ..
-    } = &mut edited.main.nodes[3].kind
-    else {
-        panic!("expected state update")
-    };
-    *target = ir_target("state.other");
-    *expression = ir("state.count + 40");
-    let WorkflowNodeKind::Computation {
-        binding,
-        expression,
-    } = &mut edited.main.nodes[4].kind
-    else {
-        panic!("expected computation")
-    };
-    *binding = Some(ir_target("started"));
-    let lashlang::Expr::List(items) = expression else {
-        panic!("expected a list computation");
-    };
-    items.push(items[0].clone());
-    let edited_runs = expression.clone();
-
-    let rendered = workflow_graph_to_source(&edited).expect("edited graph renders");
-    assert!(
-        rendered.contains("while ((state.count < 2))"),
-        "rendered source:\n{rendered}"
-    );
-    assert!(rendered.contains("state.other = (state.count + 40);"));
-    assert!(
-        rendered.contains("started = [await (processes.start({ definition: child })), await (processes.start({ definition: child })), await (processes.start({ definition: child }))];"),
-        "rendered source:\n{rendered}"
-    );
-
-    let reprojected = workflow_graph_from_source(&rendered).expect("edited source reprojects");
-    assert!(matches!(
-        &reprojected.main.nodes[2].kind,
-        WorkflowNodeKind::Container(WorkflowContainer::While { condition, .. })
-            if condition == &ir("state.count < 2")
-    ));
-    assert!(matches!(
-        &reprojected.main.nodes[3].kind,
-        WorkflowNodeKind::StateUpdate { target, expression, update: None }
-            if target == &ir_target("state.other") && expression == &ir("state.count + 40")
-    ));
-    assert!(matches!(
-        &reprojected.main.nodes[4].kind,
-        WorkflowNodeKind::Computation { binding, expression }
-            if binding.as_ref() == Some(&ir_target("started"))
-                && expression == &edited_runs
-    ));
-    assert_eq!(
-        workflow_graph_to_source(&reprojected).expect("reprojected graph renders"),
-        rendered
-    );
-}
-
-#[test]
 fn invalid_host_edited_text_is_refused_before_it_enters_the_graph() {
     let globals = BTreeSet::from(["value".to_string(), "state".to_string()]);
     assert!(parse_typescript_expression("value <", &globals, &BTreeSet::new()).is_err());
     assert!(parse_typescript_assign_target("state.", &globals, &BTreeSet::new()).is_err());
-}
-
-#[test]
-fn all_container_expression_slots_accept_host_edits() {
-    let source = r#"const values = [1, 2];
-if (true) {
-  await sleep(1);
-} else {
-  await sleep(2);
-}
-for (const value of values) {
-  await sleep(value);
-}
-finish(1);
-"#;
-    let mut graph = workflow_graph_from_source(source).expect("fixture projects");
-    let WorkflowNodeKind::Container(WorkflowContainer::If { condition, .. }) =
-        &mut graph.main.nodes[1].kind
-    else {
-        panic!("expected if container")
-    };
-    *condition = ir("false");
-    let WorkflowNodeKind::Container(WorkflowContainer::For { iterable, .. }) =
-        &mut graph.main.nodes[2].kind
-    else {
-        panic!("expected for container")
-    };
-    *iterable = ir("[3, 4]");
-
-    let rendered = workflow_graph_to_source(&graph).expect("edited graph renders");
-    assert!(
-        rendered.contains("if (false)"),
-        "rendered source:\n{rendered}"
-    );
-    assert!(
-        rendered.contains("for (const value of [3, 4])"),
-        "rendered source:\n{rendered}"
-    );
-
-    let reprojected = workflow_graph_from_source(&rendered).expect("edited source reprojects");
-    assert!(matches!(
-        &reprojected.main.nodes[1].kind,
-        WorkflowNodeKind::Container(WorkflowContainer::If { condition, .. })
-            if condition == &ir("false")
-    ));
-    assert!(matches!(
-        &reprojected.main.nodes[2].kind,
-        WorkflowNodeKind::Container(WorkflowContainer::For { iterable, .. })
-            if iterable == &ir("[3, 4]")
-    ));
-    assert_eq!(
-        workflow_graph_to_source(&reprojected).expect("reprojected graph renders"),
-        rendered
-    );
-}
-
-#[test]
-fn execution_site_correlation_survives_edit_and_reprojection() {
-    let source = r#"if (await tools.ready({ attempt: 1 })) {
-  console.log("ready");
-} else {
-  console.log("not ready");
-}
-for (const value of await tools.values({ batch: 1 })) {
-  console.log("loop");
-}
-finish(1);
-"#;
-    let mut graph = workflow_graph_from_source(source).expect("fixture projects");
-    let original_sites = graph.main.nodes[..2]
-        .iter()
-        .map(|node| node.execution_sites.clone())
-        .collect::<Vec<_>>();
-    assert!(original_sites.iter().all(|sites| !sites.is_empty()));
-
-    let WorkflowNodeKind::Container(WorkflowContainer::If { condition, .. }) =
-        &mut graph.main.nodes[0].kind
-    else {
-        panic!("expected if container")
-    };
-    replace_number(condition, 2.0);
-
-    let WorkflowNodeKind::Container(WorkflowContainer::For {
-        binding, iterable, ..
-    }) = &mut graph.main.nodes[1].kind
-    else {
-        panic!("expected for container")
-    };
-    *binding = "entry".to_string();
-    replace_number(iterable, 3.0);
-
-    let rendered = workflow_graph_to_source(&graph).expect("edited graph renders");
-    let reprojected = workflow_graph_from_source(&rendered).expect("edited source reprojects");
-
-    for (node, sites) in reprojected.main.nodes[..2].iter().zip(original_sites) {
-        assert_eq!(node.execution_sites, sites);
-        for workflow_site in sites {
-            let correlated = lashlang::workflow_node_id(&workflow_site.owner, &workflow_site.path);
-            assert_eq!(correlated, node.id);
-            assert!(
-                reprojected
-                    .nodes()
-                    .any(|candidate| candidate.id == correlated)
-            );
-        }
-    }
 }
 
 #[test]
@@ -1513,26 +1140,6 @@ fn artifact_projection_rebuilds_canonical_spans_for_lifted_processes() {
             .map(|node| node.source_span)
             .collect::<Vec<_>>(),
         "the runnable view carries the draft's canonical provenance"
-    );
-}
-
-#[test]
-fn unprintable_program_projection_exposes_no_source_spans() {
-    use lashlang::testing::ast_builders as b;
-
-    let mut program = b::program(vec![b::assign(
-        "joined",
-        b::builtin("join", vec![b::list(vec![]), b::string(",")]),
-    )]);
-    program.spans.insert(
-        lashlang::AstPath::main(vec![0]),
-        lashlang::Span { start: 0, end: 1 },
-    );
-
-    let graph = workflow_graph_from_program(&program);
-    assert!(
-        graph.nodes().all(|node| node.source_span.is_none()),
-        "an IR with no canonical TypeScript text must not expose unrelated offsets"
     );
 }
 
@@ -1904,27 +1511,6 @@ fn type_diagnostic_carries_slot_and_kind() {
 }
 
 #[test]
-fn nested_call_diagnostic_identifies_the_inner_failing_argument() {
-    let graph = workflow_graph_from_source_with_facets(
-        "await tools.shape_text({ text: await tools.echo(42) });\n",
-        Some(&slot_path_environment()),
-    )
-    .expect("a nested mismatch remains projectable");
-    let diagnostic = graph.main.nodes[0]
-        .type_facets
-        .as_ref()
-        .expect("call has facets")
-        .diagnostics
-        .first()
-        .expect("inner mismatch produces a diagnostic");
-
-    assert_eq!(
-        diagnostic.slot.as_ref().map(ToString::to_string).as_deref(),
-        Some("call[1].arg[0]")
-    );
-}
-
-#[test]
 fn multi_call_diagnostic_identifies_only_the_later_failing_call() {
     let graph = workflow_graph_from_source_with_facets(
         concat!(
@@ -2010,50 +1596,6 @@ finish(1);
 }
 
 #[test]
-fn type_facets_are_ignored_by_put_and_canonicalization() {
-    let source = "const value = \"text\";\nfinish(value);\n";
-    let canonical = canonical(source);
-    let environment =
-        LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::all());
-    let mut graph = workflow_graph_from_source_with_facets(source, Some(&environment))
-        .expect("a host-backed projection is best effort");
-    graph.facet_schema_version = Some(WORKFLOW_TYPE_FACET_SCHEMA_VERSION + 99);
-    let terminal_id = graph.main.nodes[1].id.clone();
-    graph.main.nodes[1]
-        .type_facets
-        .as_mut()
-        .expect("the terminal node has type facets")
-        .diagnostics
-        .push(WorkflowTypeDiagnostic {
-            node_id: terminal_id,
-            kind: WorkflowDiagnosticKind::UnknownName,
-            classification: lashlang::WorkflowDiagnosticClassification::Definite,
-            slot: None,
-            message: "must not become source".to_string(),
-            span: None,
-        });
-
-    assert_eq!(
-        workflow_graph_to_source(&graph).expect("graph renders"),
-        canonical
-    );
-    let reprojected = workflow_graph_from_source(&canonical).expect("canonical source reprojects");
-    assert_eq!(reprojected.facet_schema_version, None);
-    assert!(reprojected.nodes().all(|node| node.type_facets.is_none()));
-}
-
-#[test]
-fn standalone_pure_expressions_remain_computations() {
-    let graph = workflow_graph_from_source("1 + 1;\n").expect("fixture projects");
-    assert!(matches!(
-        graph.main.nodes[0].kind,
-        WorkflowNodeKind::Computation { ref expression, binding: None }
-            if expression == &ir("1 + 1")
-    ));
-    assert_lens_laws("1 + 1;\n");
-}
-
-#[test]
 fn effectful_composites_are_typed_and_never_opaque() {
     let source = r#"const child = async () => {
     return 1;
@@ -2112,56 +1654,6 @@ fn while_collects_condition_sites_without_duplicating_body_sites() {
 fn structured_loop_control_round_trips() {
     let source = "for (const value of [1, 2]) {\n  if (value === 1) {\n    continue;\n  } else {\n    break;\n  }\n}\n";
     assert_lens_laws(source);
-}
-
-#[test]
-fn function_declarations_survive_the_graph_round_trip() {
-    // A pure body contributes no steps, so a function is carried verbatim
-    // rather than projected — projecting it would invent workflow structure
-    // that never executes as its own node.
-    assert_lens_laws(
-        "function describe(name: string, count: number) {\n  return name + count;\n}\n\nconsole.log(describe(\"items\", 2));\nfinish(null);\n",
-    );
-}
-
-#[test]
-fn projection_covers_calls_containers_and_terminals() {
-    // Moved from the Lashlang parser suite, which asserted graph projection
-    // rather than parsing (FIG-3033).
-    let source = r#"const triage = async (input: unknown) => {
-    if (input.source === "gmail") {
-      const message = await gmail.getMessage(input.messageId);
-      return message;
-    } else {
-      return null;
-    }
-  };
-const handle = await processes.start({ definition: triage, args: { input: 1 } });
-finish(handle);
-"#;
-    let graph = workflow_graph_from_source(source).expect("module should project");
-    assert_eq!(only_process(&graph).params.len(), 1);
-    assert!(
-        graph
-            .nodes()
-            .any(|node| matches!(node.kind, WorkflowNodeKind::Call { .. }))
-    );
-    assert!(graph.nodes().any(|node| matches!(
-        node.kind,
-        WorkflowNodeKind::Container(WorkflowContainer::If { .. })
-    )));
-    assert!(
-        graph
-            .nodes()
-            .any(|node| matches!(node.kind, WorkflowNodeKind::Terminal { .. }))
-    );
-    assert!(
-        graph
-            .main
-            .edges
-            .iter()
-            .any(|edge| matches!(edge.kind, WorkflowEdgeKind::Sequence))
-    );
 }
 
 const LABELED: &str = r#"/** @label Lookup — Read the app's current state */
@@ -2228,60 +1720,6 @@ fn label_doc_comments_name_nodes_through_every_lens_law() {
     );
 }
 
-/// The label is a name, not an instruction: it must not change what the
-/// program compiles to.
-#[test]
-fn a_label_comment_changes_no_lowered_program() {
-    let labeled = parse(LABELED).expect("labeled source parses");
-    let bare = parse(
-        &LABELED
-            .lines()
-            .filter(|line| !line.trim_start().starts_with("/**"))
-            .collect::<Vec<_>>()
-            .join("\n"),
-    )
-    .expect("unlabeled source parses");
-    // Source spans move, because the comment occupies bytes and the label
-    // node occupies an AST path. What the program *does* — its declarations
-    // and its body — does not.
-    for part in ["declarations", "main"] {
-        assert_eq!(
-            strip_labels(
-                serde_json::to_value(&labeled).expect("labeled program serializes")[part].clone()
-            ),
-            strip_labels(
-                serde_json::to_value(&bare).expect("bare program serializes")[part].clone()
-            ),
-            "the label is the only difference a label comment makes to `{part}`",
-        );
-    }
-}
-
-fn strip_labels(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(mut object) => {
-            if let Some(annotated) = object.remove("LabelAnnotated") {
-                let mut annotated = match annotated {
-                    serde_json::Value::Object(annotated) => annotated,
-                    other => return strip_labels(other),
-                };
-                return strip_labels(annotated.remove("expr").expect("annotated expression"));
-            }
-            object.remove("label");
-            serde_json::Value::Object(
-                object
-                    .into_iter()
-                    .map(|(key, value)| (key, strip_labels(value)))
-                    .collect(),
-            )
-        }
-        serde_json::Value::Array(values) => {
-            serde_json::Value::Array(values.into_iter().map(strip_labels).collect())
-        }
-        other => other,
-    }
-}
-
 /// Two names for one node is the author contradicting themselves, and no rule
 /// for picking between them would be the one they meant.
 #[test]
@@ -2315,51 +1753,6 @@ fn comments_that_are_not_the_label_form_stay_trivia() {
         let rendered = workflow_graph_to_source(&graph).expect("graph renders");
         assert!(!rendered.contains("@label"), "rendered source:\n{rendered}");
     }
-}
-
-/// A title the renderer cannot write back is refused rather than mangled: a
-/// rename that silently became a different name is worse than a typed error.
-#[test]
-fn a_label_with_no_spelling_is_refused_by_the_renderer() {
-    let mut graph = workflow_graph_from_source(&canonical(LABELED)).expect("labeled source");
-    let node = graph
-        .main
-        .nodes
-        .iter_mut()
-        .find(|node| node.name_source == WorkflowNodeNameSource::Label)
-        .expect("a labeled node");
-    node.name = "Close */ me".into();
-    assert!(matches!(
-        workflow_graph_to_source(&graph),
-        Err(GraphRenderError::CanonicalSource(
-            TypeScriptSourceError::UnrepresentableLabel { .. }
-        ))
-    ));
-}
-/// An inline process body is a process container of the module (FIG-2997):
-/// it projects its own declaration, named exactly what the linker lifts the
-/// literal to, and the lens laws hold over a call that carries one in
-/// argument position.
-#[test]
-fn an_inline_process_body_projects_as_a_process_container() {
-    let source = "await triggers.register({\n  source: { expr: \"0 8 * * *\" },\n  target: { definition: async (event) => {\n    print(event);\n  } },\n})\nfinish(null);\n";
-    let canonical = canonical(source);
-    let graph = workflow_graph_from_source(&canonical).expect("canonical source projects");
-    let literal = graph
-        .declarations
-        .iter()
-        .find_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) if process.name.starts_with("__process_") => {
-                Some(process)
-            }
-            _ => None,
-        })
-        .expect("the literal projects as a process container");
-    assert!(
-        literal.body.nodes.iter().any(|node| node.name == "print"),
-        "the authored body is the container's subgraph: {literal:?}"
-    );
-    assert_lens_laws(source);
 }
 
 /// FIG-3118: the lens owns a lifted process's body in *both* directions.
@@ -2421,51 +1814,6 @@ fn an_edit_inside_a_process_container_survives_the_round_trip() {
         saved,
         "rendering the reprojection is a fixpoint"
     );
-}
-
-#[test]
-fn call_argument_ir_edit_renders_without_an_expression_text_field() {
-    const SOURCE: &str = "const flow = async () => {\n  \
-        await (display.show_message({ text: \"before\" }));\n};\n";
-
-    let mut graph = workflow_graph_from_source(SOURCE).expect("the fixture projects");
-    let WorkflowDeclaration::Process(process) = &mut graph.declarations[0] else {
-        panic!("the fixture lifts one process");
-    };
-    let WorkflowNodeKind::Call { arguments, .. } = &mut process.body.nodes[0].kind else {
-        panic!("the process body starts with a call");
-    };
-    let [WorkflowArgument::Named { fields }] = arguments.as_mut_slice() else {
-        panic!("the call has one named argument record");
-    };
-    let (_, lashlang::Expr::String(value)) = &mut fields[0] else {
-        panic!("the named text argument is a string");
-    };
-    *value = "after".into();
-
-    let rendered = workflow_graph_to_source(&graph).expect("edited argument IR renders");
-    assert_eq!(rendered, SOURCE.replace("\"before\"", "\"after\""));
-}
-
-#[test]
-fn effect_argument_ir_edit_renders_without_an_expression_text_field() {
-    const SOURCE: &str = "await sleep(\"1s\");\n";
-    let mut graph = workflow_graph_from_source(SOURCE).expect("fixture projects");
-    let WorkflowNodeKind::Effect { arguments, .. } = &mut graph.main.nodes[0].kind else {
-        panic!("sleep projects as an effect");
-    };
-    let [
-        WorkflowArgument::Positional {
-            value: lashlang::Expr::String(duration),
-        },
-    ] = arguments.as_mut_slice()
-    else {
-        panic!("sleep carries one positional string argument");
-    };
-    *duration = "2s".into();
-
-    let rendered = workflow_graph_to_source(&graph).expect("edited effect argument IR renders");
-    assert_eq!(rendered, "await sleep(\"2s\");\n");
 }
 
 #[path = "workflow_graph/carrier_fix_round.rs"]

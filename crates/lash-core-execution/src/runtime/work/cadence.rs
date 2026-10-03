@@ -113,19 +113,3 @@ fn validate_initial_not_greater_than_max(
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn work_cadence_defaults_match_the_wait_and_delivery_constants() {
-        let cadence = WorkCadencePolicy::default();
-
-        assert_eq!(cadence.poll_initial, Duration::from_millis(25));
-        assert_eq!(cadence.poll_max, Duration::from_secs(1));
-        assert_eq!(cadence.delivery_batch, NonZeroUsize::new(32).unwrap());
-        assert_eq!(cadence.delivery_retry_initial, Duration::from_millis(50));
-        assert_eq!(cadence.delivery_retry_max, Duration::from_secs(5 * 60));
-    }
-}

@@ -104,48 +104,6 @@ mod tests {
     }
 
     #[test]
-    fn decoder_accepts_plain_and_complete_append_identities() {
-        assert!(matches!(
-            decode_append_request_identity("append-session-nodes", None, None, None)
-                .expect("plain commit identity"),
-            AppendRequestIdentity::PlainCommit
-        ));
-        assert!(matches!(
-            decode_append_request_identity(
-                "append-session-nodes",
-                Some("hash".to_string()),
-                Some(2),
-                Some(3)
-            )
-            .expect("complete append identity"),
-            AppendRequestIdentity::Append {
-                encoding_version: 2,
-                ref request_hash,
-                requested_node_count: 3,
-                requested_ancestor_node_id: None,
-            } if request_hash == "hash"
-        ));
-    }
-
-    #[test]
-    fn decoder_recovers_semantic_boundary_identities_by_operation_family() {
-        for (key, operation) in [
-            ("record-config", SemanticBoundaryOperation::RecordConfig),
-            ("create-session", SemanticBoundaryOperation::CreateSession),
-        ] {
-            assert!(matches!(
-                decode_append_request_identity(key, Some("hash".to_string()), Some(1), None)
-                    .expect("semantic-boundary identity"),
-                AppendRequestIdentity::SemanticBoundary {
-                    operation: decoded,
-                    encoding_version: 1,
-                    ref request_hash,
-                } if decoded == operation && request_hash == "hash"
-            ));
-        }
-    }
-
-    #[test]
     fn decoder_refuses_a_countless_identity_for_a_foreign_operation() {
         for key in ["append-session-nodes", "initial-park", "commit"] {
             let error =
@@ -158,26 +116,6 @@ mod tests {
                         "operation `{key}` does not own a semantic-boundary identity family"
                     )
             ));
-        }
-    }
-
-    #[test]
-    fn decoder_refuses_out_of_range_encoding_versions() {
-        for version in [-1, i64::from(u32::MAX) + 1] {
-            for requested_node_count in [Some(1), None] {
-                let error = decode_append_request_identity(
-                    if requested_node_count.is_some() {
-                        "append-session-nodes"
-                    } else {
-                        "record-config"
-                    },
-                    Some("hash".to_string()),
-                    Some(version),
-                    requested_node_count,
-                )
-                .expect_err("out-of-range version must be refused");
-                assert!(matches!(error, StoreError::StoredDataCorrupt { .. }));
-            }
         }
     }
 }

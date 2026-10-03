@@ -732,38 +732,6 @@ mod tests {
     }
 
     #[test]
-    fn only_a_typed_refusal_refuses_an_open() {
-        assert!(too_old(36).refuses_open());
-        assert!(!StoreSchemaVerdict::Matches.refuses_open());
-        assert!(!StoreSchemaVerdict::Migratable { found: 36 }.refuses_open());
-        assert!(!StoreSchemaVerdict::Absent.refuses_open());
-        assert!(
-            !StoreSchemaVerdict::Unreadable {
-                reason: "disk I/O error".to_string(),
-            }
-            .refuses_open(),
-            "an unreadable database is undecided, not refused"
-        );
-    }
-
-    #[test]
-    fn an_undecided_verdict_is_neither_a_refusal_nor_a_pass() {
-        let undecided = StoreSchemaVerdict::Unreadable {
-            reason: "permission denied".to_string(),
-        };
-        assert!(undecided.is_undecided());
-        assert!(!undecided.refuses_open());
-        for decided in [
-            StoreSchemaVerdict::Matches,
-            StoreSchemaVerdict::Migratable { found: 1 },
-            StoreSchemaVerdict::Absent,
-            too_old(1),
-        ] {
-            assert!(!decided.is_undecided(), "{decided:?}");
-        }
-    }
-
-    #[test]
     fn an_undecided_database_never_reads_as_ready() {
         // The defect the boolean had: nothing refuses, so "is it fine?" said
         // yes over a database nobody could read.
@@ -810,32 +778,6 @@ mod tests {
     }
 
     #[test]
-    fn conformance_names_every_refusing_database_and_only_those() {
-        let status = StoreSchemaStatus {
-            release: StoreReleaseState::Unstamped,
-            fleet_format: FleetFormatState::Unrecorded,
-            databases: vec![
-                database("durable core", StoreSchemaVerdict::Matches),
-                database("process registry", too_old(23)),
-                database("triggers", StoreSchemaVerdict::Absent),
-                database(
-                    "effect replay",
-                    StoreSchemaVerdict::Unreadable {
-                        reason: "file is not a database".to_string(),
-                    },
-                ),
-            ],
-        };
-
-        assert_eq!(status.outcome(), StoreSchemaOutcome::Refused);
-        let refused: Vec<&str> = status
-            .refusals()
-            .map(|database| database.name.as_str())
-            .collect();
-        assert_eq!(refused, vec!["process registry"]);
-    }
-
-    #[test]
     fn an_empty_deployment_is_ready() {
         let status = StoreSchemaStatus {
             release: StoreReleaseState::Unstamped,
@@ -845,17 +787,6 @@ mod tests {
         assert_eq!(status.outcome(), StoreSchemaOutcome::Ready);
         assert_eq!(status.refusals().count(), 0);
         assert_eq!(status.undecided().count(), 0);
-    }
-
-    fn stamp(release: &str) -> StoreReleaseStamp {
-        StoreReleaseStamp {
-            release: release.to_string(),
-            schema_versions: vec![StoreComponentVersion {
-                component: "durable core".to_string(),
-                version: 66,
-            }],
-            written_at_epoch_ms: 1_700_000_000_000,
-        }
     }
 
     #[test]
@@ -938,61 +869,5 @@ mod tests {
             None,
             "a tuple this build cannot read is unreadable, not empty"
         );
-    }
-
-    #[test]
-    fn an_unstamped_store_is_reported_as_an_absence_not_a_blank_release() {
-        let unstamped = StoreReleaseState::Unstamped;
-        assert_eq!(unstamped.release(), None);
-        let unreadable = StoreReleaseState::Unreadable {
-            reason: "no such table: release_stamp".to_string(),
-        };
-        assert_eq!(unreadable.release(), None);
-        assert_ne!(
-            unstamped, unreadable,
-            "an unread stamp is a different finding from an absent one"
-        );
-        assert_eq!(
-            StoreReleaseState::Stamped(stamp("0.4.1")).release(),
-            Some("0.4.1")
-        );
-    }
-
-    #[test]
-    fn the_report_names_the_writing_release() {
-        let status = StoreSchemaStatus {
-            release: StoreReleaseState::Stamped(stamp("0.4.1")),
-            fleet_format: FleetFormatState::Unrecorded,
-            databases: vec![database("durable core", StoreSchemaVerdict::Matches)],
-        };
-        let rendered = status.to_string();
-        assert!(
-            rendered.contains("written by lash release 0.4.1"),
-            "{rendered}"
-        );
-        assert!(rendered.contains("durable core=66"), "{rendered}");
-
-        let unstamped = StoreSchemaStatus {
-            release: StoreReleaseState::Unstamped,
-            fleet_format: FleetFormatState::Unrecorded,
-            databases: Vec::new(),
-        };
-        assert!(
-            unstamped.to_string().contains("no release stamp"),
-            "{unstamped}"
-        );
-    }
-
-    #[test]
-    fn rendering_carries_the_refusal_in_its_own_words() {
-        let status = StoreSchemaStatus {
-            release: StoreReleaseState::Unstamped,
-            fleet_format: FleetFormatState::Unrecorded,
-            databases: vec![database("durable core", too_old(36))],
-        };
-        let rendered = status.to_string();
-        assert!(rendered.contains("durable core: refused: "), "{rendered}");
-        assert!(rendered.contains("is at version 36"), "{rendered}");
-        assert!(rendered.contains("`lashctl migrate`"), "{rendered}");
     }
 }

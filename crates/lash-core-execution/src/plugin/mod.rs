@@ -394,53 +394,6 @@ mod tests {
         }
     }
 
-    struct DuplicateNameToolProvider;
-
-    #[async_trait::async_trait]
-    impl ToolProvider for DuplicateNameToolProvider {
-        fn tool_manifests(&self) -> Vec<ToolManifest> {
-            vec![
-                ToolDefinition::raw(
-                    "tool:different_id",
-                    "mock_tool",
-                    "duplicate model-facing name",
-                    ToolDefinition::default_input_schema(),
-                    json!({}),
-                )
-                .expect("valid declared tool schemas")
-                .manifest(),
-            ]
-        }
-
-        fn resolve_contract(&self, _name: &str) -> Option<Arc<crate::ToolContract>> {
-            None
-        }
-
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-            ToolOutcome::ok(json!("unreachable")).into()
-        }
-    }
-
-    #[test]
-    fn plugin_registrar_preserves_typed_duplicate_tool_name_refusal() {
-        let mut registrar =
-            PluginRegistrar::new(PluginRevision::new("duplicate-law", BehaviorRevision::ONE));
-        registrar
-            .tools()
-            .provider(Arc::new(MockToolProvider))
-            .expect("first provider registers");
-
-        let error = registrar
-            .tools()
-            .provider(Arc::new(DuplicateNameToolProvider))
-            .expect_err("the registrar refuses the duplicate before assembly");
-        assert!(matches!(
-            error,
-            PluginError::Registration(ref message)
-                if message == "duplicate plugin tool name `mock_tool`"
-        ));
-    }
-
     struct MockPluginFactory;
 
     impl PluginFactory for MockPluginFactory {
@@ -457,46 +410,6 @@ mod tests {
                 PluginError::Session("the mock plugin serves sessions".to_string())
             })?;
             Ok(Arc::new(MockPlugin { session_id }))
-        }
-    }
-
-    const TEST_EXTENSION_ID: &str = "test.extension";
-
-    struct ExtensionPluginFactory;
-
-    impl PluginFactory for ExtensionPluginFactory {
-        fn id(&self) -> &'static str {
-            "extension_resource"
-        }
-
-        fn declaration(&self) -> crate::plugin::PluginDeclaration {
-            crate::plugin::PluginDeclaration::initial(self.id())
-        }
-
-        fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
-            vec![PluginExtensionContribution::from_value(
-                TEST_EXTENSION_ID,
-                json!({ "resource": "clock.alarm" }),
-            )]
-        }
-
-        fn build(
-            &self,
-            _ctx: &PluginSessionContext,
-        ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-            Ok(Arc::new(ExtensionPlugin))
-        }
-    }
-
-    struct ExtensionPlugin;
-
-    impl SessionPlugin for ExtensionPlugin {
-        fn id(&self) -> &'static str {
-            "extension_resource"
-        }
-
-        fn register(&self, _reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-            Ok(())
         }
     }
 
@@ -544,149 +457,6 @@ mod tests {
                 })?;
             Ok(())
         }
-    }
-
-    #[test]
-    fn plugin_host_collects_factory_extension_contributions() {
-        let host = PluginHost::new(vec![Arc::new(ExtensionPluginFactory)]);
-
-        assert_eq!(
-            host.extensions().payloads(TEST_EXTENSION_ID),
-            &[json!({ "resource": "clock.alarm" })]
-        );
-        let session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-            .expect("session");
-        assert_eq!(
-            session.extensions().payloads(TEST_EXTENSION_ID),
-            &[json!({ "resource": "clock.alarm" })]
-        );
-    }
-
-    #[test]
-    fn plugin_host_collects_session_plugin_extension_contributions() {
-        struct SessionExtensionFactory;
-
-        impl PluginFactory for SessionExtensionFactory {
-            fn id(&self) -> &'static str {
-                "session_extension"
-            }
-
-            fn declaration(&self) -> crate::plugin::PluginDeclaration {
-                crate::plugin::PluginDeclaration::initial(self.id())
-            }
-
-            fn build(
-                &self,
-                _ctx: &PluginSessionContext,
-            ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-                Ok(Arc::new(SessionExtensionPlugin))
-            }
-        }
-
-        struct SessionExtensionPlugin;
-
-        impl SessionPlugin for SessionExtensionPlugin {
-            fn id(&self) -> &'static str {
-                "session_extension"
-            }
-
-            fn register(&self, _reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-                Ok(())
-            }
-
-            fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
-                vec![PluginExtensionContribution::from_value(
-                    TEST_EXTENSION_ID,
-                    json!({ "resource": "session.alarm" }),
-                )]
-            }
-        }
-
-        let host = PluginHost::new(vec![Arc::new(SessionExtensionFactory)]);
-        let session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-            .expect("session");
-
-        assert_eq!(
-            session.session_extensions().payloads(TEST_EXTENSION_ID),
-            &[json!({ "resource": "session.alarm" })]
-        );
-        assert!(
-            session.extensions().payloads(TEST_EXTENSION_ID).is_empty(),
-            "session contributions must stay distinct from host-static extensions"
-        );
-    }
-
-    #[test]
-    fn declared_triggers_enter_session_catalog() {
-        struct TriggerEventOnlyFactory;
-
-        impl PluginFactory for TriggerEventOnlyFactory {
-            fn id(&self) -> &'static str {
-                "trigger_only"
-            }
-
-            fn declaration(&self) -> crate::plugin::PluginDeclaration {
-                crate::plugin::PluginDeclaration::initial(self.id())
-            }
-
-            fn build(
-                &self,
-                _ctx: &PluginSessionContext,
-            ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-                Ok(Arc::new(TriggerEventOnlyPlugin))
-            }
-        }
-
-        struct TriggerEventOnlyPlugin;
-
-        impl SessionPlugin for TriggerEventOnlyPlugin {
-            fn id(&self) -> &'static str {
-                "trigger_only"
-            }
-
-            fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-                reg.triggers().declare(crate::TriggerEvent::new(
-                    "Button",
-                    "ui.button",
-                    "pressed",
-                    crate::JsonSchema::any(),
-                ))
-            }
-        }
-
-        let host = PluginHost::new(vec![Arc::new(TriggerEventOnlyFactory)]);
-
-        let session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-            .expect("session");
-        assert!(
-            session
-                .triggers()
-                .get("Button", "ui.button", "pressed")
-                .is_some()
-        );
-        let event = session
-            .triggers()
-            .get("Button", "ui.button", "pressed")
-            .expect("button event");
-        assert_eq!(event.source_type(), "ui.button.pressed");
-    }
-
-    #[tokio::test]
-    async fn session_collects_tools() {
-        let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-            .expect("session");
-        let tool_names = session
-            .tools()
-            .tool_manifests()
-            .into_iter()
-            .map(|manifest| manifest.name)
-            .collect::<std::collections::BTreeSet<_>>();
-        assert!(tool_names.contains("mock_tool"));
     }
 
     #[tokio::test]
@@ -752,136 +522,6 @@ mod tests {
         assert_eq!(output.session_id.as_deref(), Some("root"));
     }
 
-    #[test]
-    fn plugin_operation_rejects_duplicate_names() {
-        struct DuplicatePlugin;
-
-        impl SessionPlugin for DuplicatePlugin {
-            fn id(&self) -> &'static str {
-                "duplicate"
-            }
-
-            fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-                reg.operations()
-                    .typed_query::<TypedEchoOp, _, _>(move |ctx, args| async move {
-                        Ok(TypedEchoOutput {
-                            value: args.value,
-                            session_id: ctx.session_id,
-                        })
-                    })?;
-                reg.operations()
-                    .typed_query::<TypedEchoOp, _, _>(move |ctx, args| async move {
-                        Ok(TypedEchoOutput {
-                            value: args.value,
-                            session_id: ctx.session_id,
-                        })
-                    })
-            }
-        }
-
-        struct DuplicateFactory;
-        impl PluginFactory for DuplicateFactory {
-            fn id(&self) -> &'static str {
-                "duplicate"
-            }
-
-            fn declaration(&self) -> crate::plugin::PluginDeclaration {
-                crate::plugin::PluginDeclaration::initial(self.id())
-            }
-
-            fn build(
-                &self,
-                _ctx: &PluginSessionContext,
-            ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-                Ok(Arc::new(DuplicatePlugin))
-            }
-        }
-
-        let err = match PluginHost::new(vec![Arc::new(DuplicateFactory)])
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-        {
-            Ok(_) => panic!("duplicate typed plugin operation should fail"),
-            Err(err) => err,
-        };
-        assert!(err.to_string().contains("duplicate plugin operation name"));
-    }
-
-    fn kindless_operation_spec(name: &str) -> PluginOperationSpec {
-        PluginOperationSpec {
-            name: name.to_string(),
-            description: "operation registered without naming a kind".to_string(),
-            session_param: SessionParam::Forbidden,
-            input_schema: json!({}),
-            output_schema: json!({}),
-            error_type: "test.operation".into(),
-            error_version: crate::FormatVersion::ONE,
-            error_schema: json!({"type": "object"}),
-        }
-    }
-
-    fn query_context() -> PluginOperationContext {
-        PluginOperationContext::Query(PluginQueryContext {
-            session_id: None,
-            sessions: Arc::new(NoopSessionManager),
-            processes: Arc::new(NoopSessionManager),
-        })
-    }
-
-    /// A kind mismatch is unrepresentable because `PluginOperationSpec` has no kind to
-    /// contradict: the stored discriminant comes from whichever registration constructor
-    /// wrapped the handler, and nowhere else.
-    #[tokio::test]
-    async fn plugin_operation_registration_stamps_kind_from_its_constructor() {
-        let query = PluginOperationRegistration::query(
-            kindless_operation_spec("test.kindless_query"),
-            Arc::new(|_ctx, args| Box::pin(async move { Ok(args) })),
-        );
-        let command = PluginOperationRegistration::command(
-            kindless_operation_spec("test.kindless_command"),
-            Arc::new(|_ctx, args| {
-                Box::pin(async move { Ok(ErasedPluginOperationOutcome::new(args)) })
-            }),
-        );
-        let task = PluginOperationRegistration::task(
-            kindless_operation_spec("test.kindless_task"),
-            Arc::new(|_ctx, args| {
-                Box::pin(async move { Ok(ErasedPluginOperationOutcome::new(args)) })
-            }),
-        );
-
-        assert_eq!(query.def().kind(), PluginOperationKind::Query);
-        assert_eq!(command.def().kind(), PluginOperationKind::Command);
-        assert_eq!(task.def().kind(), PluginOperationKind::Task);
-
-        // The query registration accepts the context its stamped kind names.
-        let outcome = query
-            .invoke(query_context(), json!({"ok": true}))
-            .await
-            .expect("query invocation");
-        assert_eq!(outcome.output, json!({"ok": true}));
-
-        // The other two degrade to a typed failure rather than panicking.
-        let err = command
-            .invoke(query_context(), json!({}))
-            .await
-            .expect_err("command registration must refuse a query context");
-        assert_eq!(
-            err.to_string(),
-            "command registration invoked with a query context"
-        );
-        let err = task
-            .invoke(query_context(), json!({}))
-            .await
-            .expect_err("task registration must refuse a query context");
-        assert_eq!(
-            err.to_string(),
-            "task registration invoked with a query context"
-        );
-    }
-
-    /// The one-map collapse keeps operation names globally unique across
-    /// kinds: a task may not take a name a query already holds, and the
-    /// refusal is the same one a same-kind collision gets.
     #[test]
     fn plugin_operation_rejects_cross_kind_duplicate_names() {
         struct EchoTaskOp;
@@ -957,72 +597,76 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn typed_external_query_errors_on_invalid_output() {
-        struct BadOp;
-        impl PluginOperation for BadOp {
-            const NAME: &'static str = "mock.echo";
-            const DESCRIPTION: &'static str = "bad typed projection over raw op";
-            const SESSION_PARAM: SessionParam = SessionParam::Optional;
-            type Args = TypedEchoArgs;
-            type Output = TypedEchoOutput;
-            type Error = String;
-            const ERROR_TYPE: &'static str = Self::NAME;
-            const ERROR_VERSION: crate::FormatVersion = crate::FormatVersion::ONE;
-            fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
-                lash_sansio::PluginFailureClass::Terminal
-            }
+    fn kindless_operation_spec(name: &str) -> PluginOperationSpec {
+        PluginOperationSpec {
+            name: name.to_string(),
+            description: "operation registered without naming a kind".to_string(),
+            session_param: SessionParam::Forbidden,
+            input_schema: json!({}),
+            output_schema: json!({}),
+            error_type: "test.operation".into(),
+            error_version: crate::FormatVersion::ONE,
+            error_schema: json!({"type": "object"}),
         }
-        impl PluginQuery for BadOp {}
-
-        let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-            .expect("session");
-        let (_plugin_id, output) = session
-            .query_plugin(
-                BadOp::NAME,
-                serde_json::to_value(TypedEchoArgs {
-                    value: "hello".to_string(),
-                })
-                .unwrap(),
-                None,
-                true,
-                Arc::new(NoopSessionManager),
-                Arc::new(NoopSessionManager),
-            )
-            .await
-            .expect("raw query");
-        let err = serde_json::from_value::<TypedEchoOutput>(output)
-            .expect_err("raw output shape should not match typed output");
-        assert!(err.to_string().contains("missing field"));
     }
 
-    #[tokio::test]
-    async fn plugin_session_queries_registered_session() {
-        let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-            .expect("session");
+    fn query_context() -> PluginOperationContext {
+        PluginOperationContext::Query(PluginQueryContext {
+            session_id: None,
+            sessions: Arc::new(NoopSessionManager),
+            processes: Arc::new(NoopSessionManager),
+        })
+    }
 
-        let (_plugin_id, result) = session
-            .query_plugin(
-                "mock.echo",
-                json!({"ok":true}),
-                Some(SessionId::from("root")),
-                false,
-                Arc::new(NoopSessionManager),
-                Arc::new(NoopSessionManager),
-            )
-            .await
-            .expect("invoke");
-        assert_eq!(
-            result.get("session_id").and_then(|v| v.as_str()),
-            Some("root")
+    /// A kind mismatch is unrepresentable because `PluginOperationSpec` has no kind to
+    /// contradict: the stored discriminant comes from whichever registration constructor
+    /// wrapped the handler, and nowhere else.
+    #[tokio::test]
+    async fn plugin_operation_registration_stamps_kind_from_its_constructor() {
+        let query = PluginOperationRegistration::query(
+            kindless_operation_spec("test.kindless_query"),
+            Arc::new(|_ctx, args| Box::pin(async move { Ok(args) })),
         );
+        let command = PluginOperationRegistration::command(
+            kindless_operation_spec("test.kindless_command"),
+            Arc::new(|_ctx, args| {
+                Box::pin(async move { Ok(ErasedPluginOperationOutcome::new(args)) })
+            }),
+        );
+        let task = PluginOperationRegistration::task(
+            kindless_operation_spec("test.kindless_task"),
+            Arc::new(|_ctx, args| {
+                Box::pin(async move { Ok(ErasedPluginOperationOutcome::new(args)) })
+            }),
+        );
+
+        assert_eq!(query.def().kind(), PluginOperationKind::Query);
+        assert_eq!(command.def().kind(), PluginOperationKind::Command);
+        assert_eq!(task.def().kind(), PluginOperationKind::Task);
+
+        // The query registration accepts the context its stamped kind names.
+        let outcome = query
+            .invoke(query_context(), json!({"ok": true}))
+            .await
+            .expect("query invocation");
+        assert_eq!(outcome.output, json!({"ok": true}));
+
+        // The other two degrade to a typed failure rather than panicking.
+        let err = command
+            .invoke(query_context(), json!({}))
+            .await
+            .expect_err("command registration must refuse a query context");
         assert_eq!(
-            result.get("plugin_session_id").and_then(|v| v.as_str()),
-            Some("root")
+            err.to_string(),
+            "command registration invoked with a query context"
+        );
+        let err = task
+            .invoke(query_context(), json!({}))
+            .await
+            .expect_err("task registration must refuse a query context");
+        assert_eq!(
+            err.to_string(),
+            "task registration invoked with a query context"
         );
     }
 
@@ -1073,120 +717,5 @@ mod tests {
             Ok(_) => panic!("expected missing session"),
             Err(other) => panic!("unexpected error: {other}"),
         }
-    }
-
-    #[test]
-    fn snapshot_round_trip_preserves_plugin_entries() {
-        let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-            .expect("session");
-        let snapshot = session.export_state();
-        assert!(snapshot.plugins.contains_key("mock"));
-        let restored = host
-            .build_session(PluginSessionRequest::rematerialization(
-                "child",
-                &snapshot,
-                SessionAuthorityContext::default(),
-            ))
-            .expect("restored");
-        let restored_snapshot = restored.export_state();
-        assert!(restored_snapshot.plugins.contains_key("mock"));
-    }
-
-    #[test]
-    fn runtime_services_are_backed_by_plugin_sessions() {
-        let host = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
-            crate::plugin::PluginDeclaration::initial("mock_tool"),
-            PluginSpec::new()
-                .with_tool_provider(Arc::new(MockToolProvider) as Arc<dyn ToolProvider>),
-        ))]);
-        let services = crate::testing::runtime_services_without_ports(
-            host.build_session(PluginSessionRequest::creation("root", Default::default()))
-                .expect("session"),
-        );
-        assert_eq!(
-            services.plugins.owner(),
-            &crate::RuntimeOwner::Session("root".into())
-        );
-        assert!(
-            services
-                .plugins
-                .tools()
-                .tool_manifests()
-                .iter()
-                .any(|tool| tool.name == "mock_tool")
-        );
-    }
-
-    struct ProjectorPluginFactory {
-        plugin_id: &'static str,
-    }
-
-    impl PluginFactory for ProjectorPluginFactory {
-        fn id(&self) -> &'static str {
-            self.plugin_id
-        }
-
-        fn declaration(&self) -> crate::plugin::PluginDeclaration {
-            crate::plugin::PluginDeclaration::initial(self.id())
-        }
-
-        fn build(
-            &self,
-            _ctx: &PluginSessionContext,
-        ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-            Ok(Arc::new(ProjectorPlugin {
-                plugin_id: self.plugin_id,
-            }))
-        }
-    }
-
-    struct ProjectorPlugin {
-        plugin_id: &'static str,
-    }
-
-    impl SessionPlugin for ProjectorPlugin {
-        fn id(&self) -> &'static str {
-            self.plugin_id
-        }
-
-        fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-            reg.tool_results().presentation_step(Arc::new(|input| {
-                Box::pin(async move {
-                    Ok(crate::ModelToolReturn::from_output(
-                        input.context.tool_name,
-                        &input.context.output,
-                    ))
-                })
-            }));
-            Ok(())
-        }
-    }
-
-    /// FIG-3420: presentation steps compose; registering a second step is not
-    /// a `model_observation` conflict anymore.
-    #[test]
-    fn multiple_presentation_steps_register_in_order() {
-        let host = PluginHost::new(vec![
-            Arc::new(ProjectorPluginFactory {
-                plugin_id: "projector-a",
-            }),
-            Arc::new(ProjectorPluginFactory {
-                plugin_id: "projector-b",
-            }),
-        ]);
-        let session = host
-            .build_session(PluginSessionRequest::creation("root", Default::default()))
-            .expect("two presentation steps compose");
-        assert_eq!(
-            session
-                .contributions
-                .presentation_steps
-                .iter()
-                .map(|registered| registered.identity.owner.plugin.as_str())
-                .collect::<Vec<_>>(),
-            vec!["projector-a", "projector-b"],
-        );
     }
 }

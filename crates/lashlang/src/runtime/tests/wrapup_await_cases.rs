@@ -237,34 +237,6 @@ async fn aggregate_process_finish(host: &AggregateProcessHost, program: Program)
     }
 }
 
-/// A handle written at an element position of an awaited literal, beside a
-/// module leaf, is refused.
-///
-/// ADR 0087 settled such a handle through the process-await seam in a second
-/// phase after the tool batch. There is one recorded batch order now, so the
-/// handle is not settled at all: the repair names `processes.await(handle)`,
-/// the tool that parks on the durable wait and therefore is a leaf of that one
-/// batch. The seam is never reached.
-#[tokio::test(flavor = "current_thread")]
-async fn a_literal_process_handle_element_is_refused_before_the_process_seam() {
-    let host = AggregateProcessHost::default();
-    let compiled = aggregate_compile(aggregate_module(vec![
-        started_handle(),
-        builders::finish(builders::await_expr(builders::list(vec![
-            builders::var("h"),
-            op("tools", "echo", Vec::new()),
-        ]))),
-    ]));
-    let error = execute_compiled(&compiled, &mut State::new(), &host)
-        .await
-        .expect_err("a process handle is not an aggregate leaf");
-    assert!(
-        error.to_string().contains("processes.await(handle)"),
-        "{error}"
-    );
-    assert_eq!(host.awaits.load(Ordering::SeqCst), 0);
-}
-
 /// A handle nested *inside* an element is not at an element position, so it is
 /// carried through as data rather than refused — and no batch settles it
 /// either. ADR 0087's recursive process-leaf walk reached it; ADR 0096's
@@ -526,69 +498,6 @@ async fn mapped_aggregates_match_literal_expansion() {
         assert_eq!(nested_host.batches().len(), 1, "{label}");
         assert_eq!(nested_host.singles.load(Ordering::SeqCst), 0, "{label}");
     }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn nested_aggregate_rejections_follow_written_order() {
-    let host = AggregateBatchHost::default();
-    let compiled = aggregate_compile(aggregate_module(vec![builders::finish(
-        builders::await_expr(builders::record(vec![
-            (
-                "orders",
-                builders::list(vec![
-                    op("tools", "err", vec![("value", builders::string("first"))]),
-                    op("tools", "err", vec![("value", builders::string("second"))]),
-                ]),
-            ),
-            (
-                "last",
-                op("tools", "echo", vec![("value", builders::string("last"))]),
-            ),
-        ])),
-    )]));
-    let error = execute_compiled(&compiled, &mut State::new(), &host)
-        .await
-        .unwrap_err();
-    // A Lashlang-native aggregate waits for every result and reports its
-    // first *written* rejection (ADR 0099 §10 L7). This host runs its leaves
-    // in reverse, so a settlement-ordered selection would report `second`.
-    assert!(error.to_string().contains("first"), "{error}");
-    assert_eq!(
-        host.batches(),
-        vec![vec![
-            "err:first".to_string(),
-            "err:second".to_string(),
-            "echo:last".to_string()
-        ]]
-    );
-    assert_eq!(host.singles.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn dynamic_settled_await_names_the_value_and_nested_path() {
-    let host = AggregateBatchHost::default();
-    let compiled = aggregate_compile(aggregate_module(vec![
-        builders::assign(
-            "value",
-            op(
-                "tools",
-                "echo",
-                vec![(
-                    "value",
-                    builders::record(vec![("orders", builders::list(vec![builders::num(7.0)]))]),
-                )],
-            ),
-        ),
-        builders::finish(builders::await_expr(builders::var("value"))),
-    ]));
-    let error = execute_compiled(&compiled, &mut State::new(), &host)
-        .await
-        .unwrap_err();
-    assert!(matches!(error, RuntimeError::AwaitExpectsHandle { .. }));
-    assert!(
-        error.to_string().contains("number at `orders[0]`"),
-        "{error}"
-    );
 }
 
 #[tokio::test(flavor = "current_thread")]

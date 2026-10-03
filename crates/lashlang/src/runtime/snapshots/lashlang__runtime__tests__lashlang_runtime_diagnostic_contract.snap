@@ -1,9 +1,0 @@
----
-source: crates/lashlang/src/runtime/tests.rs
-assertion_line: 371
-expression: "runtime_diagnostic(\"x = 1\\nfinish len(true)\").await"
----
-`len` requires a string, tuple, list, record, or null; use `.size` for images
---> line 2, column 1
-finish len(true)
-^~~~~~~~~~~~~~~~

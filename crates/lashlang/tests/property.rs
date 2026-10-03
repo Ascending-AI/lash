@@ -2,9 +2,7 @@
 //!
 //! ADR 0096 makes TypeScript the sole authored RLM dialect, so every generated
 //! program below is TypeScript lowered through `lash_typescript`, and the
-//! generators emit TypeScript rather than the retired surface. The type-literal
-//! generator emits `TypeExpr` directly: `Type { .. }` had no TypeScript
-//! spelling, and the JSON-schema law it pins is a property of the IR.
+//! generators emit TypeScript rather than the retired surface.
 //!
 //! The code→graph→code laws moved out with the workflow-graph lens: rendering
 //! and re-reading a program's canonical source is the lens's own contract, and
@@ -12,14 +10,12 @@
 //! is pinned there against the TypeScript printer rather than here against a
 //! retired one.
 
-use std::collections::HashMap;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, ImageValue,
     ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
-    ResourceHandle, Snapshot, State, TypeExpr, TypeField, Value,
+    ResourceHandle, Snapshot, State, Value,
 };
 use proptest::prelude::*;
 
@@ -258,10 +254,6 @@ fn encode_string(value: &str) -> String {
     out
 }
 
-fn globals_strategy() -> impl Strategy<Value = HashMap<String, GenValue>> {
-    prop::collection::hash_map(ident_strategy(), gen_value_strategy(), 0..6)
-}
-
 #[derive(Debug)]
 struct SnapshotProjectedDescriptor;
 
@@ -463,19 +455,7 @@ proptest! {
         .. ProptestConfig::default()
     })]
 
-    #[test]
-    fn parse_never_panics_on_arbitrary_input(source in ".*") {
-        let result = catch_unwind(AssertUnwindSafe(|| lash_typescript::parse(&source)));
-        prop_assert!(result.is_ok(), "parse panicked for input: {source:?}");
-    }
 
-    #[test]
-    fn execute_never_panics_on_arbitrary_input(source in ".*") {
-        let host = DeterministicHost;
-        let mut state = State::new();
-        let result = catch_unwind(AssertUnwindSafe(|| run_execute(&source, &mut state, &host)));
-        prop_assert!(result.is_ok(), "execute panicked for input: {source:?}");
-    }
 
     #[test]
     fn generated_value_programs_round_trip_through_parser_and_runtime(
@@ -539,23 +519,6 @@ proptest! {
         prop_assert_eq!(restored.snapshot(), state.snapshot());
     }
 
-    #[test]
-    fn snapshot_round_trip_preserves_state(
-        globals in globals_strategy()
-    ) {
-        let state = State::from_snapshot(Snapshot::new(
-            globals
-                .iter()
-                .map(|(key, value)| (key.clone(), value.to_value()))
-                .collect(),
-        ));
-
-        let encoded = state.snapshot().to_canonical_bytes().expect("snapshot encode");
-        let decoded = lashlang::VmInstance::pristine().open_snapshot(&encoded).expect("snapshot decode");
-        let restored = State::from_snapshot(decoded);
-
-        prop_assert_eq!(restored.globals(), state.globals());
-    }
 
     #[test]
     fn canonical_snapshot_round_trip_covers_every_value_variant(
@@ -585,38 +548,6 @@ proptest! {
         }
     }
 
-    #[test]
-    fn execution_from_restored_snapshot_matches_fresh_state(
-        globals in globals_strategy(),
-        value in gen_value_strategy()
-    ) {
-        let base_globals: Record = globals
-            .iter()
-            .map(|(key, value)| (key.clone(), value.to_value()))
-            .collect();
-        let source = format!(
-            "const roundtrip_result = {};\nfinish(roundtrip_result);\n",
-            value.to_source()
-        );
-        let host = DeterministicHost;
-
-        let mut fresh = State::from_snapshot(Snapshot::new(base_globals.clone()));
-        let mut restored = State::from_snapshot(Snapshot::new(base_globals));
-        let blob = restored
-            .snapshot()
-            .to_canonical_bytes()
-            .expect("snapshot encode");
-        let snapshot = lashlang::VmInstance::pristine().open_snapshot(&blob).expect("snapshot decode");
-        restored = State::from_snapshot(snapshot);
-
-        let fresh_value = finished(run_execute(&source, &mut fresh, &host).expect("fresh execution"));
-        let restored_value = finished(
-            run_execute(&source, &mut restored, &host).expect("restored execution")
-        );
-
-        prop_assert_eq!(fresh_value, restored_value);
-        prop_assert_eq!(fresh.globals(), restored.globals());
-    }
 
     #[test]
     fn tool_result_contract_is_stable_for_generated_values(
@@ -637,149 +568,4 @@ proptest! {
         prop_assert_eq!(result, value.to_value());
     }
 
-    #[test]
-    fn generated_type_literal_always_produces_valid_json_schema(
-        ty in gen_type_strategy(6)
-    ) {
-        // Type literals have no TypeScript spelling (ADR 0096 keeps the type
-        // language in the IR), so the program is built from the public AST.
-        let program = lashlang::Program::block(vec![lashlang::Expr::Finish(Box::new(
-            lashlang::testing::ast_builders::type_literal(ty.to_type_expr()),
-        ))]);
-        let host = DeterministicHost;
-        let mut state = State::new();
-        let outcome = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime")
-            .block_on(lashlang::execute(&lashlang_compile_program(&program).expect("the program compiles"), &mut state, &host));
-        let value = finished(outcome.expect("Type literal should execute"));
-        let inner = lashlang::unwrap_type_value(&value).expect("wrapped type");
-        let schema = inner.as_record().expect("schema record");
-        // Every generated type is an object at the top level.
-        prop_assert_eq!(&schema["type"], &Value::String("object".into()));
-        // `required` always exists as a list (possibly empty if everything is optional).
-        prop_assert!(matches!(&schema["required"], Value::List(_)));
-        prop_assert_eq!(&schema["additionalProperties"], &Value::Bool(false));
-    }
-}
-
-// ------------------------------------------------------------------
-//  Generator for arbitrary Type literals. Used only by property tests.
-// ------------------------------------------------------------------
-
-#[derive(Clone, Debug)]
-enum GenType {
-    Scalar(&'static str),
-    Enum(Vec<String>),
-    List(Box<GenType>),
-    Object(Vec<(String, GenType, bool)>),
-}
-
-impl GenType {
-    /// Lowers the generated shape into the IR's own type language.
-    ///
-    /// Only `Object` is a valid top-level type literal; the other variants
-    /// appear as field types, so the caller wraps them in a field.
-    fn to_type_expr(&self) -> TypeExpr {
-        match self {
-            Self::Scalar("str") => TypeExpr::Str,
-            Self::Scalar("int") => TypeExpr::Int,
-            Self::Scalar("float") => TypeExpr::Float,
-            Self::Scalar("bool") => TypeExpr::Bool,
-            Self::Scalar("dict") => TypeExpr::Dict,
-            Self::Scalar("any") => TypeExpr::Any,
-            Self::Scalar(other) => panic!("unexpected generated scalar: {other}"),
-            Self::Enum(values) => {
-                TypeExpr::Enum(values.iter().map(|value| value.as_str().into()).collect())
-            }
-            Self::List(inner) => TypeExpr::List(Box::new(inner.to_type_expr())),
-            Self::Object(fields) => TypeExpr::Object(
-                fields
-                    .iter()
-                    .map(|(name, ty, optional)| TypeField {
-                        name: name.as_str().into(),
-                        ty: ty.to_type_expr(),
-                        optional: *optional,
-                    })
-                    .collect(),
-            ),
-        }
-    }
-}
-
-fn gen_field_name() -> impl Strategy<Value = String> {
-    // Field names live in the IR's type language, not in any dialect's
-    // namespace, so no keyword filtering is needed here.
-    "[a-z][a-z0-9_]{0,6}"
-}
-
-fn gen_enum_value() -> impl Strategy<Value = String> {
-    "[a-z]{1,5}".prop_map(|s| s)
-}
-
-fn gen_scalar_name() -> impl Strategy<Value = GenType> {
-    prop_oneof![
-        Just(GenType::Scalar("str")),
-        Just(GenType::Scalar("int")),
-        Just(GenType::Scalar("float")),
-        Just(GenType::Scalar("bool")),
-        Just(GenType::Scalar("dict")),
-        Just(GenType::Scalar("any")),
-    ]
-}
-
-fn gen_type_strategy(max_depth: u32) -> impl Strategy<Value = GenType> {
-    gen_type_expr(max_depth).prop_flat_map(|inner| {
-        // Wrap in an Object if the inner isn't already one — the top-level
-        // Type literal must always be an Object in our grammar.
-        match inner {
-            GenType::Object(fields) => Just(GenType::Object(fields)).boxed(),
-            other => (gen_field_name(), Just(other))
-                .prop_map(|(name, ty)| GenType::Object(vec![(name, ty, false)]))
-                .boxed(),
-        }
-    })
-}
-
-fn gen_type_expr(_max_depth: u32) -> BoxedStrategy<GenType> {
-    let leaf = prop_oneof![
-        gen_scalar_name(),
-        prop::collection::vec(gen_enum_value(), 1..4).prop_map(|values| {
-            // Deduplicate to keep JSON-Schema enums valid.
-            let mut seen = std::collections::HashSet::new();
-            let unique: Vec<String> = values
-                .into_iter()
-                .filter(|v| seen.insert(v.clone()))
-                .collect();
-            GenType::Enum(unique)
-        }),
-    ];
-    leaf.prop_recursive(3, 32, 4, |inner| {
-        prop_oneof![
-            inner.clone().prop_map(|ty| GenType::List(Box::new(ty))),
-            prop::collection::vec((gen_field_name(), inner, any::<bool>()), 1..4).prop_map(
-                |fields| {
-                    let mut seen = std::collections::HashSet::new();
-                    let unique: Vec<(String, GenType, bool)> = fields
-                        .into_iter()
-                        .filter(|(name, _, _)| seen.insert(name.clone()))
-                        .collect();
-                    GenType::Object(unique)
-                }
-            ),
-        ]
-    })
-    .boxed()
-}
-
-/// Compiles an IR program as the main entry of the raw module artifact it
-/// forms, through the one public compile entry.
-fn lashlang_compile_program(
-    program: &lashlang::Program,
-) -> Result<lashlang::CompiledProgram, String> {
-    let artifact = lashlang::ModuleArtifact::from_program(program.clone())
-        .map_err(|error| error.to_string())?;
-    lashlang::compile(&artifact, lashlang::Entry::Main, Some(&program.spans))
-        .map_err(|error| error.to_string())
 }

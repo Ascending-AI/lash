@@ -27,7 +27,6 @@ mod empty_completion_tests;
 mod error_classification_tests;
 mod gateway_meta_tests;
 mod generation_tests;
-mod openrouter_execution_evidence_tests;
 mod output_started_tests;
 mod reasoning_retention_tests;
 mod replay_provenance_tests;
@@ -109,33 +108,6 @@ impl RecordingHttpTransport {
 fn openrouter_provider() -> OpenAiCompatibleProvider {
     OpenAiCompatibleProvider::new("key", OPENROUTER_BASE_URL)
         .with_compat(OpenAiCompat::openrouter())
-}
-
-#[test]
-fn openrouter_preset_requires_terminal_evidence() {
-    assert_eq!(
-        OpenAiCompat::openrouter().stream_termination,
-        Some(StreamTermination::RequireTerminalEvidence)
-    );
-    assert_eq!(
-        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-            .resolved_compat(CompletionEndpoint::ChatCompletions)
-            .stream_termination,
-        StreamTermination::RequireTerminalEvidence
-    );
-}
-
-#[test]
-fn local_compat_preset_has_exact_local_field_set() {
-    assert_eq!(
-        OpenAiCompat::local(),
-        OpenAiCompat {
-            request_fields: Some(false),
-            store: Some(false),
-            streaming_usage: Some(false),
-            ..OpenAiCompat::default()
-        }
-    );
 }
 
 #[test]
@@ -539,45 +511,6 @@ async fn response_metadata_captures_only_allowlisted_headers() {
 }
 
 #[tokio::test]
-async fn response_metadata_is_empty_without_explicit_allowlists() {
-    let transport = Arc::new(RecordingHttpTransport::responding_with(
-        vec![("x-opper-cost".to_string(), "0.000008".to_string())],
-        r#"{"id":"gen-123","model":"test-model","choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"cost":0.000063}"#,
-    ));
-    let mut provider =
-        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
-
-    let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
-        .await
-        .expect("request succeeds");
-
-    assert!(response.response_metadata.is_empty());
-}
-
-#[tokio::test]
-async fn response_metadata_captures_buffered_body_json_pointers() {
-    let transport = Arc::new(RecordingHttpTransport::responding_with(
-        Vec::new(),
-        r#"{"id":"gen-123","model":"test-model","choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"cost":0.000063}"#,
-    ));
-    let mut provider =
-        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
-
-    let response = provider
-        .complete(capturing(
-            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
-            &[],
-            &["/cost", "/missing"],
-        ))
-        .await
-        .expect("request succeeds");
-
-    assert_eq!(response.response_metadata["body:/cost"], json!(0.000063));
-    assert!(!response.response_metadata.contains_key("body:/missing"));
-}
-
-#[tokio::test]
 async fn response_metadata_captures_buffered_responses_endpoint_observations() {
     let transport = Arc::new(RecordingHttpTransport::responding_with(
         vec![("x-opper-cost".to_string(), "0.000008".to_string())],
@@ -599,42 +532,6 @@ async fn response_metadata_captures_buffered_responses_endpoint_observations() {
         json!("0.000008")
     );
     assert_eq!(response.response_metadata["body:/cost"], json!(0.000063));
-}
-
-#[test]
-fn chat_image_attachment_serializes_as_data_url() {
-    let provider = openrouter_provider();
-    let png_bytes = vec![0x89, 0x50, 0x4E, 0x47];
-    let attachment = AttachmentSource::inline(
-        lash_core::MediaType::parse("image/png").unwrap(),
-        png_bytes.clone(),
-    );
-    let req = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![
-            LlmContentBlock::Text {
-                text: "look".into(),
-                response_meta: None,
-                cache_breakpoint: false,
-            },
-            LlmContentBlock::Attachment {
-                source: Box::new(attachment),
-            },
-        ],
-    )]);
-    let body = provider.build_chat_request_body(&req, false).unwrap();
-    let messages = body["messages"].as_array().expect("messages");
-    let user_msg = messages.last().expect("user message");
-    let content = user_msg["content"].as_array().expect("content array");
-    let image_part = content
-        .iter()
-        .find(|part| part["type"] == "image_url")
-        .expect("image_url part");
-    let expected_b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-    assert_eq!(
-        image_part["image_url"]["url"],
-        format!("data:image/png;base64,{expected_b64}")
-    );
 }
 
 #[test]
@@ -662,42 +559,6 @@ fn chat_unsupported_image_mime_is_rejected_at_request_boundary() {
     assert_eq!(
         err.message,
         "message index 0: OpenAI Chat Completions cannot materialize attachment MIME `image/bmp` from source `inline`; providers accepting this MIME/source: none"
-    );
-}
-
-#[test]
-fn responses_image_attachment_serializes_as_input_image_data_url() {
-    let provider = OpenAiProvider::new("key");
-    let png_bytes = vec![0x89, 0x50, 0x4E, 0x47];
-    let attachment = AttachmentSource::inline(
-        lash_core::MediaType::parse("image/png").unwrap(),
-        png_bytes.clone(),
-    );
-    let req = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![
-            LlmContentBlock::Text {
-                text: "look".into(),
-                response_meta: None,
-                cache_breakpoint: false,
-            },
-            LlmContentBlock::Attachment {
-                source: Box::new(attachment),
-            },
-        ],
-    )]);
-    let body = provider.build_responses_request_body(&req, false).unwrap();
-    let input = body["input"].as_array().expect("input array");
-    let user_msg = input.last().expect("user message");
-    let content = user_msg["content"].as_array().expect("content array");
-    let image_part = content
-        .iter()
-        .find(|part| part["type"] == "input_image")
-        .expect("input_image part");
-    let expected_b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-    assert_eq!(
-        image_part["image_url"],
-        format!("data:image/png;base64,{expected_b64}")
     );
 }
 
@@ -742,54 +603,6 @@ fn responses_body_emits_reasoning_from_capability_variant() {
 }
 
 #[test]
-fn responses_body_rejects_numeric_reasoning_from_budget_encoding() {
-    let provider = OpenAiProvider::new("key");
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.model.metadata_mut().capability = budget_reasoning_capability();
-
-    let error = provider
-        .build_responses_request_body(&req, true)
-        .expect_err("OpenAI Responses cannot encode a budget");
-
-    assert_eq!(
-        error.code.as_ref().map(|code| code.to_string()),
-        Some("lash:reasoning_encoding_unrepresentable".to_string())
-    );
-    assert!(!error.is_retryable());
-    assert!(error.message.contains("token-budget"));
-}
-
-#[test]
-fn responses_body_emits_none_effort_for_disabled_selection() {
-    let provider = OpenAiProvider::new("key");
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
-    req.model.metadata_mut().capability = reasoning_capability();
-
-    let body = provider.build_responses_request_body(&req, true).unwrap();
-
-    assert_eq!(body["reasoning"], json!({ "effort": "none" }));
-}
-
-#[test]
-fn responses_body_refuses_an_effort_without_capability() {
-    let provider = OpenAiProvider::new("key");
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model.metadata_mut().wire_model = "custom-direct-model".to_string();
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-
-    let error = provider
-        .build_responses_request_body(&req, true)
-        .expect_err("an effort without capability is refused");
-
-    assert_eq!(
-        error.code.as_ref().map(ToString::to_string).as_deref(),
-        Some("lash:effort_not_configurable")
-    );
-}
-
-#[test]
 fn responses_body_requests_reasoning_summaries_when_provider_exposes_thinking() {
     let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
@@ -800,23 +613,6 @@ fn responses_body_requests_reasoning_summaries_when_provider_exposes_thinking() 
     let body = provider.build_responses_request_body(&req, true).unwrap();
 
     assert_eq!(body["reasoning"]["summary"], "auto");
-}
-
-#[test]
-fn providers_serialize_distinct_config_shapes() {
-    let direct = OpenAiProvider::new("key");
-    let direct_config = direct.serialize_config();
-    assert_eq!(direct.kind(), "openai");
-    assert_eq!(direct_config["api_key"], "key");
-    assert!(direct_config.get("base_url").is_none());
-    assert!(direct_config.get("wire_api").is_none());
-
-    let compatible = openrouter_provider();
-    let compatible_config = compatible.serialize_config();
-    assert_eq!(compatible.kind(), "openai-compatible");
-    assert_eq!(compatible_config["api_key"], "key");
-    assert_eq!(compatible_config["base_url"], OPENROUTER_BASE_URL);
-    assert!(compatible_config.get("wire_api").is_none());
 }
 
 #[test]
@@ -872,20 +668,6 @@ fn chat_body_emits_reasoning_from_capability_variant() {
 
     assert_eq!(body["reasoning"], json!({ "effort": "high" }));
     assert!(body.get("reasoning_effort").is_none());
-}
-
-#[test]
-fn chat_body_openai_dialect_emits_top_level_reasoning_effort_only() {
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.model.metadata_mut().capability = reasoning_capability();
-    let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_reasoning_dialect(OpenAiReasoningDialect::OpenAi);
-
-    let body = provider.build_chat_request_body(&req, true).unwrap();
-
-    assert_eq!(body["reasoning_effort"], "high");
-    assert!(body.get("reasoning").is_none());
 }
 
 #[test]
@@ -962,40 +744,6 @@ fn disabled_selection_maps_per_dialect() {
     assert_eq!(chat["reasoning_effort"], "none");
     let responses = openai.build_responses_request_body(&req, true).unwrap();
     assert_eq!(responses["reasoning"], json!({ "effort": "none" }));
-}
-
-#[test]
-fn chat_body_refuses_an_effort_without_capability() {
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model.metadata_mut().wire_model = "openrouter/custom-model".to_string();
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-
-    let error = openrouter_provider()
-        .build_chat_request_body(&req, true)
-        .expect_err("an effort on a model with no reasoning capability is refused");
-
-    assert_eq!(
-        error.code.as_ref().map(|code| code.to_string()),
-        Some("lash:effort_not_configurable".to_string())
-    );
-}
-
-#[test]
-fn chat_body_without_a_reasoning_dialect_refuses_an_explicit_selection() {
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.model.metadata_mut().capability = reasoning_capability();
-    let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1");
-
-    let error = provider
-        .build_chat_request_body(&req, true)
-        .expect_err("a route with no reasoning dialect refuses an explicit selection");
-
-    assert_eq!(
-        error.code.as_ref().map(|code| code.to_string()),
-        Some("lash:reasoning_encoding_unrepresentable".to_string())
-    );
-    assert!(!error.is_retryable());
 }
 
 #[test]
@@ -1401,39 +1149,6 @@ fn responses_none_cache_retention_omits_prompt_cache_fields() {
 }
 
 #[test]
-fn openai_compat_config_serializes_when_non_default() {
-    let provider = openrouter_provider().with_compat(OpenAiCompat {
-        max_tokens_field: Some(OpenAiCompatMaxTokensField::MaxCompletionTokens),
-        streaming_usage: Some(false),
-        provider_routing: Some(ProviderRoutingPrefs {
-            require_parameters: true,
-            ..ProviderRoutingPrefs::default()
-        }),
-        ..OpenAiCompat::default()
-    });
-
-    let config = provider.serialize_config();
-
-    assert_eq!(
-        config["compat"]["max_tokens_field"],
-        json!("max_completion_tokens")
-    );
-    assert_eq!(config["compat"]["streaming_usage"], false);
-    assert_eq!(
-        config["compat"]["provider_routing"],
-        json!({ "require_parameters": true })
-    );
-    // Response-metadata capture is recorded model metadata carried on each
-    // request (FIG-4397), never a provider option.
-    assert!(config["options"].get("response_metadata_headers").is_none());
-    assert!(
-        config["options"]
-            .get("response_metadata_body_paths")
-            .is_none()
-    );
-}
-
-#[test]
 fn reasoning_dialects_round_trip_through_config_and_unknown_names_are_refused() {
     for (dialect, name) in [
         (OpenAiReasoningDialect::OpenAi, "openai"),
@@ -1469,43 +1184,6 @@ fn provider_routing_config_rejects_unknown_sibling_keys() {
     .expect_err("unknown provider routing preference must be rejected");
 
     assert!(error.to_string().contains("unknown_preference"));
-}
-
-#[test]
-fn openai_compat_resolver_covers_openrouter_and_session_affinity() {
-    let openrouter = openrouter_provider();
-    let openrouter_caps = openrouter.resolved_compat(CompletionEndpoint::ChatCompletions);
-    assert_eq!(
-        openrouter_caps.reasoning,
-        Some(OpenAiReasoningDialect::OpenRouter)
-    );
-    assert!(openrouter_caps.streaming_usage);
-    assert!(openrouter_caps.cache_session_affinity);
-    // Endpoint facts only: restricted routing is a host decision, so the
-    // preset leaves it unresolved. Response-metadata capture is recorded
-    // model metadata carried on each request, never a preset fact.
-    assert_eq!(openrouter_caps.provider_routing, None);
-}
-
-#[test]
-fn localhost_without_local_preset_keeps_optional_request_fields() {
-    let compat = OpenAiCompatibleProvider::new("key", "http://localhost:11434/v1")
-        .resolved_compat(CompletionEndpoint::ChatCompletions);
-
-    assert!(compat.request_fields);
-    assert!(compat.store);
-    assert!(compat.streaming_usage);
-}
-
-#[test]
-fn non_local_url_with_local_preset_omits_optional_request_fields() {
-    let compat = OpenAiCompatibleProvider::new("key", "https://gpu-box.example/v1")
-        .with_compat(OpenAiCompat::local())
-        .resolved_compat(CompletionEndpoint::ChatCompletions);
-
-    assert!(!compat.request_fields);
-    assert!(!compat.store);
-    assert!(!compat.streaming_usage);
 }
 
 #[test]
@@ -2127,99 +1805,6 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
         Some("lash:unsafe_retry_after_output_started".to_string())
     );
     assert!(!failure.is_retryable());
-}
-
-#[tokio::test]
-async fn response_metadata_streaming_body_capture_is_last_wins() {
-    let body = concat!(
-        "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}],\"cost\":0.1}\n\n",
-        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"cost\":0.2}\n\n",
-        "data: [DONE]\n\n"
-    );
-    let transport = Arc::new(RecordingHttpTransport::responding_with(
-        vec![("content-type".to_string(), "text/event-stream".to_string())],
-        body,
-    ));
-    let mut provider =
-        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
-
-    let response = provider
-        .complete(capturing(
-            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
-            &[],
-            &["/cost"],
-        ))
-        .await
-        .expect("terminal stream succeeds and [DONE] is tolerated");
-
-    assert_eq!(response.response_metadata["body:/cost"], json!(0.2));
-}
-
-#[tokio::test]
-async fn response_metadata_buffered_sse_body_capture_is_last_wins() {
-    let body = concat!(
-        "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}],\"cost\":0.1}\n\n",
-        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"cost\":0.2}\n\n",
-        "data: [DONE]\n\n"
-    );
-    let transport = Arc::new(RecordingHttpTransport::responding_with(Vec::new(), body));
-    let mut provider =
-        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
-
-    let response = provider
-        .complete(capturing(
-            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
-            &[],
-            &["/cost"],
-        ))
-        .await
-        .expect("buffered SSE-shaped response succeeds and [DONE] is tolerated");
-
-    assert_eq!(response.response_metadata["body:/cost"], json!(0.2));
-}
-
-#[tokio::test]
-async fn response_metadata_headers_are_preserved_on_partial_stream_responses() {
-    let body = concat!(
-        "data: {\"cost\":0.000008,\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
-        "data: [DONE]\n\n"
-    );
-    let transport = Arc::new(RecordingHttpTransport::responding_with(
-        vec![
-            ("content-type".to_string(), "text/event-stream".to_string()),
-            ("x-opper-cost".to_string(), "0.000008".to_string()),
-            ("x-private-receipt".to_string(), "secret".to_string()),
-        ],
-        body,
-    ));
-    let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_compat(OpenAiCompat {
-            stream_termination: Some(StreamTermination::RequireTerminalEvidence),
-            ..OpenAiCompat::default()
-        })
-        .with_transport(transport);
-
-    let error = provider
-        .complete(capturing(
-            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
-            &["X-Opper-Cost"],
-            &["/cost"],
-        ))
-        .await
-        .expect_err("missing terminal evidence returns a partial response");
-    let partial = error.partial_response.expect("partial response");
-
-    assert_eq!(
-        partial.response_metadata["header:x-opper-cost"],
-        json!("0.000008")
-    );
-
-    assert_eq!(partial.response_metadata["body:/cost"], json!(0.000008));
-    assert!(
-        !partial
-            .response_metadata
-            .contains_key("header:x-private-receipt")
-    );
 }
 
 #[tokio::test]

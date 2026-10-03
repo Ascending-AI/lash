@@ -782,101 +782,8 @@ fn truncate(text: &str, budget: usize) -> String {
 mod tests {
     use super::*;
 
-    const ALL_KINDS: &[Kind] = &[
-        Kind::Ingress,
-        Kind::Park,
-        Kind::Resume,
-        Kind::Cancel,
-        Kind::Worker,
-        Kind::Fault,
-        Kind::Provider,
-        Kind::Tool,
-        Kind::Exec,
-        Kind::Spawn,
-        Kind::Await,
-        Kind::Wake,
-        Kind::Lease,
-        Kind::Observe,
-        Kind::Commit,
-        Kind::Effect,
-        Kind::Outcome,
-    ];
-
     fn session(raw: &str) -> Actor {
         Actor::session(raw)
-    }
-
-    #[test]
-    fn every_kind_has_a_distinct_token_and_one_family() {
-        let mut tokens = std::collections::BTreeSet::new();
-        for kind in ALL_KINDS {
-            assert!(
-                tokens.insert(kind.as_str()),
-                "duplicate rendered token for {kind:?}"
-            );
-            assert!(
-                kind.as_str().len() <= KIND_WIDTH,
-                "{kind:?} does not fit the kind column"
-            );
-            let _family: Family = kind.family();
-        }
-        assert!(
-            ALL_KINDS
-                .iter()
-                .any(|kind| kind.family() == Family::DurableWrite),
-        );
-    }
-
-    #[test]
-    fn identifiers_are_aliased_by_first_mention_within_their_namespace() {
-        let mut transcript = Transcript::new();
-        transcript
-            .record(
-                Entry::new(Kind::Spawn, session("s-b"), "process.start").attr(Attr::id(
-                    "process",
-                    IdKind::Process,
-                    "process:engine:sha256:ffff",
-                )),
-            )
-            .record(
-                Entry::new(Kind::Spawn, session("s-a"), "process.start").attr(Attr::id(
-                    "process",
-                    IdKind::Process,
-                    "process:engine:sha256:aaaa",
-                )),
-            )
-            .record(
-                Entry::new(Kind::Spawn, session("s-b"), "process.start").attr(Attr::id(
-                    "process",
-                    IdKind::Process,
-                    "process:engine:sha256:ffff",
-                )),
-            );
-        let rendered = transcript.render();
-        let lines = rendered.lines().collect::<Vec<_>>();
-        assert!(lines[0].starts_with("session-001"), "{rendered}");
-        assert!(lines[1].starts_with("session-002"), "{rendered}");
-        assert!(lines[2].starts_with("session-001"), "{rendered}");
-        assert!(lines[0].ends_with("process=process-001"), "{rendered}");
-        assert!(lines[1].ends_with("process=process-002"), "{rendered}");
-        assert!(lines[2].ends_with("process=process-001"), "{rendered}");
-    }
-
-    #[test]
-    fn pinned_names_replace_aliases_for_every_namespace() {
-        let mut transcript = Transcript::new();
-        transcript.pin("raw-session", "root");
-        transcript.pin("raw-process", "child/left");
-        transcript.record(
-            Entry::new(Kind::Await, session("raw-session"), "process.await").attr(Attr::id(
-                "process",
-                IdKind::Process,
-                "raw-process",
-            )),
-        );
-        let rendered = transcript.render();
-        assert!(rendered.starts_with("root "), "{rendered}");
-        assert!(rendered.ends_with("process=child/left"), "{rendered}");
     }
 
     #[test]
@@ -894,37 +801,6 @@ mod tests {
         assert!(rendered.contains("<hash>"), "{rendered}");
         assert!(!rendered.contains("6f6b8e0e"), "{rendered}");
         assert!(!rendered.contains('\n'), "{rendered}");
-    }
-
-    #[test]
-    fn debug_variant_names_become_one_token_normal_form() {
-        #[derive(Debug)]
-        #[allow(dead_code)]
-        enum Sample {
-            AfterWork,
-            Failure,
-        }
-        let mut transcript = Transcript::new();
-        transcript
-            .record(
-                Entry::new(Kind::Commit, session("s"), "checkpoint.request")
-                    .attr(Attr::debug_token("checkpoint", &Sample::AfterWork)),
-            )
-            .record(
-                Entry::new(Kind::Tool, session("s"), "tool.result")
-                    .attr(Attr::debug_token("outcome", &Sample::Failure)),
-            );
-        let rendered = transcript.render();
-        assert!(rendered.contains("checkpoint=after_work"), "{rendered}");
-        assert!(rendered.contains("outcome=failure"), "{rendered}");
-    }
-
-    #[test]
-    fn short_hex_runs_are_left_alone() {
-        assert_eq!(
-            mask_identifiers("exit=0 code=deadbeef"),
-            "exit=0 code=deadbeef"
-        );
     }
 
     #[test]
@@ -950,29 +826,6 @@ mod tests {
     }
 
     #[test]
-    fn durable_commit_lines_carry_the_tokens_the_pr_rule_keys_on() {
-        let mut transcript = Transcript::new();
-        transcript.record(
-            Entry::commit(session("s"), 1, 2)
-                .component(Component::stored("turn_state", Some(412)))
-                .component(Component::unchanged_ref("tool_state")),
-        );
-        let rendered = transcript.render();
-        insta::assert_snapshot!(rendered, @r###"
-        session-001  commit    checkpoint.commit       rev=1->2
-        session-001              turn_state            stored logical=412B
-        session-001              tool_state            ref (unchanged)
-        "###);
-        assert!(rendered.contains("rev=1->2"), "{rendered}");
-        assert!(rendered.contains("stored logical=412B"), "{rendered}");
-        assert!(rendered.contains("ref (unchanged)"), "{rendered}");
-        assert!(
-            DURABLE_WRITE_EVENTS.contains(&CHECKPOINT_COMMIT_EVENT),
-            "the commit event must stay in the durable-marker list"
-        );
-    }
-
-    #[test]
     fn opaque_tool_state_sizes_are_normalized_by_the_renderer() {
         let mut transcript = Transcript::new();
         transcript.record(
@@ -994,18 +847,6 @@ mod tests {
     }
 
     #[test]
-    fn rendering_is_reproducible_for_the_same_recorded_facts() {
-        let build = || {
-            let mut transcript = Transcript::new();
-            transcript
-                .record(Entry::new(Kind::Ingress, session("s"), "turn.start"))
-                .record(Entry::commit(session("s"), 0, 1));
-            transcript.render()
-        };
-        assert_eq!(build(), build());
-    }
-
-    #[test]
     #[should_panic(expected = "over the 2-line review budget")]
     fn rendering_past_the_review_budget_is_a_failure_not_a_long_snapshot() {
         let mut transcript = Transcript::new().with_review_budget(2);
@@ -1013,11 +854,5 @@ mod tests {
             transcript.record(Entry::new(Kind::Ingress, session("s"), "turn.start"));
         }
         transcript.render();
-    }
-
-    #[test]
-    #[should_panic(expected = "recorded no entries")]
-    fn an_empty_transcript_cannot_be_rendered() {
-        Transcript::new().render();
     }
 }

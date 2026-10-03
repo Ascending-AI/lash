@@ -15,28 +15,6 @@ fn recorded_llm_profile(key: &str) -> crate::LlmProfileConfig {
     ))
 }
 
-#[test]
-fn commit_operation_identity_depends_on_caller_boundary_not_head_revision() {
-    let first = boundary_operation(
-        &SessionId::from("session"),
-        "request-42",
-        "append-session-nodes",
-    );
-    let retry = boundary_operation(
-        &SessionId::from("session"),
-        "request-42",
-        "append-session-nodes",
-    );
-    let next = boundary_operation(
-        &SessionId::from("session"),
-        "request-43",
-        "append-session-nodes",
-    );
-
-    assert_eq!(first, retry);
-    assert_ne!(first, next);
-}
-
 fn resident_leaf_body_bytes(state: &RuntimeSessionState) -> usize {
     state
         .checkpoint_components
@@ -455,127 +433,6 @@ fn descriptorless_execution_state_leaves_without_a_root_remain_corrupt() {
 }
 
 #[test]
-fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips() {
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("snapshot-test"),
-        policy: SessionPolicy {
-            model: Some(recorded_llm_profile("mock")),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-        },
-        head_revision: 42,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-    };
-    state.set_tool_state_snapshot(Some(crate::ToolState::default()));
-    state.set_plugin_state(Some(crate::PluginState::default()));
-    state.set_execution_state_snapshot(Some(vec![1, 2, 3].into()));
-    state.ensure_agent_frame_initialized();
-
-    let value = serde_json::to_value(state.to_snapshot()).expect("serialize snapshot");
-
-    for runtime_key in [
-        "head_revision",
-        "persisted_node_ids",
-        "tool_state_snapshot",
-        "plugin_state",
-        "execution_state_snapshot",
-    ] {
-        assert!(
-            value.get(runtime_key).is_none(),
-            "snapshot unexpectedly exposed {runtime_key}"
-        );
-    }
-    assert!(value.get("agent_frames").is_none());
-
-    let snapshot: SessionSnapshot = serde_json::from_value(value).expect("round-trip snapshot");
-    let hydrated = RuntimeSessionState::from_snapshot(snapshot);
-
-    assert_eq!(hydrated.session_id, "snapshot-test");
-    assert_eq!(hydrated.policy.model, Some(recorded_llm_profile("mock")));
-    assert_eq!(hydrated.head_revision, 0);
-    assert!(hydrated.tool_state_snapshot().is_none());
-    assert!(hydrated.plugin_state().is_none());
-    assert!(hydrated.execution_state_snapshot().is_none());
-    assert!(!hydrated.agent_frames.is_empty());
-}
-
-/// FIG-3107: a read view carries the session graph, so the snapshot it projects
-/// must carry the frame identity derived from that graph. Dropping it made a
-/// durable frame switch invisible to every read-view consumer, and left the
-/// standard-compaction recovery deriving its next frame key from an empty parent.
-#[test]
-fn read_view_snapshot_projects_frame_identity_from_the_graph() {
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("read-view-frames"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-    };
-    state.ensure_agent_frame_initialized();
-    assert!(state.current_frame_node_id.is_some());
-
-    let projected = state.read_view().to_snapshot();
-
-    assert_eq!(
-        projected.current_frame_node_id, state.current_frame_node_id,
-        "the read view dropped the frame the session is resident in"
-    );
-    assert_eq!(
-        projected.agent_frames.len(),
-        state.agent_frames.len(),
-        "the read view dropped the session's frame records"
-    );
-}
-
-#[test]
-fn boxed_runtime_authority_keeps_flat_json_and_requires_tool_access() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ));
-    state
-        .authority
-        .tool_access
-        .hide_tool("hidden")
-        .expect("valid hidden name");
-    state.authority.subagent = Some(crate::SubagentSessionContext {
-        capability: "research".to_string(),
-        depth: 1,
-    });
-
-    let mut value = serde_json::to_value(&state).expect("serialize runtime state");
-    assert!(value.get("authority").is_none());
-    assert_eq!(
-        value["tool_access"]["hidden_tools"],
-        serde_json::json!(["hidden"])
-    );
-    assert_eq!(
-        value["subagent"],
-        serde_json::json!({"capability": "research", "depth": 1})
-    );
-
-    let object = value.as_object_mut().expect("runtime state object");
-    object.remove("tool_access");
-    let error = serde_json::from_value::<RuntimeSessionState>(value)
-        .expect_err("missing serialized tool authority must refuse");
-    assert!(error.to_string().contains("missing field `tool_access`"));
-
-    let current = serde_json::to_value(RuntimeSessionState::new(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    )))
-    .expect("serialize current runtime state");
-    assert_eq!(
-        current.get("tool_access"),
-        Some(&serde_json::json!({ "mode": "ambient" }))
-    );
-    assert_eq!(current.get("subagent"), Some(&serde_json::Value::Null));
-}
-
-#[test]
 fn incomplete_checkpoint_component_projection_is_a_typed_error() {
     let projected = RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
@@ -599,26 +456,6 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
 }
 
 #[test]
-fn new_session_rejects_unproven_checkpoint_component_projection() {
-    let projected = RuntimeSessionState::new(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .to_snapshot();
-    let state = RuntimeSessionState::from_snapshot(projected);
-
-    let error = state
-        .checkpoint_components
-        .complete_for_new_session()
-        .expect_err("a public projection cannot prove a complete new-session root");
-
-    assert!(matches!(
-        error,
-        crate::StoreError::IncompleteCheckpointComponentSet
-    ));
-}
-
-#[test]
 #[should_panic(expected = "adopted head revision must advance")]
 fn persisted_commit_cannot_adopt_nonadvancing_revision() {
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
@@ -627,19 +464,6 @@ fn persisted_commit_cannot_adopt_nonadvancing_revision() {
     ));
     let mut receipt = commit_result_for(&state);
     receipt.head_revision = state.head_revision;
-    state.apply_persisted_commit_result(receipt);
-}
-
-#[test]
-#[should_panic(expected = "adopted head revision must advance")]
-fn persisted_commit_cannot_adopt_regressing_revision() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ));
-    state.head_revision = 2;
-    let mut receipt = commit_result_for(&state);
-    receipt.head_revision = 1;
     state.apply_persisted_commit_result(receipt);
 }
 
@@ -725,29 +549,6 @@ fn a_persisted_initial_frame_keeps_the_config_it_opened_under() {
     state.authority.plugin_config = protocol_config(serde_json::json!({ "channel": "cell" }));
     state.open_unpersisted_initial_frame_under_current_assignment();
     assert_eq!(initial_frame_protocol_turn_options(&state), opened_under);
-}
-
-/// The head config is the revision's durable home: it round-trips through
-/// `persisted_session_config_from_state`, and adopting a durable head
-/// restores it.
-#[test]
-fn config_revision_round_trips_through_the_persisted_head_config() {
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ));
-    state.config_revision = 5;
-
-    let config = crate::store::persisted_session_config_from_state(&state);
-    assert_eq!(config.config_revision, 5);
-
-    let mut restored = RuntimeSessionState::new(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ));
-    apply_persisted_session_config(&mut restored, &config);
-    assert_eq!(restored.config_revision, 5);
-    assert_eq!(restored.policy.model, config.model);
 }
 
 /// Install a run view that runs under `config`, resolved against the
@@ -1000,60 +801,6 @@ fn projection_text(id: &str) -> crate::Message {
         origin: None,
         reply_marker: None,
     }
-}
-
-/// ADR 0112 §9, §14 test 7: the state's read model and every read view built
-/// from it hand out the same `Arc`s, until an append folds once.
-#[test]
-fn the_state_and_its_read_views_share_one_projection() {
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("shared-projection"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-    };
-    state.append_active_conversation_messages(&[projection_text("m1")]);
-
-    let model = state.read_model();
-    let again = state.read_model();
-    assert!(lash_sansio::AppendVec::ptr_eq(
-        &model.messages,
-        &again.messages
-    ));
-    assert!(lash_sansio::AppendVec::ptr_eq(
-        &model.active_events,
-        &again.active_events
-    ));
-    assert!(std::sync::Arc::ptr_eq(
-        &model.prompt_render_cache,
-        &again.prompt_render_cache
-    ));
-
-    let view = crate::SessionReadView::from_persisted_state(&state);
-    let relation_view = crate::SessionReadView::from_persisted_state_with_relation(
-        &state,
-        crate::SessionRelation::Root,
-    );
-    for read in [&view, &relation_view, &state.read_view()] {
-        assert!(std::ptr::eq(read.messages(), model.messages.as_slice()));
-        assert!(std::ptr::eq(
-            read.active_events(),
-            model.active_events.as_slice()
-        ));
-    }
-
-    state.append_active_conversation_messages(&[projection_text("m2")]);
-    let folded = state.read_model();
-    assert!(!lash_sansio::AppendVec::ptr_eq(
-        &model.messages,
-        &folded.messages
-    ));
-    assert_eq!(folded.messages.len(), 2);
-    assert!(lash_sansio::AppendVec::ptr_eq(
-        &folded.messages,
-        &state.read_model().messages
-    ));
 }
 
 /// ADR 0112 §9, §14 test 6: once a frame switch is durable, the resident

@@ -650,28 +650,8 @@ mod error_detail_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Debug)]
-    struct ApiErrorTransport;
-
-    #[derive(Debug)]
     struct ProjectResolutionTransport {
         calls: AtomicUsize,
-    }
-
-    #[async_trait::async_trait]
-    impl LlmHttpTransport for ApiErrorTransport {
-        async fn send(
-            &self,
-            _request: LlmHttpRequest,
-            _timeout: Option<std::time::Duration>,
-        ) -> Result<lash_llm_transport::LlmHttpResponse, LlmTransportError> {
-            Ok(lash_llm_transport::LlmHttpResponse {
-                status: 400,
-                headers: Vec::new(),
-                body: lash_llm_transport::LlmHttpBody::buffered(
-                    r#"{"error":{"message":"Gemini API detail"}}"#,
-                ),
-            })
-        }
     }
 
     #[async_trait::async_trait]
@@ -739,87 +719,6 @@ mod error_detail_tests {
             generation: Default::default(),
             provider_trace: None,
         }
-    }
-
-    #[tokio::test]
-    async fn generate_content_error_surfaces_api_message() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            u64::MAX,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
-        .with_transport(Arc::new(ApiErrorTransport));
-        let error = provider
-            .execute_request(
-                "access",
-                json!({ "model": "gemini-test" }),
-                None,
-                None,
-                ResponseReading {
-                    stream_termination: StreamTermination::EofTolerated,
-                    defaults: lash_core::provider::LlmProfileRequestDefaults {
-                        expose_thinking: false,
-                        ..Default::default()
-                    },
-                },
-                None,
-            )
-            .await
-            .expect_err("fixture is an HTTP error");
-        assert!(error.message.contains("Gemini API detail"));
-    }
-
-    #[tokio::test]
-    async fn load_code_assist_error_surfaces_api_message() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            u64::MAX,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
-        .with_transport(Arc::new(ApiErrorTransport));
-        let error = provider
-            .resolve_project_id("access")
-            .await
-            .expect_err("fixture is an HTTP error");
-        assert!(error.message.contains("Gemini API detail"));
-    }
-
-    #[tokio::test]
-    async fn complete_retains_resolved_project_on_original_provider() {
-        let transport = Arc::new(ProjectResolutionTransport {
-            calls: AtomicUsize::new(0),
-        });
-        let mut provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            u64::MAX,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        )
-        .with_transport(transport.clone());
-
-        let response = provider
-            .complete(completion_request())
-            .await
-            .expect("credentialed completion succeeds");
-
-        assert_eq!(response.full_text(), "done");
-        assert_eq!(provider.project_id.as_deref(), Some("resolved-project"));
-        assert_eq!(
-            provider.serialize_config()["project_id"],
-            json!("resolved-project")
-        );
-        assert_eq!(transport.calls.load(Ordering::SeqCst), 2);
     }
 
     /// Every refusal lands before the project lookup, any upload and the

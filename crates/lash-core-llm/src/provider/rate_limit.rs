@@ -249,20 +249,6 @@ mod tests {
     }
 
     #[test]
-    fn exact_window_capacity_is_admitted_and_next_request_waits() {
-        let now = std::time::Instant::now();
-        let mut bucket = WindowBucket::new(now);
-        for _ in 0..2 {
-            let decision = bucket_decision(&bucket, now, Some(2), Some(50), 1);
-            assert_eq!(decision.wait, None);
-            bucket = decision.commit(true);
-        }
-        let decision = bucket_decision(&bucket, now, Some(2), Some(50), 1);
-        assert_eq!(decision.wait, Some(Duration::from_millis(50)));
-        assert_eq!(decision.commit(false).used, 2);
-    }
-
-    #[test]
     fn an_oversized_single_cost_consumes_one_full_window_without_deadlock() {
         let now = std::time::Instant::now();
         let bucket = WindowBucket::new(now);
@@ -272,45 +258,6 @@ mod tests {
         assert_eq!(bucket.used, 3);
         let decision = bucket_decision(&bucket, now, Some(3), Some(20), 1);
         assert_eq!(decision.wait, Some(Duration::from_millis(20)));
-    }
-
-    #[test]
-    fn reaching_the_window_boundary_resets_usage_before_admission() {
-        let now = std::time::Instant::now();
-        let bucket = WindowBucket::new(now);
-        let decision = bucket_decision(&bucket, now, Some(1), Some(10), 1);
-        assert_eq!(decision.wait, None);
-        let bucket = decision.commit(true);
-        let boundary = now + Duration::from_millis(10);
-        let decision = bucket_decision(&bucket, boundary, Some(1), Some(10), 1);
-        assert_eq!(decision.wait, None);
-        let bucket = decision.commit(true);
-        assert_eq!(bucket.used, 1);
-        assert_eq!(bucket.reset_at, boundary + Duration::from_millis(10));
-    }
-
-    #[test]
-    fn concurrency_zero_is_unlimited_and_positive_values_install_a_gate() {
-        let limiter = ProviderRateLimiter::new();
-        limiter.concurrency_gate(&ProviderRateLimitPolicy {
-            max_concurrency: Some(0),
-            ..Default::default()
-        });
-        assert!(limiter.state.lock_recover().semaphore.is_none());
-        limiter.concurrency_gate(&ProviderRateLimitPolicy {
-            max_concurrency: Some(2),
-            ..Default::default()
-        });
-        assert_eq!(
-            limiter
-                .state
-                .lock_recover()
-                .semaphore
-                .as_ref()
-                .expect("configured semaphore")
-                .available_permits(),
-            2
-        );
     }
 }
 

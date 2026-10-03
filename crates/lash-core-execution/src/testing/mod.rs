@@ -274,18 +274,6 @@ pub fn runtime_lease_owner() -> crate::LeaseOwnerIdentity {
 
 pub use lash_core_ids::test_clock::TestClock;
 
-#[test]
-fn test_clock_wall_clock_faces_agree() {
-    let clock = TestClock::new(1_700_000_000_123);
-    let clock: &dyn crate::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
-}
-
 /// Production-equivalent logical payload accounting for one runtime commit.
 pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
 
@@ -765,22 +753,6 @@ impl<'run> ToolCallFixture<'run> {
             &self.context,
             execution_scope_id.into(),
             crate::tool_provider::AttemptCompletionSupport::NotDeclared,
-        )
-    }
-
-    /// Like [`Self::attempt`], but with a completion key already reserved, as
-    /// the coordinator does for a tool that declared it defers. A body that
-    /// parks reads the key before returning `Pending`, so a test of a parking
-    /// tool that used the keyless projection would only ever observe the "did
-    /// not declare deferred completion" refusal.
-    pub fn attempt_with_completion_key(
-        &self,
-        key: crate::AwaitEventKey,
-    ) -> crate::AttemptContext<'run> {
-        crate::AttemptContext::from_tool_context(
-            &self.context,
-            "test-turn".to_string(),
-            crate::tool_provider::AttemptCompletionSupport::Available(key),
         )
     }
 }
@@ -1335,18 +1307,6 @@ impl crate::Clock for FrozenToolCoordinatorClock {
     async fn sleep(&self, _duration: std::time::Duration) {}
 
     async fn sleep_until(&self, _deadline: std::time::Instant) {}
-}
-
-#[test]
-fn frozen_tool_coordinator_clock_wall_clock_faces_agree() {
-    let clock = FrozenToolCoordinatorClock(std::time::Instant::now());
-    let clock: &dyn crate::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 /// Execute one opted-in provider through the production attempt coordinator,

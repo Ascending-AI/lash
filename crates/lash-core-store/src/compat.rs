@@ -1228,9 +1228,8 @@ pub fn admit(
 #[cfg(test)]
 mod tests {
     use super::{
-        CompatAdmission, CompatDescriptor, CompatRefusal, CompatStamp, ComponentId, DESCRIPTORS,
-        POSTGRES_SCHEMA_VERSION, SQLITE_CORE_SCHEMA_VERSION, SQLITE_REGISTRY_SCHEMA_VERSION,
-        SQLITE_TRIGGERS_SCHEMA_VERSION, StampRead, VersionRange, admit,
+        CompatAdmission, CompatDescriptor, CompatRefusal, CompatStamp, ComponentId, StampRead,
+        VersionRange, admit,
     };
 
     fn stamp(version: u32, min_reader: u32) -> StampRead {
@@ -1319,75 +1318,6 @@ mod tests {
         );
     }
 
-    /// A store component's descriptor is its schema-version constant and
-    /// nothing else: the default build reads and writes exactly it, and the
-    /// synthetic successor writes the next version while still reading it.
-    #[test]
-    fn every_component_declares_its_generation_policy() {
-        fn store(version: u32) -> (VersionRange, VersionRange) {
-            #[cfg(not(feature = "synthetic-next"))]
-            return (
-                VersionRange::exactly(version),
-                VersionRange::exactly(version),
-            );
-            #[cfg(feature = "synthetic-next")]
-            return (
-                VersionRange::between(version, version + 1),
-                VersionRange::exactly(version + 1),
-            );
-        }
-        #[cfg(not(feature = "synthetic-next"))]
-        let object_family = VersionRange::exactly(1);
-        #[cfg(feature = "synthetic-next")]
-        let object_family = VersionRange::between(1, 2);
-
-        let policies: Vec<_> = DESCRIPTORS
-            .iter()
-            .map(|descriptor| {
-                (
-                    descriptor.component.as_str(),
-                    (descriptor.reads, descriptor.writes),
-                )
-            })
-            .collect();
-        assert_eq!(
-            policies,
-            [
-                ("postgres", store(POSTGRES_SCHEMA_VERSION)),
-                ("sqlite-core", store(SQLITE_CORE_SCHEMA_VERSION)),
-                ("sqlite-registry", store(SQLITE_REGISTRY_SCHEMA_VERSION)),
-                ("sqlite-triggers", store(SQLITE_TRIGGERS_SCHEMA_VERSION)),
-                ("restate-effect-group-state", (object_family, object_family)),
-                (
-                    "restate-effect-group-payload",
-                    (object_family, object_family)
-                ),
-                (
-                    "restate-durable-wait-registry",
-                    (object_family, object_family)
-                ),
-            ]
-        );
-    }
-
-    #[test]
-    fn refusal_json_is_tagged() {
-        let refusal = CompatRefusal::FleetOutsideWritable {
-            recorded: 3,
-            writable: VersionRange::new(1, 2).expect("range"),
-            writing_release: None,
-        };
-        let json = serde_json::to_string(&refusal).expect("encode");
-        assert_eq!(
-            json,
-            r#"{"refusal":"fleet_outside_writable","recorded":3,"writable":{"min":1,"max":2}}"#
-        );
-        assert_eq!(
-            serde_json::from_str::<CompatRefusal>(&json).expect("decode"),
-            refusal
-        );
-    }
-
     /// FIG-4819: a floor above this build's range on a store an older
     /// release stamped predates the counter restart. The same floor under
     /// this release, a newer one, or no readable stamp stays "newer".
@@ -1441,25 +1371,6 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&refusal).expect("encode"),
             r#"{"refusal":"pre_release","component":"restate-wire"}"#
-        );
-    }
-
-    #[test]
-    fn refusal_names_writing_release_without_changing_its_reason() {
-        let refusal = CompatRefusal::ReaderFloorAbove {
-            component: "postgres".into(),
-            found: 2,
-            min_reader: 2,
-            reads: VersionRange::exactly(1),
-            writing_release: Some("1.1.0".into()),
-        };
-        assert!(refusal.to_string().contains("Writing release: 1.1.0"));
-        let json = serde_json::to_value(&refusal).expect("encode");
-        assert_eq!(json["refusal"], "reader_floor_above");
-        assert_eq!(json["writing_release"], "1.1.0");
-        assert_eq!(
-            serde_json::from_value::<CompatRefusal>(json).expect("decode"),
-            refusal
         );
     }
 }

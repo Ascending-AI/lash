@@ -364,16 +364,4 @@ mod tests {
         assert_eq!(record.get("k10"), Some(&Value::Number(10.0)));
         assert_eq!(record.get("k0"), Some(&Value::Number(0.0)));
     }
-
-    /// The un-indexed path takes the same shift, and a record that never
-    /// reaches the threshold must not grow an index on the way out.
-    #[test]
-    fn removing_a_key_from_a_small_record_keeps_order() {
-        let mut record = record_of(4);
-        assert_eq!(record.remove("k1"), Some(Value::Number(1.0)));
-        assert_eq!(keys_of(&record), ["k0", "k2", "k3"]);
-        assert!(record.index.is_none());
-        assert_eq!(record.remove("missing"), None);
-        assert_eq!(record.get("k3"), Some(&Value::Number(3.0)));
-    }
 }

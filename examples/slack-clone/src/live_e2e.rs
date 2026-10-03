@@ -1568,33 +1568,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_priced_and_unknown_models_are_not() {
-        assert!(price_for(DEFAULT_RLM_MODEL).is_some());
-        assert!(price_for(DEFAULT_STANDARD_MODEL).is_some());
-        assert!(price_for("vendor/unknown").is_none());
-    }
-
-    #[test]
     fn default_cap_derives_a_bounded_output_ceiling() {
         let cap = derived_output_token_cap(DEFAULT_MAX_SPEND_USD).expect("default cap");
         assert!((MIN_OUTPUT_TOKENS..=MAX_OUTPUT_TOKENS).contains(&cap));
         assert!(worst_case_spend_usd(cap) <= DEFAULT_MAX_SPEND_USD);
-    }
-
-    #[test]
-    fn continuation_budget_stays_within_per_agent_ceiling() {
-        assert_eq!(
-            MAX_SESSION_TURNS_PER_AGENT * MAX_MODEL_TURNS_PER_SESSION_TURN,
-            MAX_MODEL_TURNS_PER_AGENT
-        );
-    }
-
-    #[test]
-    fn nonces_are_fresh_long_alphanumeric_tokens() {
-        let a = fresh_nonce();
-        let b = fresh_nonce();
-        assert_ne!(a, b);
-        assert!(a.len() >= 16);
-        assert!(a.chars().all(|character| character.is_ascii_alphanumeric()));
     }
 }

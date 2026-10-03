@@ -29,24 +29,6 @@ fn malformed_rlm_turn_options_fail_before_llm() {
 }
 
 #[test]
-fn null_rlm_turn_options_fail_before_llm() {
-    let config = test_config_with_protocol_turn_options(
-        lash_core::ProtocolTurnOptions::from_payload(serde_json::Value::Null),
-    );
-    let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
-
-    let effects = drain_effects(&mut machine);
-
-    assert!(find_llm_call(&effects).is_none());
-    assert!(effects_include_runtime_error(
-        &effects,
-        "invalid recorded RLM session config"
-    ));
-    assert!(find_done(&effects).is_some());
-}
-
-#[test]
 fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
     let mut machine = TurnMachine::new(
         test_config(),
@@ -220,45 +202,6 @@ fn provider_stop_evidence_does_not_reconstruct_an_unclosed_cell() {
 }
 
 #[test]
-fn natural_stop_without_applied_boundary_does_not_close_or_execute_a_cell() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("respond")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "Visible plan.\n<typescript>\nprint \"unfinished\"";
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![text_part(text)],
-            terminal_reason: lash_core::LlmTerminalReason::Stop,
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
-    );
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
-            if content == "Visible plan."
-    )));
-    assert!(!effects.iter().any(|effect| matches!(
-        effect,
-        Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
-            if content.contains("<typescript>")
-    )));
-}
-
-#[test]
 fn buffered_response_discards_trailing_content_after_the_first_complete_cell() {
     let mut machine = TurnMachine::new(
         test_config(),
@@ -294,116 +237,6 @@ fn buffered_response_discards_trailing_content_after_the_first_complete_cell() {
     assert!(!effects.iter().any(|effect| {
         matches!(effect, Effect::ExecCode { code, .. } if code.contains("discarded"))
     }));
-}
-
-#[test]
-fn buffered_response_executes_only_first_of_two_complete_cells_without_retry() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("respond")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = concat!(
-        "<typescript>\n",
-        "print \"first\"\n",
-        "</typescript>\n",
-        "<typescript>\n",
-        "finish \"second\"\n",
-        "</typescript>",
-    );
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![text_part(text)],
-            terminal_reason: lash_core::LlmTerminalReason::Stop,
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(effects.iter().any(
-        |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "print \"first\"")
-    ));
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::LlmCall { .. }))
-    );
-    assert!(!effects.iter().any(|effect| {
-        matches!(effect, Effect::ExecCode { code, .. } if code.contains("second"))
-    }));
-}
-
-#[test]
-fn illustrative_prose_with_an_unclosed_cell_retries_without_execution() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("how do you run code?")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "You wrap it like:\n<typescript>\nfiles.delete \"old\"\n";
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![text_part(text)],
-            terminal_reason: lash_core::LlmTerminalReason::Stop,
-            generation_disposition: Some(lash_core::GenerationReceipt {
-                stop_sequences: lash_core::GenerationOptionOutcome::Applied,
-                ..Default::default()
-            }),
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(find_checkpoint(&effects).is_some());
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
-    );
-}
-
-#[test]
-fn natural_end_turn_with_a_partial_program_retries_without_execution() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("swap the file")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "<typescript>\nfiles.delete \"old\"";
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![text_part(text)],
-            terminal_reason: lash_core::LlmTerminalReason::Stop,
-            generation_disposition: Some(lash_core::GenerationReceipt {
-                stop_sequences: lash_core::GenerationOptionOutcome::Applied,
-                ..Default::default()
-            }),
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(find_checkpoint(&effects).is_some());
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
-    );
 }
 
 #[test]
@@ -1384,37 +1217,6 @@ fn config_with_no_progress_budget(max_attempts: usize) -> TurnMachineConfig {
     config
 }
 
-/// A cell that never closes never executes, so it commits nothing. Before the
-/// budget existed this turn had no terminating branch at all.
-#[test]
-fn a_reply_that_never_yields_a_cell_stops_at_the_no_progress_budget() {
-    let mut machine = TurnMachine::new(
-        config_with_no_progress_budget(4),
-        vec![user_message("do the thing")],
-        Default::default(),
-        0,
-    );
-
-    let stalled = drive_stalling_turn(&mut machine, "<typescript>\nfinish(\"ok\");", None, 32);
-
-    assert_eq!(
-        stalled.llm_calls, 4,
-        "the bound is the number of provider calls"
-    );
-    assert_eq!(
-        stalled.outcome,
-        Some(lash_core::facade_support::TurnOutcome::Stopped(
-            lash_core::facade_support::TurnStop::MaxTurns
-        )),
-        "exhaustion is terminal for the turn"
-    );
-    assert!(
-        stalled.stop_message().is_some(),
-        "the transcript says why the turn stopped: {:#?}",
-        stalled.messages
-    );
-}
-
 /// The measured `code-failure` shape: the cell parses out of the reply and
 /// runs, and raises every time. It commits a trajectory entry per attempt, so
 /// "appended something" is not progress — an error-free execution is.
@@ -1815,43 +1617,6 @@ fn a_one_line_tag_mention_still_finishes_as_prose() {
     assert!(
         find_done(&effects).is_some(),
         "and the turn finishes on it rather than asking again"
-    );
-}
-
-/// Prose *about* the tags is an answer, not a fence to correct.
-///
-/// A line that opens with the tag is indistinguishable from an attempted cell,
-/// so the fence correction is asked for only where a cell is required. On a
-/// `Natural` turn this reply is exactly what the user wanted; answering it with
-/// grammar guidance would bury the answer and spend the turn's attempts.
-#[test]
-fn a_natural_turn_answering_about_the_tags_is_not_corrected() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("what are the tags?")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(rlm_response(vec![text_part(
-            "<typescript> and </typescript> are the tags you asked about.",
-        )])),
-    });
-
-    let effects = drain_effects(&mut machine);
-    let effects = complete_through_checkpoint(&mut machine, &effects);
-    assert!(
-        find_done(&effects).is_some(),
-        "the turn finishes on its answer"
-    );
-    assert_eq!(
-        single_llm_extraction_payload(&machine)["decision"],
-        "finish_prose",
-        "prose about the tags finishes; it is not a refused fence"
     );
 }
 

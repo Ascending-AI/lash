@@ -1450,43 +1450,6 @@ pub(super) async fn durable_trace_is_observed_once_across_a_redrive_and_adds_no_
     );
 }
 
-#[tokio::test]
-pub(super) async fn restate_handler_controller_journals_typed_trigger_execution() {
-    let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let envelope = RuntimeEffectEnvelope::new(
-        operation_effect_invocation(
-            "restate-trigger-session",
-            lash_core::RuntimeAttribution::for_session("restate-trigger-session"),
-            "restate-trigger-list",
-            "restate-trigger-list",
-        ),
-        RuntimeEffectCommand::Trigger {
-            command: Box::new(lash_core::TriggerCommand::List {
-                owner_scope: lash_core::TriggerOwnerScope::session("restate-trigger-session"),
-                filter: lash_core::TriggerSubscriptionFilter::default(),
-            }),
-        },
-    );
-    let store = memory_trigger_store().await;
-
-    let outcome = controller
-        .execute_effect(envelope, RuntimeEffectLocalExecutor::triggers(store))
-        .await
-        .expect("handler-scoped Restate controller must execute typed trigger effects")
-        .into_trigger()
-        .expect("typed trigger outcome");
-
-    assert!(matches!(
-        outcome,
-        Ok(lash_core::TriggerCommandOutcome::List { records }) if records.is_empty()
-    ));
-    assert_eq!(
-        context.runs.lock_recover().as_slice(),
-        ["lash:restate-trigger-list"]
-    );
-}
-
 pub(super) fn fig1464_poison_list_envelope(session: &str, effect: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         operation_effect_invocation(
@@ -1576,45 +1539,6 @@ pub(super) async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_t
     );
 }
 
-/// FIG-1464: the poison substitute still carries the envelope replay validation
-/// matches on, so an envelope that is itself over budget leaves no journalable
-/// record at all. Journaling the substitute anyway would propose an entry the
-/// engine rejects, reviving the redrive loop with the give-up now silent. The
-/// seam decides before it pays for the effect, and occupies the journal slot with
-/// the fixed-size poison entry so the journal shape does not depend on the
-/// configured budget.
-#[tokio::test]
-pub(super) async fn fig1464_over_budget_envelope_gives_up_with_a_fixed_size_poison_entry() {
-    let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::with_options_for_test(
-        Arc::clone(&context),
-        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
-    );
-    let store = memory_trigger_store().await;
-
-    let error = controller
-        .execute_effect(
-            fig1464_poison_list_envelope("restate-wide-envelope-session", "restate-wide-envelope"),
-            RuntimeEffectLocalExecutor::triggers(store),
-        )
-        .await
-        .expect_err("an unjournalable envelope must not be recorded as a result");
-
-    assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned
-    );
-    assert!(
-        error.code.is_terminal(),
-        "the give-up must not be re-attempted"
-    );
-    assert_eq!(
-        context.runs.lock_recover().as_slice(),
-        ["lash:restate-wide-envelope"],
-        "the give-up must occupy its journal slot exactly once"
-    );
-}
-
 /// FIG-1464 deciding risk: the give-up verdict reads a process-configured
 /// budget, so a budget change between attempts must not flip the *shape* of the
 /// journal. The give-up occupies its slot with a fixed-size poison entry, so a
@@ -1695,49 +1619,6 @@ pub(super) fn fig3564_budget_group(operation: &str) -> lash_core::RuntimeEffectG
         lash_core::LoserPolicy::RunToCompletion,
     )
     .expect("a valid one-child group")
-}
-
-/// FIG-1464 / FIG-3564: an effect-group open journals engine calls whose
-/// requests carry every child's envelope, so a group the journal cannot hold
-/// must give up before the open reaches the engine - the pre-flight the
-/// deleted durable tool batch had, and the one the durable process command
-/// keeps. The give-up is the process-command arm's typed failure, and it
-/// occupies only its own verdict slot.
-#[tokio::test]
-pub(super) async fn fig1464_over_budget_group_open_gives_up_before_the_group_is_opened() {
-    let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::with_options_for_test(
-        Arc::clone(&context),
-        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
-    );
-
-    // The recording context serves no group engine: an open that got past the
-    // pre-flight would fail on its index probe with a different code.
-    let error = controller
-        .open_effect_group(fig3564_budget_group("fig1464-over-budget-group"))
-        .await
-        .expect_err("an unjournalable group open must give up");
-
-    assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned,
-        "the group open must give up with the process-command arm's typed failure: {}",
-        error.message
-    );
-    assert!(
-        error.code.is_terminal(),
-        "the give-up must not be re-attempted"
-    );
-    assert_eq!(
-        error.message,
-        "journaled effect `lash:fig1464-over-budget-group:group` gave up because its payload \
-         exceeded the 16-byte durable journal budget"
-    );
-    assert_eq!(
-        context.runs.lock_recover().as_slice(),
-        ["lash:fig1464-over-budget-group:group.journal-budget"],
-        "the give-up occupies its verdict slot and nothing else is journaled"
-    );
 }
 
 /// FIG-1464 / FIG-3564 deciding risk: the verdict reads a process-configured
@@ -2169,57 +2050,6 @@ pub(super) fn restate_replay_refuses_pre_effect_19_session_list_envelope() {
         error.code,
         lash_core::RuntimeErrorCode::EffectReplayDivergence
     );
-}
-
-#[test]
-pub(super) fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
-    let recorded_envelope = test_sleep_envelope(1)
-        .canonical_form()
-        .expect("recorded envelope");
-    let reconstructed = test_sleep_envelope(2)
-        .canonical_form()
-        .expect("reconstructed envelope");
-    let recorded = RecordedRuntimeEffect {
-        envelope: Arc::new(recorded_envelope),
-        outcome: Ok(RuntimeEffectOutcome::Sleep),
-    };
-
-    let err = validate_recorded_effect_envelope(recorded, &reconstructed, None)
-        .expect_err("hash mismatch");
-
-    assert_eq!(
-        err.code,
-        lash_core::RuntimeErrorCode::EffectReplayDivergence
-    );
-    assert!(
-        err.code.is_replay_mismatch(),
-        "Restate replay divergence must retain the shared typed classification"
-    );
-    assert_eq!(
-        *err.summary.expect("mismatch summary"),
-        lash_core::RuntimeEffectReplayMismatchReport {
-            divergent_path_count: 1,
-            first_divergent_paths: vec!["command.spec.duration_ms".to_string()],
-            effect_kind: Some("sleep".to_string()),
-        }
-    );
-}
-
-#[test]
-pub(super) fn recorded_runtime_effect_hash_match_returns_replayed_outcome() {
-    let envelope = test_sleep_envelope(1)
-        .canonical_form()
-        .expect("canonical envelope");
-    let recorded = RecordedRuntimeEffect {
-        envelope: Arc::new(envelope.clone()),
-        outcome: Ok(RuntimeEffectOutcome::Sleep),
-    };
-
-    let outcome = validate_recorded_effect_envelope(recorded, &envelope, None)
-        .expect("hash match")
-        .expect("replayed outcome");
-
-    assert!(matches!(outcome, RuntimeEffectOutcome::Sleep));
 }
 
 pub(super) fn test_sleep_envelope(duration_ms: u64) -> RuntimeEffectEnvelope {

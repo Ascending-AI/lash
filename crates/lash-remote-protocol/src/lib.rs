@@ -452,18 +452,6 @@ where
         Self::decode_json_with_limits(bytes, local, JsonDecodeLimits::default())
     }
 
-    #[cfg(test)]
-    pub(crate) fn decode_json_expecting_protocol_version(
-        bytes: &[u8],
-        expected_version: u32,
-    ) -> Result<Self, RemoteProtocolError> {
-        Self::decode_json_with_limits(
-            bytes,
-            VersionRange::exactly(expected_version),
-            JsonDecodeLimits::default(),
-        )
-    }
-
     /// Refuse byte, structure and allocation estimates before constructing the body.
     pub fn decode_json_with_limits(
         bytes: &[u8],
@@ -532,9 +520,6 @@ mod context_overflow_tests;
 
 #[cfg(test)]
 mod versioned_decode_tests;
-
-#[cfg(test)]
-mod attachment_capability_tests;
 
 #[cfg(test)]
 mod decode_budget_tests;

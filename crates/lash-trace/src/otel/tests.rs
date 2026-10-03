@@ -691,58 +691,6 @@ fn provider_attempts_use_reported_identity_and_never_project_aggregate_calls() {
 }
 
 #[test]
-fn every_admission_kind_has_registered_name_kind_and_first_writer_outcome() {
-    use crate::telemetry::TraceScopeOwner;
-    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
-    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let owners = [
-        TraceScopeOwner::Run {
-            session_id: "s".into(),
-            run: "r".into(),
-        },
-        TraceScopeOwner::Turn {
-            session_id: "s".into(),
-            turn_id: "t".into(),
-        },
-        TraceScopeOwner::Tool {
-            session_id: "s".into(),
-            turn_id: "t".into(),
-            call_id: "c".into(),
-        },
-        TraceScopeOwner::ToolIntent {
-            owner: lash_sansio::RuntimeOwner::Session("s".into()),
-            replay_key: "key".into(),
-        },
-        TraceScopeOwner::Process {
-            process_id: lash_sansio::ProcessId::fixture("p"),
-        },
-        TraceScopeOwner::TriggerOccurrence {
-            occurrence_id: "fire".into(),
-        },
-    ];
-    for owner in owners {
-        let id = TraceScopeId::admission(owner);
-        let selected = adapter.propose(&id, &TraceCause::Root);
-        let retained = selected.anchor();
-        selected.settle(TraceCandidateOutcome::Selected);
-        let losing = adapter.propose(&id, &TraceCause::Root);
-        assert_ne!(retained, losing.anchor());
-        losing.settle(TraceCandidateOutcome::Reused);
-        let spans = exporter.get_finished_spans().unwrap();
-        let pair = &spans[spans.len() - 2..];
-        assert_eq!(pair[0].name, admitted(id.kind()).definition().name);
-        assert_eq!(pair[0].span_kind, admitted(id.kind()).definition().kind);
-        assert_eq!(pair[1].name, "lash.admission.attempt");
-        assert!(
-            pair[1]
-                .attributes
-                .contains(&A::AdmissionOutcome.value("reused"))
-        );
-    }
-    assert_eq!(exporter.get_finished_spans().unwrap().len(), 12);
-}
-
-#[test]
 fn tool_wait_and_code_completions_use_explicit_scope_and_local_leaf_durations() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());

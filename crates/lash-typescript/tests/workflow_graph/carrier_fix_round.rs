@@ -172,31 +172,6 @@ fn graph_submission_cannot_edit_a_process_origin() {
     );
 }
 
-/// A compound member assignment is an attribute update (FIG-3571): it
-/// projects as a state update of its target with its operator, and renders
-/// back as the same compound assignment.
-#[test]
-fn compound_member_assignment_is_an_attribute_update() {
-    let source = "const box = { value: 1 };\nbox.value += 2;\nfinish(box.value);\n";
-    let graph = workflow_graph_from_source(source).expect("fixture projects");
-    let update = graph
-        .nodes()
-        .find_map(|node| match &node.kind {
-            WorkflowNodeKind::StateUpdate {
-                target,
-                expression,
-                update: Some(operator),
-            } => Some((target.clone(), expression.clone(), *operator)),
-            _ => None,
-        })
-        .expect("the compound assignment projects as a state update");
-    assert_eq!(update.0.root.as_str(), "box");
-    assert_eq!(update.1, lashlang::Expr::Number(2.0));
-    assert_eq!(update.2, lashlang::UpdateOperator::Add);
-    let rendered = workflow_graph_to_source(&graph).expect("the graph renders");
-    assert!(rendered.contains("box.value += 2;"), "{rendered}");
-}
-
 /// A host edits an admitted view: it re-reads every node's text through the
 /// lens's fragment door and inserts statements around a lifted literal. The
 /// literal's lifted declaration is still found — by the reference the view

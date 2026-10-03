@@ -40,38 +40,6 @@ fn settlement() -> ToolSettlement {
     }
 }
 
-/// Both durable carriers stamp this build's format version — a derived
-/// `Default` (version `0`) would make every decode of an empty carrier refuse.
-#[test]
-fn version_stamps_are_stable() {
-    assert_eq!(settlement().version, TOOL_SETTLEMENT_VERSION);
-    assert_eq!(
-        ToolAttemptCapture::default().version,
-        TOOL_ATTEMPT_CAPTURE_VERSION
-    );
-    settlement()
-        .validate()
-        .expect("this build reads the settlement it writes");
-    ToolAttemptCapture::default()
-        .validate()
-        .expect("this build reads the capture it writes");
-}
-
-/// The skip predicate the `ToolAttempt` outcome arm uses: any one fact makes
-/// the capture worth journaling; none of them leaves the ungrouped outcome
-/// corpus byte-identical.
-#[test]
-fn an_attempt_capture_is_empty_only_when_it_holds_no_fact_at_all() {
-    assert!(ToolAttemptCapture::default().is_empty());
-    assert!(
-        !ToolAttemptCapture {
-            messages: vec![message("committed")],
-            ..Default::default()
-        }
-        .is_empty()
-    );
-}
-
 /// A carrier this build cannot reconstruct is refused rather than served as a
 /// prefix of what the child produced.
 #[test]

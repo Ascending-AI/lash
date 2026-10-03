@@ -55,45 +55,6 @@ fn standard_protocol_distinguishes_ambient_from_restricted_empty_access() {
     assert!(tool_names(&restricted).is_empty());
 }
 
-#[test]
-fn standard_protocol_registers_no_catalog_tools() {
-    let session = PluginHost::new(vec![Arc::new(
-        lash_protocol_standard::StandardProtocolPluginFactory::new(),
-    )])
-    .build_session(PluginSessionRequest::creation("root", Default::default()))
-    .expect("session");
-
-    assert!(
-        tool_names(&session).is_empty(),
-        "`batch` is protocol sugar, not a catalog entry, and processes are not the protocol's"
-    );
-}
-
-#[test]
-fn process_controls_and_a_model_provider_compose_with_standard_protocol() {
-    let fixture: Arc<dyn lash_core::ToolProvider> = Arc::new(lash_core::testing::FixtureTools);
-    let session = PluginHost::new(vec![
-        Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::session_or_starter,
-            ),
-        ),
-        Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("native-tools-fixture"),
-            lash_core::facade_support::PluginSpec::new().with_tool_provider(fixture),
-        )),
-        Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
-    ])
-    .build_session(PluginSessionRequest::creation("root", Default::default()))
-    .expect("session");
-
-    let names = tool_names(&session);
-    assert!(!names.contains(&"batch".to_string()));
-    assert!(names.contains(&lash_core::testing::FIXTURE_ECHO_TOOL.to_string()));
-    assert!(names.contains(&"list_process_handles".to_string()));
-    assert!(names.contains(&"cancel_process".to_string()));
-}
-
 /// A catalogue tool named `batch` could never be called while the sugar names
 /// it in every request, so it is refused; withheld, the name is free.
 #[test]

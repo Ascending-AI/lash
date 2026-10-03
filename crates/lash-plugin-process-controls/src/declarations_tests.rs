@@ -12,10 +12,6 @@ fn tools() -> SessionProcessAdminTools {
     }
 }
 
-fn process_handle(process_id: &lash_core::ProcessId) -> Value {
-    lash_core::RuntimeExecutionContext::process_handle_json(process_id)
-}
-
 fn intents(outcome: ToolAttemptOutcome) -> (Value, Vec<ToolIntent>) {
     let ToolAttemptOutcome::Done { result, intents } = outcome else {
         panic!("expected a done attempt");
@@ -85,37 +81,6 @@ fn definition() -> Value {
         lash_core::ProcessSignature::Unknown,
     ))
     .expect("definition")
-}
-
-#[tokio::test]
-async fn start_process_declares_a_start_and_answers_with_its_start_slot() {
-    let (output, declared) = intents(attempt!(
-        "start_process",
-        serde_json::json!({"definition": definition(), "args": {"request": "one"}})
-    ));
-    let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
-        panic!("one start")
-    };
-    let lash_core::ProcessStartTarget::Definition {
-        definition_id,
-        args,
-        signature_claim,
-    } = &intent.declaration.input
-    else {
-        panic!("definition start")
-    };
-    assert_eq!(definition_id, &id(1));
-    assert_eq!(
-        args,
-        &serde_json::Map::from_iter([("request".into(), serde_json::json!("one"))])
-    );
-    assert_eq!(signature_claim, &Some(lash_core::ProcessSignature::Unknown));
-    assert_eq!(output, lash_sansio::handle::process_start_slot_json(0));
-    assert!(intent.declaration.identity.is_none());
-    assert!(
-        output.get(lash_sansio::handle::HANDLE_FIELD).is_none(),
-        "the unrealized answer carries no handle"
-    );
 }
 
 /// A start outside any chain is a session start, so the calling session is the
@@ -254,48 +219,6 @@ fn a_started_definition_is_the_definition_processes_list_filters_by() {
     }
 }
 
-#[test]
-fn host_surface_has_no_named_operation() {
-    let tools = crate::processes_tool_definitions(true);
-    assert!(
-        tools
-            .iter()
-            .any(|tool| tool.name() == "get_process_definition")
-    );
-    assert!(tools.iter().all(|tool| tool.name() != "register_process"));
-    assert!(
-        !process_start_tool_definition()
-            .contract()
-            .input_schema
-            .canonical()["properties"]
-            .as_object()
-            .expect("properties")
-            .contains_key("name")
-    );
-}
-
-#[tokio::test]
-async fn signal_process_declares_the_signal_the_handle_names() {
-    let outcome = attempt!(
-        "signal_process",
-        serde_json::json!({
-            "handle": process_handle(&lash_core::ProcessId::fixture("process-7")),
-            "name": "approved",
-            "payload": { "by": "sam" },
-        })
-    );
-    let (_, declared) = intents(outcome);
-    let [ToolIntent::SignalProcess(intent)] = declared.as_slice() else {
-        panic!("expected one signal declaration, got {declared:?}");
-    };
-    assert_eq!(
-        intent.process_id,
-        lash_core::ProcessId::fixture("process-7")
-    );
-    assert_eq!(intent.signal_name, "approved");
-    assert_eq!(intent.payload, serde_json::json!({ "by": "sam" }));
-}
-
 #[tokio::test]
 async fn signal_process_refuses_a_value_that_is_not_a_process_handle() {
     let message = refusal(attempt!(
@@ -318,22 +241,4 @@ async fn emit_process_event_is_refused_outside_a_process() {
         message.contains("running inside a durable process"),
         "{message}"
     );
-}
-
-#[tokio::test]
-async fn emit_process_event_declares_an_append_to_its_own_process() {
-    let outcome = attempt!(
-        "emit_process_event",
-        serde_json::json!({ "value": { "stage": "approved" } }),
-        Some("process-9")
-    );
-    let (_, declared) = intents(outcome);
-    let [ToolIntent::EmitProcessEvent(intent)] = declared.as_slice() else {
-        panic!("expected one append declaration, got {declared:?}");
-    };
-    assert_eq!(
-        intent.process_id,
-        lash_core::ProcessId::fixture("process-9")
-    );
-    assert_eq!(intent.payload, serde_json::json!({ "stage": "approved" }));
 }

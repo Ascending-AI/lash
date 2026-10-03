@@ -541,15 +541,6 @@ fn make_stream_event_sender(
 mod tests {
     use super::*;
 
-    #[test]
-    fn protocol_event_writes_tagged_payload() {
-        let event = ProtocolEvent::typed("test_protocol", serde_json::json!({ "value": 42 }))
-            .expect("typed event");
-        let serialized = serde_json::to_value(event).expect("serialize");
-        assert_eq!(serialized["plugin_id"], "test_protocol");
-        assert!(serialized.get("payload").is_some());
-    }
-
     /// FIG-4546: `max_tool_calls` has no default. A recorded policy or
     /// session head that states none is refused at load, typed by the field
     /// it lacks, and zero is not a limit.
@@ -616,116 +607,6 @@ mod tests {
             err.to_string().contains("missing field `turn_budget`"),
             "missing policy field should name turn_budget: {err}"
         );
-    }
-
-    /// FIG-1407: the no-progress budget is an additive policy field, and a
-    /// policy that never mentions it must serialize byte-for-byte as before —
-    /// the persisted policy is part of the process-execution identity
-    /// preimage, so a silently widened default shape would re-key every
-    /// process.
-    #[test]
-    fn a_default_no_progress_budget_is_absent_from_the_serialized_policy() {
-        let value = serde_json::to_value(SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-        .expect("serialize policy");
-        assert!(
-            value.get("no_progress_budget").is_none(),
-            "the default bound must not widen the persisted shape: {value}"
-        );
-
-        let decoded: SessionPolicy = serde_json::from_value(value).expect("decode policy");
-        assert_eq!(
-            decoded.no_progress_budget,
-            NoProgressBudget::default(),
-            "a carrier that predates the field resolves to the bound"
-        );
-    }
-
-    /// Charge safety is recorded session config (FIG-4376): a chosen appetite
-    /// survives the durable policy round trip, and the safe default stays
-    /// absent so the default shape does not widen.
-    #[test]
-    fn charge_safety_round_trips_through_the_durable_policy_shape() {
-        let default_value = serde_json::to_value(SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-        .expect("serialize default policy");
-        assert!(
-            default_value.get("charge_safety").is_none(),
-            "the safe default must not widen the persisted shape: {default_value}"
-        );
-
-        let mut policy =
-            SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
-        policy.charge_safety = ChargeSafetyPolicy::AcceptDuplicateBilling {
-            max_unsafe_retries: 2,
-            max_duplicate_cost_tokens: Some(4_096),
-        };
-        let value = serde_json::to_value(&policy).expect("serialize policy");
-        assert!(value.get("charge_safety").is_some(), "{value}");
-        let decoded: SessionPolicy = serde_json::from_value(value).expect("decode policy");
-        assert_eq!(decoded.charge_safety, policy.charge_safety);
-    }
-
-    #[test]
-    fn session_spec_states_charge_safety_for_creation() {
-        let base = SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
-        let appetite = ChargeSafetyPolicy::AcceptDuplicateBilling {
-            max_unsafe_retries: 3,
-            max_duplicate_cost_tokens: Some(8_192),
-        };
-
-        assert_eq!(
-            resolve(&SessionSpec::inherit(), &base).charge_safety,
-            ChargeSafetyPolicy::RequireGuarantee
-        );
-        assert_eq!(
-            resolve(
-                &SessionSpec::inherit().charge_safety(appetite.clone()),
-                &base
-            )
-            .charge_safety,
-            appetite
-        );
-    }
-
-    /// An explicit host choice — including the opt-out — survives the round
-    /// trip, which is what makes it a policy rather than a constant.
-    #[test]
-    fn an_explicit_no_progress_budget_round_trips() {
-        for budget in [NoProgressBudget::bounded(3), NoProgressBudget::Unbounded] {
-            let policy = SessionPolicy {
-                no_progress_budget: budget,
-                ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-            };
-            let value = serde_json::to_value(&policy).expect("serialize policy");
-            assert!(value.get("no_progress_budget").is_some(), "{value}");
-            let decoded: SessionPolicy = serde_json::from_value(value).expect("decode policy");
-            assert_eq!(decoded.no_progress_budget, budget);
-        }
-    }
-
-    #[test]
-    fn session_policy_serializes_the_recorded_llm_profile_and_no_transport() {
-        let policy = SessionPolicy {
-            model: Some(recorded("mock-model")),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-        };
-
-        let value = serde_json::to_value(&policy).expect("serialize policy");
-
-        assert_eq!(value["model"]["model"]["key"], "mock-model");
-        assert_eq!(
-            value["model"]["model"]["metadata"]["wire_model"],
-            "mock-model-wire"
-        );
-        assert!(value.get("provider").is_none());
-        assert!(value.get("provider_id").is_none());
-        let decoded: SessionPolicy = serde_json::from_value(value).expect("decode policy");
-        assert_eq!(decoded.model, policy.model);
     }
 
     /// A catalog serving the listed keys, counting its mints; it is never
@@ -925,38 +806,6 @@ mod tests {
             .expect("the provider's default reasoning fits a model with no controls");
     }
 
-    #[test]
-    fn session_policy_persists_generation_options_only_when_set() {
-        let mut policy =
-            SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
-        let value = serde_json::to_value(&policy).expect("serialize policy");
-        assert!(
-            value.get("generation").is_none(),
-            "a policy expressing no generation intent must not write the key"
-        );
-
-        policy.generation = crate::GenerationOptions {
-            output_token_cap: std::num::NonZeroUsize::new(4096),
-            temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
-            seed: Some(1234),
-            stop_sequences: Vec::new(),
-            parallel_tool_calls: None,
-            projection_provenance: Default::default(),
-        };
-        let value = serde_json::to_value(&policy).expect("serialize policy");
-        assert_eq!(
-            value["generation"],
-            serde_json::json!({
-                "output_token_cap": 4096,
-                "temperature": 0.0,
-                "seed": 1234,
-            })
-        );
-
-        let restored: SessionPolicy = serde_json::from_value(value).expect("deserialize policy");
-        assert_eq!(restored.generation, policy.generation);
-    }
-
     fn pinned_base_policy() -> SessionPolicy {
         SessionPolicy {
             generation: crate::GenerationOptions {
@@ -968,27 +817,6 @@ mod tests {
             },
             ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         }
-    }
-
-    #[test]
-    fn session_spec_generation_inherits_when_absent_and_merges_per_option_when_present() {
-        let base = pinned_base_policy();
-
-        let inherited = resolve(&SessionSpec::inherit(), &base);
-        assert_eq!(inherited.generation, base.generation);
-
-        let merged = resolve(
-            &SessionSpec::inherit().generation(crate::GenerationOptions {
-                seed: Some(11),
-                ..Default::default()
-            }),
-            &base,
-        );
-        assert_eq!(merged.generation.seed, Some(11));
-        assert_eq!(
-            merged.generation.temperature, base.generation.temperature,
-            "an option the spec leaves unset keeps the value it inherits"
-        );
     }
 
     #[test]

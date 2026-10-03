@@ -1,6 +1,5 @@
 use super::super::*;
 use super::harness::AgentScenarioRun;
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeSet;
@@ -365,101 +364,12 @@ pub(super) fn assert_labeled_resource_operation(
     }
 }
 
-pub(super) fn assert_labeled_node(
-    contract: &GraphContract,
-    title: &str,
-    expected_status: NodeStatusFact,
-) {
-    let node = contract
-        .nodes()
-        .find(|node| node.label_title.as_deref() == Some(title) && node.status == expected_status)
-        .unwrap_or_else(|| {
-            panic!("missing labeled node `{title}` with status {expected_status:?}: {contract:#?}")
-        });
-    assert_eq!(
-        node.status, expected_status,
-        "labeled node `{title}` had wrong status: {node:#?}"
-    );
-}
-
 pub(super) fn assert_no_duplicate_label_step(contract: &GraphContract, title: &str) {
     assert!(
         !contract
             .nodes()
             .any(|node| node.kind == "step" && node.label == title),
         "label `{title}` produced a duplicate standalone step: {contract:#?}"
-    );
-}
-
-/// Every completed process graph is a lifted process body.
-///
-/// A process is an uncalled `const`-bound async arrow (FIG-2997/FIG-2999), and
-/// the lifted declaration's name is a digest over the body and its AST path,
-/// so an authored name is not a thing a scenario can pin. What stays
-/// assertable is that each completed process graph came from a lift, and how
-/// many did.
-pub(super) fn assert_completed_lifted_process_graphs(contract: &GraphContract, expected: usize) {
-    let lifted = contract
-        .graphs
-        .iter()
-        .filter(|graph| {
-            graph.entry_kind == "process"
-                && graph.subject_kind == "process"
-                && graph
-                    .entry_name
-                    .starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
-                && graph.status == crate::tracing::TraceLanguageExecutionStatus::Completed
-        })
-        .count();
-    assert_eq!(
-        lifted, expected,
-        "expected {expected} completed lifted process graphs, got {lifted}: {contract:#?}"
-    );
-}
-
-pub(super) fn assert_min_completed_process_graphs(contract: &GraphContract, expected_min: usize) {
-    if expected_min == 0 {
-        return;
-    }
-    let count = contract
-        .graphs
-        .iter()
-        .filter(|graph| {
-            graph.entry_kind == "process"
-                && graph.subject_kind == "process"
-                && graph.status == crate::tracing::TraceLanguageExecutionStatus::Completed
-        })
-        .count();
-    assert!(
-        count >= expected_min,
-        "expected at least {expected_min} completed process graphs, got {count}: {contract:#?}"
-    );
-}
-
-pub(super) fn assert_min_completed_child_session_exec_graphs(
-    run: &AgentScenarioRun,
-    root_session_id: &SessionId,
-    expected_min: usize,
-) {
-    if expected_min == 0 {
-        return;
-    }
-    let count = run
-        .graph_snapshots
-        .iter()
-        .filter(|graph| {
-            graph.scope.session_id.as_ref() != Some(root_session_id)
-                && matches!(
-                    &graph.subject,
-                    crate::tracing::TraceRuntimeSubject::Effect { .. }
-                )
-                && graph.status == crate::tracing::TraceLanguageExecutionStatus::Completed
-        })
-        .count();
-    assert!(
-        count >= expected_min,
-        "expected at least {expected_min} child-session exec graphs, got {count}: {:#?}",
-        GraphContract::from_graphs(&run.graph_snapshots)
     );
 }
 
@@ -492,32 +402,4 @@ pub(super) fn assert_subagent_bridge_exec_graphs(
             GraphContract::from_graphs(&run.graph_snapshots)
         );
     }
-}
-
-pub(super) fn assert_session_turn_child_graph(
-    run: &AgentScenarioRun,
-    child_session_id: &SessionId,
-    process_id: &ProcessId,
-) {
-    let graph = run
-        .graph_snapshots
-        .iter()
-        .find(|graph| {
-            graph.scope.session_id.as_ref() == Some(child_session_id)
-                && graph.scope.turn_id.as_deref() == Some(process_id)
-                && matches!(
-                    &graph.subject,
-                    crate::tracing::TraceRuntimeSubject::Effect { .. }
-                )
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "missing scoped session-turn child exec graph: {:#?}",
-                GraphContract::from_graphs(&run.graph_snapshots)
-            )
-        });
-    assert_eq!(
-        graph.status,
-        crate::tracing::TraceLanguageExecutionStatus::Completed
-    );
 }

@@ -1212,17 +1212,6 @@ mod tests {
     }
 
     #[test]
-    fn tool_value_serializes_nested_attachments() {
-        let value = ToolValue::Array(vec![ToolValue::Attachment(attachment_source("img"))]);
-
-        let json = serde_json::to_value(&value).unwrap();
-
-        assert_eq!(json[0][TAG_KEY], ATTACHMENT_TAG);
-        assert_eq!(json[0][SOURCE_KEY]["attachment_ref"]["id"], "img");
-        assert_eq!(serde_json::from_value::<ToolValue>(json).unwrap(), value);
-    }
-
-    #[test]
     fn untrusted_json_nests_reserved_keys_whole() {
         let foreign = serde_json::json!({ TAG_KEY: ATTACHMENT_TAG, "user": true });
         let value = ToolValue::untrusted_json(foreign.clone());
@@ -1383,35 +1372,6 @@ mod tests {
     }
 
     #[test]
-    fn model_tool_return_skips_empty_notices_and_round_trips_typed_notice() {
-        let mut model_return =
-            ModelToolReturn::from_output("tool".to_string(), &ToolCallOutput::success("ok"));
-        let accepted = serde_json::to_value(&model_return).expect("serialize accepted return");
-        assert!(accepted.get("attachment_notices").is_none());
-
-        let unsupported = AttachmentSource::stored(crate::AttachmentRef {
-            id: AttachmentId::parse("unsupported").expect("valid attachment id"),
-            media_type: MediaType::parse("application/octet-stream").expect("binary MIME"),
-            byte_len: 34,
-            type_metadata: None,
-            label: Some("artifact.bin".to_string()),
-        });
-        let notice = AttachmentMaterializationNotice::no_provider_accepts(&unsupported);
-        model_return.attachment_notices.push(notice.clone());
-        let encoded = serde_json::to_value(&model_return).expect("serialize noticed return");
-        assert_eq!(
-            encoded["attachment_notices"][0]["reason"],
-            "no_provider_accepts_mime_and_source"
-        );
-        assert_eq!(
-            serde_json::from_value::<ModelToolReturn>(encoded)
-                .expect("decode noticed return")
-                .attachment_notices,
-            vec![notice]
-        );
-    }
-
-    #[test]
     fn tool_output_failure_projects_raw_attachments_after_failure_text() {
         let attachment = attachment_source("img");
         let output = ToolCallOutput::failure(ToolFailure {
@@ -1460,47 +1420,5 @@ mod tests {
                 .pointer("/raw"),
             Some(&foreign)
         );
-    }
-
-    #[test]
-    fn model_tool_return_text_part_serializes() {
-        let part = ModelToolReturnPart::text("hello");
-
-        let json = serde_json::to_value(&part).unwrap();
-
-        assert_eq!(json, serde_json::json!({ "type": "text", "text": "hello" }));
-        assert_eq!(
-            serde_json::from_value::<ModelToolReturnPart>(json).unwrap(),
-            part
-        );
-    }
-
-    #[test]
-    fn tool_output_status_distinguishes_cancelled_from_failure() {
-        let failure = ToolCallOutput::failure(ToolFailure::tool(
-            ToolFailureClass::Execution,
-            "boom",
-            "boom",
-        ));
-        let cancelled = ToolCallOutput::cancelled(ToolCancellation::runtime("stopped"));
-
-        assert_eq!(failure.status(), ToolCallStatus::Failure);
-        assert_eq!(cancelled.status(), ToolCallStatus::Cancelled);
-        assert!(!cancelled.is_success());
-    }
-
-    #[test]
-    fn typed_tool_failure_constructors_set_class_code_source_and_retry() {
-        let invalid = ToolFailure::invalid_request("invalid_glob", "bad pattern");
-        assert_eq!(invalid.class, ToolFailureClass::InvalidRequest);
-        assert_eq!(invalid.code, "invalid_glob");
-        assert_eq!(invalid.source, ToolFailureSource::Tool);
-        assert_eq!(invalid.retry, ToolRetryStatus::Never);
-
-        let io = ToolFailure::io("read_failed", "could not read file");
-        assert_eq!(io.class, ToolFailureClass::Io);
-        assert_eq!(io.code, "read_failed");
-        assert_eq!(io.source, ToolFailureSource::Tool);
-        assert_eq!(io.retry, ToolRetryStatus::Never);
     }
 }

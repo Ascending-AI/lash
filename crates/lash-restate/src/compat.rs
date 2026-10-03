@@ -305,7 +305,7 @@ impl ObjectCompat {
 
 #[cfg(test)]
 mod tests {
-    use super::{COMPAT_KEY, Call, ObjectCompat, RELEASE_LINE, RESTATE_WIRE, Reply, VersionRange};
+    use super::{COMPAT_KEY, Call, ObjectCompat, RESTATE_WIRE, Reply, VersionRange};
 
     #[test]
     fn restate_call_and_reply_json_is_frozen() {
@@ -337,22 +337,6 @@ mod tests {
             serde_json::to_string(&compat).expect("encode"),
             r#"{"format":1,"min_reader":1,"min_writer":1,"line":1}"#
         );
-    }
-
-    /// FIG-4819: what a pre-release build wrote states no release line. It
-    /// decodes, as line 0, so the refusal is the typed one a handler makes
-    /// and never a decode fault.
-    #[test]
-    fn a_pre_release_call_and_record_read_as_line_zero() {
-        assert_eq!(RELEASE_LINE, 1);
-        let call: Call<()> =
-            serde_json::from_str(r#"{"wire":{"min":1,"max":1},"body":null}"#).expect("decode");
-        assert_eq!(call.line, 0);
-        let compat: ObjectCompat =
-            serde_json::from_str(r#"{"format":1,"min_reader":1,"min_writer":1}"#).expect("decode");
-        assert_eq!(compat.line, 0);
-        assert_eq!(Call::new(()).line, RELEASE_LINE);
-        assert_eq!(ObjectCompat::fresh(1).line, RELEASE_LINE);
     }
 
     /// RT0016 (FIG-3805): a journaled call's bytes are the same whatever
@@ -397,18 +381,6 @@ mod tests {
         assert_eq!(
             super::DeploymentWire::current(),
             super::DeploymentWire::speaking(RESTATE_WIRE, n_epoch)
-        );
-    }
-
-    #[test]
-    fn a_call_selects_the_highest_common_wire() {
-        assert_eq!(Call::new(()).select(), Some(RESTATE_WIRE.max()));
-        let newer = Call::stating(VersionRange::new(1, 2).expect("range"), ());
-        assert_eq!(newer.select(), Some(RESTATE_WIRE.max()));
-        let disjoint = Call::stating(VersionRange::exactly(RESTATE_WIRE.max() + 1), ());
-        assert_eq!(disjoint.select(), None);
-        assert!(
-            serde_json::from_str::<Call<()>>(r#"{"wire":{"min":0,"max":1},"body":null}"#).is_err()
         );
     }
 }

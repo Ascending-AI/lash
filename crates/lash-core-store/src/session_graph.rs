@@ -1061,13 +1061,6 @@ impl SessionGraph {
         Self::from_validated_nodes(nodes, leaf_node_id)
     }
 
-    /// Strong count of the shared graph-data allocation.
-    #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
-    pub fn data_strong_count(&self) -> usize {
-        Arc::strong_count(&self.inner)
-    }
-
     pub fn validate_resident_integrity(&self) -> Result<(), crate::StoreError> {
         if !self.nodes.is_empty() && self.leaf_node_id.is_none() {
             return Err(crate::StoreError::InvalidGraphLeaf { leaf_node_id: None });

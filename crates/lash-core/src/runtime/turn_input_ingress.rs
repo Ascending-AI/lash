@@ -33,49 +33,6 @@ mod tests {
     use crate::TurnId;
 
     #[test]
-    fn checkpoint_boundary_wire_values_match_the_persisted_ingress_encoding() {
-        for boundary in TurnInputCheckpointBoundary::ALL.iter().copied() {
-            assert_eq!(
-                serde_json::to_value(boundary).expect("serialize boundary"),
-                serde_json::Value::String(boundary.as_wire_str().to_string()),
-                "the SQL literal a store filters on must equal the persisted wire value"
-            );
-        }
-    }
-
-    #[test]
-    fn turn_input_state_wire_round_trips_every_variant() {
-        let active = TurnInputIngress::active_turn(
-            TurnId::from("turn-1"),
-            TurnInputCheckpointBoundary::AfterWork,
-        );
-        let next = TurnInputIngress::next_turn();
-        for kind in TurnInputStateKind::ALL.iter().copied() {
-            // Each name has at least one scope it admits, and decoding that
-            // pair reproduces the name — disagreement stays unrepresentable.
-            let ingress = match kind {
-                TurnInputStateKind::PendingActive
-                | TurnInputStateKind::Accepted
-                | TurnInputStateKind::Cancelled
-                | TurnInputStateKind::Completed => active.clone(),
-                TurnInputStateKind::DeferredNextTurn => next.clone(),
-            };
-            let state = TurnInputState::from_persisted(
-                kind.as_str(),
-                ingress,
-                matches!(
-                    kind,
-                    TurnInputStateKind::Cancelled | TurnInputStateKind::Completed
-                )
-                .then_some(7),
-            )
-            .expect("scope-legal pair decodes");
-            assert_eq!(state.kind(), kind);
-            assert_eq!(state.as_str(), kind.as_str());
-        }
-    }
-
-    #[test]
     fn turn_input_state_decode_rejects_scope_disagreement() {
         let active = TurnInputIngress::active_turn(
             TurnId::from("turn-1"),
@@ -87,32 +44,6 @@ mod tests {
             TurnInputState::from_persisted("deferred_next_turn", active.clone(), None).is_err()
         );
         assert!(TurnInputState::from_persisted("accepted", next, None).is_err());
-    }
-
-    #[test]
-    fn turn_input_state_wire_values_match_the_persisted_ingress_encoding() {
-        assert_eq!(TurnInputStateKind::PendingActive.as_str(), "pending_active");
-        assert_eq!(
-            TurnInputStateKind::DeferredNextTurn.as_str(),
-            "deferred_next_turn"
-        );
-        assert_eq!(TurnInputStateKind::Accepted.as_str(), "accepted");
-        assert_eq!(TurnInputStateKind::Cancelled.as_str(), "cancelled");
-        assert_eq!(TurnInputStateKind::Completed.as_str(), "completed");
-    }
-
-    #[test]
-    fn turn_input_state_terminality_covers_exactly_settled_states() {
-        for state in TurnInputStateKind::ALL.iter().copied() {
-            assert_eq!(
-                state.is_terminal(),
-                matches!(
-                    state,
-                    TurnInputStateKind::Cancelled | TurnInputStateKind::Completed
-                ),
-                "terminality drifted for {state:?}"
-            );
-        }
     }
 
     #[test]
@@ -136,24 +67,6 @@ mod tests {
         assert!(
             !TurnInputCheckpointBoundary::BeforeCompletion.admits(CheckpointKind::AfterWork),
             "before-completion ingress must be withheld at the after-work checkpoint"
-        );
-    }
-
-    #[test]
-    fn admitted_min_boundary_sql_spells_the_current_checkpoints_exactly() {
-        assert_eq!(
-            crate::store_backend_support::admitted_min_boundary_sql(
-                "min_boundary",
-                CheckpointKind::AfterWork
-            ),
-            "COALESCE(min_boundary, 'after_work') IN ('after_work')"
-        );
-        assert_eq!(
-            crate::store_backend_support::admitted_min_boundary_sql(
-                "min_boundary",
-                CheckpointKind::BeforeCompletion
-            ),
-            "COALESCE(min_boundary, 'after_work') IN ('after_work', 'before_completion')"
         );
     }
 

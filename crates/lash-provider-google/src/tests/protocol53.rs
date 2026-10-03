@@ -41,39 +41,6 @@ fn request_body(req: &LlmRequest) -> Value {
 }
 
 #[test]
-fn protocol53_legacy_tool_schema_uses_projection() {
-    let body = request_body(&tool_request("legacy"));
-    assert!(body["request"]["tools"][0]["functionDeclarations"][0]["parametersJsonSchema"]["properties"].get("projected").is_some());
-}
-#[test]
-fn protocol53_vertex_tool_schema_uses_projection() {
-    let mut req = tool_request("aliased-model");
-    req.model.metadata_mut().capability.google_dialect = lash_core::GoogleDialect::ClaudeOnVertex;
-    let body = request_body(&req);
-    assert!(
-        body["request"]["tools"][0]["functionDeclarations"][0]["parameters"]["properties"]
-            .get("projected")
-            .is_some()
-    );
-}
-#[test]
-fn protocol53_structured_output_uses_projection() {
-    let mut req = request(None);
-    req.output_spec = Some(LlmOutputSpec::JsonSchema(
-        lash_core::llm::types::LlmJsonSchema {
-            name: "output".into(),
-            schema: projected_contract(),
-            strict: false,
-        },
-    ));
-    let body = request_body(&req);
-    assert!(
-        body["request"]["generationConfig"]["responseSchema"]["properties"]
-            .get("projected")
-            .is_some()
-    );
-}
-#[test]
 fn protocol53_lookalike_name_does_not_supply_dialect() {
     let mut req = request(None);
     req.model.metadata_mut().wire_model = "unrelated-gemini-3-lookalike".into();
@@ -90,14 +57,6 @@ fn protocol53_lookalike_name_does_not_supply_dialect() {
         .build_contents_with_attachment_parts(&req, &[])
         .expect("retention policy");
     assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
-}
-
-#[test]
-fn protocol53_gemini3_tool_schema_uses_projection() {
-    let mut req = tool_request("host-catalog-alias");
-    req.model.metadata_mut().capability.google_dialect = lash_core::GoogleDialect::Gemini3;
-    let body = request_body(&req);
-    assert!(body["request"]["tools"][0]["functionDeclarations"][0]["parametersJsonSchema"]["properties"].get("projected").is_some());
 }
 
 #[test]

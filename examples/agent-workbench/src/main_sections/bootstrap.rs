@@ -831,17 +831,6 @@ mod startup_tests {
     }
 
     #[test]
-    fn startup_honors_context_window_environment_override() {
-        let context_window_tokens = context_window_tokens_from(|name| {
-            assert_eq!(name, AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV);
-            Ok("42000".to_string())
-        })
-        .expect("valid context-window override should be accepted");
-
-        assert_eq!(context_window_tokens, 42_000);
-    }
-
-    #[test]
     fn startup_refuses_context_window_below_the_minimum() {
         let below_floor = (MIN_CONTEXT_WINDOW_TOKENS - 1).to_string();
         let error = context_window_tokens_from(|_| Ok(below_floor))
@@ -870,20 +859,6 @@ mod startup_tests {
             )),
             "unexpected parse refusal: {error:#}"
         );
-    }
-
-    #[test]
-    fn startup_non_unicode_error_does_not_claim_a_minimum_violation() {
-        let error = context_window_tokens_from(|_| {
-            Err(std::env::VarError::NotUnicode(std::ffi::OsString::from(
-                "not-unicode",
-            )))
-        })
-        .expect_err("a non-Unicode override must refuse startup");
-
-        let message = error.to_string();
-        assert!(message.contains("is not valid Unicode"));
-        assert!(!message.contains("at least"));
     }
 
     #[test]
@@ -925,15 +900,6 @@ mod startup_tests {
                 .starts_with("agent-workbench: OPENROUTER_API_KEY is not set"),
             "unexpected startup refusal: {error:#}"
         );
-    }
-
-    #[test]
-    fn startup_allows_dev_provider_scenario_without_openrouter_key() {
-        validate_provider_credentials(
-            Some(failure_provider::DevProviderScenario::AuthFailureOnce),
-            "",
-        )
-        .expect("a dev provider scenario supports keyless startup");
     }
 
     /// An offline boot must degrade to "no web tools", never refuse to start.

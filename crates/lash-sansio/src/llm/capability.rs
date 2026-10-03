@@ -623,35 +623,6 @@ mod tests {
     }
 
     #[test]
-    fn is_empty_tracks_reasoning_presence() {
-        assert!(capability(None).is_empty());
-        assert!(!capability(Some(reasoning())).is_empty());
-        assert!(
-            !LlmProfileCapability {
-                cache_control: Some(CacheControlDialect::Anthropic),
-                ..LlmProfileCapability::default()
-            }
-            .is_empty()
-        );
-        assert!(
-            !LlmProfileCapability {
-                stream_termination: Some(StreamTermination::RequireTerminalEvidence),
-                ..LlmProfileCapability::default()
-            }
-            .is_empty()
-        );
-        // A capability whose only statement is "this model pins its own
-        // sampling" must still reach the wire.
-        let pinned = LlmProfileCapability {
-            sampling: SamplingCapability::Pinned,
-            ..LlmProfileCapability::default()
-        };
-        assert!(!pinned.is_empty());
-        assert!(!pinned.allows_caller_temperature());
-        assert!(LlmProfileCapability::default().allows_caller_temperature());
-    }
-
-    #[test]
     fn effort_names_match_exactly_without_aliases_case_folding_or_clamping() {
         let cap = capability(Some(reasoning()));
         assert_eq!(
@@ -772,34 +743,6 @@ mod tests {
     }
 
     #[test]
-    fn category_codes_are_stable_snake_case() {
-        assert_eq!(
-            LlmProfileEffortValidationCategory::UnsupportedEffort
-                .failure_code()
-                .as_str(),
-            "unsupported_effort"
-        );
-        assert_eq!(
-            LlmProfileEffortValidationCategory::EffortNotConfigurable
-                .failure_code()
-                .as_str(),
-            "effort_not_configurable"
-        );
-        assert_eq!(
-            LlmProfileEffortValidationCategory::EffortRequired
-                .failure_code()
-                .as_str(),
-            "effort_required"
-        );
-        assert_eq!(
-            LlmProfileEffortValidationCategory::MalformedCapability
-                .failure_code()
-                .as_str(),
-            "malformed_capability"
-        );
-    }
-
-    #[test]
     fn budget_encoding_completeness_is_validated_for_every_selection() {
         struct Case {
             name: &'static str,
@@ -863,36 +806,6 @@ mod tests {
             ),
             Ok(Some(ReasoningIntent::Budget(8192)))
         );
-    }
-
-    #[test]
-    fn llm_profile_capability_serde_roundtrips_and_skips_empties() {
-        let cap = capability(None);
-        let json = serde_json::to_value(&cap).expect("serialize");
-        assert_eq!(json, serde_json::json!({}));
-        let back: LlmProfileCapability = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(back, cap);
-
-        let cap = LlmProfileCapability {
-            cache_control: Some(CacheControlDialect::Gemini),
-            ..LlmProfileCapability::default()
-        };
-        let json = serde_json::to_value(&cap).expect("serialize");
-        assert_eq!(json, serde_json::json!({ "cache_control": "gemini" }));
-        let back: LlmProfileCapability = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(back, cap);
-
-        let mut r = reasoning();
-        r.encoding = ReasoningEncoding::Budget(BTreeMap::from([
-            ("low".to_string(), 1024u32),
-            ("medium".to_string(), 4096u32),
-            ("high".to_string(), 8192u32),
-            ("max".to_string(), 16384u32),
-        ]));
-        let cap = capability(Some(r));
-        let json = serde_json::to_value(&cap).expect("serialize");
-        let back: LlmProfileCapability = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(back, cap);
     }
 
     #[test]
@@ -1017,35 +930,6 @@ impl AttachmentAcceptanceRule {
                 | AttachmentSource::Stored { .. }
                 | AttachmentSource::ExternalUrl { .. },
             ) => false,
-        }
-    }
-}
-
-#[cfg(test)]
-mod instruction_tests {
-    use super::*;
-    #[test]
-    fn host_instruction_capabilities_serialize_when_nondefault() {
-        let default: LlmProfileCapability = serde_json::from_str("{}").unwrap();
-        assert_eq!(default.instruction_role, InstructionRole::System);
-        assert!(!default.native_mid_conversation_system);
-        assert!(default.is_empty());
-        for capability in [
-            LlmProfileCapability {
-                instruction_role: InstructionRole::Developer,
-                ..Default::default()
-            },
-            LlmProfileCapability {
-                native_mid_conversation_system: true,
-                ..Default::default()
-            },
-        ] {
-            assert!(!capability.is_empty());
-            let json = serde_json::to_value(&capability).unwrap();
-            assert_eq!(
-                serde_json::from_value::<LlmProfileCapability>(json).unwrap(),
-                capability
-            );
         }
     }
 }

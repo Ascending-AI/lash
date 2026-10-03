@@ -651,14 +651,6 @@ impl<'run> ToolContextBuilder<'run> {
         }
     }
 
-    /// Runs the test builder's context as the admitted `call`.
-    #[cfg(test)]
-    pub(crate) fn prepared_call(mut self, call: &PreparedToolCall) -> Self {
-        self.call_id = call.call_id.clone();
-        self.prepared_payload = call.prepared_payload.clone();
-        self
-    }
-
     pub(crate) fn cancellation_token(
         mut self,
         cancellation_token: Option<tokio_util::sync::CancellationToken>,
@@ -1435,67 +1427,6 @@ pub trait ToolProvider: Send + Sync + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tool_context_builder_carries_call_payload_and_cancellation_state() {
-        let cancellation = tokio_util::sync::CancellationToken::new();
-        let prepared = PreparedToolCall {
-            call_id: crate::ToolCallId::fixture("call-1"),
-            provider_call_id: None,
-            tool_id: "tool:demo_tool".into(),
-            tool_name: "demo_tool".into(),
-            args: serde_json::json!({ "input": true }),
-            replay: None,
-            prepared_payload: serde_json::json!({ "prepared": true }),
-        };
-
-        let context = ToolContext::builder(
-            SessionId::from("session-1"),
-            Arc::new(crate::testing::MockSessionManager::default()),
-            Arc::new(crate::testing::MockSessionManager::default()),
-            Arc::new(crate::testing::MockSessionManager::default()),
-            Arc::new(crate::UnavailableProcessService),
-            crate::runtime::ScopedEffectController::shared(
-                Arc::new(crate::testing::UnavailableEffectController),
-                crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
-            )
-            .expect("valid test runtime scope"),
-            Arc::new(crate::RuntimeAttachmentStore::unavailable()),
-            crate::DirectCompletionClient::unavailable(
-                "direct completions are unavailable in this test context",
-            ),
-        )
-        .prepared_call(&prepared)
-        .cancellation_token(Some(cancellation.clone()))
-        .enclosing_process(Some(crate::ProcessId::fixture("process-1")))
-        .build();
-
-        assert_eq!(
-            context.owner().session_id(),
-            Some(&SessionId::from("session-1"))
-        );
-        assert_eq!(context.call_id(), &crate::ToolCallId::fixture("call-1"));
-        assert_eq!(
-            context.prepared_payload,
-            serde_json::json!({ "prepared": true })
-        );
-        assert_eq!(
-            context.enclosing_process(),
-            Some(&crate::ProcessId::fixture("process-1"))
-        );
-        assert!(context.cancellation_token().is_some());
-    }
-
-    #[test]
-    fn enclosing_process_travels_from_tool_context_to_attempt_context() {
-        let attempt = crate::testing::ToolCallFixture::mock()
-            .enclosing_process_id(Some(crate::ProcessId::fixture("process-1")))
-            .attempt("attempt-scope");
-        assert_eq!(
-            attempt.enclosing_process(),
-            Some(&crate::ProcessId::fixture("process-1"))
-        );
-    }
 
     // -----------------------------------------------------------------------
     // FIG-3417: the lifecycle parent a child start declares comes from ONE

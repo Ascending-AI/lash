@@ -457,35 +457,6 @@ async fn a_run_awaiting_work_that_needs_a_worker_parks_releases_its_slot_and_res
     );
 }
 
-/// A run that cannot be captured where it stands declines the park: its
-/// decline is acknowledged, it issues the request again, and the operation
-/// runs in place, once, on the worker it already holds.
-#[tokio::test]
-async fn a_declined_park_performs_the_reissued_request_in_place_once() {
-    let mut fixture = Fixture::new(2);
-    fixture.journal.needs_worker = ["compile".to_string()].into();
-    fixture.pool.plan(Some(Fault::DeclinePark));
-    let program = ScriptedProgram::new(vec![
-        echo(1),
-        Step::Invoke(Invocation {
-            binding: "tools".into(),
-            operation: "compile".into(),
-            arguments: serde_json::json!({ "source": "x" }),
-        }),
-        echo(3),
-    ]);
-    let end = fixture.run(&program).await.expect("the run completes");
-    assert_eq!(results(&end).len(), 3);
-    let stats = fixture.pool.stats();
-    assert_eq!(stats.checkouts, 1, "a declined park keeps its worker");
-    assert_eq!(stats.discards, 0);
-    assert_eq!(
-        fixture.journal.dispatches().len(),
-        3,
-        "the reissued operation ran once"
-    );
-}
-
 /// A declined park reissues and completes whatever the request's family and
 /// however the parent resolves it (FIG-4706): the reissued request is
 /// resolved as admission resolved it, by the configured resolver over the

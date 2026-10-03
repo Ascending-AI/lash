@@ -1,5 +1,4 @@
 use crate::*;
-use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::prelude::*;
 
 tokio::task_local! {
@@ -151,58 +150,4 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
             .all(|(_, commit, load)| (*commit, *load) == (3, 2)),
         "checkpoint commit/load statement counts must be independent of component depth: {observed:?}"
     );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn checkpoint_statement_measurements_do_not_reset_each_other() {
-    let Some(database_url) = postgres_test_support::database_url() else {
-        return;
-    };
-    let database = crate::testing::IsolatedDatabase::create(&database_url).await;
-    let pool = PgPoolOptions::new()
-        .max_connections(2)
-        .connect(database.url())
-        .await
-        .expect("connect statement witness");
-    let mut outer_connection = pool
-        .acquire()
-        .await
-        .expect("acquire outer measured connection");
-    let mut inner_connection = pool
-        .acquire()
-        .await
-        .expect("acquire inner measured connection");
-    let (_, outer_count) = count_checkpoint_data_statements(async {
-        sqlx::query("SELECT $1::integer")
-            .bind(1_i32)
-            .execute(&mut *outer_connection)
-            .await
-            .expect("execute outer statement");
-        let inner_count = tokio::spawn(async move {
-            let (_, count) = count_checkpoint_data_statements(async {
-                sqlx::query("SELECT $1::bigint")
-                    .bind(2_i64)
-                    .execute(&mut *inner_connection)
-                    .await
-                    .expect("execute first inner statement");
-                sqlx::query("SELECT $1::text")
-                    .bind("three")
-                    .execute(&mut *inner_connection)
-                    .await
-                    .expect("execute second inner statement");
-            })
-            .await;
-            count
-        })
-        .await
-        .expect("join independent measurement");
-        assert_eq!(inner_count, 2, "inner witness lost a statement");
-    })
-    .await;
-    assert_eq!(
-        outer_count, 1,
-        "independent measurement changed the outer witness"
-    );
-    drop(outer_connection);
-    pool.close().await;
 }

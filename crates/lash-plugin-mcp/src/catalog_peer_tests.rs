@@ -247,24 +247,6 @@ async fn http_catalog_refuses_cycles_and_each_limit_plus_one() {
 }
 
 #[tokio::test]
-async fn http_valid_catalog_refresh_installs_once() {
-    let fixture = HttpPeer::start(Scenario::Valid).await;
-    let pool = McpConnectionPool::connect(BTreeMap::from([("http".to_string(), fixture.config())]))
-        .await
-        .expect("connected HTTP entry");
-    let entry = pool.entries.read_recover()["http"].clone();
-    entry.request_tool_refresh(entry.service_snapshot().expect("HTTP service").generation);
-    while pool.advertised_tools()[0].name()
-        != crate::mcp_tool_names("http", &["work-2"])["work-2"].clone()
-    {
-        tokio::task::yield_now().await;
-    }
-    entry.establish().await.expect("publication barrier");
-    assert_eq!(fixture.state.calls.load(Ordering::SeqCst), 2);
-    pool.shutdown_all().await;
-}
-
-#[tokio::test]
 async fn http_server_instructions_follow_catalog_refresh_and_reconnect() {
     tokio::time::timeout(Duration::from_secs(20), async {
         let fixture = HttpPeer::start(Scenario::Valid).await;

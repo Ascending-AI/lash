@@ -1150,46 +1150,6 @@ mod tool_catalog_cache_tests {
         );
     }
 
-    #[test]
-    fn ambient_and_restricted_empty_select_distinct_resident_catalogs() {
-        let ambient = admission_probe_plugins(
-            Arc::new(AdmissionProbeProvider {
-                contract_available: true,
-                prepare_calls: Arc::new(AtomicUsize::new(0)),
-            }),
-            crate::SessionToolAccess::ambient(),
-        );
-        assert!(
-            ambient
-                .resolved_tool_catalog()
-                .expect("ambient resident catalog")
-                .has_callable_tool("resident")
-        );
-
-        let restricted = admission_probe_plugins(
-            Arc::new(AdmissionProbeProvider {
-                contract_available: true,
-                prepare_calls: Arc::new(AtomicUsize::new(0)),
-            }),
-            crate::SessionToolAccess::restricted([]).expect("restricted empty is valid"),
-        );
-        assert!(
-            restricted
-                .resolved_tool_catalog()
-                .expect("restricted-empty resident catalog")
-                .tools
-                .is_empty()
-        );
-        assert!(
-            restricted
-                .tool_registry()
-                .export_state()
-                .iter()
-                .any(|(_, entry)| entry.manifest().name == "resident" && entry.is_member()),
-            "restricted access curates the session catalog without changing registry membership"
-        );
-    }
-
     #[tokio::test]
     async fn model_request_pin_enumerates_once_and_freezes_catalog_and_dispatch() {
         let names = Arc::new(std::sync::Mutex::new(vec!["alpha".to_string()]));

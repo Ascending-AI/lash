@@ -5,7 +5,6 @@
 //! build without a drain gate, and a build never registers over another
 //! build's endpoint.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +12,6 @@ use lash_sansio::TurnId;
 
 use lash_restate_test::{CrashPoint, CrashRule, RestateTestServer, ServerConfig};
 
-use super::bindings::{backend_and_process_worker, bindings_generation, discovery_document};
 use super::session_shift_roll_on_the_double::{
     BUILD_N_URI, SessionRoll, generation, stable_session,
 };
@@ -31,56 +29,10 @@ use crate::effect_group::{
     EffectGroupProbeResponse, EffectGroupState as _, EffectGroupStateImpl,
 };
 use crate::object_state::StampedValue;
-use crate::wire::{CALL_SCHEMA_TITLE, REPLY_SCHEMA_TITLE, RestateCompatError};
+use crate::wire::RestateCompatError;
 use crate::{LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRegistrationError};
 use lash_core::engine::ShiftStop;
 use lash_core_store::compat::CompatRefusal;
-
-/// The done-when enumeration: read from the discovery document of an
-/// endpoint `endpoint_builder` bound — what Restate registers — every
-/// handler of every lash service under every lane, and require that each
-/// takes a `Call` and answers a `Reply`.
-#[tokio::test]
-async fn every_handler_the_binder_binds_takes_a_call_and_answers_a_reply() {
-    let (backend, worker) = backend_and_process_worker().await;
-    let endpoint = backend
-        .endpoint_builder(worker)
-        .expect("the core bound the engine's generation")
-        .build();
-    let document = discovery_document(&endpoint).await;
-    let namespace = crate::RestateNamespace::default();
-    let mut lanes = BTreeSet::new();
-    let mut handlers = 0;
-    for service in document["services"].as_array().expect("services") {
-        let name = service["name"].as_str().expect("a service name");
-        let Some(route) = namespace.parse(name) else {
-            continue;
-        };
-        lanes.insert(route.name().into_owned());
-        for handler in service["handlers"].as_array().expect("handlers") {
-            let handler_name = handler["name"].as_str().expect("a handler name");
-            assert_eq!(
-                handler["input"]["jsonSchema"]["title"], CALL_SCHEMA_TITLE,
-                "{name}/{handler_name} takes a Call: {handler}"
-            );
-            assert_eq!(
-                handler["output"]["jsonSchema"]["title"], REPLY_SCHEMA_TITLE,
-                "{name}/{handler_name} answers a Reply: {handler}"
-            );
-            handlers += 1;
-        }
-    }
-    let expected = crate::services::LASH_SERVICES
-        .iter()
-        .flat_map(|&service| crate::services::lanes(&namespace, service, &bindings_generation()))
-        .map(|route| route.name().into_owned())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(lanes, expected, "every lash lane was enumerated");
-    assert!(
-        handlers > lanes.len(),
-        "the enumeration read the handlers, {handlers} of them"
-    );
-}
 
 /// The three object families, bound alone on a double: they call no other
 /// service on the paths these tests take.

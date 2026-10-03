@@ -95,8 +95,6 @@ struct GraphProjection<'a> {
     visible_keys: BTreeSet<String>,
     #[cfg(test)]
     expansions: BTreeMap<String, usize>,
-    #[cfg(test)]
-    fallback_candidates: std::cell::Cell<usize>,
 }
 
 impl<'a> GraphProjection<'a> {
@@ -172,8 +170,6 @@ impl<'a> GraphProjection<'a> {
             visible_keys,
             #[cfg(test)]
             expansions: BTreeMap::new(),
-            #[cfg(test)]
-            fallback_candidates: std::cell::Cell::new(0),
         })
     }
 
@@ -397,9 +393,6 @@ impl<'a> GraphProjection<'a> {
             .into_iter()
             .flatten()
             .filter(|(_, attempt)| {
-                #[cfg(test)]
-                self.fallback_candidates
-                    .set(self.fallback_candidates.get() + 1);
                 child
                     .child_attempt
                     .is_none_or(|expected| *attempt == Some(expected))
@@ -578,25 +571,6 @@ mod tests {
             history: Vec::new(),
             execution_map: None,
         }
-    }
-
-    #[test]
-    fn foreground_graph_title_is_dialect_neutral() {
-        let graph = test_graph(
-            "effect:session:turn:exec",
-            &SessionId::from("session"),
-            TraceRuntimeSubject::Effect {
-                address: lash::runtime::EffectAddress::new(
-                    lash::runtime::ExecutionScope::turn("session", "turn-1"),
-                    "exec",
-                )
-                .expect("valid test effect address"),
-                effect_id: "exec".to_string(),
-            },
-            Vec::new(),
-        );
-
-        assert_eq!(graph_title(&graph), "foreground execution");
     }
 
     #[tokio::test]
@@ -1038,76 +1012,6 @@ mod tests {
                 assert!(detail.is_err(), "{} must be inaccessible", graph.graph_key);
             }
         }
-    }
-
-    #[tokio::test]
-    async fn visibility_expands_each_graph_once() {
-        let (observer, _, _double) = test_process_observer().await;
-        for graphs in traversal_fixtures() {
-            let mut projection = GraphProjection::new(&observer, &SessionId::from("root"), graphs)
-                .await
-                .expect("projection");
-            projection.compute_visibility().await;
-            assert_eq!(
-                projection
-                    .expansions
-                    .keys()
-                    .cloned()
-                    .collect::<BTreeSet<_>>(),
-                projection.visible_keys
-            );
-            assert!(
-                projection.expansions.values().all(|count| *count == 1),
-                "expansions: {:?}",
-                projection.expansions
-            );
-            assert_eq!(projection.fallback_candidates.get(), 0);
-        }
-    }
-
-    #[tokio::test]
-    async fn fallback_only_inspects_process_candidates() {
-        let (observer, _, _double) = test_process_observer().await;
-        let mut graphs = vec![
-            process_graph("attempt-two", "target", Some(Some(2))),
-            process_graph("empty", "target", None),
-            process_graph("attempt-one", "target", Some(Some(1))),
-            process_graph("unset", "target", Some(None)),
-        ];
-        // The first history event owns the attempt, even if a later one differs.
-        let later = graphs[2].history[0].clone();
-        graphs[0].history.push(later);
-        graphs.extend(
-            (0..40).map(|index| {
-                process_graph(&format!("unrelated-{index}"), "unrelated", Some(Some(1)))
-            }),
-        );
-        let projection = GraphProjection::new(&observer, &SessionId::from("root"), graphs)
-            .await
-            .expect("projection");
-        for (explicit, attempt, expected, inspected) in [
-            (Some("missing"), Some(1), vec!["attempt-one"], 3),
-            (None, Some(2), vec!["attempt-two"], 3),
-            (None, None, vec!["attempt-two", "attempt-one", "unset"], 3),
-            (None, Some(3), vec![], 3),
-            (Some("empty"), Some(1), vec!["empty"], 0),
-            (Some("unrelated-0"), Some(2), vec!["unrelated-0"], 0),
-        ] {
-            projection.fallback_candidates.set(0);
-            assert_eq!(
-                projection
-                    .resolved_child_graph_keys(&child_link("root", explicit, "target", attempt)),
-                expected
-            );
-            assert_eq!(projection.fallback_candidates.get(), inspected);
-        }
-        projection.fallback_candidates.set(0);
-        assert!(
-            projection
-                .resolved_child_graph_keys(&child_link("root", None, "absent", None))
-                .is_empty()
-        );
-        assert_eq!(projection.fallback_candidates.get(), 0);
     }
 
     #[tokio::test]

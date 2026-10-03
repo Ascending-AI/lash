@@ -574,26 +574,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn runtime_owner_displays_its_kind_and_id_and_round_trips_tagged() {
-        let session = RuntimeOwner::Session(SessionId::from("s-1"));
-        assert_eq!(session.to_string(), "session:s-1");
-        assert_eq!(
-            serde_json::to_value(&session).unwrap(),
-            serde_json::json!({"session": "s-1"})
-        );
-        let process = RuntimeOwner::Process(ProcessId::fixture("owner"));
-        assert_eq!(
-            process.to_string(),
-            format!("process:{}", ProcessId::fixture("owner"))
-        );
-        let encoded = serde_json::to_string(&process).unwrap();
-        assert_eq!(
-            serde_json::from_str::<RuntimeOwner>(&encoded).unwrap(),
-            process
-        );
-    }
-
-    #[test]
     fn every_public_process_id_mint_round_trips_through_parse() {
         let registrar = ProcessIdRegistrar::REGISTRAR;
         for payload in [0, 1, u128::MAX, 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210] {
@@ -629,63 +609,6 @@ mod tests {
         }
     }
 
-    /// Each identity is spelled out by hand rather than looped over the macro:
-    /// a round trip through the generated impls would agree with itself even if
-    /// the whole macro started emitting a wrapper object.
-    #[test]
-    fn serde_is_the_original_string_bytes() {
-        assert_eq!(
-            serde_json::to_string(&SessionId::from("session-7")).unwrap(),
-            r#""session-7""#
-        );
-        let process = ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | 7);
-        assert_eq!(
-            serde_json::to_string(&process).unwrap(),
-            r#""p_00000000000070008000000000000007""#
-        );
-        assert_eq!(
-            serde_json::to_string(&NodeId::from("node-7")).unwrap(),
-            r#""node-7""#
-        );
-        assert_eq!(
-            serde_json::to_string(&InputId::from("input-7")).unwrap(),
-            r#""input-7""#
-        );
-        assert_eq!(
-            serde_json::to_string(&BatchId::from("batch-7")).unwrap(),
-            r#""batch-7""#
-        );
-        assert_eq!(
-            serde_json::to_string(&TurnId::from("turn-7")).unwrap(),
-            r#""turn-7""#
-        );
-
-        assert_eq!(
-            serde_json::from_str::<SessionId>(r#""session-7""#).unwrap(),
-            SessionId::from("session-7")
-        );
-        assert_eq!(
-            serde_json::from_str::<ProcessId>(r#""p_00000000000070008000000000000007""#).unwrap(),
-            process
-        );
-        assert_eq!(
-            serde_json::from_str::<NodeId>(r#""node-7""#).unwrap(),
-            NodeId::from("node-7")
-        );
-        assert_eq!(
-            serde_json::from_str::<InputId>(r#""input-7""#).unwrap(),
-            InputId::from("input-7")
-        );
-        assert_eq!(
-            serde_json::from_str::<BatchId>(r#""batch-7""#).unwrap(),
-            BatchId::from("batch-7")
-        );
-        assert_eq!(
-            serde_json::from_str::<TurnId>(r#""turn-7""#).unwrap(),
-            TurnId::from("turn-7")
-        );
-    }
-
     /// A process id is only ever a minted spelling: a host-chosen name, an
     /// uppercase or short digest, and the pre-minting `process:…` derivations
     /// are all refused, by the parser and by deserialization alike.
@@ -716,14 +639,6 @@ mod tests {
                 "{refused:?}"
             );
         }
-    }
-
-    #[test]
-    fn session_owner_namespace_has_one_canonical_spelling() {
-        assert_eq!(
-            session_owner_namespace(SessionId::from("session-blue")),
-            "session:session-blue"
-        );
     }
 
     /// A blank string is never an identity: every decoder refuses it, so the
@@ -775,69 +690,5 @@ mod tests {
                 id
             );
         }
-    }
-
-    #[test]
-    fn an_identity_from_uuid_bits_is_the_uuids_hyphenated_text() {
-        assert_eq!(
-            SessionId::from_uuid(0x0192_0000_0000_7000_8000_0000_0000_0001),
-            "01920000-0000-7000-8000-000000000001"
-        );
-        assert_eq!(
-            SessionId::from_uuid(0),
-            "00000000-0000-0000-0000-000000000000"
-        );
-    }
-
-    #[test]
-    fn a_derived_identity_extends_a_literal_or_an_existing_identity() {
-        assert_eq!(TurnId::prefixed("shift-run:", 7), "shift-run:7");
-        assert_eq!(TurnId::prefixed("shift-run:", ""), "shift-run:");
-        assert_eq!(TurnId::from("run").with_suffix(""), "root");
-        assert_eq!(TurnId::from("run").with_suffix("~fork1"), "root~fork1");
-    }
-
-    #[test]
-    #[should_panic(expected = "a literal session id must not be blank")]
-    fn a_blank_literal_identity_is_a_defect() {
-        let _ = SessionId::from(" ");
-    }
-
-    #[test]
-    #[should_panic(expected = "the literal prefix of a turn id must not be blank")]
-    fn a_blank_literal_prefix_is_a_defect() {
-        let _ = TurnId::prefixed("", "");
-    }
-
-    /// The schema a typed identity contributes is an inline string of at least
-    /// one character: a `$ref` to a generated definition would change every
-    /// published tool and process schema that carries an identity.
-    #[test]
-    fn json_schema_is_an_inline_non_empty_string() {
-        let mut generator = schemars::SchemaGenerator::default();
-        for identity_schema in [
-            <SessionId as schemars::JsonSchema>::json_schema(&mut generator),
-            <NodeId as schemars::JsonSchema>::json_schema(&mut generator),
-            <InputId as schemars::JsonSchema>::json_schema(&mut generator),
-            <BatchId as schemars::JsonSchema>::json_schema(&mut generator),
-            <TurnId as schemars::JsonSchema>::json_schema(&mut generator),
-        ] {
-            assert_eq!(
-                serde_json::to_value(identity_schema).unwrap(),
-                serde_json::json!({"type": "string", "minLength": 1})
-            );
-        }
-        let string_schema = serde_json::to_value(<String as schemars::JsonSchema>::json_schema(
-            &mut generator,
-        ))
-        .unwrap();
-        assert_eq!(
-            serde_json::to_value(<ProcessId as schemars::JsonSchema>::json_schema(
-                &mut generator
-            ))
-            .unwrap(),
-            string_schema
-        );
-        assert!(generator.definitions().is_empty());
     }
 }

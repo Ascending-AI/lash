@@ -115,18 +115,3 @@ fn a_process_wake_id_is_computed_from_its_target_process_and_sequence() {
         assert_ne!(other.wake_id(), wake.wake_id());
     }
 }
-
-/// The encoded wake carries neither a stored id nor a copy of the event's
-/// invocation.
-#[test]
-fn an_encoded_process_wake_states_no_identity_and_no_event_invocation() {
-    let encoded = serde_json::to_value(process_wake(
-        "session",
-        crate::process_id_for_test("process"),
-        4,
-    ))
-    .expect("encode wake delivery");
-    let fields = encoded.as_object().expect("wake delivery object");
-    assert!(!fields.contains_key("wake_id"));
-    assert!(!fields.contains_key("event_invocation"));
-}

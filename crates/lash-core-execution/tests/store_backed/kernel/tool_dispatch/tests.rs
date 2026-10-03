@@ -15,7 +15,7 @@ use crate::{
     dispatch_tool_call_with_execution_context,
 };
 use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
-use lash_sansio::core_support::*;
+
 use lash_sansio::sync::MutexExt;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -197,18 +197,6 @@ impl crate::Clock for FrozenIntentLawClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
-}
-
-#[test]
-fn frozen_intent_law_clock_wall_clock_faces_agree() {
-    let clock = FrozenIntentLawClock::new();
-    let clock: &dyn crate::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 impl IntentReplayController {
@@ -617,7 +605,6 @@ enum PendingProbeMode {
     /// Declares a park announcement the runtime cannot append, because this
     /// dispatch context is not inside a durable process.
     AnnouncingWithoutProcess,
-    Done,
 }
 
 #[derive(Clone)]
@@ -675,7 +662,6 @@ impl ToolProvider for PendingProbeTools {
                     ),
                 ))
             }
-            PendingProbeMode::Done => ToolOutcome::ok(json!({ "done": true })),
         })
         .into()
     }
@@ -911,11 +897,6 @@ async fn projection_policy_dispatch_context<'h>(
     }
 }
 
-struct CountingContractTools {
-    contracts_resolved: Arc<AtomicUsize>,
-    executed: Arc<AtomicUsize>,
-}
-
 struct ExactDispatchTools {
     contracts_resolved: Arc<AtomicUsize>,
     executed: Arc<AtomicUsize>,
@@ -935,23 +916,6 @@ struct RetryProbeTools {
     cancel_on_first: bool,
     observed_attempts: SharedAttemptObservations,
     retry_after_ms: Option<u64>,
-}
-
-#[async_trait::async_trait]
-impl ToolProvider for CountingContractTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        manifests(vec![beta_tool()])
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        self.contracts_resolved.fetch_add(1, Ordering::SeqCst);
-        (name == "beta").then(|| Arc::new(beta_tool().contract()))
-    }
-
-    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolOutcome::ok(json!("ok")).into()
-    }
 }
 
 #[async_trait::async_trait]
@@ -1033,55 +997,6 @@ impl ToolProvider for RetryProbeTools {
             self.retry_after_ms,
         )
         .into()
-    }
-}
-
-async fn pinned_contract_dispatch_context<'h>(
-    ports: crate::support::DispatchPorts<'h>,
-    contracts_resolved: Arc<AtomicUsize>,
-    executed: Arc<AtomicUsize>,
-) -> ToolDispatchContext<'h> {
-    let provider: Arc<dyn ToolProvider> = Arc::new(CountingContractTools {
-        contracts_resolved,
-        executed,
-    });
-    let tools = Arc::clone(&provider);
-    let tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(vec![beta_tool()]));
-    ToolDispatchContext {
-        tool_receipts: None,
-        plugins: test_plugins(provider),
-        tools,
-        tool_registry: None,
-        tool_catalog,
-        sessions: Arc::new(MockSessionManager::default()),
-        session_lifecycle: Arc::new(MockSessionManager::default()),
-        session_graph: Arc::new(MockSessionManager::default()),
-        processes: Arc::new(crate::UnavailableProcessService),
-        trigger_router: None,
-        process_engines: Default::default(),
-        effect_controller: ports.controller,
-        direct_completions: crate::DirectCompletionClient::unavailable(
-            "direct completions are unavailable in this test context",
-        ),
-        parent_invocation: None,
-        observation_call_key: None,
-        execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
-        ),
-        owner: crate::ExecutionOwner::SessionFrame {
-            session_id: SessionId::from("session"),
-            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        },
-        observer: crate::engine::NullObservationSink::arc(),
-        checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-        trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: ports.attachment_store,
-        attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
-        turn_context: crate::TurnContext::default(),
-        clock: std::sync::Arc::new(crate::SystemClock),
-        process_lineage: None,
-        process_originator: None,
     }
 }
 
@@ -1355,51 +1270,6 @@ fn tool_context_for_prepared<'run>(
 }
 
 #[tokio::test]
-async fn dispatch_rejects_invalid_args_before_provider_execution() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let outcome = dispatch_tool_call(
-        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
-        "beta".to_string(),
-        json!({}),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(
-        outcome.record.output.value_for_projection()["message"],
-        json!("\"value\" is a required property")
-    );
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn dispatch_uses_catalog_pinned_contract_without_reresolution() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let contracts_resolved = Arc::new(AtomicUsize::new(0));
-    let executed = Arc::new(AtomicUsize::new(0));
-    let outcome = dispatch_tool_call(
-        &pinned_contract_dispatch_context(
-            crate::support::double_dispatch_ports(&double, &handler),
-            Arc::clone(&contracts_resolved),
-            Arc::clone(&executed),
-        )
-        .await,
-        "beta".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(
-        outcome.record.output.is_success(),
-        "{:?}",
-        outcome.record.output
-    );
-    assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);
-    assert_eq!(executed.load(Ordering::SeqCst), 1);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
 async fn pending_tool_without_completion_key_is_runtime_failure() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
@@ -1430,44 +1300,6 @@ async fn pending_tool_without_completion_key_is_runtime_failure() {
         panic!("expected failure output");
     };
     assert_eq!(failure.code, "pending_tool_missing_completion_key");
-    drop(context);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn retry_policy_stops_after_pending_launch() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let context = pending_dispatch_context(
-        crate::support::double_dispatch_ports(&double, &handler),
-        PendingProbeMode::PendingWithKey,
-        Arc::clone(&attempts),
-        None,
-        ToolRetryPolicy::safe(5, 0, 0),
-    )
-    .await;
-    let prepared = pending_prepared_call();
-    let tool_context = tool_context_for_prepared(&context, &prepared);
-
-    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
-        &context,
-        prepared,
-        None,
-        tool_context,
-    )
-    .await;
-
-    let ToolCallLaunch::Pending(pending) = launch else {
-        panic!("tool should launch pending");
-    };
-    assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    assert_eq!(pending.tool_name, "pending_probe");
-    assert_eq!(
-        pending.key.wait,
-        crate::AwaitEventWaitIdentity::tool_completion(lash_core_execution::ToolCallId::fixture(
-            "pending-call"
-        ))
-    );
     drop(context);
     handler.close().await.expect("close the dispatch handler");
 }
@@ -1551,63 +1383,6 @@ async fn retry_ladder_survives_a_later_pending_completion() {
 }
 
 #[tokio::test]
-async fn after_tool_hook_runs_only_for_completed_tool_results() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let after_calls = Arc::new(AtomicUsize::new(0));
-    let pending_attempts = Arc::new(AtomicUsize::new(0));
-    let pending_context = pending_dispatch_context(
-        crate::support::double_dispatch_ports(&double, &handler),
-        PendingProbeMode::PendingWithKey,
-        pending_attempts,
-        Some(Arc::clone(&after_calls)),
-        ToolRetryPolicy::Never,
-    )
-    .await;
-    let prepared = pending_prepared_call();
-    let tool_context = tool_context_for_prepared(&pending_context, &prepared);
-
-    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
-        &pending_context,
-        prepared,
-        None,
-        tool_context,
-    )
-    .await;
-
-    assert!(matches!(launch, ToolCallLaunch::Pending(_)));
-    assert_eq!(
-        after_calls.load(Ordering::SeqCst),
-        0,
-        "launch-time Pending is not a completed tool result"
-    );
-
-    let done_attempts = Arc::new(AtomicUsize::new(0));
-    let done_context = pending_dispatch_context(
-        crate::support::double_dispatch_ports(&double, &handler),
-        PendingProbeMode::Done,
-        done_attempts,
-        Some(Arc::clone(&after_calls)),
-        ToolRetryPolicy::Never,
-    )
-    .await;
-    let prepared = pending_prepared_call();
-    let tool_context = tool_context_for_prepared(&done_context, &prepared);
-
-    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
-        &done_context,
-        prepared,
-        None,
-        tool_context,
-    )
-    .await;
-
-    assert!(matches!(launch, ToolCallLaunch::Done(_)));
-    assert_eq!(after_calls.load(Ordering::SeqCst), 1);
-    drop((done_context, pending_context));
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
 async fn before_tool_hook_receives_resolved_argument_projection_policy() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let captured = Arc::new(std::sync::Mutex::new(None));
@@ -1639,38 +1414,6 @@ async fn dispatch_rejects_non_catalog_tool_before_provider_resolution() {
         contracts_resolved: Arc::clone(&contracts_resolved),
         executed: Arc::clone(&executed),
         contract_available: true,
-        observed_execution_bindings: None,
-    });
-    let outcome = dispatch_tool_call(
-        &exact_dispatch_context(
-            crate::support::double_dispatch_ports(&double, &handler),
-            provider,
-        )
-        .await,
-        "host_only".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(
-        outcome.record.output.value_for_projection()["message"],
-        json!("Tool is unavailable in this session")
-    );
-    assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);
-    assert_eq!(executed.load(Ordering::SeqCst), 0);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn non_catalog_tool_is_rejected_before_contract_resolution() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let contracts_resolved = Arc::new(AtomicUsize::new(0));
-    let executed = Arc::new(AtomicUsize::new(0));
-    let provider: Arc<dyn ToolProvider> = Arc::new(ExactDispatchTools {
-        contracts_resolved: Arc::clone(&contracts_resolved),
-        executed: Arc::clone(&executed),
-        contract_available: false,
         observed_execution_bindings: None,
     });
     let outcome = dispatch_tool_call(

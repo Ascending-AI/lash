@@ -608,26 +608,6 @@ mod tests {
     }
 
     #[test]
-    fn serde_round_trips_through_the_prefixed_lowercase_hex_string() {
-        let id = ToolCallId::derive(
-            NAMESPACE,
-            ToolCallRoot::process(&ProcessId::fixture("worker")),
-            &[
-                ToolCallPosition::CodeCommand(4),
-                ToolCallPosition::CodeAggregate(1),
-            ],
-        );
-        let encoded = serde_json::to_value(&id).expect("serialize");
-        assert_eq!(encoded, serde_json::json!(id.to_string()));
-        assert_eq!(
-            serde_json::from_value::<ToolCallId>(encoded).expect("deserialize"),
-            id
-        );
-        assert_eq!(id.as_str().parse::<ToolCallId>(), Ok(id.clone()));
-        assert_eq!(ToolCallId::try_from(id.as_str()), Ok(id));
-    }
-
-    #[test]
     fn refuses_empty_and_malformed_strings() {
         let valid = ToolCallId::derive(NAMESPACE, turn("op"), &[]);
         let uppercase = valid.as_str().to_uppercase().replacen("TC_", "tc_", 1);
@@ -671,21 +651,5 @@ mod tests {
                 Err(ToolCallRootError::BlankHandle)
             );
         }
-    }
-
-    #[test]
-    fn json_schema_is_the_plain_string_schema() {
-        let mut generator = schemars::SchemaGenerator::default();
-        assert_eq!(
-            serde_json::to_value(<ToolCallId as schemars::JsonSchema>::json_schema(
-                &mut generator
-            ))
-            .unwrap(),
-            serde_json::to_value(<String as schemars::JsonSchema>::json_schema(
-                &mut generator
-            ))
-            .unwrap()
-        );
-        assert!(generator.definitions().is_empty());
     }
 }

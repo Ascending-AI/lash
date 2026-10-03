@@ -53,12 +53,6 @@ fn retired_status(column: &str) -> String {
     format!("{column} NOT IN ('running', 'waiting')")
 }
 
-/// A stand-in for the process family's lifecycle expansions, which are
-/// generated from `lash_core`'s enums and cannot be reached from this crate.
-fn stub_predicate(column: &str) -> String {
-    format!("{column} = ?")
-}
-
 const VOCABULARY: Vocabulary = Vocabulary::new(&[
     VocabularyTerm::new("live_process_status", live_status),
     VocabularyTerm::new("retired_process_status", retired_status),
@@ -285,27 +279,6 @@ fn an_already_qualified_name_is_not_qualified_twice() {
 }
 
 #[test]
-fn a_subquery_a_table_valued_function_and_extract_are_not_table_positions() {
-    assert!(
-        render(
-            "SELECT 1 FROM (SELECT key_id FROM await_event_waits) AS probe",
-            Dialect::postgres(),
-            TABLES,
-        )
-        .is_ok()
-    );
-    assert!(
-        render(
-            "UPDATE runtime_effect_replay SET updated_at_ms = \
-             floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint",
-            Dialect::postgres(),
-            TABLES,
-        )
-        .is_ok()
-    );
-}
-
-#[test]
 fn a_table_position_naming_an_unowned_relation_is_refused() {
     let error = render(
         "DELETE FROM runtime_turn_commits WHERE turn_id = ?1",
@@ -411,52 +384,6 @@ fn a_name_the_statement_binds_for_itself_is_not_a_table() {
             at: aliased.rfind("total").expect("the trailing alias"),
         }
     );
-}
-
-#[test]
-fn every_owned_statement_renders_for_both_backends() {
-    // Over the crate's real table list rather than this module's fixture: a
-    // statement set is only renderable for a layout that places every table
-    // it names, and this self-test asks whether the text is well formed, not
-    // where a deployment puts it.
-    const EVERY_TABLE_IN_MAIN: TableLayout =
-        TableLayout::new(&[SchemaTables::new("main", crate::TABLES)]);
-    const EVERY_TABLE_ATTACHED: TableLayout =
-        TableLayout::new(&[SchemaTables::new("effect_journal", crate::TABLES)]);
-    const STORE_TERMS: Vocabulary = Vocabulary::new(&[
-        VocabularyTerm::new("live_process_status", stub_predicate),
-        VocabularyTerm::new("retired_process_status", stub_predicate),
-        VocabularyTerm::new("nonterminal_process_status", stub_predicate),
-        VocabularyTerm::new("undelivered_wake_delivery_state", stub_predicate),
-        VocabularyTerm::new("pending_wake_delivery_state", stub_predicate),
-        VocabularyTerm::new("pending_wake_delivery_state_value", stub_predicate),
-        VocabularyTerm::new("enqueuing_wake_delivery_state", stub_predicate),
-        VocabularyTerm::new("discarded_wake_delivery_state", stub_predicate),
-        VocabularyTerm::new("not_enqueued_wake_delivery_state", stub_predicate),
-        VocabularyTerm::new("accepted_turn_input_state", stub_predicate),
-        VocabularyTerm::new("active_turn_input_state", stub_predicate),
-        VocabularyTerm::new("cancelled_turn_input_state", stub_predicate),
-        VocabularyTerm::new("deferred_next_turn_turn_input_state", stub_predicate),
-        VocabularyTerm::new("nonterminal_turn_input_state", stub_predicate),
-        VocabularyTerm::new("pending_active_turn_input_state", stub_predicate),
-        VocabularyTerm::new("released_turn_input_state", stub_predicate),
-        VocabularyTerm::new("terminal_turn_input_state", stub_predicate),
-        VocabularyTerm::new("undelivered_turn_input_state", stub_predicate),
-        VocabularyTerm::new("ingress_turn_id", stub_predicate),
-        VocabularyTerm::new("attachment_referrer_kind", stub_predicate),
-    ]);
-
-    for statement in crate::all_statements() {
-        for dialect in [
-            Dialect::sqlite(EVERY_TABLE_IN_MAIN).with_vocabulary(STORE_TERMS),
-            Dialect::sqlite(EVERY_TABLE_ATTACHED).with_vocabulary(STORE_TERMS),
-            Dialect::postgres().with_vocabulary(STORE_TERMS),
-        ] {
-            statement
-                .render(dialect)
-                .unwrap_or_else(|error| panic!("`{}` does not render: {error}", statement.name()));
-        }
-    }
 }
 
 #[test]

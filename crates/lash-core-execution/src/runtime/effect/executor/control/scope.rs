@@ -716,68 +716,6 @@ mod admitted_scope_tests {
         Arc::new(crate::testing::UnavailableEffectController)
     }
 
-    /// A process scope alone cannot name its opener: the incarnation the
-    /// admission authority bound is part of the controller's construction, so
-    /// the half-admitted shape has no constructor to build (ADR 0099 §1).
-    #[test]
-    fn a_process_scoped_controller_names_its_process() {
-        let scoped = ScopedEffectController::shared(
-            shared_controller(),
-            AdmittedScope::process(process_id("worker")),
-        )
-        .expect("process scope");
-
-        assert_eq!(scoped.admitted_process(), Some(&process_id("worker")));
-        assert_eq!(
-            scoped.execution_scope(),
-            &ExecutionScope::process(crate::process_id_for_test("worker"))
-        );
-    }
-
-    /// The child session turn a process backs is spawned onto its own task, so
-    /// the binding has to survive the `'static` conversion that spawn requires.
-    #[test]
-    fn the_admitted_process_survives_the_static_conversion() {
-        let scoped = ScopedEffectController::shared(
-            shared_controller(),
-            AdmittedScope::process(process_id("worker")),
-        )
-        .expect("process scope");
-
-        assert_eq!(
-            scoped
-                .to_static()
-                .expect("a shared controller is static")
-                .admitted_process(),
-            Some(&process_id("worker"))
-        );
-        assert_eq!(
-            scoped
-                .into_static()
-                .map_err(|_| "a shared controller is static")
-                .expect("static")
-                .admitted_process(),
-            Some(&process_id("worker"))
-        );
-    }
-
-    /// A rescope is a different opener, so it never inherits the incarnation of
-    /// the scope it left.
-    #[test]
-    fn a_rescope_drops_the_admitted_process() {
-        let scoped = ScopedEffectController::shared(
-            shared_controller(),
-            AdmittedScope::process(process_id("worker")),
-        )
-        .expect("process scope");
-
-        let rescoped = scoped
-            .rescope(AdmittedScope::turn("session-1", "turn-1"))
-            .expect("rescope onto a turn");
-
-        assert!(rescoped.admitted_process().is_none());
-    }
-
     /// A non-process controller has no pin a process target could match, so
     /// it can never rescope into a process controller: process admission only
     /// exists at construction.

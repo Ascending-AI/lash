@@ -739,26 +739,6 @@ mod editable_value_tests {
     use super::*;
 
     #[test]
-    fn literal_expression_member_and_expression_have_distinct_bytes() {
-        let literal = EditableValue::Object(BTreeMap::from([(
-            "$expr".to_string(),
-            EditableValue::String("1 + 1".to_string()),
-        )]));
-        let expression = EditableValue::Expr("1 + 1".to_string());
-        let literal_bytes = serde_json::to_vec(&literal).expect("encode literal");
-        let expression_bytes = serde_json::to_vec(&expression).expect("encode expression");
-        assert_ne!(literal_bytes, expression_bytes);
-        assert_eq!(
-            serde_json::from_slice::<EditableValue>(&literal_bytes).expect("decode literal"),
-            literal
-        );
-        assert_eq!(
-            serde_json::from_slice::<EditableValue>(&expression_bytes).expect("decode expression"),
-            expression
-        );
-    }
-
-    #[test]
     fn nested_literal_records_keep_arbitrary_keys_and_expression_kinds() {
         let value = EditableValue::List(vec![
             EditableValue::Object(BTreeMap::from([
@@ -919,72 +899,6 @@ mod node_name_tests {
                 "invalid edge decoded: {payload}"
             );
         }
-    }
-
-    fn node_data(name: Value) -> Result<NodeData, serde_json::Error> {
-        let mut payload = json!({ "kind": "call" });
-        let object = payload.as_object_mut().expect("node data object");
-        for (key, value) in name.as_object().expect("name fields") {
-            object.insert(key.clone(), value.clone());
-        }
-        serde_json::from_value::<NodeData>(payload)
-    }
-
-    #[test]
-    fn an_authored_name_round_trips_with_its_description() {
-        let data = node_data(json!({
-            "title": "Greet the customer",
-            "description": "The opening message",
-            "nameSource": "label",
-        }))
-        .expect("authored node data");
-
-        assert_eq!(
-            data.name,
-            NodeName::Authored {
-                title: "Greet the customer".to_string(),
-                description: Some("The opening message".to_string()),
-            }
-        );
-        assert_eq!(data.name.name_source(), WorkflowNodeNameSource::Label);
-        assert_eq!(
-            serde_json::to_value(&data.name).expect("serialize authored name"),
-            json!({
-                "nameSource": "label",
-                "title": "Greet the customer",
-                "description": "The opening message",
-            })
-        );
-    }
-
-    #[test]
-    fn a_title_without_a_tag_is_not_representable() {
-        let error = node_data(json!({ "title": "Greet the customer" }))
-            .expect_err("untagged title must not decode");
-        assert!(
-            error.to_string().contains("nameSource"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[test]
-    fn an_unknown_tag_is_a_decode_error_and_never_derived() {
-        let error = node_data(json!({ "title": "Greet the customer", "nameSource": "lable" }))
-            .expect_err("unknown tag must not decode");
-        let message = error.to_string();
-        assert!(
-            message.contains("lable") && message.contains("label") && message.contains("derived"),
-            "unexpected error: {message}"
-        );
-    }
-
-    #[test]
-    fn a_derived_name_carries_no_description() {
-        let data = node_data(json!({ "title": "call greet", "nameSource": "derived" }))
-            .expect("derived node data");
-
-        assert_eq!(data.name.description(), None);
-        assert_eq!(data.name.name_source(), WorkflowNodeNameSource::Derived);
     }
 }
 

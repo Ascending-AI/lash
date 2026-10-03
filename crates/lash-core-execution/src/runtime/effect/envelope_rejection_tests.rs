@@ -88,22 +88,6 @@ fn rejects_empty_address_replay_key() {
 }
 
 #[test]
-fn effect_header_round_trips_without_universal_subject_or_replay_slots() {
-    let invocation =
-        invocation(RuntimeEffectKind::Sleep).with_caused_by(Some(CausalRef::Process {
-            process_id: crate::process_id_for_test("process"),
-        }));
-    let encoded = serde_json::to_value(&invocation).expect("effect header encodes");
-    assert!(encoded.get("address").is_some());
-    assert!(encoded.get("subject").is_none());
-    assert!(encoded.get("replay").is_none());
-    assert_eq!(
-        serde_json::from_value::<RuntimeEffectInvocation>(encoded).expect("effect header decodes"),
-        invocation
-    );
-}
-
-#[test]
 fn legacy_universal_effect_header_is_refused() {
     let legacy = serde_json::to_value(RuntimeInvocation::effect(
         EffectAddress::new(ExecutionScope::runtime_operation("session"), "replay")

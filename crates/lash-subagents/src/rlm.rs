@@ -322,11 +322,6 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
 /// The manifest id of `spawn_agent`.
 const SPAWN_AGENT_TOOL_ID: &str = "tool:spawn_agent";
 
-#[cfg(test)]
-pub(crate) fn rlm_subagent_tool_definitions(capability_names: &[String]) -> Vec<ToolDefinition> {
-    vec![spawn_agent_tool_definition(capability_names)]
-}
-
 pub fn spawn_agent_tool_definition(capability_names: &[String]) -> ToolDefinition {
     let example_capability = example_capability_name(capability_names);
     let capability_arg = capability_example_arg(capability_names, &example_capability);

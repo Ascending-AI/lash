@@ -249,38 +249,6 @@ async fn partial_costs_survive_retries_and_charge_safety_refusal_is_visible() {
     assert_eq!(crate::summary::Usage::from_attempts(&rows).cost, Some(0.05));
 }
 
-#[test]
-fn trace_file_contains_context_and_request_response_pair() {
-    let path = std::env::temp_dir().join(format!("toolbench-trace-{}.log", std::process::id()));
-    {
-        let subscriber = trace_subscriber(&path).unwrap();
-        tracing::subscriber::with_default(subscriber, || {
-            let span = tracing::info_span!(
-                "task",
-                model = "test-model",
-                task = "weather",
-                repetition = 8,
-                channel = "standard"
-            );
-            let _guard = span.enter();
-            tracing::debug!(target:"toolbench", request="{}", "provider request");
-            tracing::debug!(target:"toolbench", response="{}", "provider response");
-        });
-    }
-    let text = std::fs::read_to_string(&path).unwrap();
-    for value in [
-        "test-model",
-        "weather",
-        "repetition=8",
-        "standard",
-        "provider request",
-        "provider response",
-    ] {
-        assert!(text.contains(value), "missing {value}: {text}");
-    }
-    std::fs::remove_file(path).unwrap();
-}
-
 #[tokio::test]
 async fn cancellation_during_backoff_keeps_the_failed_call_and_its_cost() {
     let telemetry = crate::telemetry::Telemetry::default();

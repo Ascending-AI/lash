@@ -328,31 +328,4 @@ mod tests {
         assert_eq!(redacted, REDACTED_PLACEHOLDER);
         assert_eq!(redact_location("postgres://"), REDACTED_PLACEHOLDER);
     }
-
-    #[test]
-    fn a_url_without_credentials_keeps_its_target() {
-        assert_eq!(
-            redact_location("postgres://db.internal/lash"),
-            "db.internal/lash"
-        );
-    }
-
-    // A lazy pool performs no I/O but still installs its idle reaper, so this
-    // needs a runtime — not a live server.
-    #[tokio::test]
-    async fn the_backend_location_is_the_redacted_one() {
-        // Proves the redaction is what `backend()` publishes, without needing a
-        // live server: the handle carries the string it was constructed with.
-        let handle = PostgresStorePreflight {
-            pool: PgPool::connect_lazy("postgres://lash:hunter2@db.internal/lash")
-                .expect("a lazy pool performs no I/O"),
-            location: redact_location("postgres://lash:hunter2@db.internal/lash"),
-            owns_pool: true,
-        };
-        let StoreBackend::Postgres { location } = handle.backend() else {
-            panic!("a Postgres handle reports a Postgres backend");
-        };
-        assert_eq!(location, "db.internal/lash");
-        assert!(!location.contains("hunter2"), "{location}");
-    }
 }

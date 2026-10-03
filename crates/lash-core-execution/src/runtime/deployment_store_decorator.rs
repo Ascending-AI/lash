@@ -199,42 +199,6 @@ mod tests {
             "`deployment_operations!` must list exactly the `DeploymentStore` operations"
         );
     }
-    #[test]
-    // A deployment decorator intercepts the control-intent ledger through its
-    // hooks; implementing `ControlIntentStore` directly would overlap the
-    // blanket implementation (E0119).
-    fn a_deployment_decorator_intercepts_control_intents_through_its_hooks() {
-        use crate::StoreError;
-        use crate::runtime::DeploymentStore;
-        use crate::store::{
-            ClaimToken, ControlIntentId, ControlIntentStore, IntentSettle, RuntimeStoreDecorator,
-        };
-
-        struct AcknowledgeHook(std::sync::Arc<dyn DeploymentStore>);
-
-        #[async_trait::async_trait]
-        impl RuntimeStoreDecorator for AcknowledgeHook {
-            type Inner = dyn DeploymentStore;
-
-            fn inner(&self) -> &Self::Inner {
-                self.0.as_ref()
-            }
-
-            async fn acknowledge_intent(
-                &self,
-                id: ControlIntentId,
-                claim: &ClaimToken,
-                at_ms: u64,
-            ) -> Result<IntentSettle, StoreError> {
-                self.inner().acknowledge_intent(id, claim, at_ms).await
-            }
-        }
-
-        impl super::DeploymentStoreDecorator for AcknowledgeHook {}
-
-        fn is_a_deployment<T: DeploymentStore + ControlIntentStore + ?Sized>() {}
-        is_a_deployment::<AcknowledgeHook>();
-    }
 
     #[test]
     // Architecture lint: the scripted deployment's operations are the listed

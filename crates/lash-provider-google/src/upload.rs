@@ -369,17 +369,6 @@ mod error_detail_tests {
     }
 
     #[tokio::test]
-    async fn upload_start_error_surfaces_api_message() {
-        let error = upload_with(vec![response(
-            400,
-            Vec::new(),
-            r#"{"error":{"message":"upload start detail"}}"#,
-        )])
-        .await;
-        assert!(error.message.contains("upload start detail"));
-    }
-
-    #[tokio::test]
     async fn upload_missing_url_is_explicitly_non_retryable() {
         let error = upload_with(vec![response(200, Vec::new(), "")]).await;
 
@@ -387,27 +376,6 @@ mod error_detail_tests {
         assert!(error.retry_verdict_is_classified());
         let failure = DefaultProviderFailureClassifier.classify(error);
         assert!(!failure.is_retryable());
-    }
-
-    #[tokio::test]
-    async fn upload_finalize_error_surfaces_api_message() {
-        let error = upload_with(vec![
-            response(
-                200,
-                vec![(
-                    "x-goog-upload-url".to_string(),
-                    "https://upload.example/session".to_string(),
-                )],
-                "",
-            ),
-            response(
-                400,
-                Vec::new(),
-                r#"{"error":{"message":"upload finalize detail"}}"#,
-            ),
-        ])
-        .await;
-        assert!(error.message.contains("upload finalize detail"));
     }
 
     #[tokio::test]

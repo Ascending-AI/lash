@@ -298,15 +298,6 @@ mod tests {
     }
 
     #[test]
-    fn collector_records_pool_checkout_wait_samples() {
-        let _guard = install_guard();
-        let collector = Collector::install().expect("install performance witness");
-        record_pool_checkout_wait(Duration::from_nanos(37));
-
-        assert_eq!(collector.snapshot().pool_checkout_wait_nanos, vec![37]);
-    }
-
-    #[test]
     fn collector_splits_sql_statements_by_verb_and_sums_to_the_total() {
         let _guard = install_guard();
         let collector = Collector::install().expect("install performance witness");

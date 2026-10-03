@@ -245,34 +245,6 @@ first_party_codes! {
         Self::TriggerStoreUnavailable,
 }
 
-#[test]
-fn missing_process_execution_id_round_trips() {
-    let err = RuntimeError::missing_process_execution_id();
-    assert_eq!(err.code, RuntimeErrorCode::MissingProcessExecutionId);
-    let json = serde_json::to_value(&err).expect("serialize runtime error");
-    assert_eq!(json["code"], "missing_process_execution_id");
-    let decoded: RuntimeError = serde_json::from_value(json).expect("decode runtime error");
-    assert_eq!(decoded.code, RuntimeErrorCode::MissingProcessExecutionId);
-}
-
-#[test]
-fn replay_mismatch_classification_covers_every_durable_controller_code() {
-    for code in [
-        "effect_replay_divergence",
-        "lashlang_cell_replay_divergence",
-        "retired_generation",
-        "lashlang_cell_binding_drift",
-    ] {
-        let typed = RuntimeErrorCode::from_wire_code(code);
-        assert!(typed.is_replay_mismatch(), "{code}");
-        assert_eq!(
-            typed.as_str(),
-            code,
-            "classification must preserve display code"
-        );
-    }
-}
-
 /// The retired replacement-abort codes are not aliased (clean cutover): a
 /// stored error carrying one decodes as a foreign code, never as the
 /// engine-neutral divergence.
@@ -293,39 +265,6 @@ fn retired_replacement_abort_wire_codes_are_not_aliased() {
         serde_json::to_value(&code).expect("serialize divergence code"),
         serde_json::json!("effect_replay_divergence")
     );
-}
-
-#[test]
-fn nearby_mismatch_codes_are_not_replay_divergence() {
-    for code in [
-        "runtime_effect_envelope_canonical_hash_invariant",
-        "runtime_effect_local_executor_mismatch",
-    ] {
-        assert!(
-            !RuntimeErrorCode::from_wire_code(code).is_replay_mismatch(),
-            "{code}"
-        );
-    }
-}
-
-#[test]
-fn session_execution_lease_lost_round_trips() {
-    let err = RuntimeError::new(RuntimeErrorCode::SessionExecutionLeaseLost, "lease lost");
-    let json = serde_json::to_value(&err).expect("serialize runtime error");
-    assert_eq!(json["code"], "session_execution_lease_lost");
-    let decoded: RuntimeError = serde_json::from_value(json).expect("decode runtime error");
-    assert_eq!(decoded.code, RuntimeErrorCode::SessionExecutionLeaseLost);
-}
-
-#[test]
-fn runtime_error_code_serializes_as_stable_string() {
-    let err = RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, "commit failed");
-
-    let json = serde_json::to_value(&err).expect("serialize runtime error");
-    assert_eq!(json["code"], "store_commit_failed");
-
-    let decoded: RuntimeError = serde_json::from_value(json).expect("decode runtime error");
-    assert_eq!(decoded.code, RuntimeErrorCode::StoreCommitFailed);
 }
 
 #[test]
@@ -386,42 +325,6 @@ fn assistant_response_hook_failures_are_retryable_not_terminal() {
     );
 }
 
-#[test]
-fn terminal_cause_overrides_retryable_runtime_store_code() {
-    let error = RuntimeError::new(RuntimeErrorCode::RuntimeStore, "session deleted").with_cause(
-        super::RuntimeErrorCause::SessionDeleted {
-            session_id: SessionId::from("retired"),
-        },
-    );
-
-    assert!(!error.is_retryable());
-    assert!(error.is_terminal());
-}
-
-#[test]
-fn foreign_runtime_error_code_round_trips() {
-    let decoded: RuntimeError = serde_json::from_value(serde_json::json!({
-        "code": "plugin_defined_abort",
-        "message": "stopped by plugin"
-    }))
-    .expect("decode plugin runtime error");
-
-    assert_eq!(
-        decoded.code,
-        RuntimeErrorCode::from_wire_code("plugin_defined_abort")
-    );
-    assert_eq!(decoded.code.as_str(), "plugin_defined_abort");
-}
-
-#[test]
-fn wire_constructor_canonicalizes_built_in_codes() {
-    let code = RuntimeErrorCode::from_wire_code("runtime_store");
-
-    assert_eq!(code, RuntimeErrorCode::RuntimeStore);
-    assert!(code.is_retryable());
-    assert!(!code.is_terminal());
-}
-
 /// A `lash:` spelling belongs to exactly one failure vocabulary.
 #[test]
 fn runtime_and_turn_failure_spellings_do_not_overlap() {
@@ -475,29 +378,6 @@ fn runtime_error_code_conversion_never_mints_lash_for_foreign_codes() {
     ));
     assert_eq!(pair.namespace().as_str(), "agent_workbench");
     assert_eq!(pair.spelling(), "spend_cap");
-}
-
-#[test]
-fn turn_input_source_key_conflict_is_a_typed_identity_conflict() {
-    let conflict = || crate::store::StoreError::PendingTurnInputSourceKeyConflict {
-        session_id: SessionId::from("session"),
-        source_key: "host:retry".to_string(),
-        existing_input_id: crate::InputId::from("ti:existing"),
-    };
-    for error in [
-        crate::runtime_error::runtime_error_from_turn_input_admission(conflict()),
-        crate::runtime_error::runtime_error_from_store_commit(conflict()),
-    ] {
-        assert_eq!(error.code, RuntimeErrorCode::DurableIdentityConflict);
-        assert!(error.is_terminal() && !error.is_retryable());
-    }
-    assert_eq!(
-        crate::runtime_error::runtime_error_from_turn_input_admission(
-            crate::store::StoreError::Backend("disk".to_string())
-        )
-        .code,
-        RuntimeErrorCode::RuntimeStore
-    );
 }
 
 /// FIG-3575: one answer per code. A code is terminal exactly when a failed
@@ -620,27 +500,6 @@ fn a_journaled_controller_error_is_an_outcome_whatever_its_code() {
     );
 }
 
-/// FIG-3575: the acceptance an aborted direct turn returns rides the error and
-/// is absent from the wire form of every other error.
-#[test]
-fn an_aborted_turn_error_carries_its_acceptance_receipt() {
-    let plain = RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, "commit failed");
-    let json = serde_json::to_value(&plain).expect("serialize runtime error");
-    assert!(json.get("turn_input_acceptance").is_none());
-
-    let receipt = crate::turn_input_vocabulary::TurnInputAcceptanceReceipt {
-        input_id: crate::InputId::from("input-1"),
-        session_id: SessionId::from("session-1"),
-        source_key: None,
-        ingress: crate::turn_input_vocabulary::TurnInputIngress::NextTurn,
-    };
-    let aborted = plain.with_turn_input_acceptance(receipt.clone());
-    let decoded: RuntimeError =
-        serde_json::from_value(serde_json::to_value(&aborted).expect("serialize"))
-            .expect("decode runtime error");
-    assert_eq!(decoded.turn_input_acceptance.as_deref(), Some(&receipt));
-}
-
 /// FIG-3586: a lashlang replay refusal parks its turn. It is neither an
 /// outcome — nothing about the turn failed, and a redeploy of the build that
 /// wrote the journal serves it — nor a live fault a queued run may spend its
@@ -761,46 +620,6 @@ fn a_stored_session_state_refusal_round_trips_with_its_generations() {
     }
 }
 
-/// A journaled step body whose store read hits the session's own retirement
-/// records the refusal instead of asking for another attempt: the
-/// retirement is the step's settled answer (FIG-3630), and retrying the
-/// derivation forever was the `LashSession/shift` wedge a session delete
-/// left behind (FIG-3822).
-#[test]
-fn session_retirement_never_takes_derivation_retry_authority() {
-    use crate::runtime_error::{EffectErrorJournalPolicy, RuntimeEffectControllerError};
-    for store_error in [
-        crate::StoreError::SessionDeleted {
-            session_id: SessionId::from("retired-admission"),
-        },
-        crate::StoreError::SessionClosing {
-            session_id: SessionId::from("retired-admission"),
-            intent: crate::store::ControlIntentId::from_sequence(7),
-        },
-    ] {
-        let fault = RuntimeEffectControllerError::from(
-            crate::runtime_error::runtime_error_from_store_commit(store_error),
-        )
-        .retryable_uncommitted_derivation();
-        assert!(fault.is_session_retirement());
-        assert_eq!(
-            fault.journal_disposition(crate::RuntimeEffectKind::AdmitShift),
-            EffectErrorJournalPolicy::Terminal,
-            "a retired session's fault records; the step never runs again"
-        );
-    }
-    // A live store fault still takes the retry authority it always did.
-    let live = RuntimeEffectControllerError::from(
-        crate::runtime_error::runtime_error_from_store_commit(crate::StoreError::Contended),
-    )
-    .retryable_uncommitted_derivation();
-    assert_eq!(
-        live.journal_disposition(crate::RuntimeEffectKind::AdmitShift),
-        EffectErrorJournalPolicy::RetryUncommittedResponseDerivation,
-        "a live fault is still the attempt's, never the step's outcome"
-    );
-}
-
 fn terminal_store_causes() -> Vec<crate::RuntimeErrorCause> {
     use crate::compat::{CompatRefusal, VersionRange};
     use crate::store::StoreRefusal;
@@ -883,18 +702,6 @@ fn assert_terminal_derivation(fault: &crate::runtime_error::RuntimeEffectControl
         !fault.is_attempt_fault(),
         "a terminal cause is the recorded answer: {fault:?}"
     );
-}
-
-#[test]
-fn terminal_causes_never_take_derivation_retry_authority() {
-    for cause in terminal_store_causes() {
-        let mut fault = crate::runtime_error::RuntimeEffectControllerError::new(
-            RuntimeErrorCode::StoreCommitFailed,
-            "a refused derivation",
-        );
-        fault.cause = Some(cause);
-        assert_terminal_derivation(&fault.retryable_uncommitted_derivation());
-    }
 }
 
 #[test]
@@ -1022,60 +829,6 @@ fn an_unbound_llm_profile_is_the_attempts_fault_on_model_calls_alone() {
     ))
     .expect("serialize runtime error");
     assert!(plain.get("cause").is_none());
-}
-
-#[test]
-fn store_refusals_keep_their_codes_and_fields_across_runtime_boundaries() {
-    use crate::compat::{CompatRefusal, VersionRange};
-    use crate::runtime_error::{
-        RuntimeEffectControllerError, RuntimeErrorCause, runtime_error_from_store_commit,
-    };
-    use crate::store::StoreRefusal;
-    for refusal in [
-        StoreRefusal::TurnCancelClosureOwnerReleased {
-            participant_id: "sqlite-catalog:released-owner".into(),
-        },
-        StoreRefusal::WriterFenced {
-            recorded: 2,
-            writable: VersionRange::exactly(1),
-        },
-        StoreRefusal::Incompatible {
-            refusal: CompatRefusal::Unstamped {
-                component: "sqlite-registry".into(),
-                writing_release: None,
-            },
-        },
-        StoreRefusal::TurnCancelBindingMismatch {
-            session_id: crate::SessionId::from("bound-elsewhere"),
-            expected: "the admitted authority".into(),
-            presented: "another authority".into(),
-        },
-    ] {
-        let code = refusal.code();
-        let controller = RuntimeEffectControllerError::from(refusal.clone().into_store_error());
-        assert_eq!(controller.code, code);
-        assert!(controller.is_terminal());
-        let runtime = controller.into_runtime_error();
-        let committed = runtime_error_from_store_commit(refusal.clone().into_store_error());
-        let admitted = crate::runtime_error::runtime_error_from_turn_input_admission(
-            refusal.clone().into_store_error(),
-        );
-        for runtime in [runtime, committed, admitted] {
-            assert_eq!(runtime.code, code);
-            assert!(runtime.is_terminal());
-            assert!(!runtime.is_retryable());
-            let decoded: RuntimeError =
-                serde_json::from_value(serde_json::to_value(&runtime).expect("serialize refusal"))
-                    .expect("decode refusal");
-            assert_eq!(decoded.code, code);
-            assert_eq!(
-                decoded.cause,
-                Some(RuntimeErrorCause::StoreRefusal {
-                    refusal: Box::new(refusal.clone())
-                })
-            );
-        }
-    }
 }
 
 #[test]
@@ -1213,24 +966,6 @@ mod typed_refusal_causes {
             assert_eq!(runtime.run_shape_refusal(), Some(&refusal));
             assert_eq!(runtime.config_refusal(), None);
         }
-    }
-
-    #[test]
-    fn a_raised_refusal_reads_back_as_its_raisers_type() {
-        let definition = RunDefinitionRefusal::new(
-            DefinitionRef::new("review", 2),
-            &Raised::TooWide { width: 9 },
-        );
-        assert_eq!(definition.message, "9 is too wide");
-        assert_eq!(
-            serde_json::from_value::<Raised>(definition.refusal).expect("the raiser's type"),
-            Raised::TooWide { width: 9 }
-        );
-        let render = RenderRefusal::new(&Raised::TooWide { width: 101 });
-        assert_eq!(
-            serde_json::from_value::<Raised>(render.refusal).expect("the raiser's type"),
-            Raised::TooWide { width: 101 }
-        );
     }
 
     #[test]

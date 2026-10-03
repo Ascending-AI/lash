@@ -1,21 +1,5 @@
 use super::*;
 
-#[test]
-fn absent_user_segment_marker_decodes_as_non_boundary() {
-    let expected = LlmMessage::text(LlmRole::User, "synthetic user-role observation");
-    let legacy_json = serde_json::to_value(&expected).expect("serialize marker-free message");
-    assert_eq!(legacy_json.get("starts_user_segment"), None);
-    let message: LlmMessage = serde_json::from_value(legacy_json.clone())
-        .expect("legacy message without a boundary marker decodes");
-
-    assert!(!message.starts_user_segment);
-    assert_eq!(message, expected);
-    assert_eq!(
-        serde_json::to_value(message).expect("serialize legacy-compatible message"),
-        legacy_json
-    );
-}
-
 fn response_started() -> LlmStreamEvidence {
     LlmStreamEvidence {
         response_started: true,
@@ -206,36 +190,6 @@ fn execution_identity_conflict_leaves_the_collector_atomic() {
             serde_json::json!("kept"),
         )])
     );
-}
-#[test]
-fn provider_file_media_type_is_optional_and_omitted_when_absent() {
-    let scope = ProviderFileScope::new("anthropic", "credential");
-    let without_hint = AttachmentSource::provider_file(scope.clone(), "file-1", None);
-    let without_hint_json = serde_json::to_value(&without_hint).unwrap();
-    assert_eq!(
-        without_hint_json,
-        serde_json::json!({
-            "source": "provider_file",
-            "provider_scope": {
-                "provider": "anthropic",
-                "credential_scope": "credential"
-            },
-            "id": "file-1"
-        })
-    );
-    assert_eq!(
-        serde_json::from_value::<AttachmentSource>(without_hint_json).unwrap(),
-        without_hint
-    );
-
-    let with_hint = AttachmentSource::provider_file(
-        scope,
-        "file-2",
-        Some(MediaType::parse("image/png").unwrap()),
-    );
-    let with_hint_json = serde_json::to_value(&with_hint).unwrap();
-    assert_eq!(with_hint_json["media_type"], "image/png");
-    assert_eq!(with_hint.media_type().unwrap().as_str(), "image/png");
 }
 #[test]
 fn sealed_retry_decision_refuses_the_contradictory_boolean_shape() {

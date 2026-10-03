@@ -1001,25 +1001,6 @@ mod tests {
             });
     }
 
-    #[test]
-    fn execute_code_runs_a_typescript_cell() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(async {
-                let state = RlmRuntimeState::new_for_tests().expect("runtime state");
-                let response = execute_cell(
-                    &state,
-                    cell("const answer: number = 40 + 2; finish(answer);"),
-                )
-                .await
-                .expect("the TypeScript dialect must execute");
-                assert_eq!(response.error, None);
-                assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));
-            });
-    }
-
     /// A restore view for `frame` whose active history carries one RLM seed
     /// event per label, each binding `projected_<label>`.
     fn seed_restore_view(

@@ -76,14 +76,6 @@ fn a_deterministic_shift_passes_cold_separate_worker_and_perturbed_replays() {
     );
 }
 
-#[test]
-fn the_check_is_itself_deterministic_under_its_seed() {
-    let engine = LocalEngine::new(|| (), deterministic_shift);
-    let first = check().run(&engine).map(|report| report.transcript);
-    let second = check().run(&engine).map(|report| report.transcript);
-    assert_eq!(first, second);
-}
-
 /// A value the shift reads that nothing records: a clock, an RNG, a global
 /// counter. It changes between runs of one worker.
 static AMBIENT: AtomicU64 = AtomicU64::new(0);

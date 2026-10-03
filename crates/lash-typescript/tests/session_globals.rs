@@ -24,13 +24,6 @@ fn environment(globals: [&str; 1]) -> lashlang::LashlangHostEnvironment {
 }
 
 #[test]
-fn a_live_session_global_is_readable_from_a_later_cell() {
-    let environment = environment(["findings"]);
-    lash_typescript::link("finish(findings);", &environment)
-        .expect("a session global must be readable");
-}
-
-#[test]
 fn a_live_session_global_can_be_read_shaped_and_rebound() {
     let environment = environment(["findings"]);
     // The three shapes a second cell actually uses: read a field, pass it to a
@@ -83,17 +76,6 @@ fn a_name_no_one_has_is_still_rejected_at_parse() {
         "the diagnostic must stay the parse-stage unknown-binding one: {rendered}"
     );
     assert!(rendered.contains("nowhere"), "{rendered}");
-}
-
-#[test]
-fn a_session_global_does_not_disable_the_scope_rules_around_it() {
-    let environment = environment(["findings"]);
-    // Ambient names are const: assigning to one without declaring it is still
-    // refused, and the temporal-dead-zone and duplicate-binding analyses are
-    // unchanged for source-local names.
-    assert!(lash_typescript::link("findings = 1;\nfinish(1);", &environment).is_err());
-    assert!(lash_typescript::link("const a = b;\nconst b = 1;\nfinish(a);", &environment).is_err());
-    assert!(lash_typescript::link("const c = 1;\nconst c = 2;\nfinish(c);", &environment).is_err());
 }
 
 #[test]

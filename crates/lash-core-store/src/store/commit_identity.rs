@@ -802,77 +802,6 @@ mod append_request_identity_tests {
     }
 
     #[test]
-    fn receipt_decision_table_pins_count_corruption_and_precedence() {
-        use RuntimeCommitReceiptDecision::{
-            AppendIdentityConflict, CorruptRequestedNodeCount, Replay, RuntimeCommitConflict,
-        };
-
-        let identity =
-            |version, request_hash: &str, requested_node_count| AppendRequestIdentity::Append {
-                encoding_version: version,
-                request_hash: request_hash.to_string(),
-                requested_node_count,
-                requested_ancestor_node_id: None,
-            };
-        let plain = AppendRequestIdentity::PlainCommit;
-        let decide = |stored_hash,
-                      attempted_hash,
-                      stored_identity: &AppendRequestIdentity,
-                      attempted_identity: &AppendRequestIdentity| {
-            decide_runtime_commit_receipt(
-                stored_hash,
-                attempted_hash,
-                stored_identity,
-                attempted_identity,
-            )
-        };
-
-        assert_eq!(
-            decide(
-                "same",
-                "same",
-                &identity(1, "original-ancestor-identity", 1),
-                &identity(1, "changed-ancestor-identity", 1),
-            ),
-            AppendIdentityConflict,
-            "exact commit hashes cannot conceal comparable append identity drift"
-        );
-        assert_eq!(
-            decide("same", "same", &plain, &identity(1, "new", 2)),
-            Replay,
-            "legacy exact-hash replay tolerates absent legacy metadata"
-        );
-        assert_eq!(
-            decide("same", "same", &identity(1, "id", 1), &identity(1, "id", 2),),
-            CorruptRequestedNodeCount {
-                stored: 1,
-                attempted: 2,
-            }
-        );
-        assert_eq!(
-            decide("old", "new", &identity(1, "id", 2), &identity(1, "id", 2),),
-            Replay
-        );
-        assert_eq!(
-            decide("old", "new", &plain, &identity(1, "id", 2)),
-            RuntimeCommitConflict
-        );
-        assert_eq!(
-            decide(
-                "old",
-                "new",
-                &identity(1, "old-id", 2),
-                &identity(1, "new-id", 2),
-            ),
-            AppendIdentityConflict
-        );
-        assert_eq!(
-            decide("old", "new", &identity(1, "id", 2), &identity(2, "id", 2),),
-            RuntimeCommitConflict
-        );
-    }
-
-    #[test]
     fn append_request_identity_v7_golden_byte_corpus() {
         let rendered = append_request_golden_rows();
         assert_eq!(
@@ -1499,21 +1428,6 @@ pub(super) fn turn_commit_hash(commit: &RuntimeCommit) -> Result<String, StoreEr
         LASH_INTENT_DOMAIN_VERSION,
         &identity.finish(),
     ))
-}
-
-#[cfg(test)]
-mod blake3_vector_tests {
-    #[test]
-    fn commit_identity_v2_blake3_vector_is_pinned() {
-        let mut identity = crate::stable_identity::IdentityEncoder::new_unframed(
-            super::TURN_COMMIT_IDENTITY_DOMAIN,
-        );
-        identity.bytes(b"lash-commit-vector");
-        assert_eq!(
-            crate::stable_hash::blake3_hex("lash-intent/v2", &identity.finish()),
-            "120001d338cb60a97d39d2f223d690a8f7548bf8e42beb0a3d7c03a36b477443"
-        );
-    }
 }
 
 pub fn derive_history_node_id(

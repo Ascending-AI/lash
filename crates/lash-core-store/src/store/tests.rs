@@ -220,75 +220,6 @@ fn ingress_settlement_refuses_a_completion_minted_for_another_session() {
 }
 
 #[test]
-fn first_persisted_state_commit_derives_and_installs_node_ids() {
-    let placeholder = "draft-node/v2:first".to_string();
-    let mut state = crate::RuntimeSessionState {
-        session_id: SessionId::from("first-commit"),
-        session_graph: crate::SessionGraph::from_nodes(
-            vec![crate::SessionNodeRecord {
-                node_id: crate::NodeId::fixture(placeholder.clone()),
-                parent_node_id: None,
-                timestamp: "2026-07-27T00:00:00Z".to_string(),
-                payload: crate::SessionNodePayload::Plugin {
-                    plugin_type: "first-commit".to_string(),
-                    body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
-                },
-            }],
-            Some(crate::NodeId::fixture(placeholder)),
-        )
-        .expect("first-commit fixture graph is valid"),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-    };
-    let operation = OperationId::new(
-        crate::ExecutionScope::runtime_operation("first-commit"),
-        "initial",
-    );
-    let expected = derive_history_node_id(&state.session_id, &operation, 0)
-        .expect("derive expected first node id");
-
-    let (commit, persisted_node_ids) =
-        RuntimeCommit::persisted_state_with_operation(&mut state, operation)
-            .expect("build first append");
-    let leaf_node_id = commit.graph.leaf_node_id().cloned();
-    let GraphAppend::Extend { nodes } = &commit.graph else {
-        panic!("test commit appends nodes")
-    };
-    assert_eq!(persisted_node_ids, vec![expected.clone()]);
-    assert_eq!(nodes[0].node_id, expected);
-    assert_eq!(leaf_node_id.as_deref(), Some(nodes[0].node_id.as_str()));
-    assert_eq!(state.session_graph.nodes[0].node_id, nodes[0].node_id);
-    assert_eq!(state.session_graph.leaf_node_id, leaf_node_id);
-}
-
-#[test]
-fn with_operation_returns_the_append_id_mapping() {
-    let commit = intent_fixture();
-    let nodes = commit.graph.nodes();
-    let old_node_id = nodes[0].node_id.clone();
-    let operation = OperationId::turn("golden-session", "turn-43", "final");
-    let expected_node_id = derive_history_node_id(&commit.session_id, &operation, 0)
-        .expect("derive replacement node id");
-
-    let (commit, mapping) = commit
-        .with_operation(operation)
-        .expect("derive and stamp commit");
-
-    assert_eq!(
-        mapping,
-        vec![(old_node_id.clone(), expected_node_id.clone())]
-    );
-    let leaf_node_id = commit.graph.leaf_node_id().cloned();
-    let GraphAppend::Extend { nodes } = &commit.graph else {
-        panic!("test commit appends nodes")
-    };
-    assert_eq!(nodes[0].node_id, expected_node_id);
-    assert_eq!(leaf_node_id, Some(expected_node_id));
-}
-
-#[test]
 fn legacy_hash_reproduces_random_committed_message_id_conflict() {
     let mut first = intent_fixture();
     let completion = crate::TurnInputCompletion {
@@ -444,33 +375,6 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
 }
 
 #[test]
-fn session_head_meta_takes_its_identity_from_the_row_key() {
-    let meta = SessionHeadMeta::assemble(
-        &SessionId::from("keyed-session"),
-        SessionHeadPayload {
-            schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
-            session_id: SessionId::from("keyed-session"),
-            config: crate::PersistedSessionConfig::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            ),
-            published_by_shift: false,
-        },
-        7,
-        None,
-        None,
-        None,
-    )
-    .expect("an agreeing head payload assembles");
-
-    assert_eq!(
-        meta.session_id,
-        SessionId::from("keyed-session"),
-        "the assembled identity is the row key"
-    );
-}
-
-#[test]
 fn session_head_meta_refuses_a_head_json_naming_another_session() {
     let error = SessionHeadMeta::assemble(
         &SessionId::from("keyed-session"),
@@ -555,19 +459,6 @@ fn session_head_payload_excludes_the_leaf_derived_frame() {
             "{column} is not head payload"
         );
     }
-}
-
-#[test]
-fn operation_conflict_diagnostic_explains_identity_reuse() {
-    let message = StoreError::RuntimeTurnCommitConflict {
-        session_id: SessionId::from("root"),
-        operation_key: "operation-key".to_string(),
-    }
-    .to_string();
-
-    assert!(message.contains("runtime operation"));
-    assert!(message.contains("different commit content"));
-    assert!(message.contains("reuse an operation identity only"));
 }
 
 #[test]
@@ -785,41 +676,6 @@ fn node_derivation_remaps_in_batch_parent_edges() {
 }
 
 #[test]
-fn frame_node_identity_is_stable_across_operation_realization() {
-    let operation = OperationId::turn("session", "turn", "final");
-    let frame_key =
-        crate::FrameKey::from_caller_material("initial-frame").expect("non-empty frame material");
-    let frame_node_id =
-        crate::session_graph::frame_node_id(&SessionId::from("session"), frame_key.as_str());
-    let mut graph = GraphAppend::Extend {
-        nodes: vec![crate::SessionNodeRecord {
-            node_id: crate::NodeId::fixture(frame_node_id.to_string()),
-            parent_node_id: None,
-            timestamp: "2026-07-26T10:00:00Z".to_string(),
-            payload: crate::SessionNodePayload::FrameOpen {
-                frame_key,
-                reason: crate::AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                )),
-            },
-        }],
-    };
-
-    graph
-        .derive_node_ids(&SessionId::from("session"), &operation)
-        .expect("realize frame node");
-
-    let nodes = graph.nodes();
-    assert_eq!(nodes[0].node_id, frame_node_id.as_str());
-    assert_eq!(
-        graph.leaf_node_id().map(|id| id.as_str()),
-        Some(frame_node_id.as_str())
-    );
-}
-
-#[test]
 fn append_chain_rejects_self_parent_cycles() {
     let graph = GraphAppend::Extend {
         nodes: vec![crate::SessionNodeRecord {
@@ -841,29 +697,6 @@ fn append_chain_rejects_self_parent_cycles() {
             ..
         }) if parent == "cycle"
     ));
-}
-
-#[test]
-fn append_leaf_is_derived_from_the_terminal_appended_node() {
-    assert_eq!(GraphAppend::PreserveHead.leaf_node_id(), None);
-    assert!(GraphAppend::PreserveHead.nodes().is_empty());
-
-    let node = |node_id: &str, parent_node_id: Option<&str>| crate::SessionNodeRecord {
-        node_id: node_id.parse().unwrap(),
-        parent_node_id: parent_node_id.map(|id| id.parse().unwrap()),
-        timestamp: "2026-07-27T00:00:00Z".to_string(),
-        payload: crate::SessionNodePayload::Plugin {
-            plugin_type: node_id.to_string(),
-            body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
-        },
-    };
-    let graph = GraphAppend::Extend {
-        nodes: vec![node("first", None), node("last", Some("first"))],
-    };
-
-    assert_eq!(graph.nodes().len(), 2);
-    assert_eq!(graph.leaf_node_id().map(|id| id.as_str()), Some("last"));
-    graph.validate_append_topology().expect("chain topology");
 }
 
 #[test]

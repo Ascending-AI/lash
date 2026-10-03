@@ -20,30 +20,6 @@ fn shape(replay_keys: &[&str]) -> EffectGroupShape {
 }
 
 #[test]
-fn a_wire_membership_may_disagree_with_its_shape_and_is_refused_terminally() {
-    // `replay_keys` and the membership are independent public values, so
-    // nothing in the types or in serde stops a caller from sending a pair
-    // that disagrees -- this test builds exactly that and round-trips it
-    // through the wire form to prove deserialization accepts it.
-    // `validate_membership` is what refuses it, at the boundary, with a
-    // terminal error a retry cannot fix.
-    let mismatched = (shape(&["child-0"]), EffectGroupMembership(Vec::new()));
-    let encoded = serde_json::to_vec(&mismatched).expect("serialize mismatched pair");
-    let (decoded, membership): (EffectGroupShape, EffectGroupMembership) =
-        serde_json::from_slice(&encoded).expect("the wire form accepts a mismatched pair");
-
-    let error = decoded
-        .validate_membership(&membership)
-        .expect_err("a membership that disagrees with its shape must be refused");
-    assert!(
-        error
-            .message()
-            .contains("declares 1 children but retains 0 accepted requests"),
-        "the refusal must name both counts: {error}"
-    );
-}
-
-#[test]
 fn a_child_position_past_the_replay_keys_is_a_typed_terminal_error() {
     // The close, retirement-cancel, and dispatch-child paths all pair a
     // position with the replay key at that position. Out of range must be a

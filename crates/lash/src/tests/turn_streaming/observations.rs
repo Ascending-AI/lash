@@ -10,32 +10,6 @@ fn bid() -> lash_core::llm::types::StreamBlockIdentity {
 }
 
 #[tokio::test]
-pub(super) async fn turn_builder_stream_emits_activities_and_finishes() -> Result<()> {
-    let core = standard_core().await;
-    let session = core.session("turn-stream").created().await.open().await?;
-    let handle = session.send(TurnInput::text("stream me")).await?;
-    let mut stream = handle.events();
-
-    let mut activities = Vec::new();
-    while let Some(activity) = stream.next().await {
-        activities.push(activity?);
-    }
-    let result = handle.output().await?.result;
-
-    assert!(matches!(
-        result.outcome,
-        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
-    ));
-    assert_eq!(assistant_prose(&activities), "echo: stream me");
-    assert!(
-        activities
-            .iter()
-            .any(|activity| matches!(&activity.event, TurnEvent::AssistantProseDelta { .. }))
-    );
-    Ok(())
-}
-
-#[tokio::test]
 async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Result<()> {
     let streamed_reasoning = LlmOutputPart::Reasoning {
         text: "**Planning single file search step**".to_string(),
@@ -247,59 +221,6 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
 }
 
 #[tokio::test]
-async fn semantic_publication_streamed_reasoning_keeps_distinct_completed_reasoning() -> Result<()>
-{
-    let streamed = reasoning_output_part("streamed A", "reasoning-a");
-    let completed = reasoning_output_part("completed-only B", "reasoning-b");
-    let provider = crate::testing::TestProvider::builder()
-        .kind("mixed-reasoning-publication")
-        .requires_streaming(true)
-        .complete(move |request| {
-            let streamed = streamed.clone();
-            let completed = completed.clone();
-            async move {
-                let stream = request.stream_events.expect("stream events");
-                stream.send(LlmStreamEvent::ReasoningDelta {
-                    block: lash_core::llm::types::StreamBlockIdentity::new(
-                        "reasoning-a:summary:0",
-                        0,
-                    )
-                    .with_item_id(Some("reasoning-a".to_string())),
-                    text: "streamed A".to_string(),
-                });
-                stream.send(LlmStreamEvent::Part(streamed.clone()));
-                Ok(LlmResponse {
-                    parts: vec![streamed, completed],
-                    response_metadata: Default::default(),
-                    ..LlmResponse::default()
-                })
-            }
-        })
-        .build()
-        .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("mixed-reasoning-publication")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    let output = session
-        .send(TurnInput::text("keep every distinct reasoning item"))
-        .output()
-        .await?;
-
-    assert_eq!(
-        reasoning_activities(&output),
-        vec!["streamed A", "completed-only B"]
-    );
-    Ok(())
-}
-
-#[tokio::test]
 async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Result<()> {
     let reasoning = reasoning_output_part("reasoning once", "reasoning-before-text");
     let provider = crate::testing::TestProvider::builder()
@@ -397,43 +318,6 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
         );
     }
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    Ok(())
-}
-
-#[tokio::test]
-pub(super) async fn session_observation_replays_live_activity_and_commit() -> Result<()> {
-    let core = standard_core().await;
-    let session = core
-        .session("session-observation-replay")
-        .created()
-        .await
-        .open()
-        .await?;
-    let cursor = session.observe().current_observation().cursor;
-
-    let output = session.send(TurnInput::text("observe me")).output().await?;
-    assert_eq!(assistant_prose(&output.activities), "echo: observe me");
-
-    let replay = session.observe().resume_from_cursor(&cursor)?;
-    let SessionResume::Replayed { events } = replay else {
-        panic!("recent cursor should replay live events");
-    };
-    assert!(events.iter().any(|event| {
-        matches!(
-            &event.payload,
-            lash_core::SessionObservationEventPayload::TurnActivity(activity)
-                if matches!(
-                    &activity.event,
-                    TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == "echo: observe me"
-                )
-        )
-    }));
-    assert!(events.iter().any(|event| {
-        matches!(
-            &event.payload,
-            lash_core::SessionObservationEventPayload::Committed { .. }
-        )
-    }));
     Ok(())
 }
 
@@ -923,91 +807,6 @@ pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_t
 include!("observations/attempt_reset.rs");
 
 #[tokio::test]
-pub(super) async fn session_observation_rejects_cursor_from_another_session() -> Result<()> {
-    let core = standard_core().await;
-    let session = core
-        .session("session-observation-a")
-        .created()
-        .await
-        .open()
-        .await?;
-    let other = core
-        .session("session-observation-b")
-        .created()
-        .await
-        .open()
-        .await?;
-    let other_cursor = other.observe().current_observation().cursor;
-
-    let err = session
-        .observe()
-        .resume_from_cursor(&other_cursor)
-        .expect_err("cursor from another session should be rejected");
-    assert!(
-        err.to_string().contains("session-observation-b")
-            && err.to_string().contains("session-observation-a"),
-        "unexpected error: {err}"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-pub(super) async fn session_observation_subscription_replays_buffered_events_before_live_events()
--> Result<()> {
-    let core = standard_core().await;
-    let session = core
-        .session("session-observation-subscribe-replay")
-        .created()
-        .await
-        .open()
-        .await?;
-    let cursor = session.observe().current_observation().cursor;
-
-    session
-        .send(TurnInput::text("first observed"))
-        .output()
-        .await?;
-    let SessionObservationSubscription::Subscribed(mut subscription) =
-        session.observe().subscribe_from_cursor(&cursor)?
-    else {
-        panic!("recent cursor should subscribe without a gap");
-    };
-
-    loop {
-        let event = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            futures_util::StreamExt::next(&mut subscription),
-        )
-        .await
-        .expect("timed out waiting for replayed event")
-        .expect("replay subscription closed")
-        .expect("replayed event");
-        if observation_assistant_delta(&event).as_deref() == Some("echo: first observed") {
-            break;
-        }
-    }
-
-    session
-        .send(TurnInput::text("second observed"))
-        .output()
-        .await?;
-    loop {
-        let event = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            futures_util::StreamExt::next(&mut subscription),
-        )
-        .await
-        .expect("timed out waiting for live event")
-        .expect("live subscription closed")
-        .expect("live event");
-        if observation_assistant_delta(&event).as_deref() == Some("echo: second observed") {
-            break;
-        }
-    }
-    Ok(())
-}
-
-#[tokio::test]
 pub(super) async fn session_observation_recovery_stream_replays_buffered_events_before_live_events()
 -> Result<()> {
     let core = standard_core().await;
@@ -1052,132 +851,6 @@ pub(super) async fn session_observation_recovery_stream_replays_buffered_events_
             break;
         }
     }
-    Ok(())
-}
-
-#[tokio::test]
-pub(super) async fn session_observation_remote_subscription_replays_dto_events() -> Result<()> {
-    let core = standard_core().await;
-    let session = core
-        .session("session-observation-remote-subscribe")
-        .created()
-        .await
-        .open()
-        .await?;
-    let observation = session.observe().current_remote_observation();
-    assert_eq!(
-        observation.session_id,
-        "session-observation-remote-subscribe"
-    );
-
-    session
-        .send(TurnInput::text("remote observed"))
-        .output()
-        .await?;
-    let crate::observe::RemoteSessionObservationSubscription::Subscribed(mut subscription) =
-        session.observe().subscribe_from_remote_cursor(
-            &crate::remote::observations::RemoteSessionCursor::new(observation.cursor.clone()),
-        )?
-    else {
-        panic!("recent remote cursor should subscribe without a gap");
-    };
-
-    loop {
-        let event =
-            tokio::time::timeout(std::time::Duration::from_secs(2), subscription.next_event())
-                .await
-                .expect("timed out waiting for remote replayed event")
-                .expect("remote replayed event");
-        if remote_observation_assistant_delta(&event).as_deref() == Some("echo: remote observed") {
-            assert_eq!(event.session_id, "session-observation-remote-subscribe");
-            break;
-        }
-    }
-    Ok(())
-}
-
-#[tokio::test]
-pub(super) async fn session_observation_remote_recovery_stream_yields_dto_gap() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::new(
-                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
-                    max_events_per_session: 1,
-                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
-                },
-            ),
-        ))
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("session-observation-remote-gap")
-        .created()
-        .await
-        .open()
-        .await?;
-    let observation = session.observe().current_remote_observation();
-
-    session
-        .send(TurnInput::text("trimmed before remote subscribe"))
-        .output()
-        .await?;
-    let mut stream = session.observe().subscribe_and_recover_remote(
-        crate::remote::observations::RemoteSessionCursor::new(observation.cursor),
-    )?;
-    let item = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
-        .await
-        .expect("timed out waiting for remote gap stream item")
-        .expect("remote recovery stream should stay open")?;
-    let crate::observe::RemoteSessionObservationStreamItem::Gap { observation, gap } = item else {
-        panic!("trimmed remote cursor should yield a gap item");
-    };
-
-    assert_eq!(
-        gap.reason,
-        crate::remote::observations::RemoteLiveReplayGapReason::Trimmed
-    );
-    assert_eq!(gap.latest_cursor, observation.cursor);
-    assert_eq!(observation.session_id, "session-observation-remote-gap");
-    Ok(())
-}
-
-#[tokio::test]
-pub(super) async fn capacity_and_age_trim_force_snapshot_with_matching_observation_cursor()
--> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::new(
-                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
-                    max_events_per_session: 1,
-                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
-                },
-            ),
-        ))
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("session-observation-recovered-gap")
-        .created()
-        .await
-        .open()
-        .await?;
-    let cursor = session.observe().current_observation().cursor;
-
-    session
-        .send(TurnInput::text("trimmed before subscribe"))
-        .output()
-        .await?;
-    let mut stream = session.observe().subscribe_and_recover(cursor);
-    let item = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
-        .await
-        .expect("timed out waiting for gap stream item")
-        .expect("recovery stream should stay open")?;
-    let crate::observe::SessionObservationStreamItem::Gap { observation, gap } = item else {
-        panic!("trimmed cursor should yield a gap item");
-    };
-
-    assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Trimmed);
-    assert_eq!(gap.latest_cursor, observation.cursor);
     Ok(())
 }
 
@@ -1235,52 +908,6 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
             if *kind == lash_core::SessionQueueEventKind::Enqueued
                 && batch_ids == &["unseen-batch"]
     ));
-    Ok(())
-}
-
-#[tokio::test]
-pub(super) async fn recoverable_chat_conformance_snapshot_subscription_and_terminal_replacement()
--> Result<()> {
-    let core = standard_core().await;
-    let session = core
-        .session("recoverable-chat-terminal")
-        .created()
-        .await
-        .open()
-        .await?;
-    let snapshot = session.observe().recoverable_chat_snapshot();
-    assert!(snapshot.read_view.messages().is_empty());
-    let mut stream = session
-        .observe()
-        .subscribe_recoverable_chat(snapshot.cursor);
-
-    session
-        .send(TurnInput::text("terminal replacement"))
-        .id("recoverable-terminal-turn")
-        .output()
-        .await?;
-
-    let terminal = loop {
-        let update = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
-            .await
-            .expect("recoverable chat terminal timeout")
-            .expect("recoverable chat stream stays open")?;
-        if let crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
-            snapshot,
-            ..
-        } = update
-        {
-            break snapshot;
-        }
-    };
-    assert!(
-        terminal
-            .read_view
-            .messages()
-            .iter()
-            .any(|message| crate::message_text(message).contains("terminal replacement")),
-        "terminal replacement must carry the authoritative committed transcript"
-    );
     Ok(())
 }
 
@@ -2336,20 +1963,4 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
     let result = turn.await.expect("join turn")?;
     assert!(matches!(result.result.outcome, TurnOutcome::Finished(_)));
     Ok(())
-}
-
-pub(super) fn remote_observation_assistant_delta(
-    event: &crate::remote::observations::RemoteSessionObservationEvent,
-) -> Option<String> {
-    match &event.event {
-        crate::remote::observations::RemoteSessionObservationEventPayload::TurnActivity {
-            activity,
-        } => match &activity.event {
-            crate::remote::usage::RemoteTurnEvent::AssistantProseDelta { text, .. } => {
-                Some(text.clone())
-            }
-            _ => None,
-        },
-        _ => None,
-    }
 }

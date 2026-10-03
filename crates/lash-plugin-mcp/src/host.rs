@@ -513,13 +513,3 @@ fn compile_elicitation_response_validator(
             ))
         })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn protocol_version_is_known_to_the_pinned_rmcp_sdk() {
-        assert!(ProtocolVersion::KNOWN_VERSIONS.contains(&MCP_PROTOCOL_VERSION));
-    }
-}

@@ -860,25 +860,4 @@ mod process_visibility_tests {
             }
         }
     }
-
-    #[tokio::test]
-    async fn process_read_service_honors_model_tool_visibility_if_wired_that_way() {
-        let (service, filter, double, hidden) =
-            Box::pin(test_service(ProcessVisibility::ModelTool)).await;
-        filter.reset();
-
-        let handler = operation_scope(&double).await;
-        let records = crate::plugin::ProcessReadService::list_visible(
-            &service,
-            &SessionId::from(SESSION_ID),
-            crate::ProcessListMode::Live,
-            crate::ProcessOpScope::new(handler.scoped()),
-        )
-        .await
-        .expect("list process read records");
-        handler.close().await.expect("close the turn's handler");
-
-        assert!(!contains_hidden(&records, &hidden));
-        assert_eq!(filter.invocations(), 2);
-    }
 }

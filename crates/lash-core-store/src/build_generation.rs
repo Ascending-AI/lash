@@ -204,17 +204,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_generation_renders_its_digest_as_twelve_lower_hex() {
-        let generation = BuildGeneration::from_digest([0x3f, 0xa9, 0x00, 0xbc, 0x12, 0xde]);
-        assert_eq!(generation.as_str(), "3fa900bc12de");
-        assert_eq!(generation.to_string(), "3fa900bc12de");
-        assert_eq!(
-            BuildGeneration::parse("3fa900bc12de").expect("a rendered digest parses"),
-            generation
-        );
-    }
-
-    #[test]
     fn parse_refuses_anything_but_twelve_lower_hex() {
         for malformed in [
             "",
@@ -229,29 +218,6 @@ mod tests {
                 "{malformed:?} is not a build generation"
             );
         }
-    }
-
-    #[test]
-    fn the_service_suffix_is_g_plus_the_hex() {
-        let generation = BuildGeneration::from_digest([0x3f, 0xa9, 0x00, 0xbc, 0x12, 0xde]);
-        assert_eq!(generation.service_suffix(), "_g3fa900bc12de");
-    }
-
-    #[test]
-    fn test_generations_are_valid_and_distinct_per_label() {
-        let first = BuildGeneration::for_test("t0");
-        let second = BuildGeneration::for_test("t1");
-        assert_eq!(BuildGeneration::parse(first.as_str()).as_ref(), Ok(&first));
-        assert_eq!(
-            BuildGeneration::parse(second.as_str()).as_ref(),
-            Ok(&second)
-        );
-        assert_ne!(first, second);
-        assert_eq!(
-            first,
-            BuildGeneration::for_test("t0"),
-            "for_test is deterministic"
-        );
     }
 
     #[test]

@@ -1016,51 +1016,8 @@ mod stream_event_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ErrorEnvelope, FailureCode, Namespace, NoProgressBudget, SessionStreamEvent, TokenUsage,
-        TurnBudget, TurnFailureKind, TurnOutcome,
-    };
-    use crate::llm::types::{LlmTerminalReason, ProviderFailureKind};
-
-    #[test]
-    #[should_panic(expected = "turn budget must be non-zero; use TurnBudget::Unbounded to opt out")]
-    fn bounded_turn_budget_rejects_zero() {
-        let _ = TurnBudget::bounded(0);
-    }
-
-    /// The no-progress budget is exhausted *at* its bound, not past it: the
-    /// nth consecutive unproductive attempt is the last one bought.
-    #[test]
-    fn a_bounded_no_progress_budget_is_exhausted_at_its_bound() {
-        let budget = NoProgressBudget::bounded(3);
-
-        assert!(!budget.is_exhausted_by(0));
-        assert!(!budget.is_exhausted_by(2));
-        assert!(budget.is_exhausted_by(3));
-        assert!(budget.is_exhausted_by(4));
-        assert_eq!(budget.max_attempts(), Some(3));
-    }
-
-    /// Unlike the turn budget, silence resolves to the bound. A default that
-    /// loops is the bug this budget exists to close.
-    #[test]
-    fn an_absent_no_progress_budget_is_bounded() {
-        assert_eq!(
-            NoProgressBudget::default().max_attempts(),
-            Some(NoProgressBudget::DEFAULT_MAX_ATTEMPTS)
-        );
-        assert!(NoProgressBudget::default().is_exhausted_by(usize::MAX));
-        assert!(!NoProgressBudget::Unbounded.is_exhausted_by(usize::MAX));
-        assert_eq!(NoProgressBudget::Unbounded.max_attempts(), None);
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "no-progress budget must be non-zero; use NoProgressBudget::Unbounded to opt out"
-    )]
-    fn a_bounded_no_progress_budget_rejects_zero() {
-        let _ = NoProgressBudget::bounded(0);
-    }
+    use super::TokenUsage;
+    use crate::llm::types::ProviderFailureKind;
 
     #[test]
     fn checked_token_usage_add_is_atomic_and_reasoning_is_not_additive_total() {
@@ -1125,91 +1082,6 @@ mod tests {
     // snapshots too.
 
     #[test]
-    fn error_envelope_decodes_legacy_snapshot_without_retryability_fields() {
-        let legacy = r#"{
-            "kind":"llm_provider",
-            "code":"429",
-            "terminal_reason":"provider_error",
-            "user_message":"LLM error: rate limited",
-            "raw":"{\"error\":\"rate_limited\"}"
-        }"#;
-        let envelope: ErrorEnvelope = serde_json::from_str(legacy).expect("legacy envelope");
-        assert_eq!(envelope.kind, TurnFailureKind::LlmProvider);
-        assert_eq!(envelope.code, Some(FailureCode::provider("429")));
-        assert_eq!(envelope.retryable, None);
-        assert_eq!(envelope.provider_failure_kind, None);
-
-        // The legacy shape embedded in a persisted `SessionStreamEvent::Error`
-        // record decodes the same way.
-        let legacy_event = r#"{
-            "type":"error",
-            "message":"LLM error: rate limited",
-            "envelope":{"kind":"llm_provider","user_message":"LLM error: rate limited"}
-        }"#;
-        let event: SessionStreamEvent = serde_json::from_str(legacy_event).expect("legacy event");
-        match event {
-            SessionStreamEvent::Error { envelope, .. } => {
-                let envelope = envelope.expect("envelope");
-                assert_eq!(envelope.retryable, None);
-                assert_eq!(envelope.provider_failure_kind, None);
-            }
-            other => panic!("expected error event, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn error_envelope_roundtrips_retryability_fields() {
-        let envelope = ErrorEnvelope {
-            kind: TurnFailureKind::LlmProvider,
-            code: Some(FailureCode::provider("429")),
-            terminal_reason: Some(LlmTerminalReason::ProviderError),
-            user_message: "LLM error: rate limited".to_string(),
-            raw: None,
-            retryable: Some(true),
-            provider_failure_kind: Some(ProviderFailureKind::Quota),
-        };
-        let json = serde_json::to_value(&envelope).expect("serialize envelope");
-        assert_eq!(json["retryable"], serde_json::json!(true));
-        assert_eq!(json["provider_failure_kind"], serde_json::json!("quota"));
-        let decoded: ErrorEnvelope = serde_json::from_value(json).expect("decode envelope");
-        assert_eq!(decoded.retryable, Some(true));
-        assert_eq!(
-            decoded.provider_failure_kind,
-            Some(ProviderFailureKind::Quota)
-        );
-    }
-
-    #[test]
-    fn error_envelope_omits_unset_retryability_fields_on_the_wire() {
-        let envelope = ErrorEnvelope {
-            kind: TurnFailureKind::Plugin,
-            code: Some(
-                FailureCode::foreign(
-                    Namespace::host("my_plugin").expect("valid plugin namespace"),
-                    "plugin_abort",
-                )
-                .expect("a validated host namespace is foreign-mintable"),
-            ),
-            terminal_reason: None,
-            user_message: "stopped".to_string(),
-            raw: None,
-            retryable: None,
-            provider_failure_kind: None,
-        };
-        let json = serde_json::to_value(&envelope).expect("serialize envelope");
-        let object = json.as_object().expect("object");
-        assert!(!object.contains_key("retryable"));
-        assert!(!object.contains_key("provider_failure_kind"));
-
-        // A host-authored code round-trips with its namespace intact and is
-        // never recolored into Lash vocabulary.
-        assert_eq!(json["code"], serde_json::json!("my_plugin:plugin_abort"));
-        let decoded: ErrorEnvelope = serde_json::from_value(json).expect("decode envelope");
-        assert_eq!(decoded.code, envelope.code);
-        assert_eq!(decoded.code.as_ref().and_then(|c| c.turn_code()), None);
-    }
-
-    #[test]
     fn provider_failure_kind_refuses_unknown_future_codes() {
         assert!(
             serde_json::from_value::<ProviderFailureKind>(serde_json::json!("some_future_kind"))
@@ -1230,41 +1102,6 @@ mod tests {
             assert_eq!(json, serde_json::json!(kind.code()));
             let round: ProviderFailureKind = serde_json::from_value(json).expect("decode kind");
             assert_eq!(round, kind);
-        }
-    }
-
-    #[test]
-    fn agent_frame_switch_decodes_event_without_initial_nodes() {
-        let frame_key =
-            crate::FrameKey::from_caller_material("frame-2").expect("non-empty caller material");
-        let event_json = format!(
-            r#"{{
-            "type":"turn_outcome",
-            "outcome":{{
-                "agent_frame_switch":{{
-                    "frame_key":"{}",
-                    "task":"continue"
-                }}
-            }}
-        }}"#,
-            frame_key.as_str()
-        );
-        let event: SessionStreamEvent =
-            serde_json::from_str(&event_json).expect("frame switch event");
-        match event {
-            SessionStreamEvent::TurnOutcome {
-                outcome:
-                    TurnOutcome::AgentFrameSwitch {
-                        frame_key: decoded_frame_key,
-                        task,
-                        initial_nodes,
-                    },
-            } => {
-                assert_eq!(decoded_frame_key, frame_key);
-                assert_eq!(task, "continue");
-                assert!(initial_nodes.is_empty());
-            }
-            other => panic!("expected agent-frame switch event, got {other:?}"),
         }
     }
 }

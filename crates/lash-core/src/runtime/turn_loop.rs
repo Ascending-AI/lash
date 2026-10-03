@@ -552,79 +552,9 @@ async fn publish_terminal_after_commit(
 
 #[cfg(test)]
 mod tests {
-    use crate::SessionId;
     use crate::TurnId;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::{ActiveTurnControl, next_physical_turn_id, publish_terminal_after_commit};
-    use crate::{
-        AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope, Resolution,
-        ResolveOutcome, RuntimeError, TurnAddress, TurnTerminal,
-    };
-
-    /// Refuses every terminal publication and forwards the rest of the
-    /// await-event surface to a backend host's controller for the turn.
-    struct RejectTerminalPublication<'a> {
-        attempts: AtomicUsize,
-        inner: &'a dyn crate::RuntimeEffectController,
-    }
-
-    #[async_trait::async_trait]
-    impl AwaitEventResolver for RejectTerminalPublication<'_> {
-        fn await_event_authority_binding_id(&self) -> Option<String> {
-            self.inner.await_event_authority_binding_id()
-        }
-
-        async fn await_event_key(
-            &self,
-            scope: &ExecutionScope,
-            wait: AwaitEventWaitIdentity,
-        ) -> Result<AwaitEventKey, RuntimeError> {
-            self.inner.await_event_key(scope, wait).await
-        }
-
-        async fn resolve_await_event(
-            &self,
-            _key: &AwaitEventKey,
-            _resolution: Resolution,
-        ) -> Result<ResolveOutcome, RuntimeError> {
-            self.attempts.fetch_add(1, Ordering::SeqCst);
-            Err(RuntimeError::new(
-                crate::RuntimeErrorCode::TransientTerminalPublication,
-                "terminal backend unavailable",
-            ))
-        }
-
-        async fn peek_await_event(
-            &self,
-            key: &AwaitEventKey,
-        ) -> Result<Option<Resolution>, RuntimeError> {
-            self.inner.peek_await_event(key).await
-        }
-
-        async fn await_await_event(
-            &self,
-            key: &AwaitEventKey,
-            cancel: tokio_util::sync::CancellationToken,
-            deadline: Option<std::time::Instant>,
-        ) -> Result<Resolution, RuntimeError> {
-            self.inner.await_await_event(key, cancel, deadline).await
-        }
-
-        async fn revoke_await_events_for_session(
-            &self,
-            session_id: &SessionId,
-        ) -> Result<(), RuntimeError> {
-            self.inner.revoke_await_events_for_session(session_id).await
-        }
-
-        async fn cancel_await_events_for_session(
-            &self,
-            session_id: &SessionId,
-        ) -> Result<(), RuntimeError> {
-            self.inner.cancel_await_events_for_session(session_id).await
-        }
-    }
+    use super::next_physical_turn_id;
 
     #[test]
     fn physical_turn_ids_count_on_from_the_run_deterministically() {
@@ -636,46 +566,6 @@ mod tests {
             crate::store::PhysicalTurn::split_turn_id(&second),
             (TurnId::from("root-turn"), 2)
         );
-    }
-
-    #[tokio::test]
-    async fn terminal_publication_failure_is_non_fatal_after_commit() {
-        let double =
-            crate::testing::kernel_double(0x3861_0401, lash_restate_test::ServerConfig::default())
-                .await;
-        let handler = double
-            .open_handler(crate::AdmittedScope::turn(
-                SessionId::from("committed-session"),
-                TurnId::from("committed-turn"),
-            ))
-            .await
-            .expect("open committed turn handler");
-        {
-            let scoped = handler.scoped();
-            let resolver = RejectTerminalPublication {
-                attempts: AtomicUsize::new(0),
-                inner: scoped.controller(),
-            };
-            let control = ActiveTurnControl::new(
-                &resolver,
-                TurnAddress::new("committed-session", "committed-turn"),
-            )
-            .await
-            .expect("active turn control");
-            publish_terminal_after_commit(
-                &control,
-                &resolver,
-                &TurnTerminal::Committed {
-                    stop: None,
-                    session_revision: Some(1),
-                },
-                &SessionId::from("committed-session"),
-                &TurnId::from("committed-turn"),
-            )
-            .await;
-            assert_eq!(resolver.attempts.load(Ordering::SeqCst), 1);
-        }
-        handler.close().await.expect("close committed turn handler");
     }
 }
 

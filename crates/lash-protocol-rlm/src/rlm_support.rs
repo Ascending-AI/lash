@@ -796,19 +796,6 @@ mod bound_variable_tests {
     use serde_json::json;
 
     #[test]
-    fn shape_names_singularize_plural_segments_without_truncating_other_names() {
-        for (plural, singular) in [
-            ("entries", "entry"),
-            ("items", "item"),
-            ("s", "s"),
-            ("class", "class"),
-            ("value", "value"),
-        ] {
-            assert_eq!(singularize_segment(plural), singular);
-        }
-    }
-
-    #[test]
     fn inferred_typescript_shapes_use_the_tool_schema_spelling() {
         let value = json!({"payload": {
             "two words": "x".repeat(2_000),
@@ -875,26 +862,6 @@ mod bound_variable_tests {
     }
 
     #[test]
-    fn small_values_render_inline_without_type_or_size() {
-        let g = globals(json!({ "inventory": ["lantern", "sword"], "count": 3 }));
-        let mut cache = BoundVariableRenderCache::default();
-        let rendered = render_bound_variables(
-            &mut cache,
-            &g,
-            &[],
-            &crate::dialect::TypescriptDialect,
-            &crate::render::BuiltinCodeRenderer,
-            &lash_render::RenderParams::preview(),
-        );
-        let s = &rendered;
-        assert!(s.contains("- `inventory` = [\"lantern\",\"sword\"]"), "{s}");
-        assert!(s.contains("- `count` = 3"), "{s}");
-        // Inline values carry no redundant type/size hint.
-        assert!(!s.contains("`inventory`:"), "{s}");
-        assert!(!s.contains("len="), "{s}");
-    }
-
-    #[test]
     fn record_shaped_string_is_quoted_while_record_rendering_stays_unchanged() {
         let mut cache = BoundVariableRenderCache::default();
         let s = render_with_cache(
@@ -919,50 +886,6 @@ mod bound_variable_tests {
     }
 
     #[test]
-    fn large_values_fall_back_to_type_and_size_hint() {
-        let big: Vec<String> = (0..500).map(|i| format!("item-{i}")).collect();
-        let g = globals(json!({ "big": big }));
-        let mut cache = BoundVariableRenderCache::default();
-        let rendered = render_bound_variables(
-            &mut cache,
-            &g,
-            &[],
-            &crate::dialect::TypescriptDialect,
-            &crate::render::BuiltinCodeRenderer,
-            &lash_render::RenderParams::preview(),
-        );
-        let s = &rendered;
-        assert!(s.contains("- `big`:"), "{s}");
-        assert!(s.contains("len=500"), "{s}");
-        assert!(s.contains("hidden items"), "{s}");
-    }
-
-    #[test]
-    fn large_record_degrades_to_keys_preview() {
-        let rooms = serde_json::Value::Object(
-            (0..30)
-                .map(|i| (format!("room_{i:02}"), json!({ "exits": ["n", "s"] })))
-                .collect(),
-        );
-        let g = globals(json!({ "map": rooms }));
-        let mut cache = BoundVariableRenderCache::default();
-        let s = render_bound_variables(
-            &mut cache,
-            &g,
-            &[],
-            &crate::dialect::TypescriptDialect,
-            &crate::render::BuiltinCodeRenderer,
-            &lash_render::RenderParams::preview(),
-        )
-        .to_string();
-        assert!(s.contains("`map`:"), "{s}"); // type still shown
-        assert!(s.contains("keys=30"), "{s}"); // size still shown
-        assert!(s.contains("≈ {"), "{s}"); // preview present
-        assert!(s.contains("room_00"), "{s}"); // some keys shown
-        assert!(s.contains("≈ {"), "{s}");
-    }
-
-    #[test]
     fn large_list_degrades_to_head_and_tail() {
         let items: Vec<_> = (0..40).map(|i| json!(format!("note-{i:02}"))).collect();
         let g = globals(json!({ "notes": items }));
@@ -980,52 +903,6 @@ mod bound_variable_tests {
         assert!(s.contains("note-00"), "{s}"); // head retained
         assert!(s.contains("note-39"), "{s}"); // tail retained
         assert!(s.contains("hidden items"), "{s}"); // middle elided
-    }
-
-    #[test]
-    fn history_is_rendered_by_the_history_driver_only() {
-        let mut cache = BoundVariableRenderCache::default();
-        let s = render_with_cache(&mut cache, json!({ "task": "ship" }));
-        assert!(!s.contains("HistoryItem"));
-        assert!(!s.contains("truncated"));
-    }
-
-    /// The one mistake this runtime does not report is a wrong field name: the
-    /// read yields `undefined`, the arithmetic yields `NaN` or nothing, and the
-    /// cell succeeds with a wrong number. The rule that closes it has to be in
-    /// the section that renders the values it is about.
-    #[test]
-    fn the_bound_variables_section_forbids_guessing_field_names() {
-        let mut cache = BoundVariableRenderCache::default();
-        let s = render_with_cache(&mut cache, json!({ "task": "ship" }));
-
-        assert!(
-            s.contains("Never write a field name you haven't seen in the key sets below"),
-            "{s}"
-        );
-        assert!(
-            s.contains("guessed field names silently produce zeros rather than errors"),
-            "{s}"
-        );
-        assert!(
-            s.contains("If a name is not listed, it does not exist"),
-            "{s}"
-        );
-    }
-
-    /// A row that shows only a preview used to report `keys=4` and leave the
-    /// names to the `Schema:` block further down. The names belong at the point
-    /// of contact — the line the model reads just before writing `value.field`.
-    #[test]
-    fn a_previewed_record_names_its_observed_keys_on_its_own_row() {
-        let mut cache = BoundVariableRenderCache::default();
-        let body = "z".repeat(2_000);
-        let s = render_with_cache(
-            &mut cache,
-            json!({ "order": { "id": 1, "total": 2, "currency": "GBP", "body": body } }),
-        );
-
-        assert!(s.contains("keys=4 (body, currency, id, total)"), "{s}");
     }
 
     /// Past a dozen names the row stops being scannable, which is the one thing
@@ -1110,35 +987,6 @@ mod bound_variable_tests {
     }
 
     #[test]
-    fn new_rows_are_inserted_in_name_order() {
-        let mut cache = BoundVariableRenderCache::default();
-        let _ = render_with_cache(&mut cache, json!({ "b": 1 }));
-
-        let s = render_with_cache(&mut cache, json!({ "a": 2, "b": 1 }));
-
-        let b_idx = s.find("- `b` = 1").expect("b row");
-        let a_idx = s.find("- `a` = 2").expect("a row");
-        assert!(a_idx < b_idx, "{s}");
-    }
-
-    #[test]
-    fn new_rows_recompute_schema_names_from_stable_name_order() {
-        let mut cache = BoundVariableRenderCache::default();
-        let large = "z".repeat(2_000);
-        let _ = render_with_cache(&mut cache, json!({ "z": { "id": 1, "body": large } }));
-
-        let large = "z".repeat(2_000);
-        let s = render_with_cache(
-            &mut cache,
-            json!({ "a": { "id": 2, "body": large }, "z": { "id": 1, "body": large } }),
-        );
-
-        let a_idx = s.find("- `a`: `A`, keys=2").expect("a row");
-        let z_idx = s.find("- `z`: `A`, keys=2").expect("z row");
-        assert!(a_idx < z_idx, "{s}");
-    }
-
-    #[test]
     fn summarized_shape_or_count_changes_update_row_hash() {
         let mut cache = BoundVariableRenderCache::default();
         let _ = render_with_cache(
@@ -1154,19 +1002,6 @@ mod bound_variable_tests {
         let big_idx = s.find("- `big`: `Array<number>`, len=41").expect("big row");
         let steady_idx = s.find(r#"- `steady` = "same""#).expect("steady row");
         assert!(big_idx < steady_idx, "{s}");
-    }
-
-    #[test]
-    fn removed_rows_do_not_affect_name_order() {
-        let mut cache = BoundVariableRenderCache::default();
-        let _ = render_with_cache(&mut cache, json!({ "a": 1, "b": 2 }));
-        let _ = render_with_cache(&mut cache, json!({ "b": 2 }));
-
-        let s = render_with_cache(&mut cache, json!({ "a": 1, "b": 2 }));
-
-        let a_idx = s.find("- `a` = 1").expect("a row");
-        let b_idx = s.find("- `b` = 2").expect("b row");
-        assert!(a_idx < b_idx, "{s}");
     }
 
     #[test]

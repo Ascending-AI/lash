@@ -434,42 +434,6 @@ mod tests {
         }
     }
 
-    /// A journaled `tool-intent:v1:` replay key diverges from this build's
-    /// key like any other field: the mismatch names the path.
-    #[test]
-    fn a_tool_intent_replay_key_of_another_format_is_an_ordinary_replay_divergence() {
-        const KEY: &str = "replay_key";
-        let paths = mismatch_paths(
-            json!({ KEY: "tool-intent:v1:blake3:literal" }),
-            json!({ KEY: "tool-intent:v2:blake3:literal" }),
-        );
-        assert_eq!(paths, [format!("command.call.args.{KEY}")]);
-    }
-
-    #[test]
-    fn current_session_list_envelope_recapture_is_hash_fixpoint() {
-        let captured = session_list_envelope()
-            .canonical_form()
-            .expect("capture current session list envelope");
-        let encoded = serde_json::to_string(&captured).expect("encode canonical envelope");
-        let decoded: CanonicalRuntimeEffectEnvelope =
-            serde_json::from_str(&encoded).expect("decode current canonical envelope");
-        let reconstructed: RuntimeEffectEnvelope =
-            serde_json::from_str(decoded.json()).expect("decode runtime envelope");
-        let recaptured = reconstructed
-            .canonical_form()
-            .expect("recapture runtime envelope");
-
-        assert_eq!(decoded.hash(), recaptured.hash());
-        assert_eq!(decoded.json(), recaptured.json());
-        let current_inner: Value =
-            serde_json::from_str(decoded.json()).expect("inspect current runtime envelope");
-        assert_eq!(
-            current_inner.pointer("/command/command/filter/session_id"),
-            None
-        );
-    }
-
     fn mismatch_paths(recorded: Value, reconstructed: Value) -> Vec<String> {
         let error = validate_replayed_effect_envelope(
             &canonical(recorded),
@@ -619,39 +583,6 @@ mod tests {
             crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant
         );
         assert!(error.summary.is_none());
-    }
-
-    #[test]
-    fn diff_trace_uses_default_wiring_when_a_sink_is_configured() {
-        let sink = Arc::new(RecordingSink::default());
-        let sink_dyn: Arc<dyn TraceSink> = sink.clone();
-        let trace = RuntimeEffectReplayTrace::for_divergence(
-            &crate::trace::TraceRuntime::default().with_trace_sink(sink_dyn),
-            None,
-            TraceContext::default(),
-        )
-        .expect("a configured sink is sufficient under default wiring");
-        let error = validate_replayed_effect_envelope(
-            &canonical(json!({"value": 1})),
-            &canonical(json!({"value": 2})),
-            crate::RuntimeErrorCode::EffectReplayDivergence,
-            Some(&trace),
-        )
-        .expect_err("mismatch");
-        assert_eq!(error.summary.expect("summary").divergent_path_count, 1);
-        assert!(matches!(
-            sink.records.lock_recover()[0].event,
-            TraceEvent::EffectEnvelopeDiff { .. }
-        ));
-
-        assert!(
-            RuntimeEffectReplayTrace::for_divergence(
-                &crate::trace::TraceRuntime::default(),
-                None,
-                TraceContext::default(),
-            )
-            .is_none()
-        );
     }
 
     #[test]

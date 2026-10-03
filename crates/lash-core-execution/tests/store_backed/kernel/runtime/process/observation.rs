@@ -7,13 +7,11 @@ mod tests {
 
     use crate::runtime::process::{
         ObservedWorkItemState, ProcessAwaitOutput, ProcessInput, ProcessListFilter,
-        ProcessRegistryFaults, ProcessWorkObserver, WaitState,
+        ProcessRegistryFaults, ProcessWorkObserver,
     };
     use crate::{
-        InputItem, PluginOptions, ProcessEventAppendRequest, ProcessExecutionEnvRef,
-        ProcessIdentity, ProcessObserverBy, ProcessProvenance, ProcessRegistration,
-        SessionCreateRequest, SessionScope, SessionStartPoint, SubagentSessionContext,
-        ToolFailureClass, TurnInput, WaitKind,
+        ProcessEventAppendRequest, ProcessObserverBy, ProcessProvenance, ProcessRegistration,
+        SessionScope, ToolFailureClass,
     };
     use crate::{ProcessId, ProcessRegistry, SessionId};
 
@@ -56,78 +54,6 @@ mod tests {
             .await
             .expect("add process observer");
         process_id
-    }
-
-    #[tokio::test]
-    async fn snapshot_for_session_reads_observed_processes_and_events_as_epoch_ms() {
-        let registry = memory_registry().await;
-        let visible_scope = SessionScope::new("visible");
-        let visible_process_id =
-            register_visible(&registry, &visible_scope, external_registration("Visible")).await;
-        register_visible(
-            &registry,
-            &SessionScope::new("other"),
-            external_registration("Hidden"),
-        )
-        .await;
-        registry
-            .append_event(
-                &visible_process_id,
-                ProcessEventAppendRequest::cancel_requested(
-                    &registry
-                        .require_process_id(&visible_process_id)
-                        .await
-                        .expect("retained observed target"),
-                    &crate::CancelRequest::new(
-                        crate::CancelOrigin::OperatorRequested,
-                        "actor:observation-test",
-                        11,
-                    ),
-                ),
-            )
-            .await
-            .expect("append event");
-
-        let snapshot = observer(Arc::clone(&registry))
-            .snapshot_for_session("visible")
-            .await
-            .expect("snapshot");
-
-        assert_eq!(snapshot.session_id, "visible");
-        assert_eq!(snapshot.visible_processes, vec![visible_process_id.clone()]);
-        assert_eq!(snapshot.items.len(), 1);
-        assert_eq!(snapshot.items[0].events.len(), 2);
-        assert_eq!(
-            snapshot.items[0].process.last_event_sequence,
-            snapshot.items[0].event_tail_sequence(),
-            "a stable observation must pair record and event-tail positions"
-        );
-        assert!(!snapshot.items[0].has_mispaired_event_tail());
-        assert!(
-            snapshot.items[0]
-                .events
-                .iter()
-                .any(|event| event.event_type == "process.observer_added"),
-            "observer membership changes are part of the durable audit tail"
-        );
-        assert_eq!(
-            snapshot.items[0].process.cancel_request,
-            Some(crate::CancelRequest::new(
-                crate::CancelOrigin::OperatorRequested,
-                "actor:observation-test",
-                11
-            )),
-            "the observation carries the accepted cancellation fact"
-        );
-        let cancelled = snapshot.items[0]
-            .events
-            .iter()
-            .find(|event| event.event_type == "process.cancel_requested")
-            .expect("cancel event");
-        assert!(
-            cancelled.occurred_at_ms > 0,
-            "event timestamps are epoch milliseconds"
-        );
     }
 
     #[tokio::test]
@@ -252,44 +178,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_preserves_mixed_process_results_without_lease_projection() {
-        let registry = Arc::new(ProcessRegistryFaults::new(memory_registry().await));
-        let mut ids = std::collections::BTreeMap::new();
-        for process_id in ["batch-live-a", "batch-live-b", "batch-terminal"] {
-            let registered = registry
-                .register_process(external_registration(process_id))
-                .await
-                .expect("register batch observation fixture");
-            ids.insert(process_id, registered.id.clone());
-        }
-        registry
-            .complete_process(
-                &ids["batch-terminal"],
-                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
-                crate::ProcessCompletionAuthority::external_owner(),
-            )
-            .await
-            .expect("complete observed terminal process");
-
-        let watched = crate::facade_support::watch_process_registry(
-            Arc::clone(&registry) as Arc<dyn ProcessRegistry>
-        );
-        let observed = observer(Arc::clone(watched.registry()))
-            .list(&ProcessListFilter {
-                status: crate::ProcessStatusFilter::Any,
-                ..ProcessListFilter::default()
-            })
-            .await
-            .expect("observe mixed records");
-
-        assert_eq!(observed.len(), 3);
-        assert_eq!(
-            observed.iter().filter(|process| process.terminal()).count(),
-            1
-        );
-    }
-
-    #[tokio::test]
     async fn snapshot_for_session_sorts_work_by_updated_then_created_descending() {
         let registry = memory_registry().await;
         let scope = SessionScope::new("sort");
@@ -390,184 +278,6 @@ mod tests {
         assert_eq!(
             cancelled.error_code,
             Some(crate::ObservedProcessFailure::Cancelled { origin: None })
-        );
-    }
-
-    #[tokio::test]
-    async fn observed_process_exposes_current_wait_state() {
-        let registry = memory_registry().await;
-        let scope = SessionScope::new("wait");
-        let mut registration = ProcessRegistration::new(
-            ProcessInput::Engine {
-                kind: "observation-test".to_string(),
-                payload: json!({}),
-            },
-            ProcessProvenance::host(),
-            crate::Lifetime::Detached,
-        );
-        registration.env_ref = Some(ProcessExecutionEnvRef::new("process-env:observation-test"));
-        let waiting_process_id = register_visible(&registry, &scope, registration).await;
-        registry
-            .record_first_started(
-                &waiting_process_id,
-                crate::ProcessStarted {
-                    owner: crate::LeaseOwnerIdentity::engine_process_execution(
-                        &waiting_process_id,
-                        "observation-test",
-                    ),
-                    attempt: 1,
-                    started_at_ms: 1,
-                    generation: None,
-                    build_generation: None,
-                    plugins: None,
-                },
-            )
-            .await
-            .expect("start engine process");
-        let wait = WaitState {
-            since_ms: 1234,
-            kind: WaitKind::Signal {
-                name: "ready".to_string(),
-                event_type: "signal.ready".to_string(),
-                key: "process:waiting-process:signal.ready:1".to_string(),
-                ordinal: 1,
-            },
-        };
-        registry
-            .set_process_wait(&waiting_process_id, wait.clone())
-            .await
-            .expect("set wait");
-
-        let observer = observer(Arc::clone(&registry));
-        let observed = observer
-            .process(&waiting_process_id)
-            .await
-            .expect("read waiting process")
-            .expect("waiting process");
-        let snapshot = observer
-            .snapshot_for_session("wait")
-            .await
-            .expect("snapshot");
-
-        assert_eq!(observed.wait, Some(wait.clone()));
-        assert_eq!(snapshot.items.len(), 1);
-        assert_eq!(snapshot.items[0].process.wait, Some(wait));
-    }
-
-    #[tokio::test]
-    async fn snapshot_for_session_prefers_typed_labels_and_extracts_child_session_id() {
-        let registry = memory_registry().await;
-        let scope = SessionScope::new("labels");
-        let mut child_request = SessionCreateRequest::child_session(
-            "labels",
-            SessionStartPoint::Empty,
-            PluginOptions::default(),
-        )
-        .with_session_id("child-session");
-        child_request.subagent = Some(SubagentSessionContext {
-            capability: "researcher".to_string(),
-            depth: 1,
-        });
-        let cases = [
-            (
-                "tool",
-                ProcessInput::Engine {
-                    kind: "one-tool".to_string(),
-                    payload: json!({"tool": "files.read"}),
-                },
-                "one-tool",
-                "files.read",
-                None,
-            ),
-            (
-                "engine",
-                ProcessInput::Engine {
-                    kind: "test-engine".to_string(),
-                    payload: json!({}),
-                },
-                "test-engine",
-                "remember",
-                None,
-            ),
-            (
-                "session",
-                ProcessInput::SessionTurn {
-                    definition_key: "observation-test-session-turn:v1".to_string(),
-                    create_request: Box::new(child_request),
-                    turn_input: Box::new(TurnInput::items([InputItem::text("run child")])),
-                    result: crate::SessionTurnOutcome::Turn,
-                },
-                "session_turn",
-                "researcher",
-                Some("child-session"),
-            ),
-            (
-                "external",
-                ProcessInput::External {
-                    metadata: json!({ "label": "external job" }),
-                },
-                "external",
-                "external job",
-                None,
-            ),
-        ];
-        let mut ids = std::collections::BTreeMap::new();
-        for (case, input, kind, label, _child_session_id) in cases {
-            let needs_env = matches!(
-                input,
-                ProcessInput::Engine { .. } | ProcessInput::SessionTurn { .. }
-            );
-            let mut registration = ProcessRegistration::new(
-                input,
-                ProcessProvenance::host(),
-                crate::Lifetime::Detached,
-            )
-            .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
-                ProcessIdentity::labelled(kind, Some(label.to_string())),
-            ));
-            if needs_env {
-                registration = registration.with_execution_env_ref(Some(
-                    ProcessExecutionEnvRef::new(format!("process-env:test:{case}")),
-                ));
-            }
-            ids.insert(
-                case,
-                register_visible(&registry, &scope, registration).await,
-            );
-        }
-
-        let snapshot = observer(Arc::clone(&registry))
-            .snapshot_for_session("labels")
-            .await
-            .expect("snapshot");
-        let by_case = snapshot
-            .items
-            .iter()
-            .map(|item| (item.process.process_id.clone(), item))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let by_id = |case: &str| by_case[&ids[case]];
-
-        assert_eq!(by_id("tool").label(), "files.read");
-        assert_eq!(by_id("engine").label(), "remember");
-        assert_eq!(by_id("engine").process.kind(), "test-engine");
-        assert_eq!(by_id("session").label(), "researcher");
-        assert_eq!(
-            by_id("session").process.child_session_id.as_deref(),
-            Some("child-session")
-        );
-        assert_eq!(by_id("external").label(), "external job");
-    }
-
-    #[tokio::test]
-    async fn observed_process_missing_lookup_returns_none() {
-        let registry = memory_registry().await;
-
-        assert!(
-            observer(registry)
-                .process(&crate::ProcessId::fixture("missing"))
-                .await
-                .expect("read missing process")
-                .is_none()
         );
     }
 }

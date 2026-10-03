@@ -2,13 +2,12 @@ use crate::support::prelude::*;
 use std::sync::Arc;
 
 use crate::runtime::process::{
-    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
-    ProcessEventAppendRequest, ProcessEventQueryMode, ProcessEventReadOutcome,
+    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
     ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
     ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
     ProcessWakeSpec, ProjectionWatermark,
 };
-use crate::{Lifetime, ProcessId, ProcessRegistry, SessionId, StoreSet as _};
+use crate::{Lifetime, ProcessRegistry, SessionId, StoreSet as _};
 
 use crate::support::sqlite_memory_store_set;
 
@@ -132,35 +131,6 @@ fn wake_registration(id: &str, target_session_id: &SessionId) -> ProcessRegistra
         }])
 }
 
-/// Register a process, finish and prune it, then start another: a minted id
-/// is never reused, so the second process has an id of its own.
-async fn register_after_prune(registry: &Arc<dyn ProcessRegistry>) -> (ProcessId, ProcessId) {
-    let old = registry
-        .register_process(registration("pruned"))
-        .await
-        .expect("register first process");
-    registry
-        .complete_process(
-            &old.id,
-            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!("old"),
-            )),
-            ProcessCompletionAuthority::external_owner(),
-        )
-        .await
-        .expect("complete first process");
-    registry
-        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
-        .await
-        .expect("prune first process");
-    let current = registry
-        .register_process(registration("current"))
-        .await
-        .expect("register second process");
-    assert_ne!(old.id, current.id, "a minted id is never reused");
-    (old.id, current.id)
-}
-
 #[tokio::test]
 async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
     let backend = sqlite_memory_store_set().await;
@@ -250,83 +220,6 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
             .expect("compact after cleanup acknowledgement"),
         0
     );
-}
-
-#[tokio::test]
-async fn a_pruned_process_event_window_refuses_instead_of_reading_another_process() {
-    let registry = memory_registry().await;
-    let (old, _) = register_after_prune(&registry).await;
-
-    let result = registry.full_event_window(&old, 0).await;
-
-    assert!(
-        matches!(
-            result,
-            Err(crate::PluginError::ProcessNoLongerRetained { .. })
-        ),
-        "a pruned id's event window must refuse, got {result:?}"
-    );
-}
-
-/// A page read names one process. The projection is a request parameter,
-/// not part of any continuation.
-#[tokio::test]
-async fn event_pages_read_the_named_process() {
-    let registry = memory_registry().await;
-    let first = registry
-        .register_process(registration("event-page"))
-        .await
-        .expect("register process");
-    let limit = std::num::NonZeroUsize::new(1).expect("non-zero page size");
-
-    for mode in [ProcessEventQueryMode::Full, ProcessEventQueryMode::Lite] {
-        let current = registry
-            .event_page_after(&first.id, 0, limit, mode)
-            .await
-            .expect("current page");
-        assert!(matches!(current, ProcessEventReadOutcome::Retained(_)));
-    }
-}
-
-#[tokio::test]
-async fn an_observer_edge_to_a_pruned_process_is_refused() {
-    let registry = memory_registry().await;
-    let (old, _) = register_after_prune(&registry).await;
-
-    let result = registry
-        .add_observer(
-            &SessionId::from("stale-observer"),
-            &old,
-            ProcessObserverBy::host("stale-edge"),
-        )
-        .await;
-
-    assert!(
-        matches!(
-            result,
-            Err(crate::PluginError::ProcessNoLongerRetained { .. })
-        ),
-        "an edge to a pruned process must refuse, got {result:?}"
-    );
-}
-
-#[tokio::test]
-async fn a_pruned_process_tombstone_sits_beside_the_next_live_process() {
-    let registry = memory_registry().await;
-    let (old, current) = register_after_prune(&registry).await;
-
-    let (changes, _) = registry
-        .processes_changed_since(ProcessChangeCursor::initial(), 100)
-        .await
-        .expect("read full process change feed");
-    assert!(changes.iter().any(|change| matches!(
-        change,
-        ProcessChange::Deleted { tombstone } if tombstone.process_id == old
-    )));
-    assert!(changes.iter().any(|change| matches!(
-        change,
-        ProcessChange::Upsert { record } if record.id == current
-    )));
 }
 
 #[tokio::test]

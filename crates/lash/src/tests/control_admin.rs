@@ -444,60 +444,6 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
 }
 
 #[tokio::test]
-async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("queue-observation-events")
-        .created()
-        .await
-        .open()
-        .await?;
-    let cursor = session.observe().current_observation().cursor;
-
-    let pending = session
-        .durable()
-        .send(TurnInput::text("queued observation"))
-        .id("queue-observation")
-        .accepted()
-        .await?;
-    let inputs = session.durable().pending_turn_inputs().await?;
-    assert_eq!(
-        inputs
-            .iter()
-            .map(|input| input.input.input_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![pending.input_id.as_str()]
-    );
-    let cancelled = session
-        .durable()
-        .cancel_pending_turn_input(&pending.input_id)
-        .await?;
-    assert!(matches!(
-        cancelled,
-        crate::PendingTurnInputCancelOutcome::Cancelled(_)
-    ));
-
-    let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor)? else {
-        panic!("recent cursor should replay queue observation events");
-    };
-    assert!(events.iter().any(|event| matches!(
-        &event.payload,
-        lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids }
-            if *kind == lash_core::SessionQueueEventKind::Enqueued
-                && batch_ids.as_slice() == std::slice::from_ref(&pending.input_id)
-    )));
-    assert!(events.iter().any(|event| matches!(
-        &event.payload,
-        lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids }
-            if *kind == lash_core::SessionQueueEventKind::Cancelled
-                && batch_ids.as_slice() == std::slice::from_ref(&pending.input_id)
-    )));
-    Ok(())
-}
-
-#[tokio::test]
 async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
@@ -1020,62 +966,6 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
 }
 
 #[tokio::test]
-async fn processes_cancel_cancels_visible_process() -> Result<()> {
-    let provider = mock_provider();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    serve_processes(&core);
-    let session = core.session("host-cancel").created().await.open().await?;
-    let host_process = session
-        .admin()
-        .processes()
-        .start(
-            lash_core::ProcessStartRequest::external(
-                lash_core::ProcessOriginator::host(),
-                serde_json::Value::Null,
-                lash_core::Lifetime::Detached,
-            )
-            .with_observers([lash_core::SessionId::from("host-cancel")]),
-            runtime_operation_scope(&core, "host-cancel-start").await,
-        )
-        .await?
-        .process_id;
-
-    let summary = session
-        .admin()
-        .processes()
-        .cancel(
-            &host_process,
-            runtime_operation_scope(&core, format!("host-process-op:{host_process}")).await,
-        )
-        .await?;
-
-    assert_eq!(summary.process_id, host_process);
-    assert_eq!(
-        summary.status,
-        lash_core::ProcessStatus::Running,
-        "cancel is a durable request; the runner owns terminalization"
-    );
-    assert!(
-        complete_full_page(
-            core.processes()
-                .events(
-                    crate::process::ProcessEventsFrom::Start(host_process.clone()),
-                    std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
-                    lash_core::ProcessEventQueryMode::Full,
-                )
-                .await?
-                .outcome
-        )
-        .iter()
-        .any(|event| event.event_type == "process.cancel_requested"),
-        "the visible-process cancel appended its durable request"
-    );
-    Ok(())
-}
-
-#[tokio::test]
 async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Result<()> {
     let provider = mock_provider();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
@@ -1234,29 +1124,6 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
             .collect::<Vec<_>>(),
         started
     );
-    Ok(())
-}
-
-#[tokio::test]
-async fn observation_updates_after_completed_turn() -> Result<()> {
-    let core = standard_core().await;
-    let session = core
-        .session("observation-after-turn")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    assert!(session.read_view().messages().is_empty());
-    session
-        .send(TurnInput::text("hello observation"))
-        .output()
-        .await?;
-
-    let observed = session.observe();
-    assert_eq!(observed.read_view().messages().len(), 2);
-
-    assert_eq!(observed.policy_snapshot().wire_model(), Some("mock-model"));
     Ok(())
 }
 

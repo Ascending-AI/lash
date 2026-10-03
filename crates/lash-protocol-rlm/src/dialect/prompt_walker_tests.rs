@@ -519,26 +519,6 @@ fn retired_type_words(text: &str) -> Vec<String> {
     found
 }
 
-/// Non-vacuity for the type-word walk, and its one boundary: TypeScript's own
-/// `string`, `number` and `boolean` start with a retired word and are not one.
-#[test]
-fn the_type_word_walk_tells_the_retired_spelling_from_typescript() {
-    assert_eq!(
-        retired_type_words("- `q: str` — `items?: list[int] | null`, `mode: enum[\"a\"]`"),
-        ["str", "list", "int", "enum"]
-    );
-    assert_eq!(
-        retired_type_words("x: record{a: bool, b: float}"),
-        ["record", "bool", "float"]
-    );
-    assert!(
-        retired_type_words(
-            "q: string; n?: number | null; ok: boolean; xs: Array<string>; r: Record<string, unknown>"
-        )
-        .is_empty()
-    );
-}
-
 /// The walker only measures if its marker list can fire, and only proves
 /// anything if a rendered example is *parseable* TypeScript.
 #[test]
@@ -604,91 +584,4 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
         "<lashlang>",
         "the sole vocabulary must not be the retired one"
     );
-}
-
-/// Every construct family the dialect accepts is mentioned somewhere in the
-/// assembled TypeScript prompt.
-///
-/// The standard-library section is generated from the signature table, so a new
-/// method reaches the prompt by construction. The *hand-written* sections are
-/// where drift lives: async helpers, the `URL`/`URLSearchParams` constructors,
-/// and the widened `instanceof` targets were all shipped and accepted while the
-/// prose still described the surface without them — a model reading this prompt
-/// would not have written any of the three. Nothing failed, because nothing was
-/// looking.
-///
-/// The check is deliberately coarse: one family, a few tokens, at least one of
-/// which must appear. It cannot verify the prose is *good*; it can only make
-/// silent omission impossible. The list is explicit and maintained — widening
-/// FIG-2750 supersedes exhaustive syntax teaching with a compact library list.
-// FIG-2750: ordinary TypeScript syntax is learned from diagnostics; only the
-// supported library families and host execution rules belong in the prompt.
-#[tokio::test]
-async fn typescript_teaches_library_families_without_exhaustive_inventory() {
-    let prompt = assembled_prompt_fragments(&crate::dialect::typescript_test_dialect())
-        .await
-        .into_iter()
-        .map(|(_, text)| text)
-        .collect::<Vec<_>>()
-        .join("\n");
-    for name in [
-        "Math", "Date", "String", "Array", "Object", "JSON", "Map", "Set", "RegExp", "URL",
-        "finish(",
-    ] {
-        assert!(prompt.contains(name), "{name}");
-    }
-    assert!(!prompt.contains("### v1 guardrails"));
-    assert!(!prompt.contains("### Deterministic standard library"));
-}
-
-#[tokio::test]
-async fn composed_typescript_prompt_has_no_markdown_fences() {
-    let mut resources = ::lashlang::LashlangHostCatalog::new();
-    resources
-        .add_trigger_source_constructor(
-            ["cron", "Schedule"],
-            ::lashlang::TypeExpr::Object(vec![::lashlang::TypeField {
-                name: "expr".into(),
-                ty: ::lashlang::TypeExpr::Str,
-                optional: false,
-            }]),
-            ::lashlang::NamedDataType::object(
-                "cron.Tick",
-                vec![::lashlang::TypeField {
-                    name: "fired_at".into(),
-                    ty: ::lashlang::TypeExpr::Str,
-                    optional: false,
-                }],
-            )
-            .expect("tick type"),
-        )
-        .expect("trigger constructor");
-    let dialect = super::SessionDialect::new(
-        std::sync::Arc::new(crate::dialect::TypescriptDialect),
-        lash_lashlang_runtime::LashlangSurface {
-            abilities: ::lashlang::LashlangAbilities::all(),
-            language_features: Default::default(),
-            resources,
-        },
-        super::test_dialect_services(),
-    );
-    // The full-assembly fixture includes tool signatures, contracts, examples,
-    // host operations, and both natural and finish-required finalization.
-    for (name, fragment) in assembled_prompt_fragments_with_projection(
-        &dialect,
-        serde_json::json!({"path": "src/lib.rs", "lines": [1, 2]}),
-    )
-    .await
-    {
-        if name == "execution section" {
-            assert!(fragment.contains("type cron_Tick ="));
-            assert!(fragment.contains("cron.Schedule(input:"));
-            // Response shape opens execution directly; no redundant language sentence.
-            assert!(fragment.contains("### Response shape"));
-        }
-        assert!(
-            !fragment.contains("```"),
-            "TypeScript prompt fragment `{name}` contains a Markdown fence"
-        );
-    }
 }

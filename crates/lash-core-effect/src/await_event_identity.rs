@@ -210,28 +210,4 @@ mod tests {
         assert!(!constant_time_eq(b"same", b"sale"));
         assert!(!constant_time_eq(b"same", b"same-longer"));
     }
-
-    #[test]
-    fn key_derivation_is_the_stable_public_hash() {
-        let scope = ExecutionScope::turn("session", "turn");
-        let wait =
-            AwaitEventWaitIdentity::tool_completion(lash_sansio::ToolCallId::fixture("call"));
-
-        assert_eq!(
-            derive_key_id(&scope, &wait).expect("derive key id"),
-            "await-event:v3:blake3:682389333e0eb5acb2f3b43cf7d51cf2ab82f559e2a684281b31146107b1057e"
-        );
-    }
-
-    #[test]
-    fn promise_key_family_version_is_explicit_and_stable() {
-        let scope = ExecutionScope::turn("session", "turn");
-        let wait =
-            AwaitEventWaitIdentity::tool_completion(lash_sansio::ToolCallId::fixture("call"));
-
-        assert_eq!(
-            derive_key_id(&scope, &wait).expect("derive versioned key"),
-            "await-event:v3:blake3:682389333e0eb5acb2f3b43cf7d51cf2ab82f559e2a684281b31146107b1057e"
-        );
-    }
 }

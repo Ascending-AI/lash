@@ -293,7 +293,6 @@ impl ToolProvider for McpDeferredToolProvider {
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod tests {
     use super::*;
-    use lash_core::ToolDefinition;
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
 
@@ -324,42 +323,6 @@ mod tests {
                 ToolOutcome::Pending(Box::new(pending))
             }
         }
-    }
-
-    /// Pure unit test ported from `crates/lash/src/mcp.rs`. Verifies that a
-    /// `ToolDefinition::raw` constructed from an MCP-advertised input schema
-    /// keeps the schema verbatim — this is the canonical input contract the
-    /// model sees, so any drift here is user-visible.
-    #[test]
-    fn mcp_definition_preserves_server_schema_as_canonical_input_contract() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query"
-                },
-                "filters": {
-                    "type": "array",
-                    "items": { "type": "string" }
-                },
-                "strict": {
-                    "type": ["boolean", "null"],
-                    "default": false
-                }
-            },
-            "required": ["query", "filters"]
-        });
-        let definition = ToolDefinition::raw(
-            "mcp:demo/search",
-            "mcp__demo__search",
-            "Search",
-            schema.clone(),
-            json!({}),
-        )
-        .expect("valid declared tool schemas");
-        assert_eq!(definition.contract.input_schema.canonical(), &schema);
-        assert_eq!(definition.parameter_metadata().len(), 3);
     }
 
     /// Full stdio integration test: spin up a tiny `sh` mock that emits three

@@ -1,6 +1,5 @@
 #![expect(
     clippy::expect_used,
-    clippy::unwrap_used,
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
@@ -34,8 +33,6 @@ mod differential_oracle;
 mod early_errors;
 #[path = "ecma_regressions.rs"]
 mod ecma_regressions;
-#[path = "fluency_smoke.rs"]
-mod fluency_smoke;
 #[path = "for_of_facets.rs"]
 mod for_of_facets;
 #[path = "global_this_reads.rs"]

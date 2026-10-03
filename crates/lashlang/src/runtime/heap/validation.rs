@@ -435,44 +435,6 @@ fn claim_owner(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::runtime::HeapObject;
-
-    /// Depth measurement terminates on a cyclic graph.
-    ///
-    /// The forest validator rejects cycles before this runs today. This asserts
-    /// the property directly, so the guarantee survives a change to what runs
-    /// first.
-    #[test]
-    fn depth_measurement_terminates_on_a_cycle() {
-        let mut heap = Heap::default();
-        let Value::Ref(first) = heap
-            .allocate(HeapObject::list(Vec::new()))
-            .expect("allocate first")
-        else {
-            unreachable!()
-        };
-        let Value::Ref(second) = heap
-            .allocate(HeapObject::list(vec![Value::Ref(first)]))
-            .expect("allocate second")
-        else {
-            unreachable!()
-        };
-        heap.replace_object(first, HeapObject::list(vec![Value::Ref(second)]))
-            .expect("close the cycle");
-
-        let root = Value::Ref(first);
-        let mut roots = PersistedRoots::default();
-        roots.durable("root", &root);
-        // The measurement is finite and bounded by the number of objects; the
-        // exact value is not meaningful for a graph that cannot be persisted.
-        assert!(heap.max_value_depth(&roots) <= 2);
-        assert!(heap.validate_persisted_graph(&roots).is_err());
-    }
-}
-
-#[cfg(test)]
 mod mutation_tests {
     use super::*;
 

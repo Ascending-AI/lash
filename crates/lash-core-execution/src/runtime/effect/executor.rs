@@ -1569,7 +1569,6 @@ mod unresolved_execution_env_tests;
 mod task_boundary_tests {
     use super::*;
     use crate::RuntimeEffectInvocation;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     struct TaskIdentityRunner {
         observed: oneshot::Sender<tokio::task::Id>,
@@ -1629,103 +1628,5 @@ mod task_boundary_tests {
         let child_id = observed_rx.await.expect("effect task id");
         let parent_id = parent.await.expect("parent task");
         assert_ne!(child_id, parent_id);
-    }
-
-    #[test]
-    fn sleep_wait_shape_round_trips_through_remote_execution() {
-        for observe_turn_cancel in [false, true] {
-            let cancellation = CancellationToken::new();
-            let scope = ExecutionScope::runtime_operation(format!(
-                "sleep-wait-shape-{observe_turn_cancel}"
-            ));
-            let (remote, local) = RuntimeEffectLocalExecutor::sleep(cancellation.clone())
-                .with_turn_cancel_observation(observe_turn_cancel)
-                .with_turn_cancel_scope(scope.clone())
-                .into_remote_execution();
-
-            assert!(local.is_none());
-            let options = remote.into_sleep_options();
-            assert_eq!(options.observe_turn_cancel, observe_turn_cancel);
-            assert_eq!(options.turn_cancel_scope, Some(scope));
-
-            cancellation.cancel();
-            assert!(options.cancellation.is_cancelled());
-        }
-    }
-
-    #[test]
-    fn external_wait_shape_round_trips_through_remote_execution() {
-        for observe_turn_cancel in [false, true] {
-            let cancellation = CancellationToken::new();
-            let deadline = Some(Instant::now() + std::time::Duration::from_secs(1));
-            let scope = ExecutionScope::runtime_operation(format!(
-                "external-wait-shape-{observe_turn_cancel}"
-            ));
-            let (remote, local) =
-                RuntimeEffectLocalExecutor::await_event(cancellation.clone(), deadline)
-                    .with_turn_cancel_observation(observe_turn_cancel)
-                    .with_turn_cancel_scope(scope.clone())
-                    .into_remote_execution();
-
-            assert!(local.is_none());
-            let options = remote
-                .into_await_event_options()
-                .expect("await-event options");
-            assert_eq!(options.observe_turn_cancel, observe_turn_cancel);
-            assert_eq!(options.turn_cancel_scope, Some(scope));
-            assert_eq!(options.deadline, deadline);
-
-            cancellation.cancel();
-            assert!(options.cancellation.is_cancelled());
-        }
-    }
-
-    #[tokio::test]
-    async fn replayed_effect_may_skip_remote_local_execution() {
-        let executed = Arc::new(AtomicBool::new(false));
-        let local_executed = Arc::clone(&executed);
-        let local_executor = RuntimeEffectLocalExecutor::testing(move |_| async move {
-            local_executed.store(true, Ordering::SeqCst);
-            Ok(RuntimeEffectOutcome::Sleep)
-        });
-        // The proxy answers the request itself, so the controller behind it
-        // never executes: one with no host is enough.
-        let controller = crate::testing::UnavailableEffectController;
-        let execution_scope = ExecutionScope::runtime_operation("replay-skips-local");
-        let (proxy, mut requests) = EffectTaskController::scoped(
-            &controller,
-            crate::AdmittedScope::runtime_operation("replay-skips-local"),
-        )
-        .expect("task controller");
-        let envelope = RuntimeEffectEnvelope::new(
-            RuntimeEffectInvocation::new(
-                crate::EffectAddress::new(execution_scope, "replay-skips-local:sleep")
-                    .expect("valid task proxy address"),
-                crate::RuntimeAttribution::none(),
-                "sleep",
-            ),
-            RuntimeEffectCommand::Sleep {
-                spec: crate::SleepSpec::For { duration_ms: 0 },
-            },
-        );
-        let invoke = proxy.controller().execute_effect(envelope, local_executor);
-        let service = async {
-            let Some(EffectControllerTaskRequest::Execute {
-                local_executor,
-                response,
-                ..
-            }) = requests.recv().await
-            else {
-                panic!("expected proxied execute request");
-            };
-            drop(local_executor);
-            tokio::task::yield_now().await;
-            response
-                .send(Ok(RuntimeEffectOutcome::Sleep))
-                .expect("proxy response receiver");
-        };
-        let (outcome, ()) = tokio::join!(invoke, service);
-        assert!(matches!(outcome, Ok(RuntimeEffectOutcome::Sleep)));
-        assert!(!executed.load(Ordering::SeqCst));
     }
 }

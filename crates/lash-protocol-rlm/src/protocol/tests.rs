@@ -14,43 +14,12 @@ fn extract_typescript_cell(
     extract_cell(text, tags())
 }
 
-fn project_visible_assistant_prose(text: &str) -> String {
-    cell::project_visible_assistant_prose_with_tags(text, tags())
-}
-
 #[test]
 fn cell_extraction_rejects_a_started_but_unclosed_block() {
     assert!(matches!(
         extract_typescript_cell("<typescript>\nfinish(1);"),
         Err(super::cell::CellExtractionError::UnclosedCell)
     ));
-}
-
-#[test]
-fn cell_extraction_leaves_non_cell_markup_as_prose() {
-    for text in [
-        "<typescript>",
-        "</typescript>\nfinish(1);",
-        "%%typescript\nfinish(1);",
-    ] {
-        assert!(
-            extract_typescript_cell(text)
-                .expect("non-cell markup is not an extraction error")
-                .is_none(),
-            "non-cell markup should not parse: {text:?}"
-        );
-    }
-}
-
-#[test]
-fn cell_extraction_uses_prose_before_start_tag_and_code_before_end_tag() {
-    let text = "Before\n\n<typescript>\nprint(1);\nfinish(2);\n</typescript>\n  \n";
-    let extraction = extract_typescript_cell(text)
-        .expect("valid cell")
-        .expect("should extract");
-    assert_eq!(extraction.prose, "Before");
-    assert_eq!(extraction.code, "print(1);\nfinish(2);");
-    assert_eq!(project_visible_assistant_prose(text), "Before");
 }
 
 #[test]

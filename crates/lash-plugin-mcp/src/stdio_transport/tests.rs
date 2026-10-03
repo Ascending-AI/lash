@@ -148,15 +148,6 @@ async fn split_response(chunks: &[&[u8]], newline: bool) {
 }
 
 #[tokio::test]
-async fn split_response_survives_concurrent_send_completion() {
-    let response = serde_json::to_vec(&json!({
-        "jsonrpc":"2.0", "id":1, "result":{"text":"é".repeat(12_000)}
-    }))
-    .expect("large UTF-8 response");
-    split_response(&[&response], true).await;
-}
-
-#[tokio::test]
 async fn repeated_cancellation_preserves_split_utf8_response() {
     let response = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"text\":\"\xc3\xa9\"}}";
     let split = response

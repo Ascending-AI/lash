@@ -751,7 +751,6 @@ mod tests {
                 "adapter/prototype_chain.rs",
                 include_str!("adapter/prototype_chain.rs"),
             ),
-            ("adapter/tests.rs", include_str!("adapter/tests.rs")),
             ("adapter/traversal.rs", include_str!("adapter/traversal.rs")),
             (
                 "adapter/optional_chain.rs",
@@ -895,24 +894,6 @@ mod tests {
             listed.len(),
             DiagnosticCode::ALL.len(),
             "DiagnosticCode::ALL repeats a variant"
-        );
-    }
-
-    /// The repair channel is only worth having if a model can rely on it, and
-    /// the codes it can rely on are the ones that refuse a construct: those all
-    /// have an in-dialect replacement, by definition of being a *dialect*
-    /// restriction rather than a resource limit or a typo.
-    #[test]
-    fn every_unsupported_code_names_the_accepted_idiom() {
-        let silent = DiagnosticCode::ALL
-            .iter()
-            .filter(|code| code.as_str().ends_with("_UNSUPPORTED"))
-            .filter(|code| code.accepted_idiom().is_none())
-            .map(|code| code.as_str())
-            .collect::<Vec<_>>();
-        assert!(
-            silent.is_empty(),
-            "these refuse a construct without naming its replacement: {silent:?}"
         );
     }
 

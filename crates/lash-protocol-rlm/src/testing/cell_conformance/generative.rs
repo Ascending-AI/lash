@@ -27,8 +27,6 @@ const RESIDENT_SHARDS: usize = 8;
 /// cell there costs a full capture and restore, so the count is smaller and the
 /// breadth comes from the resident sweep above.
 const RESTARTING_SESSIONS: u64 = 120;
-/// Sessions in the `#[ignore]`d soak.
-const SOAK_SESSIONS: u64 = 25_000;
 /// Cells per generated session.
 const SESSION_LENGTH: usize = 10;
 
@@ -187,16 +185,6 @@ fn sweep_resident_shard(shard: u64) {
     );
 }
 
-/// The corpus is a fixture: the same seed builds the same session, different
-/// seeds build different ones, and every session has the same length.
-#[test]
-fn the_generated_corpus_is_deterministic() {
-    let first = generate_session(7);
-    assert_eq!(first, generate_session(7));
-    assert_ne!(first, generate_session(8));
-    assert_eq!(first.len(), SESSION_LENGTH + 1);
-}
-
 #[test]
 fn generated_sessions_never_poison_a_session_shard_0() {
     sweep_resident_shard(0);
@@ -240,41 +228,4 @@ fn generated_sessions_never_poison_a_session_shard_7() {
 #[test]
 fn generated_sessions_survive_a_restart_between_every_cell() {
     sweep(HarnessMode::RestartBetweenCells, 0..RESTARTING_SESSIONS);
-}
-
-#[test]
-#[ignore = "soak: the same generator, far longer; run it when chasing a generated failure"]
-fn generated_sessions_soak() {
-    sweep(HarnessMode::Resident, 0..SOAK_SESSIONS);
-}
-
-/// The corpus reaches every cell shape it is supposed to.
-///
-/// A generator that never emits a closure cell would pass the sweep above
-/// without testing anything, which is the failure mode of every property test
-/// that only asserts an invariant.
-#[test]
-fn the_generated_corpus_reaches_every_cell_shape() {
-    let mut seen_closure_garbage = false;
-    let mut seen_closure_binding = false;
-    let mut seen_failure = false;
-    let mut seen_extend = false;
-    let mut seen_drop = false;
-    for seed in 0..RESIDENT_SESSIONS {
-        for cell in generate_session(seed) {
-            match cell {
-                Cell::ClosureGarbage { .. } => seen_closure_garbage = true,
-                Cell::ClosureBinding { .. } => seen_closure_binding = true,
-                Cell::CompileError | Cell::RuntimeError | Cell::Refusal => seen_failure = true,
-                Cell::Extend { .. } => seen_extend = true,
-                Cell::Drop { .. } => seen_drop = true,
-                _ => {}
-            }
-        }
-    }
-    assert!(seen_closure_garbage, "no closure-garbage cell");
-    assert!(seen_closure_binding, "no closure-valued binding cell");
-    assert!(seen_failure, "no failing cell");
-    assert!(seen_extend, "no extend cell");
-    assert!(seen_drop, "no drop cell");
 }

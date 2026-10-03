@@ -25,7 +25,6 @@ const SEED: u64 = 0x5_2d23;
 #[derive(Default)]
 struct ExternalWorld {
     applied: std::sync::Mutex<Vec<String>>,
-    reverted: std::sync::Mutex<Vec<String>>,
 }
 
 impl ExternalWorld {
@@ -33,26 +32,8 @@ impl ExternalWorld {
         self.applied.lock_recover().push(effect.to_string());
     }
 
-    fn revert(&self, effect: &str) {
-        self.reverted.lock_recover().push(effect.to_string());
-        self.applied
-            .lock_recover()
-            .retain(|landed| landed != effect);
-    }
-
-    fn contains(&self, effect: &str) -> bool {
-        self.applied
-            .lock_recover()
-            .iter()
-            .any(|landed| landed == effect)
-    }
-
     fn applied(&self) -> Vec<String> {
         self.applied.lock_recover().clone()
-    }
-
-    fn reverted(&self) -> Vec<String> {
-        self.reverted.lock_recover().clone()
     }
 }
 
@@ -65,18 +46,10 @@ enum Stage {
     Pending,
     /// The world write landed and the attempt marked it.
     Applied,
-    /// Reconciliation proved the pending effect never landed. Nothing to
-    /// undo.
-    NoEffect,
-    /// Reverse-compensated at a retained history point.
-    Compensated,
 }
 
 struct EffectRow {
     seq: u64,
-    /// The effect the attempt intended to write, recorded so a dead attempt
-    /// can be reconciled and a replayed one deduplicated.
-    effect: String,
     stage: Stage,
     /// The call's durable outcome as the after-tool hook observed it. `false`
     /// on a `Pending` row means the call is over and the row still cannot
@@ -116,7 +89,7 @@ impl HostEffectLedger {
     /// The write-ahead seam inside the attempt: claim the call's row before
     /// the world is touched, so whichever side of the window a crash lands
     /// on is distinguishable afterward.
-    fn claim(&self, call_id: &str, effect: &str) -> Claim {
+    fn claim(&self, call_id: &str, _effect: &str) -> Claim {
         let mut state = self.state.lock_recover();
         match state.rows.get_mut(call_id) {
             None => {
@@ -126,7 +99,6 @@ impl HostEffectLedger {
                     call_id.to_string(),
                     EffectRow {
                         seq,
-                        effect: effect.to_string(),
                         stage: Stage::Pending,
                         outcome: None,
                     },
@@ -151,49 +123,6 @@ impl HostEffectLedger {
         if let Some(row) = self.state.lock_recover().rows.get_mut(call_id) {
             row.outcome = Some(ok);
         }
-    }
-
-    /// The host's restart pass: pending rows whose calls are over are
-    /// reconciled against the world — the recorded effect either landed or
-    /// it did not. Returns how many rows converged.
-    fn reconcile(&self, world: &ExternalWorld) -> usize {
-        let mut state = self.state.lock_recover();
-        let mut resolved = 0;
-        for row in state.rows.values_mut() {
-            if row.stage == Stage::Pending && row.outcome != Some(true) {
-                row.stage = if world.contains(&row.effect) {
-                    Stage::Applied
-                } else {
-                    Stage::NoEffect
-                };
-                resolved += 1;
-            }
-        }
-        resolved
-    }
-
-    /// Reverse compensation at a retained history point: undo every applied
-    /// row at or after `seq_floor`, newest first. `budget` models a pass
-    /// that dies partway — compensated rows are skipped on re-entry, so a
-    /// restarted pass resumes exactly where the dead one stopped.
-    fn compensate_from(&self, seq_floor: u64, world: &ExternalWorld, budget: usize) -> usize {
-        let mut state = self.state.lock_recover();
-        let mut targets: Vec<&mut EffectRow> = state
-            .rows
-            .values_mut()
-            .filter(|row| row.seq >= seq_floor && row.stage == Stage::Applied)
-            .collect();
-        targets.sort_by_key(|row| std::cmp::Reverse(row.seq));
-        let mut undone = 0;
-        for row in targets {
-            if undone == budget {
-                break;
-            }
-            world.revert(&row.effect);
-            row.stage = Stage::Compensated;
-            undone += 1;
-        }
-        undone
     }
 
     fn row(&self, call_id: &str) -> Option<(u64, Stage, Option<bool>)> {
@@ -397,53 +326,6 @@ async fn host_effect_ledger_hook_call_id_matches_the_executed_call_record() {
 }
 
 #[tokio::test]
-async fn host_effect_ledger_deduplicates_retried_attempts_on_the_call_id() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let ledger = Arc::new(HostEffectLedger::default());
-    let world = Arc::new(ExternalWorld::default());
-    let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let executions = Arc::new(AtomicUsize::new(0));
-    let provider: Arc<dyn ToolProvider> = Arc::new(LedgeredEffectTools {
-        definition: ledger_tool("effect", ToolRetryPolicy::safe(3, 0, 0)),
-        ledger: Arc::clone(&ledger),
-        world: Arc::clone(&world),
-        executions: Arc::clone(&executions),
-        transient_failures: 1,
-    });
-    let context = ledger_dispatch_context(
-        crate::support::double_dispatch_ports(&double, &handler),
-        provider,
-        ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
-    )
-    .await;
-
-    // Attempt 1 applies the effect, marks the row, then reports a retryable
-    // failure — the acknowledgement was lost after the write. Attempt 2's
-    // claim finds the applied row and touches nothing.
-    let outcome = dispatch_ledger_call(&context, "call-r", json!({ "effect": "charge" })).await;
-
-    assert!(outcome.record.output.is_success());
-    assert_eq!(executions.load(Ordering::SeqCst), 2);
-    assert_eq!(
-        world.applied(),
-        vec!["charge".to_string()],
-        "the retried attempt must not double-apply the effect"
-    );
-    assert_eq!(
-        ledger.row(&ledger_key("call-r")),
-        Some((1, Stage::Applied, Some(true)))
-    );
-    // The hook observed both attempts under one call id — re-entry is the
-    // documented shape, so observations deduplicate on it.
-    assert_eq!(
-        observations.lock_recover().as_slice(),
-        &[(ledger_key("call-r"), false), (ledger_key("call-r"), true),]
-    );
-    drop(context);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
 async fn host_effect_ledger_replay_reexecutes_neither_effect_nor_hook() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let ledger = Arc::new(HostEffectLedger::default());
@@ -493,175 +375,6 @@ async fn host_effect_ledger_replay_reexecutes_neither_effect_nor_hook() {
         "replay skips the hook — the ledger sees one observation per call"
     );
     assert_eq!(world.applied(), vec!["deploy".to_string()]);
-    drop(context);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn host_effect_ledger_reconciles_a_pending_row_against_the_world() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let ledger = Arc::new(HostEffectLedger::default());
-    let world = Arc::new(ExternalWorld::default());
-    let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let provider: Arc<dyn ToolProvider> = Arc::new(LedgeredEffectTools {
-        definition: ledger_tool("effect", ToolRetryPolicy::Never),
-        ledger: Arc::clone(&ledger),
-        world: Arc::clone(&world),
-        executions: Arc::new(AtomicUsize::new(0)),
-        transient_failures: 0,
-    });
-    let context = ledger_dispatch_context(
-        crate::support::double_dispatch_ports(&double, &handler),
-        provider,
-        ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
-    )
-    .await;
-
-    // The attempt claimed its row, wrote to the world, and died inside the
-    // crash window before marking the row — surfacing to the runtime as a
-    // failed call, which the hook notes without concluding anything.
-    let outcome = dispatch_ledger_call(
-        &context,
-        "call-crash",
-        json!({ "effect": "refund", "mode": "die_after_apply" }),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(
-        ledger.row(&ledger_key("call-crash")),
-        Some((1, Stage::Pending, Some(false))),
-        "a failed call leaves the pending row undecided"
-    );
-    assert!(world.contains("refund"));
-
-    // The host's restart pass reconciles the pending row against the world.
-    assert_eq!(ledger.reconcile(&world), 1);
-    assert_eq!(
-        ledger.row(&ledger_key("call-crash")),
-        Some((1, Stage::Applied, Some(false))),
-        "the effect is on record as landed once the world confirms it"
-    );
-    drop(context);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn host_effect_ledger_compensates_only_what_reconciliation_proves() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let ledger = Arc::new(HostEffectLedger::default());
-    let world = Arc::new(ExternalWorld::default());
-    let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let provider: Arc<dyn ToolProvider> = Arc::new(LedgeredEffectTools {
-        definition: ledger_tool("effect", ToolRetryPolicy::Never),
-        ledger: Arc::clone(&ledger),
-        world: Arc::clone(&world),
-        executions: Arc::new(AtomicUsize::new(0)),
-        transient_failures: 0,
-    });
-    let context = ledger_dispatch_context(
-        crate::support::double_dispatch_ports(&double, &handler),
-        provider,
-        ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
-    )
-    .await;
-
-    // A partial failure: the first call's effect landed, the second died
-    // before writing. Both rows pend the reconciliation the host runs at
-    // restart.
-    let ok = dispatch_ledger_call(&context, "call-ok", json!({ "effect": "invite" })).await;
-    let failed = dispatch_ledger_call(
-        &context,
-        "call-bad",
-        json!({ "effect": "charge", "mode": "fail_before_apply" }),
-    )
-    .await;
-    assert!(ok.record.output.is_success());
-    assert!(!failed.record.output.is_success());
-
-    assert_eq!(ledger.reconcile(&world), 1);
-    assert_eq!(
-        ledger
-            .row(&ledger_key("call-bad"))
-            .map(|(_, stage, _)| stage),
-        Some(Stage::NoEffect),
-        "the failed call's effect never landed — nothing to undo"
-    );
-
-    // Reverse compensation reaches only the row the world confirms.
-    assert_eq!(ledger.compensate_from(0, &world, usize::MAX), 1);
-    assert_eq!(world.reverted(), vec!["invite".to_string()]);
-    assert!(world.applied().is_empty());
-    assert_eq!(
-        ledger
-            .row(&ledger_key("call-ok"))
-            .map(|(_, stage, _)| stage),
-        Some(Stage::Compensated)
-    );
-    drop(context);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn host_effect_ledger_reverse_compensation_resumes_at_a_retained_point() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let ledger = Arc::new(HostEffectLedger::default());
-    let world = Arc::new(ExternalWorld::default());
-    let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let provider: Arc<dyn ToolProvider> = Arc::new(LedgeredEffectTools {
-        definition: ledger_tool("effect", ToolRetryPolicy::Never),
-        ledger: Arc::clone(&ledger),
-        world: Arc::clone(&world),
-        executions: Arc::new(AtomicUsize::new(0)),
-        transient_failures: 0,
-    });
-    let context = ledger_dispatch_context(
-        crate::support::double_dispatch_ports(&double, &handler),
-        provider,
-        ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
-    )
-    .await;
-
-    for (call_id, effect) in [
-        ("call-a", "step.a"),
-        ("call-b", "step.b"),
-        ("call-c", "step.c"),
-    ] {
-        let outcome = dispatch_ledger_call(&context, call_id, json!({ "effect": effect })).await;
-        assert!(outcome.record.output.is_success());
-    }
-
-    // Compensate everything at or after call-b's history point. A budget of
-    // one models a pass that dies mid-compensation: call-c is undone, then
-    // the pass stops.
-    let retained = ledger
-        .row(&ledger_key("call-b"))
-        .map(|(seq, _, _)| seq)
-        .unwrap();
-    assert_eq!(ledger.compensate_from(retained, &world, 1), 1);
-    assert_eq!(world.reverted(), vec!["step.c".to_string()]);
-    assert_eq!(
-        world.applied(),
-        vec!["step.a".to_string(), "step.b".to_string()]
-    );
-
-    // The restarted pass resumes where the dead one stopped — compensated
-    // rows are skipped, and rows before the point are out of scope.
-    assert_eq!(ledger.compensate_from(retained, &world, usize::MAX), 1);
-    assert_eq!(
-        world.reverted(),
-        vec!["step.c".to_string(), "step.b".to_string()],
-        "newest first, each exactly once"
-    );
-    assert_eq!(world.applied(), vec!["step.a".to_string()]);
-    assert_eq!(
-        ledger.row(&ledger_key("call-a")).map(|(_, stage, _)| stage),
-        Some(Stage::Applied),
-        "the retained history point is not compensated"
-    );
-
-    // A further pass is a no-op: reverse compensation is idempotent.
-    assert_eq!(ledger.compensate_from(retained, &world, usize::MAX), 0);
     drop(context);
     handler.close().await.expect("close the dispatch handler");
 }

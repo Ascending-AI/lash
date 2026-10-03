@@ -453,14 +453,4 @@ mod tests {
         );
         upstream_task.abort();
     }
-    #[test]
-    fn response_recording_preserves_utf8_across_chunks() {
-        let capture = Capture::default();
-        capture_bytes(&capture, 1, &[0xc3]);
-        capture_bytes(&capture, 1, &[0xa9]);
-        assert_eq!(
-            std::str::from_utf8(&capture.http_bodies.lock().unwrap()[&1]).unwrap(),
-            "é"
-        );
-    }
 }

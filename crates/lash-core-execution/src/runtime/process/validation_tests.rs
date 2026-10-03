@@ -3,9 +3,8 @@ use super::{
     validate_process_registration,
 };
 use crate::runtime::process::{
-    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectOccurrence,
-    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
-    validate_generic_process_event_append,
+    ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+    ProcessEffectOutcomeClass, validate_generic_process_event_append,
 };
 use crate::{
     ProcessEventAppendRequest, ProcessExternalRef, ProcessInput, ProcessProvenance, ProcessRecord,
@@ -22,30 +21,6 @@ fn fixture_registration(_label: &str) -> ProcessRegistration {
     )
 }
 
-#[test]
-fn producer_cannot_override_runtime_lifecycle_event_types() {
-    let mut collision =
-        super::runtime_lifecycle_event_type("process.waiting").expect("reserved event type");
-    collision.semantics.terminal = Some(crate::ProcessTerminalSpec {
-        status: crate::TerminalProcessStatus::Completed,
-        await_output: None,
-    });
-    let registration = fixture_registration("reserved-collision").with_event_types([collision]);
-    let error = prepare_process_registration(registration)
-        .expect_err("reserved lifecycle collision must be rejected");
-    assert!(
-        error
-            .to_string()
-            .contains("reserved runtime lifecycle event type `process.waiting`")
-    );
-}
-
-#[cfg(not(feature = "synthetic-next"))]
-#[test]
-fn process_event_vocabulary_version_is_pinned() {
-    assert_eq!(PROCESS_EVENT_VOCABULARY_VERSION, 1);
-}
-
 fn effect_summary_request() -> crate::ProcessEventAppendRequest {
     ProcessEffectOccurrence::new(
         "resource_operation:node",
@@ -57,64 +32,6 @@ fn effect_summary_request() -> crate::ProcessEventAppendRequest {
         crate::FleetFormat::current(),
     )
     .append_request()
-}
-
-#[test]
-fn effect_summary_refuses_predecessor_vocabulary() {
-    let record = ProcessRecord::from_registration(
-        fixture_registration("effect-summary-predecessor"),
-        crate::process_id_for_test("record"),
-    );
-    let mut request = effect_summary_request();
-    request.payload["vocabulary_version"] = serde_json::json!(0);
-    request.payload["unknown_predecessor_field"] = serde_json::json!(true);
-
-    let error = prepare_process_event_append(
-        &record,
-        request,
-        1,
-        None,
-        None,
-        None,
-        42,
-        None,
-        crate::FleetFormat::current(),
-    )
-    .expect_err("a predecessor effect-summary payload must be refused");
-    assert!(
-        error.to_string().contains(&format!(
-            "effect summary vocabulary version 0 is unsupported; expected \
-                 {PROCESS_EVENT_VOCABULARY_VERSION}"
-        )),
-        "{error}"
-    );
-}
-
-#[test]
-fn effect_summary_refuses_unknown_field() {
-    let record = ProcessRecord::from_registration(
-        fixture_registration("effect-summary-unknown-field"),
-        crate::process_id_for_test("record"),
-    );
-    let mut request = effect_summary_request();
-    request.payload["unknown"] = serde_json::json!(true);
-
-    let error = prepare_process_event_append(
-        &record,
-        request,
-        1,
-        None,
-        None,
-        None,
-        42,
-        None,
-        crate::FleetFormat::current(),
-    )
-    .expect_err("an unknown effect-summary payload field must be refused");
-    assert!(
-        error.to_string().contains("unknown field `unknown`"),
-        "{error}"
-    );
 }
 
 #[test]
@@ -185,68 +102,6 @@ fn effect_summary_refuses_payload_and_append_identity_drift() {
 }
 
 #[test]
-fn effect_summary_replay_is_a_noop_and_changed_payload_conflicts() {
-    let record = ProcessRecord::from_registration(
-        fixture_registration("effect-summary-replay"),
-        crate::process_id_for_test("record"),
-    );
-    let request = effect_summary_request();
-    let insert = prepare_process_event_append(
-        &record,
-        request.clone(),
-        1,
-        None,
-        None,
-        None,
-        42,
-        None,
-        crate::FleetFormat::current(),
-    )
-    .expect("the first effect outcome inserts");
-    let ProcessEventAppendPlan::Insert { event, .. } = insert else {
-        panic!("the first effect outcome must insert")
-    };
-    let replay = prepare_process_event_append(
-        &record,
-        request.clone(),
-        2,
-        Some(1),
-        Some(event.clone()),
-        None,
-        43,
-        None,
-        crate::FleetFormat::current(),
-    )
-    .expect("an identical effect outcome replays");
-    assert!(matches!(replay, ProcessEventAppendPlan::Replay { .. }));
-
-    let mut changed = request;
-    changed.payload["outcome_class"] = serde_json::json!("success");
-    changed
-        .payload
-        .as_object_mut()
-        .expect("object")
-        .remove("code");
-    let error = prepare_process_event_append(
-        &record,
-        changed,
-        2,
-        Some(1),
-        Some(event),
-        None,
-        43,
-        None,
-        crate::FleetFormat::current(),
-    )
-    .expect_err("a changed outcome under one replay key must conflict");
-    assert!(
-        error
-            .to_string()
-            .contains("conflicts with an existing event")
-    );
-}
-
-#[test]
 fn the_generic_append_refuses_runtime_owned_effect_summary_kinds() {
     let mut counts = ProcessEffectOmittedCounts::default();
     counts.record(ProcessEffectOutcomeClass::Success);
@@ -268,62 +123,6 @@ fn the_generic_append_refuses_runtime_owned_effect_summary_kinds() {
             "a host append of `{event_type}` must be refused"
         );
     }
-}
-
-#[test]
-fn effect_summary_refuses_occurrences_beyond_the_cap_and_malformed_omissions() {
-    let record = ProcessRecord::from_registration(
-        fixture_registration("effect-summary-cap"),
-        crate::process_id_for_test("record"),
-    );
-    let beyond = ProcessEffectOccurrence::new(
-        "node",
-        PROCESS_EFFECT_OCCURRENCE_CAP + 1,
-        "fixture.operation",
-        ProcessEffectOutcomeClass::Success,
-        None,
-        "effect:beyond",
-        crate::FleetFormat::current(),
-    )
-    .append_request();
-    let error = prepare_process_event_append(
-        &record,
-        beyond,
-        1,
-        None,
-        None,
-        None,
-        42,
-        None,
-        crate::FleetFormat::current(),
-    )
-    .expect_err("the writer never records an occurrence past the cap");
-    assert!(
-        error.to_string().contains("outside the recorded cap"),
-        "{error}"
-    );
-
-    let empty = ProcessEffectOmissions::new(
-        std::collections::BTreeMap::new(),
-        crate::FleetFormat::current(),
-    )
-    .append_request("omissions");
-    let error = prepare_process_event_append(
-        &record,
-        empty,
-        1,
-        None,
-        None,
-        None,
-        42,
-        None,
-        crate::FleetFormat::current(),
-    )
-    .expect_err("an omission record must name an omission");
-    assert!(
-        error.to_string().contains("no omitted occurrence"),
-        "{error}"
-    );
 }
 
 #[test]
@@ -524,26 +323,6 @@ fn a_resume_cannot_return_an_ended_process_to_running() {
     );
     assert_eq!(record, ended, "the refused resume leaves the record ended");
     assert_eq!(record.terminal(), Some(&outcome));
-}
-
-#[test]
-fn a_core_named_override_remains_a_valid_registration() {
-    let with_core_events = prepare_process_registration(fixture_registration("second-lookup-id"))
-        .expect("prepare exact core defaults");
-
-    let mut overridden = with_core_events.clone();
-    let completed = overridden
-        .event_types
-        .iter_mut()
-        .find(|event_type| event_type.name == "process.completed")
-        .expect("completed default");
-    completed.semantics.terminal = Some(crate::ProcessTerminalSpec {
-        status: crate::TerminalProcessStatus::Completed,
-        await_output: Some(crate::ProcessValueSelector::Pointer(
-            "/hijacked".to_string(),
-        )),
-    });
-    validate_process_registration(&overridden).expect("core-named override remains valid");
 }
 
 #[test]

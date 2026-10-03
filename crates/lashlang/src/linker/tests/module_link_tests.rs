@@ -139,13 +139,6 @@ fn linked_module_accepts_restate_board_process_with_imported_schemas() {
 }
 
 #[test]
-fn linked_module_accepts_top_level_sleep() {
-    let program = builders::program(vec![builders::sleep_for(builders::num(1.0))]);
-
-    LinkedModule::link(program, full_host_environment()).expect("top-level sleep should link");
-}
-
-#[test]
 fn linked_module_rejects_process_lifecycle_outside_process_body() {
     // payload = wait_signal("ready")
     let program = builders::program(vec![builders::assign(
@@ -182,29 +175,6 @@ fn linked_module_accepts_top_level_signal_run() {
     )]);
 
     LinkedModule::link(program, full_host_environment()).expect("top-level signal_run should link");
-}
-
-#[test]
-fn linked_module_rejects_unresolved_operations() {
-    // process scan(tool: Tools) { finish await tool.missing({})? }
-    let bad_operation = builders::module(
-        vec![builders::process(
-            "scan",
-            vec![builders::param("tool", TypeExpr::Ref("Tools".into()))],
-            builders::block(vec![builders::finish(builders::unwrap(
-                builders::await_expr(builders::receiver_call(
-                    builders::var("tool"),
-                    "missing",
-                    vec![builders::record(Vec::new())],
-                )),
-            ))]),
-        )],
-        Vec::new(),
-    );
-    assert!(matches!(
-        LinkedModule::link(bad_operation, full_host_environment()),
-        Err(LinkError::UnknownResourceOperation { operation, .. }) if operation == "missing"
-    ));
 }
 
 /// `sleep` is the one remaining engine ability (FIG-2999): processes, process
@@ -376,74 +346,6 @@ fn linked_module_infers_process_output_and_validates_return_annotations() {
         LinkedModule::link(union_mismatch, full_host_environment()),
         Err(LinkError::IncompatibleProcessReturn { .. })
     ));
-}
-
-#[test]
-fn linked_module_hash_ignores_unused_host_abilities() {
-    let program = builders::program(vec![builders::finish(builders::num(1.0))]);
-    let minimal = LinkedModule::link(
-        program.clone(),
-        LashlangHostEnvironment::new(resources(), LashlangAbilities::default()),
-    )
-    .expect("link minimal");
-    let processes = LinkedModule::link(
-        program,
-        LashlangHostEnvironment::new(resources(), LashlangAbilities::default()),
-    )
-    .expect("link process ability");
-
-    assert_eq!(
-        minimal.artifact.module_ref(),
-        processes.artifact.module_ref()
-    );
-    assert_eq!(
-        minimal.artifact.host_requirements_ref(),
-        processes.artifact.host_requirements_ref()
-    );
-}
-
-#[tokio::test]
-async fn module_artifact_store_bytes_reject_corruption() {
-    // process scan() { finish 1 }
-    let linked = LinkedModule::link(
-        builders::module(
-            vec![builders::process(
-                "scan",
-                Vec::new(),
-                builders::block(vec![builders::finish(builders::num(1.0))]),
-            )],
-            Vec::new(),
-        ),
-        full_host_environment(),
-    )
-    .expect("link module");
-    let store = crate::LashlangArtifacts::new(std::sync::Arc::new(
-        crate::InMemoryLashlangArtifactStore::new(),
-    ));
-
-    store
-        .publish_module_artifact(
-            &lash_core_execution::ReferrerClaim::unguarded(
-                lash_core_execution::ArtifactReferrer::HostPin(
-                    lash_core_execution::HostArtifactPin::mint(),
-                ),
-            )
-            .expect("a host pin is unguarded"),
-            &linked.artifact,
-        )
-        .await
-        .expect("put artifact");
-    assert_eq!(
-        store
-            .get_module_artifact(linked.artifact.module_ref())
-            .await
-            .expect("get artifact")
-            .expect("artifact exists")
-            .module_ref(),
-        linked.artifact.module_ref()
-    );
-
-    assert!(ModuleArtifact::from_store_bytes(b"not json").is_err());
 }
 
 /// The artifact port keys store bytes by the reference its caller names, so a

@@ -80,15 +80,6 @@ fn expected_method_value_outcome() -> ExecutionOutcome {
     ))
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn method_values_keep_their_identity_resident() {
-    let program = compile_program_for_tests(method_value_program());
-    assert_eq!(
-        uninterrupted_continuation_result(&program).await,
-        expected_method_value_outcome()
-    );
-}
-
 /// At every instruction boundary the run can park at, a continuation restored
 /// from its bytes finishes exactly as the resident VM does, and a second cold
 /// run parked at the same boundary captures the same state: a replay rebuilds

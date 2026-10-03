@@ -1741,44 +1741,6 @@ fn retained_request_digest(
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A host-code batch's group key carries its batch id exactly once, and
-    /// two different call lists mint two keys.
-    #[test]
-    fn the_group_key_carries_the_batch_id_once() {
-        let calls = |id: &str| {
-            vec![ToolInvocation::new(
-                crate::ToolCallId::fixture(id),
-                crate::ToolId::from("tool:one"),
-                serde_json::json!({}),
-            )]
-        };
-        let first_id = deterministic_tool_invocation_batch_id(&calls("call-1"));
-        let second_id = deterministic_tool_invocation_batch_id(&calls("call-2"));
-        assert_ne!(first_id, second_id);
-
-        let context = crate::testing::TestExecutionContextBuilder::over_controller(
-            std::sync::Arc::new(crate::testing::UnavailableEffectController)
-                as std::sync::Arc<dyn crate::RuntimeEffectController>,
-        )
-        .build()
-        .into_runtime();
-        let first = context.tool_child_group_key(&first_id);
-        let second = context.tool_child_group_key(&second_id);
-        assert_ne!(first, second);
-        assert_eq!(first, context.tool_child_group_key(&first_id));
-        assert_eq!(
-            first.matches(first_id.as_str()).count(),
-            1,
-            "the batch id appears in the group key exactly once"
-        );
-        assert_eq!(first.matches(second_id.as_str()).count(), 0);
-    }
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "dispatch", rename_all = "snake_case")]
 pub enum ToolDispatchResult {

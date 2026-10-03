@@ -246,41 +246,6 @@ struct BlockingAppTools {
     release_rx: TokioMutex<Option<oneshot::Receiver<()>>>,
 }
 
-#[derive(Clone, Default)]
-struct ContractRecordingTools {
-    resolved: Arc<StdMutex<Vec<serde_json::Value>>>,
-}
-
-impl ContractRecordingTools {
-    fn take_resolved(&self) -> Vec<serde_json::Value> {
-        std::mem::take(&mut *self.resolved.lock_recover())
-    }
-}
-
-#[async_trait]
-impl ToolProvider for ContractRecordingTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![app_tool_definition().manifest()]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        if name != "app_lookup" {
-            return None;
-        }
-        let contract = Arc::new(app_tool_definition().contract());
-        self.resolved
-            .lock_recover()
-            .push(serde_json::to_value(contract.as_ref()).expect("serialize tool contract"));
-        Some(contract)
-    }
-
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        (async { lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })) })
-            .await
-            .into()
-    }
-}
-
 #[cfg(feature = "rlm")]
 impl BlockingAppTools {
     fn new(entered_tx: oneshot::Sender<()>, release_rx: oneshot::Receiver<()>) -> Self {

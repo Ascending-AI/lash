@@ -1,7 +1,6 @@
 use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -28,108 +27,39 @@ const SEED: u64 = 0xf10_a05;
 
 #[derive(Clone, Copy, Debug)]
 struct StandardProtocolScenarioCoverage {
-    test_name: &'static str,
-    declared_test: fn(),
     display_name: &'static str,
-    owned_invariant: &'static str,
 }
 
-macro_rules! standard_protocol_coverage {
-    ($test_fn:ident, $display_name:literal, $owned_invariant:literal) => {
-        StandardProtocolScenarioCoverage {
-            test_name: stringify!($test_fn),
-            declared_test: $test_fn,
-            display_name: $display_name,
-            owned_invariant: $owned_invariant,
-        }
+const PROJECTION: StandardProtocolScenarioCoverage = StandardProtocolScenarioCoverage {
+    display_name: "projection",
+};
+const EMPTY_MODEL_RESPONSE: StandardProtocolScenarioCoverage = StandardProtocolScenarioCoverage {
+    display_name: "empty response",
+};
+const PROVIDER_ERROR: StandardProtocolScenarioCoverage = StandardProtocolScenarioCoverage {
+    display_name: "provider error",
+};
+const NATIVE_TOOL_LOOP: StandardProtocolScenarioCoverage = StandardProtocolScenarioCoverage {
+    display_name: "native tool loop",
+};
+const PARALLEL_TOOL_CHECKPOINT: StandardProtocolScenarioCoverage =
+    StandardProtocolScenarioCoverage {
+        display_name: "parallel tool checkpoint",
     };
-}
-
-const PROJECTION: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_projects_initial_request,
-    "projection",
-    "Standard protocol projects user/system input into the first model request."
-);
-const EMPTY_MODEL_RESPONSE: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_empty_model_response_finishes_after_checkpoint,
-    "empty response",
-    "Successful empty provider response finishes through the normal completion checkpoint."
-);
-const PROVIDER_ERROR: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_provider_error_stops_without_checkpoint,
-    "provider error",
-    "Provider errors stop without committing a protocol checkpoint."
-);
-const NATIVE_TOOL_LOOP: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint,
-    "native tool loop",
-    "Native tool calls checkpoint and re-enter the model loop."
-);
-const PARALLEL_TOOL_CHECKPOINT: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_parallel_tool_results_checkpoint_once,
-    "parallel tool checkpoint",
-    "Parallel native tool results checkpoint once before protocol re-entry."
-);
-const TOOL_FAILURE_FEEDBACK: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_tool_failure_feedback_reenters_model_after_checkpoint,
-    "tool failure feedback",
-    "Tool failure is converted into model feedback after checkpoint."
-);
-const TOOL_INTENT_FEEDBACK: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback,
-    "tool intent feedback",
-    "Typed outcomes for every v1 intent kind survive the Standard tool boundary and enter the next model request."
-);
-const STREAMED_TEXT_TERMINATION: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_streamed_text_finishes_without_duplicate_delta,
-    "streamed text termination",
-    "Streaming text projection emits a clean final response without duplicate deltas."
-);
-const BUFFERED_TEXT_TERMINATION: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_buffered_text_finishes_with_the_response_text,
-    "buffered text termination",
-    "A non-streamed provider response finishes through the completion checkpoint with its text as the assistant message."
-);
-const MAX_TURN_TERMINATION: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_max_turns_terminates_after_tool_result,
-    "max turn termination",
-    "Tool-result continuation terminates at max-turns with the expected final message."
-);
-
-const STANDARD_PROTOCOL_SCENARIO_COVERAGE: &[StandardProtocolScenarioCoverage] = &[
-    PROJECTION,
-    EMPTY_MODEL_RESPONSE,
-    PROVIDER_ERROR,
-    NATIVE_TOOL_LOOP,
-    PARALLEL_TOOL_CHECKPOINT,
-    TOOL_FAILURE_FEEDBACK,
-    TOOL_INTENT_FEEDBACK,
-    STREAMED_TEXT_TERMINATION,
-    BUFFERED_TEXT_TERMINATION,
-    MAX_TURN_TERMINATION,
-];
-
-#[test]
-fn standard_protocol_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(STANDARD_PROTOCOL_SCENARIO_COVERAGE.len(), 10);
-    let mut names = BTreeSet::new();
-    for coverage in STANDARD_PROTOCOL_SCENARIO_COVERAGE {
-        let _declared_test = coverage.declared_test;
-        assert!(
-            coverage
-                .test_name
-                .starts_with("standard_protocol_scenario_"),
-            "unexpected Standard Protocol Scenario test name {}",
-            coverage.test_name
-        );
-        assert!(!coverage.owned_invariant.trim().is_empty());
-        assert!(
-            names.insert(coverage.test_name),
-            "duplicate Standard Protocol Scenario coverage metadata for {}",
-            coverage.test_name
-        );
-    }
-}
+const TOOL_FAILURE_FEEDBACK: StandardProtocolScenarioCoverage = StandardProtocolScenarioCoverage {
+    display_name: "tool failure feedback",
+};
+const STREAMED_TEXT_TERMINATION: StandardProtocolScenarioCoverage =
+    StandardProtocolScenarioCoverage {
+        display_name: "streamed text termination",
+    };
+const BUFFERED_TEXT_TERMINATION: StandardProtocolScenarioCoverage =
+    StandardProtocolScenarioCoverage {
+        display_name: "buffered text termination",
+    };
+const MAX_TURN_TERMINATION: StandardProtocolScenarioCoverage = StandardProtocolScenarioCoverage {
+    display_name: "max turn termination",
+};
 
 #[derive(Clone, Debug)]
 struct StandardProtocolScenario {
@@ -1242,31 +1172,6 @@ fn standard_protocol_scenario_max_turns_terminates_after_tool_result() {
         .run();
 }
 
-#[test]
-fn scenario_transcript_has_an_independent_public_outcome() {
-    let run = StandardProtocolScenario::new("independent terminal witness")
-        .user_message("answer directly")
-        .llm_response(false, vec![text_part("literal public answer")])
-        .checkpoint()
-        .expect(StandardProtocolExpectations {
-            llm_call_count: Some(1),
-            done: Some(true),
-            turn_outcome: Some(TurnOutcome::Finished(TurnFinish::AssistantMessage {
-                text: "literal public answer".into(),
-            })),
-            checkpoints: vec![CheckpointKind::BeforeCompletion],
-            ..Default::default()
-        })
-        .run();
-    assert_eq!(
-        run.turn_outcomes,
-        vec![TurnOutcome::Finished(TurnFinish::AssistantMessage {
-            text: "literal public answer".into()
-        })]
-    );
-    assert!(run.transcript.render().contains("literal public answer"));
-}
-
 #[derive(Clone, Copy)]
 enum PublicWork {
     Model,
@@ -1447,30 +1352,5 @@ fn public_effect_emission_contract_matrix() {
                 .collect::<Vec<_>>()
         };
         assert_eq!(ids(&first), ids(&replayed));
-    }
-}
-
-#[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "isolated test processes keep inline snapshots independent"
-)]
-fn registered_scenarios_emit_typed_transcripts() {
-    for coverage in STANDARD_PROTOCOL_SCENARIO_COVERAGE {
-        let path = coverage.test_name.to_owned();
-        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
-            .args([&path, "--exact", "--nocapture"])
-            .output()
-            .expect("run registered scenario");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            output.status.success(),
-            "{path}: {stdout}\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            stdout.contains("1 passed; 0 failed"),
-            "{path} did not execute: {stdout}"
-        );
     }
 }

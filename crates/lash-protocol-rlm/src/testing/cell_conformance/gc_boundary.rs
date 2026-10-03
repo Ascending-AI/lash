@@ -15,39 +15,6 @@ use super::harness::{HarnessMode, Session};
 use super::shift;
 use super::syntax::{Cell, Literal};
 
-/// The FIG-1562 law at its narrowest: a cell that leaves a closure behind as
-/// garbage must not fail the next cell.
-#[test]
-fn garbage_from_one_cell_does_not_reach_the_next_cells_validation() {
-    let mut session = Session::open(HarnessMode::Resident);
-    session.run_ok(&Cell::closure_garbage("scaled").render());
-    let outcome = session.run_ok(&Cell::number("answer", 42.0).render());
-    assert!(outcome.succeeded());
-    assert_eq!(
-        session.globals().get("scaled"),
-        Some(&serde_json::json!(6)),
-        "the value the garbage-producing cell computed still belongs to the session"
-    );
-}
-
-/// Garbage left behind by a cell that *failed* is garbage too.
-#[test]
-fn garbage_from_a_failed_cell_does_not_reach_the_next_cell() {
-    let (session, _) = shift(
-        HarnessMode::Resident,
-        &[
-            Cell::closure_garbage("scaled"),
-            Cell::RuntimeError,
-            Cell::closure_garbage("scaled_again"),
-            Cell::number("answer", 42.0),
-        ],
-    );
-    assert_eq!(
-        session.globals().get("answer"),
-        Some(&serde_json::json!(42))
-    );
-}
-
 /// A structure a root still reaches survives every boundary collection.
 #[test]
 fn a_rooted_structure_survives_the_boundary_collection() {

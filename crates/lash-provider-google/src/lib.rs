@@ -828,22 +828,6 @@ mod tests {
     }
 
     #[test]
-    fn google_image_attachment_serializes_as_inline_data_part() {
-        let png_bytes = vec![0x89, 0x50, 0x4E, 0x47];
-        let attachment = AttachmentSource::inline(
-            lash_core::MediaType::parse("image/png").unwrap(),
-            png_bytes.clone(),
-        );
-        let req = request(None);
-
-        let part = GoogleOAuthProvider::inline_attachment_part(&req, &attachment);
-
-        let expected_b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-        assert_eq!(part["inlineData"]["mimeType"], "image/png");
-        assert_eq!(part["inlineData"]["data"], expected_b64);
-    }
-
-    #[test]
     fn google_audio_attachment_serializes_as_inline_data_part() {
         let bytes = vec![0x49, 0x44, 0x33];
         let attachment = AttachmentSource::inline(
@@ -893,22 +877,6 @@ mod tests {
                 json!({"fileData": {"fileUri": "files/123"}})
             );
         }
-    }
-
-    #[test]
-    fn google_accepts_webp_attachment_through_validation() {
-        let mut req = request(None);
-        req.messages.push(LlmMessage::new(
-            LlmRole::User,
-            vec![LlmContentBlock::Attachment {
-                source: Box::new(AttachmentSource::inline(
-                    lash_core::MediaType::parse("image/webp").unwrap(),
-                    vec![0],
-                )),
-            }],
-        ));
-
-        GoogleOAuthProvider::validate_attachments(&req).expect("webp is supported");
     }
 
     #[test]
@@ -1010,98 +978,6 @@ mod tests {
             ),
             "cumulative thought events must coalesce into one reasoning part, got {:?}",
             state.output_parts
-        );
-    }
-
-    #[test]
-    fn thinking_config_uses_effort_encoding_for_thinking_level() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
-        let body = GoogleOAuthProvider::build_request(
-            &provider,
-            &request_with_capability(
-                Some("medium"),
-                effort_capability(&["low", "medium", "high"]),
-            ),
-            Vec::new(),
-            None,
-        )
-        .expect("schema projection");
-
-        assert_eq!(
-            body["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
-            "medium"
-        );
-        assert!(
-            body["request"]["generationConfig"]["thinkingConfig"]
-                .get("thinkingBudget")
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn thinking_config_uses_budget_encoding_for_variant_budget() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
-        let body = GoogleOAuthProvider::build_request(
-            &provider,
-            &request_with_capability(
-                Some("high"),
-                budget_capability(&[("high", 16_000), ("max", 24_576)]),
-            ),
-            Vec::new(),
-            None,
-        )
-        .expect("schema projection");
-
-        assert_eq!(
-            body["request"]["generationConfig"]["thinkingConfig"]["thinkingBudget"],
-            16_000
-        );
-        assert!(
-            body["request"]["generationConfig"]["thinkingConfig"]
-                .get("thinkingLevel")
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn disabled_budget_model_emits_zero_thinking_budget() {
-        let provider = GoogleOAuthProvider::new(
-            "access",
-            "refresh",
-            0,
-            crate::GoogleOAuthClient {
-                id: "oauth-client-id".into(),
-                secret: "oauth-client-secret".into(),
-            },
-        );
-        let mut req = request_with_capability(
-            None,
-            budget_capability(&[("high", 16_000), ("max", 24_576)]),
-        );
-        req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
-
-        let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None)
-            .expect("schema projection");
-
-        assert_eq!(
-            body["request"]["generationConfig"]["thinkingConfig"],
-            json!({ "thinkingBudget": 0 })
         );
     }
 

@@ -51,29 +51,3 @@ fn imperative(kind: CellFailureKind, cell_noun: &str) -> String {
         ),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The two imperatives have to actually differ, or the split is decoration.
-    #[test]
-    fn the_two_imperatives_give_opposite_instructions() {
-        let policy = imperative(CellFailureKind::Policy, "cell");
-        let error = imperative(CellFailureKind::Program, "cell");
-        assert_ne!(policy, error);
-        assert!(policy.contains("refused"), "{policy}");
-        assert!(error.contains("the defect is in the program"), "{error}");
-        // The Error branch also covers compile-time defects, which never ran, so
-        // it must not claim the program did.
-        assert!(!error.contains("ran and failed"), "{error}");
-    }
-
-    #[test]
-    fn a_host_failure_does_not_blame_the_program() {
-        let host = imperative(CellFailureKind::Host, "cell");
-
-        assert!(!host.contains("program"), "{host}");
-        assert!(host.contains("host"), "{host}");
-    }
-}

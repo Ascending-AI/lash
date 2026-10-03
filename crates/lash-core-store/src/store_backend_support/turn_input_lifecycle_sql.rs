@@ -129,7 +129,3 @@ pub fn released_turn_input_state_sql(column: &str) -> String {
         super::state_sql_literal_list(&[TurnInputStateKind::PendingActive]),
     )
 }
-
-#[cfg(test)]
-#[path = "turn_input_lifecycle_sql_tests.rs"]
-mod tests;

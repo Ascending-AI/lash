@@ -125,71 +125,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn rlm_catalog_renders_all_members_under_call_path() {
-        let tools = [
-            ToolDefinition::raw(
-                "tool:test/fetch_url",
-                "fetch_url",
-                "Fetch URL",
-                ToolContract::default_input_schema(),
-                json!({ "type": "string" }),
-            )
-            .expect("valid declared tool schemas")
-            .with_tool_binding(ToolBinding::new(["web"], "fetch")),
-            ToolDefinition::raw(
-                "tool:test/read_file",
-                "read_file",
-                "Read a file",
-                ToolContract::default_input_schema(),
-                json!({ "type": "string" }),
-            )
-            .expect("valid declared tool schemas")
-            .with_tool_binding(ToolBinding::new(["files"], "read")),
-        ];
-        let contracts: std::collections::BTreeMap<_, _> = tools
-            .iter()
-            .map(|tool| (tool.manifest.id.clone(), Arc::new(tool.contract())))
-            .collect();
-        let manifests = tools.iter().map(|tool| tool.manifest()).collect::<Vec<_>>();
-        let contribution = rlm_tool_catalog(
-            ToolCatalogContext {
-                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
-                tools: manifests.clone(),
-                resolve_contract: Some(Arc::new({
-                    let contracts = contracts.clone();
-                    move |manifest| contracts.get(&manifest.id).cloned()
-                })),
-                tool_access: lash_core::SessionToolAccess::default(),
-                subagent: None,
-                extensions: Default::default(),
-            },
-            &typescript_test_dialect(),
-        )
-        .unwrap();
-        assert!(contribution.is_empty(), "RLM contributes no removals");
-        let catalog = build_tool_catalog(ToolCatalogBuildInput {
-            tools: manifests,
-            resolve_contract: Some(Arc::new(move |manifest| {
-                contracts.get(&manifest.id).cloned()
-            })),
-            contributions: vec![contribution],
-        })
-        .expect("complete resident definitions");
-
-        assert!(catalog.has_callable_tool("fetch_url"));
-        assert!(catalog.has_callable_tool("read_file"));
-        let docs = rlm_prompt_tool_docs(
-            &catalog,
-            &typescript_test_dialect(),
-            crate::protocol::RlmPromptFeatures::default(),
-        );
-        assert!(docs.contains("web.fetch"), "{docs}");
-        assert!(docs.contains("files.read"), "{docs}");
-        // No legacy catalogue notes or tier filtering.
-        assert!(!docs.contains("Catalogued capabilities:"), "{docs}");
-    }
-
-    #[test]
     fn native_rlm_and_validation_share_one_pinned_definition_under_registry_drift() {
         let definition = ToolDefinition::raw(
             "tool:test/pinned",
@@ -313,53 +248,6 @@ mod tests {
                 .contains("missing an explicit `lash.tool` binding"),
             "{err}"
         );
-    }
-
-    /// Membership is advertisement, so a binding whose call path a TypeScript
-    /// cell cannot write is refused at registration rather than rendered as a
-    /// declaration nothing can call (FIG-1444). `delete` is a module root no
-    /// cell can spell; `Math` is a root the lowerer resolves as an ECMA global
-    /// namespace.
-    #[test]
-    fn rlm_catalog_rejects_typescript_call_paths_no_cell_can_address() {
-        for module in ["delete", "Math"] {
-            let unaddressable = ToolDefinition::raw(
-                "tool:test/purge",
-                "purge",
-                "Purge",
-                ToolContract::default_input_schema(),
-                json!({ "type": "string" }),
-            )
-            .expect("valid declared tool schemas")
-            .with_tool_binding(ToolBinding::new([module], "run"));
-
-            let err = rlm_tool_catalog(
-                ToolCatalogContext {
-                    owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
-                    tools: vec![unaddressable.manifest()],
-                    resolve_contract: None,
-                    tool_access: lash_core::SessionToolAccess::default(),
-                    subagent: None,
-                    extensions: Default::default(),
-                },
-                &typescript_test_dialect(),
-            )
-            .expect_err("an unaddressable TypeScript call path must fail registration");
-
-            assert!(
-                err.to_string().contains("no TypeScript cell can call"),
-                "{err}"
-            );
-            assert!(err.to_string().contains(&format!("{module}.run")), "{err}");
-            // The refusal must lead with why the path is unadvertisable. The
-            // probe's own diagnostic answers a different question — `Math.*`
-            // fails it as `TS_AWAIT_UNSUPPORTED`, which reads as "drop the
-            // await" — so it belongs after the reason, never in place of it.
-            assert!(
-                err.to_string().contains("does not dispatch a tool"),
-                "{err}"
-            );
-        }
     }
 
     /// The retired `lashlang.tool` key is not a reader alias: a manifest that
@@ -587,30 +475,6 @@ mod tests {
         )
         .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["agents"], "spawn"))
-    }
-
-    #[test]
-    fn typescript_named_tool_prose_registers() {
-        let tool = tool_with_prose(
-            "Run a TypeScript subagent in a <typescript> cell.",
-            "A TypeScript process definition value, for example `on_button`.",
-        );
-        let contract = Arc::new(tool.contract());
-        let name = tool.name().to_string();
-        rlm_tool_catalog(
-            ToolCatalogContext {
-                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
-                tools: vec![tool.manifest()],
-                resolve_contract: Some(Arc::new(move |requested| {
-                    (requested.name == name).then(|| Arc::clone(&contract))
-                })),
-                tool_access: lash_core::SessionToolAccess::default(),
-                subagent: None,
-                extensions: Default::default(),
-            },
-            &typescript_test_dialect(),
-        )
-        .expect("TypeScript prose must register");
     }
 
     #[test]

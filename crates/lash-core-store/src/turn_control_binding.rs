@@ -114,37 +114,3 @@ pub enum TurnControlBindingIdError {
     #[error("turn-control binding id must not be empty")]
     Empty,
 }
-
-#[cfg(test)]
-mod binding_id_tests {
-    use super::*;
-
-    #[test]
-    fn a_binding_id_round_trips_and_refuses_an_empty_authority() {
-        let id = TurnControlBindingId::new("authority-1").expect("a valid binding id");
-        let json = serde_json::to_string(&id).expect("serializes");
-        assert_eq!(json, "\"authority-1\"");
-        assert_eq!(
-            serde_json::from_str::<TurnControlBindingId>(&json).expect("decodes"),
-            id
-        );
-        assert_eq!(
-            TurnControlBindingId::new("  ").expect_err("blank is refused"),
-            TurnControlBindingIdError::Empty
-        );
-        assert!(
-            serde_json::from_str::<TurnControlBindingId>("\"\"").is_err(),
-            "decoding must refuse what the constructor refuses"
-        );
-    }
-
-    /// The physical-scope suffix the minting function adds survives the
-    /// newtype, so `binding_id_admits_scope` still reads what it wrote.
-    #[test]
-    fn a_physical_scope_binding_survives_the_newtype() {
-        let scope = crate::ExecutionScope::runtime_operation("op-1");
-        let minted = turn_control_binding_id_for_scope("base", &scope).expect("mints");
-        let typed = TurnControlBindingId::new(minted).expect("a valid binding id");
-        assert!(binding_id_admits_scope(typed.as_str(), &scope));
-    }
-}

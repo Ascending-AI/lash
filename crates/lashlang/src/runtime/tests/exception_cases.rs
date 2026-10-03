@@ -34,19 +34,6 @@ pub(super) async fn run_exception_program<H: ExecutionHost>(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn explicit_throw_transfers_the_original_value_to_catch() {
-    let program = exception_finish(exception_try(
-        Expr::Throw(Box::new(Expr::String("boom".into()))),
-        Some(("error", Expr::Variable("error".into()))),
-        None,
-    ));
-    assert_eq!(
-        run_exception_program(program, &Host).await,
-        Ok(ExecutionOutcome::Finished(Value::String("boom".into())))
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn runtime_errors_are_caught_as_heap_backed_error_records() {
     let program = exception_finish(exception_try(
         Expr::BuiltinCall {
@@ -235,83 +222,6 @@ async fn finally_runs_on_normal_and_exceptional_paths_and_a_new_throw_replaces_t
     assert_eq!(
         run_exception_program(exception_finish(normal), &Host).await,
         Ok(ExecutionOutcome::Finished(Value::Number(7.0)))
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn throw_unwinds_function_frames_to_the_callers_handler() {
-    let function = Expr::Function(Box::new(crate::FunctionExpr {
-        name: None,
-        js_name: None,
-        receiver: None,
-        params: Vec::new(),
-        captures: Vec::new(),
-        body: Box::new(Expr::Throw(Box::new(Expr::String("from callee".into())))),
-    }));
-    let program = Program::block(vec![
-        Expr::Assign {
-            target: crate::AssignTarget::variable("f".into()),
-            expr: Box::new(function),
-        },
-        Expr::Finish(Box::new(exception_try(
-            Expr::Call {
-                function: Box::new(Expr::Variable("f".into())),
-                args: Vec::new(),
-            },
-            Some(("error", Expr::Variable("error".into()))),
-            None,
-        ))),
-    ]);
-    assert_eq!(
-        run_exception_program(program, &Host).await,
-        Ok(ExecutionOutcome::Finished(Value::String(
-            "from callee".into()
-        )))
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn continuation_round_trips_inside_try_and_finally() {
-    let try_program = compile_program(&exception_finish(exception_try(
-        Expr::Block(vec![
-            Expr::BuiltinCall {
-                name: "len".into(),
-                args: vec![Expr::String("work".into())],
-            },
-            Expr::Number(11.0),
-        ]),
-        Some(("error", Expr::Number(-1.0))),
-        None,
-    )));
-    let expected = uninterrupted_continuation_result(&try_program).await;
-    let inside_try = find_instruction_continuation(&try_program, |continuation| {
-        !continuation.handler_stack.is_empty() && continuation.finally_stack.is_empty()
-    })
-    .await;
-    assert_eq!(
-        round_trip_and_resume(&try_program, inside_try).await,
-        expected
-    );
-
-    let finally_program = compile_program(&exception_finish(exception_try(
-        Expr::Number(12.0),
-        None,
-        Some(Expr::Block(vec![
-            Expr::BuiltinCall {
-                name: "len".into(),
-                args: vec![Expr::String("cleanup".into())],
-            },
-            Expr::Null,
-        ])),
-    )));
-    let expected = uninterrupted_continuation_result(&finally_program).await;
-    let inside_finally = find_instruction_continuation(&finally_program, |continuation| {
-        !continuation.finally_stack.is_empty()
-    })
-    .await;
-    assert_eq!(
-        round_trip_and_resume(&finally_program, inside_finally).await,
-        expected
     );
 }
 

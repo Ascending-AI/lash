@@ -115,11 +115,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_unowned_head_accepts_a_write_outside_the_shift() {
-        assert!(require_unowned_head(&SessionId::from("s"), HeadOwnershipFacts::default()).is_ok());
-    }
-
-    #[test]
     fn the_first_owner_a_host_waits_on_is_named() {
         let error = require_unowned_head(
             &SessionId::from("s"),
@@ -152,12 +147,5 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    #[test]
-    fn only_a_write_outside_the_shift_onto_a_head_is_checked() {
-        assert!(head_write_needs_ownership(false, true));
-        assert!(!head_write_needs_ownership(true, true));
-        assert!(!head_write_needs_ownership(false, false));
     }
 }

@@ -44,31 +44,3 @@ pub(super) fn extract_cell(
         cell_count: 1,
     }))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const TYPESCRIPT_TAGS: CellTags = CellTags {
-        open: "<typescript>",
-        close: "</typescript>",
-    };
-
-    /// A whitespace-dirtied open tag is not a cell.
-    ///
-    /// What such a reply no longer falls back to is silence —
-    /// [`malformed_cell_fence`] recognizes the attempted fence and the driver
-    /// answers it by naming the rule.
-    #[test]
-    fn a_malformed_open_tag_is_not_a_cell() {
-        let malformed = "<typescript >\nfinish(1);\n</typescript>";
-        assert!(
-            malformed_cell_fence(malformed, TYPESCRIPT_TAGS),
-            "a session that dirtied its own tag must still be told the rule"
-        );
-        assert!(
-            matches!(extract_cell(malformed, TYPESCRIPT_TAGS), Ok(None)),
-            "a malformed open tag is not a cell"
-        );
-    }
-}

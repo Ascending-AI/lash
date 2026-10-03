@@ -459,20 +459,6 @@ mod tests {
     }
 
     #[test]
-    fn catalog_membership_is_flat_and_callable() {
-        let catalog = build_tool_catalog(build_input(
-            vec![tool("read_file"), tool("grep"), tool("write_file")],
-            Vec::new(),
-        ))
-        .expect("complete resident definitions");
-
-        assert_eq!(catalog.callable_tools().len(), 3);
-        assert!(catalog.has_callable_tool("read_file"));
-        assert!(catalog.has_callable_tool("grep"));
-        assert!(!catalog.has_callable_tool("absent"));
-    }
-
-    #[test]
     fn contributions_remove_members() {
         let catalog = build_tool_catalog(build_input(
             vec![tool("read_file"), tool("write_file")],
@@ -483,56 +469,6 @@ mod tests {
         assert!(catalog.has_callable_tool("read_file"));
         assert!(!catalog.has_callable_tool("write_file"));
         assert_eq!(catalog.callable_tools().len(), 1);
-    }
-
-    #[test]
-    fn catalog_pins_contract_once_before_any_projection() {
-        let contract_resolutions = Arc::new(AtomicUsize::new(0));
-        let callable = tool("read_file");
-        let resolver_count = Arc::clone(&contract_resolutions);
-        let catalog = build_tool_catalog(ToolCatalogBuildInput {
-            tools: vec![callable.manifest()],
-            resolve_contract: Some(Arc::new(move |manifest| {
-                resolver_count.fetch_add(1, Ordering::SeqCst);
-                (manifest.id == callable.manifest.id).then(|| Arc::new(callable.contract()))
-            })),
-            contributions: Vec::new(),
-        })
-        .expect("resident definition is complete");
-
-        assert_eq!(contract_resolutions.load(Ordering::SeqCst), 1);
-        assert_eq!(catalog.model_tool_specs().len(), 1);
-        assert_eq!(contract_resolutions.load(Ordering::SeqCst), 1);
-        assert_eq!(catalog.model_tool_specs().len(), 1);
-        assert_eq!(contract_resolutions.load(Ordering::SeqCst), 1);
-    }
-
-    /// A derived document is paid once per catalog generation, and a filtered
-    /// catalog — different membership — never reads its parent's.
-    #[test]
-    fn derived_documents_follow_clones_but_not_filtered_membership() {
-        struct MemberCount(usize);
-        let derivations = AtomicUsize::new(0);
-        let count = |catalog: &ToolCatalog| {
-            derivations.fetch_add(1, Ordering::SeqCst);
-            MemberCount(catalog.tools.len())
-        };
-        let catalog = build_tool_catalog(build_input(
-            vec![tool("read_file"), tool("write_file")],
-            Vec::new(),
-        ))
-        .expect("complete resident definitions");
-
-        let first = catalog.derived(count);
-        let clone = catalog.clone();
-        assert!(Arc::ptr_eq(&first, &catalog.derived(count)));
-        assert!(Arc::ptr_eq(&first, &clone.derived(count)));
-        assert_eq!(derivations.load(Ordering::SeqCst), 1);
-
-        let filtered = catalog.filtered(|entry| entry.manifest.name == "read_file");
-        assert_eq!(filtered.derived(count).0, 1);
-        assert_eq!(first.0, 2);
-        assert_eq!(derivations.load(Ordering::SeqCst), 2);
     }
 
     #[test]

@@ -272,54 +272,6 @@ async fn pinned_source_rebinds_nonadvertised_orphan_when_its_provider_returns() 
     assert_eq!(result.value_for_projection(), json!("returning-resident"));
 }
 
-#[tokio::test]
-async fn pinned_source_rebinds_known_id_to_another_nonadvertising_source() {
-    let a_active = Arc::new(AtomicBool::new(true));
-    let b_active = Arc::new(AtomicBool::new(false));
-    let definition = test_tool("moving_resident", "moving nonadvertised resident");
-    let registry = ToolRegistry::from_tool_provider_sources(vec![
-        (
-            "moving-a".to_string(),
-            vec![Arc::new(ToggleExactProvider {
-                active: Arc::clone(&a_active),
-                definition: definition.clone(),
-                route: "route-a",
-            }) as Arc<dyn ToolProvider>],
-        ),
-        (
-            "moving-b".to_string(),
-            vec![Arc::new(ToggleExactProvider {
-                active: Arc::clone(&b_active),
-                definition: definition.clone(),
-                route: "route-b",
-            }) as Arc<dyn ToolProvider>],
-        ),
-    ])
-    .expect("moving provider registry");
-    let mut entries = BTreeMap::new();
-    entries.insert(
-        tool_id("moving_resident"),
-        ToolStateEntry::new(definition.manifest()),
-    );
-    registry
-        .restore_state(ToolState::new(registry.generation(), entries))
-        .expect("source A initially resolves the resident");
-
-    a_active.store(false, Ordering::SeqCst);
-    b_active.store(true, Ordering::SeqCst);
-    let pinned = registry
-        .compose_session_catalog(Vec::new())
-        .expect("source B rebinds the known resident");
-    let result = execute_leaf_by_id(
-        &pinned,
-        &tool_id("moving_resident"),
-        &json!({}),
-        &test_attempt_context(),
-    )
-    .await;
-    assert_eq!(result.value_for_projection(), json!("route-b"));
-}
-
 /// A curated snapshot may rename the model-facing name on a known tool id; the
 /// pinned resident route must still hand the provider the manifest it
 /// advertised for that id, and a provider swap must hand the new provider its

@@ -5,14 +5,10 @@ mod execute_support;
 
 #[path = "builtin_contract.rs"]
 mod builtin_contract;
-#[path = "diagnostic_rendering.rs"]
-mod diagnostic_rendering;
 #[path = "functions.rs"]
 mod functions;
 #[path = "intrinsic_fuel.rs"]
 mod intrinsic_fuel;
-#[path = "ir_spec.rs"]
-mod ir_spec;
 #[path = "language.rs"]
 mod language;
 #[path = "nesting_cap.rs"]

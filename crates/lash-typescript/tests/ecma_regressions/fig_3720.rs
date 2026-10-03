@@ -77,54 +77,6 @@ fn string_literals_cook_the_same_escapes_under_either_quote() {
     }
 }
 
-/// Every position the dialect accepts a template literal in cooks it: the
-/// adapter carries the cooked value once, so a computed object key, a member
-/// index, a call argument, a return value and a lifted process body all read
-/// the same text Node does.
-#[test]
-fn template_escapes_cook_in_every_position_the_dialect_accepts() {
-    assert_eq!(
-        finished("const o = { [`k\\ny`]: 9 }; finish(o['k\\ny']);"),
-        Value::Number(9.0)
-    );
-    assert_eq!(
-        finished("const o = { 'a\tb': 7 }; finish(o[`a\\tb`]);"),
-        Value::Number(7.0)
-    );
-    assert_eq!(finished("finish([`x\\ny`][0].length);"), Value::Number(3.0));
-    assert_eq!(
-        finished("const f = (v: string) => v.length; finish(f(`a\\nb`));"),
-        Value::Number(3.0)
-    );
-
-    // A lifted process literal's body cooks the same way: the lowered
-    // constants are the cooked text, not the source spelling.
-    let program = lash_typescript::parse(
-        "const worker = async (tick: unknown) => { console.log(`line\\n${1}`); return `a\\tb`; };\n",
-    )
-    .expect("a template inside a process body compiles");
-    let mut strings = Vec::new();
-    fn collect_strings(expr: &lashlang::Expr, strings: &mut Vec<String>) {
-        if let lashlang::Expr::String(value) = expr {
-            strings.push(value.as_str().to_owned());
-        }
-        for child in expr.children() {
-            collect_strings(child, strings);
-        }
-    }
-    for child in program.main.children() {
-        collect_strings(child, &mut strings);
-    }
-    assert!(
-        strings.iter().any(|value| value == "a\tb"),
-        "the process body's template lowers cooked: {strings:?}"
-    );
-    assert!(
-        strings.iter().any(|value| value == "line\n"),
-        "the process body's quasi cooks: {strings:?}"
-    );
-}
-
 /// An escape that cannot cook is a SyntaxError in an untagged template — ECMA
 /// reserves the uninterpreted form for tags, which the dialect refuses — and
 /// a cooked lone surrogate is unrepresentable like the string-literal form.

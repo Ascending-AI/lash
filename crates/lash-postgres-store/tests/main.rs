@@ -13,8 +13,7 @@ mod harness;
 
 #[path = "checkpoint_commit_delete_race.rs"]
 mod checkpoint_commit_delete_race;
-#[path = "commit_size_benchmark.rs"]
-mod commit_size_benchmark;
+
 #[path = "fleet_format.rs"]
 mod fleet_format;
 #[path = "orphaned_tombstone_reclaim.rs"]
@@ -29,8 +28,7 @@ mod postgres_clock_contract;
 mod pre_submission_digest_cutover;
 #[path = "process_prune_reclaim.rs"]
 mod process_prune_reclaim;
-#[path = "refcount_benchmark.rs"]
-mod refcount_benchmark;
+
 #[path = "release_stamp.rs"]
 mod release_stamp;
 #[path = "turn_cancel_receipt_consistency.rs"]

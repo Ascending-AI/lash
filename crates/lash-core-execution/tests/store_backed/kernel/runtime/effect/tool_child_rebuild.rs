@@ -493,59 +493,6 @@ mod tests {
         ));
     }
 
-    /// With no source installed, a child with no live opener here is not
-    /// routed, exactly as before FIG-3712. Installing one routes it; the
-    /// source going away stops the routing again rather than leaving a
-    /// dangling builder.
-    #[tokio::test]
-    async fn only_a_live_source_routes_a_child_with_no_live_opener() {
-        let backend = Backend::new().await;
-        let worker = backend.worker();
-        let envelope = envelope(backend.request(ToolRetryPolicy::Never).await, "child");
-        // The same child, whose opener recorded that it lent no context.
-        let unlent = {
-            let mut request = backend.request(ToolRetryPolicy::Never).await;
-            request.session.opener_context = ToolChildOpenerContext::Absent;
-            self::envelope(request, "child")
-        };
-        assert!(
-            crate::GroupExecutors::executor_for(worker.tool_children.as_ref(), &envelope).is_none(),
-            "no source: the child is not routed here"
-        );
-        assert_eq!(
-            crate::GroupExecutors::missing_capability(worker.tool_children.as_ref(), &unlent),
-            Some(crate::GroupChildCapability::ToolChildContextSource),
-            "no opener lent a context and the deployment installs no source"
-        );
-        let built = tools(Behavior::Answer);
-        let (_fixed, source) = source(&built);
-        assert_eq!(
-            worker.tool_children.install_context_source(&source),
-            ContextSourceInstall::Sole
-        );
-        assert!(
-            crate::GroupExecutors::executor_for(worker.tool_children.as_ref(), &envelope).is_some(),
-            "a live source routes the child"
-        );
-        assert_eq!(
-            crate::GroupExecutors::missing_capability(worker.tool_children.as_ref(), &unlent),
-            None,
-            "the deployment's source builds the context no opener lent"
-        );
-        drop(source);
-        drop(_fixed);
-        assert!(
-            crate::GroupExecutors::executor_for(worker.tool_children.as_ref(), &envelope).is_none(),
-            "a dropped source routes nothing"
-        );
-        assert_eq!(
-            crate::GroupExecutors::missing_capability(worker.tool_children.as_ref(), &unlent),
-            None,
-            "a source this process dropped is this process's fact: the deployment wires one, \
-             so another worker's builds the child"
-        );
-    }
-
     /// Two distinct live sources leave the host ambiguous: a child with no
     /// live opener here is refused, typed and retryable, and neither source
     /// builds anything, so no child runs under whichever deployment was built

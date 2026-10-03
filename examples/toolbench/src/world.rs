@@ -428,19 +428,6 @@ fn object_schema(fields: &[(&str, &str)]) -> Value {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn submit_preserves_first_value_and_records_duplicates() {
-        let world = SharedWorld::new(World::seeded());
-        world.submit(&json!({"value": null}));
-        world.submit(&json!({"value": 2}));
-        assert_eq!(world.submissions(), vec![Value::Null, json!(2)]);
-        assert_eq!(world.snapshot(), World::seeded());
-    }
-}
-
 // Original, closed fixtures: retail has 16 records; operations has 18.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Customer {

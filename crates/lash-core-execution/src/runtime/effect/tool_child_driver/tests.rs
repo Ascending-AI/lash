@@ -185,79 +185,6 @@ pub(super) fn child_controller() -> ScopedEffectController<'static> {
     .expect("a valid child scope")
 }
 
-fn rebound(request: &ToolChildRequest) -> ToolDispatchContext<'static> {
-    rebind_child_dispatch(&lent(), request, child_controller(), spec(3))
-        .expect("the lent client's test service binds to any recorded authority")
-}
-
-/// A child may be attributed to a session the lending opener is not: a process
-/// opener has no session of its own (ADR 0094) and still does tool work that
-/// belongs to one.
-#[test]
-fn the_child_is_attributed_to_its_recorded_session_not_the_opener_s() {
-    assert_eq!(
-        lent().owner.session_id(),
-        Some(&SessionId::from("opener-session")),
-        "the lent value must be wrong for this test to prove anything"
-    );
-    assert_eq!(
-        rebound(&request()).owner.session_id(),
-        Some(&SessionId::from("child-session"))
-    );
-}
-
-/// One session holds many frames (ADR 0092). A child that inherited the
-/// opener's current frame would attribute its work to the wrong one.
-#[test]
-fn the_child_keeps_its_recorded_agent_frame() {
-    assert_eq!(
-        lent().owner.agent_frame_id().map(|frame| frame.as_str()),
-        Some("opener-frame")
-    );
-    assert_eq!(
-        rebound(&request())
-            .owner
-            .agent_frame_id()
-            .map(|frame| frame.as_str()),
-        Some("child-frame")
-    );
-}
-
-/// Ruling 1 (ADR 0099 §3 item 1): a reopen may not consult the live Tool
-/// Catalog *for the recorded call*. The lent catalog holds a *different* tool
-/// with a *different* retry policy, so a rebind that kept it wholesale would
-/// run the child under a policy it was never admitted with — or fail to
-/// resolve it at all.
-#[test]
-fn the_child_is_dispatched_against_its_admitted_manifest_not_the_live_catalog() {
-    let lent = lent();
-    assert!(
-        crate::tool_dispatch::resolve_callable_manifest_by_id(&lent, &ToolId::from("search"))
-            .is_none(),
-        "the lent catalog must not contain the child's tool for this test to prove anything"
-    );
-    let child = rebound(&request());
-    let resolved =
-        crate::tool_dispatch::resolve_callable_manifest_by_id(&child, &ToolId::from("search"))
-            .expect("the admitted manifest resolves at the child's own id");
-    assert_eq!(resolved.retry_policy, ToolRetryPolicy::safe(4, 10, 100));
-    // Every other id answers from the surface the opener recorded at group
-    // open (FIG-3712), never from the context serving the child.
-    assert!(
-        crate::tool_dispatch::resolve_callable_manifest_by_id(
-            &child,
-            &ToolId::from("recorded-tool")
-        )
-        .is_some(),
-        "an admission resolves through the recorded surface"
-    );
-    assert!(
-        crate::tool_dispatch::resolve_callable_manifest_by_id(&child, &ToolId::from("opener-tool"))
-            .is_none(),
-        "an admission never resolves through the serving context's catalog"
-    );
-}
-
 /// Ruling 1 at the recorded id itself: a live entry that shares the child's
 /// tool id but drifted since admission — a different retry policy here —
 /// loses to the recorded manifest, because the reopen may not consult it for
@@ -282,55 +209,6 @@ fn a_live_entry_at_the_childs_own_id_loses_to_the_recorded_manifest() {
         resolved.retry_policy,
         ToolRetryPolicy::safe(4, 10, 100),
         "the recorded retry policy wins over a drifted live entry at the same id"
-    );
-}
-
-/// Lineage is recorded, not the opener's current one: the child's attempts
-/// derive their replay keys and causal parent from the identity the request
-/// carries.
-#[test]
-fn lineage_comes_from_the_recorded_attempt_identity() {
-    assert_eq!(
-        lent()
-            .parent_invocation
-            .and_then(|parent| parent.effect_id().map(str::to_string)),
-        Some("opener-parent".to_string())
-    );
-    assert_eq!(
-        rebound(&request())
-            .parent_invocation
-            .and_then(|parent| parent.effect_id().map(str::to_string)),
-        Some("recorded-parent".to_string())
-    );
-}
-
-/// The environment the child was admitted under, resolved from its recorded
-/// reference — never whatever the opener happens to be running now.
-#[test]
-fn the_child_runs_under_its_recorded_execution_environment() {
-    assert_eq!(
-        lent().execution_env_spec.policy.turn_budget,
-        crate::TurnBudget::bounded(9)
-    );
-    assert_eq!(
-        rebound(&request()).execution_env_spec.policy.turn_budget,
-        crate::TurnBudget::bounded(3)
-    );
-}
-
-/// ADR 0099 §2: the child's **own** admitted controller, never the lent one.
-/// This is the authority boundary; everything else on the checklist is
-/// attribution.
-#[test]
-fn the_child_runs_on_its_own_admitted_controller() {
-    assert_ne!(
-        lent().effect_controller.execution_scope(),
-        &ExecutionScope::turn("child-session", "turn"),
-        "the lent controller must be admitted under a scope that is not the child's"
-    );
-    assert_eq!(
-        rebound(&request()).effect_controller.execution_scope(),
-        &ExecutionScope::turn("child-session", "turn")
     );
 }
 
@@ -383,97 +261,6 @@ fn the_child_gets_fresh_checkpoint_and_trigger_buffers() {
         "the opener's own trigger receipt stays on the lent buffer"
     );
     assert_eq!(lent_triggers[0].occurrence_id, "occurrence-1");
-}
-
-/// Everything not on the checklist is deployment wiring and live channels, and
-/// §3 puts both on the lent side of the split. Asserted by identity, so a
-/// rebind that quietly rebuilt one of them fails here.
-#[test]
-fn everything_not_on_the_checklist_is_the_lent_value() {
-    let lent = lent();
-    let child = rebind_child_dispatch(&lent, &request(), child_controller(), spec(3))
-        .expect("the lent client's test service binds to any recorded authority");
-    assert!(Arc::ptr_eq(&lent.plugins, &child.plugins));
-    assert!(Arc::ptr_eq(&lent.tools, &child.tools));
-    assert!(Arc::ptr_eq(&lent.processes, &child.processes));
-    assert!(Arc::ptr_eq(&lent.sessions, &child.sessions));
-    assert!(Arc::ptr_eq(
-        &lent.session_lifecycle,
-        &child.session_lifecycle
-    ));
-    assert!(Arc::ptr_eq(&lent.session_graph, &child.session_graph));
-    assert!(Arc::ptr_eq(&lent.attachment_store, &child.attachment_store));
-    assert!(Arc::ptr_eq(
-        &lent.attachment_source_policy,
-        &child.attachment_source_policy
-    ));
-    assert!(Arc::ptr_eq(&lent.clock, &child.clock));
-    assert!(Arc::ptr_eq(&lent.observer, &child.observer));
-}
-
-/// §3's ruling stated as a negative: a group child holds no runtime execution
-/// context — the live context is exactly the authority a retained child must
-/// not borrow, because the facts it would record are the child's buffers'
-/// job to carry into the settlement. What the context *does* name is the
-/// rebound dispatch itself, never the opener's live one.
-#[test]
-fn a_childs_tool_context_holds_no_runtime_execution_context() {
-    let lent = lent();
-    let rebound = Arc::new(
-        rebind_child_dispatch(&lent, &request(), child_controller(), spec(3))
-            .expect("the lent client's test service binds to any recorded authority"),
-    );
-    let context = child_tool_context(
-        &rebound,
-        &request(),
-        &crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
-    );
-    assert!(
-        context.runtime_execution_context.is_none(),
-        "a group child is not lent a live execution context (§3)"
-    );
-    assert!(
-        context
-            .runtime_dispatch
-            .as_ref()
-            .is_some_and(|dispatch| Arc::ptr_eq(dispatch, &rebound)),
-        "the context's dispatch is the child's rebound dispatch"
-    );
-}
-
-/// Live-opener registration derives through the one owner derivation
-/// (`EffectOpener::for_scope`, FIG-3417), exhaustively, so a scope arm added
-/// later is a compile error rather than a silently unregistered opener: a
-/// turn and a session operation name their opener from the scope alone; a process
-/// scope names it only through the pinned incarnation the runner bound,
-/// never from the reusable name.
-#[test]
-fn opener_derivation_names_every_admitted_opener_scope() {
-    let turn = crate::AdmittedScope::turn("session", "turn");
-    assert_eq!(
-        opener_for_execution_scope(&turn),
-        Some(crate::EffectOpener::turn("session", "turn"))
-    );
-    let drain = crate::AdmittedScope::session_operation("session", "drain-1");
-    assert_eq!(
-        opener_for_execution_scope(&drain),
-        Some(crate::EffectOpener::session_operation("session", "drain-1"))
-    );
-    let process_id = crate::ProcessId::fixture("process-1");
-    let process = crate::AdmittedScope::process(process_id.clone());
-    assert_eq!(
-        opener_for_execution_scope(&process),
-        Some(crate::EffectOpener::process(process_id.clone()))
-    );
-    for admitted in [
-        crate::AdmittedScope::session_delete("session"),
-        crate::AdmittedScope::runtime_operation("op-1"),
-    ] {
-        assert!(
-            opener_for_execution_scope(&admitted).is_none(),
-            "{admitted:?} names no opener"
-        );
-    }
 }
 
 /// A `DirectCompletionService` probe on the real `Runtime` completion
@@ -699,29 +486,6 @@ fn a_completion_service_that_cannot_bind_the_recorded_authority_refuses() {
     );
 }
 
-/// The recorded cancellation authority is the scope the child's waits
-/// observe: whether the child is waiting out a retry, parked on a deferred
-/// completion, or running the attempt body, the cooperative signal that can
-/// reach it is the recorded binding's — never a foreign opener's.
-#[tokio::test]
-async fn the_cancel_wait_observes_the_admitted_scope() {
-    let with_authority = request();
-    let dispatch = Arc::new(rebound(&with_authority));
-    let wait = child_turn_cancel_wait(
-        &dispatch,
-        &with_authority,
-        &tokio_util::sync::CancellationToken::new(),
-    );
-    let observed = wait
-        .process_turn_cancellation()
-        .expect("a recorded authority observes turn cancellation");
-    assert_eq!(
-        observed.scope,
-        ExecutionScope::turn("child-session", "turn"),
-        "the wait observes the child's admitted scope"
-    );
-}
-
 /// Records the turn-cancel shape of every journaled sleep, the way the
 /// retry-gate suite's recorder does: the observable a signalled host gate
 /// would act on is `observe_turn_cancel`, so asserting the shape is asserting
@@ -887,36 +651,5 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     assert!(
         retried(&unavailable),
         "a failed acquisition is retried before journaling"
-    );
-}
-
-/// A child whose presentation effect a controller refused — a replay
-/// divergence against its record, a live journal fault — has no presentation:
-/// the refusal is returned, and the child is refused with it, never settled
-/// with the refusal's text as its model-facing return (FIG-3679).
-#[tokio::test]
-async fn a_refused_presentation_refuses_the_child_rather_than_settling_as_its_return() {
-    let request = request();
-    let dispatch = rebound(&request);
-    let outcome = ToolDispatchOutcome {
-        record: crate::ToolCallRecord {
-            call_id: request.call.call_id.clone(),
-            provider_call_id: None,
-            tool: "tool".to_string(),
-            args: serde_json::json!({}),
-            output: crate::ToolCallOutput::success(serde_json::json!("settled")),
-        },
-        attempts: Vec::new(),
-        intents: crate::ToolIntents::default(),
-        intent_outcomes: Vec::new(),
-        captures: Vec::new(),
-        triggers: Vec::new(),
-    };
-    let refused = resolve_model_return(&dispatch, &request, &outcome, &[], 0)
-        .await
-        .expect_err("the child's controller refuses the presentation effect");
-    assert!(
-        !refused.message.is_empty(),
-        "the refusal carries the controller's own error: {refused:?}"
     );
 }

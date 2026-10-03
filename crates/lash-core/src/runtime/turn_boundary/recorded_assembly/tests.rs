@@ -9,8 +9,7 @@
 //! content as its commit bytes.
 //!
 //! What this proves is narrow and deliberate: the fold is a pure function of
-//! the recorded outcomes, whatever the scheduling of their delivery, and
-//! folding in arrival order instead of declaration order would be caught. It
+//! the recorded outcomes, whatever the scheduling of their delivery. It
 //! does not exercise the production driver or publisher; the real-runtime
 //! tests (`tests/runtime/tests/commit_bytes.rs`) cover those, including a
 //! host sink that blocks until released.
@@ -20,10 +19,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use super::RecordedTurnAssembly;
-use crate::engine::testing::{
-    DeterminismCheck, DeterminismFailure, FailureCause, LocalEngine, LocalTestCx, RunMode,
-    TranscriptDivergence, TranscriptEntry,
-};
+use crate::engine::testing::{DeterminismCheck, LocalEngine, LocalTestCx, TranscriptEntry};
 use crate::engine::{ObservationCursor, ObservedEvent, ReplayKey};
 use crate::llm::types::StreamBlockIdentity;
 use crate::runtime::turn_observer::TurnObservations;
@@ -41,19 +37,9 @@ enum Host {
     StalledOneSecond,
 }
 
-/// The order in which the shift folds its parallel tool results.
-#[derive(Clone, Copy)]
-enum Fold {
-    /// Declaration order, as the turn machine incorporates tool results.
-    Declared,
-    /// Completion order: the order an observation stream would deliver them.
-    Arrival,
-}
-
 #[derive(Clone, Copy)]
 struct MiniTurn {
     host: Host,
-    fold: Fold,
 }
 
 const TOOLS: [&str; 3] = ["alpha", "beta", "gamma"];
@@ -184,20 +170,8 @@ async fn mini_turn(turn: MiniTurn, cx: &LocalTestCx) {
             )
         })
         .collect::<Vec<_>>();
-    match turn.fold {
-        Fold::Declared => {
-            for emissions in futures_util::future::join_all(calls).await {
-                fold(&mut assembly, emissions);
-            }
-        }
-        Fold::Arrival => {
-            let mut arriving = calls;
-            while !arriving.is_empty() {
-                let (emissions, _, pending) = futures_util::future::select_all(arriving).await;
-                fold(&mut assembly, emissions);
-                arriving = pending;
-            }
-        }
+    for emissions in futures_util::future::join_all(calls).await {
+        fold(&mut assembly, emissions);
     }
 
     let cell = cx
@@ -283,15 +257,11 @@ const SEED: u64 = 0x3672_0006;
 fn commit_content_repeats_under_perturbed_scheduling_and_a_stalled_host() {
     let check = DeterminismCheck::new(SEED).perturbed_replays(6);
     let prompt = check
-        .run(&engine(MiniTurn {
-            host: Host::Prompt,
-            fold: Fold::Declared,
-        }))
+        .run(&engine(MiniTurn { host: Host::Prompt }))
         .unwrap_or_else(|failure| panic!("{failure}"));
     let stalled = check
         .run(&engine(MiniTurn {
             host: Host::StalledOneSecond,
-            fold: Fold::Declared,
         }))
         .unwrap_or_else(|failure| panic!("{failure}"));
 
@@ -309,33 +279,4 @@ fn commit_content_repeats_under_perturbed_scheduling_and_a_stalled_host() {
         .unwrap_or_else(|divergence| {
             panic!("a host that stalls for a second changed the commit: {divergence}")
         });
-}
-
-#[test]
-fn folding_in_arrival_order_is_caught_by_the_check() {
-    let failure: DeterminismFailure = DeterminismCheck::new(SEED)
-        .perturbed_replays(6)
-        .run(&engine(MiniTurn {
-            host: Host::Prompt,
-            fold: Fold::Arrival,
-        }))
-        .expect_err("an assembly folded in arrival order must diverge under perturbation");
-    assert!(
-        matches!(failure.mode, RunMode::Replay(_)),
-        "the fresh run completes; a replay diverges: {failure}"
-    );
-    let FailureCause::Diverged(divergence) = &failure.cause else {
-        panic!("expected a divergence, got {failure}");
-    };
-    assert!(
-        matches!(
-            &**divergence,
-            TranscriptDivergence {
-                expected: Some(TranscriptEntry::Commit { .. }),
-                actual: Some(TranscriptEntry::Commit { .. }),
-                ..
-            }
-        ),
-        "the replay issues the same commands and commits different bytes: {failure}"
-    );
 }

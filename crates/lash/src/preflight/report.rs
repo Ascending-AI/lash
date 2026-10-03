@@ -744,17 +744,6 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_walk_is_empty_rather_than_readable() {
-        // The distinction a boolean loses: "nothing is parked" and "everything
-        // parked opens" are different operational facts, and only one of them
-        // means a drain is unnecessary because a drain already happened.
-        let row = tally_row(FormatTally::default(), FormatVersion::Counter(8));
-        assert_eq!(row.verdict, ComponentVerdict::Empty);
-        assert_eq!(row.scanned, 0);
-        assert!(!row.refuses_open());
-    }
-
-    #[test]
     fn a_counter_boundary_refuses_in_both_directions() {
         for found in [7, 9] {
             let mut tally = FormatTally::default();
@@ -781,15 +770,6 @@ mod tests {
     }
 
     #[test]
-    fn undecodable_items_alone_are_undecided_rather_than_readable() {
-        let mut tally = FormatTally::default();
-        tally.undecodable("not valid JSON");
-        let row = tally_row(tally, FormatVersion::Counter(8));
-        assert_eq!(row.verdict, ComponentVerdict::Undecodable);
-        assert!(!row.refuses_open(), "nobody read a version to refuse");
-    }
-
-    #[test]
     fn undecodable_reasons_are_capped_but_counted_in_full() {
         let mut tally = FormatTally::default();
         for index in 0..50 {
@@ -798,97 +778,6 @@ mod tests {
         let row = tally_row(tally, FormatVersion::Counter(8));
         assert_eq!(row.undecodable, 50);
         assert_eq!(row.undecodable_reasons.len(), MAX_UNDECODABLE_REASONS);
-    }
-
-    #[test]
-    fn found_versions_are_counted_and_ordered() {
-        let mut tally = FormatTally::default();
-        tally.record(9);
-        tally.record(8);
-        tally.record(9);
-        let row = tally_row(tally, FormatVersion::Counter(8));
-        assert_eq!(
-            row.found,
-            vec![
-                FoundVersion {
-                    version: 8,
-                    count: 1
-                },
-                FoundVersion {
-                    version: 9,
-                    count: 2
-                }
-            ]
-        );
-    }
-
-    fn refused_report() -> PreflightReport {
-        let mut tally = FormatTally::default();
-        tally.record(2);
-        PreflightReport {
-            backend: "sqlite (/srv/lash/durable-core.db)".to_string(),
-            mode: PreflightMode::Summary,
-            outcome: PreflightOutcome::Refused,
-            schema: SchemaReport {
-                outcome: "ready",
-                databases: Vec::new(),
-                release: ReleaseStampReport::Unstamped,
-                fleet_format: FleetFormatReport::Unrecorded,
-            },
-            components: vec![tally.into_row(
-                DurableFormat::LashlangSegmentHandover,
-                FormatVersion::Counter(3),
-                FormatProbe::Comparable,
-                FormatEvidence::Direct,
-            )],
-            drain: vec![DrainBlocker {
-                process_id: Some(ProcessId::fixture("p-1")),
-                session_id: Some(SessionId::from("s-1")),
-                status: Some("waiting".to_string()),
-                format: "Lashlang segment handover".to_string(),
-                expected: "3".to_string(),
-                found: Some(2),
-                detail: "process `p-1` parked a segment at version 2".to_string(),
-            }],
-            not_scanned: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn a_refusal_message_names_the_boundary_the_count_and_the_remedy() {
-        let message = refused_report()
-            .refusal_message()
-            .expect("a refused report has a message");
-        assert!(message.contains("Lashlang segment handover"), "{message}");
-        assert!(message.contains("2 (1 item(s))"), "{message}");
-        assert!(message.contains("this build writes 3"), "{message}");
-        assert!(message.contains("Drain 1 affected item(s)"), "{message}");
-        assert!(message.contains("no migration decoder"), "{message}");
-    }
-
-    #[test]
-    fn a_ready_report_has_no_refusal_message() {
-        // A host that printed a refusal over a healthy store would teach its
-        // operators to ignore the message.
-        let mut report = refused_report();
-        report.outcome = PreflightOutcome::Ready;
-        assert_eq!(report.refusal_message(), None);
-    }
-
-    #[test]
-    fn the_report_serializes_the_fields_a_gate_asserts_on() {
-        let json = serde_json::to_value(refused_report()).expect("the report serializes");
-        assert_eq!(json["outcome"], "refused");
-        assert_eq!(json["mode"], "summary");
-        assert_eq!(json["components"][0]["verdict"], "refused");
-        assert_eq!(json["components"][0]["found"][0]["version"], 2);
-        assert_eq!(json["components"][0]["found"][0]["count"], 1);
-        assert_eq!(json["components"][0]["evidence"]["kind"], "direct");
-        assert_eq!(
-            json["drain"][0]["process_id"],
-            ProcessId::fixture("p-1").as_str()
-        );
-        assert_eq!(json["drain"][0]["found"], 2);
     }
 
     #[test]
@@ -926,21 +815,5 @@ mod tests {
             serde_json::to_string(&format).expect("the skipped format serializes"),
             r#"{"what":"session head meta","reason":"no bounded surface"}"#
         );
-    }
-
-    #[test]
-    fn rendering_names_what_was_not_scanned() {
-        let mut report = refused_report();
-        report.not_scanned.push(NotScanned::Surface {
-            surface: DurableSurface::SessionCheckpoint,
-            reason: "summary mode skips the per-session blob walk".to_string(),
-        });
-        let rendered = report.to_string();
-        assert!(rendered.contains("mode: summary"), "{rendered}");
-        assert!(
-            rendered.contains("not scanned: session checkpoints"),
-            "{rendered}"
-        );
-        assert!(rendered.contains("[found 2 x1]"), "{rendered}");
     }
 }

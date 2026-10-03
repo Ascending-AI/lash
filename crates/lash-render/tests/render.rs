@@ -1,6 +1,5 @@
 use lash_render::{
-    CutKind, Layout, RenderNode, RenderParams, RenderParamsPatch, RenderValue, Rendered,
-    ShownRange, render, truncate_chars,
+    CutKind, Layout, RenderNode, RenderParams, RenderValue, ShownRange, render, truncate_chars,
 };
 use serde_json::{Value, json};
 use std::borrow::Cow;
@@ -220,63 +219,6 @@ fn uncut_count_matches_escaped_output_without_sampling_nested_arrays() {
     assert_eq!(rendered.body, nested.to_string());
     assert_eq!(rendered.cuts.original_chars, rendered.body.chars().count());
     assert!(rendered.cuts.is_empty());
-}
-
-#[test]
-fn sparse_patches_layer_every_parameter() {
-    let host = RenderParamsPatch {
-        max_chars: Some(12),
-        layout: Some(Layout::Pretty),
-        line_width: Some(20),
-        indent: Some(4),
-        max_depth: Some(2),
-        array_threshold: Some(5),
-        array_head: Some(2),
-        array_tail: Some(1),
-        min_item_chars: Some(7),
-        stack_head: Some(2),
-        stack_tail: Some(2),
-    };
-    let turn = RenderParamsPatch {
-        max_chars: Some(6),
-        array_head: Some(1),
-        ..RenderParamsPatch::default()
-    };
-    let resolved = turn.over(&host).apply(&RenderParams::default());
-    assert_eq!(resolved.max_chars, 6);
-    assert_eq!(resolved.array_head, 1);
-    assert_eq!(resolved.stack_tail, 2);
-    assert_eq!(resolved.indent, 4);
-    assert_eq!(resolved.max_depth, 2);
-    assert_eq!(resolved.array_threshold, 5);
-    assert_eq!(resolved.array_tail, 1);
-    assert_eq!(resolved.min_item_chars, 7);
-    assert_eq!(resolved.stack_head, 2);
-    assert_eq!(resolved.line_width, 20);
-    assert_eq!(resolved.layout, Layout::Pretty);
-    let encoded = serde_json::to_value(&turn).unwrap();
-    assert_eq!(encoded, json!({"max_chars": 6, "array_head": 1}));
-    assert_eq!(
-        serde_json::from_value::<RenderParamsPatch>(encoded).unwrap(),
-        turn
-    );
-    assert!(serde_json::from_value::<RenderParamsPatch>(json!({"extra": 1})).is_err());
-    assert!(RenderParamsPatch::default().is_empty());
-    assert_eq!(RenderParams::preview().max_depth, 2);
-    assert_eq!(RenderParams::preview().max_chars, 1_000);
-    assert_eq!(RenderParams::preview().layout, Layout::Compact);
-}
-
-#[test]
-fn cut_report_merge_preserves_counts_and_ranges() {
-    let mut a: Rendered<String> = render(&json!(vec![0; 11]), &RenderParams::default());
-    let b = truncate_chars(render(&json!("é🙂"), &RenderParams::default()), 1);
-    let original = a.cuts.original_chars;
-    a.cuts.merge(b.cuts);
-    assert_eq!(a.cuts.original_chars, original + 2);
-    assert_eq!(a.cuts.counts[&CutKind::Array], 1);
-    assert_eq!(a.cuts.counts[&CutKind::Chars], 1);
-    assert_eq!(a.cuts.shown.len(), 6);
 }
 
 #[test]

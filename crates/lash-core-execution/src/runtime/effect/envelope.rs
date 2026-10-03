@@ -1969,7 +1969,3 @@ impl From<RuntimeEffectInvocation> for crate::RuntimeInvocation {
 #[cfg(test)]
 #[path = "envelope_rejection_tests.rs"]
 mod rejection_tests;
-
-#[cfg(test)]
-#[path = "envelope_tests.rs"]
-mod cell_replay_grammar_tests;

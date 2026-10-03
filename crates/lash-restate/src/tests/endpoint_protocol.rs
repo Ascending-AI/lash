@@ -885,15 +885,6 @@ pub(super) fn encode_run_replay<T: serde::Serialize>(
     Ok(body.freeze())
 }
 
-/// FIG-779: `SleepCommand` (0x040C) carrying only `wake_up_time` and its
-/// completion id, as the SDK writes it for `ctx.sleep()`.
-fn encode_sleep_command(completion_id: u32) -> Bytes {
-    let mut payload = BytesMut::new();
-    put_varint_field(&mut payload, 1, 1);
-    put_varint_field(&mut payload, 11, u64::from(completion_id));
-    encode_restate_message(0x040C, payload.to_vec())
-}
-
 /// FIG-779: `SleepCompletionNotification` (0x800C) with a void result, i.e. the
 /// timer already fired and its completion is in the replayed journal.
 pub(super) fn encode_sleep_completion(completion_id: u32) -> Bytes {
@@ -901,21 +892,6 @@ pub(super) fn encode_sleep_completion(completion_id: u32) -> Bytes {
     put_varint_field(&mut payload, 1, u64::from(completion_id));
     put_len_field(&mut payload, 4, &[]);
     encode_restate_message(0x800C, payload.to_vec())
-}
-
-/// FIG-779: an invocation body whose journal already contains a completed
-/// durable timer, so the handler replays the sleep straight to `Ready`.
-pub(super) fn encode_completed_sleep_replay<T: serde::Serialize>(
-    workflow_key: &str,
-    input: &T,
-) -> Result<Bytes, TerminalError> {
-    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
-    let mut body = BytesMut::new();
-    body.extend_from_slice(&encode_start_message(workflow_key, 3));
-    body.extend_from_slice(&encode_input_command(&input));
-    body.extend_from_slice(&encode_sleep_command(1));
-    body.extend_from_slice(&encode_sleep_completion(1));
-    Ok(body.freeze())
 }
 
 pub(super) fn decode_varint(input: &[u8], cursor: &mut usize) -> Option<u64> {

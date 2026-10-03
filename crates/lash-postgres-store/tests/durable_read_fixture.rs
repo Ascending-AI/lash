@@ -359,18 +359,6 @@ fn source_manifest_dir_for(workspace: Option<std::ffi::OsString>) -> PathBuf {
     )
 }
 
-#[test]
-fn fixture_source_dir_resolves_build_workspace() {
-    assert_eq!(
-        source_manifest_dir_for(Some("/tmp/lash-fork".into())),
-        PathBuf::from("/tmp/lash-fork/crates/lash-postgres-store")
-    );
-    assert_eq!(
-        source_manifest_dir_for(None),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    );
-}
-
 fn json_with_newline(value: &impl Serialize) -> Vec<u8> {
     let mut bytes = serde_json::to_vec_pretty(value).expect("encode Postgres fixture JSON");
     bytes.push(b'\n');

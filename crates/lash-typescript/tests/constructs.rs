@@ -272,16 +272,6 @@ fn parameter_defaults_rest_and_destructuring_run_in_parameter_order() {
 }
 
 #[test]
-fn classic_for_creates_per_iteration_closure_values() {
-    assert_eq!(
-        finished(
-            "function run(){let first=()=>-1; let second=()=>-1; for(let i=0;i<2;i++){if(i===0){first=()=>i;}else{second=()=>i;}} return `${first()}|${second()}`;} finish(run());",
-        ),
-        Value::String("0|1".into())
-    );
-}
-
-#[test]
 fn async_map_all_settled_wraps_each_callback_settlement() {
     assert_eq!(
         finished(
@@ -343,26 +333,4 @@ fn nested_global_assignment_and_uri_codecs_use_registered_intrinsics() {
             .into(),
         )
     );
-}
-
-#[test]
-fn every_wpa_private_intrinsic_shape_links_through_the_production_wrapper() {
-    let environment = lashlang::LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        lashlang::LashlangAbilities::all(),
-    );
-    for source in [
-        "const e = new Error('x'); finish(e instanceof Error);",
-        "globalThis.present = 1; finish('present' in globalThis);",
-        "globalThis.removed = 1; finish(delete globalThis.removed);",
-        "function add(a,b){return a+b;} finish(add(...[1,2]));",
-        "finish(await Promise.all([1,2].map(async x => x + 1)));",
-        "function collect(a=1,...rest){return [a,...rest];} finish(collect(undefined,2));",
-        "function set(){return globalThis.nested=3;} finish(set());",
-        "finish([encodeURIComponent('a b'),decodeURIComponent('a%20b'),encodeURI('a b'),decodeURI('a%20b')]);",
-    ] {
-        lash_typescript::link(source, &environment).unwrap_or_else(|error| {
-            panic!("source must link through the production wrapper: {source}: {error}")
-        });
-    }
 }

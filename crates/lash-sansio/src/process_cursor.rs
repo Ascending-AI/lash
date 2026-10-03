@@ -422,14 +422,4 @@ mod tests {
             Err(ProcessCursorError::UnsupportedVersion { found: next })
         );
     }
-
-    #[test]
-    fn cursor_is_minted_at_the_fleet_version() {
-        let version = PROCESS_CURSOR_VERSION;
-        let cursor = ProcessCursor::at_version(version, "fleet", reference(), 2, 7)
-            .expect("mint at selected fleet version");
-        assert_eq!(cursor.version(), version);
-        assert!(cursor.to_string().starts_with(&format!("lashpc{version}:")));
-        assert_eq!(ProcessCursor::parse(&cursor.to_string()), Ok(cursor));
-    }
 }

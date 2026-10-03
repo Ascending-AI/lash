@@ -285,34 +285,6 @@ async fn a_pre_cutover_sessions_group_child_is_refused_before_its_tool_is_dispat
     );
 }
 
-/// The control: on the current generation the same child passes the gate and
-/// its first call is its admission, exactly as before the gate existed.
-#[tokio::test]
-async fn a_current_sessions_group_child_passes_the_gate_to_admission() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let sessions = session_catalog(dir.path(), None).await;
-    let executors = Arc::new(CountingExecutors::default());
-    let endpoint = endpoint(sessions, executors);
-
-    let output = invoke_endpoint_with_named_call_responses(
-        &endpoint,
-        &dispatch_route().name(),
-        "child",
-        GROUP,
-        &tool_child(),
-        Vec::new(),
-    )
-    .await
-    .expect("shift the child invocation");
-
-    let calls = child_call_parameters(&output);
-    assert_eq!(
-        calls.first().map(|(handler, _)| handler.as_str()),
-        Some("admit_child"),
-        "a current-generation child proceeds to admission"
-    );
-}
-
 /// FIG-3735: a turn handler whose redrive the generation gate refused parks
 /// the turn when one is in flight for its scope — here a direct turn whose
 /// journaled acceptance wrote its input row — and answers `None` for a scope

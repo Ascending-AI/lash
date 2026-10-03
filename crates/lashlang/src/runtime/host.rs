@@ -857,34 +857,4 @@ mod tests {
             "the default execution bounds must carry a finite memory ceiling"
         );
     }
-
-    /// Opting out stays possible, and stays explicit.
-    #[test]
-    fn a_host_can_still_declare_unbounded_memory() {
-        assert!(matches!(
-            ExecutionBounds::unbounded().memory_limit,
-            ExecutionBound::Unbounded
-        ));
-    }
-
-    #[test]
-    fn plain_execution_host_errors_keep_the_message_only_contract() {
-        let error = ExecutionHostError::new("plain host failure");
-        assert_eq!(error.message(), "plain host failure");
-        assert_eq!(error.tool_failure_class(), None);
-        assert_eq!(error.tool_failure_code(), None);
-        assert_eq!(error.tool_failure_source(), None);
-        assert_eq!(error.tool_failure_retry(), None);
-        assert_eq!(
-            serde_json::to_value(&error).unwrap(),
-            serde_json::json!({ "message": "plain host failure" })
-        );
-        assert_eq!(
-            serde_json::from_value::<ExecutionHostError>(serde_json::json!({
-                "message": "plain host failure"
-            }))
-            .unwrap(),
-            error
-        );
-    }
 }

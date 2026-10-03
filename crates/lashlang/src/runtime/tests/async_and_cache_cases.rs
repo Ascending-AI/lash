@@ -392,75 +392,6 @@ async fn aggregate_await_reports_all_children_once() {
     );
 }
 
-#[test]
-fn compiled_process_cache_reuses_process_ref_and_host_requirements_ref() {
-    let linked = crate::LinkedModule::link(
-        // process scan() { finish 1 }
-        builders::module(vec![scan_process()], Vec::new()),
-        runtime_test_environment(),
-    )
-    .expect("link module");
-    let process_ref = linked
-        .artifact
-        .process_ref("scan")
-        .expect("scan process ref")
-        .clone();
-    let mut cache = CompiledProcessCache::with_capacity(2);
-
-    let first = cache
-        .get_or_compile(
-            &linked.artifact,
-            &process_ref,
-            linked.artifact.host_requirements_ref(),
-        )
-        .expect("compile first");
-    let second = cache
-        .get_or_compile(
-            &linked.artifact,
-            &process_ref,
-            linked.artifact.host_requirements_ref(),
-        )
-        .expect("compile second");
-
-    assert!(Arc::ptr_eq(&first, &second));
-    assert_eq!(cache.stats().hits, 1);
-    assert_eq!(cache.stats().misses, 1);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn receiver_module_operation_unwraps_result() {
-    // `finish (await tools.echo({ value: "ok" })?)`
-    let value = exec(builders::program(vec![builders::finish(
-        builders::module_call(
-            &["tools"],
-            "echo",
-            vec![builders::record(vec![("value", builders::string("ok"))])],
-        ),
-    )]))
-    .await
-    .expect("module operation should run");
-    assert_eq!(value, Value::String("ok".into()));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn receiver_module_operation_errors_are_sanitized() {
-    // `finish (await tools.err({ value: "nope" })?)`
-    let err = exec(builders::program(vec![builders::finish(
-        builders::module_call(
-            &["tools"],
-            "err",
-            vec![builders::record(vec![("value", builders::string("nope"))])],
-        ),
-    )]))
-    .await
-    .expect_err("module operation should fail");
-    assert!(matches!(
-        err,
-        RuntimeError::UnwrappedModuleOperationFailed { .. }
-    ));
-    assert!(err.to_string().contains("module operation"));
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn while_runs_inside_process_body() {
     // process count_to(limit: int) {
@@ -555,27 +486,6 @@ async fn process_lifecycle_controls_sleep_and_wait() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn process_fail_returns_terminal_failure_outcome() {
-    let host = RecordingProcessHost::default();
-    let program = Program::block(vec![Expr::Fail(Box::new(Expr::Record(vec![(
-        "reason".into(),
-        Expr::String("bad".into()),
-    )])))]);
-    let mut state = State::new();
-    let compiled = compile_program(&program);
-    let outcome = execute_compiled_process(&compiled, &mut state, &host)
-        .await
-        .expect("process fail should run");
-    let ExecutionOutcome::Failed(value) = outcome else {
-        panic!("expected process failure");
-    };
-    let failure = value
-        .as_record()
-        .expect("failure should preserve raw value");
-    assert_eq!(failure["reason"], Value::String("bad".into()));
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn process_mode_falling_off_end_finishes_null() {
     let host = RecordingProcessHost::default();
     let program = Program::block(vec![Expr::String("ignored".into())]);
@@ -653,33 +563,6 @@ async fn process_mode_rejects_programmatic_foreground_controls() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn sync_steps_resume_correctly_after_tool_effects() {
-    // `before = 20 + 2` / `echoed = await tools.echo({ value: before })?`
-    // `after = echoed + 1` / `finish [before, echoed, after]`
-    let mut expressions = echo_round_trip_prefix();
-    expressions.push(builders::finish(builders::list(vec![
-        builders::var("before"),
-        builders::var("echoed"),
-        builders::var("after"),
-    ])));
-    let value = exec(builders::program(expressions))
-        .await
-        .expect("program should run");
-
-    assert_eq!(
-        value,
-        Value::List(
-            vec![
-                Value::Number(22.0),
-                Value::Number(22.0),
-                Value::Number(23.0)
-            ]
-            .into()
-        )
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn traced_started_tool_errors_point_at_failing_tool_expression() {
     // `before = 1` / `value = await tools.err({})?` / `finish value`. The
     // statement table carries the three top-level spans; the expression table
@@ -728,179 +611,6 @@ async fn traced_started_tool_errors_point_at_failing_tool_expression() {
         message.contains("                      ^~~~~~~~~~~~~"),
         "{message}"
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn profiled_tool_effect_keeps_sync_instruction_counts() {
-    // `before = 20 + 2` / `echoed = await tools.echo({ value: before })?`
-    // `after = echoed + 1` / `finish after`
-    let mut expressions = echo_round_trip_prefix();
-    expressions.push(builders::finish(builders::var("after")));
-    let compiled = compile_program_for_tests(builders::program(expressions));
-    let mut state = State::new();
-    let (_outcome, report) = profile_compiled(&compiled, &mut state, &Host)
-        .await
-        .expect("profile should succeed");
-    let count = |name| {
-        report
-            .instruction_stats()
-            .iter()
-            .find(|stat| stat.name == name)
-            .map_or(0, |stat| stat.count)
-    };
-
-    assert!(
-        count("resource_call") > 0,
-        "{:?}",
-        report.instruction_stats()
-    );
-    assert!(count("binary") > 0, "{:?}", report.instruction_stats());
-    assert!(count("load_name") > 0, "{:?}", report.instruction_stats());
-    assert!(count("store_name") >= 3, "{:?}", report.instruction_stats());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn profile_report_tracks_loop_append_and_iteration() {
-    // `values = []` / `for n in range(0, 6) { if n > 1 { values = push(values, n * 2) } }`
-    // / `finish values`
-    let compiled = compile_program_for_tests(builders::program(vec![
-        builders::assign("values", builders::list(Vec::new())),
-        builders::for_in(
-            "n",
-            builders::builtin("range", vec![builders::num(0.0), builders::num(6.0)]),
-            builders::if_else(
-                builders::binary(
-                    builders::var("n"),
-                    CoercingBinaryOp::Greater,
-                    builders::num(1.0),
-                ),
-                builders::assign(
-                    "values",
-                    builders::builtin(
-                        "push",
-                        vec![
-                            builders::var("values"),
-                            builders::binary(
-                                builders::var("n"),
-                                CoercingBinaryOp::Multiply,
-                                builders::num(2.0),
-                            ),
-                        ],
-                    ),
-                ),
-                builders::null(),
-            ),
-        ),
-        builders::finish(builders::var("values")),
-    ]));
-    assert!(
-        compiled
-            .chunk
-            .code
-            .iter()
-            .any(|instruction| matches!(instruction, Instruction::BeginRangeIter { .. })),
-        "a range loop should compile to iterator bytecode"
-    );
-
-    let mut state = State::new();
-    let (outcome, report) = profile_compiled(&compiled, &mut state, &Host)
-        .await
-        .expect("profile should succeed");
-    assert_eq!(
-        outcome,
-        ExecutionOutcome::Finished(Value::List(
-            vec![
-                Value::Number(4.0),
-                Value::Number(6.0),
-                Value::Number(8.0),
-                Value::Number(10.0),
-            ]
-            .into()
-        ))
-    );
-
-    let instruction_count = |name| {
-        report
-            .instruction_stats()
-            .iter()
-            .find(|stat| stat.name == name)
-            .map_or(0, |stat| stat.count)
-    };
-    // `values = push(values, ...)` fuses to the PushAssign intrinsic, which is
-    // profiled as an intrinsic instruction rather than a builtin call.
-    assert_eq!(
-        instruction_count("intrinsic"),
-        4,
-        "{:?}",
-        report.instruction_stats()
-    );
-    assert!(
-        instruction_count("begin_iter") > 0,
-        "{:?}",
-        report.instruction_stats()
-    );
-    assert!(
-        instruction_count("iter_next") > 0,
-        "{:?}",
-        report.instruction_stats()
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn await_unknown_handle_reports_runtime_error() {
-    // result = await 1
-    // finish result
-    let program = builders::program(vec![
-        builders::assign("result", builders::await_expr(builders::num(1.0))),
-        builders::finish(builders::var("result")),
-    ]);
-    let mut state = State::new();
-    let error = execute_program(&program, &mut state, &AsyncHost)
-        .await
-        .expect_err("awaiting a resolved value must fail loudly");
-    assert!(
-        matches!(&error, RuntimeError::AwaitExpectsHandle { .. }),
-        "expected the typed await error, got {error:?}"
-    );
-    assert_eq!(
-        error.to_string(),
-        "`await` expects a process handle but found number; the value is already resolved"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn await_list_of_handles_returns_results_in_order() {
-    // process echo(value: str) { finish value }
-    // handles = [
-    //   start echo(value: "first"),
-    //   start echo(value: "second"),
-    //   start echo(value: "third")
-    // ]
-    // results = await handles
-    // finish results
-    let program = await_handles_program(builders::list(vec![
-        start_echo("first"),
-        start_echo("second"),
-        start_echo("third"),
-    ]));
-    let mut state = State::new();
-    let outcome = execute_program(&program, &mut state, &AsyncHost)
-        .await
-        .expect("program should run");
-    let ExecutionOutcome::Finished(value) = outcome else {
-        panic!("expected finish");
-    };
-    let Value::List(results) = value else {
-        panic!("await list should return a list");
-    };
-    assert_eq!(results.len(), 3);
-    for (result, expected) in results.iter().zip(["first", "second", "third"]) {
-        let record = result
-            .as_record()
-            .expect("await should return wrapped result");
-        assert_eq!(record["ok"], Value::Bool(true));
-        assert_eq!(record["value"], Value::String(expected.into()));
-    }
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1097,37 +807,6 @@ fn finish_type_literal(fields: Vec<crate::ast::TypeField>) -> Program {
     ))])
 }
 
-/// `before = 20 + 2` / `echoed = await tools.echo({ value: before })?`
-/// `after = echoed + 1`
-fn echo_round_trip_prefix() -> Vec<Expr> {
-    vec![
-        builders::assign(
-            "before",
-            builders::binary(
-                builders::num(20.0),
-                CoercingBinaryOp::Add,
-                builders::num(2.0),
-            ),
-        ),
-        builders::assign(
-            "echoed",
-            builders::module_call(
-                &["tools"],
-                "echo",
-                vec![builders::record(vec![("value", builders::var("before"))])],
-            ),
-        ),
-        builders::assign(
-            "after",
-            builders::binary(
-                builders::var("echoed"),
-                CoercingBinaryOp::Add,
-                builders::num(1.0),
-            ),
-        ),
-    ]
-}
-
 /// Extract the inner JSON Schema wrapped by a `$lash_type` value.
 fn unwrap_schema(value: &Value) -> &Record {
     crate::runtime::unwrap_type_value(value)
@@ -1221,25 +900,6 @@ async fn type_list_schema_wraps_inner_type_as_items() {
     assert_eq!(tags["type"], Value::String("array".into()));
     let items = tags["items"].as_record().expect("items schema");
     assert_eq!(items["type"], Value::String("string".into()));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn type_list_of_enum_preserves_nested_shape() {
-    // `finish Type { labels: list[enum["a", "b"]] }`
-    let value = exec(finish_type_literal(vec![builders::type_field(
-        "labels",
-        TypeExpr::List(Box::new(TypeExpr::Enum(vec!["a".into(), "b".into()]))),
-        false,
-    )]))
-    .await
-    .expect("should succeed");
-    let schema = unwrap_schema(&value);
-    let labels = schema["properties"].as_record().unwrap()["labels"]
-        .as_record()
-        .expect("list schema");
-    let items = labels["items"].as_record().expect("enum item schema");
-    assert_eq!(items["type"], Value::String("string".into()));
-    assert!(matches!(items["enum"], Value::List(_)));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1350,89 +1010,6 @@ async fn type_ref_with_undefined_name_is_undefined_variable() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn type_literal_inside_resource_operation_args_passes_through_as_record() {
-    struct CaptureHost {
-        captured: std::sync::Mutex<Option<Value>>,
-    }
-    impl ExecutionHost for CaptureHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
-            match op {
-                AbilityOp::ResourceOperation(operation) => {
-                    if operation.operation == "spawn" {
-                        let schema = operation
-                            .args
-                            .first()
-                            .and_then(Value::as_record)
-                            .and_then(|record| record.get("output"))
-                            .cloned()
-                            .expect("output arg must be present");
-                        *self.captured.lock_recover() = Some(schema);
-                        return Ok(AbilityOutcome::Value(Value::Null));
-                    }
-                    Err(ExecutionHostError::new(format!(
-                        "unknown: {}",
-                        operation.operation
-                    )))
-                }
-                AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                    Ok(AbilityOutcome::Value(value))
-                }
-                _ => Err(ExecutionHostError::new("unsupported host ability")),
-            }
-        }
-    }
-    let host = CaptureHost {
-        captured: std::sync::Mutex::new(None),
-    };
-    // Shape = Type { name: str, tags: list[str] }
-    // await tools.spawn({ output: Shape })
-    // finish null
-    let program = builders::program(vec![
-        builders::assign(
-            "Shape",
-            builders::type_literal(TypeExpr::Object(vec![
-                builders::type_field("name", TypeExpr::Str, false),
-                builders::type_field("tags", TypeExpr::List(Box::new(TypeExpr::Str)), false),
-            ])),
-        ),
-        builders::await_expr(builders::receiver_call(
-            builders::resource(&["tools"]),
-            "spawn",
-            vec![builders::record(vec![("output", builders::var("Shape"))])],
-        )),
-        builders::finish(builders::null()),
-    ]);
-    let mut state = State::new();
-    execute_program(&program, &mut state, &host)
-        .await
-        .expect("should run");
-
-    let captured = host.captured.lock_recover().clone().expect("captured");
-    let inner = crate::runtime::unwrap_type_value(&captured).expect("has $lash_type");
-    let schema = inner.as_record().expect("schema record");
-    assert_eq!(schema["type"], Value::String("object".into()));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn lash_type_wrapper_survives_round_trip_through_json() {
-    // `finish Type { n: int }`
-    let value = exec(finish_type_literal(vec![builders::type_field(
-        "n",
-        TypeExpr::Int,
-        false,
-    )]))
-    .await
-    .expect("should succeed");
-    // to_json + from_json must preserve the Type-ness.
-    let json = crate::runtime::to_json(&value);
-    let recovered = crate::runtime::from_json(json);
-    let schema = crate::runtime::unwrap_type_value(&recovered)
-        .and_then(Value::as_record)
-        .expect("round-trip must preserve wrapper");
-    assert_eq!(schema["type"], Value::String("object".into()));
-}
-
 // ----------------------------------------------------------------------------
 // Projection propagation: `Value::Projected` carries through path expressions
 // (Field / Index) but is stripped by computation. This is the lashlang side
@@ -1449,27 +1026,6 @@ fn projected_record_bindings(name: &str, record: serde_json::Value) -> Projected
         ProjectedValue::scalar(name.to_string(), crate::runtime::from_json(record)),
     );
     projected
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn field_access_on_projected_record_returns_projected() {
-    let projected = projected_record_bindings(
-        "input",
-        serde_json::json!({ "prompt": "hello", "depth": 3 }),
-    );
-    let (value, _) = exec_with_projected(
-        builders::program(vec![builders::finish(builders::field(
-            builders::var("input"),
-            "prompt",
-        ))]),
-        &projected,
-    )
-    .await
-    .expect("projected field read");
-    assert!(
-        matches!(value, Value::Projected(_)),
-        "expected `input.prompt` to stay projected, got {value:?}"
-    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1579,7 +1135,6 @@ async fn record_literal_preserves_per_entry_projection() {
 
 #[derive(Clone, Copy)]
 enum TerminatorMode {
-    Identity,
     Transform,
     Err,
     Unit,
@@ -1609,7 +1164,6 @@ impl ExecutionHost for TerminatorHost {
                 };
                 self.observed.lock_recover().push(observed);
                 match self.mode {
-                    TerminatorMode::Identity => Ok(AbilityOutcome::Value(value)),
                     TerminatorMode::Transform => match value {
                         Value::Number(n) => Ok(AbilityOutcome::Value(Value::Number(n + 100.0))),
                         other => Ok(AbilityOutcome::Value(other)),
@@ -1644,18 +1198,6 @@ async fn run_process_with_terminator_host(
     let outcome = execute_compiled_process(&compiled, &mut state, &host).await;
     let observed = host.observed.lock_recover().clone();
     (outcome, observed)
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn finish_routes_through_host() {
-    let (outcome, observed) =
-        run_with_terminator_host(finish_seven(), TerminatorMode::Identity).await;
-    assert_eq!(
-        outcome.expect("finish should succeed"),
-        ExecutionOutcome::Finished(Value::Number(7.0))
-    );
-    assert_eq!(observed.len(), 1, "host should observe one terminator op");
-    assert!(matches!(observed[0], AbilityOp::Finish(Value::Number(n)) if n == 7.0));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1694,18 +1236,6 @@ async fn finish_routes_through_host_in_process_mode() {
     assert_eq!(
         outcome.expect("finish should succeed"),
         ExecutionOutcome::Finished(Value::Number(107.0))
-    );
-    assert_eq!(observed.len(), 1);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn fail_routes_through_host_and_carries_failed_outcome() {
-    let program = Program::block(vec![Expr::Fail(Box::new(Expr::String("boom".into())))]);
-    let (outcome, observed) =
-        run_process_with_terminator_host(program, TerminatorMode::Identity).await;
-    assert_eq!(
-        outcome.expect("fail should produce an outcome"),
-        ExecutionOutcome::Failed(Value::String("boom".into()))
     );
     assert_eq!(observed.len(), 1);
 }

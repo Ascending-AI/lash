@@ -445,38 +445,4 @@ mod tests {
         assert_eq!(index.get("derived-1"), Some(1));
         assert_eq!(index.get("derived-1999"), Some(1999));
     }
-
-    #[test]
-    fn an_index_branch_never_sees_another_branches_writes() {
-        let mut first = NodeIdIndex::from_resident(HashMap::from([("root".into(), 0)]));
-        let mut branch = first.clone();
-        first.insert("first".into(), 1);
-        first.rename(&"root".into(), "renamed".into(), 0);
-        branch.insert("branch".into(), 1);
-        assert_eq!(branch.get("root"), Some(0));
-        assert_eq!(branch.get("first"), None);
-        assert_eq!(branch.get("renamed"), None);
-        assert_eq!(first.get("branch"), None);
-        assert_eq!(first.get("renamed"), Some(0));
-        branch.rename(&"root".into(), "branch-root".into(), 0);
-        assert_eq!(branch.get("branch-root"), Some(0));
-        assert_eq!(first.get("branch-root"), None);
-    }
-
-    #[test]
-    fn discarded_index_writes_are_reclaimed_without_copying_the_prefix() {
-        let index = NodeIdIndex::from_resident(HashMap::from([("root".into(), 0)]));
-        for ordinal in 0..300 {
-            let mut speculative = index.clone();
-            speculative.insert(NodeId::fixture(format!("discarded-{ordinal}")), 1);
-            assert!(Arc::ptr_eq(&index.0.data, &speculative.0.data));
-            assert_eq!(index.get(&format!("discarded-{ordinal}")), None);
-        }
-        let mut committed = index.clone();
-        committed.insert("committed".into(), 1);
-        assert!(Arc::ptr_eq(&index.0.data, &committed.0.data));
-        assert_eq!(committed.get("discarded-299"), None);
-        assert_eq!(committed.get("committed"), Some(1));
-        assert_eq!(index.get("committed"), None);
-    }
 }

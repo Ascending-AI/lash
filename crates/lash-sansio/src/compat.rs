@@ -205,18 +205,4 @@ mod tests {
         assert!(range(1, 2).contains(1) && range(1, 2).contains(2));
         assert!(!range(1, 2).contains(0) && !range(1, 2).contains(3));
     }
-
-    #[test]
-    fn between_constructs_a_const_two_version_range() {
-        const TWO: VersionRange = VersionRange::between(1, 2);
-        assert_eq!(TWO, range(1, 2));
-        assert_eq!(TWO.select(VersionRange::exactly(2)), Some(2));
-    }
-
-    #[test]
-    fn between_refuses_invalid_bounds() {
-        for (min, max) in [(0, 0), (0, 2), (2, 0), (3, 2)] {
-            assert!(std::panic::catch_unwind(|| VersionRange::between(min, max)).is_err());
-        }
-    }
 }

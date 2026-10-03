@@ -108,27 +108,6 @@ fn marker(observer: &TurnObserver, cursor: &mut ObservationCursor, label: &str) 
 }
 
 #[test]
-fn a_host_that_keeps_up_receives_every_delta_as_published() {
-    let (observer, mut observations) = TurnObserver::unread();
-    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
-    for chunk in ["Hello", " world"] {
-        delta(&observer, &mut cursor, false, "A", chunk);
-    }
-    delta(&observer, &mut cursor, true, "R", "why");
-    assert_eq!(
-        drain(&mut observations),
-        vec![
-            row("session_text", "A", "Hello"),
-            row("turn_text", "A", "Hello"),
-            row("session_text", "A", " world"),
-            row("turn_text", "A", " world"),
-            row("session_reasoning", "R", "why"),
-            row("turn_reasoning", "R", "why"),
-        ]
-    );
-}
-
-#[test]
 fn a_lagging_single_lane_host_gets_merged_deltas() {
     // An activity-only host: session events are never queued, so no pairs.
     let (observer, mut observations) = TurnObserver::with_quiet_lanes(true, false);

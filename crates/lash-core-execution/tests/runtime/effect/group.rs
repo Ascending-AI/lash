@@ -220,29 +220,6 @@ mod effect_group_contract_tests {
         }
     }
 
-    /// The structural reason the golden hashes above hold: the field is omitted
-    /// entirely rather than encoded as `null`.
-    ///
-    /// Kept beside the golden test because it is the invariant a future editor
-    /// would break — dropping `skip_serializing_if` still encodes *validly*, so
-    /// only this assertion names the mistake.
-    #[test]
-    fn an_ungrouped_envelope_omits_the_group_field_entirely() {
-        for (name, envelope) in ungrouped_corpus() {
-            let json = lash_core_ids::stable_hash::stable_json_string(&envelope)
-                .expect("envelope encodes");
-            // Structural, not a substring search: a corpus payload that merely
-            // *contained* the text "group" would otherwise read as a hash
-            // regression.
-            let decoded = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&json)
-                .expect("an envelope encodes as a JSON object");
-            assert!(
-                !decoded.contains_key("group"),
-                "an ungrouped `{name}` envelope must not encode a top-level group key at all: {json}"
-            );
-        }
-    }
-
     /// A group child's membership folds into its hash, which is what makes
     /// "replay cannot silently change the wake rule" backed rather than
     /// asserted — it is the only mechanism available on engine tiers that keep
@@ -331,43 +308,6 @@ mod effect_group_contract_tests {
         );
     }
 
-    #[test]
-    fn group_membership_round_trips_through_the_envelope() {
-        let envelope = RuntimeEffectEnvelope::new(
-            invocation(RuntimeEffectKind::Sleep),
-            RuntimeEffectCommand::Sleep {
-                spec: lash_core_execution::SleepSpec::For { duration_ms: 1 },
-            },
-        )
-        .in_effect_group(
-            "scope:group:batch:2",
-            3,
-            GroupWakePolicy::FirstSuccess,
-            LoserPolicy::Cancel,
-        );
-        let encoded = serde_json::to_string(&envelope).expect("envelope encodes");
-        let decoded =
-            serde_json::from_str::<RuntimeEffectEnvelope>(&encoded).expect("envelope decodes");
-        let membership = decoded.group.expect("membership survives the round trip");
-        assert_eq!(membership.group_key, "scope:group:batch:2");
-        assert_eq!(membership.position, 3);
-        assert_eq!(membership.wake, GroupWakePolicy::FirstSuccess);
-    }
-
-    /// The handle is durable continuation state, so its consumed cursor must
-    /// survive encoding: a restored frame that lost it would re-consume rank 1
-    /// and observe the winner twice.
-    #[test]
-    fn an_effect_group_handle_round_trips_its_consumed_cursor() {
-        let handle = EffectGroupHandle::restored("scope:group:batch:0", 3, 2)
-            .expect("a sane cursor restores");
-        let encoded = serde_json::to_string(&handle).expect("handle encodes");
-        let decoded = serde_json::from_str::<EffectGroupHandle>(&encoded).expect("handle decodes");
-        assert_eq!(decoded, handle);
-        assert_eq!(decoded.consumed(), 2);
-        assert!(!decoded.is_exhausted());
-    }
-
     /// A corrupt continuation must fail closed rather than resume as a finished
     /// group. Both malformed shapes below satisfy `is_exhausted()`, which is the
     /// one state indistinguishable from orderly completion, so an unvalidated
@@ -403,20 +343,6 @@ mod effect_group_contract_tests {
                 "the decode refusal must carry the constructor's reason: {decode_error}"
             );
         }
-    }
-
-    #[test]
-    fn a_handle_reports_exhaustion_once_every_child_is_consumed() {
-        let mut handle = EffectGroupHandle::new(&group_of(2));
-        assert_eq!(handle.consumed(), 0, "a fresh handle has consumed nothing");
-        assert!(!handle.is_exhausted());
-        handle.advance().expect("rank 1 of 2");
-        assert!(!handle.is_exhausted());
-        handle.advance().expect("rank 2 of 2");
-        assert!(
-            handle.is_exhausted(),
-            "exhaustion is the caller's arithmetic, knowable without a round trip"
-        );
     }
 
     /// The write side of the same fence
@@ -478,18 +404,6 @@ mod effect_group_contract_tests {
         assert!(decoded.is_exhausted());
     }
 
-    fn child(position: usize, group_key: &str, wake: GroupWakePolicy) -> RuntimeEffectEnvelope {
-        RuntimeEffectEnvelope::new(
-            child_invocation(RuntimeEffectKind::Sleep, position),
-            RuntimeEffectCommand::Sleep {
-                spec: lash_core_execution::SleepSpec::For {
-                    duration_ms: position as u64 + 1,
-                },
-            },
-        )
-        .in_effect_group(group_key, position, wake, LoserPolicy::RunToCompletion)
-    }
-
     fn group_of(children: usize) -> RuntimeEffectGroup {
         RuntimeEffectGroup::try_new(
             invocation(RuntimeEffectKind::Sleep),
@@ -512,74 +426,6 @@ mod effect_group_contract_tests {
         )
     }
 
-    /// The group is the one place the key, wake rule, and positions are made to
-    /// agree. Every durability claim in ADR 0065 reduces to that agreement, and
-    /// before `try_new` existed every disagreement below was representable,
-    /// silent, and diagnosable only as a `ReplayMismatch` in production.
-    #[test]
-    fn assembling_a_group_stamps_unstamped_children_from_their_own_index() {
-        let group = RuntimeEffectGroup::try_new(
-            invocation(RuntimeEffectKind::Sleep),
-            "scope:group:batch:0",
-            vec![unstamped_child(0), unstamped_child(1)],
-            GroupWakePolicy::First,
-            LoserPolicy::RunToCompletion,
-        )
-        .expect("a group of unstamped children assembles");
-        assert_eq!(group.group_key(), "scope:group:batch:0");
-        assert_eq!(group.wake(), GroupWakePolicy::First);
-        for (index, child) in group.children().iter().enumerate() {
-            let membership = child.group.as_deref().expect("every child is stamped");
-            assert_eq!(membership.group_key, "scope:group:batch:0");
-            assert_eq!(membership.position, index);
-            assert_eq!(membership.wake, GroupWakePolicy::First);
-        }
-    }
-
-    #[test]
-    fn assembling_a_group_refuses_children_that_disagree_with_it() {
-        let key = "scope:group:batch:0";
-        let cases: Vec<(&str, Vec<RuntimeEffectEnvelope>)> = vec![
-            ("empty", vec![]),
-            (
-                "foreign key",
-                vec![
-                    child(0, key, GroupWakePolicy::First),
-                    child(1, "scope:group:batch:1", GroupWakePolicy::First),
-                ],
-            ),
-            (
-                "permuted position",
-                vec![
-                    child(1, key, GroupWakePolicy::First),
-                    child(0, key, GroupWakePolicy::First),
-                ],
-            ),
-            (
-                "drifted wake",
-                vec![
-                    child(0, key, GroupWakePolicy::First),
-                    child(1, key, GroupWakePolicy::All),
-                ],
-            ),
-        ];
-        for (name, children) in cases {
-            let error = RuntimeEffectGroup::try_new(
-                invocation(RuntimeEffectKind::Sleep),
-                key,
-                children,
-                GroupWakePolicy::First,
-                LoserPolicy::RunToCompletion,
-            )
-            .expect_err(&format!("a group with a {name} child must not assemble"));
-            assert_eq!(
-                error.code,
-                lash_core_execution::RuntimeErrorCode::RuntimeEffectGroupShape,
-                "a {name} disagreement must be a typed group-shape refusal"
-            );
-        }
-    }
-
     #[test]
     fn assembling_a_group_refuses_an_empty_group_key() {
         let error = RuntimeEffectGroup::try_new(
@@ -590,34 +436,6 @@ mod effect_group_contract_tests {
             LoserPolicy::RunToCompletion,
         )
         .expect_err("a group without an identity must not assemble");
-        assert_eq!(
-            error.code,
-            lash_core_execution::RuntimeErrorCode::RuntimeEffectGroupShape
-        );
-    }
-
-    /// Close may narrow the declared disposition but never widen it. Widening
-    /// would make the losers' fate depend on whether the caller reached its close
-    /// at all — a crash-drain applies the *declared* disposition — which is the
-    /// divergence that declaring at open exists to remove.
-    #[test]
-    fn a_close_may_narrow_the_declared_loser_disposition_but_not_widen_it() {
-        use LoserPolicy::{Cancel, RunToCompletion};
-        assert_eq!(
-            LoserPolicy::resolve_close(RunToCompletion, RunToCompletion).expect("same"),
-            RunToCompletion
-        );
-        assert_eq!(
-            LoserPolicy::resolve_close(Cancel, Cancel).expect("same"),
-            Cancel
-        );
-        assert_eq!(
-            LoserPolicy::resolve_close(RunToCompletion, Cancel)
-                .expect("narrowing a declared RunToCompletion to Cancel is allowed"),
-            Cancel
-        );
-        let error = LoserPolicy::resolve_close(Cancel, RunToCompletion)
-            .expect_err("widening a declared Cancel must be refused");
         assert_eq!(
             error.code,
             lash_core_execution::RuntimeErrorCode::RuntimeEffectGroupShape

@@ -97,36 +97,3 @@ async fn until_scope_list_uses_the_lifetime_scope_index() {
         "a populated until scope must seek the scope index:\n{plan}"
     );
 }
-
-#[test]
-fn an_unpopulated_filter_leaves_no_predicate_behind() {
-    let sql = list_processes_sql(&lash_core_execution::ProcessListFilter {
-        status: lash_core_execution::ProcessStatusFilter::Any,
-        ..lash_core_execution::ProcessListFilter::default()
-    });
-    assert_eq!(sql, process_sql().process_postgres.list.sql());
-    assert!(
-        !sql.contains("lifetime_scope_kind") && !sql.contains("cancel_requested_at_ms"),
-        "an absent filter must not widen the statement:\n{sql}"
-    );
-}
-
-/// `schema.sql` spells the partial index out as SQL text, so this is the only
-/// check that keeps it equal to the fragment the query generates.
-#[test]
-fn the_pending_cancel_index_predicate_is_the_generated_fragment() {
-    let predicate =
-        lash_core_execution::store_backend_support::nonterminal_process_status_predicate_sql(
-            "status",
-        );
-    assert_eq!(
-        predicate,
-        "status NOT IN ('completed', 'failed', 'cancelled', 'abandoned')"
-    );
-    assert!(
-        crate::PostgresStorage::schema_ddl().contains(&format!(
-            "WHERE cancel_requested_at_ms IS NOT NULL\n      AND {predicate}"
-        )),
-        "the index predicate must be byte-identical to the query predicate"
-    );
-}

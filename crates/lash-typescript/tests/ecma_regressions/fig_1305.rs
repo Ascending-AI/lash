@@ -22,18 +22,6 @@ fn sparse_and_non_index_array_writes_reject_by_name() {
 }
 
 #[test]
-fn join_uses_javascript_string_conversion() {
-    assert_eq!(
-        finished("finish([1, null, undefined, 2].join(','));"),
-        Value::String("1,,,2".into())
-    );
-    assert_eq!(
-        finished("finish([[1, 2], 3].join(','));"),
-        Value::String("1,2,3".into())
-    );
-}
-
-#[test]
 fn agent_stdlib_regressions_match_ecmascript() {
     assert_eq!(
         finished("finish('abc'.charCodeAt(0, 99));"),

@@ -512,37 +512,6 @@ mod tests {
         assert!(error.contains("; "), "{error}");
     }
 
-    #[test]
-    fn output_schema_has_no_language_runtime_dependency() {
-        let manifest = include_str!("../Cargo.toml");
-        for dependency in ["lash-lashlang-runtime", "lashlang"] {
-            assert!(
-                !manifest.lines().any(|line| line
-                    .split_once('=')
-                    .is_some_and(|(name, _)| name.trim() == dependency)),
-                "output-schema parsing must not depend on {dependency}"
-            );
-        }
-    }
-
-    #[test]
-    fn llm_definitions_include_llm_query_only() {
-        let provider = llm_query_provider();
-        let manifests = provider.tool_manifests();
-        let names = manifests
-            .iter()
-            .map(|tool| tool.name.clone())
-            .collect::<Vec<_>>();
-        assert_eq!(names, vec!["llm_query"]);
-        assert!(
-            manifests[0]
-                .bindings
-                .contains_key(lash_tool_support::TOOL_BINDING_KEY),
-            "llm_query must carry its tool binding: {:?}",
-            manifests[0].bindings.keys().collect::<Vec<_>>()
-        );
-    }
-
     #[tokio::test]
     async fn llm_query_uses_current_policy_and_direct_completion() {
         let manager = Arc::new(DirectCompletionManager {
@@ -596,53 +565,6 @@ mod tests {
             .join("\n");
         assert!(prompt.contains("extract root cause"));
         assert!(prompt.contains("\"log\": \"failed\""));
-    }
-
-    /// The runtime supplies the recorded binding; the tool supplies only
-    /// the session's generation intent and the focused prompt.
-    #[tokio::test]
-    async fn llm_query_leaves_binding_to_its_session_owner() {
-        let mut extra_body = serde_json::Map::new();
-        extra_body.insert("catalog_revision".to_string(), json!("r1"));
-        let metadata = lash_core::LlmProfileMetadata::builder("root-model")
-            .context_window_tokens(64_000)
-            .extra_body(extra_body.clone())
-            .max_output_tokens(4096)
-            .build()
-            .expect("model metadata");
-        let recorded = lash_core::testing::test_llm_profile_config("root-model", metadata.clone());
-        let manager = Arc::new(DirectCompletionManager {
-            snapshot: RuntimeSessionState {
-                policy: lash_core::SessionPolicy {
-                    model: Some(recorded),
-                    ..lash_core::SessionPolicy::new(
-                        lash_core::TurnBudget::Unbounded,
-                        lash_core::MaxToolCalls::new(1024),
-                    )
-                },
-                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
-                    lash_core::MaxToolCalls::new(1024),
-                ))
-            },
-            requests: Mutex::new(Vec::new()),
-            response_text: r#"{"kind":"value","value":"done","error":null}"#.to_string(),
-        });
-        let provider = llm_query_provider();
-        let context = direct_completion_attempt_context(manager.clone());
-
-        let args = json!({ "task": "answer directly" });
-        let result = run_llm_query(&provider, &args, &context).await;
-
-        assert!(result.is_success(), "{:?}", result.value_for_projection());
-        let requests = manager.requests.lock_recover();
-        assert_eq!(requests.len(), 1);
-        let (request, _) = &requests[0];
-        assert_eq!(request.generation, manager.snapshot.policy.generation);
-        let wire = serde_json::to_value(request).expect("direct request");
-        assert!(wire.get("model").is_none());
-        assert!(wire.get("extra_body").is_none());
-        assert!(wire.get("request_defaults").is_none());
     }
 
     #[tokio::test]

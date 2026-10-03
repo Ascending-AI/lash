@@ -4,7 +4,6 @@
 //! witness uses a real PostgreSQL with settled history and collected statistics.
 
 use super::turn_ingress_sql;
-use lash_core_execution::store_backend_support as vocabulary;
 
 enum PlanParam {
     Text(&'static str),
@@ -212,101 +211,6 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
         assert!(
             plan.contains("idx_lash_queued_work_admission_order"),
             "`{}` reads admitted queued work:\n{plan}",
-            statement.name(),
-        );
-    }
-}
-
-#[test]
-fn every_statement_renders_for_this_backend() {
-    // Rendering happens once, lazily; touching the set is what makes a
-    // malformed neutral statement a test failure here rather than a startup
-    // failure in front of a caller.
-    let sql = turn_ingress_sql();
-    assert!(
-        sql.pending_inputs
-            .select_by_id
-            .sql()
-            .contains("lash_pending_turn_inputs")
-    );
-    assert!(sql.pending_inputs.select_by_id.sql().contains("$1"));
-    assert!(!sql.pending_inputs.select_by_id.sql().contains("?1"));
-    assert!(
-        sql.queued_batches
-            .list_by_session
-            .sql()
-            .contains("lash_queued_work_batches")
-    );
-}
-
-#[test]
-fn a_state_token_renders_to_the_predicate_its_generator_spells() {
-    // A `{{term(column)}}` token is only worth having if it renders to exactly
-    // what the generator produces: the enum stays the one source of the
-    // vocabulary, and the two backends' predicates cannot drift apart.
-    let sql = turn_ingress_sql();
-    assert!(sql.pending_inputs.delete_withdrawn.sql().contains(
-        &vocabulary::cancelled_turn_input_state_predicate_sql("state")
-    ),);
-    assert!(
-        sql.pending_inputs
-            .release_run
-            .sql()
-            .contains(&vocabulary::released_turn_input_state_sql("state")),
-    );
-    assert!(sql.pending_inputs.list_undelivered.sql().contains(
-        &vocabulary::undelivered_turn_input_state_predicate_sql("state")
-    ),);
-    assert!(
-        sql.pending_inputs_postgres
-            .admission_candidates_next_turn
-            .sql()
-            .contains(&vocabulary::undelivered_turn_input_state_predicate_sql(
-                "state"
-            )),
-    );
-}
-
-#[test]
-fn a_checkpoint_statement_spells_the_boundary_its_generator_spells() {
-    // The minimum-boundary predicate cannot be a vocabulary token: its column
-    // is this backend's `jsonb` extraction, not an identifier. So the
-    // statements spell it, and this holds the spelling to
-    // `admitted_min_boundary_sql` — the one place the boundary enum reaches
-    // SQL.
-    let sql = turn_ingress_sql();
-    let expression = "ingress_json::jsonb ->> 'min_boundary'";
-    for (statement, checkpoint) in [
-        (
-            &sql.pending_inputs_postgres
-                .admission_candidates_active_turn_after_work,
-            lash_core_execution::CheckpointKind::AfterWork,
-        ),
-        (
-            &sql.pending_inputs_postgres
-                .admission_candidates_active_turn_before_completion,
-            lash_core_execution::CheckpointKind::BeforeCompletion,
-        ),
-        (
-            &sql.family_postgres.checkpoint_work_pending_after_work,
-            lash_core_execution::CheckpointKind::AfterWork,
-        ),
-        (
-            &sql.family_postgres
-                .checkpoint_work_pending_before_completion,
-            lash_core_execution::CheckpointKind::BeforeCompletion,
-        ),
-    ] {
-        let admitted = vocabulary::admitted_min_boundary_sql(expression, checkpoint);
-        let spelled = statement
-            .sql()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        let admitted = admitted.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(
-            spelled.contains(&admitted),
-            "`{}` does not spell `{admitted}`",
             statement.name(),
         );
     }

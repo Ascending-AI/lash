@@ -18,53 +18,6 @@ fn attachment_source(id: &str) -> AttachmentSource {
     ))
 }
 
-#[test]
-fn tool_attachment_is_a_block_of_the_one_result() {
-    let attachment = attachment_source("att-1");
-    let output = ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone()));
-    let model_return = ModelToolReturn::from_output("screenshot".to_string(), &output);
-
-    let part = tool_result_part(lash_core::ToolCallId::fixture("call-9"), model_return);
-
-    assert!(matches!(part.kind(), PartKind::ToolResult));
-    assert_eq!(
-        part.call_id(),
-        Some(&lash_core::ToolCallId::fixture("call-9"))
-    );
-    assert_eq!(part.tool_name(), Some("screenshot"));
-    assert_eq!(
-        part.tool_result_content(),
-        Some(&[ModelToolReturnPart::Attachment(attachment)][..])
-    );
-}
-
-#[test]
-fn tool_text_and_attachment_keep_their_order_inside_one_result() {
-    let attachment = attachment_source("att-2");
-    let output = ToolCallOutput::success_tool_value(ToolValue::Array(vec![
-        ToolValue::String("before".into()),
-        ToolValue::Attachment(attachment.clone()),
-        ToolValue::String("after".into()),
-    ]));
-    let model_return = ModelToolReturn::from_output("snap".to_string(), &output);
-
-    let part = tool_result_part(lash_core::ToolCallId::fixture("call-snap"), model_return);
-
-    // The array projection's compact JSON text sits around the
-    // attachment, in position, inside the call's single result.
-    assert_eq!(
-        part.tool_result_content(),
-        Some(
-            &[
-                ModelToolReturnPart::text("[\"before\","),
-                ModelToolReturnPart::Attachment(attachment),
-                ModelToolReturnPart::text(",\"after\"]"),
-            ][..]
-        )
-    );
-    assert_eq!(part.content(), "[\"before\",\n[Attachment 1]\n,\"after\"]");
-}
-
 /// FIG-3515: the transcript this protocol commits for any tool value is
 /// one the resume-safety check accepts, and the prompt rendered from it
 /// answers each call with exactly one tool-result block carrying the

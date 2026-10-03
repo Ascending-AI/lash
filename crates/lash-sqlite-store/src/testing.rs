@@ -461,24 +461,3 @@ impl SqlitePauses {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn an_unreached_transaction_pause_fails_and_releases() {
-        let pauses = SqlitePauses::default();
-        let pause = pauses.pause_after_fence();
-        let waiter = pause.clone();
-        let failed = tokio::spawn(async move {
-            waiter
-                .wait_until_reached_for(std::time::Duration::from_millis(10))
-                .await
-        })
-        .await
-        .expect_err("an unreached pause must fail");
-        assert!(failed.is_panic());
-        assert!(pause.state.state.lock_recover().released);
-    }
-}

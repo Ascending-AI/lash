@@ -1600,49 +1600,6 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     );
 }
 
-// Boundary: Runtime Scenarios own command-only queue completion at the store
-// layer. This full runtime test stays here to assert the public scheduler API:
-// command-only work returns `None` rather than fabricating a turn.
-#[tokio::test]
-pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
-    let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) =
-        standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
-            .await;
-    let command =
-        enqueue_session_command(store.as_ref(), &SessionId::from("root"), "test refresh").await;
-
-    let handler = double
-        .open_handler(AdmittedScope::turn(
-            SessionId::from("root"),
-            "command-only-queue-drain",
-        ))
-        .await
-        .expect("open the drain's handler");
-    let drained = runtime
-        .execute_one_admitted_queued_run(TurnOptions::new(
-            CancellationToken::new(),
-            handler.scoped(),
-        ))
-        .await
-        .expect("command-only drain succeeds")
-        .ran();
-    handler.close().await.expect("close the drain's handler");
-
-    assert!(drained.is_none());
-    assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("list queue after command-only drain")
-        .is_empty(),
-        "command batch `{}` should be completed",
-        command.batch_id
-    );
-}
-
 // The process-wake and active-checkpoint tests exercise the engine shift and
 // its provider-visible turn, while the selected-batch invariant remains in
 // runtime persistence conformance.

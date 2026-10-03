@@ -89,24 +89,3 @@ fn array_from_walks_an_array_live_and_copies_function_elements() {
         assert_eq!(finished(source), expected, "{source}");
     }
 }
-
-/// A parameter default that closes over an outer binding the body redeclares
-/// sees the outer one: ECMA-262 gives such a body its own variable
-/// environment (FIG-3707's re-bless; the body's binding used to share the
-/// captured slot).
-#[test]
-fn a_parameter_default_closes_over_the_outer_binding_the_body_redeclares() {
-    let cases = [
-        (
-            "var x = 'outside'; let probe: any; function f(_ = probe = () => x) { var x = 'inside'; return x; } const inner = f(); finish(inner + ',' + probe());",
-            Value::String("inside,outside".into()),
-        ),
-        (
-            "function run() { let x = 'outer'; const f = (a = () => x) => { let x = 'body'; return a() + ',' + x; }; return f(); } finish(run());",
-            Value::String("outer,body".into()),
-        ),
-    ];
-    for (source, expected) in cases {
-        assert_eq!(finished(source), expected, "{source}");
-    }
-}

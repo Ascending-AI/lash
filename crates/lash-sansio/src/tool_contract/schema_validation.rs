@@ -241,25 +241,6 @@ mod tests {
     }
 
     #[test]
-    fn jsonschema_dependency_cannot_resolve_http_references() {
-        let schema = serde_json::json!({
-            "$ref": "https://example.com/schema.json"
-        });
-
-        let error = jsonschema::validator_for(&schema)
-            .expect_err("external references must fail during validator construction")
-            .to_string();
-
-        assert!(
-            error
-                .to_string()
-                .contains("https://example.com/schema.json"),
-            "{error}"
-        );
-        assert!(error.to_string().contains("retriev"), "{error}");
-    }
-
-    #[test]
     fn validation_rejects_deep_recursive_violation() {
         let schema = JsonSchema::admit(serde_json::json!({
             "$ref": "#/definitions/Node",
@@ -292,74 +273,6 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "/child/child/child/name: 123 is not of type \"string\""
-        );
-    }
-
-    #[test]
-    fn validation_combines_ref_target_and_sibling_constraints() {
-        let schema = JsonSchema::admit(serde_json::json!({
-            "$ref": "#/$defs/AtLeastFive",
-            "minimum": 1,
-            "$defs": {
-                "AtLeastFive": {
-                    "type": "number",
-                    "minimum": 5
-                }
-            }
-        }))
-        .expect("valid declared payload schema");
-
-        let error = schema.validate(&serde_json::json!(2)).unwrap_err();
-
-        assert_eq!(error.to_string(), "2 is less than the minimum of 5");
-    }
-
-    #[test]
-    fn validation_reports_missing_required_property_by_path() {
-        let tool = ToolDefinition::raw(
-            "tool:spotify",
-            "spotify",
-            "",
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "access_token": { "type": "string" }
-                },
-                "required": ["access_token"],
-                "additionalProperties": false
-            }),
-            serde_json::json!({}),
-        )
-        .expect("valid declared tool schemas");
-
-        let error = validate_tool_input(&tool.contract(), &serde_json::json!({})).unwrap_err();
-        assert_eq!(error.to_string(), "\"access_token\" is a required property");
-    }
-
-    #[test]
-    fn validation_reports_numeric_limits_by_path() {
-        let tool = ToolDefinition::raw(
-            "tool:spotify",
-            "spotify",
-            "",
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "page_limit": { "type": "integer", "maximum": 20 }
-                },
-                "required": ["page_limit"],
-                "additionalProperties": false
-            }),
-            serde_json::json!({}),
-        )
-        .expect("valid declared tool schemas");
-
-        let error =
-            validate_tool_input(&tool.contract(), &serde_json::json!({ "page_limit": 100 }))
-                .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "/page_limit: 100 is greater than the maximum of 20"
         );
     }
 

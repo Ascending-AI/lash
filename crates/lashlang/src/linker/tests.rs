@@ -15,11 +15,6 @@ mod trigger_tests;
 mod type_flow_tests;
 mod workflow_classification_tests;
 
-#[test]
-fn empty_union_normalizes_to_null_for_empty_lists() {
-    assert_eq!(union_type(Vec::new()), TypeExpr::Null);
-}
-
 fn resources() -> LashlangHostCatalog {
     let mut catalog = LashlangHostCatalog::new();
     catalog

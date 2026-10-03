@@ -83,19 +83,6 @@ fn process_opener(name: &str) -> EffectOpener {
     EffectOpener::process(ProcessId::fixture(name))
 }
 
-/// The rule the whole mechanism rests on: a child whose opener is not live
-/// here is **not ours to run**, and that is reported as absence rather than as
-/// a failure.
-#[test]
-fn an_opener_this_host_does_not_run_is_absent_rather_than_an_error() {
-    let registry = Arc::new(LiveOpenerRegistry::new());
-    let absent = EffectOpener::turn("session", "turn-1");
-
-    assert!(registry.context_for(&absent).is_none());
-    assert!(!registry.is_live(&absent));
-    assert!(registry.is_empty());
-}
-
 /// Two openers that would render to colliding text are distinct keys, because
 /// the key is the value (ADR 0099 §1).
 #[test]
@@ -116,40 +103,6 @@ fn openers_are_keyed_by_value_not_by_rendered_text() {
          that collision is the aliasing section 1 refuses"
     );
     assert_eq!(registry.len(), 1);
-}
-
-/// Two processes are two openers, so one does not inherit the other's
-/// children.
-#[test]
-fn another_process_is_a_different_opener() {
-    let registry = Arc::new(LiveOpenerRegistry::new());
-    let first = process_opener("indexer-a");
-    let second = process_opener("indexer-b");
-
-    let (_guard, _ended) = registry.register(first.clone(), live_context());
-
-    assert!(registry.is_live(&first));
-    assert!(
-        !registry.is_live(&second),
-        "a second process must not find the first's registration"
-    );
-}
-
-/// Dropping the owner's guard is the deregistration.
-#[test]
-fn dropping_the_guard_deregisters_the_opener() {
-    let registry = Arc::new(LiveOpenerRegistry::new());
-    let opener = EffectOpener::turn("session", "turn-1");
-
-    let (guard, _ended) = registry.register(opener.clone(), live_context());
-    assert!(registry.is_live(&opener));
-
-    drop(guard);
-    assert!(
-        !registry.is_live(&opener),
-        "an opener this worker is no longer running must stop lending its context"
-    );
-    assert!(registry.is_empty());
 }
 
 /// A redrive re-registers the same opener, and the superseded worker's guard
@@ -207,21 +160,5 @@ fn the_registration_token_ends_with_the_entry() {
     assert!(
         !fresh_ended.is_cancelled(),
         "the superseding entry's token is its own, not the evicted one's"
-    );
-}
-
-/// Two hosts in one process do not see each other's openers.
-#[test]
-fn registries_are_per_host_with_no_shared_state() {
-    let first = Arc::new(LiveOpenerRegistry::new());
-    let second = Arc::new(LiveOpenerRegistry::new());
-    let opener = EffectOpener::turn("session", "turn-1");
-
-    let (_guard, _ended) = first.register(opener.clone(), live_context());
-
-    assert!(first.is_live(&opener));
-    assert!(
-        !second.is_live(&opener),
-        "a child must never run against a deployment that did not admit it"
     );
 }

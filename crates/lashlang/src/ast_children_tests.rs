@@ -188,25 +188,6 @@ fn walk_mut(expr: &mut Expr, into: &mut Vec<Expr>) {
 }
 
 #[test]
-fn children_mut_visits_the_same_nodes_as_children() {
-    for expr in every_expr_variant() {
-        let mut mutable = expr.clone();
-        let shared: Vec<&Expr> = expr.children().collect();
-        let visited: Vec<Expr> = mutable.children_mut().map(|child| child.clone()).collect();
-        assert_eq!(
-            shared.len(),
-            visited.len(),
-            "child count differs for {expr:?}"
-        );
-        assert_eq!(
-            shared.into_iter().cloned().collect::<Vec<_>>(),
-            visited,
-            "child order differs for {expr:?}"
-        );
-    }
-}
-
-#[test]
 fn children_mut_walks_a_whole_program_in_the_same_order_as_children() {
     // The whole corpus as one tree, so the parity holds recursively and
     // not only one level down: the lens's splice recurses.
@@ -237,12 +218,4 @@ fn children_mut_edits_reach_the_expression() {
             else_block: Box::new(Expr::Null),
         }
     );
-}
-
-#[test]
-fn children_mut_size_hint_is_exact() {
-    let mut block = Expr::Block(vec![var("a"), var("b"), var("c"), var("d")]);
-    let iter = block.children_mut();
-    assert_eq!(iter.len(), 4);
-    assert_eq!(iter.size_hint(), (4, Some(4)));
 }

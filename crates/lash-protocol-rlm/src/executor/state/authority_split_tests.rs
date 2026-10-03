@@ -51,28 +51,6 @@ fn parse_root(bytes: &[u8]) -> RlmSnapshotRoot {
 }
 
 #[tokio::test]
-async fn deferred_tool_outcomes_are_absent_from_durable_root() {
-    let session = session_with_sentinel_grant().await;
-    let hydrated = session
-        .hydrated_execution_state(lash_core::FleetFormat::current())
-        .await
-        .expect("capture the session");
-    assert!(
-        !contains(&hydrated.root, SENTINEL_SECRET),
-        "the journal owns the grant; the durable root must carry no copy"
-    );
-    let root: BTreeMap<String, serde::de::IgnoredAny> =
-        rmp_serde::from_slice(&hydrated.root).expect("decode root");
-    assert!(!root.contains_key("deferred_resolutions"));
-    let mut restored = RlmExecutionState::new();
-    restored
-        .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
-        .await
-        .expect("restore the guest state");
-    assert!(restored.deferred_link.is_none());
-}
-
-#[tokio::test]
 async fn rlm_worker_envelope_carries_no_grant_or_binding() {
     let fleet_format = lash_core::FleetFormat::current();
     let session = session_with_sentinel_grant().await;

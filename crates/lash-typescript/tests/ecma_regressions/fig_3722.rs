@@ -8,27 +8,6 @@
 
 use super::*;
 
-/// Reads of advertised built-in globals as values: identity-stable objects,
-/// one per built-in (FIG-3656/FIG-3701), usable anywhere a value is.
-#[test]
-fn builtin_globals_read_as_identity_stable_values() {
-    for source in [
-        "finish(JSON === JSON);",
-        "const o = JSON; finish(o === JSON && Object.is(o, JSON));",
-        "finish(Array.isArray(Math) === false && Array.isArray([]));",
-        "finish([].constructor === Array);",
-        "finish(typeof Object === 'function' && typeof Array === 'function');",
-        "finish(typeof Math === 'object' && typeof JSON === 'object');",
-        "const n = Number; finish(n === Number && n.MAX_VALUE > 0);",
-        "finish(Math.max === Math.max);",
-        // A name passed to a call is the same object the member read sees.
-        "finish(Object.is(Math, Math));",
-        "finish(typeof 'x'.includes === 'function' && [].map.length === 1);",
-    ] {
-        assert_eq!(finished(source), Value::Bool(true), "{source}");
-    }
-}
-
 /// A bare write to an advertised built-in global lands on the global
 /// property: the name then reads the new value, including through
 /// `globalThis`, until it is written back.

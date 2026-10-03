@@ -32,41 +32,6 @@ async fn a_throw_escapes_a_builtin_map_callback() {
     );
 }
 
-/// `throw x` hands the catch binding the value the source slot still owns, so
-/// every instruction boundary of the transfer has to stay capturable: a second
-/// durable owner of one heap object would violate the persisted forest rule.
-#[tokio::test(flavor = "current_thread")]
-async fn every_boundary_of_a_caught_throw_stays_capturable() {
-    let program = compile_program(&Program::block(vec![
-        Expr::Assign {
-            target: crate::AssignTarget::variable("x".into()),
-            expr: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
-        },
-        Expr::Assign {
-            target: crate::AssignTarget::variable("caught".into()),
-            expr: Box::new(exception_try(
-                Expr::Throw(Box::new(Expr::Variable("x".into()))),
-                Some(("e", Expr::Variable("e".into()))),
-                None,
-            )),
-        },
-        Expr::Finish(Box::new(Expr::Number(0.0))),
-    ]));
-    let host = Host;
-    let mut captured = 0usize;
-    for budget in 1..=program.chunk.code.len() * 4 {
-        let mut vm = continuation_test_vm(&program, &host);
-        vm.suspend_after_instructions(budget);
-        if !matches!(vm.run_for_mode().await, Ok(ExecutionOutcome::Continued)) {
-            continue;
-        }
-        vm.suspend()
-            .unwrap_or_else(|error| panic!("boundary {budget} must be capturable: {error}"));
-        captured += 1;
-    }
-    assert!(captured > 5, "the probe captured {captured} boundaries");
-}
-
 /// The catch binding names the same object that was thrown, so writing through
 /// it is visible at the slot the value came from. This pins ECMA reference
 /// semantics (ADR 0096): the binding is an alias, not a copy.

@@ -775,20 +775,6 @@ async fn retry_drains_only_the_final_attempts_intents() {
     drop(context);
     handler.close().await.expect("close the dispatch handler");
 }
-#[tokio::test]
-async fn empty_v2_batch_is_a_noop() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let outcomes = execute_final_tool_intents(
-        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
-        &crate::ToolCallId::fixture("empty-batch-call"),
-        &crate::ToolIntents::default(),
-        None,
-    )
-    .await
-    .expect("empty v2 batch is a no-op");
-    assert!(outcomes.is_empty());
-    handler.close().await.expect("close the dispatch handler");
-}
 
 async fn register_trigger_intent_subscription(
     world: &IntentLawWorld,

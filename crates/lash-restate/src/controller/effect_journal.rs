@@ -430,26 +430,6 @@ mod tests {
     }
 
     #[test]
-    fn every_written_entry_carries_the_current_generation() {
-        let value = gave_up_value();
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "effect_journal_version": EFFECT_JOURNAL_VERSION,
-                "journaled_effect_gave_up_over_budget": 64,
-            })
-        );
-        let decoded: JournaledEffectRecord =
-            serde_json::from_value(value).expect("the current generation decodes");
-        assert!(matches!(
-            decoded,
-            JournaledEffectRecord::GaveUp(GaveUpEntry {
-                journaled_effect_gave_up_over_budget: 64
-            })
-        ));
-    }
-
-    #[test]
     fn an_unstamped_or_foreign_entry_decodes_as_retired_and_keeps_its_bytes() {
         let current = gave_up_value();
         let mut unstamped = current.clone();

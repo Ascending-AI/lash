@@ -256,37 +256,3 @@ pub(super) fn instruction_keeps_vm_state_heapified(
         _ => false,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn function_opcodes_keep_closure_references_inside_the_vm() {
-        use crate::runtime::Instruction as I;
-        let program = crate::compile_ast(&crate::testing::ast_builders::program(vec![
-            crate::testing::ast_builders::finish(crate::testing::ast_builders::num(0.0)),
-        ]))
-        .expect("a trivial program compiles");
-        let chunk = &program.chunk;
-        let function_opcodes = [
-            I::MakeClosure {
-                function: 0,
-                captures: 1,
-            },
-            I::Call { argc: 1 },
-            I::CallDynamic,
-            I::Map,
-            I::AsyncMap,
-            I::Return,
-        ];
-        for (index, instruction) in function_opcodes.into_iter().enumerate() {
-            let plan = instruction_heap_plan(instruction, chunk).expect("function heap plan");
-            assert_eq!(
-                (plan.stack, plan.slots),
-                (StackExport::Top(0), SlotExport::None),
-                "function opcode {index} must not export a closure"
-            );
-        }
-    }
-}

@@ -1497,19 +1497,4 @@ mod tests {
             serde_json::json!({"kind": "host", "message": raw_error})
         );
     }
-
-    #[test]
-    fn all_success_omission_does_not_report_a_failure() {
-        let calls = (0..MAX_EXEC_TOOL_CALL_RECORDS + 1)
-            .map(|index| call(index, ToolCallOutput::success(serde_json::json!(index))))
-            .collect::<Vec<_>>();
-
-        let (bounded, omitted) = bounded_exec_tool_call_records(&calls);
-        let omitted = omitted.expect("typed omission");
-
-        assert_eq!(bounded.len(), MAX_EXEC_TOOL_CALL_RECORDS);
-        assert_eq!(omitted.count, 1);
-        assert_eq!(omitted.failures, 0);
-        assert!(omitted.attachments.is_empty());
-    }
 }

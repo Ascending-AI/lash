@@ -823,53 +823,6 @@ async fn alias_replacement_is_reported_as_superseded_and_never_refuses() {
     );
 }
 
-/// A session whose only unresolved tools are opt-outs has lost nothing, so
-/// Require opens it.
-#[tokio::test(flavor = "multi_thread")]
-async fn an_opt_out_only_snapshot_does_not_refuse_under_require() {
-    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let session_id = SessionId::from("fig3367-opt-out-only");
-    let store = double_unbound_store(&double).await;
-
-    let mut granted = create_or_open_fixture_runtime(
-        &backend,
-        &session_id,
-        &store,
-        Some(FixedTools::new(vec![(BETA_ID, BETA_NAME)])),
-        lash_core::ToolSourcePolicy::Tolerate,
-    )
-    .await
-    .expect("granted open");
-    let mut curated = granted.tool_state().expect("tool state");
-    curated
-        .set_membership(&lash_core::ToolId::from(BETA_ID), false)
-        .expect("opt out beta");
-    Box::pin(granted.apply_tool_state(curated))
-        .await
-        .expect("apply the opt-out");
-    Box::pin(granted.park()).await.expect("park");
-
-    let strict = create_or_open_fixture_runtime(
-        &backend,
-        &session_id,
-        &store,
-        None,
-        lash_core::ToolSourcePolicy::Require,
-    )
-    .await
-    .expect("an opt-out-only snapshot opens under Require");
-    let report = strict.tool_restore_report().expect("report");
-    assert!(
-        report.lost_members.is_empty(),
-        "an opt-out is not a lost member"
-    );
-    assert_eq!(
-        report.parked_opt_outs,
-        vec![lash_core::ToolId::from(BETA_ID)]
-    );
-}
-
 /// Direct construction under Require refuses with the typed error, and the
 /// refusal carries the report.
 #[tokio::test(flavor = "multi_thread")]

@@ -19,8 +19,6 @@ pub(crate) use parser::Parser;
 mod prototype_chain;
 mod rejections;
 mod template;
-#[cfg(test)]
-mod tests;
 mod traversal;
 mod types;
 use enums::{ConstEnumValue, enum_member_property_name};

@@ -150,17 +150,6 @@ impl TriggerEventCatalog {
         }
         Ok(catalog)
     }
-
-    #[cfg(test)]
-    pub(crate) fn get(
-        &self,
-        resource_type: &str,
-        alias: &str,
-        event: &str,
-    ) -> Option<&TriggerEvent> {
-        self.events
-            .get(&TriggerEventKey::new(resource_type, alias, event))
-    }
 }
 
 /// Terminal fate of one observed trigger occurrence.

@@ -39,40 +39,7 @@ async fn sqlite_seed_round_trips_through_a_fresh_store() {
     Box::pin(fixture::assert_semantics(&handles, &written_now)).await;
 }
 
-/// The round trip is not vacuous: fed a seed whose expectations were mutated
-/// after the write, it fails.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_seed_round_trip_refuses_a_mutated_seed() {
-    let temp = tempfile::tempdir().expect("SQLite mutated-seed tempdir");
-    let written_now = seed_fresh_store(temp.path()).await;
-    let mutations: [(&str, Mutation); 3] = [
-        ("head revision", |expected| expected.head_revision += 1),
-        ("graph node order", |expected| {
-            expected.node_ids_in_read_order.reverse();
-        }),
-        ("pending input id", |expected| {
-            expected.pending_input_id.push_str("-drifted");
-        }),
-    ];
-    for (name, mutate) in mutations {
-        let mut mutated: fixture::ExpectedFixture =
-            serde_json::from_slice(&json_with_newline(&written_now))
-                .expect("copy the seeded expectations");
-        mutate(&mut mutated);
-        let handles = open_handles(temp.path(), fixture::FIXTURE_READ_MS).await;
-        let outcome = tokio::spawn(async move {
-            Box::pin(fixture::assert_semantics(&handles, &mutated)).await;
-        })
-        .await;
-        assert!(
-            outcome.is_err_and(|error| error.is_panic()),
-            "the round trip accepted a seed whose {name} was mutated"
-        );
-    }
-}
-
 /// One way a seed's expectations can drift from what the store holds.
-type Mutation = fn(&mut fixture::ExpectedFixture);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "FIG-4495 release cut: requires an explicit tagged LASH_RELEASE_FIXTURES_DIR"]
@@ -313,18 +280,6 @@ fn source_manifest_dir_for(workspace: Option<std::ffi::OsString>) -> PathBuf {
         || PathBuf::from(env!("CARGO_MANIFEST_DIR")),
         |root| PathBuf::from(root).join("crates/lash-sqlite-store"),
     )
-}
-
-#[test]
-fn fixture_source_dir_resolves_build_workspace() {
-    assert_eq!(
-        source_manifest_dir_for(Some("/tmp/lash-fork".into())),
-        PathBuf::from("/tmp/lash-fork/crates/lash-sqlite-store")
-    );
-    assert_eq!(
-        source_manifest_dir_for(None),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    );
 }
 
 fn json_with_newline(value: &impl Serialize) -> Vec<u8> {

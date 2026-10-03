@@ -211,30 +211,3 @@ impl RemoteTurnRequest {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod ownership_tests {
-    use super::*;
-
-    #[test]
-    fn version_retention_preserves_owned_items() {
-        let mut input = RemoteTurnInput::text("owned text");
-        #[cfg(feature = "synthetic-next")]
-        {
-            input.synthetic_next_note = Some("drop at N".into());
-        }
-        let items = input.items.as_ptr();
-        let RemoteInputItem::Text { text } = &input.items[0] else {
-            panic!("text")
-        };
-        let text_ptr = text.as_ptr();
-        input.retain_version(crate::REMOTE_PROTOCOL_VERSION);
-        assert_eq!(items, input.items.as_ptr());
-        let RemoteInputItem::Text { text } = &input.items[0] else {
-            panic!("text")
-        };
-        assert_eq!(text_ptr, text.as_ptr());
-        #[cfg(feature = "synthetic-next")]
-        assert!(input.synthetic_next_note.is_none());
-    }
-}

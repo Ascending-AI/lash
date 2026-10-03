@@ -6,7 +6,8 @@
 
 mod bench_support;
 
-use bench_support::{BenchHost, FrameHost, FunctionScenario, function_benchmark_program};
+use bench_support::BenchHost;
+use bench_support::functions::{FrameHost, FunctionScenario, function_benchmark_program};
 use lashlang::{ExecutionOutcome, State, Value, Vm, VmRunOutcome, execute};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;

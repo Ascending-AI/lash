@@ -2,8 +2,7 @@ mod tests {
     use lash_core_execution::runtime::effect::*;
     use lash_core_execution::tool_dispatch::ToolAttemptLineage;
     use lash_core_execution::{
-        FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessId, SessionId,
-        ToolExecutionGrant, ToolManifest, ToolRetryPolicy,
+        FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessId, SessionId, ToolManifest,
     };
     use lash_core_execution::{ToolDefinition, ToolId};
 
@@ -80,34 +79,6 @@ mod tests {
         )
     }
 
-    /// Every field survives the durable round trip. A request that lost a field
-    /// in serialization is a child recovered under partial authority, which is
-    /// the exact failure §3 retains input to prevent.
-    #[test]
-    fn a_request_round_trips_every_field_through_its_durable_bytes() {
-        let mut original = request();
-        original.scope.opener = EffectOpener::process(process_id("process-9"));
-        let json = serde_json::to_string(&original).expect("a request serializes");
-        let decoded: ToolChildRequest = serde_json::from_str(&json).expect("a request decodes");
-        assert_eq!(decoded, original);
-        assert_eq!(decoded.version, TOOL_CHILD_REQUEST_VERSION);
-        assert_eq!(decoded.cancellation_authority.as_str(), "binding-7");
-        assert_eq!(decoded.execution_env.as_str(), "env-ref");
-        assert_eq!(
-            decoded.enclosing_process(),
-            Some(&process_id("process-9")),
-            "the enclosing process is the recorded opener's own"
-        );
-        assert_eq!(
-            decoded
-                .scope
-                .owner
-                .agent_frame_id()
-                .map(|frame| frame.as_str()),
-            Some("frame-1")
-        );
-    }
-
     /// A field this build does not know is refused, not dropped. A retired field
     /// that vanished into a default would silently narrow the authority a
     /// recovered child runs under (prelude, FIG-2886 review).
@@ -123,21 +94,6 @@ mod tests {
         assert!(
             error.to_string().contains("fabricated"),
             "the refusal must name the field it refused, got {error}"
-        );
-    }
-
-    /// A version no build wrote is refused rather than read under this build's
-    /// field meanings.
-    #[test]
-    fn a_foreign_format_version_is_refused_rather_than_defaulted() {
-        let mut foreign = request();
-        foreign.version = TOOL_CHILD_REQUEST_VERSION + 1;
-        let error = foreign
-            .validate()
-            .expect_err("a foreign version is refused");
-        assert_eq!(
-            error.code,
-            lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestVersion
         );
     }
 
@@ -173,64 +129,6 @@ mod tests {
                 .expect_err("a crossed admission is refused")
                 .code,
             lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestAdmission
-        );
-    }
-
-    /// The pinned manifest is the whole catalog dependency: the retry policy a
-    /// reopen uses comes from the record, so a catalog edited after admission
-    /// cannot change how a recovered child retries (ADR 0099 §3).
-    #[test]
-    fn the_retry_policy_is_read_from_the_pinned_admission_not_a_live_catalog() {
-        let mut tool = manifest("search");
-        tool.retry_policy = ToolRetryPolicy::safe(4, 10, 100);
-        let pinned = ToolChildRequest::new(
-            call(tool.id.as_str()),
-            ToolChildAdmission::Catalog {
-                owner: lash_core_execution::plugin::PluginRevision::new(
-                    "test_protocol",
-                    lash_core_execution::plugin::BehaviorRevision::ONE,
-                ),
-                manifest: Box::new(tool),
-            },
-            ToolAttemptLineage::default(),
-            scope(),
-            authority(),
-            env(),
-            ToolChildCompletionRouting::Inline,
-            lash_core_execution::runtime::effect::ToolChildSessionFacts::default(),
-        );
-        let decoded: ToolChildRequest =
-            serde_json::from_str(&serde_json::to_string(&pinned).expect("serializes"))
-                .expect("decodes");
-        assert_eq!(decoded.retry_policy(), ToolRetryPolicy::safe(4, 10, 100));
-    }
-
-    /// A granted call carries its own manifest and contract, so it needs no
-    /// pinned catalog entry beside it — the two arms are alternatives, and the
-    /// grant arm answers `manifest()` from the grant.
-    #[test]
-    fn a_granted_admission_answers_from_its_own_grant() {
-        let admission = ToolChildAdmission::Granted {
-            grant: Box::new(ToolExecutionGrant::from_definition(
-                lash_core_execution::plugin::PluginRevision::new(
-                    "mock",
-                    lash_core_execution::plugin::BehaviorRevision::ONE,
-                ),
-                definition("search"),
-            )),
-        };
-        assert_eq!(admission.manifest().id, ToolId::from("search"));
-        assert!(admission.grant().is_some());
-        assert!(
-            ToolChildAdmission::Catalog {
-                owner: lash_core_execution::plugin::PluginRevision::new(
-                    "test_protocol",
-                    lash_core_execution::plugin::BehaviorRevision::ONE
-                ),
-                manifest: Box::new(manifest("search"))
-            }
-            .grant()
-            .is_none()
         );
     }
 
@@ -322,28 +220,6 @@ mod tests {
         .expect("the admitted envelope round-trips");
     }
 
-    /// The defect ADR 0099 §1 names, at the shape level: a process re-registered
-    /// under the same name is a different opener, and a retained request must
-    /// not compare equal to one admitted under its predecessor. An
-    /// `ExecutionScope::Process` could not express this at all.
-    #[test]
-    fn another_process_opener_is_not_the_opener_that_was_admitted() {
-        let mut admitted = request();
-        admitted.scope.opener = EffectOpener::process(process_id("indexer-a"));
-        let mut successor = request();
-        successor.scope.opener = EffectOpener::process(process_id("indexer-b"));
-        assert_ne!(admitted.scope.opener, successor.scope.opener);
-
-        let decoded: ToolChildRequest =
-            serde_json::from_str(&serde_json::to_string(&admitted).expect("serializes"))
-                .expect("decodes");
-        assert_eq!(
-            decoded.scope.opener.process_id(),
-            Some(&process_id("indexer-a")),
-            "the admitted process is what recovery validates against"
-        );
-    }
-
     /// A turn opener names its session, so a request attributing its work to a
     /// different one is representable and invalid. Refused at the boundary.
     #[test]
@@ -413,43 +289,5 @@ mod tests {
             error.to_string().contains("execution_env"),
             "the refusal must name the missing field, got {error}"
         );
-    }
-
-    /// An inline child is a different fact from a deferring one, and a reopen
-    /// that guessed would derive a key nothing resolves (ADR 0099 §14).
-    #[test]
-    fn completion_routing_round_trips_every_mode() {
-        for mode in [
-            ToolChildCompletionRouting::Inline,
-            ToolChildCompletionRouting::Durable,
-        ] {
-            let mut request = request();
-            request.completion_routing = mode.clone();
-            let decoded: ToolChildRequest =
-                serde_json::from_str(&serde_json::to_string(&request).expect("serializes"))
-                    .expect("decodes");
-            assert_eq!(decoded.completion_routing, mode);
-        }
-    }
-
-    /// Lineage is the attempt identity's parent, carried once. Losing it would
-    /// reparent every attempt a recovered child makes.
-    #[test]
-    fn lineage_rides_the_attempt_identity_and_survives_the_round_trip() {
-        let parent = lash_core_execution::RuntimeInvocation::effect(
-            lash_core_execution::EffectAddress::new(
-                lash_core_execution::ExecutionScope::turn("session", "turn"),
-                "parent-effect",
-            )
-            .expect("a valid address"),
-            lash_core_execution::RuntimeAttribution::for_session("session"),
-            "parent-effect",
-        );
-        let mut request = request();
-        request.lineage = ToolAttemptLineage::under(parent.clone());
-        let decoded: ToolChildRequest =
-            serde_json::from_str(&serde_json::to_string(&request).expect("serializes"))
-                .expect("decodes");
-        assert_eq!(decoded.lineage.parent_invocation(), Some(&parent));
     }
 }

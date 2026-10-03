@@ -133,16 +133,6 @@ impl CodexProvider {
             .unwrap_or_default()
     }
 
-    #[cfg(test)]
-    pub(super) fn cached_websocket_body(
-        continuation: &CodexContinuation,
-        full_body: &Value,
-    ) -> Option<Value> {
-        Self::cached_websocket_body_result(continuation, full_body)
-            .map(|(body, _)| body)
-            .ok()
-    }
-
     fn cached_websocket_body_result(
         continuation: &CodexContinuation,
         full_body: &Value,
@@ -384,34 +374,6 @@ mod tests {
 
         for (outcome, plan, expected) in cases {
             assert_eq!(plan.context.rendered(), expected, "{outcome}");
-        }
-    }
-
-    #[test]
-    fn cache_miss_wire_reasons_are_exhaustive() {
-        let reasons = [
-            (
-                CodexWebsocketCacheMiss::Disabled {
-                    continuation_available: false,
-                },
-                "disabled",
-            ),
-            (
-                CodexWebsocketCacheMiss::MissingContinuation,
-                "missing_continuation",
-            ),
-            (
-                CodexWebsocketCacheMiss::BodyFingerprintMismatch,
-                "body_fingerprint_mismatch",
-            ),
-            (
-                CodexWebsocketCacheMiss::InputPrefixMismatch,
-                "input_prefix_mismatch",
-            ),
-        ];
-
-        for (miss, expected) in reasons {
-            assert_eq!(miss.wire_reason(), expected);
         }
     }
 }

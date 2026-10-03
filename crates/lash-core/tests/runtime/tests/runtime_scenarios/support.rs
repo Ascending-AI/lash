@@ -123,11 +123,6 @@ impl RuntimeScenario {
             }
         }
     }
-
-    pub(crate) fn phase_order_is_valid_for_test(&self) -> bool {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.validate_phase_order()))
-            .is_ok()
-    }
 }
 
 struct RuntimeScenarioContext {

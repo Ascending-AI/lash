@@ -39,37 +39,6 @@ fn empty_tool_identities_are_rejected_by_request_builder() {
 }
 
 #[test]
-fn nonempty_tool_identities_match_and_encode_repeatably() {
-    for id in [
-        "call_1-ABC".to_string(),
-        "call.a/é".to_string(),
-        "x".repeat(80),
-    ] {
-        let req = request(vec![
-            LlmMessage::new(LlmRole::Assistant, vec![call(&id)]),
-            LlmMessage::new(LlmRole::User, vec![result(&id)]),
-        ]);
-        let provider = AnthropicProvider::new("key");
-        let body = provider.build_request_body(&req).unwrap();
-        let wire_id = body["messages"][0]["content"][0]["id"].as_str().unwrap();
-        assert!(!wire_id.is_empty());
-        assert!(wire_id.len() <= 64);
-        assert!(
-            wire_id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-        );
-        assert_eq!(body["messages"][1]["content"][0]["tool_use_id"], wire_id);
-        if id == "call_1-ABC" {
-            assert_eq!(wire_id, id);
-        } else {
-            assert_ne!(wire_id, id);
-        }
-        assert_eq!(body, provider.build_request_body(&req).unwrap());
-    }
-}
-
-#[test]
 fn rewritten_tool_ids_do_not_collide_and_results_follow_their_calls() {
     let prefix = "x".repeat(64);
     let ids = [

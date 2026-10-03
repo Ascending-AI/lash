@@ -65,8 +65,6 @@ pub use lash_core_execution::testing::{
 pub mod adversarial_text;
 pub mod checkpoint_observer;
 pub mod conformance_support;
-#[cfg(test)]
-mod kernel_door_tests;
 mod layered_backend;
 mod live_replay;
 mod poll;

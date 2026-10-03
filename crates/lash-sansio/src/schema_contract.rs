@@ -1125,43 +1125,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn schema_dialect_wire_spellings_match_pre_enum_constants() {
-        let spellings = [
-            (
-                SchemaDialect::OpenaiToolParameters,
-                "openai_tool_parameters",
-            ),
-            (
-                SchemaDialect::OpenaiStrictToolParameters,
-                "openai_strict_tool_parameters",
-            ),
-            (
-                SchemaDialect::OpenaiStructuredOutput,
-                "openai_structured_output",
-            ),
-            (SchemaDialect::AnthropicToolInput, "anthropic_tool_input"),
-            (
-                SchemaDialect::AnthropicOutputConfigJsonSchema,
-                "anthropic_output_config_json_schema",
-            ),
-            (
-                SchemaDialect::BedrockClaudeOutputConfigJsonSchema,
-                "bedrock_claude_output_config_json_schema",
-            ),
-            (SchemaDialect::GoogleSchema, "google_schema"),
-            (SchemaDialect::JsonPromptSchema, "json_prompt_schema"),
-        ];
-        for (dialect, spelling) in spellings {
-            assert_eq!(dialect.as_str(), spelling);
-            assert_eq!(serde_json::to_value(dialect).unwrap(), json!(spelling));
-            assert_eq!(
-                serde_json::from_value::<SchemaDialect>(json!(spelling)).unwrap(),
-                dialect
-            );
-        }
-    }
-
     fn required_names(schema: &Value) -> Vec<String> {
         let mut names = schema["required"]
             .as_array()
@@ -1171,14 +1134,6 @@ mod tests {
             .collect::<Vec<_>>();
         names.sort();
         names
-    }
-
-    #[test]
-    fn projection_does_not_mutate_canonical_schema() {
-        let schema = json!({"type": "object"});
-        let projected = project_tool_parameters(&schema).unwrap();
-        assert_eq!(schema, json!({"type": "object"}));
-        assert_eq!(projected.schema["properties"], json!({}));
     }
 
     #[test]

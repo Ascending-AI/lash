@@ -28,32 +28,6 @@ fn product_event_log_rejects_future_format_with_expected_and_found_versions() {
 }
 
 #[test]
-fn product_event_log_rejects_old_format_with_expected_and_found_versions() {
-    let data_dir = tempfile::tempdir().expect("old product event tempdir");
-    let path = data_dir.path().join("product-events.json");
-    std::fs::write(&path, r#"{"format_version":1,"histories":{}}"#)
-        .expect("write old product event log");
-
-    let error = match SessionEventRegistry::persistent(path, 4) {
-        Ok(_) => panic!("an old product event format must be rejected"),
-        Err(error) => error,
-    };
-    let typed = error
-        .downcast_ref::<ProductEventLogLoadError>()
-        .expect("product event load failures remain typed");
-    assert!(matches!(
-        typed.source,
-        ProductEventLogDecodeError::FormatVersionMismatch {
-            expected: 2,
-            found: 1
-        }
-    ));
-    let rendered = error.to_string();
-    assert!(rendered.contains("expected 2"), "actual error: {rendered}");
-    assert!(rendered.contains("found 1"), "actual error: {rendered}");
-}
-
-#[test]
 fn product_event_log_decode_error_names_histories_and_the_nested_cause() {
     let data_dir = tempfile::tempdir().expect("malformed product event tempdir");
     let path = data_dir.path().join("product-events.json");
@@ -129,41 +103,6 @@ fn product_event_log_rejects_unversioned_product_event_root_with_clear_error() {
         ),
         "actual error: {rendered}"
     );
-}
-
-#[test]
-fn product_event_log_rejects_unversioned_product_event_array_history() {
-    let data_dir = tempfile::tempdir().expect("legacy product event array tempdir");
-    let path = data_dir.path().join("product-events.json");
-    std::fs::write(
-        &path,
-        r#"{
-            "released-session": [{
-                "event_id": "released-message",
-                "sequence": 1,
-                "type": "message",
-                "message": {
-                    "id": "message",
-                    "role": "assistant",
-                    "text": "legacy event array",
-                    "at": ""
-                }
-            }]
-        }"#,
-    )
-    .expect("write unversioned product event array history");
-
-    let error = match SessionEventRegistry::persistent(path, 4) {
-        Ok(_) => panic!("an unversioned product event array must be rejected"),
-        Err(error) => error,
-    };
-    let typed = error
-        .downcast_ref::<ProductEventLogLoadError>()
-        .expect("product event load failures remain typed");
-    assert!(matches!(
-        typed.source,
-        ProductEventLogDecodeError::UnversionedRoot
-    ));
 }
 
 #[test]

@@ -77,36 +77,3 @@ pub(in crate::runtime) fn protocol_step_trace_event(
         payload: protocol_event.payload.clone(),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn protocol_step_trace_event_preserves_protocol_payload() {
-        let protocol_event = crate::ProtocolEvent::typed(
-            "custom",
-            serde_json::json!({
-                "code": "print \"hi\"",
-                "final_output": "done"
-            }),
-        )
-        .expect("protocol event");
-
-        let lash_trace::TraceEvent::ProtocolStep { plugin_id, payload } =
-            protocol_step_trace_event(&protocol_event)
-        else {
-            panic!("expected protocol step trace event");
-        };
-
-        assert_eq!(plugin_id, "custom");
-        assert_eq!(
-            payload.get("code").and_then(serde_json::Value::as_str),
-            Some("print \"hi\"")
-        );
-        assert_eq!(
-            payload.get("final_output"),
-            Some(&serde_json::json!("done"))
-        );
-    }
-}

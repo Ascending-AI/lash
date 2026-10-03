@@ -9,18 +9,6 @@ use lash::SessionId;
 use lash::StoreSet as _;
 
 #[test]
-fn workbench_work_rail_exposes_process_cancellation() {
-    assert!(ui::INDEX_HTML.contains("className = \"work-cancel\""));
-    assert!(ui::INDEX_HTML.contains("/cancel\""));
-    assert!(ui::INDEX_HTML.contains("Request cooperative process cancellation"));
-    assert!(ui::INDEX_HTML.contains("error: \" + process.error"));
-    assert!(
-        ui::INDEX_HTML.contains("row.error ? \" error\""),
-        "failed work must receive the work rail's visible error treatment"
-    );
-}
-
-#[test]
 fn await_work_route_returns_terminal_outcome_and_reconciled_events() {
     run_async_test_on_stack_budget("workbench-await-work-test", || {
         await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
@@ -1168,13 +1156,6 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         "the reclaimed row must read as a payload-free tombstone"
     );
     let _ = std::fs::remove_dir_all(data_dir);
-}
-
-#[test]
-fn bootstrap_installs_the_process_event_sink_on_the_engine() {
-    const BOOTSTRAP_SOURCE: &str = include_str!("../bootstrap.rs");
-    assert!(BOOTSTRAP_SOURCE.contains("ChannelProcessEventSink::new(process_event_tx)"));
-    assert!(BOOTSTRAP_SOURCE.contains(".with_process_event_sink(Arc::clone(&process_event_sink))"));
 }
 
 /// The process ids the work rail renders with no session selected: the

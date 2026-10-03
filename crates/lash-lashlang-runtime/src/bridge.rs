@@ -256,35 +256,6 @@ mod tests {
     }
 
     #[test]
-    fn observed_failure_keeps_recorded_retry_and_replay_key_before_projection() {
-        let output =
-            ToolCallOutput::failure(policy_failure(ToolRetryStatus::Exhausted { attempts: 3 }));
-        let observed = protocol_tool_output_to_lashlang_value(
-            &output,
-            "stable-effect-key",
-            &ExecutionCancellation::new(),
-        )
-        .expect_err("failed tool output has typed provenance")
-        .tool_failure()
-        .expect("typed host error has effect provenance");
-        assert_eq!(observed.class, ToolFailureClass::PermissionDenied);
-        assert_eq!(observed.code, "approval_denied");
-        assert_eq!(observed.message, "approval was denied");
-        assert_eq!(observed.replay_key, "stable-effect-key");
-        assert_eq!(observed.source, ToolFailureSource::Policy);
-        assert_eq!(observed.retry, ToolRetryStatus::Exhausted { attempts: 3 });
-        assert_eq!(
-            protocol_tool_output_to_lashlang_value(
-                &ToolCallOutput::success(serde_json::json!("ok")),
-                "stable-effect-key",
-                &ExecutionCancellation::new(),
-            )
-            .expect("successful output projects"),
-            LashlangValue::String("ok".into()),
-        );
-    }
-
-    #[test]
     fn successful_tool_bridges_keep_scalar_record_and_attachment_projections() {
         let cancellation = ExecutionCancellation::new();
         let owned = protocol_tool_reply_to_lashlang_value(

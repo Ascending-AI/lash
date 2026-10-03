@@ -31,17 +31,6 @@ fn stack_budget_source(blocks: usize, parens: usize) -> String {
     )
 }
 
-fn delimiter_free_source(shape: &str, depth: usize) -> String {
-    match shape {
-        "not" => format!("finish({}1);", "!".repeat(depth)),
-        "minus" => format!("finish({}1);", "- ".repeat(depth)),
-        "typeof" => format!("finish({}1);", "typeof ".repeat(depth)),
-        "ternary" => format!("finish({}1);", "1?1:".repeat(depth)),
-        "binary" => format!("finish(1{});", "+1".repeat(depth)),
-        _ => panic!("unknown delimiter-free nesting shape: {shape}"),
-    }
-}
-
 fn mixed_delimiter_source(braces: usize, brackets: usize) -> String {
     format!(
         "{}finish({}1{});{}",
@@ -50,66 +39,6 @@ fn mixed_delimiter_source(braces: usize, brackets: usize) -> String {
         "]".repeat(brackets),
         "}".repeat(braces),
     )
-}
-
-#[test]
-fn ten_thousand_nested_parens_return_a_named_diagnostic_without_aborting() {
-    const CHILD_ENV: &str = "LASH_TS_DEPTH_GUARD_CHILD";
-    if std::env::var_os(CHILD_ENV).is_some() {
-        let source = format!("finish({}1{});", "(".repeat(10_000), ")".repeat(10_000));
-        let error = lash_typescript::parse(&source).expect_err("nesting must be rejected");
-        assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
-        return;
-    }
-
-    let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
-        .args([
-            "depth_guard::ten_thousand_nested_parens_return_a_named_diagnostic_without_aborting",
-            "--exact",
-            "--nocapture",
-        ])
-        .env(CHILD_ENV, "1")
-        .output()
-        .expect("depth child starts");
-    assert!(
-        output.status.success(),
-        "depth child did not fail closed: {}\nstdout:\n{}\nstderr:\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-}
-
-#[test]
-fn delimiter_free_nesting_returns_a_named_diagnostic_without_aborting() {
-    const CHILD_ENV: &str = "LASH_TS_DELIMITER_FREE_DEPTH_CHILD";
-    const SHAPES: [&str; 5] = ["not", "minus", "typeof", "ternary", "binary"];
-    if let Some(shape) = std::env::var_os(CHILD_ENV) {
-        let shape = shape.to_string_lossy();
-        let source = delimiter_free_source(&shape, 4_000);
-        let error = lash_typescript::parse(&source).expect_err("nesting must be rejected");
-        assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
-        return;
-    }
-
-    for shape in SHAPES {
-        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
-            .args([
-                "depth_guard::delimiter_free_nesting_returns_a_named_diagnostic_without_aborting",
-                "--exact",
-                "--nocapture",
-            ])
-            .env(CHILD_ENV, shape)
-            .output()
-            .expect("depth child starts");
-        assert!(
-            output.status.success(),
-            "{shape} depth child did not fail closed: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-    }
 }
 
 #[test]

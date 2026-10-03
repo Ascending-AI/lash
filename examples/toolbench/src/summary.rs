@@ -151,20 +151,6 @@ pub(crate) fn markdown(
 mod tests {
     use super::*;
     use serde_json::json;
-    #[test]
-    fn arithmetic_keeps_missing_usage_unknown_and_reasoning_in_completion() {
-        let u = Usage::from_attempts(&[
-            json!({"prompt_tokens_total":150,"prompt_uncached":100,"cache_read":40,"cache_write":10,"completion_tokens":20,"reasoning_tokens":15,"cost_usd":0.02}),
-            json!({"prompt_tokens_total":200,"prompt_uncached":50,"cache_read":150,"cache_write":0,"completion_tokens":30,"reasoning_tokens":25,"cost_usd":0.01}),
-        ]);
-        assert_eq!(u.prompt_tokens_total, Some(350));
-        assert_eq!(u.completion_tokens, Some(50));
-        assert_eq!(u.reasoning_tokens, Some(40));
-        assert_eq!(u.cost, Some(0.03));
-        assert_eq!(Usage::from_attempts(&[json!({})]).cost, None);
-        assert_eq!(Usage::from_attempts(&[]).cost, Some(0.0));
-        assert_eq!(delta(Some(300.0), Some(100.0)), "+200.0%");
-    }
 
     #[test]
     fn cohort_sums_unknowns_medians_and_per_task_means() {

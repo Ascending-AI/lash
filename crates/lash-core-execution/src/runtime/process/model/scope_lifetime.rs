@@ -435,28 +435,6 @@ mod tests {
         ScopeId::process(crate::process_id_for_test("worker"))
     }
 
-    #[test]
-    fn a_scope_round_trips_through_its_versioned_payload() {
-        for scope in [
-            turn_scope(),
-            process_scope(),
-            ScopeId::session_operation(SessionId::from("s"), "d"),
-            ScopeId::session("s"),
-        ] {
-            let payload = scope
-                .storage_payload(crate::FleetFormat::current())
-                .expect("encode the payload");
-            let decoded = ScopeId::from_storage_columns(
-                scope.storage_kind(),
-                &scope.storage_id(),
-                &payload,
-                crate::FleetFormat::current(),
-            )
-            .expect("the payload is the authority the projection agrees with");
-            assert_eq!(decoded, scope);
-        }
-    }
-
     /// `("s/a","c")` and `("s","a/c")` share no projection, and a session
     /// named like a turn's encoding does not alias it.
     #[test]

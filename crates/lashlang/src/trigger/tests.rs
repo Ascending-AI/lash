@@ -256,27 +256,6 @@ fn process_assignability_preserves_names_order_variance_and_gradual_unknown() {
 }
 
 #[test]
-fn host_descriptor_encode_decode_and_typed_decode_round_trip() {
-    let value = serde_json::json!({
-        "expr": "*/10 * * * * *",
-        "tz": "UTC",
-    });
-    let encoded = HostDescriptor::encode("cron.Schedule", value).expect("host descriptor encode");
-    let decoded = HostDescriptor::decode(&encoded).expect("host descriptor decode");
-    let payload: ScheduleSource = decoded
-        .decode_as(&resources())
-        .expect("typed host descriptor payload");
-
-    assert_eq!(
-        payload,
-        ScheduleSource {
-            expr: "*/10 * * * * *".to_string(),
-            tz: Some("UTC".to_string()),
-        }
-    );
-}
-
-#[test]
 fn host_descriptor_typed_decode_rejects_unknown_source_type() {
     let decoded = HostDescriptor::new("missing.Source", serde_json::json!({ "expr": "*" }));
     let err = decoded

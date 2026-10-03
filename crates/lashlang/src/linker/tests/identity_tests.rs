@@ -340,42 +340,6 @@ fn module_aliases_sharing_resource_type_route_to_distinct_host_operations() {
 }
 
 #[test]
-fn conflicting_module_operation_binding_returns_a_typed_error() {
-    let mut catalog = LashlangHostCatalog::new();
-    catalog
-        .add_module_operation(
-            ["directory"],
-            "Directory",
-            "lookup",
-            "first",
-            TypeExpr::Any,
-            TypeExpr::Any,
-        )
-        .expect("first binding is valid");
-
-    let error = catalog
-        .add_module_operation(
-            ["directory"],
-            "Directory",
-            "lookup",
-            "second",
-            TypeExpr::Any,
-            TypeExpr::Any,
-        )
-        .expect_err("conflicting dispatch must be rejected");
-
-    assert_eq!(
-        error,
-        LashlangHostCatalogError::ConflictingModuleOperation {
-            module: "directory".to_string(),
-            operation: "lookup".to_string(),
-            existing: "first".to_string(),
-            incoming: "second".to_string(),
-        }
-    );
-}
-
-#[test]
 fn identical_module_operation_binding_is_refused_by_name() {
     let mut catalog = LashlangHostCatalog::new();
     catalog

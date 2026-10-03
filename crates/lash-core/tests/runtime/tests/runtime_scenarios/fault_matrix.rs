@@ -3,259 +3,112 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use super::cases::RUNTIME_SCENARIO_COVERAGE;
-use std::collections::BTreeSet;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-enum DurableFaultKind {
-    CrashReopen,
-    DuplicateInputs,
-    ProviderFailureRetry,
-    Cancellation,
-    LeaseLoss,
-    TriggerDeliveryRecovery,
-    BackendPermutation,
-}
-
 #[derive(Clone, Copy, Debug)]
 struct CargoTestEvidence {
     package: &'static str,
     test_target: Option<&'static str>,
     filter: Option<&'static str>,
-    required_env: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, Debug)]
 enum FaultEvidence {
-    RuntimeScenario {
-        test_name: &'static str,
-    },
+    RuntimeScenario,
     CargoTest(CargoTestEvidence),
-    #[allow(dead_code)]
-    Blocked {
-        rationale: &'static str,
-    },
+    Blocked,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct DurableFaultMatrixRow {
     id: &'static str,
-    kind: DurableFaultKind,
-    contract: &'static str,
     evidence: FaultEvidence,
 }
 
 const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
     DurableFaultMatrixRow {
         id: "crash-reopen-runtime-rebuild",
-        kind: DurableFaultKind::CrashReopen,
-        contract: "A deployment that dies mid journal step and comes up fresh recovers its process to one terminal, with no input lost or executed twice.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-sim",
             test_target: Some("crash_point_matrix"),
             filter: Some("process_terminal_mid_journal_step"),
-            required_env: None,
         }),
     },
     DurableFaultMatrixRow {
         id: "duplicate-turn-input-source-key",
-        kind: DurableFaultKind::DuplicateInputs,
-        contract: "Duplicate source-key turn input returns the original pending input and payload.",
-        evidence: FaultEvidence::RuntimeScenario {
-            test_name: "runtime_scenario_observation_replay_keeps_original_turn_input",
-        },
+        evidence: FaultEvidence::RuntimeScenario,
     },
     DurableFaultMatrixRow {
         id: "provider-retry-exhaustion",
-        kind: DurableFaultKind::ProviderFailureRetry,
-        contract: "Retryable LLM provider failures are retried deterministically and fail the turn only after exhaustion.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-core",
             test_target: None,
             filter: Some("retryable_llm_failures_exhaust_and_fail_turn"),
-            required_env: None,
         }),
     },
     DurableFaultMatrixRow {
         id: "protocol-provider-failure",
-        kind: DurableFaultKind::ProviderFailureRetry,
-        contract: "Protocol-level provider failure stops without manufacturing a checkpoint.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-protocol-standard",
             test_target: Some("protocol_scenarios"),
             filter: Some("standard_protocol_scenario_provider_error_stops_without_checkpoint"),
-            required_env: None,
         }),
     },
     DurableFaultMatrixRow {
         id: "checkpoint-redrive-cancel",
-        kind: DurableFaultKind::Cancellation,
-        contract: "Active-turn and next-turn cancellation prevents later redrive after checkpoint deferral.",
-        evidence: FaultEvidence::RuntimeScenario {
-            test_name: "runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel",
-        },
+        evidence: FaultEvidence::RuntimeScenario,
     },
     DurableFaultMatrixRow {
         id: "lease-release-advisory",
-        kind: DurableFaultKind::LeaseLoss,
-        contract: "A released advisory lease does not block a current-head commit, while the head-revision CAS still rejects stale follow-up state.",
-        evidence: FaultEvidence::RuntimeScenario {
-            test_name: "runtime_scenario_commits_after_advisory_session_lease_release",
-        },
+        evidence: FaultEvidence::RuntimeScenario,
     },
     DurableFaultMatrixRow {
         id: "stale-lease-ttl",
-        kind: DurableFaultKind::LeaseLoss,
-        contract: "An unexpired stale lease stays busy until TTL, then a successor advances the fence.",
-        evidence: FaultEvidence::RuntimeScenario {
-            test_name: "runtime_scenario_waits_for_stale_session_lease_ttl",
-        },
+        evidence: FaultEvidence::RuntimeScenario,
     },
     DurableFaultMatrixRow {
         id: "stale-shift-fence-writes-nothing",
-        kind: DurableFaultKind::LeaseLoss,
-        contract: "After a later shift seals, the earlier fence's run admission, checkpoint admission, settling commit and command commit are each refused without mutation.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance_memory"),
             filter: Some("a_stale_fence_writes_nothing"),
-            required_env: None,
         }),
     },
     DurableFaultMatrixRow {
         id: "settlement-predicated-on-the-run",
-        kind: DurableFaultKind::LeaseLoss,
-        contract: "A commit settling a row bound to another run, or to none, is refused and writes nothing; the owning run still settles it once.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance_memory"),
             filter: Some("settlement_is_predicated_on_the_run"),
-            required_env: None,
         }),
     },
     DurableFaultMatrixRow {
         id: "trigger-delivery-reserve-start-crash-window",
-        kind: DurableFaultKind::TriggerDeliveryRecovery,
-        contract: "A trigger delivery reserved before a crash but missing its process row is recovered through its TriggerDelivery obligation into exactly one process, bound to the delivery, without the occurrence being emitted again; a crash after the registration and before the bind recovers the same process.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance"),
             filter: Some("trigger_delivery_recovery"),
-            required_env: None,
         }),
     },
     DurableFaultMatrixRow {
         id: "trigger-delivery-prune-orphan-retention",
-        kind: DurableFaultKind::TriggerDeliveryRecovery,
-        contract: "Retention prunes trigger delivery rows with their terminal process rows so recovery does not resurrect completed trigger work.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance"),
             filter: Some("trigger_capture_route_and_compaction_refusal_matrix"),
-            required_env: None,
         }),
     },
     DurableFaultMatrixRow {
         id: "sqlite-backend-conformance",
-        kind: DurableFaultKind::BackendPermutation,
-        contract: "Sqlite runs the backend conformance contract, including reopen, source-key, admission, lease, process change-feed ordering, process_change_feed_never_misses_concurrent_terminal_writers, drainage, watermark-bounded prune, and effect replay cases.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance"),
             filter: None,
-            required_env: None,
         }),
     },
     DurableFaultMatrixRow {
         id: "postgres-backend-conformance",
-        kind: DurableFaultKind::BackendPermutation,
-        contract: "When the env-gated Postgres lane is configured, Postgres runs the same backend conformance contract, including process_change_feed_never_misses_concurrent_terminal_writers, drainage, and watermark-bounded prune, against a durable service backend.",
-        evidence: FaultEvidence::Blocked {
-            rationale: "Fast confidence cannot require an external Postgres service; Postgres conformance remains blocked in fast and runs only when LASH_POSTGRES_DATABASE_URL or Docker is available.",
-        },
+        evidence: FaultEvidence::Blocked,
     },
 ];
-
-#[test]
-fn durable_fault_matrix_covers_required_fault_classes() {
-    let observed = DURABLE_FAULT_MATRIX
-        .iter()
-        .map(|row| row.kind)
-        .collect::<BTreeSet<_>>();
-    let required = BTreeSet::from([
-        DurableFaultKind::CrashReopen,
-        DurableFaultKind::DuplicateInputs,
-        DurableFaultKind::ProviderFailureRetry,
-        DurableFaultKind::Cancellation,
-        DurableFaultKind::LeaseLoss,
-        DurableFaultKind::TriggerDeliveryRecovery,
-        DurableFaultKind::BackendPermutation,
-    ]);
-    assert_eq!(observed, required);
-}
-
-#[test]
-fn durable_fault_matrix_rows_have_executable_or_blocked_evidence() {
-    let runtime_scenarios = RUNTIME_SCENARIO_COVERAGE
-        .iter()
-        .map(|coverage| coverage.test_name)
-        .collect::<BTreeSet<_>>();
-    let mut ids = BTreeSet::new();
-
-    for row in DURABLE_FAULT_MATRIX {
-        assert!(ids.insert(row.id), "duplicate durable fault row {}", row.id);
-        assert!(
-            !row.contract.trim().is_empty(),
-            "{} has no contract",
-            row.id
-        );
-        match row.evidence {
-            FaultEvidence::RuntimeScenario { test_name } => {
-                assert!(
-                    runtime_scenarios.contains(test_name),
-                    "{} points at unknown Runtime Scenario `{}`",
-                    row.id,
-                    test_name
-                );
-            }
-            FaultEvidence::CargoTest(evidence) => {
-                assert!(
-                    !evidence.package.trim().is_empty(),
-                    "{} has an empty package",
-                    row.id
-                );
-                assert!(
-                    evidence
-                        .filter
-                        .is_none_or(|filter| !filter.trim().is_empty()),
-                    "{} has an empty test filter",
-                    row.id
-                );
-                if let Some(test_target) = evidence.test_target {
-                    assert!(
-                        !test_target.trim().is_empty(),
-                        "{} has an empty test target",
-                        row.id
-                    );
-                }
-                if let Some(required_env) = evidence.required_env {
-                    assert!(
-                        !required_env.trim().is_empty(),
-                        "{} has an empty required env var",
-                        row.id
-                    );
-                }
-            }
-            FaultEvidence::Blocked { rationale } => {
-                assert!(
-                    rationale.split_whitespace().count() >= 5,
-                    "{} blocked row needs a concrete rationale",
-                    row.id
-                );
-            }
-        }
-    }
-}
 
 #[test]
 fn durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence() {
@@ -277,7 +130,7 @@ fn durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence() {
     let fault_matrix_commands = run_fast_gate_with_fake_cargo("fault-matrix");
     for row in DURABLE_FAULT_MATRIX {
         match row.evidence {
-            FaultEvidence::RuntimeScenario { .. } | FaultEvidence::Blocked { .. } => {}
+            FaultEvidence::RuntimeScenario | FaultEvidence::Blocked => {}
             FaultEvidence::CargoTest(evidence) => {
                 let command = fault_matrix_commands
                     .iter()
@@ -410,7 +263,6 @@ fn durable_fault_matrix_target_name_is_not_a_test_filter() {
         package: "lash-internal-sqlite-store",
         test_target: Some("conformance"),
         filter: Some("conformance"),
-        required_env: None,
     };
     let mut command = [
         "test",

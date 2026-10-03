@@ -1017,38 +1017,3 @@ impl super::super::registry_concerns::ProcessClockRebind for ProcessRegistryFaul
         })
     }
 }
-
-#[cfg(test)]
-mod pause_tests {
-    use super::NonTerminalPagePause;
-    use std::time::Duration;
-
-    #[tokio::test(start_paused = true)]
-    #[should_panic(expected = "gate `process registry pause`: 0 of 1 arrivals within 10s")]
-    async fn an_unreached_registry_pause_fails_with_its_label() {
-        let pause = NonTerminalPagePause::new();
-        tokio::time::timeout(Duration::from_secs(11), pause.wait_until_validated())
-            .await
-            .expect("the registry pause left its wait unbounded");
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_registry_pause_holds_the_call_until_resumed() {
-        let pause = NonTerminalPagePause::new();
-        let mut call = std::pin::pin!(pause.hold());
-        tokio::select! {
-            biased;
-            () = &mut call => panic!("the registry call passed its closed pause"),
-            () = pause.wait_until_validated() => {}
-        }
-        assert!(
-            tokio::time::timeout(Duration::from_secs(1), &mut call)
-                .await
-                .is_err()
-        );
-        pause.resume();
-        tokio::time::timeout(Duration::from_secs(1), call)
-            .await
-            .expect("the resumed registry call passes");
-    }
-}

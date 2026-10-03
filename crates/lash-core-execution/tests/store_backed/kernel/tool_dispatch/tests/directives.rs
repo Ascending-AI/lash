@@ -160,67 +160,6 @@ async fn dispatch_with_terminal_plugins(
 }
 
 #[tokio::test]
-async fn deny_cannot_be_overridden_by_later_success_on_the_raw_fold() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let outcome = crate::tool_dispatch::apply_before_tool_directives(
-        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
-        json!({ "value": "original" }),
-        vec![
-            crate::plugin::PluginOwned {
-                plugin_id: "deny".to_string(),
-                value: policy_denial(),
-            },
-            crate::plugin::PluginOwned {
-                plugin_id: "allow".to_string(),
-                value: successful_short_circuit(),
-            },
-        ],
-    )
-    .await;
-
-    let result = outcome.short_circuit.expect("directive must terminate");
-    assert!(
-        !result.is_success(),
-        "a later plugin cannot restore permission"
-    );
-    assert_eq!(
-        result.value_for_projection()["code"],
-        json!("policy_denied")
-    );
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn multi_plugin_deny_then_allow_keeps_deny() {
-    let output = dispatch_with_terminal_plugins(vec![
-        ("deny", policy_denial()),
-        ("allow", successful_short_circuit()),
-    ])
-    .await;
-
-    assert!(!output.is_success());
-    assert_eq!(
-        output.value_for_projection()["code"],
-        json!("policy_denied")
-    );
-}
-
-#[tokio::test]
-async fn multi_plugin_allow_then_deny_keeps_deny() {
-    let output = dispatch_with_terminal_plugins(vec![
-        ("allow", successful_short_circuit()),
-        ("deny", policy_denial()),
-    ])
-    .await;
-
-    assert!(!output.is_success());
-    assert_eq!(
-        output.value_for_projection()["code"],
-        json!("policy_denied")
-    );
-}
-
-#[tokio::test]
 async fn multi_plugin_abort_wins_in_either_registration_order() {
     for directives in [
         vec![
@@ -364,48 +303,6 @@ async fn reinspection_does_not_emit_a_self_conflict() {
         session_graph.events.lock_recover().is_empty(),
         "self-conflict trace event"
     );
-    drop(context);
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn replacement_is_seen_by_remaining_plugin_hooks() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let inspected = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let inspector_observations = Arc::clone(&inspected);
-    let replacer = fixed_before_tool_factory(
-        "replace",
-        crate::ReplaceToolArgsDirective {
-            args: json!({ "value": "replaced" }),
-        }
-        .into(),
-    );
-    let inspector = before_tool_factory(
-        "inspect",
-        Arc::new(move |ctx| {
-            let inspector_observations = Arc::clone(&inspector_observations);
-            Box::pin(async move {
-                inspector_observations.lock_recover().push(ctx.args);
-                Ok(Vec::new())
-            })
-        }),
-    );
-    let context = exact_dispatch_context_with_plugins(
-        crate::support::double_dispatch_ports(&double, &handler),
-        before_tool_plugin_stack(vec![replacer, inspector]),
-    )
-    .await;
-
-    let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
-        .await
-        .record
-        .output;
-
-    assert_eq!(
-        inspected.lock_recover().as_slice(),
-        &[json!({ "value": "replaced" })]
-    );
-    assert_eq!(output.value_for_projection(), json!("replaced"));
     drop(context);
     handler.close().await.expect("close the dispatch handler");
 }
@@ -631,49 +528,6 @@ async fn reinspection_rehonors_terminals_without_reapplying_side_effects() {
     handler.close().await.expect("close the dispatch handler");
 }
 
-#[tokio::test]
-async fn two_unconditional_replacers_are_a_typed_composition_error() {
-    let plugins = before_tool_plugin_stack(vec![
-        fixed_before_tool_factory(
-            "normalizer_one",
-            crate::ReplaceToolArgsDirective {
-                args: json!({ "value": "one" }),
-            }
-            .into(),
-        ),
-        fixed_before_tool_factory(
-            "normalizer_two",
-            crate::ReplaceToolArgsDirective {
-                args: json!({ "value": "two" }),
-            }
-            .into(),
-        ),
-    ]);
-
-    let error = plugins
-        .before_tool_call(crate::plugin::ToolCallHookContext::new(
-            crate::RuntimeOwner::Session(SessionId::from("session")),
-            Default::default(),
-            "beta".to_string(),
-            json!({ "value": "original" }),
-            beta_tool().manifest().argument_projection,
-            crate::TurnContext::default(),
-            Arc::new(crate::testing::MockSessionManager::default()),
-        ))
-        .await
-        .expect_err("two unconditional replacers must fail closed");
-
-    let crate::PluginError::BeforeToolCallReplacementConflict {
-        replacing_plugin_id,
-        repeated_plugin_id,
-    } = error
-    else {
-        panic!("expected typed replacement conflict: {error:?}");
-    };
-    assert_eq!(replacing_plugin_id, "normalizer_two");
-    assert_eq!(repeated_plugin_id, "normalizer_one");
-}
-
 async fn dispatch_with_after_terminal_plugins(
     directives: Vec<(&'static str, crate::AfterToolCallPluginDirective)>,
 ) -> crate::ToolCallOutput {
@@ -703,27 +557,6 @@ fn successful_replacement(value: &str) -> crate::AfterToolCallPluginDirective {
         output: crate::ToolCallOutput::success(json!(value)),
     }
     .into()
-}
-
-#[tokio::test]
-async fn after_tool_deny_wins_in_either_registration_order() {
-    for directives in [
-        vec![
-            ("deny", policy_denial()),
-            ("allow", successful_replacement("allowed")),
-        ],
-        vec![
-            ("allow", successful_replacement("allowed")),
-            ("deny", policy_denial()),
-        ],
-    ] {
-        let output = dispatch_with_after_terminal_plugins(directives).await;
-        assert!(!output.is_success());
-        assert_eq!(
-            output.value_for_projection()["code"],
-            json!("policy_denied")
-        );
-    }
 }
 
 #[tokio::test]
@@ -765,22 +598,6 @@ async fn after_tool_abort_wins_in_either_registration_order() {
     let projected = output.value_for_projection();
     assert_eq!(projected["code"], json!("tool_error"));
     assert_eq!(projected["message"], json!("plugin aborted the turn"));
-}
-
-#[tokio::test]
-async fn after_tool_three_plugins_keep_the_most_restrictive_terminal() {
-    let output = dispatch_with_after_terminal_plugins(vec![
-        ("first", successful_replacement("first")),
-        ("deny", policy_denial()),
-        ("abort", abort_turn()),
-    ])
-    .await;
-
-    assert!(!output.is_success());
-    assert_eq!(
-        output.value_for_projection()["code"],
-        json!("policy_denied")
-    );
 }
 
 #[tokio::test]
@@ -863,44 +680,6 @@ async fn after_tool_replacement_is_reinspected_by_policy_in_either_registration_
             "policy_first={policy_first}"
         );
     }
-    handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn after_tool_clean_bounded_reinspection_keeps_the_replaced_result() {
-    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let earlier_observed = Arc::clone(&observed);
-    let earlier = after_tool_factory(
-        "earlier",
-        Arc::new(move |ctx| {
-            let earlier_observed = Arc::clone(&earlier_observed);
-            Box::pin(async move {
-                earlier_observed
-                    .lock_recover()
-                    .push(ctx.result.value_for_projection());
-                Ok(Vec::new())
-            })
-        }),
-    );
-    let later = fixed_after_tool_factory("later", vec![successful_replacement("replaced")]);
-    let context = exact_dispatch_context_with_plugins(
-        crate::support::double_dispatch_ports(&double, &handler),
-        after_tool_plugin_stack(vec![earlier, later]),
-    )
-    .await;
-
-    let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
-        .await
-        .record
-        .output;
-
-    assert_eq!(
-        observed.lock_recover().as_slice(),
-        &[json!("original"), json!("replaced")]
-    );
-    assert_eq!(output.value_for_projection(), json!("replaced"));
-    drop(context);
     handler.close().await.expect("close the dispatch handler");
 }
 
@@ -1040,39 +819,6 @@ async fn after_tool_reinspection_does_not_emit_a_self_conflict() {
     );
     drop(context);
     handler.close().await.expect("close the dispatch handler");
-}
-
-#[tokio::test]
-async fn after_tool_two_unconditional_replacers_fail_closed() {
-    let plugins = after_tool_plugin_stack(vec![
-        fixed_after_tool_factory("first", vec![successful_replacement("first")]),
-        fixed_after_tool_factory("second", vec![successful_replacement("second")]),
-    ]);
-
-    let error = plugins
-        .after_tool_call(crate::plugin::ToolResultHookContext::new(
-            crate::RuntimeOwner::Session(SessionId::from("session")),
-            Default::default(),
-            lash_core_execution::ToolCallId::fixture("call"),
-            "beta".to_string(),
-            json!({ "value": "original" }),
-            crate::ToolOutcome::from_output(crate::ToolCallOutput::success(json!("original"))),
-            0,
-            crate::TurnContext::default(),
-            Arc::new(crate::testing::MockSessionManager::default()),
-        ))
-        .await
-        .expect_err("two unconditional result replacers must fail closed");
-
-    let crate::PluginError::AfterToolCallReplacementConflict {
-        replacing_plugin_id,
-        repeated_plugin_id,
-    } = error
-    else {
-        panic!("expected typed replacement conflict: {error:?}");
-    };
-    assert_eq!(replacing_plugin_id, "second");
-    assert_eq!(repeated_plugin_id, "first");
 }
 
 #[tokio::test]

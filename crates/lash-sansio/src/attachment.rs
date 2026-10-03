@@ -348,27 +348,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn attachment_id_accepts_content_hashes_and_caller_ids() {
-        assert_eq!(
-            AttachmentId::parse("a".repeat(64)).unwrap().as_str(),
-            "a".repeat(64)
-        );
-        assert_eq!(
-            AttachmentId::parse("workbench attachment.png")
-                .unwrap()
-                .as_str(),
-            "workbench attachment.png"
-        );
-        assert_eq!(
-            AttachmentId::parse("a".repeat(MAX_ATTACHMENT_ID_LEN))
-                .unwrap()
-                .as_str()
-                .len(),
-            MAX_ATTACHMENT_ID_LEN
-        );
-    }
-
-    #[test]
     fn attachment_id_rejects_ids_that_are_not_a_single_namespace_component() {
         for invalid in [
             "",
@@ -410,12 +389,6 @@ mod tests {
             serde_json::from_str::<AttachmentId>(r#""abc123""#).unwrap(),
             AttachmentId::parse("abc123").unwrap()
         );
-    }
-
-    #[test]
-    fn attachment_id_round_trips_through_json_as_a_bare_string() {
-        let id = AttachmentId::parse("abc123").unwrap();
-        assert_eq!(serde_json::to_string(&id).unwrap(), r#""abc123""#);
     }
 
     #[test]

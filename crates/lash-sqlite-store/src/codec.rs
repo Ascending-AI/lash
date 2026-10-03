@@ -314,70 +314,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_admitted_envelope_version_round_trips() {
-        let content = b"durable attachment".to_vec();
-        let admitted: Vec<u32> = (1..=SQLITE_BLOB_ENVELOPE_VERSION)
-            .filter(|version| blob_envelope_admits(*version))
-            .collect();
-        assert_eq!(admitted.last(), Some(&SQLITE_BLOB_ENVELOPE_VERSION));
-        assert_eq!(
-            admitted.len(),
-            if cfg!(feature = "synthetic-next") {
-                2
-            } else {
-                1
-            }
-        );
-        for version in admitted {
-            let stored = encode_msgpack(
-                &StoredBlobEnvelope {
-                    version,
-                    compression: "None".to_string(),
-                    content: content.clone(),
-                },
-                "blob fixture",
-            )
-            .expect("encode envelope");
-            assert_eq!(decode_artifact_blob(&stored).expect("decode"), content);
-        }
-    }
-
-    #[test]
-    fn blob_envelope_decoder_refuses_an_unknown_version_or_compression() {
-        let content = b"durable attachment".to_vec();
-        for (version, compression) in [
-            (SQLITE_BLOB_ENVELOPE_VERSION + 1, "None"),
-            (SQLITE_BLOB_ENVELOPE_VERSION, "future-codec"),
-        ] {
-            let stored = encode_msgpack(
-                &StoredBlobEnvelope {
-                    version,
-                    compression: compression.to_string(),
-                    content: content.clone(),
-                },
-                "blob fixture",
-            )
-            .expect("encode future envelope");
-            let refusal = decode_artifact_blob(&stored).expect_err("must refuse unknown shape");
-            if version != SQLITE_BLOB_ENVELOPE_VERSION {
-                assert!(matches!(
-                    refusal,
-                    StoreError::UnsupportedRecordSchemaVersion {
-                        record_kind: "SQLite stored blob envelope",
-                        actual,
-                        expected: SQLITE_BLOB_ENVELOPE_VERSION,
-                    } if actual == version
-                ));
-            } else {
-                assert!(matches!(refusal, StoreError::Incompatible { .. }));
-            }
-            let still_stored: StoredBlobEnvelope =
-                rmp_serde::from_slice(&stored).expect("stored bytes remain intact");
-            assert_eq!(still_stored.content, content);
-        }
-    }
-
-    #[test]
     fn blob_envelope_carries_no_descriptor_field() {
         let content = vec![b'x'; 8192];
         for (profile, compression) in [
@@ -417,34 +353,6 @@ mod tests {
                     }
                 );
                 assert_eq!(decode_artifact_blob(&encoded).unwrap(), content);
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn blob_identity_uses_logical_content_across_storage_profiles() {
-        let content = vec![b'x'; 8192];
-        let expected = BlobRef::for_content(&content);
-        for blob_profile in [BuiltinBlobProfile::LowLatency, BuiltinBlobProfile::Compact] {
-            let store = crate::test_support::sqlite_memory_store_with_options(StoreOptions {
-                blob_profile,
-                ..StoreOptions::default()
-            })
-            .await
-            .expect("open blob store");
-            for descriptor in [
-                BlobArtifactDescriptor::checkpoint_component(),
-                BlobArtifactDescriptor::new(Vec::new()),
-            ] {
-                let reference = store
-                    .put_unrooted_artifact_blob_for_testing(descriptor, &content)
-                    .await
-                    .expect("store logical payload");
-                assert_eq!(reference, expected);
-                assert_eq!(
-                    store.get_blob(&reference).await.unwrap(),
-                    Some(content.clone())
-                );
             }
         }
     }

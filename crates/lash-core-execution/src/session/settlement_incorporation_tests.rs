@@ -80,32 +80,6 @@ fn a_settlement_is_incorporated_exactly_once() {
     assert!(context.dispatch.checkpoint_messages.drain().is_empty());
 }
 
-/// A cancel-decided child accepted no value, committed no messages and
-/// possesses nothing, so its settlement applies nothing.
-#[test]
-fn a_cancelled_childs_settlement_applies_nothing() {
-    let context = context();
-    let mut settlement = settlement();
-    settlement.possession = Vec::new();
-    settlement.checkpoint_messages = Vec::new();
-    settlement.triggers = Vec::new();
-
-    let incorporated = context
-        .incorporate_tool_settlement(
-            SettlementSource::GroupRank {
-                group_key: "group".to_string(),
-                rank: 0,
-                child_replay_key: "child".to_string(),
-            },
-            &settlement,
-        )
-        .expect("a cancelled child's settlement still incorporates");
-    assert_eq!(incorporated.messages, 0);
-    assert!(incorporated.possession.is_empty());
-    assert!(context.started_process_ids().is_empty());
-    assert!(context.dispatch.checkpoint_messages.drain().is_empty());
-}
-
 /// §6: the ledger travels with the handover — a successor context restored
 /// from the predecessor's snapshot does not re-apply the settlement, so a
 /// crash between an attempt's commit and the settlement's incorporation

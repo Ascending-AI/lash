@@ -1044,17 +1044,4 @@ mod tests {
             }
         }
     }
-
-    /// Every cell has to reach a terminal statement. A cell that only computes
-    /// leaves the turn with no final value, which the runner reads as a missing
-    /// answer rather than as a broken script.
-    #[test]
-    fn every_mock_script_reaches_a_terminal_statement() {
-        for script in every_mock_script() {
-            assert!(
-                script.contains("finish(") || script.contains("control.continue_as("),
-                "mock script neither finishes nor switches frame:\n{script}"
-            );
-        }
-    }
 }

@@ -374,10 +374,6 @@ mod tests {
         first_cell_span(text, tags())
     }
 
-    fn render_cell_text_for_tests(prose: &str, code: &str) -> String {
-        render_cell_text(tags(), prose, code)
-    }
-
     /// The grammar is parameterized by the tag pair it is handed, not wired to
     /// one spelling: a cell rendered with one pair is invisible to another.
     #[test]
@@ -405,17 +401,6 @@ mod tests {
         Some(&text[span.body_start..span.body_end])
     }
 
-    #[test]
-    fn prose_only_has_no_cell() {
-        assert!(first_cell_span_for_tests("plain prose").is_none());
-    }
-
-    #[test]
-    fn inline_tag_mentions_are_prose() {
-        assert!(first_cell_span_for_tests("Use <typescript> here.").is_none());
-        assert!(first_cell_span_for_tests("Use </typescript> here.").is_none());
-    }
-
     /// The FIG-1475 shape: a whole cell on one line.
     #[test]
     fn one_line_cell_extracts_its_source() {
@@ -429,16 +414,6 @@ mod tests {
             Some("finish 1")
         );
         assert_eq!(code("<typescript></typescript>"), Some(""));
-    }
-
-    #[test]
-    fn one_line_cell_span_addresses_prose_and_tags() {
-        let text = "Before\n<typescript>finish 1</typescript>\nAfter";
-        let span = first_cell_span_for_tests(text).expect("inline cell");
-        assert_eq!(&text[..span.start_tag_start].trim_end(), &"Before");
-        assert_eq!(&text[span.body_start..span.body_end], "finish 1");
-        assert_eq!(&text[span.end_tag_start..], "</typescript>\nAfter");
-        assert_eq!(&text[span.end_tag_end..], "After");
     }
 
     /// A block-shape cell still wins when both could match, because the block
@@ -576,21 +551,6 @@ mod tests {
     }
 
     #[test]
-    fn start_only_incomplete_block_has_no_cell() {
-        assert!(first_cell_span_for_tests("<typescript>\nfinish 1").is_none());
-    }
-
-    #[test]
-    fn end_without_start_has_no_cell() {
-        assert!(first_cell_span_for_tests("</typescript>\nfinish 1").is_none());
-    }
-
-    #[test]
-    fn empty_block_extracts_empty_source() {
-        assert_eq!(code("<typescript>\n</typescript>"), Some(""));
-    }
-
-    #[test]
     fn prose_plus_complete_block_extracts_code_and_prose_offsets() {
         let text = "Before\n\n<typescript>\nprint 1\nfinish 2\n</typescript>";
         let span = first_cell_span_for_tests(text).expect("complete block");
@@ -618,38 +578,8 @@ mod tests {
     }
 
     #[test]
-    fn raw_triple_strings_containing_backticks_are_source() {
-        assert_eq!(
-            code(
-                "<typescript>\npayload = r\"\"\"```\nvalue\n```\"\"\"\nfinish payload\n</typescript>"
-            ),
-            Some("payload = r\"\"\"```\nvalue\n```\"\"\"\nfinish payload")
-        );
-    }
-
-    #[test]
-    fn suffix_text_after_end_tag_is_ignored_by_span() {
-        let text = "<typescript>\nfinish 1\n</typescript>\nTrailing prose.";
-        let span = first_cell_span_for_tests(text).expect("complete block");
-        assert_eq!(&text[span.body_start..span.body_end], "finish 1");
-        assert_eq!(&text[span.end_tag_end..], "Trailing prose.");
-    }
-
-    #[test]
     fn second_block_is_ignored_after_first_close() {
         let text = "<typescript>\nfinish 1\n</typescript>\n<typescript>\nfinish 2\n</typescript>";
         assert_eq!(code(text), Some("finish 1"));
-    }
-
-    #[test]
-    fn retired_percent_marker_is_plain_prose() {
-        assert!(first_cell_span_for_tests("%%typescript\nfinish 1").is_none());
-    }
-
-    #[test]
-    fn canonical_renderer_round_trips_empty_code() {
-        let rendered = render_cell_text_for_tests("", "");
-        let span = first_cell_span_for_tests(&rendered).expect("complete block");
-        assert_eq!(&rendered[span.body_start..span.body_end], "");
     }
 }

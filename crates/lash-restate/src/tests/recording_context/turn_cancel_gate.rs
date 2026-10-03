@@ -112,13 +112,6 @@ impl TestTurnCancelGate {
         );
     }
 
-    pub(crate) fn is_revoked(&self, session_id: &SessionId) -> bool {
-        self.state
-            .lock_recover()
-            .revoked_sessions
-            .contains(session_id)
-    }
-
     pub(crate) fn registrations_created(&self) -> usize {
         self.state.lock_recover().next_registration_id
     }

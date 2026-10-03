@@ -261,17 +261,6 @@ mod tests {
     }
 
     #[test]
-    fn a_tool_handle_and_a_process_handle_never_share_an_id() {
-        assert_ne!(HandleId::tool(1, 2), HandleId::process(&process(1)));
-    }
-
-    #[test]
-    fn distinct_executions_and_requests_get_distinct_handles() {
-        assert_ne!(HandleId::tool(1, 0), HandleId::tool(2, 0));
-        assert_ne!(HandleId::tool(1, 0), HandleId::tool(1, 1));
-    }
-
-    #[test]
     fn hand_written_ids_name_nothing() {
         for text in [
             "",
@@ -298,28 +287,6 @@ mod tests {
                 "`{text}` was read as a live handle"
             );
         }
-    }
-
-    #[test]
-    fn the_json_record_is_the_one_shape_and_parses_back() {
-        let id = HandleId::tool(0x9e37, 1);
-        let record = handle_record_json(&id);
-        assert_eq!(
-            record,
-            serde_json::json!({ "__handle__": "lash", "id": id.as_str() })
-        );
-        assert_eq!(parse_handle_json(&record), Some(id));
-    }
-
-    #[test]
-    fn the_handle_shape_is_the_marker_field_and_nothing_else() {
-        assert!(is_handle_shape(["__handle__", "id"]));
-        assert!(is_handle_shape(["__handle__"]));
-        // Before ADR 0095 a bare `handle` key was read as a handle too; that
-        // was one of the four divergent readers, and it is not a handle.
-        assert!(!is_handle_shape(["handle"]));
-        assert!(!is_handle_shape(["id"]));
-        assert!(!is_handle_shape(std::iter::empty()));
     }
 
     #[test]

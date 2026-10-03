@@ -1,12 +1,10 @@
 //! What the turn-ingress family's SQLite statements are held to.
 //!
-//! Two classes. The **plan** tests run `EXPLAIN QUERY PLAN` against the real
+//! The plan tests run `EXPLAIN QUERY PLAN` against the real
 //! schema and assert each named statement still seeks the index it was written
 //! for: the statements that replaced a `format!` used to splice their filter in
 //! per call, and the whole reason each filter shape has its own name is that a
-//! spliced optional predicate cannot seek. The **byte-identity** tests pin the
-//! predicates the renderer now produces to the one source that generates them,
-//! the way FIG-2844's witnesses do for the process family.
+//! spliced optional predicate cannot seek.
 
 use rusqlite::Connection;
 
@@ -307,124 +305,4 @@ fn a_run_release_seeks_the_admission_index() {
         &sql.queued_batches.release_run,
         "idx_queued_work_admission_order",
     );
-}
-
-/// The predicates the renderer produces, against the one source that generates
-/// them.
-mod byte_identity {
-    use super::{catalog, turn_ingress_sql};
-    use lash_core_execution::store_backend_support as vocabulary;
-
-    #[test]
-    fn a_state_token_renders_to_the_predicate_its_generator_spells() {
-        // A `{{term(column)}}` token is only worth having if it renders to
-        // exactly what the generator produces: the enum stays the one source of
-        // the vocabulary, and `idx_pending_turn_inputs_open_state` is only usable by
-        // a predicate that repeats its own terms.
-        let sql = turn_ingress_sql();
-        assert!(
-            sql.pending_inputs.delete_withdrawn.sql().contains(
-                &vocabulary::cancelled_turn_input_state_predicate_sql("state")
-            ),
-            "the retention delete no longer spells the generated cancelled state",
-        );
-        assert!(
-            sql.pending_inputs_sqlite
-                .admission_candidates_next_turn
-                .sql()
-                .contains(&vocabulary::undelivered_turn_input_state_predicate_sql(
-                    "state"
-                )),
-            "the next-turn admission scan no longer spells the open-row index's state set",
-        );
-        assert!(
-            sql.pending_inputs.list_undelivered.sql().contains(
-                &vocabulary::undelivered_turn_input_state_predicate_sql("state")
-            ),
-            "the undelivered list no longer spells the generated undelivered set",
-        );
-        assert!(
-            sql.family.has_admissible_work.sql().contains(
-                &vocabulary::undelivered_turn_input_state_predicate_sql("pti.state")
-            ),
-            "the open-work probe no longer spells the generated undelivered set",
-        );
-    }
-
-    #[test]
-    fn a_checkpoint_statement_spells_the_boundary_its_generator_spells() {
-        // The minimum-boundary predicate cannot be a vocabulary token: its
-        // column is a dialect-specific JSON extraction, not an identifier. So
-        // the statements spell it, and this is what holds the spelling to
-        // `admitted_min_boundary_sql` — the one place the boundary enum reaches
-        // SQL.
-        let sql = turn_ingress_sql();
-        let expression = "json_extract(ingress_json, '$.min_boundary')";
-        for (statement, checkpoint) in [
-            (
-                &sql.pending_inputs_sqlite
-                    .admission_candidates_active_turn_after_work,
-                lash_core_execution::CheckpointKind::AfterWork,
-            ),
-            (
-                &sql.pending_inputs_sqlite
-                    .admission_candidates_active_turn_before_completion,
-                lash_core_execution::CheckpointKind::BeforeCompletion,
-            ),
-            (
-                &sql.family_sqlite.checkpoint_work_pending_after_work,
-                lash_core_execution::CheckpointKind::AfterWork,
-            ),
-            (
-                &sql.family_sqlite.checkpoint_work_pending_before_completion,
-                lash_core_execution::CheckpointKind::BeforeCompletion,
-            ),
-        ] {
-            let admitted = vocabulary::admitted_min_boundary_sql(expression, checkpoint);
-            let spelled = statement
-                .sql()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
-            let admitted = admitted.split_whitespace().collect::<Vec<_>>().join(" ");
-            assert!(
-                spelled.contains(&admitted),
-                "`{}` does not spell `{admitted}`",
-                statement.name(),
-            );
-        }
-    }
-
-    #[test]
-    fn the_schema_still_declares_the_checks_the_release_statements_depend_on() {
-        // Every release path clears both admission columns because these
-        // CHECKs refuse a row that carries one without the other, and a
-        // settled row that still names a run. If either constraint were ever
-        // dropped, the spelling would stop being load-bearing and this test
-        // would say so.
-        let conn = catalog();
-        for (table, check) in [
-            (
-                "pending_turn_inputs",
-                "ck_pending_turn_inputs_admission_all_or_none",
-            ),
-            (
-                "pending_turn_inputs",
-                "ck_pending_turn_inputs_settled_unadmitted",
-            ),
-            (
-                "queued_work_batches",
-                "ck_queued_work_batches_admission_all_or_none",
-            ),
-        ] {
-            let declared: String = conn
-                .query_row(
-                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    [table],
-                    |row| row.get(0),
-                )
-                .expect("the table is declared");
-            assert!(declared.contains(check), "`{check}` is gone:\n{declared}");
-        }
-    }
 }

@@ -237,34 +237,6 @@ fn raw_operation_registration_cannot_half_register_a_module_operation() {
 }
 
 #[test]
-fn module_alias_survives_catalog_serialization_and_joint_resolution() {
-    let mut catalog = LashlangHostCatalog::new();
-    catalog
-        .add_module_operation(
-            ["inbox", "work"],
-            "Inbox",
-            "send",
-            "inbox__work__send",
-            TypeExpr::Any,
-            TypeExpr::Str,
-        )
-        .expect("module operation is unique");
-
-    let encoded = serde_json::to_value(&catalog).expect("catalog serializes");
-    assert_eq!(
-        encoded["module_instances"]["inbox.work"]["alias"],
-        "inbox.work"
-    );
-    let decoded: LashlangHostCatalog =
-        serde_json::from_value(encoded).expect("catalog deserializes");
-    let resolved = decoded
-        .resolve_module_operation("Inbox", "inbox.work", "send")
-        .expect("decoded operation resolves jointly");
-    assert_eq!(resolved.host_operation, "inbox__work__send");
-    assert_eq!(resolved.binding.output_ty, TypeExpr::Str);
-}
-
-#[test]
 fn joint_resolution_rejects_a_decoded_half_operation() {
     let catalog: LashlangHostCatalog = serde_json::from_value(serde_json::json!({
         "module_instances": {

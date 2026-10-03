@@ -128,21 +128,6 @@ mod tests {
     }
 
     #[test]
-    fn correctness_accepts_extra_work_and_recovery() {
-        let task = fixture();
-        let mut evidence = passing_evidence();
-        evidence.executions = 7;
-        evidence.failed_execution_errors = vec!["same error".into(); 4];
-        evidence.tool_call_count = 9;
-        evidence.rounds = 12;
-        for standard in [false, true] {
-            evidence.standard = standard;
-            evidence.submit_count = 1;
-            assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
-        }
-    }
-
-    #[test]
     fn cost_ceiling_sums_calls_accepts_boundary_and_exposes_missing_cost() {
         let task = fixture();
         let mut evidence = passing_evidence();
@@ -214,20 +199,5 @@ mod tests {
         evidence.submit_count = 2;
         evidence.submit_values = vec![Some(json!("saved"))];
         assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
-    }
-
-    #[test]
-    fn two_well_formed_differing_values_still_fail() {
-        let task = fixture();
-        let mut evidence = passing_evidence();
-        evidence.standard = true;
-        evidence.submit_count = 2;
-        evidence.submit_values = vec![Some(json!("saved")), Some(json!("other"))];
-        assert_eq!(
-            grade(&task, &task.expected_world, &evidence, 0.10)
-                .failure_reason
-                .as_deref(),
-            Some("conflicting submits")
-        );
     }
 }

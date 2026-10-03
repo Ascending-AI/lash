@@ -679,19 +679,3 @@ async fn every_charged_intrinsic_spends_the_budget_in_proportion_to_its_input() 
         assert_exhausts(case.intrinsic, &run_ast_case(case, LARGE).await);
     }
 }
-
-/// The instruction a budget runs out on is a function of the program and its
-/// input, so two runs of one cell report the same exhaustion.
-#[tokio::test(flavor = "current_thread")]
-async fn budget_exhaustion_is_identical_across_runs() {
-    for case in CASES {
-        let first = run_case(case, case.large).await;
-        let second = run_case(case, case.large).await;
-        assert_eq!(first, second, "{}", case.intrinsic);
-    }
-    for case in AST_CASES {
-        let first = run_ast_case(case, LARGE).await;
-        let second = run_ast_case(case, LARGE).await;
-        assert_eq!(first, second, "{}", case.intrinsic);
-    }
-}

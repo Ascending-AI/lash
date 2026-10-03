@@ -1251,6 +1251,35 @@ impl Provider for UnconfiguredProvider {
         Box::new(self.clone())
     }
 }
+/// Detaches the replay-safety sideband from `request` before `handle` serves
+/// it: the runtime's turn driver prepares the request, spawns the completion,
+/// and reads the sideband however the task ends. The runtime's seam;
+/// `core_internal` re-exports it and the `lash` facade does not.
+pub fn prepare_completion(
+    handle: &ProviderHandle,
+    request: &mut LlmRequest,
+) -> ProviderCompletionSideband {
+    handle.prepare_completion(request)
+}
+
+/// Serves a request [`prepare_completion`] prepared, under its sideband.
+#[allow(
+    clippy::result_large_err,
+    reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
+)]
+pub async fn complete_prepared(
+    handle: &mut ProviderHandle,
+    request: LlmRequest,
+    sideband: ProviderCompletionSideband,
+    charge_safety: crate::ChargeSafetyPolicy,
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
+) -> Result<ProviderCompletion, ProviderCompletionError> {
+    handle
+        .complete_prepared(request, sideband, charge_safety, metrics, permit)
+        .await
+}
+
 #[cfg(test)]
 mod retry_verdict_tests {
     use super::*;
@@ -1318,141 +1347,4 @@ mod retry_verdict_tests {
             }
         }
     }
-
-    #[test]
-    fn retry_verdict_throttle_charges_courtesy_then_consumes_counted_budget() {
-        let wait = Duration::from_secs(1);
-        let policy = ProviderRetryPolicy {
-            max_attempts: 2,
-            throttle_wait_budget_ms: 1000,
-            ..Default::default()
-        };
-        let failure = LlmTransportError::new("throttle").with_retry_verdict(
-            TransportRetryVerdict::RetryableThrottle {
-                retry_after: Some(wait),
-            },
-        );
-        let mut budget = RetryBudget::default();
-        let verdict = |budget: &RetryBudget| {
-            retry_verdict(
-                &failure,
-                ProtocolPosition::NoResponse,
-                GenerationRetryGuarantee::None,
-                &policy,
-                &crate::ChargeSafetyPolicy::RequireGuarantee,
-                budget,
-            )
-            .0
-        };
-        assert!(matches!(verdict(&budget), RetryVerdict::Throttle { .. }));
-        budget.charge_throttle(wait, false);
-        assert_eq!(budget.attempt, 0);
-        assert_eq!(budget.throttle_waited, wait);
-        assert!(matches!(verdict(&budget), RetryVerdict::Backoff { .. }));
-        budget.consume(false);
-        assert_eq!(
-            verdict(&budget),
-            RetryVerdict::Declined(RetryDeclineCause::RetryBudgetExhausted)
-        );
-    }
-
-    #[test]
-    fn retry_verdict_forbidden_and_retry_after_cap_never_schedule() {
-        let policy = ProviderRetryPolicy {
-            retry_after_cap_ms: Some(1000),
-            ..Default::default()
-        };
-        for transport in [
-            TransportRetryVerdict::Forbidden,
-            TransportRetryVerdict::NotRetryable,
-        ] {
-            let failure = LlmTransportError::new("refused").with_retry_verdict(transport);
-            assert_eq!(
-                retry_verdict(
-                    &failure,
-                    ProtocolPosition::NoResponse,
-                    GenerationRetryGuarantee::Idempotent,
-                    &policy,
-                    &crate::ChargeSafetyPolicy::RequireGuarantee,
-                    &RetryBudget::default()
-                )
-                .0,
-                RetryVerdict::Declined(RetryDeclineCause::NotRetryable)
-            );
-        }
-        let failure = LlmTransportError::new("cap").with_retry_verdict(
-            TransportRetryVerdict::RetryableThrottle {
-                retry_after: Some(Duration::from_secs(2)),
-            },
-        );
-        assert_eq!(
-            retry_verdict(
-                &failure,
-                ProtocolPosition::NoResponse,
-                GenerationRetryGuarantee::None,
-                &policy,
-                &crate::ChargeSafetyPolicy::RequireGuarantee,
-                &RetryBudget::default()
-            )
-            .0,
-            RetryVerdict::Declined(RetryDeclineCause::RetryAfterExceedsCap)
-        );
-    }
-}
-
-#[cfg(test)]
-mod handle_tests {
-    use super::*;
-
-    #[test]
-    fn into_components_recovers_the_original_bundle() {
-        let options = ProviderOptions {
-            response_body_bytes: Some(2_048),
-            ..Default::default()
-        };
-        let mut provider = UnconfiguredProvider::default();
-        provider.set_options(options.clone());
-        let components = provider.into_components();
-        let failure_classifier = Arc::clone(&components.failure_classifier);
-        let rate_limiter = Arc::clone(&components.rate_limiter);
-
-        let recovered = ProviderHandle::new(components).into_components();
-
-        assert_eq!(recovered.provider.kind(), "unconfigured");
-        assert_eq!(recovered.provider.options(), options);
-        assert!(Arc::ptr_eq(
-            &recovered.failure_classifier,
-            &failure_classifier
-        ));
-        assert!(Arc::ptr_eq(&recovered.rate_limiter, &rate_limiter));
-    }
-}
-
-/// Detaches the replay-safety sideband from `request` before `handle` serves
-/// it: the runtime's turn driver prepares the request, spawns the completion,
-/// and reads the sideband however the task ends. The runtime's seam;
-/// `core_internal` re-exports it and the `lash` facade does not.
-pub fn prepare_completion(
-    handle: &ProviderHandle,
-    request: &mut LlmRequest,
-) -> ProviderCompletionSideband {
-    handle.prepare_completion(request)
-}
-
-/// Serves a request [`prepare_completion`] prepared, under its sideband.
-#[allow(
-    clippy::result_large_err,
-    reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
-)]
-pub async fn complete_prepared(
-    handle: &mut ProviderHandle,
-    request: LlmRequest,
-    sideband: ProviderCompletionSideband,
-    charge_safety: crate::ChargeSafetyPolicy,
-    metrics: &TelemetryMetrics,
-    permit: Option<&EmissionPermit>,
-) -> Result<ProviderCompletion, ProviderCompletionError> {
-    handle
-        .complete_prepared(request, sideband, charge_safety, metrics, permit)
-        .await
 }

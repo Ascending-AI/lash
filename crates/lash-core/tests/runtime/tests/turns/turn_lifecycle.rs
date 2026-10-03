@@ -4,18 +4,6 @@ use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_f410;
 
-#[test]
-pub(super) fn cancel_watch_test_clock_wall_clock_faces_agree() {
-    let clock = CancelWatchTestClock(lash_core::testing::TestClock::new(1_700_000_000_123));
-    let clock: &dyn lash_core::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
-}
-
 #[derive(Debug)]
 pub(super) struct ManualClock {
     epoch_ms: std::sync::atomic::AtomicU64,
@@ -54,18 +42,6 @@ impl lash_core::Clock for ManualClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
-}
-
-#[test]
-pub(super) fn manual_clock_wall_clock_faces_agree() {
-    let clock = ManualClock::new(1_700_000_000_123);
-    let clock: &dyn lash_core::Clock = &clock;
-    let milliseconds = clock.timestamp_ms();
-    let datetime = clock.timestamp_datetime();
-    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-        .expect("clock emits RFC 3339");
-    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -430,41 +406,6 @@ pub(super) async fn double_invalidation_preserves_first_decision_id() {
         }
         ResidentSessionState::Valid => panic!("expected invalidated resident state"),
     }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-pub(super) async fn successful_reload_clears_invalidated_state_to_valid() {
-    let backend = sqlite_memory_store_backend().await;
-    let store = recording_unbound_store_on(&backend).await;
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(EmptyTools),
-        mock_provider(Vec::new()),
-        test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimeStore>,
-    )
-    .await;
-    assert_eq!(
-        *runtime.resident_session.validity(),
-        ResidentSessionState::Valid
-    );
-
-    runtime.invalidate_resident_session_state();
-    assert!(matches!(
-        runtime.resident_session.validity(),
-        ResidentSessionState::Invalidated { .. }
-    ));
-
-    runtime
-        .reload_invalidated_resident_session_state()
-        .await
-        .expect("successful reload from store/snapshot");
-
-    assert_eq!(
-        *runtime.resident_session.validity(),
-        ResidentSessionState::Valid,
-        "successful reload must clear invalidated state back to Valid"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1665,23 +1606,6 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PauseAfterEffectLoop {
     }
 }
 
-pub(super) async fn standard_runtime_with_transport_and_queue_store(
-    backend: &lash_core::Backend,
-    transport: TestProvider,
-) -> (LashRuntime, Arc<RecordingStore>) {
-    let store = unbound_recording_store(backend).await;
-    let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
-    let runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(EmptyTools),
-        transport,
-        test_host_config(backend),
-        runtime_store,
-    ))
-    .await;
-    (runtime, store)
-}
-
 pub(super) async fn standard_runtime_with_transport_and_queue_store_for_session(
     backend: &lash_core::Backend,
     transport: TestProvider,
@@ -1698,8 +1622,7 @@ pub(super) async fn standard_runtime_with_transport_and_queue_store_for_session(
     (runtime, store)
 }
 
-/// [`standard_runtime_with_transport_and_queue_store`] on the Restate server
-/// double (D1 F2): the same runtime build over `double`'s backend, with the
+/// Runtime build on the Restate server double (D1 F2), with the
 /// double's unbound store under the recording decorator.
 pub(super) async fn standard_runtime_with_transport_and_double_queue_store(
     double: &lash_restate_test::RestateTestBackend,

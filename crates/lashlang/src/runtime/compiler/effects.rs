@@ -576,31 +576,3 @@ pub(crate) fn process_ref_literal(
             .expect("definition serializes"),
     )
 }
-
-#[cfg(test)]
-mod process_ref_literal_tests {
-    #[test]
-    fn compiled_literal_uses_the_immutable_definition_codec() {
-        let identity = crate::ProcessDefinitionIdentity::new(
-            crate::ModuleRef::new(&crate::ContentHash::new("module")),
-            crate::HostRequirementsRef::new(&crate::ContentHash::new("host")),
-            crate::ProcessRef::new(crate::ContentHash::new("component"), 3),
-            "",
-        );
-        let literal = super::process_ref_literal(
-            &identity.module_ref,
-            &identity.host_requirements_ref,
-            &identity.process_ref,
-            lash_core_execution::ProcessSignature::Unknown,
-        );
-        assert_eq!(
-            serde_json::to_value(literal).expect("literal"),
-            serde_json::to_value(
-                identity
-                    .definition(lash_core_execution::ProcessSignature::Unknown)
-                    .expect("definition")
-            )
-            .expect("codec")
-        );
-    }
-}

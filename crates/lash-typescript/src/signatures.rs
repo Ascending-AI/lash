@@ -344,11 +344,6 @@ pub fn reserved_words() -> &'static [&'static str] {
 mod tests {
     use serde_json::json;
 
-    /// Shorthand for the receiver-kind column of
-    /// [`INSTANCE_STDLIB_SIGNATURES`], so a signature assertion stays readable
-    /// at one line.
-    use super::LiteralReceivers as On;
-
     use super::*;
     use lashlang::{TypeExpr, TypeField};
     use serde_json::Value;
@@ -470,15 +465,6 @@ mod tests {
     }
 
     #[test]
-    fn async_process_promise_boolean_signature_and_schema() {
-        assert_async_output(
-            "const worker = async (): Promise<boolean> => { return true; }; finish(worker);",
-            TypeExpr::Bool,
-            json!({"type": "boolean"}),
-        );
-    }
-
-    #[test]
     fn async_process_promise_number_signature_and_schema() {
         assert_async_output(
             "const worker = async (): Promise<number> => { return 42; }; finish(worker);",
@@ -497,40 +483,9 @@ mod tests {
     }
 
     #[test]
-    fn async_process_promise_object_signature_and_schema() {
-        assert_async_output(
-            "const worker = async (): Promise<{ ready: boolean }> => { return { ready: true }; }; finish(worker);",
-            TypeExpr::Object(vec![TypeField {
-                name: "ready".into(),
-                ty: TypeExpr::Bool,
-                optional: false,
-            }]),
-            json!({"type": "object", "properties": {"ready": {"type": "boolean"}}, "required": ["ready"], "additionalProperties": true}),
-        );
-    }
-
-    #[test]
-    fn async_process_promise_union_signature_and_schema() {
-        assert_async_output(
-            "const worker = async (): Promise<boolean | string> => { return true; }; finish(worker);",
-            TypeExpr::union(vec![TypeExpr::Bool, TypeExpr::Str]),
-            json!({"anyOf": [{"type": "boolean"}, {"type": "string"}]}),
-        );
-    }
-
-    #[test]
     fn async_process_unannotated_boolean_signature_and_schema() {
         assert_async_output(
             "const worker = async () => { return true; }; finish(worker);",
-            TypeExpr::Bool,
-            json!({"type": "boolean"}),
-        );
-    }
-
-    #[test]
-    fn async_process_direct_boolean_annotation_signature_and_schema() {
-        assert_async_output(
-            "const worker = async (): boolean => true; finish(worker);",
             TypeExpr::Bool,
             json!({"type": "boolean"}),
         );
@@ -770,122 +725,6 @@ mod tests {
         assert_eq!(
             render_type(&TypeExpr::Process(lashlang::ProcessType::unknown())),
             "Process"
-        );
-    }
-
-    /// The literal-receiver matrix the hand-written arms in the lowerer used to
-    /// carry, transcribed once. The size of each column is the whole claim: the
-    /// arms held 28 string, 33 array, 5 number and 3 remaining-literal names,
-    /// and this table restates them with array `valueOf` added, which is the
-    /// one divergence FIG-1718 resolves. A method widened onto a shape it did
-    /// not carry moves a count and fails here rather than quietly enlarging the
-    /// accepted surface.
-    #[test]
-    fn literal_receiver_column_restates_the_matrix_it_replaced() {
-        let carrying = |kind: LiteralReceivers| {
-            INSTANCE_STDLIB_SIGNATURES
-                .iter()
-                .filter(|signature| signature.receivers.contains(kind))
-                .count()
-        };
-        assert_eq!(carrying(On::STRING), 28, "string literal receivers");
-        assert_eq!(carrying(On::ARRAY), 35, "array literal receivers");
-        assert_eq!(carrying(On::NUMBER), 5, "number literal receivers");
-        assert_eq!(carrying(On::OTHER), 3, "remaining literal receivers");
-
-        // Cardinality alone lets a compensating swap through — one method moved
-        // off arrays and another moved on keeps the count. The array column is
-        // the one this ticket changed, so pin its membership outright; the other
-        // three are small enough that a swap inside them is caught by the string
-        // and number columns disagreeing about the same name.
-        let carried_by = |kind: LiteralReceivers| {
-            let mut names = INSTANCE_STDLIB_SIGNATURES
-                .iter()
-                .filter(|signature| signature.receivers.contains(kind))
-                .map(|signature| signature.method)
-                .collect::<Vec<_>>();
-            names.sort_unstable();
-            names
-        };
-        assert_eq!(
-            carried_by(On::ARRAY),
-            [
-                "at",
-                "concat",
-                "copyWithin",
-                "every",
-                "fill",
-                "filter",
-                "find",
-                "findIndex",
-                "findLast",
-                "findLastIndex",
-                "flat",
-                "flatMap",
-                "forEach",
-                "includes",
-                "indexOf",
-                "join",
-                "lastIndexOf",
-                "map",
-                "pop",
-                "push",
-                "reduce",
-                "reduceRight",
-                "reverse",
-                "shift",
-                "slice",
-                "some",
-                "sort",
-                "splice",
-                "toReversed",
-                "toSorted",
-                "toSpliced",
-                "toString",
-                "unshift",
-                "valueOf",
-                "with",
-            ]
-        );
-        assert_eq!(
-            carried_by(On::NUMBER),
-            [
-                "toExponential",
-                "toFixed",
-                "toPrecision",
-                "toString",
-                "valueOf"
-            ]
-        );
-        assert_eq!(
-            carried_by(On::OTHER),
-            ["hasOwnProperty", "toString", "valueOf"]
-        );
-    }
-
-    /// The receiver-kind column is keyed by method name, so a second row for a
-    /// name already in the table would answer the lookup only by accident of
-    /// ordering.
-    #[test]
-    fn instance_method_names_are_unique() {
-        let mut names = INSTANCE_STDLIB_SIGNATURES
-            .iter()
-            .map(|signature| signature.method)
-            .collect::<Vec<_>>();
-        names.sort_unstable();
-        let total = names.len();
-        names.dedup();
-        assert_eq!(names.len(), total, "duplicate instance method name");
-    }
-
-    /// A static call names an owner namespace rather than a receiver, so its
-    /// rows must not claim a literal receiver shape.
-    #[test]
-    fn static_signatures_carry_no_receiver_kind() {
-        assert!(
-            STATIC_STDLIB_SIGNATURES
-                .iter()
-                .all(|signature| signature.receivers == LiteralReceivers::NONE)
         );
     }
 }

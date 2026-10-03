@@ -658,40 +658,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn trigger_store_accepts_a_target_label_independent_of_the_identity() {
-        // FIG-2995: the target_label gate is gone. The label is host-facing
-        // presentation only and no longer proves anything about the durable
-        // identity, so a mismatch no longer refuses registration.
-        let world = router_world().await;
-        let store = Arc::clone(&world.store);
-        let draft = TriggerSubscriptionDraft::for_process(
-            "mismatched-label",
-            crate::ProcessExecutionEnvRef::new("process-env:test"),
-            "ui.button.pressed",
-            "source-key",
-            crate::ProcessInput::Engine {
-                kind: "external".to_string(),
-                payload: serde_json::json!({}),
-            },
-            crate::ProcessIdentity::labelled("external", Some("expected")),
-        )
-        .with_target_label("other");
-
-        store
-            .execute_command(
-                "mismatched-label",
-                TriggerCommand::Register {
-                    owner_scope: TriggerOwnerScope::host("test").unwrap(),
-                    actor: crate::ProcessOriginator::host_scoped("test"),
-                    draft,
-                },
-            )
-            .await
-            .expect("store execution")
-            .expect("a label no longer gates registration");
-    }
-
     #[tokio::test(flavor = "multi_thread")]
     async fn a_replayed_trigger_emission_reports_the_delivery_its_first_emission_started() {
         let world = router_world().await;

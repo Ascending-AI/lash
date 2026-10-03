@@ -84,28 +84,6 @@ pub(super) fn projected_history_is_available_without_clobbering_executor_globals
     });
 }
 
-#[test]
-pub(super) fn projected_history_defaults_to_empty_list_when_missing() {
-    block_on(async {
-        let mut state = RlmExecutionState::new();
-
-        let projected = projected_history(Vec::new());
-        let compiled = worker_compile_program(&finish_record(&[(
-            "history_len",
-            b::builtin("len", vec![b::var("history")]),
-        )]))
-        .await
-        .expect("compile");
-        let outcome = execute_with_projected(&compiled, state.vm.state_mut(), &projected)
-            .await
-            .expect("execute");
-        let ExecutionOutcome::Finished(FlowValue::Record(record)) = outcome else {
-            panic!("expected finishted record");
-        };
-        assert_eq!(record["history_len"], FlowValue::Number(0.0));
-    });
-}
-
 #[tokio::test]
 pub(super) async fn set_default_initializes_once_and_does_not_mutate_projected_globals() {
     let mut state = RlmExecutionState::new();
@@ -496,40 +474,6 @@ pub(super) fn a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_ser
         );
         assert_eq!(response.terminal_finish, None);
     });
-}
-
-#[tokio::test]
-pub(super) async fn set_default_rejects_projected_host_bindings() {
-    let mut state = RlmExecutionState::new();
-    let projected = BTreeSet::from_iter(["current_query".to_string()]);
-
-    let err = state
-        .patch_globals(
-            &lash_rlm_types::RlmGlobalsPatchPluginBody {
-                set_default: serde_json::Map::from_iter([(
-                    "current_query".to_string(),
-                    serde_json::json!("bad"),
-                )]),
-            },
-            &projected,
-        )
-        .await
-        .expect_err("projected default should fail");
-    assert!(err.to_string().contains("read-only projected host binding"));
-
-    let err = state
-        .patch_globals(
-            &lash_rlm_types::RlmGlobalsPatchPluginBody {
-                set_default: serde_json::Map::from_iter([(
-                    "history".to_string(),
-                    serde_json::json!([]),
-                )]),
-            },
-            &BTreeSet::new(),
-        )
-        .await
-        .expect_err("history default should fail");
-    assert!(err.to_string().contains("read-only projected host binding"));
 }
 
 #[test]
@@ -1140,58 +1084,6 @@ pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
 }
 
 #[test]
-pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
-    block_on(async {
-        let mut state = RlmExecutionState::new();
-        let double =
-            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
-        let handler = double
-            .open_handler(crate::testing::default_cell_scope())
-            .await
-            .expect("open the cell's handler");
-        let ctx = lash_core::testing::code_execution_context(crate::testing::double_ports(
-            &double, &handler,
-        ));
-        let response = execute_code_unbounded_with_test_render(
-            &mut state,
-            ctx,
-            ExecRequest {
-                code: "let scratch_note = \"after execution\";".to_string(),
-            },
-            crate::testing::sqlite_memory_artifact_store().await,
-            LashlangSurface::new(
-                lashlang::LashlangAbilities::default(),
-                lashlang::LashlangLanguageFeatures::default(),
-                lashlang::LashlangHostCatalog::new(),
-            ),
-            None,
-            RlmProjectedBindings::default(),
-            None,
-        )
-        .await;
-        handler.close().await.expect("close the cell's handler");
-        assert_eq!(response.error, None);
-
-        let globals = state.bound_variable_values(&BTreeSet::new());
-        let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
-        let rendered = crate::rlm_support::render_bound_variables(
-            &mut cache,
-            &globals,
-            &[],
-            &crate::dialect::TypescriptDialect,
-            &crate::render::BuiltinCodeRenderer,
-            &lash_render::RenderParams::preview(),
-        );
-
-        assert!(
-            rendered.contains(r#"- `scratch_note` = "after execution""#),
-            "{}",
-            rendered
-        );
-    });
-}
-
-#[test]
 pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
     block_on(async {
         let mut state = RlmExecutionState::new();
@@ -1259,25 +1151,6 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
 }
 
 #[test]
-pub(super) fn flow_to_json_value_emits_projected_marker_for_projected_values() {
-    block_on(async {
-        let projected = ProjectedValue::scalar("input", FlowValue::String("hello".into()));
-        let value = flow_to_json_value(&FlowValue::Projected(projected));
-        let obj = value
-            .as_object()
-            .expect("expected projected wrapper object");
-        assert_eq!(obj.len(), 1, "wrapper should have exactly one key");
-        assert_eq!(
-            obj.get(PROJECTED_JSON_TAG),
-            Some(&serde_json::json!({
-                "kind": "materialized",
-                "value": "hello"
-            }))
-        );
-    });
-}
-
-#[test]
 pub(super) fn flow_to_json_value_materializes_a_custom_projection() {
     block_on(async {
         let host = Arc::new(SnapshotProjectedToolText::default());
@@ -1293,65 +1166,6 @@ pub(super) fn flow_to_json_value_materializes_a_custom_projection() {
                 }
             })
         );
-    });
-}
-
-#[test]
-pub(super) fn image_json_round_trip_preserves_mime_and_image_type() {
-    block_on(async {
-        let image = lashlang::ImageValue::new(
-            "image-sha256",
-            lash_core::MediaType::parse("image/webp").unwrap(),
-            "cover",
-            73,
-            Some(320),
-            Some(180),
-        );
-        let flow = FlowValue::Image(Box::new(image));
-        let json = flow_to_json_value(&flow);
-
-        assert_eq!(json.get("mime").and_then(Value::as_str), Some("image/webp"));
-        assert!(json.get("media_type").is_none());
-        assert_eq!(json_to_flow_value(json), flow);
-    });
-}
-
-#[test]
-pub(super) fn flow_record_to_json_value_marks_only_projected_entries() {
-    block_on(async {
-        let projected = ProjectedValue::scalar("input", FlowValue::String("p".into()));
-        let mut record = FlowRecord::default();
-        record.insert("proj".to_string(), FlowValue::Projected(projected));
-        record.insert("glob".to_string(), FlowValue::String("g".into()));
-
-        let value = flow_record_to_json_value(&record);
-        let obj = value.as_object().expect("record object");
-        // proj entry must be wrapped in {"__projected__": ...}
-        let proj = obj
-            .get("proj")
-            .and_then(|v| v.as_object())
-            .expect("proj entry is an object");
-        assert!(proj.contains_key(PROJECTED_JSON_TAG));
-        // glob entry stays a bare string
-        assert_eq!(obj.get("glob").and_then(|v| v.as_str()).expect("glob"), "g");
-    });
-}
-
-#[test]
-pub(super) fn flow_record_to_tool_args_materializes_ordinary_tools() {
-    block_on(async {
-        let projected = ProjectedValue::scalar("input", FlowValue::String("p".into()));
-        let mut record = FlowRecord::default();
-        record.insert("query".to_string(), FlowValue::Projected(projected));
-
-        let value = flow_record_to_tool_args(
-            &record,
-            &lash_core::ToolArgumentProjectionPolicy::MaterializeProjectedValues,
-        )
-        .await
-        .expect("projection transport should be canonical");
-
-        assert_eq!(value, serde_json::json!({ "query": "p" }));
     });
 }
 

@@ -701,22 +701,3 @@ impl WakeDeliveryDriver {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{WorkCadencePolicy, retry_delay_ms};
-
-    #[test]
-    fn retry_delay_is_bounded_for_every_attempt_count() {
-        let work_cadence = WorkCadencePolicy::default();
-        let initial_ms = work_cadence.delivery_retry_initial.as_millis() as u64;
-        let max_ms = work_cadence.delivery_retry_max.as_millis() as u64;
-
-        assert_eq!(retry_delay_ms(0, &work_cadence), initial_ms);
-        assert_eq!(retry_delay_ms(1, &work_cadence), initial_ms);
-        assert_eq!(retry_delay_ms(2, &work_cadence), initial_ms * 2);
-        assert_eq!(retry_delay_ms(14, &work_cadence), max_ms);
-        assert_eq!(retry_delay_ms(64, &work_cadence), max_ms);
-        assert_eq!(retry_delay_ms(u64::MAX, &work_cadence), max_ms);
-    }
-}

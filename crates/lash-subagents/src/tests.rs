@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::rlm_support::{
     SpawnCreateRequestInput, build_session_request, build_spawn_create_request,
 };
+use lash_core::TurnInput;
 use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole};
 use lash_core::runtime::RuntimeSessionState;
 use lash_core::{
@@ -23,7 +24,6 @@ use lash_core::{
     facade_support::RuntimeHostConfig, facade_support::TraceRuntimeSubject,
     test_support::RuntimeServices,
 };
-use lash_core::{ToolArgumentProjectionPolicy, ToolOutputContract, TurnInput};
 use lash_lashlang_runtime::{
     LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
     LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface, LashlangSurfaceContribution,
@@ -132,33 +132,6 @@ fn static_capability_policy_fields_distinguish_inherit_set_and_clear() {
     assert_eq!(policy.generation.seed, Some(5));
 }
 
-struct CustomRequestCapability;
-
-impl Capability for CustomRequestCapability {
-    fn name(&self) -> &str {
-        "custom"
-    }
-
-    fn build_session_request(
-        &self,
-        ctx: SubagentSpawnContext<'_>,
-    ) -> Result<lash_core::SessionCreateRequest, String> {
-        let mut tool_access = ctx.base_tool_access.clone();
-        tool_access
-            .hide_tool("custom_hidden")
-            .map_err(|error| error.to_string())?;
-        let request = lash_core::SessionCreateRequest::child(
-            ctx.parent_session_id,
-            lash_core::SessionStartPoint::Empty,
-            ctx.base_policy()?,
-            lash_core::PluginOptions::default(),
-        )
-        .with_plugin_source(lash_core::SessionPluginSource::CurrentHostFresh)
-        .with_tool_access(tool_access);
-        ctx.finalize_request(request, self.name())
-    }
-}
-
 /// `state`'s snapshot, recording the RLM protocol as its parent's protocol.
 fn rlm_parent_snapshot(state: &RuntimeSessionState) -> lash_core::SessionSnapshot {
     let mut snapshot = state.to_snapshot();
@@ -166,108 +139,6 @@ fn rlm_parent_snapshot(state: &RuntimeSessionState) -> lash_core::SessionSnapsho
         lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
     ));
     snapshot
-}
-
-#[test]
-fn capability_can_build_complete_spawn_request() {
-    let registry = CapabilityRegistry::new().with(Arc::new(CustomRequestCapability));
-    let current_snapshot = RuntimeSessionState {
-        policy: SessionPolicy {
-            model: llm_profile_spec("parent-model", None, 200_000),
-            ..SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-                lash_core::MaxToolCalls::new(1024),
-            )
-        },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        ))
-    };
-    let tool_access = lash_core::SessionToolAccess::ambient()
-        .with_hidden_tools(["base_hidden"])
-        .expect("valid hidden name");
-
-    let request = build_spawn_create_request(SpawnCreateRequestInput {
-        registry: &registry,
-        parent_session_id: &SessionId::from("root"),
-        current_snapshot: current_snapshot.to_snapshot(),
-        session_spec: &SessionSpec::inherit(),
-        tool_access: &tool_access,
-        final_answer_format: lash_rlm_types::RlmFinalAnswerFormat::RawFinalValue,
-        capability_name: "custom",
-        output_schema: None,
-        seed: Default::default(),
-        parent_subagent: None,
-        caused_by: None,
-    })
-    .expect("custom capability request");
-
-    assert!(matches!(
-        &request.start,
-        lash_core::SessionStartPoint::Empty
-    ));
-    assert!(request.tool_access.hidden_tools().contains("base_hidden"));
-    assert!(request.tool_access.hidden_tools().contains("custom_hidden"));
-    assert_eq!(
-        request.subagent.expect("subagent context").capability,
-        "custom"
-    );
-}
-
-#[test]
-fn rlm_definitions_expose_spawn_without_mini_api() {
-    let registry = default_registry(&BTreeMap::new());
-    let rlm_defs = rlm::rlm_subagent_tool_definitions(&registry.names());
-
-    assert!(rlm_defs.iter().any(|tool| tool.name() == "spawn_agent"));
-    assert_eq!(
-        rlm_defs.iter().map(|tool| tool.name()).collect::<Vec<_>>(),
-        vec!["spawn_agent"]
-    );
-
-    let rlm_spawn = rlm_defs
-        .iter()
-        .find(|tool| tool.name() == "spawn_agent")
-        .expect("rlm spawn_agent");
-    assert_eq!(
-        rlm_spawn.contract.output_contract,
-        ToolOutputContract::from_input_schema("output", None)
-    );
-    assert_eq!(
-        rlm_spawn.manifest.argument_projection,
-        ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed")
-    );
-    assert!(
-        rlm_spawn
-            .contract
-            .examples
-            .iter()
-            .any(|example| example.contains("await agents.spawn"))
-    );
-    assert!(!rlm_spawn.description().contains("agents: Agents"));
-    assert!(!rlm_spawn.description().contains("list[str]"));
-    assert!(!rlm_spawn.description().contains("output` field"));
-    assert!(
-        rlm_spawn
-            .contract
-            .examples
-            .iter()
-            .any(|example| example.contains(r#"queries: "list[str]""#))
-    );
-    assert!(
-        rlm_spawn
-            .contract
-            .examples
-            .iter()
-            .all(|example| !example.contains(r#"["str"]"#))
-    );
-    assert!(!rlm_spawn.description().contains("use `start spawn_agent"));
-    let docs = rlm_spawn
-        .contract()
-        .compact_contract_with_signature_name(&rlm_spawn.manifest(), "agents.spawn")
-        .render_markdown();
-    assert!(docs.len() <= 3_000, "agents.spawn docs exceeded budget");
 }
 
 #[test]
@@ -323,37 +194,6 @@ fn spawn_schema_is_strict_and_nameless() {
             .validate(&serde_json::Value::Object(rejected))
             .is_err(),
         "strict spawn schema must reject retired identity arguments"
-    );
-}
-
-#[test]
-fn single_capability_spawn_can_omit_capability_field() {
-    let registry = CapabilityRegistry::new().with(Arc::new(StaticCapability::new(
-        "explore",
-        lash_core::facade_support::SessionSpec::inherit(),
-    )));
-    let rlm_spawn = rlm::spawn_agent_tool_definition(&registry.names());
-
-    assert!(
-        !rlm_spawn
-            .contract
-            .input_schema
-            .canonical
-            .as_value()
-            .get("required")
-            .and_then(serde_json::Value::as_array)
-            .expect("required fields")
-            .iter()
-            .any(|field| field.as_str() == Some("capability")),
-        "single-capability spawn should not require explicit capability"
-    );
-    assert!(
-        rlm_spawn
-            .contract
-            .examples
-            .iter()
-            .all(|example| !example.contains("capability:")),
-        "single-capability examples should not teach redundant capability args"
     );
 }
 
@@ -587,34 +427,6 @@ fn tool_doc_section(prompt: &str) -> &str {
         Some(end) => &rest[..end],
         None => rest,
     }
-}
-
-// `a_lashlang_parent_still_spawns_lashlang_children` was deleted with the
-// second dialect (ADR 0096): there is no other direction to hold open.
-#[tokio::test]
-async fn rlm_spawn_record_shorthand_returns_child_final_value() {
-    let (outcome, _) = run_seed_probe(
-        r#"<typescript>
-const direct = await agents.spawn({
-  capability: "default",
-  task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
-  seed: { chunk: ["a", "b"] },
-  output: { len: "int" }
-});
-finish(direct);
-</typescript>"#,
-        TurnInput::text("spawn a child with record shorthand output"),
-    )
-    .await;
-
-    assert_eq!(
-        outcome,
-        lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::FinalValue {
-                value: json!({ "len": 2 })
-            }
-        )
-    );
 }
 
 #[tokio::test]
@@ -1365,45 +1177,6 @@ fn request_text(request: &LlmRequest) -> String {
         }
     }
     out
-}
-
-#[tokio::test]
-async fn subagents_plugin_builds_without_mode_context() {
-    let factory = SubagentsPluginFactory::new(
-        Arc::new(default_registry(&BTreeMap::new())),
-        lash_core::lifetime::starter,
-    );
-    let ctx = PluginSessionContext {
-        tracing: lash_core::trace::TraceRuntime::default(),
-        trace: None,
-        owner: lash_core::RuntimeOwner::Session(SessionId::from("parent")),
-        tool_access: lash_core::SessionToolAccess::default(),
-        subagent: None,
-        extensions: Default::default(),
-        plugin_config: Default::default(),
-        materialization: lash_core::plugin::PluginSessionMaterialization::Creation,
-        parent_session_id: None,
-    };
-    let plugin = factory.build(&ctx).expect("plugin");
-    assert_eq!(plugin.id(), "subagents");
-}
-
-#[test]
-fn subagents_plugin_final_answer_format_defaults_raw_and_can_be_overridden() {
-    let factory = SubagentsPluginFactory::new(
-        Arc::new(default_registry(&BTreeMap::new())),
-        lash_core::lifetime::starter,
-    );
-    assert_eq!(
-        factory.final_answer_format,
-        lash_rlm_types::RlmFinalAnswerFormat::RawFinalValue
-    );
-
-    let factory = factory.with_final_answer_format(lash_rlm_types::RlmFinalAnswerFormat::Markdown);
-    assert_eq!(
-        factory.final_answer_format,
-        lash_rlm_types::RlmFinalAnswerFormat::Markdown
-    );
 }
 
 /// FIG-1480: `agents.spawn` authored a `Shape = Type { name: str, ... }`

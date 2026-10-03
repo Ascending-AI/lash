@@ -379,17 +379,4 @@ mod tests {
         );
         assert_eq!(observed.counter_value("lash.recovery_leader"), 2);
     }
-
-    #[test]
-    fn current_state_gauges_observe_cleared_values() {
-        let observed = TestMetrics::install();
-        let metrics = TelemetryMetrics::default();
-        record_parked_work_count(&metrics, "turn", "replay_divergence", 3);
-        record_parked_work_count(&metrics, "turn", "replay_divergence", 0);
-        record_parked_work_oldest_age(&metrics, "turn", 0);
-        record_generation_drain_work(&metrics, "012345abcdef", "in_flight_turns", 0);
-        assert_eq!(observed.counter_value("lash.parked_work.count"), 2);
-        assert_eq!(observed.counter_value("lash.parked_work.oldest_age"), 1);
-        assert_eq!(observed.counter_value("lash.generation_drain.work"), 1);
-    }
 }

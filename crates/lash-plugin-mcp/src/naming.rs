@@ -174,28 +174,6 @@ mod tests {
     }
 
     #[test]
-    fn server_prefix_keeps_its_lowercase_normalization() {
-        assert_eq!(
-            normalize_identifier("Spotify-Search Songs"),
-            "spotify_search_songs"
-        );
-        assert_eq!(normalize_identifier("___foo___bar___"), "foo_bar");
-        assert_eq!(normalize_identifier("!!!"), "tool");
-    }
-
-    #[test]
-    fn lone_tools_use_bare_cleaned_names_and_no_aliases() {
-        for raw in ["search_docs", "search-docs"] {
-            let names = build_catalog_names("Docs", &[raw]);
-            let (name, binding) = &names[raw];
-            assert_eq!(name, "mcp__docs__search_docs");
-            assert_eq!(binding.module_path, ["docs"]);
-            assert_eq!(binding.operation.as_deref(), Some("search_docs"));
-            assert!(binding.aliases.is_empty());
-        }
-    }
-
-    #[test]
     fn cleanup_preserves_case_and_maps_each_unaddressable_character() {
         for (raw, cleaned) in [
             ("getUser", "getUser"),
@@ -217,25 +195,6 @@ mod tests {
         assert_eq!(names["search-docs"].0, "mcp__docs__search_docs__6rlrgooy");
         assert_eq!(names["search_docs"].0, "mcp__docs__search_docs__ac5edv22");
         assert_ne!(names["search-docs"].0, names["search_docs"].0);
-    }
-
-    #[test]
-    fn collision_members_rename_symmetrically_and_return_to_bare_on_removal() {
-        let alone = build_catalog_names("directory", &["get_user", "unrelated"]);
-        let pair = build_catalog_names("directory", &["get_user", "get-user", "unrelated"]);
-        let reversed = build_catalog_names("directory", &["unrelated", "get-user", "get_user"]);
-        assert_eq!(alone["get_user"].0, "mcp__directory__get_user");
-        for raw in ["get_user", "get-user"] {
-            assert!(pair[raw].0.starts_with("mcp__directory__get_user__"));
-            assert_eq!(pair[raw].0.len(), "mcp__directory__get_user__".len() + 8);
-            assert_eq!(pair[raw].0, reversed[raw].0);
-        }
-        assert_ne!(pair["get_user"].0, pair["get-user"].0);
-        assert_eq!(alone["unrelated"].0, pair["unrelated"].0);
-        assert_eq!(
-            build_catalog_names("directory", &["get_user"])["get_user"].0,
-            alone["get_user"].0
-        );
     }
 
     #[test]

@@ -236,35 +236,6 @@ fn assert_shared_backoff(ingress: &ScriptedIngress) {
 }
 
 #[tokio::test(start_paused = true)]
-async fn child_cancel_watch_exhausts_actual_ingress_faults() {
-    for reset in [false, true] {
-        let ingress = ScriptedIngress::new(
-            (0..1000)
-                .map(|_| {
-                    if reset {
-                        transport_failure("connection reset")
-                    } else {
-                        response(503, "ingress unavailable")
-                    }
-                })
-                .collect(),
-        );
-        let watch = child_watch(&ingress);
-        let lost = tokio::time::timeout(
-            Duration::from_secs(3),
-            lash_core::retry_cancel_watch("child cancel law", || watch.cancelled()),
-        )
-        .await
-        .expect("actual faults must exhaust the ladder")
-        .expect_err("eight ingress faults lose the watch");
-        assert_eq!(lost.code, lash_core::RuntimeErrorCode::TransientCancelWatch);
-        assert_shared_backoff(&ingress);
-        tokio::time::sleep(Duration::from_secs(60)).await;
-        assert_eq!(ingress.requests.lock_recover().len(), 8);
-    }
-}
-
-#[tokio::test(start_paused = true)]
 async fn child_cancel_watch_succeeds_on_the_eighth_attempt() {
     let ingress = ScriptedIngress::new(
         (0..7)

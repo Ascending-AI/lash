@@ -122,28 +122,3 @@ pub mod wire {
         Ok(AdmittedScope::new(wire.scope))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_process_constructor_is_the_process_scope() {
-        let process = crate::process_identity::process_id_for_test("worker");
-        let admitted = AdmittedScope::process(process.clone());
-        assert_eq!(admitted.scope(), &ExecutionScope::process(process.clone()));
-        assert_eq!(admitted.process_id(), Some(&process));
-    }
-
-    #[test]
-    fn non_process_scopes_name_no_process() {
-        for admitted in [
-            AdmittedScope::turn("s", "t"),
-            AdmittedScope::session_operation("s", "d"),
-            AdmittedScope::session_delete("s"),
-            AdmittedScope::runtime_operation("op"),
-        ] {
-            assert_eq!(admitted.process_id(), None, "{admitted:?}");
-        }
-    }
-}

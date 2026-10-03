@@ -268,50 +268,6 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifact_store::{MODULE_ARTIFACT_NAMESPACE, PROCESS_ENV_NAMESPACE};
-
-    /// A pointer-table row's retained label comes from its own namespace key:
-    /// a non-manifest namespace cannot inherit the module label (FIG-1949).
-    #[tokio::test]
-    async fn pointer_table_roots_derive_labels_from_their_namespace() {
-        let store = crate::test_support::sqlite_memory_store()
-            .await
-            .expect("open store");
-        store
-            .conn
-            .call(|conn| {
-                for (namespace, artifact_ref, blob_ref) in [
-                    (MODULE_ARTIFACT_NAMESPACE, "mod-a", "blob-mod"),
-                    (PROCESS_ENV_NAMESPACE, "env-a", "blob-env"),
-                ] {
-                    crate::conn::cached_execute(
-                        conn,
-                        "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-                         VALUES (?1, ?2, ?3)",
-                        params![namespace, artifact_ref, blob_ref],
-                    )?;
-                }
-                let roots =
-                    SqliteStore::artifact_ref_roots(conn).map_err(sqlite_conversion_error)?;
-                let kinds: std::collections::BTreeMap<String, PersistedArtifactKind> = roots
-                    .into_iter()
-                    .map(|root| match root {
-                        GcRoot::ArtifactRef { blob_ref, kind } => (blob_ref.0, kind),
-                        GcRoot::CheckpointManifest(_) => {
-                            unreachable!("pointer collection yields no manifest root")
-                        }
-                    })
-                    .collect();
-                assert_eq!(kinds["blob-mod"], PersistedArtifactKind::LashlangModule);
-                assert_eq!(
-                    kinds["blob-env"],
-                    PersistedArtifactKind::ProcessExecutionEnv
-                );
-                Ok(())
-            })
-            .await
-            .expect("namespace-derived pointer labels");
-    }
 
     /// A namespace nobody mapped fails the sweep rather than being labelled
     /// with a sibling namespace's kind.

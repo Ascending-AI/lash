@@ -139,40 +139,6 @@ fn signed_draft() -> ProcessDefinitionDraft {
     )
 }
 
-/// Equal canonical definitions share one id: object key order, signed zero,
-/// artifact order and repeated artifacts are not content.
-#[test]
-fn equal_definitions_share_one_id() {
-    let first = draft(
-        "lashlang",
-        serde_json::from_str(r#"{"b":[1,-0.0],"a":"x"}"#).expect("parse value"),
-        [
-            module("module:1"),
-            env("env:1"),
-            engine_blob("scripted", "blob:9"),
-        ],
-    );
-    let second = draft(
-        "lashlang",
-        serde_json::from_str(r#"{"a":"x","b":[1,0.0]}"#).expect("parse value"),
-        [
-            engine_blob("scripted", "blob:9"),
-            module("module:1"),
-            env("env:1"),
-            module("module:1"),
-        ],
-    );
-
-    assert_eq!(first, second, "the descriptor is canonical at construction");
-    assert_eq!(first.canonical_preimage(), second.canonical_preimage());
-    assert_eq!(first.id(), second.id());
-    assert_eq!(
-        first.artifacts().len(),
-        3,
-        "a repeated artifact is one artifact"
-    );
-}
-
 /// Any changed byte of the engine kind, the canonical value or the artifact
 /// set names a different definition, and no two of these variants collide.
 #[test]

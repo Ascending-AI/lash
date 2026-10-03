@@ -527,14 +527,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.dispatch.session_graph.as_ref()
     }
 
-    #[cfg(test)]
-    pub(crate) fn tool_argument_projection_policy(
-        &self,
-        name: &str,
-    ) -> crate::ToolArgumentProjectionPolicy {
-        crate::tool_dispatch::resolve_tool_argument_projection_policy(&self.dispatch, name)
-    }
-
     pub(crate) fn to_static(&self) -> Option<RuntimeExecutionContext<'static>> {
         Some(RuntimeExecutionContext {
             dispatch: Arc::new(self.dispatch.to_static()?),

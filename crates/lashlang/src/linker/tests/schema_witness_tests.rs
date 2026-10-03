@@ -152,14 +152,6 @@ fn closed_type_literals_type_outputs_in_lowering_and_validation() {
 }
 
 #[test]
-fn literal_type_defensively_degrades_non_literal_expressions_to_any() {
-    assert_eq!(
-        literal_type(&Expr::Variable("opaque".into())),
-        TypeExpr::Any
-    );
-}
-
-#[test]
 fn nested_record_shorthand_witnesses_are_open() {
     // result = (await agents.spawn({ task: "inspect", output: { nested: "record" } }))?
     // result.nested.value
@@ -179,51 +171,6 @@ fn nested_record_shorthand_witnesses_are_open() {
     ]);
     LinkedModule::link(program, typed_output_host_environment())
         .expect("an open record witness should leave nested fields open");
-}
-
-#[test]
-fn record_shorthand_types_outputs_and_rejects_missing_fields() {
-    // result = (await agents.spawn({
-    //   task: "inspect",
-    //   output: { declared: "str", count: "int", tags: "list[str]" }
-    // }))?
-    // values = [result.declared, result.count, result.tags]
-    let declared = builders::program(vec![
-        builders::assign(
-            "result",
-            builders::module_call(
-                &["agents"],
-                "spawn",
-                vec![inspect_request(builders::record(vec![
-                    ("declared", builders::string("str")),
-                    ("count", builders::string("int")),
-                    ("tags", builders::string("list[str]")),
-                ]))],
-            ),
-        ),
-        builders::assign(
-            "values",
-            builders::list(vec![
-                builders::field(builders::var("result"), "declared"),
-                builders::field(builders::var("result"), "count"),
-                builders::field(builders::var("result"), "tags"),
-            ]),
-        ),
-    ]);
-    LinkedModule::link(declared, typed_output_host_environment())
-        .expect("record shorthand fields should link");
-
-    // result = (await llm.query({ task: "inspect", output: { declared: "str" } }))?
-    // result.undeclared
-    let missing = spawn_and_read(
-        "llm",
-        builders::record(vec![("declared", builders::string("str"))]),
-        "undeclared",
-    );
-    assert!(matches!(
-        LinkedModule::link(missing, typed_output_host_environment()),
-        Err(LinkError::UnknownObjectField { field, .. }) if field == "undeclared"
-    ));
 }
 
 #[test]

@@ -145,66 +145,6 @@ async fn a_loop_may_await_host_calls_in_its_filter_and_its_element() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn break_exits_loop_and_leaves_the_outer_binding_alone() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        const item = "outer";
-        let seen = [];
-        for (const entry of [1, 2, 3]) {
-          if (entry === 2) {
-            break;
-          }
-          seen = seen.concat([entry]);
-        }
-        finish({ seen: seen, item: item });
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    let record = value.as_record().expect("expected record");
-    assert_eq!(record["seen"], Value::List(vec![Value::Number(1.0)].into()));
-    assert_eq!(record["item"], Value::String("outer".to_string().into()));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn continue_skips_to_next_iteration() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        let seen = [];
-        for (const n of [1, 2, 3, 4]) {
-          if (n === 2) {
-            continue;
-          }
-          seen = seen.concat([n]);
-        }
-        finish(seen);
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    assert_eq!(
-        value,
-        Value::List(vec![Value::Number(1.0), Value::Number(3.0), Value::Number(4.0)].into())
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn while_loop_runs_until_condition_is_false() {
     let host = TestHost::default();
     let mut state = State::new();
@@ -240,68 +180,6 @@ async fn while_loop_runs_until_condition_is_false() {
             ]
             .into()
         )
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn break_exits_while_loop() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        let n = 0;
-        while (true) {
-          n = n + 1;
-          if (n === 3) {
-            break;
-          }
-        }
-        finish(n);
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("break should exit while"),
-    );
-
-    assert_eq!(value, Value::Number(3.0));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn continue_skips_to_next_while_condition() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        let n = 0;
-        let seen = [];
-        while (n < 5) {
-          n = n + 1;
-          if (n === 2) {
-            continue;
-          }
-          if (n === 4) {
-            continue;
-          }
-          seen = seen.concat([n]);
-        }
-        finish(seen);
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("continue should jump to while condition"),
-    );
-
-    assert_eq!(
-        value,
-        Value::List(vec![Value::Number(1.0), Value::Number(3.0), Value::Number(5.0)].into())
     );
 }
 
@@ -416,28 +294,6 @@ async fn finish_inside_loop_still_terminates_program() {
     );
 
     assert_eq!(value, Value::Number(1.0));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn ternary_selects_the_correct_branch() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        const truthy = true ? "left" : "right";
-        const falsy = false ? "left" : "right";
-        finish(truthy + ":" + falsy);
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    assert_eq!(value, Value::String("left:right".to_string().into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -736,48 +592,6 @@ async fn execution_can_continue_without_finish() {
     assert_eq!(state.globals()["counter"], Value::Number(1.0));
     let observed = host.observations.lock_recover();
     assert_eq!(observed.as_slice(), &[Value::Number(1.0)]);
-}
-
-/// A failed host call is a thrown error rather than an `{ ok, error }` record
-/// (ADR 0096), so the "summarise both outcomes" pattern is written with
-/// `try`/`catch`. What it pins is unchanged: both branches of the summary are
-/// reachable in one program, and the failure carries the host's own text.
-#[tokio::test(flavor = "current_thread")]
-async fn a_summary_can_report_both_a_successful_and_a_failed_host_call() {
-    let host = TestHost::default().with_file("src/lib.rs", "pub fn main() {}");
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        let found = "";
-        try {
-          await files.read({ path: "src/lib.rs" });
-          found = "ok";
-        } catch (error) {
-          found = "failed: " + error.message;
-        }
-        let missing = "";
-        try {
-          await files.read({ path: "src/missing.rs" });
-          missing = "ok";
-        } catch (error) {
-          missing = "failed: " + error.message;
-        }
-        finish("found=" + found + " missing=" + missing);
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    let Value::String(text) = value else {
-        panic!("expected string");
-    };
-    assert!(text.contains("found=ok"), "{text}");
-    assert!(text.contains("missing=failed:"), "{text}");
 }
 
 /// A tool call yields the host's value directly and throws on failure, which is

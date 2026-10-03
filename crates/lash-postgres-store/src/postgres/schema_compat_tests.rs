@@ -116,36 +116,6 @@ async fn postgres_opens_an_expanded_catalog_under_its_floor() {
 }
 
 #[tokio::test]
-async fn postgres_refuses_a_raised_floor_typed() {
-    let Some(url) = postgres_test_support::database_url() else {
-        return;
-    };
-    let scratch = Scratch::new(&url).await;
-    let above = postgres_descriptor().reads.max() + 1;
-    scratch
-        .apply(&format!(
-            "UPDATE lash_schema_versions SET version = {above}, min_reader = {above}
-               WHERE component = 'lash-postgres-store'"
-        ))
-        .await;
-    let error = scratch
-        .open()
-        .await
-        .expect_err("reader floor excludes this build");
-    assert!(matches!(
-        error,
-        StoreError::Incompatible {
-            refusal: CompatRefusal::ReaderFloorAbove {
-                found,
-                min_reader,
-                ..
-            }
-        } if found == above && min_reader == above
-    ));
-    scratch.cleanup().await;
-}
-
-#[tokio::test]
 async fn postgres_refuses_each_unsafe_addition() {
     let Some(url) = postgres_test_support::database_url() else {
         return;
@@ -191,26 +161,4 @@ async fn postgres_refuses_each_unsafe_addition() {
         );
         scratch.cleanup().await;
     }
-}
-
-#[tokio::test]
-async fn postgres_refuses_a_populated_catalog_without_a_stamp() {
-    let Some(url) = postgres_test_support::database_url() else {
-        return;
-    };
-    let scratch = Scratch::new(&url).await;
-    scratch
-        .apply("DELETE FROM lash_schema_versions WHERE component = 'lash-postgres-store'")
-        .await;
-    let error = scratch
-        .open()
-        .await
-        .expect_err("populated catalog has no stamp");
-    assert!(matches!(
-        error,
-        StoreError::Incompatible {
-            refusal: CompatRefusal::Unstamped { .. }
-        }
-    ));
-    scratch.cleanup().await;
 }

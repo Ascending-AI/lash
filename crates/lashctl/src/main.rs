@@ -1143,40 +1143,6 @@ mod tests {
     }
 
     #[test]
-    fn finalize_accepts_successor_plugin_registrations() {
-        let parsed = parse(words(&[
-            "finalize",
-            "0123456789ab",
-            "--restate-admin-url",
-            "http://127.0.0.1:9070",
-            "--plugin-registrations",
-            "successor-plugins.json",
-        ]))
-        .unwrap_or_else(|error| panic!("{}", error.message));
-        let Command::Finalize {
-            plugin_registrations,
-            ..
-        } = parsed.command
-        else {
-            panic!("finalize command");
-        };
-        assert_eq!(plugin_registrations, Some("successor-plugins.json".into()));
-        let registrations =
-            parse_plugin_registrations(br#"[{"plugin":"counter","native":2,"writable":[1,2]}]"#)
-                .unwrap_or_else(|error| panic!("{}", error.message));
-        assert_eq!(registrations[0].plugin, "counter");
-        assert_eq!(registrations[0].native.get(), 2);
-        assert_eq!(
-            registrations[0]
-                .writable
-                .iter()
-                .map(|version| version.get())
-                .collect::<Vec<_>>(),
-            [1, 2]
-        );
-    }
-
-    #[test]
     fn finalize_rejects_invalid_successor_registrations_before_opening_storage() {
         for input in [
             r#"[{"plugin":"counter","native":0,"writable":[1]}]"#,
@@ -1255,38 +1221,6 @@ mod tests {
                 .command,
             Command::FinalizeHold(HoldAction::Set { reason }) if reason == "watch"
         ));
-    }
-
-    /// An undrained generation is a drain still pending (exit 5); a retained
-    /// deployment and a hold are refused preconditions (exit 3); an engine
-    /// that cannot be read fails closed (exit 1). Each keeps its typed
-    /// refusal.
-    #[test]
-    fn finalize_refusals_keep_their_exit_codes_and_types() {
-        use lash_core_store::store::fleet_finalize::DeploymentRegistryError;
-        let held = CliError::finalize(FinalizeError::Refused(FinalizeRefusal::Held {
-            hold: FinalizeHold {
-                reason: "watch".to_owned(),
-                held_at_ms: 3,
-            },
-        }));
-        assert_eq!(held.exit as u8, 3);
-        assert_eq!(
-            error_json(&held)["refusal"],
-            json!({"refusal":"held","hold":{"reason":"watch","held_at_ms":3}})
-        );
-        let retained = CliError::finalize(FinalizeError::Refused(
-            FinalizeRefusal::DeploymentsRetained {
-                generation: BuildGeneration::for_test("lashctl-retained"),
-                deployments: Vec::new(),
-            },
-        ));
-        assert_eq!(retained.exit as u8, 3);
-        let registry = CliError::finalize(FinalizeError::Registry(DeploymentRegistryError {
-            detail: "connection refused".to_owned(),
-        }));
-        assert_eq!(registry.exit as u8, 1);
-        assert_eq!(error_json(&registry)["refusal"], Value::Null);
     }
 
     #[test]

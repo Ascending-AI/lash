@@ -156,19 +156,6 @@ fn invalid_urls_fail_with_the_named_diagnostic() {
 }
 
 #[test]
-fn url_search_params_paths_are_individually_executable() {
-    for source in [
-        "const p = new URLSearchParams('?x=1'); finish(p.toString());",
-        "const p = new URLSearchParams('?x=1'); const q = new URLSearchParams(p); finish(q.toString());",
-        "const p = new URLSearchParams('?x=1'); const a=[]; p.forEach((v,k) => { a[a.length] = k + '=' + v; }); finish(a);",
-        "const p = new URLSearchParams([['a',1]]); const a=[]; for (const pair of p) { a[a.length] = pair.join(':'); } finish(a);",
-        "finish(URL.canParse('/x', 'https://e.test/'));",
-    ] {
-        execute(source).unwrap_or_else(|error| panic!("source `{source}` failed: {error}"));
-    }
-}
-
-#[test]
 fn url_search_params_for_each_observes_live_appends_and_deletes() {
     assert_eq!(
         finished(

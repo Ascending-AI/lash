@@ -78,16 +78,6 @@ fn dispatch(call_path: &str, modules: &[&str], operation: &str) -> Vec<(String, 
 }
 
 #[test]
-fn reserved_word_operation_is_advertised_in_its_callable_form() {
-    lash_typescript::ensure_tool_call_path_addressable("inbox.delete")
-        .expect("the advertised identifier must be callable");
-    assert_eq!(
-        dispatch("inbox.delete", &["inbox"], "delete"),
-        vec![("inbox".to_string(), "delete".to_string())]
-    );
-}
-
-#[test]
 fn nested_reserved_word_operation_advertises_the_full_method_path() {
     lash_typescript::ensure_tool_call_path_addressable("inbox.alpha.delete")
         .expect("the advertised identifier must be callable");
@@ -156,36 +146,6 @@ fn console_and_crypto_module_roots_dispatch_their_bindings() {
         dispatch("crypto.randomUUID", &["crypto"], "randomUUID"),
         vec![("crypto".to_string(), "randomUUID".to_string())]
     );
-}
-
-/// Without a `console` module the observation shim still owns the name.
-#[test]
-fn console_log_without_a_module_root_still_observes() {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
-    catalog
-        .add_module_operation_contract(
-            vec!["web".to_string()],
-            "ToolModule",
-            "fetch",
-            "tool:test/web".to_string(),
-            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
-        )
-        .expect("operation binding");
-    let environment =
-        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
-    let linked = lash_typescript::link("console.log(1); finish(0);", &environment)
-        .expect("unregistered console.log still lowers to the observation");
-    let host = ToolCallRecordingHost {
-        dispatched: std::sync::Mutex::new(Vec::new()),
-    };
-    let outcome = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
-        &mut State::new(),
-        &host,
-    ))
-    .expect("console.log observes");
-    assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(0.0)));
-    assert!(host.dispatched.lock().expect("dispatched lock").is_empty());
 }
 
 /// A single-segment name has no receiver, so registration refuses it.

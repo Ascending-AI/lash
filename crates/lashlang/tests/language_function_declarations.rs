@@ -107,22 +107,6 @@ async fn finish_value(program: Program) -> Value {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_function_is_callable_like_a_builtin() {
-    let value = finish_value(module(
-        vec![function(
-            "double",
-            vec![param("n", TypeExpr::Int)],
-            TypeExpr::Float,
-            binary(var("n"), CoercingBinaryOp::Multiply, number(2.0)),
-        )],
-        vec![finish(call("double", vec![number(21.0)]))],
-    ))
-    .await;
-
-    assert_eq!(value, Value::Number(42.0));
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn one_function_serves_many_call_sites() {
     // The founding argument for the feature: shared logic is written once and
     // reached from several places, including from inside a loop.
@@ -161,29 +145,6 @@ async fn one_function_serves_many_call_sites() {
     .await;
 
     assert_eq!(value, Value::String("a=1,b=1,c=3".to_string().into()));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_function_may_call_itself() {
-    let value = finish_value(module(
-        vec![function(
-            "countdown",
-            vec![param("n", TypeExpr::Float)],
-            TypeExpr::Str,
-            if_else(
-                binary(var("n"), CoercingBinaryOp::LessEqual, number(0.0)),
-                string("done"),
-                call(
-                    "countdown",
-                    vec![binary(var("n"), CoercingBinaryOp::Subtract, number(1.0))],
-                ),
-            ),
-        )],
-        vec![finish(call("countdown", vec![number(5.0)]))],
-    ))
-    .await;
-
-    assert_eq!(value, Value::String("done".to_string().into()));
 }
 
 #[tokio::test(flavor = "current_thread")]

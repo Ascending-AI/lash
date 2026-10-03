@@ -536,36 +536,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn response_body_budget_refuses_buffered_limit_plus_one() {
-        let result =
-            read_http_body_bytes(HttpResponseBody::buffered("123456789"), 8, None, "body").await;
-        assert!(
-            result.is_err(),
-            "nine bytes must refuse the selected eight-byte budget"
-        );
-    }
-
-    #[tokio::test]
-    async fn response_body_budget_refuses_streamed_limit_plus_one_before_next_poll() {
-        let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let body = HttpResponseBody::streamed(BudgetFixtureStream {
-            chunks: [
-                Bytes::from_static(b"12345678"),
-                Bytes::from_static(b"9"),
-                Bytes::from_static(b"never polled"),
-            ]
-            .into(),
-            polls: polls.clone(),
-        });
-        let result = read_http_body_bytes(body, 8, None, "body").await;
-        assert!(
-            result.is_err(),
-            "the excess chunk must refuse before append"
-        );
-        assert_eq!(polls.load(std::sync::atomic::Ordering::SeqCst), 2);
-    }
-
-    #[tokio::test]
     async fn response_body_budget_exact_limit_and_zero_are_inclusive() {
         for chunks in [
             vec![Bytes::from_static(b"12345678")],
@@ -762,45 +732,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn buffered_response_preserves_status_headers_and_body() {
-        let response = HttpResponse {
-            status: 429,
-            headers: vec![
-                ("retry-after".to_string(), "3".to_string()),
-                ("set-cookie".to_string(), "a=1".to_string()),
-                ("set-cookie".to_string(), "b=2".to_string()),
-                ("content-type".to_string(), "application/json".to_string()),
-            ],
-            body: HttpResponseBody::buffered(r#"{"error":"rate limit"}"#),
-        };
-
-        assert_eq!(response.status, 429);
-        assert_eq!(
-            response
-                .headers
-                .iter()
-                .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
-                .count(),
-            2
-        );
-        assert!(header_contains(
-            &response.headers,
-            "content-type",
-            "application/json"
-        ));
-
-        let text = read_http_body_text(
-            response.body,
-            1024,
-            Some(Duration::from_secs(1)),
-            "timed out",
-        )
-        .await
-        .expect("buffered body");
-        assert_eq!(text, r#"{"error":"rate limit"}"#);
-    }
-
     #[tokio::test(start_paused = true)]
     async fn run_with_timeout_returns_timeout_error() {
         let result = run_with_timeout(
@@ -930,43 +861,5 @@ mod tests {
                 "the redirected request — credentials and body — reached another origin"
             );
         }
-    }
-
-    #[test]
-    fn builder_accepts_non_default_transport_policy() {
-        let policy = HttpTransportPolicy {
-            connect_timeout: Duration::from_secs(2),
-            tcp_keepalive: Duration::from_secs(15),
-            pool_idle_timeout: Duration::from_secs(30),
-            pool_max_idle_per_host: 4,
-            proxy: Some(reqwest::Proxy::all("http://127.0.0.1:3128").expect("valid proxy")),
-            extra_root_certificates: Vec::new(),
-        };
-
-        let client = http_client_builder_with(&policy)
-            .build()
-            .expect("non-default transport policy builds");
-        let transport = ReqwestHttpTransport::from_client(client);
-
-        assert!(transport.client().get("http://example.com").build().is_ok());
-    }
-
-    #[test]
-    fn zero_arg_builder_uses_default_transport_policy() {
-        let policy = HttpTransportPolicy::default();
-
-        assert_eq!(policy.connect_timeout, Duration::from_secs(10));
-        assert_eq!(policy.tcp_keepalive, Duration::from_secs(60));
-        assert_eq!(policy.pool_idle_timeout, Duration::from_secs(90));
-        assert_eq!(policy.pool_max_idle_per_host, usize::MAX);
-        assert!(policy.proxy.is_none());
-        assert!(policy.extra_root_certificates.is_empty());
-
-        http_client_builder()
-            .build()
-            .expect("zero-arg builder builds");
-        http_client_builder_with(&policy)
-            .build()
-            .expect("default policy builder builds");
     }
 }

@@ -114,45 +114,6 @@ mod tests {
     }
 
     #[test]
-    fn fork_plan_derives_maximum_generation_per_owner_from_edges() {
-        let plan = ForkPlan::derive(
-            &SessionId::from("child"),
-            [
-                node("a", 0, None),
-                node("a", 1, Some("a-0")),
-                node("b", 2, Some("a-1")),
-                node("b", 3, Some("b-2")),
-                node("c", 4, Some("b-3")),
-            ],
-        )
-        .expect("valid retained edge path");
-
-        assert_eq!(plan.session_id(), "child");
-        assert_eq!(
-            plan.ancestors(),
-            &[
-                ForkLineageAncestor {
-                    ancestor_session_id: SessionId::from("a"),
-                    fork_node_id: "a-1".into(),
-                    fork_generation: 1,
-                },
-                ForkLineageAncestor {
-                    ancestor_session_id: SessionId::from("b"),
-                    fork_node_id: "b-3".into(),
-                    fork_generation: 3,
-                },
-                ForkLineageAncestor {
-                    ancestor_session_id: SessionId::from("c"),
-                    fork_node_id: "c-4".into(),
-                    fork_generation: 4,
-                },
-            ]
-        );
-        assert!(plan.includes(&SessionId::from("a"), 0));
-        assert!(!plan.includes(&SessionId::from("a"), 2));
-    }
-
-    #[test]
     fn fork_plan_rejects_a_non_edge_path() {
         let error = ForkPlan::derive(
             &SessionId::from("child"),

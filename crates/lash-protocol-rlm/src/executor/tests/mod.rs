@@ -1,6 +1,4 @@
-use crate::projection::{
-    flow_record_to_json_value, flow_record_to_tool_args, flow_to_json_value, projected_index,
-};
+use crate::projection::{flow_record_to_tool_args, flow_to_json_value, projected_index};
 use lash_lashlang_runtime::ToolDefinitionBindingExt;
 use lash_rlm_types::PROJECTED_JSON_TAG;
 use lash_sansio::ProcessId;

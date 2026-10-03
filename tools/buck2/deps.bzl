@@ -107,7 +107,6 @@ PACKAGE_DEPS = {
             "lash_core_worker": "//crates/lash-core-worker:lash-core-worker",
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
-            "proptest": "//third-party/rust:p0263",
             "tempfile": "//third-party/rust:p0390",
             "tokio": "//third-party/rust:p0399",
             "tracing_subscriber": "//third-party/rust:p0418"
@@ -284,7 +283,6 @@ PACKAGE_DEPS = {
         "dev": {
             "criterion": "//third-party/rust:p0073",
             "futures": "//third-party/rust:p0125",
-            "insta": "//third-party/rust:p0177",
             "jsonschema": "//third-party/rust:p0196",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_typescript": "//crates/lash-typescript:lash-typescript",
@@ -446,7 +444,6 @@ PACKAGE_DEPS = {
     "lash-internal-postgres-store": {
         "build": {},
         "dev": {
-            "fastrand": "//third-party/rust:p0114",
             "lash": "//crates/lash:lash",
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
@@ -456,7 +453,6 @@ PACKAGE_DEPS = {
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lashlang": "//crates/lashlang:lashlang",
-            "rusqlite": "//third-party/rust:p0305",
             "tempfile": "//third-party/rust:p0390",
             "tokio": "//third-party/rust:p0399",
             "tracing_subscriber": "//third-party/rust:p0418"
@@ -525,7 +521,6 @@ PACKAGE_DEPS = {
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_worker": "//crates/lash-core-worker:lash-core-worker",
-            "lash_plugin_process_controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
@@ -550,7 +545,6 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",
-            "proptest": "//third-party/rust:p0263",
             "tokio": "//third-party/rust:p0399"
         },
         "normal": {
@@ -591,7 +585,6 @@ PACKAGE_DEPS = {
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_provider_google": "//crates/lash-provider-google:lash-provider-google",
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
-            "proptest": "//third-party/rust:p0263",
             "tokio": "//third-party/rust:p0399"
         },
         "normal": {
@@ -894,7 +887,6 @@ PACKAGE_DEPS = {
             "lashlang": "//crates/lashlang:lashlang",
             "serde": "//third-party/rust:p0331",
             "serde_yaml": "//third-party/rust:p0343",
-            "strum": "//third-party/rust:p0373",
             "swc_common": "//third-party/rust:p0379",
             "swc_ecma_ast": "//third-party/rust:p0380",
             "tokio": "//third-party/rust:p0399"

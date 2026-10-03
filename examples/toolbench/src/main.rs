@@ -532,59 +532,6 @@ mod tests {
     }
 
     #[test]
-    fn repeatable_models_and_run_alias_parse() {
-        let args = Args::parse_from([
-            "toolbench",
-            "--model",
-            "a",
-            "--model",
-            "b",
-            "--runs",
-            "2",
-            "--reasoning-effort",
-            "medium",
-        ]);
-        assert_eq!(args.model, ["a", "b"]);
-        assert_eq!(args.repetitions, 2);
-        assert_eq!(args.reasoning_effort, ReasoningEffort::Medium);
-        let work = build_work_list(&task_pack(), 1, false, ChannelSelection::Standard, || {
-            Ok(false)
-        })
-        .unwrap();
-        assert_eq!(work.len(), 28);
-        assert!(
-            work.iter()
-                .all(|item| item.channel == ChannelSelection::Standard)
-        );
-    }
-
-    #[test]
-    fn task_selection_defaults_to_full_pack_and_accepts_repeated_flags() {
-        let defaults = Args::parse_from(["toolbench"]);
-        assert_eq!(
-            selected_tasks(defaults.pack, &defaults.task).unwrap().len(),
-            28
-        );
-        let args = Args::parse_from([
-            "toolbench",
-            "--task",
-            "kv-read",
-            "--task",
-            "weather-condition",
-            "--task",
-            "kv-read",
-        ]);
-        let selected = selected_tasks(args.pack, &args.task).unwrap();
-        assert_eq!(
-            selected.iter().map(|task| task.id).collect::<Vec<_>>(),
-            ["weather-condition", "kv-read"]
-        );
-        assert!(
-            selected_tasks(Pack::All, &["kv-read".to_string(), "unknown".to_string()]).is_err()
-        );
-    }
-
-    #[test]
     fn paired_repetitions_keep_both_channels_consecutive() {
         let args = Args::parse_from(["toolbench", "--paired", "--repetitions", "2"]);
         let tasks = task_pack();

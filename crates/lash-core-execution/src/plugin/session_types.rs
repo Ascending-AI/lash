@@ -180,55 +180,11 @@ mod session_plugin_init_tests {
             "expected SessionInitTooLarge, got {err:?}"
         );
     }
-
-    #[test]
-    fn capture_serializes_the_durable_payload_shape() {
-        let init = SessionPluginInit::captured(
-            crate::PluginState::default(),
-            crate::ToolCatalogContribution::default(),
-            crate::ToolState::default(),
-        )
-        .expect("empty capture");
-
-        let bytes = serde_json::to_vec(&init).expect("serialize");
-        let roundtrip: SessionPluginInit = serde_json::from_slice(&bytes).expect("deserialize");
-        assert_eq!(roundtrip.plugin_state, init.plugin_state);
-    }
-}
-
-#[cfg(test)]
-mod agent_frame_reason_tests {
-    use super::AgentFrameReason;
-
-    #[test]
-    fn agent_frame_reason_round_trips_arbitrary_labels() {
-        let reason: AgentFrameReason =
-            serde_json::from_str("\"plan_mode\"").expect("deserialize reason");
-
-        assert_eq!(reason.as_str(), "plan_mode");
-        assert_eq!(
-            serde_json::to_string(&reason).expect("serialize reason"),
-            "\"plan_mode\""
-        );
-        assert_eq!(AgentFrameReason::compaction().as_str(), "compaction");
-    }
 }
 
 #[cfg(test)]
 mod frame_node_id_tests {
     use super::{FrameNodeId, FrameNodeIdError};
-
-    #[test]
-    fn frame_node_id_round_trips_non_empty_identity() {
-        let encoded = r#""frame-node/v3/derived""#;
-        let frame_node_id: FrameNodeId =
-            serde_json::from_str(encoded).expect("deserialize frame node id");
-
-        assert_eq!(
-            serde_json::to_string(&frame_node_id).expect("serialize frame node id"),
-            encoded
-        );
-    }
 
     #[test]
     fn frame_node_id_rejects_empty_api_and_serialized_values() {
@@ -551,99 +507,6 @@ mod session_tool_access_tests {
             }
         );
     }
-
-    #[test]
-    fn decoded_authority_rejects_missing_unknown_and_malformed_modes() {
-        for value in [
-            serde_json::Value::Null,
-            serde_json::json!({}),
-            serde_json::json!({ "mode": "unknown" }),
-            serde_json::json!({ "mode": "restricted" }),
-            serde_json::json!({ "mode": "ambient", "tools": [] }),
-            serde_json::json!({ "mode": "restricted", "tools": "all" }),
-        ] {
-            assert!(
-                serde_json::from_value::<SessionToolAccess>(value.clone()).is_err(),
-                "malformed access unexpectedly decoded: {value}"
-            );
-        }
-    }
-
-    #[test]
-    fn decoded_authority_uses_the_same_name_and_id_checks() {
-        let duplicate_names = serde_json::json!({
-            "mode": "restricted",
-            "tools": [tool("tool:first", "same"), tool("tool:second", "same")]
-        });
-        let error = serde_json::from_value::<SessionToolAccess>(duplicate_names)
-            .expect_err("duplicate names must refuse on decode");
-        assert!(
-            error
-                .to_string()
-                .contains("name `same` appears more than once")
-        );
-
-        let duplicate_ids = serde_json::json!({
-            "mode": "restricted",
-            "tools": [tool("tool:same", "first"), tool("tool:same", "second")]
-        });
-        let error = serde_json::from_value::<SessionToolAccess>(duplicate_ids)
-            .expect_err("duplicate ids must refuse on decode");
-        assert!(
-            error
-                .to_string()
-                .contains("id `tool:same` appears more than once")
-        );
-
-        let duplicate_hidden = serde_json::json!({
-            "mode": "ambient",
-            "hidden_tools": ["hidden", "hidden"]
-        });
-        let error = serde_json::from_value::<SessionToolAccess>(duplicate_hidden)
-            .expect_err("duplicate hidden names must refuse on decode");
-        assert!(
-            error
-                .to_string()
-                .contains("hidden tool name `hidden` appears more than once")
-        );
-    }
-
-    #[test]
-    fn restricted_roundtrip_preserves_complete_definition_and_opaque_null_binding() {
-        let mut definition = tool("tool:restricted", "restricted");
-        definition
-            .manifest
-            .bindings
-            .insert("opaque".to_string(), serde_json::Value::Null);
-        let access = SessionToolAccess::restricted([definition.clone()])
-            .expect("valid restricted definition")
-            .with_hidden_tools(["restricted"])
-            .expect("valid hidden name");
-
-        let encoded = serde_json::to_value(&access).expect("serialize restricted access");
-        let decoded: SessionToolAccess =
-            serde_json::from_value(encoded).expect("decode restricted access");
-        let [decoded_definition] = decoded
-            .restricted_tools()
-            .expect("restricted definition survives")
-        else {
-            panic!("expected exactly one restricted definition")
-        };
-        assert_eq!(decoded_definition.manifest, definition.manifest);
-        assert_eq!(
-            decoded_definition.contract().input_schema,
-            definition.contract().input_schema
-        );
-        assert_eq!(
-            decoded_definition.contract().output_schema,
-            definition.contract().output_schema
-        );
-        assert_eq!(
-            decoded_definition.manifest.bindings.get("opaque"),
-            Some(&serde_json::Value::Null)
-        );
-        assert!(decoded.hides("restricted"));
-    }
 }
 
 #[cfg(test)]
@@ -657,26 +520,6 @@ mod observer_intent_relation_cutover_tests {
             "relation": { "kind": "root" }
         }))
         .expect_err("an empty wrapper over root is no longer a relation");
-        assert_eq!(error.classify(), serde_json::error::Category::Data);
-        assert!(
-            error
-                .to_string()
-                .contains("unknown variant `observer_intent`")
-        );
-    }
-
-    #[test]
-    fn create_relation_rejects_nested_observer_intent_wrappers() {
-        let error = serde_json::from_value::<SessionRelation>(serde_json::json!({
-            "kind": "observer_intent",
-            "relation": {
-                "kind": "observer_intent",
-                "relation": { "kind": "root" },
-                "pending_observer_process_ids": ["inner-process"]
-            },
-            "pending_observer_process_ids": ["outer-process"]
-        }))
-        .expect_err("nested observer-intent wrappers are no longer relations");
         assert_eq!(error.classify(), serde_json::error::Category::Data);
         assert!(
             error

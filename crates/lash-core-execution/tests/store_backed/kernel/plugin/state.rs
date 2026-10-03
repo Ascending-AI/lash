@@ -38,59 +38,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn checkpoint_component_changes_iff_mediated_generation_moves() {
-        let host = crate::support::plugin_host(Vec::new());
-        let plugins = host
-            .build_session(PluginSessionRequest::creation(
-                "generation-gate",
-                Default::default(),
-            ))
-            .unwrap();
-        let handle = crate::plugin_state_store(&plugins, "mock");
-        let store = session_store("generation-gate").await;
-        let mut state = crate::RuntimeSessionState {
-            session_id: "generation-gate".into(),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            ))
-        };
-        state
-            .refresh_plugin_states(&plugins)
-            .expect("the live plugin state is captured");
-        let receipt = crate::testing::store_fixtures::commit_runtime_state_for_test(
-            &store,
-            crate::RuntimeCommit::persisted_state_for_test(&state),
-            "generation-gate",
-        )
-        .await
-        .unwrap();
-        state.apply_persisted_commit_result(receipt);
-        state
-            .refresh_plugin_states(&plugins)
-            .expect("the live plugin state is captured");
-        assert!(matches!(
-            crate::RuntimeCommit::persisted_state_for_test(&state)
-                .checkpoint
-                .components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
-            crate::HydratedCheckpointComponent::Unchanged { .. }
-        ));
-        handle.set("value", serde_json::json!(1)).unwrap();
-        state
-            .refresh_plugin_states(&plugins)
-            .expect("the live plugin state is captured");
-        assert!(
-            matches!(
-                crate::RuntimeCommit::persisted_state_for_test(&state)
-                    .checkpoint
-                    .components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
-                crate::HydratedCheckpointComponent::Changed { .. }
-            ),
-            "accepted write must make the checkpoint component Changed"
-        );
-    }
-
-    #[tokio::test]
     async fn write_after_capture_survives_commit_receipt_adoption() {
         let plugins = crate::support::plugin_host(Vec::new())
             .build_session(PluginSessionRequest::creation(

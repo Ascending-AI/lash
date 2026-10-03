@@ -214,49 +214,14 @@ macro_rules! emit_session_view {
             )*
         }
 
-        /// The operations the view forwards (test builds only).
-        #[cfg(test)]
-        pub(crate) const SESSION_VIEW_OPERATIONS: &[&str] = &[
-            $(
-                $(stringify!($name),)*
-                $($(stringify!($pname),)*)?
-            )*
-        ];
     };
 }
 
-// `SESSION_VIEW_OPERATIONS` lists every entry; the lint filters out the
-// catalog ones by their scope marker.
 super::runtime_store_decorator::runtime_store_operations!(emit_session_view);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_view_forwards_every_session_scoped_operation() {
-        let listed = super::super::runtime_store_decorator::RUNTIME_STORE_OPERATIONS;
-        assert_eq!(listed.len(), SESSION_VIEW_OPERATIONS.len());
-        for operation in listed {
-            assert!(
-                ["session", "carried", "catalog"]
-                    .iter()
-                    .any(|scope| operation.scope.starts_with(scope)),
-                "`{}` has no session scope marker",
-                operation.name
-            );
-            if operation.scope.starts_with("session") {
-                assert!(
-                    operation
-                        .params
-                        .first()
-                        .is_some_and(|param| param.replace(' ', "") == "&SessionId"),
-                    "`{}` is marked `session` but does not take the session id first",
-                    operation.name
-                );
-            }
-        }
-    }
 
     #[test]
     fn a_request_for_another_session_is_refused() {

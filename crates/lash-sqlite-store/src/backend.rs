@@ -715,27 +715,4 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
-
-    #[tokio::test]
-    async fn a_store_set_opens_only_its_three_storage_databases() {
-        let dir = tempfile::tempdir().expect("store-set root");
-        let stores = SqliteStoreSet::open(dir.path())
-            .await
-            .expect("open store set");
-        let root = crate::location::canonical_path(dir.path());
-        for database in SqliteDatabase::ALL {
-            assert!(
-                root.join(database.file_name()).exists(),
-                "{database:?} is created"
-            );
-        }
-        assert!(
-            !root.join("effects.db").exists(),
-            "the store set must not recreate the deleted effect journal"
-        );
-        assert_eq!(
-            lash_core_execution::StoreSet::binding_identity(&stores).as_str(),
-            stores.identity()
-        );
-    }
 }

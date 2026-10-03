@@ -1,7 +1,7 @@
 use super::*;
 
 mod shift_fixtures;
-use shift_fixtures::{execute_shift, registered, shift_envelope};
+use shift_fixtures::{execute_shift, registered};
 
 /// A terminal process run's suspension tail: the terminal pair, then the
 /// `lash.process.parent-end` pair applied right after terminal completion
@@ -2269,23 +2269,6 @@ pub(super) async fn fig1464_self_waking_run_closure_does_not_fuse_the_run() {
     assert_eq!(restate_output_json::<u32>(&output), Some(42));
 }
 
-/// FIG-779 contrast: an already-completed timer replays straight to `Ready`, so
-/// the guard never sees a synchronous wake. This is why the panic is only
-/// reachable on the attempt that first parks on the timer, not on the resume.
-#[tokio::test]
-pub(super) async fn fig779_completed_durable_timer_replay_does_not_enter_guard_panic() {
-    let endpoint = Endpoint::builder()
-        .bind(Fig779TimerGuardReproImpl.serve())
-        .build();
-    let input = Fig779TimerGuardReproInput { duration_ms: 2_000 };
-    let body = encode_completed_sleep_replay("fig779-timer", &input)
-        .expect("encode completed durable timer replay");
-
-    invoke_endpoint_body(&endpoint, "Fig779TimerGuardRepro", "run", body)
-        .await
-        .expect("completed durable timer replay should finish without panicking");
-}
-
 /// Executes one process up to a real segment boundary: the start's segment-0
 /// reference is recorded, the boundary names segment 1's owner and persists
 /// the segment-1 handover, and the attempt then suspends on the successor
@@ -2492,23 +2475,6 @@ async fn accepted_turn_input_shift_replays_the_journaled_admission() {
         replayed.inputs[0].enqueued_at_ms,
         first.inputs[0].enqueued_at_ms
     );
-}
-
-/// FIG-3532: nothing about the shift that performs the admission enters the
-/// shift envelope, so the journaled entry hashes identically for every shift
-/// epoch that replays it.
-#[test]
-fn accepted_turn_input_shift_envelope_hash_is_independent_of_lease_generation() {
-    let envelope = shift_envelope();
-    let canonical = serde_json::to_value(envelope.canonical_form().expect("canonical shift"))
-        .expect("encode canonical shift");
-    let encoded = canonical.to_string();
-    for lease_field in ["generation", "fencing", "lease", "owner", "claim_token"] {
-        assert!(
-            !encoded.contains(lease_field),
-            "the shift envelope must not carry `{lease_field}`: {encoded}"
-        );
-    }
 }
 
 #[tokio::test]

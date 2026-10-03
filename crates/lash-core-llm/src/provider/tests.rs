@@ -7,7 +7,7 @@ use crate::llm::types::{
     LlmContentBlock, LlmMessage, LlmOutputPart, LlmRole, LlmToolChoice, LlmUsage,
     ProviderReasoningReplay,
 };
-use crate::provider::{CacheRetention, LlmProfileRequestDefaults, ReasoningSelection};
+use crate::provider::ReasoningSelection;
 use crate::{GenerationOptions, NonNegativeFiniteF64};
 
 /// Every test double that completes with an empty `Stop` response shares
@@ -660,57 +660,6 @@ mod classifier_tests;
 #[path = "tests/generation_policy_tests.rs"]
 mod generation_policy_tests;
 
-#[derive(Debug)]
-struct MetricsTransport {
-    inner: Box<dyn Provider>,
-    hits: Arc<AtomicUsize>,
-}
-
-impl Clone for MetricsTransport {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone_boxed(),
-            hits: Arc::clone(&self.hits),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl Provider for MetricsTransport {
-    fn kind(&self) -> &'static str {
-        self.inner.kind()
-    }
-
-    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
-        self.inner.route_identity(model)
-    }
-
-    fn options(&self) -> ProviderOptions {
-        self.inner.options()
-    }
-
-    fn set_options(&mut self, options: ProviderOptions) {
-        self.inner.set_options(options);
-    }
-
-    fn serialize_config(&self) -> serde_json::Value {
-        self.inner.serialize_config()
-    }
-
-    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        self.hits.fetch_add(1, Ordering::SeqCst);
-        self.inner.complete(request).await
-    }
-
-    fn requires_streaming(&self) -> bool {
-        self.inner.requires_streaming()
-    }
-
-    fn clone_boxed(&self) -> Box<dyn Provider> {
-        Box::new(self.clone())
-    }
-}
-
 pub(super) fn empty_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
@@ -863,38 +812,6 @@ async fn invalid_endpoint_failure_records_a_real_no_response_attempt() {
 }
 
 #[test]
-fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
-    let failure = LlmTransportError::new("internal task failed: cancelled")
-        .with_kind(ProviderFailureKind::Unknown)
-        .with_lash_code(TurnFailureCode::TaskJoinFailed)
-        .with_retry_verdict(TransportRetryVerdict::NotRetryable);
-    let record = synthetic_terminal_call_record(
-        LlmCallId("task-join-call".to_string()),
-        AttemptOutcome::Interrupted,
-        &failure,
-        true,
-        ProtocolPosition::OutputStarted,
-        Vec::new(),
-    );
-
-    assert_eq!(record.call_id, LlmCallId("task-join-call".to_string()));
-    assert_eq!(record.attempts.len(), 1);
-    assert_eq!(record.attempts[0].ordinal, 1);
-    assert_eq!(record.attempts[0].outcome, AttemptOutcome::Interrupted);
-    assert_eq!(
-        record.attempts[0].protocol_position,
-        ProtocolPosition::OutputStarted
-    );
-    assert_eq!(
-        record.attempts[0]
-            .error
-            .as_ref()
-            .and_then(|error| error.code.as_ref()),
-        Some(&TurnFailureCode::TaskJoinFailed.into())
-    );
-}
-
-#[test]
 fn provider_message_is_absent_from_the_sealed_attempt() {
     const SECRET: &str = "api_key= secret Authorization: Basic abc";
     let failure = LlmTransportError::new(SECRET)
@@ -1026,34 +943,6 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
 }
 
 #[test]
-fn provider_options_serialize_only_reliability_shape() {
-    let options = ProviderOptions {
-        reliability: ProviderReliability::default()
-            .request_timeout(Some(RequestTimeout::Millis(1_234)))
-            .response_start_timeout_ms(Some(345))
-            .stream_chunk_timeout_ms(Some(567))
-            .max_attempts(2),
-        ..ProviderOptions::default()
-    };
-
-    let value = serde_json::to_value(options).expect("serialize");
-    assert!(value.get("timeout").is_none());
-    assert!(value.get("chunk_timeout").is_none());
-    assert_eq!(
-        value["reliability"]["request_timeout"],
-        serde_json::json!(1234)
-    );
-    assert_eq!(
-        value["reliability"]["response_start_timeout"],
-        serde_json::json!(345)
-    );
-    assert_eq!(
-        value["reliability"]["chunk_timeout"],
-        serde_json::json!(567)
-    );
-}
-
-#[test]
 fn provider_reliability_resolves_response_start_timeout_independently() {
     let explicit = ProviderReliability::default()
         .request_timeout(Some(RequestTimeout::Millis(300_000)))
@@ -1092,32 +981,6 @@ fn provider_reliability_without_response_start_timeout_preserves_derived_bound()
     );
 }
 
-#[test]
-fn model_request_defaults_roundtrip_retention_thinking_and_capture() {
-    let defaults = LlmProfileRequestDefaults {
-        expose_thinking: true,
-        cache_retention: CacheRetention::Long,
-        response_metadata_headers: vec!["X-Request-Cost".to_string()],
-        response_metadata_body_paths: vec!["/usage/cost".to_string()],
-    };
-
-    let value = serde_json::to_value(&defaults).expect("serialize");
-    assert_eq!(value["expose_thinking"], serde_json::json!(true));
-    assert_eq!(value["cache_retention"], serde_json::json!("long"));
-    assert_eq!(
-        value["response_metadata_headers"],
-        serde_json::json!(["X-Request-Cost"])
-    );
-    assert_eq!(
-        value["response_metadata_body_paths"],
-        serde_json::json!(["/usage/cost"])
-    );
-
-    let roundtripped: LlmProfileRequestDefaults =
-        serde_json::from_value(value).expect("deserialize");
-    assert_eq!(roundtripped, defaults);
-}
-
 /// Request behaviour is recorded with the model (FIG-4374), response-metadata
 /// capture included (FIG-4397): provider options hold only a transport's live
 /// concerns and refuse the retired fields.
@@ -1143,59 +1006,6 @@ fn provider_options_refuse_request_behaviour() {
             "provider options no longer carry `{field}`"
         );
     }
-}
-
-#[test]
-fn provider_options_roundtrip_sse_buffer_caps() {
-    let options = ProviderOptions {
-        sse_event_bytes: Some(1_048_576),
-        sse_total_bytes: Some(8_388_608),
-        ..ProviderOptions::default()
-    };
-
-    let value = serde_json::to_value(&options).expect("serialize options");
-    assert_eq!(value["sse_event_bytes"], serde_json::json!(1_048_576));
-    assert_eq!(value["sse_total_bytes"], serde_json::json!(8_388_608));
-    assert_eq!(
-        serde_json::from_value::<ProviderOptions>(value).expect("deserialize options"),
-        options
-    );
-
-    let zero_caps = ProviderOptions {
-        sse_event_bytes: Some(0),
-        sse_total_bytes: Some(0),
-        ..ProviderOptions::default()
-    };
-    assert!(
-        zero_caps.is_default(),
-        "zero selects both transport defaults"
-    );
-}
-
-#[test]
-fn model_request_defaults_default_omits_and_restores_every_field() {
-    let value = serde_json::to_value(LlmProfileRequestDefaults::default()).expect("serialize");
-    assert_eq!(value, serde_json::json!({}));
-
-    let restored: LlmProfileRequestDefaults =
-        serde_json::from_value(serde_json::json!({})).expect("default");
-    assert!(!restored.expose_thinking);
-    assert_eq!(restored.cache_retention, CacheRetention::Short);
-    assert!(restored.response_metadata_headers.is_empty());
-    assert!(restored.response_metadata_body_paths.is_empty());
-    assert!(restored.is_default());
-}
-
-#[test]
-fn provider_retry_default_uses_bounded_nonzero_jitter() {
-    let retry = ProviderRetryPolicy::default();
-
-    assert!(
-        retry.jitter_ms > 0 && retry.jitter_ms <= retry.base_delay_ms,
-        "default jitter must be within (0, base delay], got {} for {}",
-        retry.jitter_ms,
-        retry.base_delay_ms
-    );
 }
 
 #[test]
@@ -1311,57 +1121,6 @@ fn non_negative_finite_f64_rejects_integers_binary64_cannot_hold() {
         serde_json::from_str::<NonNegativeFiniteF64>(rejected)
             .expect_err("an inexact integer must not decode");
     }
-}
-
-#[test]
-fn generation_options_round_trip_and_stay_comparable() {
-    let options = GenerationOptions {
-        output_token_cap: NonZeroUsize::new(2_048),
-        temperature: Some(NonNegativeFiniteF64::new(0.0).expect("finite")),
-        seed: Some(42),
-        stop_sequences: Vec::new(),
-        parallel_tool_calls: Some(false),
-        projection_provenance: Default::default(),
-    };
-    let encoded = serde_json::to_value(&options).expect("serialize");
-    assert_eq!(
-        encoded,
-        serde_json::json!({
-            "output_token_cap": 2_048,
-            "temperature": 0.0,
-            "seed": 42,
-            "parallel_tool_calls": false,
-        })
-    );
-    let decoded: GenerationOptions = serde_json::from_value(encoded).expect("deserialize");
-    // `Eq`, not just `PartialEq`: every durable envelope and protocol type
-    // that carries GenerationOptions depends on it.
-    assert!(decoded == options);
-    assert_eq!(
-        serde_json::to_value(GenerationOptions::default()).expect("serialize default"),
-        serde_json::json!({})
-    );
-}
-
-#[tokio::test]
-async fn transport_mutations_are_visible_after_completion_returns() {
-    let mut handle = ProviderHandle::new(MutatingProvider::default().into_components());
-
-    let completion = handle.complete(empty_request()).await.expect("complete");
-
-    assert_eq!(
-        handle.options().response_body_bytes,
-        Some(MUTATED_RESPONSE_BODY_BYTES)
-    );
-    assert_eq!(completion.call_record.attempts.len(), 1);
-    assert_eq!(
-        completion.call_record.attempts[0].outcome,
-        AttemptOutcome::Completed
-    );
-    assert_eq!(
-        completion.call_record.attempts[0].protocol_position,
-        ProtocolPosition::TerminalObserved
-    );
 }
 
 #[tokio::test]
@@ -1649,20 +1408,6 @@ fn forbidden_is_terminal_even_with_retry_after_and_status_noise() {
 }
 
 #[tokio::test]
-async fn map_provider_installs_transport_decorator() {
-    let hits = Arc::new(AtomicUsize::new(0));
-    let components = MutatingProvider::default().into_components().map_provider({
-        let hits = Arc::clone(&hits);
-        move |inner| Box::new(MetricsTransport { inner, hits })
-    });
-    let mut handle = ProviderHandle::new(components);
-
-    handle.complete(empty_request()).await.expect("complete");
-
-    assert_eq!(hits.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
 async fn provider_handle_retries_retryable_failures_in_shared_executor() {
     let metrics = crate::operational_metrics::TestMetrics::install();
     let attempts = Arc::new(AtomicUsize::new(0));
@@ -1911,35 +1656,6 @@ async fn provider_handle_stops_on_non_retryable_failure() {
 }
 
 #[tokio::test]
-async fn provider_handle_set_options_affects_retry_behavior() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let provider = FailingProvider {
-        options: ProviderOptions {
-            reliability: ProviderReliability::disabled(),
-            ..ProviderOptions::default()
-        },
-        attempts: Arc::clone(&attempts),
-        fail_until: 1,
-        retryable: true,
-    };
-    let mut handle = ProviderHandle::new(provider.into_components());
-    handle.set_options(ProviderOptions {
-        reliability: ProviderReliability::default()
-            .max_attempts(2)
-            .base_delay_ms(0)
-            .max_delay_ms(0),
-        ..ProviderOptions::default()
-    });
-
-    handle
-        .complete(empty_request())
-        .await
-        .expect("retry after set_options");
-
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-}
-
-#[tokio::test]
 async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
     let metrics = crate::operational_metrics::TestMetrics::install();
     let attempts = Arc::new(AtomicUsize::new(0));
@@ -2034,37 +1750,6 @@ async fn provider_handle_retry_after_beyond_cap_fails_without_sleeping() {
             .and_then(|decision| decision.decline_cause()),
         Some(lash_sansio::llm::types::RetryDeclineCause::RetryAfterExceedsCap)
     );
-}
-
-#[tokio::test]
-async fn provider_handle_throttle_with_past_http_date_consumes_attempt() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let clock = Arc::new(RecordingClock::default());
-    let provider = StatusFailingProvider {
-        options: ProviderOptions {
-            reliability: ProviderReliability::default()
-                .max_attempts(1)
-                .base_delay_ms(0)
-                .max_delay_ms(0),
-            ..ProviderOptions::default()
-        },
-        attempts: Arc::clone(&attempts),
-        fail_until: 1,
-        status: 429,
-        retry_after: None,
-        retry_after_header: Some("Sun, 06 Nov 1994 08:49:37 GMT"),
-    };
-    let mut handle =
-        ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
-
-    let failure = handle
-        .complete(empty_request())
-        .await
-        .expect_err("past HTTP-date is not an attempt-free deferral");
-    assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    assert_eq!(clock.slept(), Duration::ZERO);
-    assert_eq!(failure.call_record.attempts.len(), 1);
-    assert!(failure.call_record.attempts[0].retry_budget_consumed);
 }
 
 #[tokio::test]

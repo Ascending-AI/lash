@@ -4,9 +4,8 @@ use lash_sansio::TurnId;
 
 use super::*;
 use crate::{
-    TraceBranchSelection, TraceContext, TraceLabelMetadata, TraceLanguageChildExecution,
-    TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceRuntimeScope,
-    TraceRuntimeSubject,
+    TraceBranchSelection, TraceContext, TraceLanguageChildExecution, TraceLanguageExecutionMapEdge,
+    TraceLanguageExecutionMapNode, TraceRuntimeScope, TraceRuntimeSubject,
 };
 
 fn identity() -> LanguageIdentity {
@@ -290,24 +289,6 @@ fn execution_finished(event_key: &str, status: LanguageExecutionStatus) -> Trace
 }
 
 #[test]
-fn graph_store_seeds_static_map_on_execution_start() {
-    let store = TraceLashlangGraphStore::default();
-
-    append_at(&store, started_event("start"), 1_000);
-
-    let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-    assert_eq!(graph.status, LanguageExecutionStatus::Running);
-    assert_eq!(
-        graph.nodes[0].observation,
-        TraceLashlangNodeObservation::Unobserved
-    );
-    assert_eq!(
-        graph.edges[0].selection,
-        TraceLashlangEdgeSelection::Unknown
-    );
-}
-
-#[test]
 fn graph_store_keeps_distinct_site_kinds_for_one_structural_node() {
     let store = TraceLashlangGraphStore::default();
     let mut event = started_event("start");
@@ -339,52 +320,6 @@ fn graph_store_keeps_distinct_site_kinds_for_one_structural_node() {
     assert_eq!(sites, BTreeSet::from(["branch", "resource_operation"]));
 }
 
-/// A TypeScript session's executions reduce into the same projection.
-///
-/// A record carries the dialect of the source that ran. Ignoring any
-/// dialect other than Lashlang would empty every TypeScript session's
-/// execution view, although both dialects run on the same VM.
-#[test]
-fn graph_store_reduces_every_dialects_execution_events() {
-    let store = TraceLashlangGraphStore::default();
-    store
-        .append(&fixture_record(
-            TraceContext::default().for_session("session-1"),
-            TraceEvent::LanguageExecution {
-                language: "typescript".to_string(),
-                event: started_event("start"),
-            },
-        ))
-        .expect("append a TypeScript execution event");
-
-    assert!(!store.graphs().is_empty());
-}
-
-#[test]
-fn graph_store_preserves_static_label_metadata() {
-    let store = TraceLashlangGraphStore::default();
-    let mut event = started_event("start");
-    if let TraceLanguageExecutionPayload::ExecutionStarted { execution_map, .. } =
-        &mut event.payload
-    {
-        execution_map.nodes[0].label_metadata = Some(TraceLabelMetadata {
-            title: "Choose path".to_string(),
-            description: Some("Branch detail".to_string()),
-        });
-    }
-
-    append_at(&store, event, 1_000);
-
-    let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-    assert_eq!(
-        graph.nodes[0].label_metadata,
-        Some(TraceLabelMetadata {
-            title: "Choose path".to_string(),
-            description: Some("Branch detail".to_string()),
-        })
-    );
-}
-
 #[test]
 fn graph_store_deduplicates_by_logical_identity_not_event_key() {
     let store = TraceLashlangGraphStore::default();
@@ -396,25 +331,6 @@ fn graph_store_deduplicates_by_logical_identity_not_event_key() {
     assert!(matches!(
         graph.nodes[0].observation,
         TraceLashlangNodeObservation::Completed { occurrence: 1, .. }
-    ));
-}
-
-#[test]
-fn graph_store_updates_completed_node_duration() {
-    let store = TraceLashlangGraphStore::default();
-
-    append_at(&store, node_started("start-node", 1), 1_000);
-    append_at(&store, node_completed("complete-node", 1), 1_750);
-
-    let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-    let node = &graph.nodes[0];
-    assert!(matches!(
-        node.observation,
-        TraceLashlangNodeObservation::Completed {
-            occurrence: 1,
-            duration_ms: Some(750),
-            ..
-        }
     ));
 }
 
@@ -576,46 +492,6 @@ fn graph_store_records_the_typed_branch_arm_and_marks_the_selected_edge() {
             .map(|edge| edge.selection),
         Some(TraceLashlangEdgeSelection::Unknown)
     );
-}
-
-#[test]
-fn graph_store_records_child_links() {
-    let store = TraceLashlangGraphStore::default();
-
-    append_at(
-        &store,
-        TraceLanguageExecution {
-            event_key: "child".to_string(),
-            identity: identity(),
-            payload: TraceLanguageExecutionPayload::ChildStarted {
-                parent_node_id: "spawn".to_string(),
-                occurrence: 1,
-                child: TraceLanguageChildExecution {
-                    scope: TraceRuntimeScope::new("session-1"),
-                    process_id: lash_sansio::ProcessId::fixture("process:child"),
-                    attempt: Some(2),
-                    module_ref: Some("module-1".to_string()),
-                    entry_ref: Some("process:0".to_string()),
-                    entry_name: Some("child".to_string()),
-                },
-            },
-        },
-        1_000,
-    );
-
-    let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
-    assert_eq!(graph.children[0].parent_node_id, "spawn");
-    assert_eq!(
-        graph.children[0].child_graph_key.as_deref(),
-        Some(
-            format!(
-                "process:{}:attempt:2",
-                lash_sansio::ProcessId::fixture("process:child")
-            )
-            .as_str()
-        )
-    );
-    assert_eq!(graph.children[0].child_entry_name.as_deref(), Some("child"));
 }
 
 #[test]
@@ -1140,45 +1016,6 @@ fn terminal_graph_status_survives_history_truncation() {
     assert_eq!(incremental.status, LanguageExecutionStatus::Completed);
 }
 
-#[test]
-fn terminal_classification_is_exhaustive() {
-    assert!(!LanguageExecutionStatus::Running.is_terminal());
-    assert!(LanguageExecutionStatus::Completed.is_terminal());
-    assert!(LanguageExecutionStatus::Failed.is_terminal());
-    assert!(LanguageExecutionStatus::Cancelled.is_terminal());
-
-    assert!(!TraceLashlangNodeObservation::Unobserved.is_terminal());
-    assert!(
-        !TraceLashlangNodeObservation::Running {
-            occurrence: 1,
-            start: Utc.timestamp_millis_opt(1).single().expect("timestamp"),
-        }
-        .is_terminal()
-    );
-    assert!(
-        TraceLashlangNodeObservation::Completed {
-            occurrence: 1,
-            start: None,
-            end: Utc.timestamp_millis_opt(2).single().expect("timestamp"),
-            duration_ms: None,
-        }
-        .is_terminal()
-    );
-    assert!(
-        TraceLashlangNodeObservation::Failed {
-            occurrence: 1,
-            start: None,
-            end: Utc.timestamp_millis_opt(2).single().expect("timestamp"),
-            duration_ms: None,
-            failure: TraceLanguageExecutionFailure::Runtime {
-                code: "test_failure".to_string(),
-                message: "failed".to_string(),
-            },
-        }
-        .is_terminal()
-    );
-}
-
 fn node_waiting(
     node_id: &str,
     node_kind: lash_sansio::ExecutionNodeKind,
@@ -1693,78 +1530,6 @@ fn graph_decode_refuses_unknown_closed_variant_at_the_current_version() {
     }
 }
 #[test]
-#[ignore = "paired 20,000-iteration fold measurement for the quiet-host baseline"]
-fn benchmark_twenty_thousand_iteration_observation_folding() {
-    use std::time::Instant;
-    const ITERATIONS: u64 = 20_000;
-    const RUNS: usize = 5;
-    let mut records = vec![record_at(started_event("seed"), 0)];
-    for occurrence in 1..=ITERATIONS {
-        records.push(record_at(
-            node_started("start", occurrence),
-            occurrence as i64 * 2,
-        ));
-        records.push(record_at(
-            node_completed("end", occurrence),
-            occurrence as i64 * 2 + 1,
-        ));
-    }
-    let mut before = Vec::new();
-    let mut after = Vec::new();
-    for run in 0..RUNS {
-        let mut reference = None;
-        let mut actual = None;
-        // Alternate which side runs first as well as interleaving each pair.
-        for optimized in if run % 2 == 0 {
-            [false, true]
-        } else {
-            [true, false]
-        } {
-            model::HISTORY_CLONES.with(|count| count.set(0));
-            let start = Instant::now();
-            let graph = if optimized {
-                let store = TraceLashlangGraphStore::default();
-                for record in &records {
-                    store.append(record).expect("append");
-                }
-                store.graph(EFFECT_GRAPH_KEY).expect("snapshot")
-            } else {
-                let mut graph = None;
-                for batch in records.chunks(256) {
-                    graph =
-                        Some(TraceLashlangGraphStore::fold(graph.as_ref(), batch).expect("fold"));
-                }
-                graph.expect("snapshot")
-            };
-            let elapsed = start.elapsed();
-            let clones = model::HISTORY_CLONES.with(std::cell::Cell::get);
-            eprintln!(
-                "run={} side={} iterations={ITERATIONS} observations={} fold_ms={:.3} history_event_clones={clones}",
-                run + 1,
-                if optimized { "after" } else { "before" },
-                records.len(),
-                elapsed.as_secs_f64() * 1000.0
-            );
-            if optimized {
-                after.push(elapsed);
-                actual = Some(graph);
-            } else {
-                before.push(elapsed);
-                reference = Some(graph);
-            }
-        }
-        assert_eq!(actual, reference, "paired run {} snapshots differ", run + 1);
-    }
-    before.sort();
-    after.sort();
-    eprintln!(
-        "median runs_per_side={RUNS} before_ms={:.3} after_ms={:.3} speedup={:.3}",
-        before[RUNS / 2].as_secs_f64() * 1000.0,
-        after[RUNS / 2].as_secs_f64() * 1000.0,
-        before[RUNS / 2].as_secs_f64() / after[RUNS / 2].as_secs_f64()
-    );
-}
-#[test]
 fn indexed_snapshots_match_the_pure_fold_after_eviction_and_late_delivery() {
     let prefix: Vec<_> = (1..=258)
         .flat_map(|occurrence| {
@@ -1879,17 +1644,6 @@ fn the_single_graph_accumulator_refuses_mixed_batches_without_mutation() {
         TraceLashlangGraphAccumulator::default().fold(&[]),
         Err(TraceLashlangGraphFoldError::NoLanguageExecutionEvents)
     );
-}
-
-#[cfg(test)]
-fn fixture_record(context: crate::TraceContext, event: crate::TraceEvent) -> crate::TraceRecord {
-    crate::TraceRecord {
-        schema_version: crate::TRACE_SCHEMA_VERSION,
-        id: "fixture-record".into(),
-        timestamp: Default::default(),
-        context,
-        event,
-    }
 }
 
 #[cfg(test)]

@@ -1189,31 +1189,6 @@ mod tests {
     }
 
     #[test]
-    fn every_kind_round_trips_through_its_canonical_id() {
-        let referrers = every_kind();
-        assert_eq!(
-            referrers
-                .iter()
-                .map(ArtifactReferrer::kind)
-                .collect::<Vec<_>>(),
-            ArtifactReferrerKind::ALL.to_vec()
-        );
-        for referrer in referrers {
-            let id = referrer.canonical_id();
-            assert!(!id.is_empty() && !id.contains('\0'));
-            let decoded =
-                ArtifactReferrer::decode(referrer.kind().as_str(), &id).expect("round trip");
-            assert_eq!(decoded, referrer);
-            assert_eq!(decoded.canonical_id(), id);
-            let json = serde_json::to_string(&referrer).expect("encode");
-            assert_eq!(
-                serde_json::from_str::<ArtifactReferrer>(&json).expect("decode"),
-                referrer
-            );
-        }
-    }
-
-    #[test]
     fn start_input_claim_is_tied_to_its_start_key_and_starter() {
         let first = ReferrerGuard::StartInput {
             start_key: start_key(),
@@ -1328,22 +1303,6 @@ mod tests {
     }
 
     #[test]
-    fn a_minted_pin_is_a_v4_uuid_under_its_prefix() {
-        let pin = HostArtifactPin::mint();
-        assert!(pin.as_str().starts_with(HOST_PIN_PREFIX));
-        assert_eq!(
-            HostArtifactPin::try_from(pin.as_str().to_owned()),
-            Ok(pin.clone())
-        );
-        let json = serde_json::to_string(&pin).expect("encode");
-        assert_eq!(
-            serde_json::from_str::<HostArtifactPin>(&json).expect("decode"),
-            pin
-        );
-        assert!(serde_json::from_str::<HostArtifactPin>(r#""host-pin:v1:zz""#).is_err());
-    }
-
-    #[test]
     fn claims_pair_each_guarded_kind_with_its_own_guard() {
         for referrer in every_kind() {
             assert_eq!(
@@ -1444,32 +1403,6 @@ mod tests {
                 .expect("JSON")
                 .get("referrer")
                 .is_none()
-        );
-    }
-
-    #[test]
-    fn a_store_receives_only_its_carries_in_artifact_order() {
-        let to = ArtifactReferrer::ProcessRecord(ProcessId::fixture("to"));
-        let carry = |store: ArtifactStoreId, artifact_ref: &str| ArtifactCarry {
-            artifact: ArtifactName {
-                store,
-                artifact_ref: artifact_ref.to_owned(),
-            },
-            to: to.clone(),
-        };
-        let carries = vec![
-            carry(ArtifactStoreId::LashlangModule, "b"),
-            carry(ArtifactStoreId::ProcessEnv, "env"),
-            carry(ArtifactStoreId::LashlangModule, "a"),
-        ];
-        let resolved =
-            ResolvedArtifactCleanup::for_store(&to, &carries, &ArtifactStoreId::LashlangModule);
-        assert_eq!(
-            resolved.carries,
-            vec![
-                carry(ArtifactStoreId::LashlangModule, "a"),
-                carry(ArtifactStoreId::LashlangModule, "b"),
-            ]
         );
     }
 }

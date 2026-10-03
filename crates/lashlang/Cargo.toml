@@ -71,7 +71,6 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
 futures = "0.3"
-insta = "1"
 jsonschema = { workspace = true, default-features = false }
 proptest = "1"
 tokio = { version = "1", features = ["macros", "rt", "time"] }

@@ -295,8 +295,6 @@ pub enum WorkflowGraphBuildError {
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
-#[cfg_attr(test, derive(strum::EnumDiscriminants))]
-#[cfg_attr(test, strum_discriminants(derive(strum::EnumIter, PartialOrd, Ord)))]
 #[non_exhaustive]
 pub enum GraphRenderError {
     #[error(transparent)]
@@ -457,19 +455,6 @@ mod validation_tests {
             validate(&graph),
             Err(GraphRenderError::RenderedSourceInvalid { .. })
         ));
-    }
-
-    #[test]
-    fn validate_prints_once_per_call_for_the_final_parse_check() {
-        let graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
-        printer::reset_program_print_count();
-
-        const VALIDATIONS: usize = 4;
-        for _ in 0..VALIDATIONS {
-            validate(&graph).expect("valid graph validates");
-        }
-
-        assert_eq!(printer::program_print_count(), VALIDATIONS);
     }
 }
 

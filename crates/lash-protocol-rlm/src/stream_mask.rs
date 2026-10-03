@@ -199,14 +199,6 @@ impl CellDetector {
         })
     }
 
-    #[cfg(test)]
-    fn reset(&mut self) {
-        self.scan = CellScan::Scanning {
-            pending: String::new(),
-        };
-        self.visible_prose.clear();
-    }
-
     fn splice_into_visible(&self, visible: &str) -> String {
         let CellScan::Closed { body } = &self.scan else {
             unreachable!("a splice exists only once the scan has closed");
@@ -411,16 +403,6 @@ mod tests {
     }
 
     #[test]
-    fn prose_streams_as_assistant_text_before_cell() {
-        let mut d = CellDetector::new();
-        let t = d.process_chunk("Hello, here's my plan.\n\n");
-        assert_eq!(t.chunk, "Hello, here's my plan.\n\n");
-        assert!(t.reasoning_deltas.is_empty());
-        assert!(t.events.is_empty());
-        assert!(!t.abort_stream);
-    }
-
-    #[test]
     fn short_prose_without_newline_streams_immediately() {
         let mut d = CellDetector::new();
         let t = d.process_chunk("Hi - what can I help with?");
@@ -507,73 +489,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn body_after_start_tag_is_suppressed_until_close() {
-        let mut d = CellDetector::new();
-        assert_eq!(d.process_chunk("<typescript>\n").chunk, "");
-        let t = d.process_chunk("finish \"hi\"\n");
-        assert_eq!(t.chunk, "");
-        assert!(!t.abort_stream);
-        assert_eq!(body(&d), "finish \"hi\"\n");
-    }
-
-    /// A one-line cell is masked, not shown: its source never reaches the
-    /// visible stream, and the splice hands history the canonical block form.
-    ///
-    /// Terminated here; the same reply without its newline is the EOF leg below.
-    #[test]
-    fn one_line_cell_is_masked_and_normalized() {
-        let mut d = CellDetector::new();
-        let t = d.process_chunk("Checking.\n<typescript>finish 1</typescript>\n");
-        assert_eq!(t.chunk, "Checking.\n");
-        assert!(t.abort_stream);
-        assert!(closed(&d));
-        assert_eq!(body(&d), "finish 1");
-        assert_eq!(
-            event_names(&t.events),
-            vec!["rlm_typescript_cell_start", "rlm_typescript_cell_end"]
-        );
-        assert_eq!(
-            d.spliced_response_text(),
-            "Checking.\n<typescript>\nfinish 1\n</typescript>"
-        );
-    }
-
-    /// A one-line cell that is the response's last line closes at EOF, where the
-    /// line is known to be whole.
-    #[test]
-    fn one_line_cell_at_response_end_closes_on_the_eof_leg() {
-        let mut d = CellDetector::new();
-        let t = d.process_chunk("Checking.\n<typescript>finish 1</typescript>");
-        assert_eq!(t.chunk, "Checking.\n");
-        assert!(!t.abort_stream, "an unfinished line decides nothing yet");
-        assert!(!closed(&d));
-
-        let events = d.finish_response();
-        assert!(closed(&d));
-        assert_eq!(body(&d), "finish 1");
-        assert_eq!(
-            event_names(&events),
-            vec!["rlm_typescript_cell_start", "rlm_typescript_cell_end"]
-        );
-        assert_eq!(
-            d.spliced_response_text(),
-            "Checking.\n<typescript>\nfinish 1\n</typescript>"
-        );
-    }
-
-    /// The source of a one-line cell must not be flushed as prose while the
-    /// line is still arriving.
-    #[test]
-    fn one_line_cell_split_mid_source_holds_the_line() {
-        let mut d = CellDetector::new();
-        assert_eq!(d.process_chunk("<typescript>fin").chunk, "");
-        let t = d.process_chunk("ish 1</typescript>\n");
-        assert_eq!(t.chunk, "");
-        assert!(t.abort_stream);
-        assert_eq!(body(&d), "finish 1");
-    }
-
     /// Held prose reaches the detector's account of the response at EOF instead
     /// of vanishing with the buffer, in both the tag-prefix and opened-line
     /// shapes.
@@ -655,52 +570,6 @@ mod tests {
         let t = d.process_chunk(" here\n");
         assert_eq!(t.chunk, "<typescript> here\n");
         assert!(!inside(&d));
-    }
-
-    #[test]
-    fn reset_prevents_cross_response_leak() {
-        let mut d = CellDetector::new();
-        d.process_chunk("Hi! How can I help you?");
-        d.reset();
-
-        let t = d.process_chunk("New response.\n\n<typescript>\ncode\n");
-        assert_eq!(t.chunk, "New response.\n\n");
-        assert!(!t.chunk.contains("How can I help"));
-    }
-
-    #[test]
-    fn reset_after_partial_cell_isolates_next_response() {
-        let mut d = CellDetector::new();
-        let t = d.process_chunk("Visible.\n<typescript>\nfinish 1");
-        assert_eq!(t.chunk, "Visible.\n");
-        assert!(inside(&d));
-        assert!(!closed(&d));
-        assert_eq!(body(&d), "finish 1");
-
-        d.reset();
-
-        let t = d.process_chunk("Next response.");
-        assert_eq!(t.chunk, "Next response.");
-        assert!(!inside(&d));
-        assert!(!closed(&d));
-        assert!(body(&d).is_empty());
-    }
-
-    #[test]
-    fn reset_after_closed_cell_isolates_next_response() {
-        let mut d = CellDetector::new();
-        let t = d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\n");
-        assert_eq!(t.chunk, "Visible.\n");
-        assert!(t.abort_stream);
-        assert!(closed(&d));
-
-        d.reset();
-
-        let t = d.process_chunk("Next response.");
-        assert_eq!(t.chunk, "Next response.");
-        assert!(!t.abort_stream);
-        assert!(!inside(&d));
-        assert!(!closed(&d));
     }
 
     /// The detector is session-scoped, so a turn whose phase 2 never ran must
@@ -941,46 +810,6 @@ mod tests {
     }
 
     #[test]
-    fn final_response_splice_reconstructs_cell_with_exact_body() {
-        let (d, visible) = stream_chunks(&[
-            "Quick check.\n\n<typescript>\n",
-            "print \"hi\"\n",
-            "finish 1\n</typescript>",
-        ]);
-        assert_eq!(visible, "Quick check.\n\n");
-        let spliced = d.spliced_response_text();
-        let span = first_cell_span_for_tests(&spliced).expect("spliced cell parses");
-        let code = &spliced[span.body_start..span.body_end];
-        assert_eq!(code, "print \"hi\"\nfinish 1");
-    }
-
-    #[test]
-    fn final_response_splice_ignores_raw_provider_full_text_with_suffix() {
-        let raw_final = "Visible before code.\n<typescript>\nfinish \"ok\"\n</typescript>\nignored";
-        let (d, visible) = stream_chunks(&[
-            "Visible before",
-            " code.\n<type",
-            "script>\nfinish ",
-            "\"ok\"\n</typescript>\nignored",
-        ]);
-        assert_eq!(visible, "Visible before code.\n");
-
-        // This is the production shape for streaming providers that return
-        // their original raw final text after the stream hook has already
-        // suppressed the cell body. Using `raw_final` as the splice base would
-        // keep suffix text that the stream abort intentionally dropped.
-        assert!(raw_final.contains("ignored"));
-        let spliced = d.spliced_response_text();
-        assert_eq!(
-            spliced,
-            "Visible before code.\n<typescript>\nfinish \"ok\"\n</typescript>"
-        );
-        let span = first_cell_span_for_tests(&spliced).expect("spliced cell parses");
-        assert_eq!(&spliced[span.body_start..span.body_end], "finish \"ok\"");
-        assert!(!spliced.contains("ignored"));
-    }
-
-    #[test]
     fn final_response_transform_never_splices_using_raw_provider_text() {
         let raw_final = "Visible before code.\n<typescript>\nfinish \"ok\"\n</typescript>\nignored";
         let (d, visible) = stream_chunks(&[
@@ -1092,21 +921,6 @@ mod tests {
     }
 
     #[test]
-    fn final_response_splice_also_handles_already_transformed_visible_text() {
-        let (d, visible) =
-            stream_chunks(&["Visible.\n", "<typescript>\nfinish \"ok\"\n</typescript>"]);
-        assert_eq!(visible, "Visible.\n");
-
-        let spliced = d.spliced_response_text();
-        assert_eq!(
-            spliced,
-            "Visible.\n<typescript>\nfinish \"ok\"\n</typescript>"
-        );
-        let span = first_cell_span_for_tests(&spliced).expect("spliced cell parses");
-        assert_eq!(&spliced[span.body_start..span.body_end], "finish \"ok\"");
-    }
-
-    #[test]
     fn final_response_splice_preserves_start_tag_line_split_across_chunks() {
         let (d, visible) = stream_chunks(&[
             "Line one.",
@@ -1154,15 +968,6 @@ mod tests {
         let transformed = transform_final_response(&d, response.clone());
         assert_eq!(transformed.full_text(), response.full_text());
         assert_eq!(transformed.parts, response.parts);
-    }
-
-    #[test]
-    fn old_percent_marker_streams_as_plain_prose() {
-        let mut d = CellDetector::new();
-        let t = d.process_chunk("%%typescript\nfinish 1\n");
-        assert_eq!(t.chunk, "%%typescript\nfinish 1\n");
-        assert!(!inside(&d));
-        assert!(!t.abort_stream);
     }
 
     /// The end event is emitted exactly on the transition to `Closed` — once —

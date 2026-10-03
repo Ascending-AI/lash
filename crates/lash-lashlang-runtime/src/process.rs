@@ -269,13 +269,6 @@ struct LashlangSegmentState {
     worker_recovery: WorkerRecoveryLedger,
 }
 
-#[cfg(test)]
-pub(crate) fn decode_lashlang_segment_state_for_tests(data: &[u8]) -> Result<(), String> {
-    decode_lashlang_segment_state(data)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
-}
-
 fn decode_lashlang_segment_state(
     data: &[u8],
 ) -> Result<LashlangSegmentState, LashlangSegmentStateError> {

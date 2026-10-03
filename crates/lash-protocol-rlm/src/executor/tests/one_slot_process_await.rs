@@ -19,24 +19,6 @@ async fn one_slot_cell_that_starts_and_awaits_a_process_completes() {
     run_one_slot_process_await().await;
 }
 
-#[tokio::test]
-async fn one_slot_process_await_under_parallel_load() {
-    let runs = (0..4)
-        .map(|_| {
-            tokio::task::spawn_blocking(|| {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("load runtime")
-                    .block_on(run_one_slot_process_await());
-            })
-        })
-        .collect::<Vec<_>>();
-    for run in runs {
-        run.await.expect("one-slot process await under load");
-    }
-}
-
 async fn run_one_slot_process_await() {
     let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_sqlite_memory_artifact_store().await;

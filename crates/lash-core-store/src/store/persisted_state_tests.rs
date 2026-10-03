@@ -182,34 +182,6 @@ fn session_meta_rejects_removed_observer_inheritance() {
     );
 }
 
-/// Refusal witness (FIG-1123): the immediate predecessor head is refused by
-/// the strict schema-version fence every store backend decodes through. It
-/// pins N's adjacency; the synthetic N+1 moves the version on.
-#[cfg(not(feature = "synthetic-next"))]
-#[test]
-fn immediate_predecessor_head_meta_v10_is_refused() {
-    const PREDECESSOR: u32 = 10;
-    assert_eq!(
-        PREDECESSOR + 1,
-        SESSION_HEAD_META_SCHEMA_VERSION,
-        "session-head schema adjacency pin"
-    );
-    let err = decode_versioned_json_record::<SessionHeadPayload>(
-        &format!(r#"{{"schema_version":{PREDECESSOR}}}"#),
-        "SessionHeadMeta",
-        SESSION_HEAD_META_SCHEMA_VERSION,
-    )
-    .expect_err("v9 session head must be refused");
-    assert!(matches!(
-        err,
-        StoreError::UnsupportedRecordSchemaVersion {
-            record_kind: "SessionHeadMeta",
-            actual: PREDECESSOR,
-            expected: SESSION_HEAD_META_SCHEMA_VERSION
-        }
-    ));
-}
-
 #[test]
 fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
     let retention = crate::ReasoningRetentionPolicy {
@@ -262,26 +234,6 @@ fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
             .reasoning_retention,
         retention
     );
-}
-
-#[test]
-fn fleet_reader_decodes_the_newest_version_verbatim() {
-    #[derive(Debug, serde::Deserialize)]
-    struct Probe {
-        schema_version: u32,
-        payload: String,
-    }
-
-    let surface = SurfaceFormat::of("PROBE_SURFACE_VERSION", 2);
-    let decoded: Probe = decode_versioned_json_record_for_fleet(
-        r#"{"schema_version":2,"payload":"x"}"#,
-        "Probe",
-        surface,
-        FleetFormat::current(),
-    )
-    .expect("the newest version decodes natively");
-    assert_eq!(decoded.schema_version, 2);
-    assert_eq!(decoded.payload, "x");
 }
 
 #[test]

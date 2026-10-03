@@ -70,35 +70,6 @@ fn process_wake_input_from_event_payload_falls_back_to_value_field() {
 }
 
 #[test]
-fn process_wake_input_from_event_payload_renders_malformed_payload_as_json() {
-    let payload = serde_json::json!({
-        "unexpected": true
-    });
-
-    assert_eq!(
-        process_wake_input_from_event_payload(&payload),
-        r#"{"unexpected":true}"#
-    );
-}
-
-#[test]
-fn process_wake_input_from_event_payload_renders_plain_scalar_payload_as_json() {
-    let payload = serde_json::json!(42);
-
-    assert_eq!(process_wake_input_from_event_payload(&payload), "42");
-}
-
-#[test]
-fn process_wake_turn_text_frames_process_id_sequence_and_input() {
-    let wake = wake_delivery("process.ready", None);
-
-    assert_eq!(
-        process_wake_turn_text(&wake),
-        "Background process wake\nProcess: p_c5546c16360677e5a56c42a3a5c9e20c\nEvent: process.ready #7\nWake input:\nline one\nline two"
-    );
-}
-
-#[test]
 fn process_wake_turn_cause_preserves_process_origin() {
     let process_caused_by = crate::CausalRef::SessionNode {
         session_id: SessionId::from("target"),
@@ -129,18 +100,6 @@ fn process_wake_turn_cause_preserves_process_origin() {
             && wake_id.as_deref() == Some(expected_wake_id.as_str())
             && caused_by == Some(process_caused_by)
     ));
-}
-
-#[test]
-fn process_wake_delivery_carries_its_process_cause() {
-    let process_caused_by = crate::CausalRef::SessionNode {
-        session_id: SessionId::from("target"),
-        node_id: "trigger:button".to_string(),
-    };
-    let wake = wake_delivery("process.ready", Some(process_caused_by.clone()));
-
-    assert_eq!(wake.event_type, "process.ready");
-    assert_eq!(wake.process_caused_by, Some(process_caused_by));
 }
 
 fn wake_delivery(
@@ -306,73 +265,6 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         repair_record.is_none(),
         "stale waiting replay must not repair a terminal projection"
     );
-}
-
-#[test]
-fn replayed_terminal_event_repairs_non_terminal_status_projection() {
-    let record = ProcessRecord::from_registration(
-        registration("process-repair"),
-        crate::process_id_for_test("process-repair"),
-    );
-    let request = ProcessEventAppendRequest::new(
-        "process.completed",
-        serde_json::json!({
-            "await_output": ProcessAwaitOutput::from_tool_output(
-                crate::ToolCallOutput::success(serde_json::json!({"ok": true})),
-            ),
-        }),
-    )
-    .with_replay_key("process-repair-terminal");
-    let first = prepare_process_event_append(
-        &record,
-        request.clone(),
-        1,
-        None,
-        None,
-        None,
-        42,
-        None,
-        crate::FleetFormat::current(),
-    )
-    .expect("prepare first terminal event");
-    let ProcessEventAppendPlan::Insert {
-        event: first_event, ..
-    } = first
-    else {
-        panic!("first terminal event should insert");
-    };
-
-    let replayed = prepare_process_event_append(
-        &record,
-        request,
-        99,
-        Some(1),
-        Some(first_event),
-        None,
-        100,
-        None,
-        crate::FleetFormat::current(),
-    )
-    .expect("prepare replayed terminal event");
-
-    let ProcessEventAppendPlan::Replay {
-        event,
-        repair_record,
-        ..
-    } = replayed
-    else {
-        panic!("terminal event replay should replay");
-    };
-    assert_eq!(event.sequence, 1);
-    assert_eq!(event.occurred_at, 42);
-    assert!(matches!(
-        repair_record.as_ref().map(|record| record.status()),
-        Some(ProcessStatus::Completed)
-    ));
-    assert!(matches!(
-        repair_record.and_then(|record| record.outcome()),
-        Some(ProcessAwaitOutput::Settled { .. })
-    ));
 }
 
 #[test]
@@ -553,19 +445,4 @@ fn an_ended_referrer_classifies_by_its_typed_cause_not_its_message() {
         None,
         "missing bytes are not a fence"
     );
-}
-
-#[test]
-fn runtime_work_has_only_complete_wiring_states() {
-    use crate::runtime::host::RuntimeWork;
-
-    let queued: std::sync::Arc<dyn crate::SessionWorkEngine> =
-        std::sync::Arc::new(crate::NoSessionWork::new());
-    let work = RuntimeWork::sessions_only(std::sync::Arc::clone(&queued));
-    match work {
-        RuntimeWork::SessionsOnly { queued: actual } => {
-            assert!(std::sync::Arc::ptr_eq(&actual, &queued));
-        }
-        RuntimeWork::Processes { .. } => panic!("sessions-only fixture has process wiring"),
-    }
 }

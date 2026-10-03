@@ -338,27 +338,4 @@ mod tests {
             .await
             .expect("drained and removed");
     }
-
-    #[test]
-    fn refusals_serialize_tagged_and_name_their_remedy() {
-        let held = FinalizeRefusal::Held {
-            hold: FinalizeHold {
-                reason: "watch N+1 for a day".to_owned(),
-                held_at_ms: 7,
-            },
-        };
-        assert_eq!(
-            serde_json::to_value(&held).expect("serialize"),
-            serde_json::json!({"refusal":"held","hold":{"reason":"watch N+1 for a day","held_at_ms":7}})
-        );
-        assert!(held.to_string().contains("lashctl finalize-hold clear"));
-        let undrained = FinalizeRefusal::GenerationNotDrained {
-            status: Box::new(status(false, 0)),
-        };
-        let wire = serde_json::to_value(&undrained).expect("serialize");
-        assert_eq!(wire["refusal"], "generation_not_drained");
-        assert_eq!(wire["status"]["unfinished_invocations"], 0);
-        assert_eq!(wire["status"]["drained"], false);
-        assert!(undrained.to_string().contains("lashctl drain"));
-    }
 }

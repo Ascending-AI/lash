@@ -21,39 +21,6 @@ use std::sync::{Arc, Mutex};
 pub use super::layered_backend::{LayeredBackend, LayeredStores};
 pub use super::recording_store::{EndRefusedRunHook, RecordingDeploymentStore, RecordingStore};
 
-pub struct FixedAttachmentRoots(pub std::collections::BTreeSet<crate::AttachmentId>);
-
-#[async_trait::async_trait]
-#[diagnostic::do_not_recommend]
-impl crate::AttachmentRootSet for FixedAttachmentRoots {
-    async fn attachment_root_page(
-        &self,
-        source: crate::attachments::AttachmentRootSource,
-        after: Option<&crate::AttachmentId>,
-    ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
-        use crate::attachments::{AttachmentRootPage, AttachmentRootSource};
-        let runs = if source == AttachmentRootSource::Referrer(crate::ArtifactReferrerKind::Session)
-        {
-            self.0
-                .iter()
-                .filter(|id| after.is_none_or(|after| *id > after))
-                .take(AttachmentRootPage::QUERY_LIMIT)
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        };
-        AttachmentRootPage::from_rows(runs)
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        id: &crate::AttachmentId,
-    ) -> Result<bool, crate::StoreError> {
-        Ok(self.0.contains(id))
-    }
-}
-
 pub fn default_state() -> RuntimeSessionState {
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,

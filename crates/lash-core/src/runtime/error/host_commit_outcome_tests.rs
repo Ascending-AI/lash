@@ -48,20 +48,6 @@ fn deleted_commit_is_typed_terminal_and_retains_the_session_id() {
 }
 
 #[test]
-fn park_and_close_preserve_store_contention_as_typed_store_error() {
-    let session_error =
-        super::session_commit_error("failed to persist runtime state", StoreError::Contended);
-
-    assert!(matches!(
-        session_error,
-        crate::SessionError::Store {
-            source: StoreError::Contended,
-            ..
-        }
-    ));
-}
-
-#[test]
 fn a_superseded_shift_fence_is_a_superseded_commit_on_every_commit_path() {
     let stale = || StoreError::StaleShiftFence {
         session_id: crate::SessionId::from("fenced"),

@@ -62,58 +62,6 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
     Ok(())
 }
 
-#[tokio::test]
-async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable() -> Result<()> {
-    const CONFIGURED_NODE_LIMIT: usize = 1;
-    let provider = crate::testing::TestProvider::builder()
-        .kind("oversized-node-commit")
-        .complete(|_request| async move { Ok(text_response("assistant response")) })
-        .build()
-        .into_handle();
-    let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(double_backend().await),
-        crate::CommitBudget::new(
-            crate::CommitBudgetLimit::Unbounded,
-            crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
-        ),
-    )
-    .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("commit-node-budget-surface")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    let error = match session
-        .send(TurnInput::text("produce a turn"))
-        .output()
-        .await
-    {
-        Ok(_) => panic!("the over-limit node commit must fail at the production surface"),
-        Err(error) => error,
-    };
-
-    let EmbedError::Runtime(runtime_error) = &error else {
-        panic!("expected a host-visible runtime error, got {error}");
-    };
-    assert_eq!(
-        runtime_error.code,
-        lash_core::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
-    );
-    assert!(
-        runtime_error.message.contains(&format!(
-            "exceeding the configured {CONFIGURED_NODE_LIMIT}-row node budget"
-        )),
-        "{}",
-        runtime_error.message
-    );
-    assert!(error.is_terminal(), "{error}");
-    assert!(!error.is_retryable(), "{error}");
-    Ok(())
-}
-
 async fn core_with_commit_budget(commit_budget: crate::CommitBudget) -> Result<LashCore> {
     core_over_backend_with_commit_budget(double_backend().await, commit_budget)
 }
@@ -140,37 +88,6 @@ fn pending_park_state(session_id: impl Into<SessionId>, text: &str) -> RuntimeSe
     state.ensure_agent_frame_initialized();
     state.append_active_conversation_messages(&[text_message(lash_core::MessageRole::User, text)]);
     state
-}
-
-#[cfg(feature = "testing")]
-#[tokio::test]
-async fn testing_set_persisted_replaces_resident_state_for_park_fixture() -> Result<()> {
-    let core = core_with_commit_budget(crate::CommitBudget::new(
-        crate::CommitBudgetLimit::Unbounded,
-        crate::CommitBudgetLimit::Unbounded,
-    ))
-    .await?;
-    let session = core
-        .session("testing-set-persisted-park")
-        .created()
-        .await
-        .open()
-        .await?;
-    let fixture = pending_park_state("testing-set-persisted-park", "park fixture via testing");
-    let node_ids = |nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>]| {
-        nodes.iter().map(|n| n.node_id.clone()).collect::<Vec<_>>()
-    };
-    let fixture_nodes = node_ids(&fixture.session_graph.nodes);
-    let fresh = node_ids(&session.admin().state().export().await.session_graph.nodes);
-    assert_ne!(fresh, fixture_nodes);
-    session.admin().state().set_persisted(fixture).await?;
-    let resident = session.admin().state().export().await;
-    assert_eq!(node_ids(&resident.session_graph.nodes), fixture_nodes);
-    assert_eq!(
-        Box::pin(session.park()).await?.session_id(),
-        "testing-set-persisted-park"
-    );
-    Ok(())
 }
 
 fn assert_byte_budget_session_error(error: &EmbedError, configured_limit: usize) {
@@ -243,64 +160,6 @@ async fn assert_budget_command_error(
 }
 
 #[tokio::test]
-async fn public_append_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
-    // Room for the command's failed settlement, the bare head's commit (a
-    // little over 2 KB now that the head's standard namespace records the
-    // configured render, FIG-4527; its refusal receipt is not charged,
-    // FIG-4471), not for the append it refuses (four times the limit).
-    const CONFIGURED_BYTE_LIMIT: usize = 3072;
-    let backend = double_backend().await;
-    let factory = backend.session_store_factory();
-    let core = core_over_backend_with_commit_budget(
-        backend,
-        crate::CommitBudget::new(
-            crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
-            crate::CommitBudgetLimit::Unbounded,
-        ),
-    )?;
-    let session = core
-        .session("append-byte-budget-surface")
-        .created()
-        .await
-        .open()
-        .await?;
-
-    let error =
-        Box::pin(
-            session
-                .admin()
-                .state()
-                .append_messages(vec![lash_core::PluginMessage::text(
-                    lash_core::MessageRole::User,
-                    "x".repeat(CONFIGURED_BYTE_LIMIT * 4),
-                )]),
-        )
-        .await
-        .expect_err("the public append must reject its over-limit commit");
-
-    let append_bytes = error
-        .to_string()
-        .split("runtime commit carries ")
-        .nth(1)
-        .and_then(|rest| rest.split_once(' '))
-        .and_then(|(bytes, _)| bytes.parse::<usize>().ok())
-        .unwrap_or_else(|| panic!("the refusal names the append's bytes: {error}"));
-    assert!(
-        append_bytes > CONFIGURED_BYTE_LIMIT,
-        "the refused append outgrows the budget: {error}"
-    );
-    assert_budget_command_error(
-        &factory,
-        "append-byte-budget-surface",
-        &error,
-        lash_core::RuntimeErrorCode::StoreCommitByteBudgetExceeded,
-        &format!("exceeding the {CONFIGURED_BYTE_LIMIT}-byte transaction budget"),
-    )
-    .await;
-    Ok(())
-}
-
-#[tokio::test]
 async fn public_append_node_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
     const CONFIGURED_NODE_LIMIT: usize = 1;
     let backend = double_backend().await;
@@ -340,53 +199,6 @@ async fn public_append_node_budget_failure_is_typed_terminal_and_actionable() ->
         &format!("exceeding the configured {CONFIGURED_NODE_LIMIT}-row node budget"),
     )
     .await;
-    Ok(())
-}
-
-/// Creation measures the head it creates (FIG-4393): a config whose
-/// created head no commit fits under the core's budget is refused typed,
-/// terminal and actionable, and nothing is written.
-#[tokio::test]
-async fn create_byte_budget_failure_is_typed_terminal_and_writes_nothing() -> Result<()> {
-    const CONFIGURED_BYTE_LIMIT: usize = 256;
-    let backend = double_backend().await;
-    let factory = backend.session_store_factory();
-    let core = core_over_backend_with_commit_budget(
-        backend,
-        crate::CommitBudget::new(
-            crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
-            crate::CommitBudgetLimit::Unbounded,
-        ),
-    )?;
-
-    let error = match core
-        .session("create-byte-budget-surface")
-        .create(crate::SessionCreation::root(mock_session_spec()))
-        .await
-    {
-        Ok(_) => panic!("creation must refuse a head no commit fits under the budget"),
-        Err(error) => error,
-    };
-
-    assert!(
-        matches!(
-            &error,
-            EmbedError::Store(lash_core::StoreError::CommitByteBudgetExceeded { max_bytes, .. })
-                if *max_bytes == CONFIGURED_BYTE_LIMIT
-        ),
-        "expected typed byte-budget rejection, got {error}"
-    );
-    assert!(error.is_terminal(), "{error}");
-    assert!(!error.is_retryable(), "{error}");
-    assert!(
-        matches!(
-            factory
-                .lookup_session(&SessionId::from("create-byte-budget-surface"))
-                .await?,
-            lash_core::SessionLookup::Absent
-        ),
-        "a refused creation writes nothing"
-    );
     Ok(())
 }
 

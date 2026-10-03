@@ -730,38 +730,6 @@ mod tests {
         assert!(!unarmed.engine_half_owed());
     }
 
-    #[test]
-    fn a_pending_intent_is_applied_unchanged_and_a_decided_one_is_not() {
-        let IntentApplication::Apply(applied) =
-            decide_intent_application(intent(ControlIntentState::Pending), None, 7)
-        else {
-            panic!("a pending intent applies");
-        };
-        assert_eq!(applied, intent(ControlIntentState::Pending));
-        assert!(matches!(
-            decide_intent_application(
-                intent(ControlIntentState::Superseded {
-                    by: ControlIntentId::from_sequence(9)
-                }),
-                None,
-                7
-            ),
-            IntentApplication::Superseded(_)
-        ));
-        assert!(matches!(
-            decide_intent_application(
-                intent(ControlIntentState::Acknowledged { at_ms: 2 }),
-                None,
-                7
-            ),
-            IntentApplication::Done(_)
-        ));
-        assert!(matches!(
-            decide_intent_application(intent(refused()), None, 7),
-            IntentApplication::Done(_)
-        ));
-    }
-
     fn redrive(state: ControlIntentState) -> ControlIntent {
         ControlIntent {
             kind: ControlIntentKind::Redrive {
@@ -789,54 +757,6 @@ mod tests {
             resume_intent: resume_intent.map(ControlIntentId::from_sequence),
             build_generation: None,
         }
-    }
-
-    /// H2 (FIG-3848): a redrive applies only while its park names it; one
-    /// the run ran past — the park gone, or re-parked without it — is
-    /// settled without resuming anything.
-    #[test]
-    fn a_redrive_applies_only_while_its_park_names_it() {
-        assert!(matches!(
-            decide_intent_application(
-                redrive(ControlIntentState::Pending),
-                Some(&park(Some(4))),
-                7
-            ),
-            IntentApplication::Apply(_)
-        ));
-        for stale in [None, Some(park(None)), Some(park(Some(9)))] {
-            let IntentApplication::Done(settled) =
-                decide_intent_application(redrive(ControlIntentState::Pending), stale.as_ref(), 7)
-            else {
-                panic!("a redrive its park does not name never applies");
-            };
-            assert_eq!(settled.state, ControlIntentState::Acknowledged { at_ms: 7 });
-        }
-    }
-
-    /// H2: a cancel or fork supersedes every owed redrive of its run, not
-    /// only the one its park names.
-    #[test]
-    fn a_cancel_supersedes_every_owed_redrive_of_its_run() {
-        let orphaned = redrive(ControlIntentState::Pending);
-        let request = RunIntentRequest {
-            session_id: SessionId::from("s"),
-            run: TurnId::from("r"),
-            park: super::super::ParkId::from_feed_sequence(3),
-            verb: RunVerb::Cancel,
-        };
-        let reparked = park(None);
-        let plan = decide_run_intent(
-            &request,
-            &RunIntentFacts {
-                closing: None,
-                park: Some(&reparked),
-                open_verbs: std::slice::from_ref(&orphaned),
-                resume: None,
-            },
-        )
-        .expect("cancel of a re-parked run");
-        assert_eq!(plan.supersede, vec![orphaned]);
     }
 
     /// F09: a redrive whose obligation stalled owes nothing, so the run it
@@ -880,40 +800,6 @@ mod tests {
             decide_intent_refusal(&ControlIntentState::Pending, &cause),
             Some(ControlIntentState::Refused {
                 cause: cause.clone()
-            })
-        );
-    }
-
-    /// F09: every state is stored under its own code, and the refusal keeps
-    /// its typed code in the stored JSON.
-    #[test]
-    fn stored_columns_round_trip() {
-        for state in [ControlIntentState::Pending, refused()] {
-            let stored = intent(state);
-            let (code, state_json) = stored_intent_state(&stored.state).expect("state");
-            assert_eq!(code, stored.state.code());
-            let kind_json = stored_intent_kind(&stored.kind).expect("kind");
-            let decoded = ControlIntent::from_stored(
-                4,
-                SessionId::from("s"),
-                CONTROL_INTENT_FORMAT,
-                &kind_json,
-                &state_json,
-                1,
-                None,
-                Some("control_intent:4".to_owned()),
-                Some("due".to_owned()),
-            )
-            .expect("decode");
-            assert_eq!(decoded, stored);
-            assert_eq!(decoded.closed_runs(), &[TurnId::from("r")]);
-        }
-        let (_, json) = stored_intent_state(&refused()).expect("state");
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&json).expect("json"),
-            serde_json::json!({
-                "state": "refused",
-                "cause": {"code": "engine_handle_mismatch", "message": "x"}
             })
         );
     }

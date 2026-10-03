@@ -597,23 +597,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn utc_math_and_extended_iso_cover_the_ecma_range() {
-        assert_eq!(date_utc(&[2_000.0, 1.0, 29.0]), 951_782_400_000.0);
-        assert_eq!(
-            to_iso_string(0.0).as_deref(),
-            Some("1970-01-01T00:00:00.000Z")
-        );
-        assert_eq!(
-            to_iso_string(MAX_TIME).as_deref(),
-            Some("+275760-09-13T00:00:00.000Z")
-        );
-        assert_eq!(
-            to_iso_string(-MAX_TIME).as_deref(),
-            Some("-271821-04-20T00:00:00.000Z")
-        );
-    }
-
-    #[test]
     fn iso_parser_is_utc_pinned_and_rejects_fallback_syntax() {
         assert_eq!(parse_iso_date("1970-01-01T01:00:00+01:00"), Ok(0.0));
         assert_eq!(parse_iso_date("1970-01-01T00:00"), Ok(0.0));

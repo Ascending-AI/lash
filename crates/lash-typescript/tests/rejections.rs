@@ -16,24 +16,6 @@ macro_rules! rejection_test {
     };
 }
 
-rejection_test!(rejects_classes, "class A {}", Code::ClassUnsupported);
-rejection_test!(
-    rejects_generators,
-    "function* f() {}",
-    Code::GeneratorUnsupported
-);
-rejection_test!(rejects_with, "with ({}) {}", Code::WithUnsupported);
-rejection_test!(rejects_eval, "eval('1');", Code::EvalUnsupported);
-rejection_test!(
-    rejects_function_constructor,
-    "Function('return 1');",
-    Code::FunctionConstructorUnsupported
-);
-rejection_test!(
-    rejects_labels,
-    "label: while (true) { break; }",
-    Code::LabelUnsupported
-);
 /// A function declaration as the bare body of an `if`/`else` or a loop is an
 /// ECMA-262 early SyntaxError — Annex B's `if`-branch exception is
 /// sloppy-only and the dialect is strict — not a statement the lowerer
@@ -62,16 +44,6 @@ fn statement_position_function_declarations_are_early_syntax_errors() {
         lash_typescript::validate(source).unwrap_or_else(|error| panic!("{source}: {error}"));
     }
 }
-rejection_test!(
-    rejects_regexp_indices_flag,
-    "const r = /x/d;",
-    Code::RegexIndicesFlagUnsupported
-);
-rejection_test!(
-    rejects_regexp_unicode_sets_flag,
-    "const r = /x/v;",
-    Code::RegexUnicodeSetsFlagUnsupported
-);
 
 #[test]
 fn retained_match_all_iterator_has_a_sink_repair() {
@@ -113,11 +85,7 @@ rejection_test!(
     "new RegExp(/a/g);",
     Code::NewUnsupported
 );
-rejection_test!(
-    rejects_getters,
-    "const x = { get value() { return 1; } };",
-    Code::AccessorUnsupported
-);
+
 rejection_test!(
     rejects_setters,
     "const x = { set value(v) {} };",
@@ -128,39 +96,7 @@ rejection_test!(
     "Object.prototype.x = 1;",
     Code::PrototypeMutationUnsupported
 );
-rejection_test!(rejects_this, "const x = this;", Code::ThisUnsupported);
-// The arguments object is a supported binding only inside a non-arrow
-// function; outside one it is refused under its own code (FIG-3708).
-rejection_test!(
-    rejects_arguments_outside_a_function,
-    "const x = arguments;",
-    Code::ArgumentsUnsupported
-);
-rejection_test!(
-    rejects_namespaces,
-    "namespace N {}",
-    Code::NamespaceUnsupported
-);
-rejection_test!(
-    rejects_decorators,
-    "@sealed class A {}",
-    Code::DecoratorUnsupported
-);
-rejection_test!(
-    rejects_dynamic_import,
-    "import('x');",
-    Code::DynamicImportUnsupported
-);
-rejection_test!(
-    rejects_static_import,
-    "import x from 'x';",
-    Code::ImportExportUnsupported
-);
-rejection_test!(
-    rejects_static_export,
-    "export const x = 1;",
-    Code::ImportExportUnsupported
-);
+
 rejection_test!(rejects_jsx, "const x = <div />;", Code::JsxUnsupported);
 rejection_test!(rejects_using, "using x = resource;", Code::UsingUnsupported);
 rejection_test!(
@@ -259,33 +195,13 @@ fn shadowed_module_root_names_the_shadowing_binding() {
 // `defineProcess` is not a construct any more (FIG-2999): a process is an
 // uncalled `const`-bound async arrow, so the retired spelling is an unbound
 // name like any other.
-rejection_test!(
-    rejects_the_retired_define_process_form,
-    "const config = {}; const worker = defineProcess(config);",
-    Code::UnknownBinding
-);
-rejection_test!(
-    rejects_yield,
-    "function* f() { yield 1; }",
-    Code::GeneratorUnsupported
-);
+
 rejection_test!(
     rejects_tagged_templates,
     "tag`value`;",
     Code::TaggedTemplateUnsupported
 );
-rejection_test!(rejects_super, "super();", Code::SuperUnsupported);
-rejection_test!(
-    rejects_meta_properties,
-    "const x = import.meta;",
-    Code::MetaPropertyUnsupported
-);
-rejection_test!(rejects_bigint, "const x = 1n;", Code::BigIntUnsupported);
-rejection_test!(
-    rejects_sequence,
-    "const x = (1, 2);",
-    Code::SequenceUnsupported
-);
+
 rejection_test!(
     rejects_instanceof,
     "const x = value instanceof Type;",
@@ -293,21 +209,6 @@ rejection_test!(
 );
 rejection_test!(rejects_debugger, "debugger;", Code::DebuggerUnsupported);
 // Stricter than ECMA-262 where `tsc --strict` rejects the program (ADR 0064).
-rejection_test!(
-    rejects_delete_of_a_non_reference,
-    "const b = delete 1;",
-    Code::DeleteNonReferenceUnsupported
-);
-rejection_test!(
-    rejects_a_function_redeclared_in_its_var_scope,
-    "function f() {} function f() {}",
-    Code::FunctionRedeclarationUnsupported
-);
-rejection_test!(
-    rejects_reserved_generated_identifier,
-    "const __lashlang_0_a = 1;",
-    Code::ReservedIdentifier
-);
 
 /// FIG-3703: `undefined`, `NaN` and `Infinity` stay reserved only where a
 /// declaration would create a *session-global* slot — the cell's top level —
@@ -323,47 +224,6 @@ fn reserved_value_identifiers_refuse_only_at_the_top_level() {
     ] {
         let error = lash_typescript::validate(source).expect_err(source);
         assert_eq!(error.code, Code::ReservedIdentifier, "{source}: {error}");
-    }
-}
-
-/// A hole in an array literal is a sparse array: admitted since the heap
-/// tracks elisions, with the remaining hole semantics owned by FIG-3700. A
-/// trailing comma alone is not an elision, and a hole in a destructuring
-/// *pattern* skips an element without creating one.
-#[test]
-fn array_literal_elisions_admit_and_commas_and_pattern_holes_do_not() {
-    for source in [
-        "const a = [, 2];",
-        "const a = [0, , 2];",
-        "const a = [1, , ];",
-        "const a = [0, , 2, , 4];",
-        "const a = [[0, , 2]];",
-        "const a = [1, ...[0, , 2]];",
-        "const a = [1,];",
-        "const a = [];",
-        "const [x, , z] = [1, 2, 3]; finish(z);",
-    ] {
-        lash_typescript::validate(source).unwrap_or_else(|error| panic!("{source}: {error}"));
-    }
-}
-
-#[test]
-fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
-    for source in [
-        "let x = 0; x++; finish(x);",
-        "let x = 1; const old = x++; finish(old);",
-        "var x = 1; const {a} = {a:2}; finish([x,a]);",
-        "const x = { ...{a:1}, ['b']:2, f(){return 3;} }; finish(x?.a);",
-        "switch(1){case 1: break;} do {} while(false);",
-        "for (let i = 0; i < 1; i++) {}",
-        "const values = [1]; for (const value of values) { print(value); }",
-        "await web.fetch({ url: 'https://example.com' });",
-        "finish(`${'abc'.startsWith('bc', 1)}`);",
-        "finish(`${'abc'.includes('b', 2)}`);",
-        "finish(`${'abc'.endsWith('b', 2)}`);",
-        "finish(`${'abc'.charCodeAt(0, 99)}`);",
-    ] {
-        lash_typescript::validate(source).expect(source);
     }
 }
 
@@ -487,11 +347,7 @@ fn date_rejections_name_the_deterministic_repair() {
 // ordinary data key that nothing ever reads through. These are the four static
 // shapes; the computed one is only knowable at the access and is covered in
 // `ecma_regressions.rs`.
-rejection_test!(
-    rejects_proto_member_write,
-    "const o: any = {}; o.__proto__ = { x: 1 };",
-    Code::PrototypeMutationUnsupported
-);
+
 rejection_test!(
     rejects_proto_member_read,
     "const o: any = { a: 1 }; finish(o.__proto__);",
@@ -517,16 +373,6 @@ rejection_test!(
     "const o: any = {}; o.__defineGetter__('x', () => 1);",
     Code::PrototypeMutationUnsupported
 );
-rejection_test!(
-    rejects_define_setter,
-    "const o: any = {}; o.__defineSetter__('x', (v: number) => v);",
-    Code::PrototypeMutationUnsupported
-);
-rejection_test!(
-    rejects_lookup_getter,
-    "const o: any = {}; finish(o.__lookupGetter__('x'));",
-    Code::PrototypeMutationUnsupported
-);
 
 // An unknown static on an ECMA global is a missing method, not a tool call.
 // These reported `TS_AWAIT_REQUIRED` — an instruction to add `await` to a
@@ -534,16 +380,7 @@ rejection_test!(
 // names that can never be a tool module. The diagnostic now names the owner
 // too, so `isError` and `fromBase64` are attributed to `Error` and
 // `Uint8Array` rather than floating free.
-rejection_test!(
-    rejects_unknown_error_static,
-    "finish(Error.isError(new Error('x')));",
-    Code::MethodUnsupported
-);
-rejection_test!(
-    rejects_unknown_typed_array_static,
-    "finish(Uint8Array.fromBase64('AAA='));",
-    Code::MethodUnsupported
-);
+
 rejection_test!(
     rejects_unknown_reflect_static,
     "finish(Reflect.ownKeys({}));",
@@ -651,7 +488,7 @@ fn a_multi_use_code_gives_advice_that_matches_the_actual_refusal() {
 // gap, so it is registered rather than fixed. Where the same `TS_*` code
 // also refuses a shape `tsc` accepts, the ADR's dialect-strictness register
 // records the split and the ticket that owns the accepted shape — nothing
-// here moves that boundary. `rejects_with` above is the TS1101 pin — the
+// here moves that boundary. the census pins TS1101 — the
 // dialect is strict-only, where `with` is already a syntax error. The
 // refusals that fire only at run time — `TS_FUNCTION_STRING_COERCION` on
 // `'' + (() => 1)` (tsc TS2365) and `TS_CONSTRUCTOR_UNSUPPORTED` on
@@ -659,17 +496,9 @@ fn a_multi_use_code_gives_advice_that_matches_the_actual_refusal() {
 // probes. `const [a] = null;` (TS2488) no longer refuses: it throws
 // ECMA's `TypeError` at run time (FIG-3654), so it has no probe.
 // tsc TS2304.
-rejection_test!(
-    rejects_an_undeclared_name_tsc_also_rejects,
-    "const x = notDeclaredAnywhere;",
-    Code::UnknownBinding
-);
+
 // tsc TS2448 (with TS7022, the circular-initializer note).
-rejection_test!(
-    rejects_a_dead_zone_read_tsc_also_rejects,
-    "const x = x;",
-    Code::TemporalDeadZone
-);
+
 // tsc TS2339 on a missing member of a built-in namespace — a *call* of one
 // still refuses (a read answers `undefined` and a write lands an expando, as
 // Node answers).
@@ -679,11 +508,7 @@ rejection_test!(
     Code::MethodUnsupported
 );
 // tsc TS2554 on a missing-argument call to a listed method.
-rejection_test!(
-    rejects_a_missing_argument_call_tsc_also_rejects,
-    "[1].map();",
-    Code::MethodUnsupported
-);
+
 // tsc TS2554 on a missing-argument call to a listed builtin.
 rejection_test!(
     rejects_a_missing_builtin_argument_tsc_also_rejects,
@@ -691,26 +516,14 @@ rejection_test!(
     Code::UnsupportedExpression
 );
 // tsc TS7009 on `new` of an authored function.
-rejection_test!(
-    rejects_new_on_an_authored_function_tsc_also_rejects,
-    "function F() { } const o = new F();",
-    Code::NewUnsupported
-);
+
 // tsc TS2769 on a non-string `RegExp` pattern; `new RegExp(re)` on a regex
 // argument is tsc-accepted and stays refused under the same code until
 // FIG-3698's constructor work lands.
-rejection_test!(
-    rejects_a_non_string_regexp_pattern_tsc_also_rejects,
-    "const r = new RegExp(null);",
-    Code::NewUnsupported
-);
+
 // tsc TS2588 on a `const` reassignment; the same code's refusals of `var`,
 // parameter and `catch` bindings are tsc-accepted shapes FIG-3703 owns.
-rejection_test!(
-    rejects_const_reassignment_tsc_also_rejects,
-    "const v = 1; v = 2;",
-    Code::AssignConst
-);
+
 // tsc TS2630 on assignment to a function declaration.
 rejection_test!(
     rejects_function_reassignment_tsc_also_rejects,

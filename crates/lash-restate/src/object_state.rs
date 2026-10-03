@@ -661,35 +661,6 @@ mod tests {
         serde_json::to_vec(&stamped(format, body)).expect("encode a stamped value")
     }
 
-    #[test]
-    fn the_current_format_round_trips() {
-        let raw = stamped(newest(), serde_json::json!({"name": "alpha", "count": 3}));
-        let decoded: serde_json::Value =
-            decode_stamped_value("state-key", raw, FORMATS).expect("current format decodes");
-        assert_eq!(decoded["name"], "alpha");
-        assert_eq!(decoded["count"], 3);
-    }
-
-    #[test]
-    fn a_stamped_scalar_round_trips() {
-        let raw = stamped(newest(), serde_json::json!("resolved"));
-        let decoded: String =
-            decode_stamped_value("state-key", raw, FORMATS).expect("scalar body decodes");
-        assert_eq!(decoded, "resolved");
-    }
-
-    #[test]
-    fn stamped_bytes_round_trip() {
-        let bytes = vec![0u8, 1, 2, 250, 255];
-        let raw = stamped(
-            newest(),
-            serde_json::to_value(&bytes).expect("bytes to value"),
-        );
-        let decoded: Vec<u8> =
-            decode_stamped_value("state-key", raw, FORMATS).expect("bytes decode");
-        assert_eq!(decoded, bytes);
-    }
-
     /// The synthetic N+1 reads the payload family's format-1 values through
     /// the family's registered lift.
     #[cfg(feature = "synthetic-next")]

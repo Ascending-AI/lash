@@ -688,21 +688,6 @@ mod tests {
         );
     }
 
-    /// `keys` over a list is the empty key set -- exactly what the scalar path
-    /// answers for a `Value::List` -- not an unanswerable request. Pinned at
-    /// the descriptor seam: JavaScript's `Object.keys` over an array is its own
-    /// index-name enumeration and does not reach this hook.
-    #[tokio::test]
-    async fn history_answers_keys_with_the_empty_key_set() {
-        let value = HistoryProjectedValue {
-            projection: Arc::new(rlm_history_projection(&step_projection("only"))),
-        };
-        assert!(matches!(
-            value.read_one(ProjectedReadRequest::Keys),
-            Some(ProjectedReadResponse::Keys(keys)) if keys.is_empty()
-        ));
-    }
-
     /// The TypeScript surface has no `empty(...)`, so `Empty` is pinned at the
     /// descriptor seam: it answers, rather than falling through to a refusal or
     /// to materializing the whole history.

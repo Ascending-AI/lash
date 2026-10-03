@@ -28,7 +28,6 @@ use crate::process::{
     workflow_key_authority,
 };
 use bytes::Bytes;
-use http_body_util::{BodyExt, Empty};
 use lash_core::ProcessWorkSubstrate as _;
 use lash_core::StoreSet as _;
 use lash_core::testing::store_fixtures::{durable_admission, recorded_process_admission};
@@ -49,7 +48,7 @@ use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-use lash_sansio::sync::{MutexExt, RwLockExt};
+use lash_sansio::sync::MutexExt;
 use restate_sdk::context::{ContextClient, RequestTarget, RunRetryPolicy, WorkflowContext};
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::prelude::Endpoint;
@@ -61,8 +60,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Mutex, RwLock};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
@@ -258,7 +257,6 @@ pub(super) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
         .trigger_store()
 }
 
-mod bindings;
 mod compat_on_the_double;
 mod determinism;
 mod effect_group_child_cancel;
@@ -282,14 +280,12 @@ mod effect_host_laws_on_the_double;
 mod effect_layer_wait_children;
 mod endpoint_protocol;
 mod folded_generation_sentinel_on_the_double;
-mod generation_drain_on_the_double;
 mod generation_sentinel_on_the_double;
 mod guarded_surface_tests;
 mod journal_cut_runner;
 mod layered_effect_host_on_the_double;
 mod live_fault_park_on_the_double;
 mod live_turn_probe;
-mod obligation_relay_on_the_double;
 mod otel_laws;
 mod parent_end_on_the_double;
 mod paused_group_children;
@@ -312,11 +308,11 @@ mod wait_handoff_generations;
 use endpoint_protocol::{
     RecordedCommand, admission_journal, admitted_invocation_body, durable_wait_index_call_response,
     encode_call_replay, encode_captured_run_and_call_replay, encode_captured_run_command_replay,
-    encode_completed_gate_sleep_replay, encode_completed_sleep_replay, encode_journal_retry,
-    encode_process_segment_send_replay, encode_process_terminal_delivery_replay,
-    encode_recorded_commands_replay, encode_recorded_commands_with_invocations_replay,
-    encode_run_replay, encode_signal_value, invoke_endpoint, invoke_endpoint_body,
-    invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses,
+    encode_completed_gate_sleep_replay, encode_journal_retry, encode_process_segment_send_replay,
+    encode_process_terminal_delivery_replay, encode_recorded_commands_replay,
+    encode_recorded_commands_with_invocations_replay, encode_run_replay, encode_signal_value,
+    invoke_endpoint, invoke_endpoint_body, invoke_endpoint_body_open,
+    invoke_endpoint_body_with_json_call_responses,
     invoke_endpoint_body_with_json_call_responses_then_suspend,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
     invoke_process_workflow_body, invoke_process_workflow_endpoint, restate_call_frames,
@@ -1578,7 +1574,6 @@ mod effect_execution;
 mod failure_settlement;
 mod indexed_waits;
 mod ingress_recovery;
-mod observer_intent_on_the_double;
 mod postgres_ingress;
 mod process_attach_wait_end;
 mod process_await_redrive;
