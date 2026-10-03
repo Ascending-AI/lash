@@ -122,6 +122,28 @@ It is fail-closed by construction: a manifest, `Cargo.lock`, the toolchain pin, 
 
 State exactly what ran and passed: a focused or change-scoped run is valid local evidence, but it is not a claim that the full suite ran. The merge queue's `CI conclusion` supplies proof for the diff-selected families configured to run on that event; an accepted event-policy skip does not prove the skipped behavior.
 
+### Which tests get admitted
+
+A test earns its place by catching something the simulator, the conformance
+laws and the regression corpus would not. Admit a unit or integration test only
+when it pins a **named rule** (a contract, invariant or decision the code must
+keep, named in the test) or a **bug that was actually found** (it fails once on
+the unfixed code). Review rejects everything else, including:
+
+- coverage padding: tests written to raise a number, not to pin a rule;
+- change detectors: tests that assert internal shape (field-by-field fixtures,
+  wiring states, exact error text no caller reads) and so break on refactors
+  without ever catching a defect;
+- trivial-code tests: constructors, defaults, getters, `Display`, derived
+  serde round-trips of types a store or schema suite already round-trips;
+- duplicates of a law that `lash-conformance`, `lash-sim` or `lash-regress`
+  already proves.
+
+Deletion follows evidence rather than taste. A test that kills no mutant, or
+kills only mutants the simulator, conformance or regression suites also kill,
+is a deletion candidate; so is a test that changes in refactor commits and has
+never failed on a real bug.
+
 ### Expect tests versus conformance assertions
 
 Use an inline expect test when the review artifact is a short, deterministic behavior transcript and a changed ordering or rendered state should be judged as one coherent diff. Keep conformance suites assertion-based: they prove backend-independent invariants across implementations, where pinning one example interleaving would narrow the contract instead of strengthening it. Never bless an expect diff until its durable-write lines still distinguish the defect the test is meant to catch.
