@@ -8,8 +8,8 @@
 //! the journaled prompt with no provider request. Then, the first attempt
 //! asks the model once and crashes after its effect loop, before the turn
 //! commits. The redrive runs under changed host code the model request is
-//! built from (a plugin that adds a note to every turn, as a redeploy
-//! would; the session's config cannot drift a recorded run, FIG-3600 S6):
+//! built from (the same registered plugin adds a different note; the
+//! session's config cannot drift a recorded run, FIG-3600 S6):
 //! the recorded model call's envelope hash conflicts, and the conflict parks the
 //! turn — it aborts with the typed replay refusal, a `TurnPark` names the
 //! diverged effect kind, the model is not asked again and nothing terminal is
@@ -87,9 +87,9 @@ async fn build_runtime(parts: DriftParts, note: Option<&'static str>) -> crate::
                         parts.probe,
                         Arc::clone(&parts.executions),
                     )])
-                    .chain(note.map(|note| {
+                    .chain([
                         Arc::new(DriftNote(note)) as Arc<dyn crate::facade_support::PluginFactory>
-                    }))
+                    ])
                     .collect(),
             )
             .with_store(crate::conformance::helpers::session_view(
@@ -103,11 +103,10 @@ async fn build_runtime(parts: DriftParts, note: Option<&'static str>) -> crate::
     .expect("build the model-call drift conformance runtime")
 }
 
-/// Host code that adds a system note to every turn it prepares: a redrive
-/// built with it rebuilds another model request than the one its first
-/// execution recorded, as a redeployed build would.
+/// A fixed plugin and callback whose optional note changes the model request
+/// without changing the recorded plugin composition.
 #[derive(Clone)]
-struct DriftNote(&'static str);
+struct DriftNote(Option<&'static str>);
 
 impl crate::plugin::PluginFactory for DriftNote {
     fn id(&self) -> &'static str {
@@ -141,10 +140,12 @@ impl crate::plugin::SessionPlugin for DriftNote {
             Arc::new(move |_| {
                 Box::pin(async move {
                     Ok(lash_core::facade_support::TurnContributions {
-                        messages: vec![lash_core::PluginMessage::text(
-                            lash_core::MessageRole::System,
-                            note,
-                        )],
+                        messages: note
+                            .map(|note| {
+                                lash_core::PluginMessage::text(lash_core::MessageRole::System, note)
+                            })
+                            .into_iter()
+                            .collect(),
                         events: Vec::new(),
                     })
                 })
