@@ -114,6 +114,7 @@ pub(super) async fn fork_at_in_catalog(
             };
             let mut current_frame_node_id = None;
             let mut fork_plan = None;
+            let mut source_frame_ended = false;
             if let Some(leaf_node_id) = leaf_node_id.as_deref() {
                 let leaf = lash_core_execution::NodeId::parse(leaf_node_id)?;
                 // Retirement never tombstones a retained revision's leaf, so
@@ -148,26 +149,9 @@ pub(super) async fn fork_at_in_catalog(
                 let fork_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
                     lash_core_execution::FrameEnvironmentId::new(request.session_id.clone(), frame_node_id.clone()),
                 );
-                let source_frame_ended = crate::artifact_store::artifact_fenced_tx(tx, &source_frame)
+                source_frame_ended = crate::artifact_store::artifact_fenced_tx(tx, &source_frame)
                     .map_err(sqlite_error)?;
-                if source_frame_ended {
-                    if let Some(retained_ref) = checkpoint_ref.clone() {
-                        let mut checkpoint = SqliteStore::get_checkpoint_conn(
-                            tx, &BlobRef(retained_ref), fleet_format,
-                        )?.ok_or_else(|| stored_data_corrupt("fork checkpoint", "the retained checkpoint is missing"))?;
-                        checkpoint.components.retain(|key, _| {
-                            key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
-                                && !matches!(
-                                    lash_core_execution::plugin::CheckpointComponentKey::parse(key),
-                                    lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(_)
-                                )
-                        });
-                        checkpoint_ref = Some(
-                            SqliteStore::put_checkpoint_conn(tx, &checkpoint, blob_profile, fleet_format)?
-                                .checkpoint_ref.as_str().to_owned(),
-                        );
-                    }
-                } else {
+                if !source_frame_ended {
                     crate::conn::cached_execute(tx,
                         crate::artifact_store::artifact_sql().edges.copy_referrer_edges.sql(),
                         params![source_frame.kind().as_str(), source_frame.canonical_id(),
@@ -246,18 +230,41 @@ pub(super) async fn fork_at_in_catalog(
                 )?);
                 current_frame_node_id = Some(frame_node_id);
             }
-            if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
+            if let Some(retained_ref) = checkpoint_ref.clone() {
                 let exists = tx
                     .query_row(
                         crate::artifact_store::artifact_sql().blobs_sqlite.select_exists.sql(),
-                        params![checkpoint_ref],
+                        params![retained_ref],
                         |row| row.get::<_, bool>(0),
                     )
                     .map_err(sqlite_error)?;
                 if !exists {
                     return Err(lash_core_execution::StoreError::CheckpointRootMissing {
-                        blob_ref: BlobRef(checkpoint_ref.to_owned()),
+                        blob_ref: BlobRef(retained_ref),
                     });
+                }
+                let mut checkpoint = SqliteStore::get_checkpoint_conn(
+                    tx, &BlobRef(retained_ref.clone()), fleet_format,
+                )?.ok_or(lash_core_execution::StoreError::CheckpointRootMissing {
+                    blob_ref: BlobRef(retained_ref),
+                })?;
+                // Namespaces are inherited; admission belongs to the parent.
+                // The child's drive records its transition before construction.
+                let inherited_admission = checkpoint.components.remove("plugin_admission").is_some();
+                if source_frame_ended {
+                    checkpoint.components.retain(|key, _| {
+                        key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                            && !matches!(
+                                lash_core_execution::plugin::CheckpointComponentKey::parse(key),
+                                lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(_)
+                            )
+                    });
+                }
+                if inherited_admission || source_frame_ended {
+                    checkpoint_ref = Some(
+                        SqliteStore::put_checkpoint_conn(tx, &checkpoint, blob_profile, fleet_format)?
+                            .checkpoint_ref.as_str().to_owned(),
+                    );
                 }
             }
             let config = request.config.clone();

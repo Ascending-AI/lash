@@ -643,6 +643,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         let mut current_frame_node_id = None;
         let mut fork_plan = None;
         let mut copy_frame_edges = None;
+        let mut source_frame_ended = false;
         if let Some(leaf_node_id) = leaf_node_id.as_deref() {
             let leaf = lash_core_execution::NodeId::parse(leaf_node_id)?;
             // Retirement never tombstones a retained revision's leaf, so a
@@ -698,7 +699,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                     .await
                     .map_err(store_sqlx_error)?;
             }
-            let source_ended: bool = sqlx::query_scalar(
+            source_frame_ended = sqlx::query_scalar(
                 crate::artifact_store::artifact_sql()
                     .fences
                     .select_is_fenced
@@ -709,35 +710,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-            if source_ended {
-                if let Some(retained_ref) = checkpoint_ref.clone() {
-                    let mut checkpoint = crate::support::get_checkpoint_tx(
-                        &mut tx,
-                        &BlobRef(retained_ref.clone()),
-                        self.fence.fleet(),
-                    )
-                    .await?
-                    .ok_or(StoreError::CheckpointRootMissing {
-                        blob_ref: BlobRef(retained_ref),
-                    })?;
-                    checkpoint.components.retain(|key, _| {
-                        key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
-                            && !matches!(
-                                lash_core_execution::plugin::CheckpointComponentKey::parse(key),
-                                lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(
-                                    _
-                                )
-                            )
-                    });
-                    checkpoint_ref = Some(
-                        crate::support::put_checkpoint_tx(&mut tx, &checkpoint, self.fence.fleet())
-                            .await?
-                            .0
-                            .as_str()
-                            .to_owned(),
-                    );
-                }
-            } else {
+            if !source_frame_ended {
                 copy_frame_edges = Some((source_frame, fork_frame));
             }
             // Relation and retention-source identities are metadata, not
@@ -798,6 +771,38 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 edge_path,
             )?);
             current_frame_node_id = Some(frame_node_id);
+        }
+        if let Some(retained_ref) = checkpoint_ref.clone() {
+            let mut checkpoint = crate::support::get_checkpoint_tx(
+                &mut tx,
+                &BlobRef(retained_ref.clone()),
+                self.fence.fleet(),
+            )
+            .await?
+            .ok_or(StoreError::CheckpointRootMissing {
+                blob_ref: BlobRef(retained_ref),
+            })?;
+            // Namespaces are inherited; admission belongs to the parent.
+            // The child's drive records its transition before construction.
+            let inherited_admission = checkpoint.components.remove("plugin_admission").is_some();
+            if source_frame_ended {
+                checkpoint.components.retain(|key, _| {
+                    key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                        && !matches!(
+                            lash_core_execution::plugin::CheckpointComponentKey::parse(key),
+                            lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(_)
+                        )
+                });
+            }
+            if inherited_admission || source_frame_ended {
+                checkpoint_ref = Some(
+                    crate::support::put_checkpoint_tx(&mut tx, &checkpoint, self.fence.fleet())
+                        .await?
+                        .0
+                        .as_str()
+                        .to_owned(),
+                );
+            }
         }
         let config = request.config.clone();
         let head = lash_core_execution::store::SessionHeadMeta::assemble(

@@ -30,6 +30,8 @@
 
 use super::*;
 
+mod catalog_fork;
+
 const SEED: u64 = 0x4390_0001;
 
 /// What the provider answers every call with.

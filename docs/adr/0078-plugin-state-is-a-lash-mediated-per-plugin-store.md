@@ -123,6 +123,12 @@ Parent and child writes are independent; there is no merge. Content-addressed
 storage can deduplicate unchanged bodies. Retention policy governs how long
 the session's checkpoint contents remain available.
 
+A catalog fork removes the parent's `plugin_admission` from its checkpoint
+manifest while retaining the namespace components. The admission names the
+parent's runtime owner and cannot authorize the child. A cold child open
+defers capability construction until the engine records and publishes the
+child's own transition. Adopting another owner's native view remains refused.
+
 ## Alternatives considered
 
 Snapshot callbacks and plugin-owned revision counters delegate freshness to
