@@ -10,6 +10,7 @@ use lash_core::{
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, SessionShifts,
     SessionWorkEngine,
 };
+use lash_restate::restate_sdk;
 use lash_restate_test::{InvocationView, RestateTestServer, ServerConfig};
 use restate_sdk::context::{ContextSideEffects, RunFuture, WorkflowContext};
 use restate_sdk::errors::HandlerResult;

@@ -77,6 +77,10 @@ result restarts it; concurrent handles share no per-handle budget.
 `tests/server_semantics.rs` in `lash-restate-test` pins these rules with the
 crash, retry and cancellation laws for started runs.
 
+The [SDK acceptance recipe](SDK_ACCEPTANCE.md) selects the unchanged handler
+laws and the concurrent-run laws by full test path, verifies executed-case
+receipts, and records the accepted dependency and predecessor live V7 proof.
+
 Upgrade note: invocations that journaled `ExecCode` under the pre-fix wrapping
 will diverge on replay after upgrade; they were already panic-looping and need
 an admin `KILL`.

@@ -69,6 +69,13 @@
 //! has no allowlist and no exemption mechanism: a gap is fixed by exporting or
 //! by narrowing, never by listing it.
 
+// SDK fixture macros emit absolute `::restate_sdk` paths. Keep their private
+// test bindings on the same SDK re-export as the facade's Restate adapter.
+#[cfg(test)]
+extern crate self as restate_sdk;
+#[cfg(test)]
+use lash_restate::restate_sdk::{context, discovery, endpoint, errors, ingress, service};
+
 /// Administrative facade handles and operations.
 pub mod admin;
 mod artifacts;

@@ -3051,7 +3051,6 @@ dependencies = [
  "lash-internal-typescript",
  "lash-internal-vm-client",
  "lash-internal-vm-worker",
- "restate-sdk",
  "rmp-serde",
  "rusqlite",
  "serde",
