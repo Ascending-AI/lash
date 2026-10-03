@@ -499,6 +499,46 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         ))
     }
 
+    /// Record a parallel Run's selection and decision with an owned SDK closure.
+    async fn record_run_schedule(
+        &self,
+        name: String,
+        step: RunRecordStep<'static>,
+    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        drop(step);
+        Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineControlUnsupported,
+            format!("this controller records no owned Run schedule: {name}"),
+        ))
+    }
+
+    /// Register one independently completing attempt now, in command order.
+    /// Replay must register the recorded prefix before awaiting an older X.
+    fn start_run_attempt(
+        &self,
+        name: String,
+        step: crate::tool_dispatch::RunAttemptStep,
+    ) -> crate::tool_dispatch::RunAttemptHandle {
+        drop(step);
+        Box::pin(async move {
+            Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::EngineControlUnsupported,
+                format!("this controller records no Run attempt: {name}"),
+            ))
+        })
+    }
+
+    /// Register a durable retry backoff now, preserving its deadline on replay.
+    fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
+        let _ = backoff_ms;
+        Box::pin(async {
+            Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::EngineControlUnsupported,
+                "this controller records no Run retry timer",
+            ))
+        })
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

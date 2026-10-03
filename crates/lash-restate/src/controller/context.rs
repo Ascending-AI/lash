@@ -220,6 +220,14 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     where
         'ctx: 'run;
 
+    /// Register a timer before awaiting any pending attempt on replay.
+    fn start_sleep_send<'run>(&'run self, duration: Duration) -> crate::JournaledFuture<'run, ()>
+    where
+        'ctx: 'run,
+    {
+        self.sleep_send(duration)
+    }
+
     /// A durable timer, raced against the turn's cancellation gate when
     /// `turn_cancel` names one. A sleep that observes no turn races the
     /// process segment's durable cancel promise when `process_cancel` says
@@ -256,6 +264,16 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     /// runs it again (FIG-3683). The fault's text is all the engine keeps of
     /// the attempt, and nothing after the step runs in it: the returned
     /// future never resolves to the fault.
+    /// Register an owned X before waiting; SDK progress owns its closure.
+    fn run_json_eager_or_retry_send<T, Fut>(
+        &self,
+        effect_name: String,
+        future: Fut,
+    ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'static
+    where
+        T: Serialize + DeserializeOwned + Send + 'static,
+        Fut: Future<Output = Result<T, String>> + Send + 'static;
+
     fn run_json_or_retry_send<'run, T, Fut>(
         &'run self,
         effect_name: String,
@@ -833,6 +851,15 @@ macro_rules! impl_restate_controller_context {
                     })
                 }
 
+                fn start_sleep_send<'run>(
+                    &'run self,
+                    duration: Duration,
+                ) -> crate::JournaledFuture<'run, ()>
+                where 'ctx: 'run,
+                {
+                    Box::pin(restate_sdk::context::ContextTimers::sleep(self, duration))
+                }
+
                 fn sleep_or_turn_cancel<'run>(
                     &'run self,
                     namespace: &'run crate::RestateNamespace,
@@ -947,6 +974,20 @@ macro_rules! impl_restate_controller_context {
                         // so fuse it here rather than trusting every caller.
                         guard_restate_run_future(run, closure_relay).await
                     })
+                }
+
+                fn run_json_eager_or_retry_send<T, Fut>(
+                    &self,
+                    effect_name: String,
+                    future: Fut,
+                ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'static
+                where T: Serialize + DeserializeOwned + Send + 'static,
+                      Fut: Future<Output = Result<T, String>> + Send + 'static,
+                {
+                    let run = restate_sdk::context::ContextSideEffects::run(self, move || async move {
+                        future.await.map(Json).map_err(|fault| HandlerError::from(std::io::Error::other(fault)))
+                    });
+                    restate_sdk::context::RunFuture::name(run, effect_name).start()
                 }
 
                 fn run_json_or_retry_send<'run, T, Fut>(

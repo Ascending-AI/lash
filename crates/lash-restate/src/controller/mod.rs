@@ -1118,6 +1118,36 @@ where
 
     /// One `ctx.run` step named `name` holding a Run record and the material
     /// it owns (FIG-4877): journaled once, served on every replay.
+    async fn record_run_schedule(
+        &self,
+        name: String,
+        step: lash_core::RunRecordStep<'static>,
+    ) -> Result<lash_core::tool_run::RunJournalEntry, lash_core::RuntimeEffectControllerError> {
+        self.journal_run_schedule(name, step).await
+    }
+
+    fn start_run_attempt(
+        &self,
+        name: String,
+        step: lash_core::tool_dispatch::RunAttemptStep,
+    ) -> lash_core::tool_dispatch::RunAttemptHandle {
+        self.start_journal_run_attempt(name, step)
+    }
+
+    fn start_run_retry(&self, backoff_ms: u64) -> lash_core::tool_dispatch::RunRetryTimer<'_> {
+        let timer = self
+            .context
+            .start_sleep_send(std::time::Duration::from_millis(backoff_ms));
+        Box::pin(async move {
+            timer.await.map_err(|error| {
+                crate::wire::lash_terminal(
+                    &error,
+                    lash_core::RuntimeErrorCode::EngineEffectController,
+                )
+            })
+        })
+    }
+
     async fn record_run_record(
         &self,
         name: String,

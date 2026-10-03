@@ -50,13 +50,40 @@ impl RunRecordObserver {
         name: String,
         step: RunRecordStep<'_>,
     ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
+        let (body, observations) = self.recording_step(engine, step)?;
+        let entry = engine.record_run_record(name, body).await?;
+        if let Some(observations) = observations {
+            observations.observe(&entry.record).await?;
+        }
+        Ok(entry)
+    }
+
+    pub async fn record_schedule(
+        &self,
+        engine: &dyn RuntimeEffectController,
+        name: String,
+        step: RunRecordStep<'static>,
+    ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
+        let (body, observations) = self.recording_step(engine, step)?;
+        let entry = engine.record_run_schedule(name, body).await?;
+        if let Some(observations) = observations {
+            observations.observe(&entry.record).await?;
+        }
+        Ok(entry)
+    }
+
+    fn recording_step<'run>(
+        &self,
+        engine: &dyn RuntimeEffectController,
+        step: RunRecordStep<'run>,
+    ) -> Result<(RunRecordStep<'run>, Option<RunObservations>), RuntimeEffectControllerError> {
         let bound = self
             .bound
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         let Some(bound) = bound else {
-            return engine.record_run_record(name, step).await;
+            return Ok((step, None));
         };
         let runtime = bound.frontier.runtime().unwrap_or_default();
         let owner = match bound.parent.as_ref().map(|scope| &scope.scope.owner) {
@@ -79,7 +106,7 @@ impl RunRecordObserver {
             engine.attempt_observation(),
             bound.parent.clone(),
         );
-        let body = Box::pin(async move {
+        let body: RunRecordStep<'run> = Box::pin(async move {
             let live = issue.begin_native();
             let mut entry = step.await?;
             let at_ms = runtime.clock().timestamp_ms();
@@ -126,9 +153,7 @@ impl RunRecordObserver {
             });
             Ok(entry)
         });
-        let entry = engine.record_run_record(name, body).await?;
-        observations.observe(&entry.record).await?;
-        Ok(entry)
+        Ok((body, Some(observations)))
     }
 }
 

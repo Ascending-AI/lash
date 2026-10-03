@@ -287,6 +287,29 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.run_record_observer()
     }
 
+    async fn record_run_schedule(
+        &self,
+        name: String,
+        step: crate::RunRecordStep<'static>,
+    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        self.ledger.record(format!("run_schedule:{name}"));
+        self.inner.record_run_schedule(name, step).await
+    }
+
+    fn start_run_attempt(
+        &self,
+        name: String,
+        step: crate::tool_dispatch::RunAttemptStep,
+    ) -> crate::tool_dispatch::RunAttemptHandle {
+        self.ledger.record(format!("run_attempt:{name}"));
+        self.inner.start_run_attempt(name, step)
+    }
+
+    fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
+        self.ledger.record(format!("run_retry:{backoff_ms}"));
+        self.inner.start_run_retry(backoff_ms)
+    }
+
     async fn record_run_record(
         &self,
         name: String,

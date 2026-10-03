@@ -231,6 +231,15 @@ impl EffectPublication {
         }
     }
 
+    pub(crate) fn publish_run(
+        mut self,
+        resolutions: Vec<StateResolution>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.settled = true;
+        self.plugins
+            .publish_run_resolutions(&self.address, resolutions)
+    }
+
     /// Publish the resolutions `outcome` carries and return its result.
     ///
     /// # Errors
@@ -278,7 +287,7 @@ impl crate::PluginSession {
     /// Reduce `proposals` once every namespace they address has no
     /// unreturned publication of another effect, and reserve those
     /// namespaces for `address` until its outcome is published.
-    async fn reduce_proposals(
+    pub(crate) async fn reduce_proposals(
         &self,
         address: &crate::EffectAddress,
         proposals: Vec<Proposal>,
@@ -458,12 +467,20 @@ impl crate::PluginSession {
             self.abandon_publication(address);
             return Err(PluginStateError::EffectOwnerMismatch.into());
         }
+        self.publish_run_resolutions(address, state.resolutions)?;
+        *result
+    }
+
+    pub(crate) fn publish_run_resolutions(
+        &self,
+        address: &crate::EffectAddress,
+        resolutions: Vec<StateResolution>,
+    ) -> Result<(), RuntimeEffectControllerError> {
         let mut registry = self.state.lock_recover();
         let mut candidate = registry.data.clone();
         let mut owed = registry.owed.clone();
         let segment = registry.segment;
-        let published = state
-            .resolutions
+        let published = resolutions
             .iter()
             .try_for_each(|resolution| {
                 let namespace = candidate
@@ -493,7 +510,7 @@ impl crate::PluginSession {
         registry.owed = owed;
         drop(registry);
         self.release_publication(address);
-        *result
+        Ok(())
     }
 
     /// Release what `address` reserved, and wake every waiting reduction: a

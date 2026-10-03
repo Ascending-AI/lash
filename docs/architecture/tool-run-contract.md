@@ -32,6 +32,22 @@ effect-host simulator targets these seams, not `ToolChildHost`.
 | K8 | Operation Run input kind over the session-operation opener (Q2) | `lash_core_store::tool_run::operation` | codec, identity | FIG-4888, FIG-4893 | host operations |
 | K10 | Callback slots and state authority, command batches, resolutions, applied frontier (Q5) | `lash_core_store::tool_run::state_command` | codec, refusal, frontier | FIG-4878 (FIG-4857 for construction) | FIG-4879, FIG-4880 |
 
+`RunCoordinator::decide_round` records one admission for the whole round,
+then registers independent `RunAttemptEntry` handles in admission order.
+Each X owns its canonical output. A selected Run record folds that X and
+its final decision together, or records retry eligibility and backoff;
+a separate recorded timer wake registers the next ordinal. Served replay
+reconstructs this command prefix before awaiting an older unfinished X.
+The independent Done path costs one A and one X/D/V per member.
+
+Body requests carry the owning plugin namespace's admission snapshot,
+including its applied frontier. Reported retries keep that snapshot.
+Successful X captures hold declared state commands as data. Only the
+selected successful final reduces them, records the P58 resolutions with
+D, and publishes after D is durable. Failed or cancelled candidates
+publish no success commands; replay installs the recorded resolutions
+without executing a body, check or reducer.
+
 The plugin registrar mints every callback key from `CallbackSlot`, so a
 callback slot cannot exist without its key prefix and its state authority.
 

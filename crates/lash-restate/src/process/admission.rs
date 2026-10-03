@@ -116,6 +116,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// from shifts that journal another boundary and admission.
 /// Epoch 8 (FIG-4848) records the admitted head verdict in the admission
 /// instead of journaling a separate inspection.
+/// Epoch 9 (FIG-4879) records independent owned attempts and their retry/
+/// selection schedule, with state resolutions in the selected decision.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -129,14 +131,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 8;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 9;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 9;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 10;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

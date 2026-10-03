@@ -51,9 +51,9 @@ pub use operation::{OperationRun, RunInputKind};
 pub use receipt::{BusinessReceipt, LogicalTerminal, ObservationPermit, ObservedFact};
 pub use retention::{MaterialBundle, MaterialHolder, MaterialRetentionError, RetainedBundle};
 pub use run_event::{
-    AttemptOrdinal, AttemptResult, CallDecision, ResultSource, RunEvent, RunEventOrdinal,
-    RunEventRefusal, RunJournalEntry, RunLedger, RunLifecycle, RunRecord, RunTraceFacts,
-    SegmentOrdinal,
+    AttemptOrdinal, AttemptResult, CallDecision, ResultSource, RunAttemptEntry, RunEvent,
+    RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger, RunLifecycle, RunRecord,
+    RunTraceFacts, SegmentOrdinal,
 };
 pub use source_seal::{
     SealOutcome, SealRefusal, SealWriter, SourceAuthority, SourceDescriptor, SourceSeal,

@@ -1376,6 +1376,7 @@ pub mod durability {
         GroupChildBinding, GroupChildCancelWatch, JournalReplay, ProcessDriveStep,
         RankedGroupSettlement, RecordedJournal, RecordedKeyRange, RunRecordStep,
     };
+    pub use lash_core::tool_dispatch::{RunAttemptHandle, RunAttemptStep, RunRetryTimer};
     pub use lash_core::{
         EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,
         facade_support::LeaseTimingsError, facade_support::RuntimeEnvironment,

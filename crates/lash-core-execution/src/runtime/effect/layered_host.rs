@@ -706,6 +706,26 @@ impl RuntimeEffectController for LayeredController<'_> {
         self.inner.as_ref().run_record_observer()
     }
 
+    async fn record_run_schedule(
+        &self,
+        name: String,
+        step: crate::RunRecordStep<'static>,
+    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        self.inner.as_ref().record_run_schedule(name, step).await
+    }
+
+    fn start_run_attempt(
+        &self,
+        name: String,
+        step: crate::tool_dispatch::RunAttemptStep,
+    ) -> crate::tool_dispatch::RunAttemptHandle {
+        self.inner.as_ref().start_run_attempt(name, step)
+    }
+
+    fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
+        self.inner.as_ref().start_run_retry(backoff_ms)
+    }
+
     async fn record_run_record(
         &self,
         name: String,

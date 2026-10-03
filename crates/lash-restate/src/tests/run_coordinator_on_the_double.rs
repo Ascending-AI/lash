@@ -75,6 +75,13 @@ enum Kind {
     Declares(Vec<ToolIntentKind>),
     /// Done, declaring nothing.
     IntentFree,
+    Cached,
+    Retry {
+        after_ms: u64,
+    },
+    Stateful {
+        key: String,
+    },
     /// Parked on a Deferred source.
     Deferred,
 }
@@ -82,7 +89,9 @@ enum Kind {
 fn call(label: &str, kind: &Kind) -> SingletonToolCall {
     let declaration = match kind {
         Kind::Declares(intents) => ToolDeclaration::default().with_intents(intents.iter().copied()),
-        Kind::IntentFree => ToolDeclaration::default(),
+        Kind::IntentFree | Kind::Cached | Kind::Retry { .. } | Kind::Stateful { .. } => {
+            ToolDeclaration::default()
+        }
         Kind::Deferred => ToolDeclaration::deferring(),
     };
     SingletonToolCall {
@@ -117,6 +126,21 @@ struct Probe {
     /// Stream events each body observes into its attempt's stream.
     streams: BTreeMap<ToolCallId, Vec<SessionStreamEvent>>,
     cancel: AtomicBool,
+    parallel: Option<Arc<tokio::sync::Barrier>>,
+    parallel_order: Vec<ToolCallId>,
+    parallel_completed: std::sync::atomic::AtomicUsize,
+    parallel_wake: tokio::sync::Notify,
+    retry: lash_core::tool_run::RecordedRetryPolicy,
+    gate: Option<(ToolCallId, ToolCallId)>,
+    gate_open: AtomicBool,
+    gate_after_crash: bool,
+    gate_wake: tokio::sync::Notify,
+    cancel_at_timer: bool,
+    handler_attempts: std::sync::atomic::AtomicUsize,
+    replay_delay: Option<Duration>,
+    cancel_at_gate: bool,
+    plugin_host: Option<Arc<lash_core::plugin::PluginHost>>,
+    plugins: Mutex<Option<Arc<lash_core::plugin::PluginSession>>>,
     executions: Mutex<Vec<(ToolCallId, AttemptOrdinal)>>,
     /// The exactly-once fence of declared intents, keyed by call and kind.
     realized: Mutex<Vec<(ToolCallId, ToolIntentKind)>>,
@@ -142,6 +166,21 @@ impl Probe {
                 .collect(),
             streams: BTreeMap::new(),
             cancel: AtomicBool::new(false),
+            parallel: None,
+            parallel_order: Vec::new(),
+            parallel_completed: Default::default(),
+            parallel_wake: Default::default(),
+            retry: Default::default(),
+            gate: None,
+            gate_open: AtomicBool::new(false),
+            gate_after_crash: false,
+            gate_wake: Default::default(),
+            cancel_at_timer: false,
+            handler_attempts: Default::default(),
+            replay_delay: None,
+            cancel_at_gate: false,
+            plugin_host: None,
+            plugins: Mutex::new(None),
             executions: Mutex::new(Vec::new()),
             realized: Mutex::new(Vec::new()),
             held: BTreeSet::new(),
@@ -189,7 +228,13 @@ impl SingletonToolHandlers for Probe {
     ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
         vec![AttributedVerdict {
             callback: binding().executable,
-            verdict: BeforeCheckReply::Allow,
+            verdict: if matches!(self.kinds[&_call.call_id], Kind::Cached) {
+                BeforeCheckReply::Cached {
+                    output: output_of(&_call.call_id),
+                }
+            } else {
+                BeforeCheckReply::Allow
+            },
         }]
     }
 
@@ -211,14 +256,77 @@ impl SingletonToolHandlers for Probe {
                 event: ObservedEvent::Session(event.clone()),
             });
         }
+        if let Some(barrier) = &self.parallel {
+            tokio::time::timeout(Duration::from_secs(1), barrier.wait())
+                .await
+                .expect("L01: every body reaches its barrier before any can finish");
+            loop {
+                let wake = self.parallel_wake.notified();
+                tokio::pin!(wake);
+                wake.as_mut().enable();
+                if self.parallel_order[self.parallel_completed.load(Ordering::SeqCst)]
+                    == *attempt.call_id
+                {
+                    break;
+                }
+                wake.await;
+            }
+        }
+        if attempt.attempt == AttemptOrdinal::FIRST
+            && self
+                .gate
+                .as_ref()
+                .is_some_and(|(held, _)| held == attempt.call_id)
+        {
+            loop {
+                let wake = self.gate_wake.notified();
+                tokio::pin!(wake);
+                wake.as_mut().enable();
+                if self.gate_open.load(Ordering::SeqCst) {
+                    break;
+                }
+                wake.await;
+            }
+        }
         let call_id = attempt.call_id;
         Ok(match &self.kinds[call_id] {
             Kind::Declares(intents) => SingletonBodyOutcome::Done {
+                commands: Default::default(),
                 output: output_of(call_id),
                 intents: intents.clone(),
                 start: None,
             },
-            Kind::IntentFree => SingletonBodyOutcome::Done {
+            Kind::Retry { after_ms } if attempt.attempt == AttemptOrdinal::FIRST => {
+                SingletonBodyOutcome::RetryableFailure {
+                    output: format!("failed {call_id}@1"),
+                    after_ms: Some(*after_ms),
+                }
+            }
+            Kind::Stateful { key } => {
+                assert!(
+                    attempt
+                        .request
+                        .state_snapshot
+                        .as_ref()
+                        .unwrap()
+                        .values
+                        .is_empty(),
+                    "admission fixes the body's snapshot even after a sibling publishes"
+                );
+                SingletonBodyOutcome::Done {
+                    output: output_of(call_id),
+                    commands: lash_core::plugin::StateCommands::new().apply(
+                        key,
+                        "append",
+                        serde_json::json!(call_id.to_string()),
+                    ),
+                    intents: Vec::new(),
+                    start: None,
+                }
+            }
+            Kind::Cached => panic!("a cached admission executes no body"),
+            Kind::IntentFree | Kind::Retry { .. } => SingletonBodyOutcome::Done {
+                commands: Default::default(),
                 output: output_of(call_id),
                 intents: Vec::new(),
                 start: None,
@@ -236,10 +344,19 @@ impl SingletonToolHandlers for Probe {
 
     async fn after_checks(
         &self,
-        _call_id: &ToolCallId,
+        call_id: &ToolCallId,
         _capture: &SingletonCapture,
     ) -> Vec<AttributedVerdict<AfterCheckVerdict>> {
+        if !self.parallel_order.is_empty() {
+            let index = self.parallel_completed.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(self.parallel_order[index], *call_id);
+            self.parallel_wake.notify_waiters();
+        }
         Vec::new()
+    }
+
+    fn plugin_session(&self) -> Option<Arc<lash_core::plugin::PluginSession>> {
+        self.plugins.lock().unwrap().clone()
     }
 
     fn run_cancel_requested(&self) -> bool {
@@ -338,6 +455,7 @@ impl SingletonToolHandlers for Probe {
 #[derive(Clone, Debug)]
 enum Step {
     Decide(usize),
+    Concurrent,
     /// Request the Run's cancellation.
     Cancel,
     Drain,
@@ -385,6 +503,7 @@ fn unrelated_record(probe: Arc<Probe>) -> lash_core::RunRecordStep<'static> {
     Box::pin(async move {
         probe.run_unrelated();
         Ok(RunJournalEntry {
+            state: Vec::new(),
             record: RunRecord {
                 segment: SegmentOrdinal(0),
                 first: RunEventOrdinal(0),
@@ -440,8 +559,71 @@ async fn drive(
     for point in crashes {
         backend.server().crash_on(CrashRule::new(point));
     }
+    let crash_count = lash_restate_test::CrashCount::new();
+    assert!(backend.server().on_crash(crash_count.listener()));
+    let release_gate = probe.gate.as_ref().map(|(_, release)| {
+        let server = backend.server().clone();
+        let release = release.clone();
+        let probe = Arc::clone(&probe);
+        tokio::spawn(async move {
+            loop {
+                let durable_final = server.invocations().iter().any(|view| {
+                    server.journal(&view.id).unwrap().iter().any(|entry| {
+                        let Some(Ok(bytes)) = entry.run_completion() else {
+                            return false;
+                        };
+                        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+                            return false;
+                        };
+                        let Some(record) = value.get("record") else {
+                            return false;
+                        };
+                        let Ok(record) = serde_json::from_value::<RunRecord>(record.clone()) else {
+                            return false;
+                        };
+                        record.events.iter().any(|event| {
+                            matches!(event,
+                            RunEvent::Decided { call_id, decision: CallDecision::Final { .. }, .. }
+                            if *call_id == release)
+                        })
+                    })
+                });
+                if durable_final && (!probe.gate_after_crash || crash_count.get() > 0) {
+                    if probe.cancel_at_gate {
+                        probe.cancel.store(true, Ordering::SeqCst);
+                    }
+                    probe.gate_open.store(true, Ordering::SeqCst);
+                    probe.gate_wake.notify_waiters();
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+    });
     let finished: Arc<Mutex<Vec<Finished>>> = Arc::new(Mutex::new(Vec::new()));
     let terminals = Arc::new(Mutex::new(BTreeMap::new()));
+    let timer_cancel = if probe.cancel_at_timer {
+        let server = backend.server().clone();
+        let probe = Arc::clone(&probe);
+        Some(tokio::spawn(async move {
+            loop {
+                let timer = server.invocations().iter().any(|view| {
+                    server
+                        .journal(&view.id)
+                        .unwrap()
+                        .iter()
+                        .any(|entry| entry.ty == MessageType::SleepCommand)
+                });
+                if timer {
+                    probe.cancel.store(true, Ordering::SeqCst);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }))
+    } else {
+        None
+    };
     let attempt: lash_restate_test::HandlerAttempt = {
         let finished = Arc::clone(&finished);
         let terminals = Arc::clone(&terminals);
@@ -452,15 +634,38 @@ async fn drive(
             let finished = Arc::clone(&finished);
             let terminals = Arc::clone(&terminals);
             Box::pin(async move {
+                if probe.handler_attempts.fetch_add(1, Ordering::SeqCst) > 0
+                    && let Some(delay) = probe.replay_delay
+                {
+                    tokio::time::sleep(delay).await;
+                }
                 // Independent whole/crashed executions use the same injected
                 // observation time; the law compares their complete records.
                 lash_core::facade_support::TraceRuntime::new(Arc::new(
                     lash_core::testing::TestClock::new(1),
                 ))
                 .turn_execution(&scoped);
+                if let Some(host) = &probe.plugin_host {
+                    let session = host
+                        .isolated_registry()
+                        .build_session(lash_core::plugin::PluginSessionRequest::creation(
+                            "session",
+                            Default::default(),
+                        ))
+                        .unwrap();
+                    *probe.plugins.lock().unwrap() = Some(session);
+                }
+                let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
                 let handlers: &dyn SingletonToolHandlers = probe.as_ref();
-                let mut run =
-                    RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                let mut run = RunCoordinator::open(
+                    &scoped,
+                    owner(),
+                    SegmentOrdinal(0),
+                    calls
+                        .iter()
+                        .flat_map(|(call, _)| call.available.clone())
+                        .collect(),
+                );
                 let mut outcome = Ok(());
                 for step in program.iter() {
                     outcome = match step {
@@ -474,6 +679,23 @@ async fn drive(
                                 }
                             })
                         }
+                        Step::Concurrent => run
+                            .decide_round(
+                                &round,
+                                Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                                probe.retry.clone(),
+                            )
+                            .await
+                            .map(|decisions| {
+                                for (call, decision) in round.iter().zip(decisions) {
+                                    if let DecidedCall::Deferred { source } = decision {
+                                        terminals.lock().unwrap().insert(
+                                            call.call_id.clone(),
+                                            SingletonTerminal::Deferred { source },
+                                        );
+                                    }
+                                }
+                            }),
                         Step::Cancel => {
                             probe.cancel.store(true, Ordering::SeqCst);
                             Ok(())
@@ -505,6 +727,12 @@ async fn drive(
     .unwrap()
     .unwrap();
     backend.server().settle().await;
+    if let Some(release) = release_gate {
+        release.await.unwrap();
+    }
+    if let Some(cancel) = timer_cancel {
+        cancel.await.unwrap();
+    }
     Driven {
         backend,
         finished,
@@ -1050,5 +1278,445 @@ async fn an_attempt_capture_bounds_its_stream_and_its_presentation_emits_it() {
                 .map(|step| name(&id, step))
                 .collect::<Vec<_>>()
         );
+    }
+}
+
+#[tokio::test]
+async fn l01_every_admitted_body_enters_before_any_completes() {
+    let calls = Arc::new(
+        (0..3)
+            .map(|i| {
+                (
+                    call(&format!("parallel-{i}"), &Kind::IntentFree),
+                    Kind::IntentFree,
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
+    let mut probe = Probe::new(&calls);
+    probe.parallel = Some(Arc::new(tokio::sync::Barrier::new(3)));
+    probe.parallel_order = [2, 0, 1]
+        .map(|index| calls[index].0.call_id.clone())
+        .to_vec();
+    let probe = Arc::new(probe);
+    let driven = drive(
+        4879,
+        Vec::new(),
+        Arc::clone(&calls),
+        Arc::new(vec![Step::Concurrent, Step::Drain]),
+        Arc::clone(&probe),
+    )
+    .await;
+    assert_eq!(
+        driven
+            .records()
+            .iter()
+            .flat_map(|record| &record.events)
+            .filter(|event| matches!(event, RunEvent::AttemptRecorded { .. }))
+            .count(),
+        3
+    );
+    let completed: Vec<_> = driven
+        .records()
+        .iter()
+        .flat_map(|record| &record.events)
+        .filter_map(|event| match event {
+            RunEvent::AttemptRecorded { call_id, .. } => Some(call_id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(completed, probe.parallel_order);
+    assert_eq!(
+        driven.journal().len(),
+        1 + 3 * calls.len(),
+        "one admission and an independent X/D/V per call"
+    );
+    for (call, _) in calls.iter() {
+        assert_eq!(probe.executions_of(&call.call_id), 1);
+        assert!(
+            matches!(driven.terminals.lock().unwrap().get(&call.call_id), Some(SingletonTerminal::Final { capture: SingletonCapture::Done { output, .. }, .. }) if output == &output_of(&call.call_id))
+        );
+    }
+}
+
+fn retry_policy() -> lash_core::tool_run::RecordedRetryPolicy {
+    lash_core::tool_run::RecordedRetryPolicy::Reported {
+        max_attempts: std::num::NonZeroU32::new(2).unwrap(),
+        base_delay_ms: 1,
+        max_delay_ms: 100,
+    }
+}
+
+#[tokio::test]
+async fn l02_l17_replay_registers_b2_before_waiting_for_unfinished_a1() {
+    let calls = Arc::new(vec![
+        (
+            call("retry-a", &Kind::Retry { after_ms: 3 }),
+            Kind::Retry { after_ms: 3 },
+        ),
+        (
+            call("retry-b", &Kind::Retry { after_ms: 1 }),
+            Kind::Retry { after_ms: 1 },
+        ),
+    ]);
+    let a = calls[0].0.call_id.clone();
+    let b = calls[1].0.call_id.clone();
+    let program = Arc::new(vec![Step::Concurrent, Step::Drain]);
+    let cuts = vec![
+        None,
+        Some(CrashPoint::BeforeFrame {
+            ty: MessageType::SleepCommand,
+        }),
+        Some(CrashPoint::BeforeRunResult {
+            name: Some(name(&b, "attempt:2")),
+        }),
+        Some(CrashPoint::BeforeRun {
+            name: "lash:run:schedule:6".to_owned(),
+        }),
+        Some(CrashPoint::BeforeRunResult {
+            name: Some(name(&a, "attempt:2")),
+        }),
+        Some(CrashPoint::BeforeFrame {
+            ty: MessageType::OutputCommand,
+        }),
+    ];
+    let mut reference = None;
+    for (index, cut) in cuts.into_iter().enumerate() {
+        let mut probe = Probe::new(&calls);
+        probe.retry = retry_policy();
+        probe.gate = Some((a.clone(), b.clone()));
+        probe.gate_after_crash = index == 3;
+        let probe = Arc::new(probe);
+        let driven = drive(
+            487917,
+            cut.into_iter().collect(),
+            Arc::clone(&calls),
+            Arc::clone(&program),
+            Arc::clone(&probe),
+        )
+        .await;
+        let records = driven.records();
+        let attempts: Vec<_> = records
+            .iter()
+            .flat_map(|record| &record.events)
+            .filter_map(|event| match event {
+                RunEvent::AttemptRecorded {
+                    call_id, attempt, ..
+                } => Some((call_id.clone(), attempt.get())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            attempts,
+            vec![
+                (b.clone(), 1),
+                (b.clone(), 2),
+                (a.clone(), 1),
+                (a.clone(), 2)
+            ],
+            "B2 becomes durable before A1 is released"
+        );
+        let mut expected = BTreeMap::from([
+            ((a.clone(), 1), 1),
+            ((a.clone(), 2), 1),
+            ((b.clone(), 1), 1),
+            ((b.clone(), 2), 1),
+        ]);
+        match index {
+            1 | 3 => {
+                expected.insert((a.clone(), 1), 2);
+            }
+            2 => {
+                expected.insert((a.clone(), 1), 2);
+                expected.insert((b.clone(), 2), 2);
+            }
+            4 => {
+                expected.insert((a.clone(), 2), 2);
+            }
+            _ => {}
+        }
+        let mut actual = BTreeMap::new();
+        for (call, attempt) in probe.executions.lock().unwrap().iter() {
+            *actual.entry((call.clone(), attempt.get())).or_insert(0) += 1;
+        }
+        assert_eq!(
+            actual, expected,
+            "cut {index}: only the unfinished receipts redeliver, under the same ordinal"
+        );
+        if let Some(reference) = &reference {
+            assert_eq!(
+                &records, reference,
+                "cut {index}: opposite replay readiness preserves the complete schedule"
+            );
+        } else {
+            reference = Some(records);
+        }
+    }
+}
+
+#[tokio::test]
+async fn l17_two_registered_timers_replay_the_recorded_wake_order() {
+    let calls = Arc::new(vec![
+        (
+            call("timers-a", &Kind::Retry { after_ms: 100 }),
+            Kind::Retry { after_ms: 100 },
+        ),
+        (
+            call("timers-b", &Kind::Retry { after_ms: 1 }),
+            Kind::Retry { after_ms: 1 },
+        ),
+    ]);
+    let a = calls[0].0.call_id.clone();
+    let b = calls[1].0.call_id.clone();
+    for (cut, unfinished_b2) in [
+        (None, false),
+        (
+            Some(CrashPoint::BeforeRun {
+                name: "lash:run:schedule:8".to_owned(),
+            }),
+            false,
+        ),
+        (
+            Some(CrashPoint::BeforeRunResult {
+                name: Some(name(&b, "attempt:2")),
+            }),
+            true,
+        ),
+    ] {
+        let mut probe = Probe::new(&calls);
+        probe.retry = retry_policy();
+        // Both old deadlines expire before a cold replay registers A's
+        // timer first. The already recorded B wake must still issue B2 first.
+        probe.replay_delay = Some(Duration::from_millis(150));
+        let probe = Arc::new(probe);
+        let driven = drive(
+            4879172,
+            cut.into_iter().collect(),
+            Arc::clone(&calls),
+            Arc::new(vec![Step::Concurrent, Step::Drain]),
+            Arc::clone(&probe),
+        )
+        .await;
+        let wakes: Vec<_> = driven
+            .records()
+            .iter()
+            .flat_map(|record| &record.events)
+            .filter_map(|event| match event {
+                RunEvent::RetryScheduled {
+                    call_id,
+                    failed,
+                    next,
+                    backoff_ms,
+                } => Some((call_id.clone(), failed.get(), next.get(), *backoff_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(wakes, vec![(b.clone(), 1, 2, 1), (a.clone(), 1, 2, 100)]);
+        let mut actual = BTreeMap::new();
+        for (call, attempt) in probe.executions.lock().unwrap().iter() {
+            *actual.entry((call.clone(), attempt.get())).or_insert(0) += 1;
+        }
+        assert_eq!(
+            actual,
+            BTreeMap::from([
+                ((a.clone(), 1), 1),
+                ((a.clone(), 2), 1),
+                ((b.clone(), 1), 1),
+                ((b.clone(), 2), 1 + usize::from(unfinished_b2))
+            ])
+        );
+    }
+}
+
+#[tokio::test]
+async fn l03_cancel_during_registered_backoff_starts_no_next_body() {
+    let kind = Kind::Retry { after_ms: 50 };
+    let calls = Arc::new(vec![(call("backoff-cancel", &kind), kind)]);
+    let mut probe = Probe::new(&calls);
+    probe.retry = retry_policy();
+    probe.cancel_at_timer = true;
+    let probe = Arc::new(probe);
+    let driven = drive(
+        487903,
+        Vec::new(),
+        Arc::clone(&calls),
+        Arc::new(vec![Step::Concurrent, Step::Drain]),
+        Arc::clone(&probe),
+    )
+    .await;
+    assert_eq!(probe.executions_of(&calls[0].0.call_id), 1);
+    assert!(matches!(
+        driven.terminals.lock().unwrap().get(&calls[0].0.call_id),
+        Some(SingletonTerminal::Withheld {
+            decision: CallDecision::Cancelled
+        })
+    ));
+    assert_eq!(
+        driven
+            .records()
+            .iter()
+            .flat_map(|record| &record.events)
+            .filter(|event| matches!(event, RunEvent::RetryTimerRegistered { .. }))
+            .count(),
+        1
+    );
+    assert!(
+        !driven
+            .records()
+            .iter()
+            .flat_map(|record| &record.events)
+            .any(|event| matches!(event, RunEvent::RetryScheduled { .. }))
+    );
+}
+
+#[tokio::test]
+async fn l19_only_the_durable_selected_final_publishes_body_commands_on_cold_replay() {
+    for (same_key, separate_namespace) in [(false, false), (true, false), (true, true)] {
+        for crash in [false, true] {
+            let mut calls = vec![
+                (
+                    call("state-a", &Kind::Stateful { key: "a".into() }),
+                    Kind::Stateful { key: "a".into() },
+                ),
+                (
+                    call(
+                        "state-b",
+                        &Kind::Stateful {
+                            key: if same_key { "a" } else { "b" }.into(),
+                        },
+                    ),
+                    Kind::Stateful {
+                        key: if same_key { "a" } else { "b" }.into(),
+                    },
+                ),
+            ];
+            let other = "fig4880-other";
+            if separate_namespace {
+                let revision = PluginRevision::new(other, revision().behavior_revision);
+                calls[1].0.binding.executable.owner = revision.clone();
+                calls[1].0.binding.preparation.owner = revision.clone();
+                calls[1]
+                    .0
+                    .binding
+                    .presentation
+                    .presenter
+                    .as_mut()
+                    .unwrap()
+                    .owner = revision.clone();
+                calls[1].0.available.push(revision);
+            }
+            let calls = Arc::new(calls);
+            let reductions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let count = Arc::clone(&reductions);
+            let spec = lash_core::plugin::PluginSpec::new().with_state_reducer(
+                "append",
+                Arc::new(move |input: lash_core::plugin::StateReduction<'_>| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Ok(Some(serde_json::json!(format!(
+                        "{}{}",
+                        input
+                            .current
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(""),
+                        input.input.as_str().unwrap()
+                    ))))
+                }),
+            );
+            let mut factories = lash_core::testing::test_standard_protocol_factories();
+            factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial(PLUGIN),
+                spec.clone(),
+            )));
+            factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial(other),
+                spec,
+            )));
+            let host = lash_core::plugin::PluginHost::new(factories);
+            let mut probe = Probe::new(&calls);
+            probe.gate = Some((calls[0].0.call_id.clone(), calls[1].0.call_id.clone()));
+            probe.cancel_at_gate = true;
+            probe.gate_after_crash = crash;
+            probe.plugin_host = Some(Arc::new(host));
+            let probe = Arc::new(probe);
+            let cut = crash.then(|| CrashPoint::BeforeRun {
+                name: "lash:run:schedule:3".to_owned(),
+            });
+            let driven = drive(
+                487919,
+                cut.into_iter().collect(),
+                Arc::clone(&calls),
+                Arc::new(vec![Step::Concurrent, Step::Drain]),
+                Arc::clone(&probe),
+            )
+            .await;
+            let state = probe.plugin_session().unwrap().export_state();
+            let values = &state.plugins[if separate_namespace { other } else { PLUGIN }].values;
+            if separate_namespace {
+                assert!(
+                    state
+                        .plugins
+                        .get(PLUGIN)
+                        .is_none_or(|namespace| namespace.values.is_empty())
+                );
+            }
+            assert_eq!(values.len(), 1);
+            assert_eq!(
+                values[if same_key { "a" } else { "b" }],
+                serde_json::json!(calls[1].0.call_id.to_string())
+            );
+            assert_eq!(
+                reductions.load(Ordering::SeqCst),
+                1,
+                "a durable final replays its resolution without a reducer; cancellation discards the sibling's commands"
+            );
+            assert!(matches!(
+                driven.terminals.lock().unwrap().get(&calls[0].0.call_id),
+                Some(SingletonTerminal::Withheld {
+                    decision: CallDecision::Cancelled
+                })
+            ));
+            assert_eq!(probe.executions_of(&calls[1].0.call_id), 1);
+            assert_eq!(
+                probe.executions_of(&calls[0].0.call_id),
+                1 + usize::from(crash)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn l05_empty_and_cached_rounds_admit_every_operand_before_a_decision() {
+    for kinds in [vec![], vec![Kind::Cached, Kind::IntentFree, Kind::Deferred]] {
+        let calls = Arc::new(
+            kinds
+                .into_iter()
+                .enumerate()
+                .map(|(i, kind)| (call(&format!("cached-{i}"), &kind), kind))
+                .collect::<Vec<_>>(),
+        );
+        let probe = Arc::new(Probe::new(&calls));
+        let driven = drive(
+            487905,
+            Vec::new(),
+            Arc::clone(&calls),
+            Arc::new(vec![Step::Concurrent, Step::Drain]),
+            Arc::clone(&probe),
+        )
+        .await;
+        let records = driven.records();
+        if calls.is_empty() {
+            assert!(records.is_empty());
+            continue;
+        }
+        assert!(
+            matches!(records[0].events.as_slice(), [RunEvent::Admitted { round }] if round.members.len() == calls.len())
+        );
+        assert_eq!(probe.executions_of(&calls[0].0.call_id), 0);
+        assert_eq!(probe.executions_of(&calls[1].0.call_id), 1);
+        assert_eq!(probe.executions_of(&calls[2].0.call_id), 1);
+        assert!(matches!(
+            driven.terminals.lock().unwrap().get(&calls[2].0.call_id),
+            Some(SingletonTerminal::Deferred { .. })
+        ));
     }
 }

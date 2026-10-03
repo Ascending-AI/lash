@@ -93,6 +93,7 @@ fn start_key(label: &str) -> StartKey {
 
 fn declaring(key: Option<StartKey>) -> SingletonBodyOutcome {
     SingletonBodyOutcome::Done {
+        commands: Default::default(),
         output: OUTPUT.to_owned(),
         intents: Vec::new(),
         start: Some(Box::new(
@@ -1153,6 +1154,7 @@ async fn slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process() {
             output: "transport timed out".to_owned(),
         },
         SingletonBodyOutcome::Done {
+            commands: Default::default(),
             output: OUTPUT.to_owned(),
             intents: Vec::new(),
             start: None,

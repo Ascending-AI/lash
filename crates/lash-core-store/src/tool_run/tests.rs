@@ -732,8 +732,22 @@ fn reported_retries_follow_one_recorded_schedule() {
         .unwrap();
         log.push(failed(&a, 1, true)).unwrap();
         log.push(failed(&b, 1, true)).unwrap();
-        log.push(retry(&a, 1)).unwrap();
-        log.push(retry(&b, 1)).unwrap();
+        for id in [&a, &b] {
+            let registered = RunEvent::RetryTimerRegistered {
+                call_id: id.clone(),
+                failed: attempt(1),
+                next: attempt(2),
+                backoff_ms: 10,
+            };
+            log.push(registered.clone()).unwrap();
+            assert!(
+                log.push(registered).is_err(),
+                "a reported failure registers only one timer"
+            );
+        }
+        let (wake_first, wake_second) = if a_first { (&a, &b) } else { (&b, &a) };
+        log.push(retry(wake_first, 1)).unwrap();
+        log.push(retry(wake_second, 1)).unwrap();
         let (first, second) = if a_first { (&a, &b) } else { (&b, &a) };
         log.push(done(first, 2)).unwrap();
         log.push(done(second, 2)).unwrap();
@@ -781,6 +795,13 @@ fn cancellation_during_backoff_starts_no_next_attempt() {
     })
     .unwrap();
     log.push(failed(&a, 1, true)).unwrap();
+    log.push(RunEvent::RetryTimerRegistered {
+        call_id: a.clone(),
+        failed: attempt(1),
+        next: attempt(2),
+        backoff_ms: 10,
+    })
+    .unwrap();
     log.push(RunEvent::Decided {
         call_id: a.clone(),
         rank: 1,

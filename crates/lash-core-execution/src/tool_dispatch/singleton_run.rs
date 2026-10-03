@@ -111,6 +111,9 @@ pub struct SingletonToolCall {
 pub struct SingletonPreparedRequest {
     pub arguments: serde_json::Value,
     pub prepared: serde_json::Value,
+    /// The plugin namespace at admission, fixed across crash redelivery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_snapshot: Option<crate::plugin::PluginNamespaceState>,
     /// The recorded process route, never an ordinary body or Deferred source.
     pub isolation: Option<RecordedIsolatedStart>,
 }
@@ -150,6 +153,8 @@ pub enum SingletonCapture {
     Isolated { binding: Box<RecordedIsolatedStart> },
     Done {
         output: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        commands: Vec<crate::tool_run::StateCommand>,
         /// The declared Lash intents the result asks the Run to realize.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         intents: Vec<ToolIntentKind>,
@@ -164,6 +169,11 @@ pub enum SingletonCapture {
         output: String,
         #[serde(default, skip_serializing_if = "AttemptStream::is_empty")]
         stream: AttemptStream,
+    },
+    RetryableFailure {
+        output: String,
+        stream: AttemptStream,
+        after_ms: Option<u64>,
     },
     /// An outcome the admitted declaration does not admit, refused before
     /// anything it declared was realized.
@@ -190,7 +200,9 @@ impl SingletonCapture {
     #[must_use]
     pub fn output(&self) -> Option<&str> {
         match self {
-            Self::Done { output, .. } | Self::Failed { output, .. } => Some(output),
+            Self::Done { output, .. }
+            | Self::Failed { output, .. }
+            | Self::RetryableFailure { output, .. } => Some(output),
             Self::Refused { .. } | Self::StartRefused { .. } | Self::Isolated { .. } => None,
         }
     }
@@ -199,7 +211,9 @@ impl SingletonCapture {
     #[must_use]
     pub fn stream(&self) -> Option<&AttemptStream> {
         match self {
-            Self::Done { stream, .. } | Self::Failed { stream, .. } => Some(stream),
+            Self::Done { stream, .. }
+            | Self::Failed { stream, .. }
+            | Self::RetryableFailure { stream, .. } => Some(stream),
             Self::Refused { .. } | Self::StartRefused { .. } | Self::Isolated { .. } => None,
         }
     }
@@ -208,6 +222,7 @@ impl SingletonCapture {
         match self {
             Self::Done { intents, .. } => intents,
             Self::Failed { .. }
+            | Self::RetryableFailure { .. }
             | Self::Refused { .. }
             | Self::StartRefused { .. }
             | Self::Isolated { .. } => &[],
@@ -220,7 +235,10 @@ impl SingletonCapture {
         match self {
             Self::Done { start, .. } => start.as_deref(),
             Self::Isolated { binding } => Some(&binding.start),
-            Self::Failed { .. } | Self::Refused { .. } | Self::StartRefused { .. } => None,
+            Self::Failed { .. }
+            | Self::RetryableFailure { .. }
+            | Self::Refused { .. }
+            | Self::StartRefused { .. } => None,
         }
     }
 
@@ -236,6 +254,7 @@ impl SingletonCapture {
 pub enum SingletonBodyOutcome {
     Done {
         output: String,
+        commands: crate::plugin::StateCommands,
         intents: Vec<ToolIntentKind>,
         /// One process start the result declares, under its stable start
         /// key. The Run binds its environment and consumer hold.
@@ -243,6 +262,11 @@ pub enum SingletonBodyOutcome {
     },
     Failed {
         output: String,
+    },
+    /// A reported failure the admitted retry policy may retry.
+    RetryableFailure {
+        output: String,
+        after_ms: Option<u64>,
     },
     /// Parked on a Deferred source; the source's seal supplies the result.
     Deferred {
@@ -280,6 +304,11 @@ pub enum BeforeCheckReply {
 /// An `Err` is a fault: the record stays unjournaled and its step runs again.
 #[async_trait::async_trait]
 pub trait SingletonToolHandlers: Send + Sync {
+    /// The session whose read-only snapshots and declared commands this Run uses.
+    fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
+        None
+    }
+
     /// The actual process implementations installed by this host.
     fn process_engines(&self) -> Option<&crate::ProcessEngineRegistry> {
         None
@@ -448,3 +477,27 @@ pub async fn run_singleton_tool(
         records: run.into_records(),
     })
 }
+
+/// The body of one independently recorded X receipt.
+pub type RunAttemptStep = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<crate::tool_run::RunAttemptEntry, String>>
+            + Send
+            + 'static,
+    >,
+>;
+
+/// An independently registered X; awaiting it does not register another command.
+pub type RunAttemptHandle = std::pin::Pin<
+    Box<
+        dyn std::future::Future<
+                Output = Result<crate::tool_run::RunAttemptEntry, RuntimeEffectControllerError>,
+            > + Send
+            + 'static,
+    >,
+>;
+
+/// A durable backoff registered before its result is awaited.
+pub type RunRetryTimer<'run> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<(), RuntimeEffectControllerError>> + Send + 'run>,
+>;

@@ -60,6 +60,56 @@ where
         }
         decode_run_journal_entry(&name, entry)
     }
+    pub(super) async fn journal_run_schedule(
+        &self,
+        name: String,
+        step: lash_core::RunRecordStep<'static>,
+    ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
+        let build_generation = self.sentinel_stamp();
+        let first = build_generation.is_some();
+        let Json(mut entry) = self
+            .context
+            .run_json_eager_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
+                let record = step.await?;
+                let mut entry =
+                    serde_json::to_value(stamped(&record)).map_err(|error| error.to_string())?;
+                if let (Some(generation), Some(object)) = (build_generation, entry.as_object_mut())
+                {
+                    object.insert(BUILD_GENERATION_FIELD.to_owned(), generation);
+                }
+                Ok(entry)
+            })
+            .await
+            .map_err(|error| {
+                crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
+            })?;
+        let generation = entry
+            .as_object_mut()
+            .and_then(|object| object.remove(BUILD_GENERATION_FIELD));
+        if first && let Some(sentinel) = &self.folded_sentinel {
+            sentinel.check(generation.as_ref()).await;
+        }
+        decode_run_journal_entry(&name, entry)
+    }
+
+    pub(super) fn start_journal_run_attempt(
+        &self,
+        name: String,
+        step: lash_core::tool_dispatch::RunAttemptStep,
+    ) -> lash_core::tool_dispatch::RunAttemptHandle {
+        let result = self
+            .context
+            .run_json_eager_or_retry_send::<serde_json::Value, _>(name.clone(), async move {
+                let entry = step.await?;
+                serde_json::to_value(stamped(&entry)).map_err(|error| error.to_string())
+            });
+        Box::pin(async move {
+            let Json(entry) = result.await.map_err(|error| {
+                crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
+            })?;
+            decode_entry(&name, entry)
+        })
+    }
 }
 
 /// The Run record a journaled `entry` holds. The generation is read from the
@@ -67,8 +117,15 @@ where
 /// refused by generation, never by an accident of decoding.
 fn decode_run_journal_entry(
     name: &str,
-    mut entry: serde_json::Value,
+    entry: serde_json::Value,
 ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
+    decode_entry(name, entry)
+}
+
+fn decode_entry<T: serde::de::DeserializeOwned>(
+    name: &str,
+    mut entry: serde_json::Value,
+) -> Result<T, RuntimeEffectControllerError> {
     if entry
         .get(EFFECT_JOURNAL_VERSION_FIELD)
         .and_then(serde_json::Value::as_u64)
@@ -120,5 +177,46 @@ mod tests {
                 Some("run_record")
             );
         }
+    }
+    #[tokio::test]
+    async fn l21_a_predecessor_run_journal_parks_before_decode_and_keeps_its_lane() {
+        use lash_core::engine::BuildGeneration;
+        let generation = |epoch: u32| {
+            let bytes = epoch.to_be_bytes();
+            BuildGeneration::from_digest([b'r', b'u', bytes[0], bytes[1], bytes[2], bytes[3]])
+        };
+        let old = generation(crate::JOURNAL_LOGIC_EPOCH - 1);
+        let new = generation(crate::JOURNAL_LOGIC_EPOCH);
+        let old_lane = crate::services::DEFAULT_NAMESPACE
+            .generation(crate::LashService::TurnDriver, old.clone())
+            .generation_lane_name()
+            .unwrap();
+        let new_lane = crate::services::DEFAULT_NAMESPACE
+            .generation(crate::LashService::TurnDriver, new.clone())
+            .generation_lane_name()
+            .unwrap();
+        assert_ne!(old_lane, new_lane);
+        let entry = serde_json::json!({ BUILD_GENERATION_FIELD: old, "record": "a predecessor shape this build cannot decode" });
+        let sentinel = crate::sentinel::FoldedSentinel::new("LashTurn/run", new);
+        let decoded = std::sync::atomic::AtomicBool::new(false);
+        let refusal = sentinel
+            .guard(async {
+                sentinel.check(entry.get(BUILD_GENERATION_FIELD)).await;
+                decoded.store(true, std::sync::atomic::Ordering::SeqCst);
+                decode_run_journal_entry("predecessor", entry.clone())
+            })
+            .await
+            .expect_err("the new handler keeps this journal for its predecessor");
+        assert!(format!("{refusal:?}").contains("RetiredGeneration"));
+        assert!(!decoded.load(std::sync::atomic::Ordering::SeqCst));
+        let predecessor = crate::sentinel::FoldedSentinel::new("LashTurn/run", old.clone());
+        predecessor.check(entry.get(BUILD_GENERATION_FIELD)).await;
+        assert_eq!(
+            crate::services::DEFAULT_NAMESPACE
+                .generation(crate::LashService::TurnDriver, old)
+                .generation_lane_name()
+                .unwrap(),
+            old_lane
+        );
     }
 }

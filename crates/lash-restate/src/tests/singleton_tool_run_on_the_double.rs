@@ -254,6 +254,7 @@ async fn cancelled_spending_calls_and_unreturned_losers_keep_recorded_provider_r
                         "spend-admission".into(),
                         Box::pin(async move {
                             Ok(RunJournalEntry {
+                                state: Vec::new(),
                                 record: RunRecord {
                                     segment: SegmentOrdinal(0),
                                     first: lash_core::tool_run::RunEventOrdinal(0),
@@ -295,6 +296,7 @@ async fn cancelled_spending_calls_and_unreturned_losers_keep_recorded_provider_r
                         let payload = MaterialPayload::new(MaterialOwner::Run { opener: owner }, MaterialRole::AttemptOutput, None, serde_json::json!({"response": completion.response, "call_record": completion.call_record}).to_string());
                         let output = payload.reference(MaterialLocation::JournalLocal).unwrap();
                         Ok(RunJournalEntry {
+                            state: Vec::new(),
                             record: RunRecord { segment: SegmentOrdinal(0), first, events: vec![RunEvent::AttemptRecorded { call_id, attempt: AttemptOrdinal::FIRST, result: AttemptResult::Done { output: output.clone() } }], trace: None },
                             materials: vec![MaterialEntry::Available { reference: output, payload: Box::new(payload) }],
                         })
@@ -309,6 +311,7 @@ async fn cancelled_spending_calls_and_unreturned_losers_keep_recorded_provider_r
                         "spend-cancel-and-abort".into(),
                         Box::pin(async move {
                             Ok(RunJournalEntry {
+                                state: Vec::new(),
                                 record: RunRecord {
                                     segment: SegmentOrdinal(0),
                                     first,
@@ -541,6 +544,12 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                         },
                     ],
                     vec![
+                        RunEvent::RetryTimerRegistered {
+                            call_id: a.clone(),
+                            failed: AttemptOrdinal::FIRST,
+                            next: AttemptOrdinal::new(2).unwrap(),
+                            backoff_ms: 0,
+                        },
                         RunEvent::RetryScheduled {
                             call_id: a.clone(),
                             failed: AttemptOrdinal::FIRST,
@@ -634,6 +643,7 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                                     );
                                 }
                                 Ok(RunJournalEntry {
+                                    state: Vec::new(),
                                     record,
                                     materials: Vec::new(),
                                 })
@@ -664,6 +674,7 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                                     format!("retained-prefix-{}", record.first.0),
                                     Box::pin(async move {
                                         Ok(RunJournalEntry {
+                                            state: Vec::new(),
                                             record,
                                             materials: Vec::new(),
                                         })
@@ -798,6 +809,7 @@ impl Probe {
 
     fn done() -> SingletonBodyOutcome {
         SingletonBodyOutcome::Done {
+            commands: Default::default(),
             output: OUTPUT.to_owned(),
             intents: Vec::new(),
             start: None,
@@ -886,6 +898,7 @@ impl SingletonToolHandlers for Probe {
             }
             SingletonCapture::Done { intents, .. } => intents.len(),
             SingletonCapture::Failed { .. }
+            | SingletonCapture::RetryableFailure { .. }
             | SingletonCapture::Refused { .. }
             | SingletonCapture::StartRefused { .. } => 0,
         };
@@ -1024,6 +1037,7 @@ fn events(records: &[RunRecord]) -> Vec<Vec<&'static str>> {
                     RunEvent::Admitted { .. } => "admitted",
                     RunEvent::AttemptRecorded { .. } => "attempt",
                     RunEvent::RetryScheduled { .. } => "retry",
+                    RunEvent::RetryTimerRegistered { .. } => "retry_timer",
                     RunEvent::Decided { .. } => "decided",
                     RunEvent::DeclarationsIssued { .. } => "declarations_issued",
                     RunEvent::DeclarationsSettled { .. } => "declarations_settled",
@@ -1114,6 +1128,7 @@ async fn a_done_singleton_is_four_records_and_reruns_only_unrecorded_work_at_eve
                     intents: Vec::new(),
                     stream: AttemptStream::default(),
                     start: None,
+                    commands: Vec::new(),
                 },
                 presentation: PRESENTATION.to_owned(),
                 launched: None,
@@ -1154,6 +1169,7 @@ async fn a_done_singleton_is_four_records_and_reruns_only_unrecorded_work_at_eve
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn final_and_cancel_choose_one_terminal_around_the_durable_decision() {
     let declaring = SingletonBodyOutcome::Done {
+        commands: Default::default(),
         output: OUTPUT.to_owned(),
         intents: vec![ToolIntentKind::EmitTrigger],
         start: None,
@@ -1250,6 +1266,7 @@ async fn a_final_settles_its_declarations_before_presentation_at_every_cut() {
     for cut in [2, 3, 4] {
         let probe = Probe::new(
             SingletonBodyOutcome::Done {
+                commands: Default::default(),
                 output: OUTPUT.to_owned(),
                 intents: vec![ToolIntentKind::EmitTrigger],
                 start: None,
@@ -1424,6 +1441,7 @@ async fn an_undeclared_outcome_is_refused_before_anything_it_declared_is_realize
         (
             "undeclared-intent",
             SingletonBodyOutcome::Done {
+                commands: Default::default(),
                 output: OUTPUT.to_owned(),
                 intents: vec![ToolIntentKind::StartProcess],
                 start: None,

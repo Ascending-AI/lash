@@ -726,6 +726,19 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         })
     }
 
+    fn run_json_eager_or_retry_send<T, Fut>(
+        &self,
+        effect_name: String,
+        future: Fut,
+    ) -> impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'static
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, String>> + Send + 'static,
+    {
+        let context = Arc::clone(self);
+        async move { context.run_json_or_retry_send(effect_name, future).await }
+    }
+
     run_json_or_retry_send_ends_the_attempt!();
 
     fn start_process_workflow<'run>(
@@ -2020,6 +2033,19 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             }
             Ok(Json(value))
         })
+    }
+
+    fn run_json_eager_or_retry_send<T, Fut>(
+        &self,
+        effect_name: String,
+        future: Fut,
+    ) -> impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'static
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, String>> + Send + 'static,
+    {
+        let context = Arc::clone(self);
+        async move { context.run_json_or_retry_send(effect_name, future).await }
     }
 
     run_json_or_retry_send_ends_the_attempt!();

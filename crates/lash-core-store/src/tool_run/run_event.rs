@@ -159,6 +159,13 @@ pub enum RunEvent {
         attempt: AttemptOrdinal,
         result: AttemptResult,
     },
+    /// Eligibility and backoff are fixed before registering a durable timer.
+    RetryTimerRegistered {
+        call_id: ToolCallId,
+        failed: AttemptOrdinal,
+        next: AttemptOrdinal,
+        backoff_ms: u64,
+    },
     /// K9: a reported retryable failure, its backoff and the registration
     /// of the next attempt, as one schedule entry.
     RetryScheduled {
@@ -256,6 +263,19 @@ pub struct RunJournalEntry {
     pub record: RunRecord,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materials: Vec<MaterialEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub state: Vec<super::StateResolution>,
+}
+
+/// An independent X receipt. Its place in the Run is chosen by the recorded
+/// selection schedule, rather than by the order its body finishes on replay.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunAttemptEntry {
+    pub call_id: ToolCallId,
+    pub attempt: AttemptOrdinal,
+    pub result: AttemptResult,
+    pub materials: Vec<MaterialEntry>,
 }
 
 /// Why the fold refused a record.
@@ -335,6 +355,7 @@ struct CallState {
     /// The attempt issued and not yet recorded.
     outstanding: Option<AttemptOrdinal>,
     attempts: BTreeMap<AttemptOrdinal, AttemptResult>,
+    retry_timer: Option<(AttemptOrdinal, AttemptOrdinal, u64)>,
     decision: Option<(u64, CallDecision)>,
     declarations_issued: bool,
     /// The declared start, admitted with the declarations.
@@ -494,12 +515,42 @@ impl RunLedger {
                 call.attempts.insert(*attempt, result.clone());
                 Ok(())
             }
+            RunEvent::RetryTimerRegistered {
+                call_id,
+                failed,
+                next,
+                backoff_ms,
+            } => {
+                let mut candidate = self.clone();
+                candidate.schedule_retry(call_id, *failed, *next)?;
+                let call = self.call(call_id)?;
+                if call.retry_timer.is_some() {
+                    return Err(RunEventRefusal::RetryNotEligible {
+                        call_id: call_id.clone(),
+                        failed: *failed,
+                        next: *next,
+                    });
+                }
+                call.retry_timer = Some((*failed, *next, *backoff_ms));
+                Ok(())
+            }
             RunEvent::RetryScheduled {
                 call_id,
                 failed,
                 next,
-                ..
-            } => self.schedule_retry(call_id, *failed, *next),
+                backoff_ms,
+            } => {
+                if self.call(call_id)?.retry_timer != Some((*failed, *next, *backoff_ms)) {
+                    return Err(RunEventRefusal::RetryNotEligible {
+                        call_id: call_id.clone(),
+                        failed: *failed,
+                        next: *next,
+                    });
+                }
+                self.schedule_retry(call_id, *failed, *next)?;
+                self.call(call_id)?.retry_timer = None;
+                Ok(())
+            }
             RunEvent::Decided {
                 call_id,
                 rank,
@@ -592,6 +643,7 @@ impl RunLedger {
                     outstanding: (selection == BeforeSelection::Execute)
                         .then_some(AttemptOrdinal::FIRST),
                     attempts: BTreeMap::new(),
+                    retry_timer: None,
                     decision: None,
                     declarations_issued: false,
                     start: None,
@@ -672,6 +724,7 @@ impl RunLedger {
             call.seated = true;
         }
         call.decision = Some((rank, decision.clone()));
+        call.retry_timer = None;
         if matches!(decision, CallDecision::Aborted) {
             self.aborted = true;
         }
