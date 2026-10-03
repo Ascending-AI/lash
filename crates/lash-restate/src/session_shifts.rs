@@ -166,6 +166,12 @@ use continuation::{continuation_generation, drain_answered, session_shift_contin
 /// Generation 5 (FIG-4850): run and shift replies carry terminal status;
 /// the answer body lives in the run's durable terminal record.
 ///
+/// Generation 5 changed in place under the pre-1.0 version freeze for
+/// FIG-4888: an admission may name an operation run
+/// (`AdmittedWork::Operation`), a host task's own `LashTurn` run, whose
+/// journal records the task's cancel peek and its effects; the command run
+/// stops at a task instead of applying it.
+///
 /// version_guard(
 ///     shapes(cover(RestateSessionShiftRequest, RestateRunRequest)),
 ///     shapes(

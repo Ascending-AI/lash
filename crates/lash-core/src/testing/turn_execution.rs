@@ -116,8 +116,11 @@ impl TestTurnExecution for LashRuntime {
                 crate::shift::execute_admitted_run_reporting(self, &controller, admitted, sinks)
                     .await
                     .map_err(crate::engine::ShiftAbort::into_error)?;
-            if matches!(work, crate::engine::AdmittedWork::Commands { .. })
-                && rules.after(&work, &report.outcome).is_none()
+            if matches!(
+                work,
+                crate::engine::AdmittedWork::Commands { .. }
+                    | crate::engine::AdmittedWork::Operation { .. }
+            ) && rules.after(&work, &report.outcome).is_none()
             {
                 ordinal += 1;
                 continue;

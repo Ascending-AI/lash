@@ -338,8 +338,11 @@ impl ShiftLoop {
             RunOutcome::Refused { run, .. } => Some(ShiftStop::Yielded { run: run.clone() }),
             RunOutcome::Released { run } => {
                 self.released.insert(run.clone());
-                matches!(work, AdmittedWork::Commands { .. })
-                    .then(|| ShiftStop::Yielded { run: run.clone() })
+                matches!(
+                    work,
+                    AdmittedWork::Commands { .. } | AdmittedWork::Operation { .. }
+                )
+                .then(|| ShiftStop::Yielded { run: run.clone() })
             }
         }
     }

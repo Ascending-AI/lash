@@ -882,9 +882,14 @@ impl LashRuntime {
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
-        self.drain_next_session_command_fenced(shift_fence, cancellation, effect_controller)
-            .await
-            .map_err(CommandDrainStop::into_runtime_error)
+        self.drain_next_session_command_fenced(
+            shift_fence,
+            cancellation,
+            effect_controller,
+            CommandRunLane::Commands,
+        )
+        .await
+        .map_err(CommandDrainStop::into_runtime_error)
     }
 
     /// Apply the session's leading open command run, its commit fenced by
@@ -904,11 +909,16 @@ impl LashRuntime {
     /// recorded read, and the run reads on headless. So does a session that
     /// retired under an execution the run read, whose settlement and commit write
     /// nothing to the journal.
+    ///
+    /// `lane` names the run applying it (K8, binding Q2): the lane's command
+    /// run stops at a host task, which runs as its own operation run, and an
+    /// operation run applies its own task alone.
     pub(super) async fn drain_next_session_command_fenced(
         &mut self,
         shift_fence: &crate::store::ShiftFence,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ScopedEffectController<'_>,
+        lane: CommandRunLane<'_>,
     ) -> Result<Option<crate::SessionCommandReceipt>, CommandDrainStop> {
         loop {
             if let Err(fault) = self.reload_invalidated_resident_session_state().await {
@@ -969,17 +979,31 @@ impl LashRuntime {
                 .into_iter()
                 .map(|(_, command)| command.clone())
                 .collect::<Vec<_>>();
-            // A replayed read may name a run this run already applied. An
-            // administrative compaction or a config transaction runs again:
-            // it replays the steps it journaled, then finds its command
-            // settled and adopts the head its commit published without
-            // committing again (FIG-4258, FIG-4379). Any other command
-            // journals nothing, so a settled run is simply passed.
-            let journaled = matches!(
+            let task = matches!(
                 commands.as_slice(),
-                [crate::SessionCommand::CompactContext { .. }
-                    | crate::SessionCommand::ApplyConfigTransaction { .. }]
+                [crate::SessionCommand::RunPluginTask { .. }]
             );
+            let own = match lane {
+                CommandRunLane::Commands => !task,
+                CommandRunLane::Operation(operation) => {
+                    task && run.batch_ids().as_slice() == std::slice::from_ref(operation)
+                }
+            };
+            if !own {
+                return Ok(None);
+            }
+            // A replayed read may name a run this run already applied. An
+            // administrative compaction, a config transaction or a host
+            // task runs again: it replays the steps it journaled, then finds
+            // its command settled and adopts the head its commit published
+            // without committing again (FIG-4258, FIG-4379). Any other
+            // command journals nothing, so a settled run is simply passed.
+            let journaled = task
+                || matches!(
+                    commands.as_slice(),
+                    [crate::SessionCommand::CompactContext { .. }
+                        | crate::SessionCommand::ApplyConfigTransaction { .. }]
+                );
             // Only a compaction and a config transaction journal their
             // apply. Any other run settles and commits off the journal, so a
             // session that retired under it leaves the run's next recorded
@@ -1096,6 +1120,7 @@ impl LashRuntime {
                     args.clone(),
                     completion,
                     shift_fence,
+                    effect_controller,
                 ))
                 .await;
             }
@@ -1106,6 +1131,7 @@ impl LashRuntime {
                     args.clone(),
                     completion,
                     shift_fence,
+                    effect_controller,
                 ))
                 .await;
             }
@@ -1303,6 +1329,16 @@ pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
 
 /// The first execution of one `ReadSessionCommandRun` step: the live read of
 /// the command lane under the run's fence (FIG-4201).
+/// The run a fenced command drain applies the lane for (K8, binding Q2).
+#[derive(Clone, Copy, Debug)]
+pub(in crate::runtime) enum CommandRunLane<'a> {
+    /// The lane's command run: every leading command but a host task, which
+    /// runs as its own operation run.
+    Commands,
+    /// The operation run of the host task `batch` names: that task alone.
+    Operation(&'a crate::BatchId),
+}
+
 /// Why a fenced command drain stopped without an answer.
 pub(in crate::runtime) enum CommandDrainStop {
     /// The drain holds no current head for its next recorded read: the

@@ -533,3 +533,119 @@ fn the_shift_loop_polls_each_request_once_per_task_poll() {
     }
     panic!("the run never settled after the parked request finished");
 }
+
+/// A controller whose effects run until the test releases them.
+#[derive(Default)]
+struct HeldEffects {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+    settled: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl AwaitEventResolver for HeldEffects {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectController for HeldEffects {
+    async fn execute_effect(
+        &self,
+        _envelope: RuntimeEffectEnvelope,
+        _local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        self.settled
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(RuntimeEffectOutcome::Sleep)
+    }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("HeldEffects"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: crate::runtime::TurnCancelWait,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("HeldEffects"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("HeldEffects"))
+    }
+}
+
+/// K8 (binding Q2): a host operation's owner cannot finish while it still
+/// owns live work. The body issues an effect it never awaits and returns;
+/// the owner enters Closing, keeps serving the issued effect on the owning
+/// controller, and returns only once that effect settled. A request sent
+/// after the body returned is refused: Closing admits nothing new.
+#[tokio::test]
+async fn an_operation_owner_drains_issued_work_and_admits_none_after_completion() {
+    let held = HeldEffects::default();
+    let scope = AdmittedScope::session_operation(crate::SessionId::from("session"), "batch");
+    let execution = scope.scope().clone();
+    let entered = &held.entered;
+    let owner = own_effect_controller_task(&held, scope, |proxy| {
+        let issuer = proxy.clone();
+        let execution = execution.clone();
+        async move {
+            // Issue the effect and drop its caller: the request is the
+            // owner's to serve, whoever waits for its answer.
+            {
+                let mut issued = std::pin::pin!(issuer.controller().execute_effect(
+                    sleep_envelope(execution, "issued"),
+                    RuntimeEffectLocalExecutor::testing(|_envelope| async {
+                        Ok(RuntimeEffectOutcome::Sleep)
+                    }),
+                ));
+                assert!(futures_util::poll!(issued.as_mut()).is_pending());
+            }
+            entered.notified().await;
+            proxy
+        }
+    });
+    let mut owner = std::pin::pin!(owner);
+    for _ in 0..8 {
+        assert!(
+            futures_util::poll!(owner.as_mut()).is_pending(),
+            "the owner returned while an issued effect was live"
+        );
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(held.settled.load(std::sync::atomic::Ordering::SeqCst), 0);
+    held.release.notify_one();
+    let proxy = owner.await.expect("the owner settles");
+    assert_eq!(
+        held.settled.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the issued effect settled before the owner returned"
+    );
+    let refused = proxy
+        .controller()
+        .execute_effect(
+            sleep_envelope(proxy.execution_scope().clone(), "late"),
+            RuntimeEffectLocalExecutor::testing(|_envelope| async {
+                panic!("a request after completion must not run")
+            }),
+        )
+        .await
+        .expect_err("the closed owner admits nothing new");
+    assert_eq!(
+        refused.code,
+        RuntimeErrorCode::RuntimeEffectControllerTaskClosed
+    );
+    assert_eq!(held.settled.load(std::sync::atomic::Ordering::SeqCst), 1);
+}

@@ -51,6 +51,10 @@ pub enum PluginTaskCancelRequest {
     Unavailable,
 }
 
+/// The replay key, and causal identity, of the recorded peek of a task's
+/// cancel signal before it runs.
+const PLUGIN_TASK_CANCEL_PEEK: &str = "plugin-task-cancel-peek";
+
 /// Whether `error` says the effect host holds no signal for the task: it
 /// mints no durable keys, or the session's waits are revoked.
 fn signal_unavailable(error: &RuntimeError) -> bool {
@@ -118,6 +122,62 @@ impl PluginTaskCancelSignal {
             Ok(Some(resolution)) => Err(foreign_resolution(&self.key, &resolution)),
             Err(error) if signal_unavailable(&error) => Ok(false),
             Err(error) => Err(error),
+        }
+    }
+
+    /// [`cancel_requested`](Self::cancel_requested) before the task runs, as
+    /// a step recorded on `controller`, the operation run's controller for
+    /// the task (K8): the task's work is journaled after it, so a replay of
+    /// the run reads the recorded answer back and takes the branch the
+    /// first execution took.
+    pub(super) async fn recorded_cancel_requested(
+        &self,
+        controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<bool, RuntimeError> {
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                controller.execution_scope().clone(),
+                PLUGIN_TASK_CANCEL_PEEK,
+            )?,
+            crate::RuntimeAttribution {
+                session_id: controller.execution_scope().session_id().cloned(),
+                turn_id: None,
+                turn_index: None,
+                protocol_iteration: None,
+            },
+            PLUGIN_TASK_CANCEL_PEEK,
+        );
+        let peeked = controller
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::PeekAwaitEvent {
+                        key: self.key.clone(),
+                    },
+                ),
+                crate::RuntimeEffectLocalExecutor::unavailable(),
+            )
+            .await;
+        match peeked {
+            Ok(crate::RuntimeEffectOutcome::PeekAwaitEvent { resolution: None }) => Ok(false),
+            Ok(crate::RuntimeEffectOutcome::PeekAwaitEvent {
+                resolution: Some(crate::Resolution::Cancelled),
+            }) => Ok(true),
+            Ok(crate::RuntimeEffectOutcome::PeekAwaitEvent {
+                resolution: Some(resolution),
+            }) => Err(foreign_resolution(&self.key, &resolution)),
+            Ok(_) => Err(RuntimeError::new(
+                RuntimeErrorCode::SessionCommandRun,
+                "the plugin task cancel peek returned a non-peek outcome",
+            )),
+            Err(error) => {
+                let error = error.into_runtime_error();
+                if signal_unavailable(&error) {
+                    Ok(false)
+                } else {
+                    Err(error)
+                }
+            }
         }
     }
 

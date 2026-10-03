@@ -40,7 +40,7 @@ pub use control::{
     ScopedEffectController, SegmentProgress, ServedOnlyRange, TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectControllerTaskRequest, EffectControllerTaskRequests};
-pub use control::{EffectTaskController, drive_effect_controller_task};
+pub use control::{EffectTaskController, drive_effect_controller_task, own_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
 pub use lash_core_store::admitted_scope::AdmittedScope;
 pub use lash_core_store::effect_opener::EffectOpener;

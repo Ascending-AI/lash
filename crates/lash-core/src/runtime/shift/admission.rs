@@ -392,7 +392,25 @@ impl AdmitShiftRunner {
             .pending_session_work_ordering()
             .await
             .map_err(|error| store_fault("pending work ordering read", error))?;
+        let queued = store
+            .list_queued_work()
+            .await
+            .map_err(|error| store_fault("open queued work read", error))?;
         if let Some(command) = ordering.session_command {
+            // A host task at the head of the lane is a tool-bearing
+            // operation: it runs as its own Run, named by the operation, so
+            // a redrive admits the same run (K8, binding Q2). Every other
+            // command applies in the lane's command run.
+            if let Some(operation) = leading_operation(&queued, command.enqueue_seq) {
+                return Ok(Some((
+                    crate::tool_run::OperationRun {
+                        session_id: self.request.session.clone(),
+                        operation_id: operation.to_string(),
+                    }
+                    .run_id(),
+                    AdmittedWork::Operation { operation },
+                )));
+            }
             return Ok(Some((
                 commands_run(&admission),
                 AdmittedWork::Commands {
@@ -400,10 +418,6 @@ impl AdmitShiftRunner {
                 },
             )));
         }
-        let queued = store
-            .list_queued_work()
-            .await
-            .map_err(|error| store_fault("open queued work read", error))?;
         let open = store
             .list_pending_turn_inputs()
             .await
@@ -462,6 +476,25 @@ fn queued_run(admission: &AdmissionId) -> TurnId {
 /// The run an admission of the command lane applies it under.
 fn commands_run(admission: &AdmissionId) -> TurnId {
     TurnId::prefixed("shift-commands:", admission.as_str())
+}
+
+/// The host operation the command lane's leading open command at
+/// `enqueue_seq` is, when it is one: a host's plugin task.
+fn leading_operation(
+    queued: &[crate::QueuedWorkBatch],
+    enqueue_seq: u64,
+) -> Option<crate::BatchId> {
+    queued
+        .iter()
+        .find(|batch| batch.enqueue_seq == enqueue_seq && batch.terminal.is_none())
+        .filter(|batch| {
+            matches!(
+                &batch.payload,
+                crate::QueuedWorkPayload::SessionCommand { command }
+                    if matches!(**command, crate::SessionCommand::RunPluginTask { .. })
+            )
+        })
+        .map(|batch| batch.batch_id.clone())
 }
 
 /// The first execution of one `SealShiftAdmission` step: the shift-epoch

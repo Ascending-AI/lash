@@ -280,7 +280,8 @@ impl LashRuntime {
 
     /// Apply the session's open command run under `admitted`'s run (ADR 0101
     /// §4): every leading command, each commit fenced by the run's seal,
-    /// until the command lane is empty. The run admits no turn. An
+    /// until the command lane is empty or its head is a host task, which runs
+    /// as its own operation run ([`Self::execute_operation_run`]). The run admits no turn. An
     /// administrative compaction runs here, lent the run's controller,
     /// which it rescopes to the command's own scope (FIG-4201), and so do a
     /// host's append, plugin operation and frame open (FIG-4202).
@@ -309,6 +310,7 @@ impl LashRuntime {
                 fence,
                 tokio_util::sync::CancellationToken::new(),
                 run_controller,
+                crate::runtime::session_api::CommandRunLane::Commands,
             ))
             .await
             {
@@ -357,6 +359,86 @@ impl LashRuntime {
         // and must answer the same. A lane that made no progress shows in the
         // next admission naming the same leading command, which stops the
         // shift ([`ShiftLoop`](crate::engine::ShiftLoop)).
+        Ok(ExecutedRun {
+            outcome: RunOutcome::Applied { run },
+            run: None,
+            executed_inputs: Vec::new(),
+            empty_drain: None,
+        })
+    }
+
+    /// Execute the host operation `operation` as `admitted`'s run (K8,
+    /// binding Q2): its task, alone, under the run's fence.
+    ///
+    /// The run reads the command lane as the command run does, and applies
+    /// the task its read names when that is the operation's own. The task
+    /// runs under the run's controller rescoped to the operation's
+    /// session-operation scope, so this run's invocation journals and owns
+    /// every effect the task issues: the task's apply returns only once
+    /// the task returned and its issued work drained. A read that names
+    /// anything else (the task settled, or a host withdrew it before the
+    /// read) applies nothing.
+    ///
+    /// The run then ends as a command run ends, with its
+    /// [`CommandsApplied`](crate::store::RunTerminalCause::CommandsApplied)
+    /// terminal, which arms its scope close.
+    pub(super) async fn execute_operation_run(
+        &mut self,
+        run_controller: &ScopedEffectController<'_>,
+        admitted: &Admitted,
+        operation: &crate::BatchId,
+        fence: &crate::store::ShiftFence,
+    ) -> Result<ExecutedRun, ShiftAbort> {
+        let run = admitted.run().clone();
+        let transition = self
+            .record_command_plugin_transition(run_controller, admitted)
+            .await?;
+        self.publish_plugin_transition(transition, fence, None)
+            .await
+            .map_err(|error| shift_abort(Some(&run), error))?;
+        match Box::pin(self.drain_next_session_command_fenced(
+            fence,
+            tokio_util::sync::CancellationToken::new(),
+            run_controller,
+            crate::runtime::session_api::CommandRunLane::Operation(operation),
+        ))
+        .await
+        {
+            Ok(_) => {}
+            Err(crate::runtime::session_api::CommandDrainStop::Headless(fault)) => {
+                return execute_headless_operation_run(
+                    run_controller,
+                    admitted,
+                    HeadlessRun::Unrefreshed {
+                        catalog: self.host.core.session_store_factory(),
+                        fault,
+                    },
+                )
+                .await
+                .map(|outcome| ExecutedRun {
+                    outcome,
+                    run: None,
+                    executed_inputs: Vec::new(),
+                    empty_drain: None,
+                });
+            }
+            Err(crate::runtime::session_api::CommandDrainStop::Failed(error)) => {
+                self.record_turn_park_after_abort(&error, &run, None).await;
+                return Err(shift_abort(Some(&run), error));
+            }
+        }
+        let store = self.shift_store()?;
+        let end = store
+            .end_command_run(fence, &run, self.host.core.clock.timestamp_ms())
+            .await
+            .map_err(|error| {
+                ShiftAbort::Retry(crate::runtime::runtime_error_from_store_commit(error))
+            })?;
+        if end.terminal().is_some()
+            && let Some(execution) = self.shift_run.as_mut()
+        {
+            execution.mark_terminal_written();
+        }
         Ok(ExecutedRun {
             outcome: RunOutcome::Applied { run },
             run: None,
@@ -1036,10 +1118,58 @@ pub(super) async fn execute_headless_commands_run(
                 [(_, crate::SessionCommand::CompactContext { .. })]
             )
         });
+        let is_task = run.session_commands().is_some_and(|commands| {
+            matches!(
+                commands.as_slice(),
+                [(_, crate::SessionCommand::RunPluginTask { .. })]
+            )
+        });
         if !journals_nothing {
             return Err(headless.past_its_steps(admitted, "a compaction's read"));
         }
+        // The command run stops at a host task, which runs as its own
+        // operation run (K8).
+        if is_task {
+            return Ok(RunOutcome::Applied {
+                run: admitted.run().clone(),
+            });
+        }
     }
+}
+
+/// Run a sealed operation run whose shift holds no current head of its
+/// session (K8): its recorded read of the command lane, under the envelope
+/// a run with a head issues it. A read that named no task is the run's
+/// whole journal, and the run ends applied; one that named its task means
+/// an earlier attempt ran the task's journaled work after it, which cannot
+/// replay without the session's head ([`HeadlessRun::past_its_steps`]).
+pub(super) async fn execute_headless_operation_run(
+    run_controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    headless: HeadlessRun,
+) -> Result<RunOutcome, ShiftAbort> {
+    let run = admitted.run().clone();
+    let batches = crate::runtime::session_api::execute_session_command_run_read(
+        run_controller,
+        admitted.session(),
+        lash_core_execution::core_internal::owned_runner_executor(
+            Box::new(HeadlessRunStepRunner {
+                session: admitted.session().clone(),
+                step: HeadlessStep::CommandRun,
+                headless: headless.clone(),
+            }),
+            None,
+        ),
+    )
+    .await
+    .map_err(|error| shift_abort(Some(&run), error))?;
+    let own = admitted.operation().is_some_and(|operation| {
+        batches.len() == 1 && batches[0].batch_id.as_str() == operation.operation_id
+    });
+    if own {
+        return Err(headless.past_its_steps(admitted, "an operation's read"));
+    }
+    Ok(RunOutcome::Applied { run })
 }
 
 /// Run a sealed follow-on recovery run whose shift holds no current head of

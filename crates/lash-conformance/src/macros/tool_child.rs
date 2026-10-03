@@ -227,6 +227,7 @@ macro_rules! shift_admission_tests {
             (no_order_of_a_runs_owner_and_another_admitter_supersedes_the_owners_fence, "shift-run-owner-fence"),
             (a_parent_turn_acceptors_run_is_closed_to_a_later_drive, "shift-run-acceptor-recorded"),
             (a_command_runs_redrive_replays_its_recorded_outcome, "shift-command-run-redrive"),
+            (a_host_task_is_admitted_as_its_own_operation_run, "shift-operation-run"),
             (a_run_end_closes_its_turn_scope_in_the_process_registry, "shift-run-registry-close"),
             (a_joined_inputs_turn_scope_closes_with_its_admitting_run, "shift-joined-scope-close"),
             (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "shift-idle-turn-lane-order"),

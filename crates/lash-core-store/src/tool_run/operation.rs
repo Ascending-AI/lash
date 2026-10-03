@@ -10,12 +10,16 @@
 //! scope outside any Run.
 //!
 //! The operation's opener is the existing session-operation opener, so its
-//! call ids, start keys and stored scope ids keep their identity bytes.
+//! call ids, start keys and stored scope ids keep their identity bytes. Its
+//! run is named by the operation alone ([`OperationRun::run_id`]): every
+//! admission of the operation, a redrive after a crash included, names the
+//! same run, and so the same keyed turn-service invocation, which stays the
+//! one journal owner of the operation's work.
 
 use serde::{Deserialize, Serialize};
 
-use crate::SessionId;
 use crate::effect_opener::EffectOpener;
+use crate::{SessionId, TurnId};
 
 /// What a logical Run executes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -41,6 +45,14 @@ impl OperationRun {
     #[must_use]
     pub fn opener(&self) -> EffectOpener {
         EffectOpener::session_operation(self.session_id.clone(), self.operation_id.clone())
+    }
+
+    /// The logical run the operation executes as: named by the operation, so
+    /// every admission of it names the same run and the same turn-service
+    /// key.
+    #[must_use]
+    pub fn run_id(&self) -> TurnId {
+        TurnId::prefixed("shift-operation:", &self.operation_id)
     }
 
     /// The input kind the session's turn service drives.

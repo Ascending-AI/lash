@@ -46,9 +46,11 @@ pub enum SessionCommand {
         #[schemars(with = "serde_json::Value")]
         args: serde_json::Value,
     },
-    /// A host's plugin task (FIG-4202): a plugin command whose effects are
-    /// journaled under the command's own scope, so a redrive of the unsettled
-    /// command replays them. It settles as a
+    /// A host's plugin task (FIG-4202): a tool-bearing operation that runs
+    /// as its own operation run (K8, FIG-4888), whose invocation journals
+    /// its effects under the command's own scope and owns them until they
+    /// drained, so a redrive of the unsettled command replays them. It
+    /// settles as a
     /// [`SessionCommandOutcome::PluginOperation`].
     RunPluginTask {
         name: String,

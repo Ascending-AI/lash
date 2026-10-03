@@ -713,3 +713,73 @@ pub async fn drive_effect_controller_task(
     })
     .await
 }
+
+/// Run `body` as the owner of every effect it issues (K8, binding Q2): the
+/// body gets a `'static` proxy of `controller`, bound to `admitted`, and
+/// every request it sends is served here, on the invocation `controller`
+/// journals in, so that invocation is the one journal owner of the body's
+/// work.
+///
+/// The owner is a Run lifecycle. While the body runs it is `Live` and serves
+/// every request the body issues. Once the body returned (its explicit
+/// completion) it is `Closing`: it admits nothing new, so a request sent
+/// after it is refused [`RuntimeEffectControllerTaskClosed`], and it keeps
+/// serving every request issued before it until each has settled. Only then
+/// is it `Settled` and the body's output returned: the owner never finishes
+/// while it still owns live work. An aborted body (its cancellation token
+/// fired) is a body that returned: its issued work drains the same way.
+///
+/// Requests are polled as [`drive_effect_controller_task`] polls them: every
+/// in-flight request once per poll of the owner, never re-entered within one.
+///
+/// [`RuntimeEffectControllerTaskClosed`]: crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed
+pub async fn own_effect_controller_task<Body, Work, T>(
+    controller: &dyn RuntimeEffectController,
+    admitted: AdmittedScope,
+    body: Body,
+) -> Result<T, RuntimeError>
+where
+    Body: FnOnce(ScopedEffectController<'static>) -> Work,
+    Work: Future<Output = T>,
+{
+    let (proxy, mut requests) = EffectTaskController::scoped(controller, admitted)?;
+    let mut body = std::pin::pin!(body(proxy));
+    let mut lifecycle = lash_core_store::tool_run::RunLifecycle::Live;
+    let mut output = None;
+    let mut in_flight: Vec<EffectControllerTaskFuture<'_>> = Vec::new();
+    let mut requests_open = true;
+    std::future::poll_fn(|cx| {
+        if lifecycle == lash_core_store::tool_run::RunLifecycle::Live
+            && let Poll::Ready(value) = body.as_mut().poll(cx)
+        {
+            output = Some(value);
+            // Explicit completion: no new request is admitted, and the
+            // ones already queued are still the owner's to serve.
+            requests.close();
+            lifecycle = lash_core_store::tool_run::RunLifecycle::Closing;
+        }
+        while requests_open {
+            match requests.poll_recv(cx) {
+                Poll::Ready(Some(request)) => in_flight.push(request.into_future(controller)),
+                Poll::Ready(None) => requests_open = false,
+                Poll::Pending => break,
+            }
+        }
+        in_flight.retain_mut(|request| request.as_mut().poll(cx).is_pending());
+        if lifecycle == lash_core_store::tool_run::RunLifecycle::Closing
+            && !requests_open
+            && in_flight.is_empty()
+        {
+            lifecycle = lash_core_store::tool_run::RunLifecycle::Settled;
+            return Poll::Ready(output.take());
+        }
+        Poll::Pending
+    })
+    .await
+    .ok_or_else(|| {
+        RuntimeError::new(
+            RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+            "the effect owner settled without its body's output",
+        )
+    })
+}

@@ -119,6 +119,18 @@ Closing a Run is not garbage collection; only a release ends a lease.
 **Operation (Q2).** A tool-bearing host operation is a Run with its own input
 kind, driven by the session's keyed turn service, over the existing
 session-operation opener. Its call ids and start keys keep their bytes.
+FIG-4888 admits a host's plugin task at the head of the command lane as
+`AdmittedWork::Operation`, under the run `OperationRun::run_id` names
+(`shift-operation:<batch>`), so every admission of the operation, a redrive
+after a crash included, names the same run and the same `LashTurn` key. The
+host command returns once the command row and its ingress obligation are
+durable; the command run stops at a task. The operation run's invocation is
+the journal owner: `own_effect_controller_task` hands the task a proxy of
+that invocation's controller, rescoped to the operation's session-operation
+scope, and serves it `Live`, then `Closing` once the task returned (nothing
+new admitted) until every issued effect settled, then `Settled`. The pre-run
+cancel peek is recorded there, so a replay takes the same branch. FIG-4893
+moves host result, follow and cancel onto the operation run.
 
 **State (Q5) and hook policy.** Only before-turn, after-turn, checkpoint and
 after-tool (result check) callbacks on the Run's sequential path may return state commands; every other

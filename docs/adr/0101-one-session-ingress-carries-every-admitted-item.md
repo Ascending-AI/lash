@@ -141,8 +141,17 @@ applies alone and settles in the one commit that makes its head write. An
 append lands its nodes, or settles `StaleBranch` when its required ancestor
 left the active path. A plugin's code runs only after admission; its services
 join the command as in-turn services join a turn, so its graph appends, usage,
-runtime events, plugin state, and queued turns ride the command's commit, and a
-task journals its effects under the command's own session-operation scope. A frame
+runtime events, plugin state, and queued turns ride the command's commit. A
+task is a tool-bearing operation (K8, binding Q2, FIG-4888): at the head of
+the lane it is admitted as its own run, `AdmittedWork::Operation`, named by
+the operation (`shift-operation:<batch>`), so a redrive admits the same run
+and the session's keyed `LashTurn` service reaches the same invocation. The
+command run applies the commands ahead of a task and stops at it. The
+operation run's invocation journals the task's effects under the command's
+own session-operation scope and owns them: the task gets a proxy of that
+invocation's controller, and its apply returns only once the task returned
+and every effect it issued has settled; a request after the task returned is
+refused. A frame
 open opens its frame and restarts the live interpreter from the seed. A command
 that cannot apply, including one whose commit exceeds the commit budget,
 settles with its typed refusal, so the lane never waits on it. The one command
@@ -167,7 +176,8 @@ shift admitted resolves the task's cancel signal, a keyed promise
 (`SessionCommandCancelSignal`) under the command's session-operation scope that
 only a host's cancel writes; a cancel of a command that already settled
 finds its settlement and writes nothing. The signal is a durable request,
-never a decision: the shift peeks it before the task runs, fires the task's
+never a decision: the shift peeks it before the task runs, as a step the
+operation run records so its replay takes the same branch, fires the task's
 cancellation token when the cancel lands, and peeks it again the moment the
 task's code returns. A cancel requested by then settles the command
 `PluginOperationCommandOutcome::Cancelled` with nothing of the task
@@ -180,14 +190,19 @@ settlement says so. Neither the withdrawal nor the cancel takes the runtime
 writer, which the shift applying the commands holds. The runtime
 writer is never held while a settlement is awaited. A command run, once it drained the lane, writes its
 `RunTerminalCause::CommandsApplied` terminal and arms its scope close, so its
-journal is retired like a turn run's.
+journal is retired like a turn run's; an operation run ends the same way once
+its task settled. A replay of an operation run past its settling commit runs
+the task's journaled work again and adopts the published head.
 
 Evidence: `crates/lash-core/src/runtime/shift/admission.rs:213`,
 `crates/lash-core/src/runtime/session_api.rs:1375`,
 `crates/lash-core/src/runtime/compact_context.rs:1`,
 `crates/lash-core/src/runtime/host_commands.rs:1`,
 `crates/lash-core/src/runtime/host_commands/task_cancel.rs:1`,
-`crates/lash-core/src/runtime/shift/run.rs` (`execute_commands_run`),
+`crates/lash-core/src/runtime/shift/run.rs` (`execute_commands_run`,
+`execute_operation_run`),
+`crates/lash-core-execution/src/runtime/effect/executor/control/task.rs`
+(`own_effect_controller_task`),
 `crates/lash/src/admin/host_commands.rs:1`, and
 `crates/lash-core-store/src/store/mod.rs:1591`.
 

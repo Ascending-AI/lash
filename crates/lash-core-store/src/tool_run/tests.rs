@@ -1531,6 +1531,11 @@ fn an_operation_run_keeps_the_session_operation_identity() {
         serde_json::to_value(operation.input()).unwrap(),
         json!({"input": "operation", "operation_id": "batch-7"})
     );
+    assert_eq!(
+        operation.run_id().as_str(),
+        "shift-operation:batch-7",
+        "every admission of the operation names one run"
+    );
 }
 
 #[test]

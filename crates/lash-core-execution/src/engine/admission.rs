@@ -117,6 +117,14 @@ pub enum AdmittedWork {
     /// `enqueue_seq` of the leading open command the admission saw, so a
     /// later admission naming the same head shows the lane made no progress.
     Commands { head: u64 },
+    /// A tool-bearing host operation at the head of the command lane: a
+    /// host's plugin task, executed as its own logical Run (K8, binding Q2),
+    /// named by the operation ([`OperationRun::run_id`]) so every admission
+    /// of it names the same run. The run's invocation owns every effect the
+    /// task issues until the task returned and its owned work drained.
+    ///
+    /// [`OperationRun::run_id`]: lash_core_store::tool_run::OperationRun::run_id
+    Operation { operation: crate::BatchId },
     /// The follow-on the session head owes (ADR 0101 §3): its recovery, as
     /// recovery number `attempts + 1`. The recorded count is what the
     /// recovery raises from, so a redrive of the run never raises it twice.
@@ -193,6 +201,22 @@ impl Admitted {
     /// What the run executes.
     pub fn work(&self) -> &AdmittedWork {
         &self.work
+    }
+
+    /// The host operation the run executes, when it executes one.
+    pub fn operation(&self) -> Option<lash_core_store::tool_run::OperationRun> {
+        match &self.work {
+            AdmittedWork::Operation { operation } => {
+                Some(lash_core_store::tool_run::OperationRun {
+                    session_id: self.session.clone(),
+                    operation_id: operation.to_string(),
+                })
+            }
+            AdmittedWork::Input { .. }
+            | AdmittedWork::Queued { .. }
+            | AdmittedWork::Commands { .. }
+            | AdmittedWork::FollowOn { .. } => None,
+        }
     }
 }
 

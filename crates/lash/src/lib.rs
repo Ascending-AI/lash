@@ -1473,6 +1473,11 @@ pub mod runtime {
     };
     /// Canonical material references and the refusals carried by runtime errors.
     pub use lash_core::tool_run::material;
+    /// A tool-bearing host operation's Run (K8): the operation an admitted
+    /// operation run executes. An expansion interface; not yet a supported
+    /// host surface.
+    #[doc(hidden)]
+    pub use lash_core::tool_run::operation;
     /// Retained material bundles and the dependency leases that hold them.
     pub use lash_core::tool_run::retention;
     /// A logical Run's event records (K3). An expansion interface for the Run

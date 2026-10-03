@@ -2032,6 +2032,7 @@ mod run_control {
     (a_command_enqueued_after_an_input_runs_admission_waits_for_the_next_boundary, "shift-command-after-admission"),
     (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "shift-turn-lane-contiguous"),
     (a_command_runs_redrive_replays_its_recorded_outcome, "shift-command-run-redrive"),
+    (a_host_task_is_admitted_as_its_own_operation_run, "shift-operation-run"),
     (a_run_recorded_under_one_executor_is_never_admitted_by_another, "shift-run-one-executor"),
     (a_lost_acceptors_run_is_executed_once_by_the_sessions_shift, "shift-run-lost-acceptor"),
     (admit_run_refuses_another_engine_held_executor, "run-admission-executor"),

@@ -234,7 +234,8 @@ fn evidence_run(admitted: &Admitted) -> TurnId {
         }
         crate::engine::AdmittedWork::Input { .. }
         | crate::engine::AdmittedWork::Queued { .. }
-        | crate::engine::AdmittedWork::Commands { .. } => admitted.run().clone(),
+        | crate::engine::AdmittedWork::Commands { .. }
+        | crate::engine::AdmittedWork::Operation { .. } => admitted.run().clone(),
     }
 }
 
@@ -591,6 +592,12 @@ pub async fn execute_admitted_run_retired(
         }
         crate::engine::AdmittedWork::Commands { .. } => {
             Box::pin(run::execute_headless_commands_run(
+                controller, &admitted, headless,
+            ))
+            .await
+        }
+        crate::engine::AdmittedWork::Operation { .. } => {
+            Box::pin(run::execute_headless_operation_run(
                 controller, &admitted, headless,
             ))
             .await
@@ -1234,6 +1241,10 @@ impl LashRuntime {
             }
             crate::engine::AdmittedWork::Commands { .. } => {
                 Box::pin(self.execute_commands_run(&run_controller, &admitted, &fence)).await
+            }
+            crate::engine::AdmittedWork::Operation { operation } => {
+                Box::pin(self.execute_operation_run(&run_controller, &admitted, &operation, &fence))
+                    .await
             }
             crate::engine::AdmittedWork::FollowOn {
                 follow_on,

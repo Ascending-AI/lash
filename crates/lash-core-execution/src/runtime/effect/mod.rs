@@ -95,7 +95,7 @@ pub use validation::{
 pub use executor::{AdmittedProcess, EffectControllerTaskRequest, ProcessRunner, ServedOnly};
 pub use executor::{
     EffectControllerTaskRequests, EffectTaskController, drive_effect_controller_task,
-    effect_groups_unsupported,
+    effect_groups_unsupported, own_effect_controller_task,
 };
 pub use executor::{RUN_SEAL_OPERATION, TurnCancelWait};
 pub use outcome::{

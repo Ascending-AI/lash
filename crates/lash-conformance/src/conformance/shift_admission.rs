@@ -38,6 +38,8 @@ pub(super) struct ShiftParts {
     pub(super) protocol: Option<Arc<dyn lash_core::plugin::ProtocolSessionPlugin>>,
     /// A law's explicit creator head, cloned unchanged when the runtime reopens.
     pub(super) initial_head: Option<crate::RuntimeSessionState>,
+    /// Plugins a law's runtime installs beside the protocol's.
+    pub(super) plugins: Vec<Arc<dyn crate::plugin::PluginFactory>>,
     calls: Arc<AtomicUsize>,
 }
 
@@ -83,6 +85,7 @@ impl ShiftParts {
             store,
             protocol: None,
             initial_head: None,
+            plugins: Vec::new(),
             calls,
         }
     }
@@ -120,17 +123,22 @@ impl ShiftParts {
                 .with_session_id(&self.session_id)
                 .with_policy(policy)
                 .with_initial_state(state)
-                .with_plugin_factories(match &self.protocol {
-                    Some(protocol) => {
-                        vec![
-                            crate::testing::test_standard_protocol_factory_with_runtime_state(
-                                Arc::clone(protocol),
-                                None,
-                            ),
-                        ]
+                .with_plugin_factories(
+                    match &self.protocol {
+                        Some(protocol) => {
+                            vec![
+                                crate::testing::test_standard_protocol_factory_with_runtime_state(
+                                    Arc::clone(protocol),
+                                    None,
+                                ),
+                            ]
+                        }
+                        None => crate::testing::test_standard_protocol_factories(),
                     }
-                    None => crate::testing::test_standard_protocol_factories(),
-                })
+                    .into_iter()
+                    .chain(self.plugins.iter().cloned())
+                    .collect(),
+                )
                 .with_store(crate::conformance::helpers::session_view(
                     &store,
                     self.session_id.clone(),
@@ -1697,6 +1705,235 @@ pub async fn a_command_enqueued_after_an_input_runs_admission_waits_for_the_next
         .collect();
     assert_eq!(applied.len(), 2, "both inputs are answered: {applied:?}");
     assert_eq!(applied[0], head, "the head is answered once, first");
+}
+
+/// K8 (binding Q2, FIG-4888): a host's plugin task is a tool-bearing
+/// operation, and it runs as its own logical Run. The lane's command run
+/// applies the command ahead of the task and stops at the task; the next
+/// admission names the task's operation run, named by the operation alone.
+/// An admission under a later shift request (a redrive after a crash) names
+/// the same operation and the same run, so the session's keyed turn service
+/// reaches the same journal owner.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_host_task_is_admitted_as_its_own_operation_run(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts = ShiftParts::new(prefix, "operation-run", &effect_host, &stores, 8).await;
+    let task_scopes = Arc::new(std::sync::Mutex::new(Vec::new()));
+    parts
+        .plugins
+        .push(operation_task_plugin(Arc::clone(&task_scopes)));
+    let command = |command: crate::SessionCommand, key: &str| {
+        crate::QueuedWorkBatchDraft::new(
+            &parts.session_id,
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+            command,
+        )
+        .with_source_key(key)
+    };
+    parts
+        .store
+        .enqueue_queued_work(command(
+            crate::SessionCommand::RefreshToolCatalog {
+                reason: "ahead of the task".to_string(),
+            },
+            "operation-run-refresh",
+        ))
+        .await
+        .expect("enqueue the command ahead of the task");
+    let task = parts
+        .store
+        .enqueue_queued_work(command(
+            crate::SessionCommand::RunPluginTask {
+                name: <OperationTask as crate::plugin::PluginOperation>::NAME.to_string(),
+                args: serde_json::json!({}),
+            },
+            "operation-run-task",
+        ))
+        .await
+        .expect("enqueue the task");
+
+    let commands = parts.request("operation-run-commands");
+    let (work, ran) = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let commands = commands.clone();
+        Box::pin(async move {
+            let admitted = admitted(
+                lash_core::shift::admit_shift(&mut runtime, &scope, &commands, 0, None)
+                    .await
+                    .expect("admit the command lane"),
+            );
+            let work = admitted.work().clone();
+            let ran = lash_core::shift::execute_admitted_run(&mut runtime, &scope, admitted)
+                .await
+                .map_err(|abort| abort.into_error().to_string());
+            (work, ran)
+        })
+    })
+    .await;
+    assert!(
+        matches!(work, lash_core::engine::AdmittedWork::Commands { .. }),
+        "the command ahead of the task runs in the command run: {work:?}"
+    );
+    assert!(
+        matches!(&ran, Ok(RunOutcome::Applied { run }) if run.as_str().starts_with("shift-commands:")),
+        "{ran:?}"
+    );
+    let open: Vec<_> = parts
+        .store
+        .list_open_queued_work(&parts.session_id)
+        .await
+        .expect("read the command lane")
+        .into_iter()
+        .map(|batch| batch.batch_id)
+        .collect();
+    assert_eq!(
+        open,
+        vec![task.batch_id.clone()],
+        "the command run applies the command ahead and stops at the task"
+    );
+
+    let operation = lash_core::tool_run::OperationRun {
+        session_id: parts.session_id.clone(),
+        operation_id: task.batch_id.to_string(),
+    };
+    for request in ["operation-run-first", "operation-run-redrive"] {
+        let request = parts.request(request);
+        let admitted = admitted(
+            on_tier(&runner, &parts, move |mut runtime, scope| {
+                let request = request.clone();
+                Box::pin(async move {
+                    lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None)
+                        .await
+                        .expect("admit the task")
+                })
+            })
+            .await,
+        );
+        assert_eq!(
+            admitted.work(),
+            &lash_core::engine::AdmittedWork::Operation {
+                operation: task.batch_id.clone(),
+            },
+            "the task at the lane's head is an operation"
+        );
+        assert_eq!(
+            admitted.run(),
+            &operation.run_id(),
+            "every admission of the operation names its one run"
+        );
+        assert_eq!(admitted.operation(), Some(operation.clone()));
+    }
+
+    // The operation run executes the task: the task's effect runs under the
+    // operation's session-operation scope (its identity bytes unchanged),
+    // the task settles, and the run ends applied.
+    let request = parts.request("operation-run-execute");
+    let ran = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let request = request.clone();
+        Box::pin(async move {
+            let admitted = admitted(
+                lash_core::shift::admit_shift(&mut runtime, &scope, &request, 0, None)
+                    .await
+                    .expect("admit the task"),
+            );
+            lash_core::shift::execute_admitted_run(&mut runtime, &scope, admitted)
+                .await
+                .map_err(|abort| abort.into_error().to_string())
+        })
+    })
+    .await;
+    assert_eq!(
+        ran,
+        Ok(RunOutcome::Applied {
+            run: operation.run_id()
+        }),
+        "the operation run applies its task"
+    );
+    let scopes = task_scopes
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    assert!(!scopes.is_empty(), "the task ran");
+    assert!(
+        scopes
+            .iter()
+            .all(|scope| scope == operation.opener().admitted_scope().scope()),
+        "the task's effects run under the operation's session-operation scope: {scopes:?}"
+    );
+    assert!(
+        parts
+            .store
+            .queued_work_batch_completion(&parts.session_id, task.batch_id.as_str())
+            .await
+            .expect("read the task's settlement")
+            .is_some(),
+        "the task settled through its command's commit"
+    );
+}
+
+/// The operation law's task: one durable sleep through the controller its
+/// operation run lends it, recording the scope it ran under.
+struct OperationTask;
+
+impl crate::plugin::PluginOperation for OperationTask {
+    const NAME: &'static str = "conformance_operation_task";
+    const DESCRIPTION: &'static str = "Sleep once through the operation's controller.";
+    const SESSION_PARAM: crate::plugin::SessionParam = crate::plugin::SessionParam::Required;
+    type Args = serde_json::Value;
+    type Output = serde_json::Value;
+    type Error = String;
+    const ERROR_TYPE: &'static str = Self::NAME;
+    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
+        lash_sansio::PluginFailureClass::Terminal
+    }
+}
+
+impl crate::plugin::PluginTask for OperationTask {}
+
+fn operation_task_plugin(
+    scopes: Arc<std::sync::Mutex<Vec<crate::ExecutionScope>>>,
+) -> Arc<dyn crate::plugin::PluginFactory> {
+    Arc::new(crate::plugin::StaticPluginFactory::new(
+        lash_core::plugin::PluginDeclaration::initial("conformance-operation-task"),
+        crate::facade_support::PluginSpec::new().with_plugin_task_value::<OperationTask, _, _>(
+            move |ctx, _args| {
+                let scopes = Arc::clone(&scopes);
+                async move {
+                    let controller = ctx.scoped_effect_controller;
+                    let scope = controller.execution_scope().clone();
+                    scopes
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(scope.clone());
+                    controller
+                        .execute_effect(
+                            crate::RuntimeEffectEnvelope::new(
+                                crate::RuntimeEffectInvocation::new(
+                                    crate::EffectAddress::new(scope, "operation-task-sleep")
+                                        .map_err(|error| error.to_string())?,
+                                    crate::RuntimeAttribution::none(),
+                                    "operation-task-sleep",
+                                ),
+                                crate::RuntimeEffectCommand::Sleep {
+                                    spec: crate::SleepSpec::For { duration_ms: 1 },
+                                },
+                            ),
+                            crate::RuntimeEffectLocalExecutor::unavailable(),
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(serde_json::json!({"slept": true}))
+                }
+            },
+        ),
+    ))
 }
 
 /// What an idle session's admission takes first: `queued` or `input:<id>`.
