@@ -178,7 +178,7 @@ mod tests {
             );
         }
     }
-    // D02 changes the source arm, subscription and decision command stream.
+    // FIG-4920 restores the command transition in deleted-session replay.
     // The immediate predecessor remains addressable by its drain lane.
     #[tokio::test]
     async fn l21_a_predecessor_run_journal_parks_before_decode_and_keeps_its_lane() {

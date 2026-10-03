@@ -289,9 +289,28 @@ impl LashRuntime {
         let transition = self
             .record_command_plugin_transition(run_controller, admitted)
             .await?;
-        self.publish_plugin_transition(transition, fence, None)
+        // Publication is outside the journal. A tombstone here must not
+        // skip lane reads an earlier attempt recorded after the transition.
+        if let Err(fault) = self
+            .publish_plugin_transition(transition, fence, None)
             .await
-            .map_err(|error| shift_abort(Some(&run), error))?;
+        {
+            return execute_headless_commands_run(
+                run_controller,
+                admitted,
+                HeadlessRun::Unrefreshed {
+                    catalog: self.host.core.session_store_factory(),
+                    fault,
+                },
+            )
+            .await
+            .map(|outcome| ExecutedRun {
+                outcome,
+                run: None,
+                executed_inputs: Vec::new(),
+                empty_drain: None,
+            });
+        }
         loop {
             match Box::pin(self.drain_next_session_command_fenced(
                 fence,
@@ -380,9 +399,26 @@ impl LashRuntime {
         let transition = self
             .record_command_plugin_transition(run_controller, admitted)
             .await?;
-        self.publish_plugin_transition(transition, fence, None)
+        if let Err(fault) = self
+            .publish_plugin_transition(transition, fence, None)
             .await
-            .map_err(|error| shift_abort(Some(&run), error))?;
+        {
+            return execute_headless_operation_run(
+                run_controller,
+                admitted,
+                HeadlessRun::Unrefreshed {
+                    catalog: self.host.core.session_store_factory(),
+                    fault,
+                },
+            )
+            .await
+            .map(|outcome| ExecutedRun {
+                outcome,
+                run: None,
+                executed_inputs: Vec::new(),
+                empty_drain: None,
+            });
+        }
         match Box::pin(self.drain_next_session_command_fenced(
             fence,
             tokio_util::sync::CancellationToken::new(),
@@ -949,7 +985,8 @@ pub(super) enum HeadlessRun {
     /// tombstone already committed (ADR 0049).
     Retired,
     /// The shift opened the session, but its resident head could not be
-    /// brought current: `fault`, which a deleted session's refresh meets too.
+    /// refreshed or its recorded transition published: `fault`, which a
+    /// deleted session meets too.
     /// `catalog` is the deployment's session catalog, which answers whether
     /// the session was deleted.
     Unrefreshed {
@@ -1052,6 +1089,36 @@ pub(super) async fn execute_headless_run(
         .await
         .map_err(|error| shift_abort(Some(&run), error.into_runtime_error()))?;
     Err(headless.past_its_steps(admitted, "its admission and plugin transition"))
+}
+
+pub(super) async fn execute_headless_command_transition(
+    controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+    headless: HeadlessRun,
+) -> Result<(), ShiftAbort> {
+    let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
+    let request = super::plugin_transition::command_transition_request(controller, admitted)?;
+    let id = request.id.clone();
+    controller
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::TransitionPlugins {
+                    request: Box::new(request),
+                },
+            ),
+            lash_core_execution::core_internal::owned_runner_executor(
+                Box::new(HeadlessRunStepRunner {
+                    session: admitted.session().clone(),
+                    step: HeadlessStep::Transition { id },
+                    headless,
+                }),
+                None,
+            ),
+        )
+        .await
+        .map_err(|error| shift_abort(Some(admitted.run()), error.into_runtime_error()))?;
+    Ok(())
 }
 
 /// Run a sealed command run whose shift holds no current head of its

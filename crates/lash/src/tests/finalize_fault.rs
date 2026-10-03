@@ -1,16 +1,8 @@
-//! A plugin fault in a turn's after-turn finalize, on the Restate engine
-//! (FIG-3897).
+//! A recorded after-turn refusal ends the Run with its typed failure.
 //!
-//! The fault settles by its cause (FIG-3575). A live fault — an opaque
-//! plugin-session failure, a store blip behind a plugin service — records
-//! nothing, so the turn handler fails its attempt retryably and the engine
-//! retries it: the retry replays the journaled model call and commits the
-//! run once. A refusal over the turn is an outcome: the run ends terminal
-//! with its typed failure after one attempt, and a redrive of the same turn
-//! id answers that failure without running the turn again. A failure the
-//! journal already holds is an outcome on every attempt, whatever its code.
-//!
-//! Every law runs on lash-restate's engine over the Restate server double.
+//! After-turn decisions and failures are recorded once under K10/L19
+//! (ADR 0078). Replay invokes no completed callback. These laws retain the
+//! terminal refusal and equal-id redrive contract on the Restate double.
 
 use super::*;
 
@@ -84,11 +76,9 @@ fn plugin(id: &'static str, spec: lash_core::facade_support::PluginSpec) -> Arc<
     ))
 }
 
-/// An `after_turn` hook that fails with `fault()` the first `failures` times
-/// it runs, and counts every run in `calls`.
+/// An `after_turn` refusal that counts every invocation.
 fn failing_after_turn(
     calls: Arc<AtomicUsize>,
-    failures: usize,
     fault: fn() -> lash_core::PluginError,
 ) -> Arc<dyn PluginFactory> {
     plugin(
@@ -98,29 +88,12 @@ fn failing_after_turn(
             Arc::new(move |_| {
                 let calls = Arc::clone(&calls);
                 Box::pin(async move {
-                    if calls.fetch_add(1, Ordering::SeqCst) < failures {
-                        return Err(fault());
-                    }
-                    Ok(Default::default())
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Err(fault())
                 })
             }),
         ),
     )
-}
-
-/// An opaque plugin-session failure: a store blip behind a plugin service.
-fn session_blip() -> lash_core::PluginError {
-    lash_core::PluginError::attempt_fault("plugin session store unavailable".to_string())
-}
-
-/// A live fault under a plugin-minted code: the plugin classes it
-/// [`TurnFailureCause::LiveFault`](lash_core::TurnFailureCause::LiveFault).
-fn minted_live_fault() -> lash_core::PluginError {
-    lash_core::PluginError::Runtime(lash_core::RuntimeError::foreign(
-        "finalize-plugin.store_blip",
-        lash_core::TurnFailureCause::LiveFault,
-        "plugin session store unavailable",
-    ))
 }
 
 /// A plugin's refusal over the turn it finalizes.
@@ -136,159 +109,6 @@ fn minted_refusal() -> lash_core::PluginError {
         lash_core::TurnFailureCause::Outcome,
         "the finalize hook refuses this turn",
     ))
-}
-
-/// F1: a live fault in the finalize hook fails the turn handler's attempt
-/// retryably. The engine retries it, the retry replays the journaled model
-/// call and runs the hook again, and the run commits exactly once.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_live_finalize_fault_is_retried_by_the_engine_to_one_committed_run() -> Result<()> {
-    retried_to_one_committed_run("finalize-live-fault", session_blip).await
-}
-
-/// F1 for a fault the plugin classes itself: a plugin-minted code it marks
-/// a live fault is retried the same way.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_minted_live_finalize_fault_is_retried_by_the_engine_to_one_committed_run() -> Result<()>
-{
-    retried_to_one_committed_run("finalize-minted-live-fault", minted_live_fault).await
-}
-
-async fn retried_to_one_committed_run(
-    session_id: &'static str,
-    fault: fn() -> lash_core::PluginError,
-) -> Result<()> {
-    const TURN: &str = "finalize-blip";
-    let finalize_calls = Arc::new(AtomicUsize::new(0));
-    let fixture = Fixture::with_plugins(vec![failing_after_turn(
-        Arc::clone(&finalize_calls),
-        1,
-        fault,
-    )])
-    .await?;
-    let session = fixture
-        .core
-        .session(session_id)
-        .created()
-        .await
-        .open()
-        .await?;
-
-    let output = session
-        .send(TurnInput::text("finalize blips once"))
-        .id(TURN)
-        .output()
-        .await
-        .expect("the engine retries the live finalize fault to completion");
-
-    assert!(output.is_success(), "{:?}", output.result.outcome);
-    assert_eq!(
-        finalize_calls.load(Ordering::SeqCst),
-        2,
-        "the hook failed once and ran again on the retry"
-    );
-    assert_eq!(
-        fixture.provider_calls.load(Ordering::SeqCst),
-        1,
-        "the retry replays the journaled model call"
-    );
-    assert_eq!(
-        fixture.turn_attempts(session_id, TURN),
-        2,
-        "the live fault ended exactly one attempt of the turn's run"
-    );
-    let applications = session.durable().turn_input_applications().await?;
-    assert_eq!(
-        applications.len(),
-        1,
-        "exactly one run committed: {applications:?}"
-    );
-    assert!(session.durable().pending_turn_inputs().await?.is_empty());
-
-    let settled = session
-        .send(TurnInput::text("finalize blips once"))
-        .id(TURN)
-        .await?
-        .outcome()
-        .await?;
-    assert_eq!(settled.status(), crate::TurnStatus::Answered);
-    assert_eq!(finalize_calls.load(Ordering::SeqCst), 2);
-    assert_eq!(fixture.provider_calls.load(Ordering::SeqCst), 1);
-    Ok(())
-}
-
-/// A live fault that recurs on every attempt spends the turn handler's
-/// retry policy: after `TURN_HANDLER_MAX_ATTEMPTS` the run's execution pauses with
-/// the fault as its last failure, and the run is stalled. No attempt
-/// committed it or recorded a failure, and every retry replayed the journaled
-/// model call.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_finalize_fault_on_every_attempt_pauses_the_run_execution() -> Result<()> {
-    const SESSION: &str = "finalize-fault-pauses";
-    const TURN: &str = "finalize-always-fails";
-    let attempts = u32::try_from(lash_restate::TURN_HANDLER_MAX_ATTEMPTS)
-        .expect("the attempt budget fits the double's counter");
-    let finalize_calls = Arc::new(AtomicUsize::new(0));
-    let fixture = Fixture::with_plugins(vec![failing_after_turn(
-        Arc::clone(&finalize_calls),
-        usize::MAX,
-        session_blip,
-    )])
-    .await?;
-    let session = fixture.core.session(SESSION).created().await.open().await?;
-    let key = lash_restate::turn_workflow_key(
-        &lash_core::SessionId::from(SESSION),
-        &lash_core::TurnId::from(TURN),
-    );
-
-    let _handle = session
-        .send(TurnInput::text("finalize always fails"))
-        .id(TURN)
-        .await?;
-    let paused = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        loop {
-            if let Some(run) = fixture
-                .double
-                .server()
-                .invocations()
-                .into_iter()
-                .find(|view| {
-                    view.target.starts_with("LashTurn")
-                        && view.target.ends_with(&format!("/{key}/run"))
-                        && view.status == "paused"
-                })
-            {
-                return run;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        }
-    })
-    .await
-    .expect("the run's execution pauses once its attempts are spent");
-
-    assert_eq!(paused.attempts, attempts);
-    let (_, last_failure) = paused
-        .last_failure
-        .expect("the pause keeps its last failure");
-    assert!(
-        last_failure.contains("plugin session store unavailable"),
-        "the pause names the finalize fault: {last_failure}"
-    );
-    assert_eq!(finalize_calls.load(Ordering::SeqCst), attempts as usize);
-    assert_eq!(
-        fixture.provider_calls.load(Ordering::SeqCst),
-        1,
-        "every retry replayed the journaled model call"
-    );
-    assert!(
-        session
-            .durable()
-            .turn_input_applications()
-            .await?
-            .is_empty(),
-        "no attempt committed the run"
-    );
-    Ok(())
 }
 
 /// A refusal in the finalize hook is an outcome: the run ends terminal
@@ -312,12 +132,8 @@ async fn refused_terminal(
 ) -> Result<()> {
     const TURN: &str = "finalize-refused";
     let finalize_calls = Arc::new(AtomicUsize::new(0));
-    let fixture = Fixture::with_plugins(vec![failing_after_turn(
-        Arc::clone(&finalize_calls),
-        usize::MAX,
-        fault,
-    )])
-    .await?;
+    let fixture =
+        Fixture::with_plugins(vec![failing_after_turn(Arc::clone(&finalize_calls), fault)]).await?;
     let session = fixture
         .core
         .session(session_id)
@@ -373,114 +189,4 @@ fn assert_finalize_refusal(error: &EmbedError) {
             .contains("the finalize hook refuses this turn"),
         "{runtime:?}"
     );
-}
-
-/// F4: a failure the journal already holds is an outcome on every attempt,
-/// whatever its code. The checkpoint hook fails with a live-coded
-/// plugin-session fault, which the checkpoint's journaled outcome records;
-/// the first attempt is then interrupted by a live finalize fault. The
-/// engine's retry replays the recorded checkpoint failure and settles it as
-/// the run's failed turn, and a redrive of the same turn id answers it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_journaled_failure_settles_the_run_failed_after_a_live_finalize_fault() -> Result<()> {
-    const SESSION: &str = "finalize-journaled-failure";
-    const TURN: &str = "journaled-failure";
-    let checkpoint_calls = Arc::new(AtomicUsize::new(0));
-    let finalize_calls = Arc::new(AtomicUsize::new(0));
-    let failing_checkpoint = plugin(
-        "finalize-fault-checkpoint",
-        lash_core::facade_support::PluginSpec::new().with_checkpoint(
-            crate::hook_key!("checkpoint-2"),
-            Arc::new({
-                let checkpoint_calls = Arc::clone(&checkpoint_calls);
-                move |_| {
-                    let checkpoint_calls = Arc::clone(&checkpoint_calls);
-                    Box::pin(async move {
-                        checkpoint_calls.fetch_add(1, Ordering::SeqCst);
-                        Err(lash_core::PluginError::attempt_fault(
-                            "checkpoint store unavailable".to_string(),
-                        ))
-                    })
-                }
-            }),
-        ),
-    );
-    let fixture = Fixture::with_plugins(vec![
-        failing_checkpoint,
-        failing_after_turn(Arc::clone(&finalize_calls), 1, session_blip),
-    ])
-    .await?;
-    let session = fixture.core.session(SESSION).created().await.open().await?;
-
-    let settled = session
-        .send(TurnInput::text("checkpoint fails and is journaled"))
-        .id(TURN)
-        .await?
-        .outcome()
-        .await?;
-    assert_journaled_failure(&settled, true);
-    let recorded_checkpoints = checkpoint_calls.load(Ordering::SeqCst);
-    assert!(recorded_checkpoints > 0, "the checkpoint ran and failed");
-    assert_eq!(
-        finalize_calls.load(Ordering::SeqCst),
-        2,
-        "the live finalize fault ended the first attempt and the retry finalized"
-    );
-    assert_eq!(fixture.turn_attempts(SESSION, TURN), 2);
-
-    let redriven = session
-        .send(TurnInput::text("checkpoint fails and is journaled"))
-        .id(TURN)
-        .await?
-        .outcome()
-        .await?;
-    assert_journaled_failure(&redriven, false);
-    assert_eq!(
-        redriven.run().cloned(),
-        settled.run().cloned(),
-        "the redrive answers the same run"
-    );
-    assert_eq!(
-        checkpoint_calls.load(Ordering::SeqCst),
-        recorded_checkpoints,
-        "neither the retry nor the redrive re-ran the recorded checkpoint"
-    );
-    assert_eq!(finalize_calls.load(Ordering::SeqCst), 2);
-    assert_eq!(fixture.provider_calls.load(Ordering::SeqCst), 1);
-    assert!(session.durable().pending_turn_inputs().await?.is_empty());
-    Ok(())
-}
-
-/// The run settled failed on the recorded checkpoint failure. The live
-/// report names it; a report rebuilt from the store for a redrive is thin
-/// (D1 §1.5 3b) and carries the typed stop alone.
-#[track_caller]
-fn assert_journaled_failure(settled: &crate::SendOutcome, live: bool) {
-    assert_eq!(
-        settled.status(),
-        crate::TurnStatus::Failed,
-        "the journaled checkpoint failure settles the run failed: {settled:?}"
-    );
-    let report = &settled
-        .output()
-        .expect("a failed run carries its settled turn")
-        .result;
-    assert!(
-        matches!(
-            report.outcome,
-            TurnOutcome::Stopped(lash_core::facade_support::TurnStop::RuntimeError)
-        ),
-        "{:?}",
-        report.outcome
-    );
-    if live {
-        assert!(
-            report.errors.iter().any(|issue| {
-                issue.kind == lash_core::TurnFailureKind::RuntimeEffectController
-                    && issue.message.contains("checkpoint store unavailable")
-            }),
-            "the failed turn names the recorded checkpoint failure: {:?}",
-            report.errors
-        );
-    }
 }

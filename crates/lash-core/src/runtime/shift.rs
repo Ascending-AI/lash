@@ -550,8 +550,8 @@ pub async fn admit_shift_retired(
 /// refused run it was. A run it recorded sealed goes on headless, through
 /// the recorded steps an earlier attempt may have journaled after the seal:
 /// an input- or queued-headed run's admission and plugin transition, a
-/// command run's reads of its command lane (FIG-4346), and a follow-on
-/// recovery run's decision (FIG-4361). `controller` serves the run's
+/// command run's plugin transition and command-lane reads (FIG-4346), and a
+/// follow-on recovery run's decision (FIG-4361). `controller` serves the run's
 /// [`shift_run_scope`](crate::engine::shift_run_scope).
 #[doc(hidden)]
 pub async fn execute_admitted_run_retired(
@@ -595,12 +595,16 @@ pub async fn execute_admitted_run_retired(
             .await
         }
         crate::engine::AdmittedWork::Commands { .. } => {
+            run::execute_headless_command_transition(controller, &admitted, headless.clone())
+                .await?;
             Box::pin(run::execute_headless_commands_run(
                 controller, &admitted, headless,
             ))
             .await
         }
         crate::engine::AdmittedWork::Operation { .. } => {
+            run::execute_headless_command_transition(controller, &admitted, headless.clone())
+                .await?;
             Box::pin(run::execute_headless_operation_run(
                 controller, &admitted, headless,
             ))

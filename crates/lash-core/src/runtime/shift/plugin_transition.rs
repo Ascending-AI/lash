@@ -14,6 +14,21 @@ pub(super) enum TransitionBasis<'a> {
     FollowOn(&'a crate::store::PendingFollowOn),
 }
 
+pub(super) fn command_transition_request(
+    controller: &ScopedEffectController<'_>,
+    admitted: &Admitted,
+) -> Result<crate::plugin::PluginTransitionRequest, ShiftAbort> {
+    let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
+    Ok(crate::plugin::PluginTransitionRequest {
+        id: crate::plugin::PluginTransitionId(invocation.address().clone()),
+        owner: crate::RuntimeOwner::Session(admitted.session().clone()),
+        base: crate::plugin::PluginTransitionBase::SessionCommand {
+            run: admitted.run().clone(),
+        },
+        target: Default::default(),
+    })
+}
+
 impl LashRuntime {
     /// Record the complete transition, or resume the native view the run
     /// already published at its admission's recorded advanced head.
@@ -41,18 +56,10 @@ impl LashRuntime {
         controller: &ScopedEffectController<'_>,
         admitted: &Admitted,
     ) -> Result<crate::plugin::PluginTransitionRecord, ShiftAbort> {
-        let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
         self.record_transition_request(
             controller,
             admitted,
-            crate::plugin::PluginTransitionRequest {
-                id: crate::plugin::PluginTransitionId(invocation.address().clone()),
-                owner: crate::RuntimeOwner::Session(admitted.session().clone()),
-                base: crate::plugin::PluginTransitionBase::SessionCommand {
-                    run: admitted.run().clone(),
-                },
-                target: Default::default(),
-            },
+            command_transition_request(controller, admitted)?,
             TransitionBasis::Admitted,
         )
         .await
