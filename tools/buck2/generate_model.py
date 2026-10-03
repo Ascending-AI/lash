@@ -1812,7 +1812,46 @@ def generated(
         raise ValueError("VM worker/client feature mismatch:\n  " + "\n  ".join(variant_failures))
     validate_test_run_sizes()
     vm_worker_runfiles.add(metadata, outputs, ROOT)
+    restate_suites(metadata, outputs)
+    outputs[ROOT / "tools/buck2/exec_sizes.bzl"] = exec_sizes_bzl()
     return outputs, inventory
+
+
+def restate_suites(metadata: dict, outputs: dict[pathlib.Path, str]) -> None:
+    """Emit private-service actions beside each registered suite's Rust binary."""
+    registry = tomllib.loads((ROOT / "scripts/restate-suites.toml").read_text())["suites"]
+    graph = vm_worker_runfiles.Graph(metadata, outputs, ROOT)
+    loaded: set[pathlib.Path] = set()
+    for suite, spec in sorted(registry.items()):
+        if spec.get("ci_driver"):
+            continue
+        label = spec["label"]
+        target = graph.targets.get(label)
+        if target is None or target.macro not in vm_worker_runfiles.TEST_MACROS:
+            raise ValueError(f"Restate suite {suite} names no emitted Rust test: {label}")
+        name = label.split(":", 1)[1]
+        package_name = next(package["name"] for package in metadata["packages"]
+                            if pathlib.Path(package["manifest_path"]).parent / "BUCK" == target.path)
+        if target.path not in loaded:
+            outputs[target.path] += '\nload("//tools/buck2:test_rules.bzl", "lash_restate_suite")\n\n'
+            loaded.add(target.path)
+        for leg in ("live", "replay"):
+            suite_name = 'restate_' + suite.replace('-', '_') + '_' + leg
+            suite_label = f"//{target.directory}:{suite_name}"
+            RESOLVED_TEST_RUNS[suite_label] = test_run_request(package_name, target.value('crate_name'), suite_label)
+            outputs[target.path] += (
+                "lash_restate_suite(\n"
+                f"    name = {quote(suite_name)},\n"
+                f"    test = {quote(':' + name + '__rust_test')},\n"
+                f"    env = {json.dumps(target.value('test_env', {}), sort_keys=True)},\n"
+                f"    timeout_seconds = {max(900, int(spec.get('timeout_seconds', 300)))},\n"
+                f"    suite = {quote(suite)},\n"
+                f"    leg = {quote(leg)},\n"
+                f"    shard_count = {int(spec.get('shards', 1))},\n"
+                ")\n\n"
+            )
+    for path in loaded:
+        outputs[path] = outputs[path].rstrip() + "\n"
 
 
 # ---------------------------------------------------------------------------

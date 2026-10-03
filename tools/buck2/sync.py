@@ -147,6 +147,7 @@ def is_content_input(relative: str) -> bool:
             ".cargo/config.toml",
             "rust-toolchain.toml",
             "scripts/feature-coverage.toml",
+            "scripts/restate-suites.toml",
             "tools/buck2/action-sizes.json",
             "tools/buck2/clippy-sizes.json",
             "tools/buck2/clippy_policy.py",
@@ -843,6 +844,7 @@ def root_buck(inventory: dict) -> str:
             GENERATED_HEADER,
             'load("//tools/buck2:schema_checks.bzl", "schema_check", "schema_check_group", "schema_documents")\n\n',
             'load("//tools/buck2:source_tree.bzl", "lash_workspace_sources")\n\n',
+            'load("//tools/buck2:test_rules.bzl", "restate_suite_inputs")\n\n',
             suite("workspace_compile", inventory["workspace_build_targets"]),
             suite("workspace_check", inventory["workspace_check_targets"]),
             suite("workspace_tests", inventory["workspace_test_suite_labels"]),
@@ -863,6 +865,11 @@ def root_buck(inventory: dict) -> str:
         ]
     )
     return aggregates + (
+        'restate_suite_inputs(\n'
+        '    name = "restate_suite_inputs",\n'
+        '    srcs = {p: p for p in glob(["scripts/ci/restate_suite.py", "scripts/restate-suites.toml", "scripts/restate-divergences/*.toml"])},\n'
+        '    visibility = ["PUBLIC"],\n'
+        ')\n\n'
         "filegroup(\n"
         '    name = "workflow_graph_schema",\n'
         f"    srcs = [{json.dumps(workflow_graph_schema())}],\n"
@@ -1036,6 +1043,15 @@ def model_outputs(canonical: dict, third_party: dict[tuple[str, str], str]) -> d
         labels = raw.get(path, "").splitlines()
         inventory["service_test_targets"][service] = labels
         outputs[BUCK2 / f"{service}_test_labels.txt"] = "".join(label + "\n" for label in labels)
+    registry = tomllib.loads((ROOT / "scripts/restate-suites.toml").read_text())["suites"]
+    inventory["restate_suite_targets"] = {
+        name: {leg: spec["label"].split(":", 1)[0] + ":restate_" + name.replace("-", "_") + "_" + leg
+               for leg in ("live", "replay")}
+        for name, spec in sorted(registry.items()) if not spec.get("ci_driver")
+    }
+    inventory["service_test_targets"]["restate"] = sorted(
+        label for legs in inventory["restate_suite_targets"].values() for label in legs.values()
+    )
     outputs[BUCK2 / "target-inventory.json"] = json.dumps(inventory, indent=2, sort_keys=True) + "\n"
     outputs[BUCK2 / "clippy_policy.bzl"] = clippy_policy.render(canonical, ROOT)
     outputs[ROOT / "BUCK"] = root_buck(inventory)

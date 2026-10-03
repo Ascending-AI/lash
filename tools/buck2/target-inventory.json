@@ -54587,6 +54587,108 @@
       }
     }
   ],
+  "restate_suite_targets": {
+    "admission-fence": {
+      "live": "//crates/lash-restate:restate_admission_fence_live",
+      "replay": "//crates/lash-restate:restate_admission_fence_replay"
+    },
+    "attachment-attach": {
+      "live": "//crates/lash-restate:restate_attachment_attach_live",
+      "replay": "//crates/lash-restate:restate_attachment_attach_replay"
+    },
+    "crash-windows": {
+      "live": "//crates/lash-restate-test:restate_crash_windows_live",
+      "replay": "//crates/lash-restate-test:restate_crash_windows_replay"
+    },
+    "drain-hand-over": {
+      "live": "//crates/lash:restate_drain_hand_over_live",
+      "replay": "//crates/lash:restate_drain_hand_over_replay"
+    },
+    "drain-hand-over-postgres": {
+      "live": "//crates/lash:restate_drain_hand_over_postgres_live",
+      "replay": "//crates/lash:restate_drain_hand_over_postgres_replay"
+    },
+    "effect-group": {
+      "live": "//crates/lash-restate:restate_effect_group_live",
+      "replay": "//crates/lash-restate:restate_effect_group_replay"
+    },
+    "host-send-wait": {
+      "live": "//crates/lash-restate-test:restate_host_send_wait_live",
+      "replay": "//crates/lash-restate-test:restate_host_send_wait_replay"
+    },
+    "json-decode": {
+      "live": "//crates/lash-restate:restate_json_decode_live",
+      "replay": "//crates/lash-restate:restate_json_decode_replay"
+    },
+    "live-replay-bounds": {
+      "live": "//crates/lash:restate_live_replay_bounds_live",
+      "replay": "//crates/lash:restate_live_replay_bounds_replay"
+    },
+    "load-behavior-replay": {
+      "live": "//runbooks/restate-postgres-workers:restate_load_behavior_replay_live",
+      "replay": "//runbooks/restate-postgres-workers:restate_load_behavior_replay_replay"
+    },
+    "mcp-catalog": {
+      "live": "//crates/lash:restate_mcp_catalog_live",
+      "replay": "//crates/lash:restate_mcp_catalog_replay"
+    },
+    "mcp-catalog-postgres": {
+      "live": "//crates/lash:restate_mcp_catalog_postgres_live",
+      "replay": "//crates/lash:restate_mcp_catalog_postgres_replay"
+    },
+    "namespaces": {
+      "live": "//crates/lash-restate-test:restate_namespaces_live",
+      "replay": "//crates/lash-restate-test:restate_namespaces_replay"
+    },
+    "paused-group-children": {
+      "live": "//crates/lash-restate:restate_paused_group_children_live",
+      "replay": "//crates/lash-restate:restate_paused_group_children_replay"
+    },
+    "process-await": {
+      "live": "//crates/lash-restate:restate_process_await_live",
+      "replay": "//crates/lash-restate:restate_process_await_replay"
+    },
+    "public-process-command": {
+      "live": "//crates/lash:restate_public_process_command_live",
+      "replay": "//crates/lash:restate_public_process_command_replay"
+    },
+    "recorded-process-behaviour": {
+      "live": "//crates/lash-protocol-rlm:restate_recorded_process_behaviour_live",
+      "replay": "//crates/lash-protocol-rlm:restate_recorded_process_behaviour_replay"
+    },
+    "recorded-runs": {
+      "live": "//crates/lash:restate_recorded_runs_live",
+      "replay": "//crates/lash:restate_recorded_runs_replay"
+    },
+    "refused-successor-drain": {
+      "live": "//crates/lash-restate:restate_refused_successor_drain_live",
+      "replay": "//crates/lash-restate:restate_refused_successor_drain_replay"
+    },
+    "remote-cancellation": {
+      "live": "//crates/lash-restate:restate_remote_cancellation_live",
+      "replay": "//crates/lash-restate:restate_remote_cancellation_replay"
+    },
+    "replay-after-advance": {
+      "live": "//crates/lash:restate_replay_after_advance_live",
+      "replay": "//crates/lash:restate_replay_after_advance_replay"
+    },
+    "run-control": {
+      "live": "//crates/lash-restate:restate_run_control_live",
+      "replay": "//crates/lash-restate:restate_run_control_replay"
+    },
+    "server-double": {
+      "live": "//crates/lash-restate-test:restate_server_double_live",
+      "replay": "//crates/lash-restate-test:restate_server_double_replay"
+    },
+    "session-shifts": {
+      "live": "//crates/lash-restate-test:restate_session_shifts_live",
+      "replay": "//crates/lash-restate-test:restate_session_shifts_replay"
+    },
+    "workload-delete": {
+      "live": "//runbooks/restate-postgres-workers:restate_workload_delete_live",
+      "replay": "//runbooks/restate-postgres-workers:restate_workload_delete_replay"
+    }
+  },
   "service_test_targets": {
     "postgres": [
       "//crates/lash-postgres-store:conformance__test",
@@ -54609,6 +54711,58 @@
       "//crates/lash-postgres-store:schema_constraints__test__fv_17f355d5",
       "//crates/lash-postgres-store:schema_drift__test",
       "//crates/lash-postgres-store:schema_drift__test__fv_17f355d5"
+    ],
+    "restate": [
+      "//crates/lash-protocol-rlm:restate_recorded_process_behaviour_live",
+      "//crates/lash-protocol-rlm:restate_recorded_process_behaviour_replay",
+      "//crates/lash-restate-test:restate_crash_windows_live",
+      "//crates/lash-restate-test:restate_crash_windows_replay",
+      "//crates/lash-restate-test:restate_host_send_wait_live",
+      "//crates/lash-restate-test:restate_host_send_wait_replay",
+      "//crates/lash-restate-test:restate_namespaces_live",
+      "//crates/lash-restate-test:restate_namespaces_replay",
+      "//crates/lash-restate-test:restate_server_double_live",
+      "//crates/lash-restate-test:restate_server_double_replay",
+      "//crates/lash-restate-test:restate_session_shifts_live",
+      "//crates/lash-restate-test:restate_session_shifts_replay",
+      "//crates/lash-restate:restate_admission_fence_live",
+      "//crates/lash-restate:restate_admission_fence_replay",
+      "//crates/lash-restate:restate_attachment_attach_live",
+      "//crates/lash-restate:restate_attachment_attach_replay",
+      "//crates/lash-restate:restate_effect_group_live",
+      "//crates/lash-restate:restate_effect_group_replay",
+      "//crates/lash-restate:restate_json_decode_live",
+      "//crates/lash-restate:restate_json_decode_replay",
+      "//crates/lash-restate:restate_paused_group_children_live",
+      "//crates/lash-restate:restate_paused_group_children_replay",
+      "//crates/lash-restate:restate_process_await_live",
+      "//crates/lash-restate:restate_process_await_replay",
+      "//crates/lash-restate:restate_refused_successor_drain_live",
+      "//crates/lash-restate:restate_refused_successor_drain_replay",
+      "//crates/lash-restate:restate_remote_cancellation_live",
+      "//crates/lash-restate:restate_remote_cancellation_replay",
+      "//crates/lash-restate:restate_run_control_live",
+      "//crates/lash-restate:restate_run_control_replay",
+      "//crates/lash:restate_drain_hand_over_live",
+      "//crates/lash:restate_drain_hand_over_postgres_live",
+      "//crates/lash:restate_drain_hand_over_postgres_replay",
+      "//crates/lash:restate_drain_hand_over_replay",
+      "//crates/lash:restate_live_replay_bounds_live",
+      "//crates/lash:restate_live_replay_bounds_replay",
+      "//crates/lash:restate_mcp_catalog_live",
+      "//crates/lash:restate_mcp_catalog_postgres_live",
+      "//crates/lash:restate_mcp_catalog_postgres_replay",
+      "//crates/lash:restate_mcp_catalog_replay",
+      "//crates/lash:restate_public_process_command_live",
+      "//crates/lash:restate_public_process_command_replay",
+      "//crates/lash:restate_recorded_runs_live",
+      "//crates/lash:restate_recorded_runs_replay",
+      "//crates/lash:restate_replay_after_advance_live",
+      "//crates/lash:restate_replay_after_advance_replay",
+      "//runbooks/restate-postgres-workers:restate_load_behavior_replay_live",
+      "//runbooks/restate-postgres-workers:restate_load_behavior_replay_replay",
+      "//runbooks/restate-postgres-workers:restate_workload_delete_live",
+      "//runbooks/restate-postgres-workers:restate_workload_delete_replay"
     ],
     "s3": [
       "//crates/lash-s3-store:lash-s3-store__unit_test"

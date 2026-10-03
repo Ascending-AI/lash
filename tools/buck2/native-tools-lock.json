@@ -6,26 +6,37 @@
       "version": "22.1.8-1",
       "url": "https://github.com/hermeticbuild/hermetic-llvm/releases/download/llvm-22.1.8-1/llvm-toolchain-minimal-22.1.8-linux-amd64-musl.tar.zst",
       "sha256": "89f29294a584267251edac00ab723a0a74514b8e1acb7f036840d13635c66bfa",
-      "required": ["bin/clang", "bin/clang++", "bin/llvm-ar", "lib/clang/22/include/stdarg.h"]
+      "required": [
+        "bin/clang",
+        "bin/clang++",
+        "bin/llvm-ar",
+        "lib/clang/22/include/stdarg.h"
+      ]
     },
     "glibc_headers": {
       "version": "2.28-20250512",
       "url": "https://github.com/cerisier/glibc-headers/releases/download/2.28-20250512/x86_64-linux-gnu.2.28.tar.zst",
       "sha256": "8015f4a710987439dfdcde7539b62cc5db52d2cd9456af5e2e297494f13c56f3",
-      "required": ["include/stdio.h"]
+      "required": [
+        "include/stdio.h"
+      ]
     },
     "kernel_headers": {
       "version": "4.19.325-20250511",
       "url": "https://github.com/cerisier/kernel-headers/releases/download/4.19.325-20250511/4.19.325-x86.tar.zst",
       "sha256": "55b232aa55b9f4aedbed6a743db0a2b7f4e92bb07b3ffeeb614e9dda30d34851",
-      "required": ["include/linux/version.h"]
+      "required": [
+        "include/linux/version.h"
+      ]
     },
     "node": {
       "version": "24.20.0",
       "url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz",
       "sha256": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
       "archive_prefix": "node-v24.20.0-linux-x64",
-      "required": ["bin/node"]
+      "required": [
+        "bin/node"
+      ]
     },
     "postgres": {
       "version": "16.15.0",
@@ -33,8 +44,17 @@
       "sha256": "653abc065c682b85d3da50168fb95dc524bd85426cdec9ce3695a550ef431df2",
       "inner": "postgres-linux-x86_64.txz",
       "archive_prefix": "",
-      "exclude": ["lib/*.a", "lib/pkgconfig", "lib/lib*.so"],
-      "required": ["bin/initdb", "bin/postgres", "lib/libicui18n.so.60", "lib/postgresql/pg_stat_statements.so"]
+      "exclude": [
+        "lib/*.a",
+        "lib/pkgconfig",
+        "lib/lib*.so"
+      ],
+      "required": [
+        "bin/initdb",
+        "bin/postgres",
+        "lib/libicui18n.so.60",
+        "lib/postgresql/pg_stat_statements.so"
+      ]
     },
     "nss_wrapper": {
       "version": "1.1.15-2",
@@ -42,8 +62,20 @@
       "sha256": "51ed4f32caa32a4b62d59f34cd1aa836b56077f8e0199c5f9a6421abc452e3cb",
       "inner": "data.tar.zst",
       "archive_prefix": "./usr/lib/x86_64-linux-gnu",
-      "members": ["./usr/lib/x86_64-linux-gnu/libnss_wrapper.so"],
-      "required": ["libnss_wrapper.so"]
+      "members": [
+        "./usr/lib/x86_64-linux-gnu/libnss_wrapper.so"
+      ],
+      "required": [
+        "libnss_wrapper.so"
+      ]
+    },
+    "restate": {
+      "version": "1.7.13",
+      "url": "https://github.com/restatedev/restate/releases/download/v1.7.13/restate-server-x86_64-unknown-linux-musl.tar.xz",
+      "sha256": "5429b216b68f3fa52b7f0e6627a2c2a86fc0c75d19b1e152cd2e7dcd8bab4c82",
+      "required": [
+        "restate-server"
+      ]
     }
   }
 }

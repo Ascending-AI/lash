@@ -796,3 +796,105 @@ lash_rust_feature_library(
     variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_adf6364f", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_131fa212", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_072d97a8", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_ed63f580", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_7477af78", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_9d27b4f5", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_dd192994", "//crates/lash-remote-protocol:lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_52ae7b05", "//crates/lash-restate:lash-restate": "//crates/lash-restate:lash-restate__fv_7e8ed7ca", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_215b4c1b", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_481e6e22", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_f1474b1c", "//crates/lashlang:lashlang": "//crates/lashlang:lashlang__fv_253acd83"},
     version = "0.0.0-dev",
 )
+
+load("//tools/buck2:test_rules.bzl", "lash_restate_suite")
+
+lash_restate_suite(
+    name = "restate_crash_windows_live",
+    test = ":crash_windows__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "crash-windows",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_crash_windows_replay",
+    test = ":crash_windows__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "crash-windows",
+    leg = "replay",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_host_send_wait_live",
+    test = ":host_send_wait__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "host-send-wait",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_host_send_wait_replay",
+    test = ":host_send_wait__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "host-send-wait",
+    leg = "replay",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_namespaces_live",
+    test = ":namespaces__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "namespaces",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_namespaces_replay",
+    test = ":namespaces__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "namespaces",
+    leg = "replay",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_server_double_live",
+    test = ":server_semantics__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "server-double",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_server_double_replay",
+    test = ":server_semantics__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "server-double",
+    leg = "replay",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_session_shifts_live",
+    test = ":session_shifts__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "session-shifts",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_session_shifts_replay",
+    test = ":session_shifts__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "session-shifts",
+    leg = "replay",
+    shard_count = 1,
+)

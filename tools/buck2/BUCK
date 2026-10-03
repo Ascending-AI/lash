@@ -62,6 +62,7 @@ test_helper_bundle(
 
 # Starts the pinned PostgreSQL inside a `hermetic-postgres` test's own action.
 export_file(name = "postgres_action_runner", src = "postgres_action_runner.py", mode = "reference", visibility = ["PUBLIC"])
+export_file(name = "restate_action_runner", src = "restate_action_runner.py", mode = "reference", visibility = ["PUBLIC"])
 
 # Per-case durations that balance libtest shards; an input of sharded tests only.
 export_file(name = "test_shard_weights", src = "test-shard-weights.json", mode = "reference", visibility = ["PUBLIC"])

@@ -237,7 +237,7 @@ class FakeDocker:
 
 
 class WithServiceBehaviour(unittest.TestCase):
-    def test_postgres_ci_suites_get_service_and_propagate_failure(self) -> None:
+    def test_remote_ci_suites_propagate_failure_without_starting_local_postgres(self) -> None:
         sys.path.insert(0, str(ROOT / "scripts/ci"))
         import restate_matrix
 
@@ -267,17 +267,16 @@ class WithServiceBehaviour(unittest.TestCase):
                          mock.patch.object(restate_matrix.subprocess, "call", side_effect=execute):
                         status = restate_matrix.run(suite, "replay")
                     result = results[0]
-                    self.assertEqual(1 if exit_code else 0, status, result.stderr)
+                    self.assertEqual(exit_code, status, result.stderr)
                     self.assertIn(f"restate_suite.py suite {suite} --leg replay --keep-test-logs", result.stdout)
-                    self.assertRegex(result.stdout, r"postgres://lash:lash@127\.0\.0\.1:\d+/lash\n")
-                    self.assertTrue(any(call.startswith("rm --force") for call in docker.logged()))
+                    self.assertNotIn("postgres://", result.stdout)
+                    self.assertEqual([], docker.logged())
 
-    def test_effect_group_recipe_requires_postgres_before_both_legs(self) -> None:
+    def test_effect_group_recipe_reaches_both_hermetic_legs(self) -> None:
         justfile = (ROOT / "justfile").read_text(encoding="utf-8")
         recipe = justfile.split("\neffect-group-conformance-e2e:\n", 1)[1]
         recipe = recipe.split("\n# ", 1)[0]
-        self.assertIn('${LASH_POSTGRES_DATABASE_URL:?', recipe)
-        self.assertLess(recipe.index('${LASH_POSTGRES_DATABASE_URL:?'), recipe.index("restate_suite.py"))
+        self.assertNotIn('${LASH_POSTGRES_DATABASE_URL:?', recipe)
         for leg in ("live", "replay"):
             self.assertIn(f"suite effect-group --leg {leg}", recipe)
 

@@ -70,10 +70,7 @@ def run(name: str, leg: str) -> int:
     if driver:
         command = ["bash", str(ROOT / driver)]
     else:
-        # Give every suite the SQL backend. New PostgreSQL cases must execute
-        # rather than silently return when their database is absent.
-        command = ["bash", str(ROOT / "scripts/ci/with-service.sh"), "pg16", "--",
-                   sys.executable, str(ROOT / "scripts/ci/restate_suite.py"),
+        command = [sys.executable, str(ROOT / "scripts/ci/restate_suite.py"),
                    "suite", name, "--leg", leg, "--keep-test-logs"]
     return subprocess.call(command, cwd=ROOT, env=env)
 

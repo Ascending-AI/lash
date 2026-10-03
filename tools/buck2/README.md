@@ -38,7 +38,7 @@ keeps one verified copy of each for every checkout of this user:
 | `buck2` | archive and executable checksums in `pins.json` | `.buck2/bin/buck2`, cloned |
 | `prelude` | Buck2 executable checksum and `prelude_overlay.py` | `.buck2/prelude`, cloned; its receipt is written locally |
 | `rust` | `toolchain-lock.json` | `tools/buck2/toolchains/rust-files`, cloned |
-| `native-<tool>` | the tool's archive record in `native-tools-lock.json` (LLVM, headers, Node, PostgreSQL, `nss_wrapper`) | `.buck2/native/<tool>`, cloned; `BUCK` and the receipt are written locally |
+| `native-<tool>` | the tool's archive record in `native-tools-lock.json` (LLVM, headers, Node, PostgreSQL, Restate, `nss_wrapper`) | `.buck2/native/<tool>`, cloned; `BUCK` and the receipt are written locally |
 | `reindeer` | the asset in `reindeer-lock.json` | `tools/buck2/bin/reindeer`, cloned |
 | `vendor` | the checksums `bootstrap_vendor.py` already records | `vendor`, a symlink to the entry |
 
@@ -119,6 +119,10 @@ execution while compilation remains remote and cacheable. A `hermetic-postgres`
 test brings its service with it: `postgres_action_runner.py` starts the pinned
 PostgreSQL 16 inside the test action, which therefore stays remote and cached
 ([hermetic PostgreSQL tests](../../docs/agents/hermetic-build.md#hermetic-postgresql-tests)).
+Registered Restate suites also declare their pinned server and run each
+shard with private Restate and PostgreSQL inside its remote action. Their
+`restate_<suite>_<leg>` labels keep the existing suite selections and replay
+checks; see [service gates](../../docs/agents/hermetic-build.md#service-and-cargo-owned-gates).
 
 Callers that execute build outputs request `--materializations final` and use
 `outputs.py --report PATH --label //package:target --single`; do not guess an

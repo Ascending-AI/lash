@@ -21398,6 +21398,168 @@ lash_rust_feature_test(
     version = "0.0.0-dev",
 )
 
+load("//tools/buck2:test_rules.bzl", "lash_restate_suite")
+
+lash_restate_suite(
+    name = "restate_drain_hand_over_live",
+    test = ":lash__unit_test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "drain-hand-over",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_drain_hand_over_replay",
+    test = ":lash__unit_test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "drain-hand-over",
+    leg = "replay",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_drain_hand_over_postgres_live",
+    test = ":lash__unit_test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "drain-hand-over-postgres",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_drain_hand_over_postgres_replay",
+    test = ":lash__unit_test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "drain-hand-over-postgres",
+    leg = "replay",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_live_replay_bounds_live",
+    test = ":facade_host_wrappers__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "live-replay-bounds",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_live_replay_bounds_replay",
+    test = ":facade_host_wrappers__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "live-replay-bounds",
+    leg = "replay",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_mcp_catalog_live",
+    test = ":integration__test__fv_42c78c40__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "mcp-catalog",
+    leg = "live",
+    shard_count = 2,
+)
+
+lash_restate_suite(
+    name = "restate_mcp_catalog_replay",
+    test = ":integration__test__fv_42c78c40__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "mcp-catalog",
+    leg = "replay",
+    shard_count = 2,
+)
+
+lash_restate_suite(
+    name = "restate_mcp_catalog_postgres_live",
+    test = ":integration__test__fv_42c78c40__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "mcp-catalog-postgres",
+    leg = "live",
+    shard_count = 2,
+)
+
+lash_restate_suite(
+    name = "restate_mcp_catalog_postgres_replay",
+    test = ":integration__test__fv_42c78c40__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "mcp-catalog-postgres",
+    leg = "replay",
+    shard_count = 2,
+)
+
+lash_restate_suite(
+    name = "restate_public_process_command_live",
+    test = ":integration__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "public-process-command",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_public_process_command_replay",
+    test = ":integration__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "public-process-command",
+    leg = "replay",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_recorded_runs_live",
+    test = ":lash__unit_test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "recorded-runs",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_recorded_runs_replay",
+    test = ":lash__unit_test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "recorded-runs",
+    leg = "replay",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_replay_after_advance_live",
+    test = ":replay_after_advance__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "replay-after-advance",
+    leg = "live",
+    shard_count = 1,
+)
+
+lash_restate_suite(
+    name = "restate_replay_after_advance_replay",
+    test = ":replay_after_advance__test__rust_test",
+    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    timeout_seconds = 900,
+    suite = "replay-after-advance",
+    leg = "replay",
+    shard_count = 1,
+)
+
 export_file(
     name = "tests/ui/core_builder_plugin_host_is_removed.rs",
     src = "tests/ui/core_builder_plugin_host_is_removed.rs",

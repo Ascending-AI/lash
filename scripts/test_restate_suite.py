@@ -14,6 +14,7 @@ import os
 import pathlib
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -30,6 +31,29 @@ SPEC.loader.exec_module(MODULE)
 
 sys.path.insert(0, str(ROOT / "scripts/ci"))
 import restate_matrix
+
+
+class ServerCleanupTests(unittest.TestCase):
+    def test_readiness_failure_reaps_the_server_and_removes_its_data(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = pathlib.Path(raw)
+            binary = work / "server"
+            binary.write_text("#!/usr/bin/python3\nimport time\ntime.sleep(60)\n")
+            binary.chmod(0o755)
+            server = MODULE.RestateServer("refuses-readiness", work, {})
+            try:
+                with mock.patch.object(MODULE, "server_path", return_value=binary), \
+                     mock.patch.object(MODULE, "http_ok", return_value=False), \
+                     mock.patch.object(MODULE, "SERVER_READY_SECONDS", -1):
+                    with self.assertRaisesRegex(SystemExit, "not ready"):
+                        server.start()
+                self.assertIsNotNone(server.process)
+                self.assertIsNotNone(server.process.poll(), "the server outlived failed readiness")
+                self.assertFalse(pathlib.Path(server.data_dir).exists(), "the data directory leaked")
+                for reservation in server.reserved.values():
+                    self.assertIsNone(reservation._socket)
+            finally:
+                server.stop()
 
 
 class MatrixTests(unittest.TestCase):
@@ -87,12 +111,11 @@ class MatrixTests(unittest.TestCase):
         self.assertTrue(restate_matrix.coverage_problems(rows[:-1]))
         self.assertTrue(restate_matrix.coverage_problems(rows + rows[:1]))
 
-    def test_ci_runs_the_same_suite_entrypoint_with_a_private_database(self) -> None:
+    def test_ci_runs_the_registered_remote_suite_entrypoint(self) -> None:
         with mock.patch.object(restate_matrix.subprocess, "call", return_value=19) as call:
             self.assertEqual(19, restate_matrix.run("json-decode", "replay"))
         command = call.call_args.args[0]
-        self.assertEqual(["bash", str(ROOT / "scripts/ci/with-service.sh"), "pg16", "--",
-                          sys.executable, str(ROOT / "scripts/ci/restate_suite.py"),
+        self.assertEqual([sys.executable, str(ROOT / "scripts/ci/restate_suite.py"),
                           "suite", "json-decode", "--leg", "replay", "--keep-test-logs"], command)
 
     def test_the_registered_workbench_driver_retains_its_cleanup(self) -> None:
@@ -100,6 +123,26 @@ class MatrixTests(unittest.TestCase):
             restate_matrix.run("agent-workbench", "replay")
         self.assertEqual(["bash", str(ROOT / "scripts/agent-workbench-restate-e2e.sh")], call.call_args.args[0])
         self.assertEqual("replay", call.call_args.kwargs["env"]["LASH_RESTATE_SUITE_LEG"])
+
+    def test_remote_legs_reach_every_registered_suite_without_a_custom_driver(self) -> None:
+        inventory = json.loads((ROOT / "tools/buck2/target-inventory.json").read_text())
+        expected = {
+            name: {leg: spec["label"].split(":", 1)[0] + ":restate_" + name.replace("-", "_") + "_" + leg
+                   for leg in MODULE.LEGS}
+            for name, spec in MODULE.load_registry().items() if not spec.get("ci_driver")
+        }
+        self.assertEqual(expected, inventory["restate_suite_targets"])
+        self.assertEqual(sorted(label for legs in expected.values() for label in legs.values()),
+                         inventory["service_test_targets"]["restate"])
+
+    def test_the_suite_entrypoint_selects_the_remote_leg_and_passes_its_filters(self) -> None:
+        args = argparse.Namespace(artifacts="artifacts", only=["tests::law"], shards=None,
+                                  timeout=None, server_env=[], include_divergent=False)
+        with mock.patch.object(MODULE.subprocess, "call", return_value=17) as call:
+            self.assertEqual(17, MODULE.remote_suite(MODULE.load_suite("server-double"), "live", args))
+        self.assertEqual([str(ROOT / "scripts/hermetic-build.sh"), "test",
+                          "//crates/lash-restate-test:restate_server_double_live",
+                          "--test-output-dir", "artifacts", "--test_arg=tests::law"], call.call_args.args[0])
 
 
 # A stand-in libtest binary: it records its argv, lists four ignored tests,

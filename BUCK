@@ -3,6 +3,8 @@ load("//tools/buck2:schema_checks.bzl", "schema_check", "schema_check_group", "s
 
 load("//tools/buck2:source_tree.bzl", "lash_workspace_sources")
 
+load("//tools/buck2:test_rules.bzl", "restate_suite_inputs")
+
 test_suite(
     name = "workspace_compile",
     tests = [
@@ -3627,6 +3629,12 @@ test_suite(
         "//examples/slack-clone:slack-clone__fv_af266eeb__clippy[clippy.txt]",
         "//examples/slack-clone:slack-clone__unit_test__fv_36f755ff__clippy[clippy.txt]"
 ],
+    visibility = ["PUBLIC"],
+)
+
+restate_suite_inputs(
+    name = "restate_suite_inputs",
+    srcs = {p: p for p in glob(["scripts/ci/restate_suite.py", "scripts/restate-suites.toml", "scripts/restate-divergences/*.toml"])},
     visibility = ["PUBLIC"],
 )
 

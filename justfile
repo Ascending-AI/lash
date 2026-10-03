@@ -227,8 +227,8 @@ workbench-continue-as-budget-gate:
 
 # The regression gate for the Restate effect-group choreography. Its suites are
 # `#[ignore]`d because they need a Restate server, so this recipe is the only
-# thing that runs them: `scripts/ci/restate_suite.py` builds the test binary on
-# the shared pool, runs every ignored law of the suite (it asks libtest for
+# thing that runs them: `scripts/ci/restate_suite.py` selects remote actions
+# that run every ignored law of the suite (they ask libtest for
 # `--ignored` tests only, which `scripts/check_service_gate_pinning.py` pins)
 # beside pinned `restate-server`s, one law per process, and then runs the same
 # laws again with every await suspended and replayed (the replay leg). The
@@ -237,7 +237,6 @@ workbench-continue-as-budget-gate:
 effect-group-conformance-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
-  : "${LASH_POSTGRES_DATABASE_URL:?run scripts/ci/with-service.sh pg16 -- just effect-group-conformance-e2e}"
   source "{{repo}}/scripts/worktree-gate-env.sh"
   lash_gate_acquire_locks effect-group-conformance-e2e
 
@@ -287,8 +286,7 @@ effect-group-conformance-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite remote-cancellation --leg replay \
     --artifacts "$artifacts"
 
-  # The drain hand-over's PostgreSQL legs (FIG-4639): this recipe has the
-  # database its SQLite legs, in `server-double-e2e`, do not need.
+  # The drain hand-over's PostgreSQL legs (FIG-4639) use the action's database.
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over-postgres --leg live \
     --artifacts "$artifacts"
 

@@ -299,6 +299,13 @@ class RestateServer:
         return self.workdir / f"{self.name}.restate-server.log"
 
     def start(self) -> None:
+        try:
+            self._start()
+        except BaseException:
+            self.stop()
+            raise
+
+    def _start(self) -> None:
         binary = server_path()
         self.workdir.mkdir(parents=True, exist_ok=True)
         # A short scratch path of its own, kept out of the artifact tree.
@@ -729,7 +736,9 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
 
     skips = list(suite.skips)
     every = list_tests(binary, cwd, suite.filters, skips)
-    listed = list_tests(binary, cwd, args.only, skips) if args.only else every
+    listed = getattr(args, "selected_tests", None)
+    if listed is None:
+        listed = list_tests(binary, cwd, args.only, skips) if args.only else every
     if not listed:
         log(f"{suite.name}: nothing matched {args.only or suite.filters}")
         return 1
@@ -937,6 +946,17 @@ def command_serve(args: argparse.Namespace) -> int:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+def remote_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
+    label = suite.label.split(":", 1)[0] + ":restate_" + suite.name.replace("-", "_") + "_" + leg
+    command = [str(ROOT / "scripts/hermetic-build.sh"), "test", label,
+               "--test-output-dir", args.artifacts]
+    for selector in args.only:
+        command.append(f"--test_arg={selector}")
+    if args.shards or args.timeout or args.server_env or args.include_divergent:
+        raise SystemExit("suite diagnostics need --binary; registered action settings come from the registry")
+    return subprocess.call(command, cwd=ROOT)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command_name", required=True)
@@ -998,7 +1018,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command_name == "serve":
         return command_serve(args)
-    return run_suite(load_suite(args.name), args.leg, args)
+    suite = load_suite(args.name)
+    if args.binary or load_registry()[args.name].get("ci_driver"):
+        return run_suite(suite, args.leg, args)
+    return remote_suite(suite, args.leg, args)
 
 
 if __name__ == "__main__":

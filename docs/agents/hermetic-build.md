@@ -714,6 +714,37 @@ on `with-service.sh`.
 
 ## Service and Cargo-owned gates
 
+Registered Restate suites without a `ci_driver` run as cacheable remote
+actions. The registry in `scripts/restate-suites.toml` generates a target
+named `restate_<suite>_<leg>` beside its Rust test binary, with hyphens in the
+suite name replaced by underscores. The existing entrypoint selects it:
+
+```sh
+kiln gate lash <fork> -- python3 scripts/ci/restate_suite.py suite server-double --leg live
+kiln test //crates/lash-restate-test:restate_server_double_live \
+  --test_arg=--exact \
+  --test_arg=live_restate_routes_new_invocations_to_the_newest_deployment_and_keeps_pins
+```
+
+Each shard declares the checksum-pinned Restate 1.7.13 release binary
+(`native//:restate`), its suite runner, registry and divergence files. It
+starts one private server, runs each selected law in its own process with
+the existing progress bound and strict replay-divergence checks, then stops
+and reaps the server. A readiness failure also stops it before removing its
+data. The action's loopback, PID namespace and temporary directory isolate
+its services. Law logs, server logs, the suite summary and JUnit cases are
+returned as test outputs. Shards partition the selected registered laws by
+name, so each law executes once.
+
+The same action starts the pinned PostgreSQL 16 and applies the published
+schema, preserving the SQL coverage the former local suite gate supplied.
+New suite actions use the canonical unmeasured test-run policy until they
+have measurements; ordinary compile and test requests are unchanged.
+`target-inventory.json` lists the suite/leg labels under
+`restate_suite_targets`. The workbench's registered custom driver keeps its
+local fixture ownership. `serve` and explicit `--binary` recipes keep their
+caller-owned service lifecycle.
+
 `scripts/ci/with-service.sh` starts the same private PostgreSQL/Garage containers
 used by CI, publishes an ephemeral loopback port, waits for readiness and removes
 the container on success, failure or interruption:
@@ -741,8 +772,8 @@ for other live gates, with identities and ports derived from `KILN_GATE_ID`.
 Main's hourly full-profile dispatch derives its Restate suite/leg matrix from
 `scripts/restate-suites.toml`. Registering a suite adds live and replay jobs.
 `python3 scripts/ci/restate_matrix.py check` verifies the producer, matrix,
-runner and conclusion wiring. Jobs run at most sixteen at once, each with its
-own runner, PostgreSQL service and Restate ports. The original three-job cap
+runner and conclusion wiring. Jobs run at most sixteen at once. Registered
+suite actions use private PostgreSQL and Restate servers on the pool. The original three-job cap
 had no shared service constraint. With 109–134 job-minutes across 48 legs,
 sixteen slots imply about 6.8–8.4 minutes at even load instead of 36–45 minutes.
 The existing 26–29 minute jobs should then set the full-run critical path.
