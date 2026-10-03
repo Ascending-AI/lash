@@ -6,23 +6,15 @@ use crate::runtime::LashRuntime;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 
 impl LashRuntime {
-    /// Adopt the head a run's admission admitted it on and pin its recorded
-    /// turn index for the prepare phase (FIG-3682).
-    ///
-    /// The admission's head verdict decides which head the resident session
-    /// is rebuilt from: a `Ready` verdict rebuilds it from the admission's
-    /// base, whatever the live head is now; an `Advanced` one from the head
-    /// the run's own commits published (FIG-4201); an `Overtaken` verdict
-    /// ends the run typed `StoreCommitSuperseded`, and a `Diverged` one
-    /// parks it.
-    ///
-    /// A base the store no longer retains parks the run too.
+    /// Record the complete transition, or resume the native view the run
+    /// already published at its admission's recorded advanced head.
     pub(super) async fn record_plugin_transition(
         &self,
         controller: &ScopedEffectController<'_>,
         admitted: &Admitted,
         base: &crate::store::SessionHeadRef,
         target: &crate::store::plugin_writers::PluginAdmission,
+        resume: Option<(&crate::store::SessionHeadRef, &crate::store::ShiftFence)>,
     ) -> Result<crate::plugin::PluginTransitionRecord, ShiftAbort> {
         let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
         let request = crate::plugin::PluginTransitionRequest {
@@ -31,7 +23,7 @@ impl LashRuntime {
             base: crate::plugin::PluginTransitionBase::Session { head: base.clone() },
             target: target.clone(),
         };
-        self.record_transition_request(controller, admitted, request)
+        self.record_transition_request(controller, admitted, request, resume)
             .await
     }
 
@@ -52,6 +44,7 @@ impl LashRuntime {
                 },
                 target: Default::default(),
             },
+            None,
         )
         .await
     }
@@ -61,6 +54,7 @@ impl LashRuntime {
         controller: &ScopedEffectController<'_>,
         admitted: &Admitted,
         request: crate::plugin::PluginTransitionRequest,
+        resume: Option<(&crate::store::SessionHeadRef, &crate::store::ShiftFence)>,
     ) -> Result<crate::plugin::PluginTransitionRecord, ShiftAbort> {
         let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
         let runner = PluginTransitionRunner {
@@ -69,6 +63,7 @@ impl LashRuntime {
             initial: self.state.clone(),
             raw_plugins: self.services.plugins.export_state(),
             commit_budget: self.host.core.durability.commit_budget,
+            resume: resume.map(|(head, fence)| (head.clone(), fence.clone())),
         };
         let outcome = controller
             .execute_effect(
@@ -109,30 +104,34 @@ impl LashRuntime {
         resume: Option<&crate::store::SessionHeadRef>,
     ) -> Result<(), crate::RuntimeError> {
         let store = self.shift_store().map_err(ShiftAbort::into_error)?;
-        let mut commit = record.publication.as_deref().cloned().ok_or_else(|| {
-            crate::RuntimeError::new(
-                crate::RuntimeErrorCode::StoreCommitFailed,
-                "recorded plugin transition has no publication",
-            )
-        })?;
-        commit.shift_fence = Some(Box::new(fence.clone()));
-        let receipt = store
-            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
-            .await
-            .map_err(crate::runtime::runtime_error_from_store_commit)?;
         let crate::plugin::PluginTransitionBase::Session { head } = &record.request.base else {
             return Err(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::StoreCommitFailed,
                 "session transition has a process base",
             ));
         };
-        let published = crate::store::SessionHeadRef {
-            generation: head.generation,
-            revision: receipt.head_revision,
-            leaf: receipt.committed_leaf_node_id.clone(),
-            checkpoint: Some(receipt.checkpoint_ref.clone()),
+        let base = if let Some(mut commit) = record.publication.as_deref().cloned() {
+            commit.shift_fence = Some(Box::new(fence.clone()));
+            let receipt = store
+                .commit_runtime_state_verified(commit, self.host.core.tracing.metrics())
+                .await
+                .map_err(crate::runtime::runtime_error_from_store_commit)?;
+            resume.cloned().unwrap_or(crate::store::SessionHeadRef {
+                generation: head.generation,
+                revision: receipt.head_revision,
+                leaf: receipt.committed_leaf_node_id,
+                checkpoint: Some(receipt.checkpoint_ref),
+            })
+        } else if let Some(resume) = resume {
+            // The recorded transition step validated the fence and retained
+            // native view. Resuming it publishes no new commit.
+            resume.clone()
+        } else {
+            return Err(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::StoreCommitFailed,
+                "recorded plugin transition has no publication",
+            ));
         };
-        let base = resume.unwrap_or(&published);
         let loaded = crate::store::load_session_window_state(
             &store,
             crate::store::WindowSelector::Admitted(base.clone()),
@@ -181,6 +180,35 @@ struct PluginTransitionRunner {
     initial: crate::RuntimeSessionState,
     raw_plugins: crate::PluginState,
     commit_budget: crate::CommitBudget,
+    resume: Option<(crate::store::SessionHeadRef, crate::store::ShiftFence)>,
+}
+
+impl PluginTransitionRunner {
+    async fn load_base(
+        &self,
+        base: &crate::store::SessionHeadRef,
+    ) -> Result<crate::RuntimeSessionState, crate::RuntimeEffectControllerError> {
+        crate::store::load_session_window_state(
+            &self.store,
+            crate::store::WindowSelector::Admitted(base.clone()),
+        )
+        .await
+        .map_err(|error| {
+            crate::RuntimeEffectControllerError::from(
+                crate::runtime::runtime_error_from_store_commit(error),
+            )
+            .retryable_uncommitted_derivation()
+        })?
+        .ok_or_else(|| {
+            crate::runtime::runtime_error_from_store_commit(
+                crate::StoreError::TurnBaseNotRetained {
+                    revision: base.revision,
+                },
+            )
+            .into()
+        })
+        .map(|loaded| loaded.state)
+    }
 }
 
 #[async_trait::async_trait]
@@ -197,6 +225,53 @@ impl RuntimeEffectLocalRunner for PluginTransitionRunner {
                 "plugin transition requires its recorded request",
             ));
         };
+        if let Some((resume, fence)) = &self.resume {
+            self.store
+                .admit_session_state(fence)
+                .await
+                .map_err(crate::runtime::runtime_error_from_store_commit)?;
+            let state = self.load_base(resume).await?;
+            let bytes = state.plugin_admission_snapshot().ok_or_else(|| {
+                crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::EffectReplayDivergence,
+                    "the run's advanced head has no published plugin transition",
+                )
+            })?;
+            let view = crate::plugin::PluginNativeView::decode(&bytes)?;
+            let same_base = matches!(
+                (&view.request.base, &request.base),
+                (
+                    crate::plugin::PluginTransitionBase::Session { head: published },
+                    crate::plugin::PluginTransitionBase::Session { head: admitted },
+                ) if published == admitted
+            );
+            if view.request.id != request.id
+                || view.request.owner != request.owner
+                || view.request.target != request.target
+                || !same_base
+            {
+                return Err(crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::EffectReplayDivergence,
+                    "the run's advanced head belongs to another plugin transition",
+                ));
+            }
+            self.host.validate_state_formats(&view.state)?;
+            self.host.validate_config_formats(&view.config)?;
+            return Ok(crate::RuntimeEffectOutcome::TransitionPlugins {
+                record: Box::new(crate::plugin::PluginTransitionRecord {
+                    request: view.request,
+                    source: view.source,
+                    namespaces: view
+                        .state
+                        .plugins
+                        .into_iter()
+                        .map(|(id, state)| (id, Ok(state)))
+                        .collect(),
+                    config: Ok(view.config),
+                    publication: None,
+                }),
+            });
+        }
         let mut state = match &request.base {
             crate::plugin::PluginTransitionBase::SessionCommand { .. } => {
                 let loaded = crate::store::load_session_window_state(
@@ -236,25 +311,7 @@ impl RuntimeEffectLocalRunner for PluginTransitionRunner {
                 initial
             }
             crate::plugin::PluginTransitionBase::Session { head: base } => {
-                crate::store::load_session_window_state(
-                    &self.store,
-                    crate::store::WindowSelector::Admitted(base.clone()),
-                )
-                .await
-                .map_err(|error| {
-                    crate::RuntimeEffectControllerError::from(
-                        crate::runtime::runtime_error_from_store_commit(error),
-                    )
-                    .retryable_uncommitted_derivation()
-                })?
-                .ok_or_else(|| {
-                    crate::runtime::runtime_error_from_store_commit(
-                        crate::StoreError::TurnBaseNotRetained {
-                            revision: base.revision,
-                        },
-                    )
-                })?
-                .state
+                self.load_base(base).await?
             }
             crate::plugin::PluginTransitionBase::Process { .. } => {
                 return Err(crate::RuntimeEffectControllerError::new(

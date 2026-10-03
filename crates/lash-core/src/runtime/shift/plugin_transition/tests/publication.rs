@@ -15,6 +15,7 @@ enum Cut {
     BeforePublication,
     PublishedBeforeReply,
     PublishedThenHeadAdvanced,
+    PublishedThenFreshShift,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +53,14 @@ async fn matrix(stores: Stores) {
         &stores,
         Verdict::Publish,
         Cut::PublishedThenHeadAdvanced,
+    )
+    .await;
+    scenario(
+        &double,
+        &backend,
+        &stores,
+        Verdict::Publish,
+        Cut::PublishedThenFreshShift,
     )
     .await;
 }
@@ -208,8 +217,27 @@ async fn scenario(
                 if first && cut == Cut::BeforeConversion {
                     panic!("before conversion");
                 }
-                let record =
-                    record(&controller, host, store.clone(), initial.clone(), request).await;
+                let resume = if cut == Cut::PublishedThenFreshShift {
+                    resume_head.lock_recover().clone()
+                } else {
+                    None
+                };
+                let record = record_resuming(
+                    &controller,
+                    host.clone(),
+                    store.clone(),
+                    initial.clone(),
+                    request.clone(),
+                    resume.clone().map(|head| (head, fence.clone())),
+                )
+                .await
+                .unwrap();
+                if resume.is_some() {
+                    assert!(
+                        record.publication.is_none(),
+                        "a fresh shift adopts the published transition without a new commit"
+                    );
+                }
                 if first && cut == Cut::BeforePublication {
                     assert_eq!(
                         store
@@ -258,7 +286,7 @@ async fn scenario(
                         let mut expected = record.candidate().unwrap();
                         let target = record.request.target.clone();
                         let resume = resume_head.lock_recover().clone();
-                        if resume.is_some() {
+                        if resume.is_some() && cut != Cut::PublishedThenFreshShift {
                             let inactive = expected.0.plugins.get_mut("inactive").unwrap();
                             inactive.generation = 10;
                             inactive
@@ -269,6 +297,25 @@ async fn scenario(
                             .publish_plugin_transition(record, &fence, resume.as_ref())
                             .await
                             .unwrap();
+                        if cut == Cut::PublishedThenFreshShift && resume.is_some() {
+                            seal_shift_fence_for_test(&raw, &initial.session_id, "successor").await;
+                            assert_eq!(
+                                record_resuming(
+                                    &controller,
+                                    host,
+                                    store.clone(),
+                                    initial.clone(),
+                                    request,
+                                    resume.clone().map(|head| (head, fence.clone())),
+                                )
+                                .await
+                                .unwrap_err()
+                                .into_runtime_error()
+                                .code,
+                                crate::RuntimeErrorCode::StoreCommitSuperseded,
+                                "resuming a published transition still refuses a superseded fence"
+                            );
+                        }
                         assert!(
                             runtime.session.is_some(),
                             "production publication constructs the session"
@@ -302,7 +349,12 @@ async fn scenario(
                 }
                 assert_eq!(counts.callbacks.load(Ordering::SeqCst), 0);
                 assert_eq!(counts.providers.load(Ordering::SeqCst), 0);
-                if first && cut == Cut::PublishedThenHeadAdvanced {
+                if first
+                    && matches!(
+                        cut,
+                        Cut::PublishedThenHeadAdvanced | Cut::PublishedThenFreshShift
+                    )
+                {
                     let advanced = support::advance_inactive_namespace(&raw, &store, &fence).await;
                     *published_head.lock_recover() = Some((
                         advanced.revision,
@@ -310,9 +362,11 @@ async fn scenario(
                         advanced.leaf.clone(),
                     ));
                     *resume_head.lock_recover() = Some(advanced);
-                    panic!(
-                        "the transition committed and a later head advanced before cold adoption"
-                    );
+                    if cut == Cut::PublishedThenHeadAdvanced {
+                        panic!(
+                            "the transition committed and a later head advanced before cold adoption"
+                        );
+                    }
                 }
                 if first && cut == Cut::PublishedBeforeReply {
                     panic!("publication decision before reply");
@@ -322,6 +376,13 @@ async fn scenario(
     };
     let admitted = crate::AdmittedScope::turn(&id, "run");
     match cut {
+        Cut::PublishedThenFreshShift => {
+            double
+                .run_in_handler(admitted.clone(), attempt.clone())
+                .await
+                .unwrap();
+            double.run_in_handler(admitted, attempt).await.unwrap();
+        }
         Cut::ConvertedBeforeRecord | Cut::RecordedBeforeAck => {
             let point = if cut == Cut::ConvertedBeforeRecord {
                 lash_restate_test::CrashPoint::BeforeRunResult { name: None }
@@ -360,7 +421,7 @@ async fn scenario(
         0
     } else if matches!(
         cut,
-        Cut::PublishedBeforeReply | Cut::PublishedThenHeadAdvanced
+        Cut::PublishedBeforeReply | Cut::PublishedThenHeadAdvanced | Cut::PublishedThenFreshShift
     ) {
         4
     } else {

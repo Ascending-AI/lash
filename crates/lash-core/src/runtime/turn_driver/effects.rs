@@ -225,9 +225,9 @@ impl RuntimeTurnDriver<'_> {
             // stays unrecorded and the engine runs it again. A hook's own
             // failure, and an answer the store did give, are still recorded:
             // a superseded shift fence ends the run typed, with no retry.
-            // The fault is told by its cause, not its code: every store
-            // error that is not terminal is one (FIG-4824).
-            Err(fault) if fault.turn_failure_cause() == crate::TurnFailureCause::LiveFault => {
+            // Use the engine's retry policy here too: a superseded commit
+            // is a live fault whose recorded fence no retry can repair.
+            Err(fault) if crate::runtime::shift::engine_retries(&fault) => {
                 return Err(
                     RuntimeEffectControllerError::from(fault).retryable_uncommitted_derivation()
                 );

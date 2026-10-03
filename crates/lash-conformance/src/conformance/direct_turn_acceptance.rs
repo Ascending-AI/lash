@@ -22,7 +22,7 @@ use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// The session every conformance store in this suite is exercised under.
 const SESSION_ID: &str = "root";
@@ -637,7 +637,8 @@ impl Journal {
     }
 
     /// Run the direct turn `turn_id` until its worker dies after the shift and
-    /// before the commit ([`crash_before_commit_plugin`]).
+    /// before the commit. Return its one-shot crash plugin so the redrive
+    /// keeps the recorded composition and callback revision.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
@@ -648,14 +649,15 @@ impl Journal {
         provider: crate::ProviderHandle,
         turn_id: &TurnId,
         text: &str,
-    ) {
+    ) -> Arc<dyn crate::facade_support::PluginFactory> {
         let died = Arc::new(tokio::sync::Notify::new());
+        let plugin = crash_before_commit_plugin(Arc::clone(&died));
         let mut runtime = acceptance_runtime_with_batching(
             SESSION_ID,
             store,
             &self.backend,
             provider,
-            vec![crash_before_commit_plugin(Arc::clone(&died))],
+            vec![Arc::clone(&plugin)],
             crate::testing::runtime_lease_owner(),
             self.batching.clone(),
         )
@@ -673,6 +675,7 @@ impl Journal {
             ),
         )
         .await;
+        plugin
     }
 
     /// [`Self::run`] with extra plugins on the runtime.
@@ -711,22 +714,28 @@ impl Journal {
     }
 }
 
-/// A worker that dies after its shift and before its commit: its turn stops
-/// in the prepare phase and never returns, and [`crash_turn`] drops it there.
+/// A worker that dies after its shift and before its commit: its first turn
+/// stops in the prepare phase, and [`crash_turn`] drops it there. The same
+/// registered callback allows the redrive to continue.
 /// No abort path runs, so the admission stays pinned to a lease generation that no
 /// longer holds the lane — the state a killed worker leaves behind.
 pub(super) fn crash_before_commit_plugin(
     died: Arc<tokio::sync::Notify>,
 ) -> Arc<dyn crate::facade_support::PluginFactory> {
+    let armed = Arc::new(AtomicBool::new(true));
     Arc::new(crate::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("conformance-crash-before-commit"),
         crate::facade_support::PluginSpec::new().with_before_turn(
             crate::hook_key!("die-before-commit"),
             Arc::new(move |_ctx| {
                 let died = Arc::clone(&died);
+                let armed = Arc::clone(&armed);
                 Box::pin(async move {
-                    died.notify_one();
-                    std::future::pending().await
+                    if armed.swap(false, Ordering::SeqCst) {
+                        died.notify_one();
+                        std::future::pending::<()>().await;
+                    }
+                    Ok(Default::default())
                 })
             }),
         ),
@@ -1091,7 +1100,7 @@ pub async fn uncommitted_redrive_executes_journaled_set_not_live_admission(
     let turn_id = TurnId::fixture(format!("{prefix}-uncommitted-redrive"));
     let journal = Journal::new(&backend);
     let (provider, requests) = recording_provider("answered the journaled set");
-    journal
+    let crash_plugin = journal
         .crash_before_commit(&store, provider.clone(), &turn_id, "the accepted words")
         .await;
     let journaled = match journal.controller.journaled_shift() {
@@ -1103,7 +1112,13 @@ pub async fn uncommitted_redrive_executes_journaled_set_not_live_admission(
     let (redrive_store, reads) = RedriveStore::wrap(&store);
     let redrive_store: Arc<dyn crate::RuntimeStore> = redrive_store;
     journal
-        .run(&redrive_store, provider, &turn_id, "the accepted words")
+        .run_with_plugins(
+            &redrive_store,
+            provider,
+            vec![crash_plugin],
+            &turn_id,
+            "the accepted words",
+        )
         .await
         .expect("the redrive commits the journaled shift set");
     assert_eq!(

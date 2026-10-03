@@ -141,12 +141,17 @@ impl LashRuntime {
                         .await;
                     return Err(abort(error));
                 }
+                let resume = match &verdict {
+                    AdmittedHeadVerdict::Advanced { head } => Some(head),
+                    _ => None,
+                };
                 let transition = self
                     .record_plugin_transition(
                         run_controller,
                         admitted,
                         &admission.base,
                         &admission.plugins,
+                        resume.map(|head| (head, fence)),
                     )
                     .await?;
                 if matches!(
@@ -169,10 +174,6 @@ impl LashRuntime {
                         .await;
                     return Err(abort(error));
                 }
-                let resume = match &verdict {
-                    AdmittedHeadVerdict::Advanced { head } => Some(head),
-                    _ => None,
-                };
                 if let Err(error) = self
                     .publish_plugin_transition(transition, fence, resume)
                     .await
@@ -550,7 +551,7 @@ impl LashRuntime {
             return Err(shift_abort(Some(&run), error));
         }
         let transition = self
-            .record_plugin_transition(run_controller, admitted, &base, &plugins)
+            .record_plugin_transition(run_controller, admitted, &base, &plugins, None)
             .await?;
         if let Err(error) = self
             .publish_plugin_transition(transition, fence, None)

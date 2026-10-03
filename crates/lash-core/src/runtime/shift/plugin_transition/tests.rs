@@ -101,6 +101,19 @@ async fn record(
     initial: crate::RuntimeSessionState,
     request: crate::plugin::PluginTransitionRequest,
 ) -> crate::plugin::PluginTransitionRecord {
+    record_resuming(controller, host, store, initial, request, None)
+        .await
+        .unwrap()
+}
+
+async fn record_resuming(
+    controller: &crate::ScopedEffectController<'_>,
+    host: crate::PluginHost,
+    store: crate::store::SessionStore,
+    initial: crate::RuntimeSessionState,
+    request: crate::plugin::PluginTransitionRequest,
+    resume: Option<(crate::store::SessionHeadRef, crate::store::ShiftFence)>,
+) -> Result<crate::plugin::PluginTransitionRecord, crate::RuntimeEffectControllerError> {
     let invocation = crate::RuntimeEffectInvocation::new(
         request.id.0.clone(),
         crate::RuntimeAttribution::for_session(initial.session_id.clone()),
@@ -121,16 +134,16 @@ async fn record(
                     initial,
                     raw_plugins: Default::default(),
                     commit_budget: crate::testing::runtime_helpers::test_commit_budget(),
+                    resume,
                 }),
                 None,
             ),
         )
-        .await
-        .unwrap();
+        .await?;
     let crate::RuntimeEffectOutcome::TransitionPlugins { record } = outcome else {
         panic!("transition outcome")
     };
-    *record
+    Ok(*record)
 }
 
 async fn matrix(file: bool, stale: bool, refuse: bool) {

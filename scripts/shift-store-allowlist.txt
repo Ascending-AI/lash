@@ -32,3 +32,4 @@ crates/lash-core/src/runtime/shift/run.rs  |  generation: self.store.read_sessio
 crates/lash-core/src/runtime/shift/run.rs  |  let admission = match self.store.admit_run(&request).await {  |  1  # RECORDED
 crates/lash-core/src/runtime/shift/run.rs  |  self.store.retain_admission_base(&self.fence, &base).await?;  |  1  # RECORDED follow-on recovery decision step retains the base its turn runs on under the fence (FIG-4380)
 crates/lash-core/src/runtime/shift/plugin_transition.rs  |  let generation = self.store.read_session_state_version().await?;  |  1  # RECORDED command transition selects its complete base inside the journaled local runner (FIG-4857)
+crates/lash-core/src/runtime/shift/plugin_transition.rs  |  .admit_session_state(fence)  |  1  # RECORDED fresh-shift native-view resumption validates its recorded fence inside the transition local runner (FIG-4919)
