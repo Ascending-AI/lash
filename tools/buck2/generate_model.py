@@ -1356,9 +1356,10 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
             if bin_unit_sized:
                 unit_args.append(bin_unit_sized)
             unit_args.append(data_exclude_argument(package_dir, None))
-            if extra_compile_data or binary_data:
+            unit_compile_data = extra_compile_data + binary_data + bin_unit_policy.compile_data
+            if unit_compile_data:
                 unit_args.append(
-                    f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
+                    f"    extra_compile_data = {string_list(unit_compile_data)},\n"
                 )
             if bin_unit_policy.data:
                 unit_args.append(f"    extra_data = {string_list(bin_unit_policy.data)},\n")
@@ -2595,6 +2596,7 @@ class FeatureLaneGraph:
             base = label_name(target, library is None and len(binaries) == 1)
             name = f"{base}__unit_test__fv_{suffix}"
             bin_unit_policy = target_policy(package_name, "bin-unit-test", target["name"])
+            unit_compile_data = extra_compile_data + binary_data + bin_unit_policy.compile_data
             self.add_chunk(
                 package_name,
                 name,
@@ -2609,7 +2611,7 @@ class FeatureLaneGraph:
                     package_name, crate_name, "test", f"//{directory}:{name}"
                 )
                 + data_exclude_argument(directory, None)
-                + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
+                + f"    extra_compile_data = {string_list(unit_compile_data)},\n"
                 + (f"    extra_data = {string_list(bin_unit_policy.data)},\n" if bin_unit_policy.data else "")
                 + f"    library = {quote(library_label) if library_label else 'None'},\n"
                 f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"

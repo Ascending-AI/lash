@@ -1329,6 +1329,55 @@ def check_workflow_graph_schema_discovery(module) -> None:
             module.ROOT = original
 
 
+def check_binary_unit_test_compile_inputs() -> None:
+    """Binary unit tests keep both inherited and test-only compile inputs."""
+    sys.path.insert(0, str(HERE))
+    import generate_model as generator
+    import sync
+
+    metadata = sync.metadata()
+    package = next(p for p in metadata["packages"] if p["name"] == "agent-workbench")
+    target = next(t for t in package["targets"] if t["kind"] == ["bin"])
+    inherited = generator.target_policy(package["name"], "bin", target["name"]).compile_data
+    test_only = generator.target_policy(
+        package["name"], "bin-unit-test", target["name"]
+    ).compile_data
+    assert test_only, "the regression needs a test-only compile input"
+
+    def compile_inputs(text: str, name: str) -> list[str]:
+        calls = [
+            statement.value
+            for statement in ast.parse(text).body
+            if isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Call)
+        ]
+        call = next(
+            call for call in calls
+            if any(keyword.arg == "name" and ast.literal_eval(keyword.value) == name
+                   for keyword in call.keywords)
+        )
+        return next(ast.literal_eval(keyword.value) for keyword in call.keywords
+                    if keyword.arg == "extra_compile_data")
+
+    ordinary, _ = generator.render_package(package, ["default"])
+    expected = inherited + test_only
+    assert compile_inputs(ordinary, "agent-workbench__unit_test") == expected, (
+        "ordinary binary unit test discarded its own compile inputs"
+    )
+    graph = generator.FeatureLaneGraph(metadata, {}, {})
+    resolved = generator.feature_variants.resolve_request(
+        graph.workspace, package["name"], default_features=False, requested=[], with_dev=True
+    )
+    graph.record_activations(resolved)
+    resolution = resolved.features
+    label = graph.emit_target(package["name"], resolution, target, "bin-unit-test", True, [])
+    variant = next(text for name, text in graph.chunks[package["name"]]
+                   if name == label.split(":")[1])
+    assert compile_inputs(variant, label.split(":")[1]) == expected, (
+        "feature binary unit test discarded its own compile inputs"
+    )
+
+
 def check_feature_lane_executable_selection() -> None:
     """A filtered lane test names the executables it filters (FIG-4470).
 
@@ -1771,6 +1820,7 @@ def main() -> int:
         check_buildscript_metadata_bridge,
         check_direct_buck_generator,
         check_schema_source_inputs,
+        check_binary_unit_test_compile_inputs,
         check_feature_lane_executable_selection,
         check_documentation_targets_are_not_tests,
         check_feature_lane_dependency_edges,

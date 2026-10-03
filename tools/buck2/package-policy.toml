@@ -419,6 +419,7 @@ compile_data = ["//:workspace_rust_sources"]
 [[rule]]
 packages = ["agent-workbench"]
 kinds = ["bin-unit-test"]
+compile_data = ["//examples/agent-service:package_files", "//examples/slack-clone:package_files"]
 data = ["native//:node"]
 env = { LASH_WORKBENCH_TEST_NODE = "$(location native//:node)" }
 
@@ -556,6 +557,7 @@ rlm_gated = [
   "rlm_config_builder_requires_channel",
   "rlm_config_builder_requires_every_bound",
   "rlm_memory_limit_cannot_take_an_instruction_budget",
+  "rlm_protocol_event_decode_is_not_public",
   "rlm_turn_options_cannot_name_a_dialect",
 ]
 store_seam = [
