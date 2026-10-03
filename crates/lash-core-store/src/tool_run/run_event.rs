@@ -25,7 +25,7 @@ use lash_sansio::ToolCallId;
 use serde::{Deserialize, Serialize};
 
 use super::admission::{RecordedRetryPolicy, RoundAdmission};
-use super::material::MaterialRef;
+use super::material::{MaterialEntry, MaterialRef};
 use super::tool_hooks::{AfterCheckVerdict, BeforeSelection, CheckRecord};
 use crate::await_event_identity::AwaitEventKey;
 use crate::effect_opener::EffectOpener;
@@ -204,6 +204,20 @@ pub struct RunRecord {
     pub segment: SegmentOrdinal,
     pub first: RunEventOrdinal,
     pub events: Vec<RunEvent>,
+}
+
+/// One Run record as its journal entry holds it (FIG-4877): the record and
+/// the canonical material it owns. A owns the prepared request and a cached
+/// result, X the attempt output, V only presentation bytes distinct from the
+/// output; D and the declaration boundaries own none. Every reference a
+/// record names resolves to material of this entry or of an entry served
+/// before it in the same journal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunJournalEntry {
+    pub record: RunRecord,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<MaterialEntry>,
 }
 
 /// Why the fold refused a record.

@@ -64,7 +64,7 @@ pub use executor::{
     ExternalCompletionError, GroupChildCancelWatch, JournalReplay, ProcessDefinitionLocalExecution,
     ProcessDriveStep, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
     RecordedJournal, RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome,
-    RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
+    RunRecordStep, RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectLocalExecutor, RuntimeSleepOptions, ScopeBoundController, ScopedEffectController,
     SegmentProgress, ServedOnlyRange, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
     TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,

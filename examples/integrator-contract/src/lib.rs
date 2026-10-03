@@ -476,6 +476,13 @@ impl RuntimeEffectController for Integrator {
     ) -> Result<(), RuntimeEffectControllerError> {
         unreachable!("external signature witness")
     }
+    async fn record_run_record(
+        &self,
+        name: String,
+        step: RunRecordStep<'_>,
+    ) -> Result<run_event::RunJournalEntry, RuntimeEffectControllerError> {
+        unreachable!("external signature witness")
+    }
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

@@ -702,6 +702,14 @@ impl RuntimeEffectController for LayeredController<'_> {
             .await
     }
 
+    async fn record_run_record(
+        &self,
+        name: String,
+        step: crate::RunRecordStep<'_>,
+    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        self.inner.as_ref().record_run_record(name, step).await
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

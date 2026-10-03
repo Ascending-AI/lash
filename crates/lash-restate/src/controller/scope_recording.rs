@@ -285,6 +285,14 @@ where
         self.inner.record_process_drive_step(name, step).await
     }
 
+    async fn record_run_record(
+        &self,
+        name: String,
+        step: lash_core::RunRecordStep<'_>,
+    ) -> Result<lash_core::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        self.inner.record_run_record(name, step).await
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

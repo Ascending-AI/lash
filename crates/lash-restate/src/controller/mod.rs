@@ -19,6 +19,7 @@ mod journal_payload;
 mod journaled_effect;
 use journaled_effect::EngineFaults;
 mod live_frontier;
+mod run_record;
 mod scope_recording;
 mod scoped;
 mod turn_cancel_request;
@@ -1113,6 +1114,16 @@ where
                 crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
             })?;
         recorded.map_err(RuntimeEffectControllerError::from)
+    }
+
+    /// One `ctx.run` step named `name` holding a Run record and the material
+    /// it owns (FIG-4877): journaled once, served on every replay.
+    async fn record_run_record(
+        &self,
+        name: String,
+        step: lash_core::RunRecordStep<'_>,
+    ) -> Result<lash_core::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        self.journal_run_record(name, step).await
     }
 
     /// An invocation is pinned to the deployment that started it, so a turn

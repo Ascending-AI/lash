@@ -433,7 +433,7 @@ where
     /// The generation to stamp on the entry about to be journaled: `Some`
     /// only on the first recorded entry of a controller that folds its
     /// handler's generation sentinel (FIG-3980).
-    fn sentinel_stamp(&self) -> Option<serde_json::Value> {
+    pub(super) fn sentinel_stamp(&self) -> Option<serde_json::Value> {
         self.folded_sentinel
             .as_ref()
             .and_then(|sentinel| sentinel.stamp())

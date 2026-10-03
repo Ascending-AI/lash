@@ -283,6 +283,17 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.record_process_drive_step(name, step).await
     }
 
+    async fn record_run_record(
+        &self,
+        name: String,
+        step: crate::RunRecordStep<'_>,
+    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        // A Run record journals a command: one issued from inside an open
+        // attempt is a crossing like any effect's.
+        self.ledger.record(format!("run_record:{name}"));
+        self.inner.record_run_record(name, step).await
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

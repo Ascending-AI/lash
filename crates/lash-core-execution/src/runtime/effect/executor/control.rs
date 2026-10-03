@@ -471,6 +471,29 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         step.await.map_err(RuntimeEffectControllerError::from)
     }
 
+    /// Journal one record of a logical Run's event log under `name` (K3,
+    /// FIG-4877), and answer the entry the journal holds.
+    ///
+    /// An engine that replays its journal by position runs `step` once and
+    /// serves the journaled entry on every redrive without running it again:
+    /// a recorded attempt never re-executes its body, and a recorded decision
+    /// never observes cancellation again. An `Err` from the step is never
+    /// journaled; it ends the attempt retryably, and the engine runs the step
+    /// again under the same name and call identity. The default refuses: a
+    /// controller that journals no Run record cannot host a Run-owned tool
+    /// call. Forwarding wrappers forward.
+    async fn record_run_record(
+        &self,
+        name: String,
+        step: RunRecordStep<'_>,
+    ) -> Result<lash_core_store::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        drop(step);
+        Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EngineControlUnsupported,
+            format!("this effect controller journals no Run record; `{name}` cannot be recorded"),
+        ))
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -768,6 +791,18 @@ pub trait RuntimeEffectController: AwaitEventResolver {
 /// [`record_process_drive_step`](RuntimeEffectController::record_process_drive_step).
 pub type ProcessDriveStep<'step> = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<(), crate::PluginError>> + Send + 'step>,
+>;
+
+/// One record of a logical Run, for
+/// [`record_run_record`](RuntimeEffectController::record_run_record): the
+/// future that produces the record and the canonical material it owns, or a
+/// fault that ends the attempt unrecorded.
+pub type RunRecordStep<'step> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<lash_core_store::tool_run::RunJournalEntry, String>>
+            + Send
+            + 'step,
+    >,
 >;
 
 /// A controller's answer to

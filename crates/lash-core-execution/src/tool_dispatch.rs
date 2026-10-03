@@ -9,6 +9,7 @@ mod intent_executor;
 mod pending_resolver;
 mod preparation;
 mod retry;
+mod singleton_run;
 
 pub use admission::{ToolRoundRefusal, admission_failure, admit_tool_round};
 pub use context::{
@@ -19,6 +20,11 @@ pub use pending_resolver::{
     ArmedResolver, LaunchReceipt, ParkSite, ResolverArming, arm_pending_resolver,
     consumer_hold_owner, discharge_abandoned_call, finish_parked_wait,
     model_visible_intent_outcomes,
+};
+pub use singleton_run::{
+    BeforeCheckReply, SingletonAttempt, SingletonBodyOutcome, SingletonCapture, SingletonDrift,
+    SingletonPreparedRequest, SingletonRunError, SingletonRunOutcome, SingletonTerminal,
+    SingletonToolCall, SingletonToolHandlers, run_singleton_tool,
 };
 
 pub(crate) use atomic_attempt::AtomicToolAttempt;

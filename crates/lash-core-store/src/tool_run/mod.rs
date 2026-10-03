@@ -52,7 +52,7 @@ pub use receipt::{BusinessReceipt, LogicalTerminal, ObservationPermit, ObservedF
 pub use retention::{MaterialBundle, MaterialHolder, MaterialRetentionError, RetainedBundle};
 pub use run_event::{
     AttemptOrdinal, AttemptResult, CallDecision, ResultSource, RunEvent, RunEventOrdinal,
-    RunEventRefusal, RunLedger, RunLifecycle, RunRecord, SegmentOrdinal,
+    RunEventRefusal, RunJournalEntry, RunLedger, RunLifecycle, RunRecord, SegmentOrdinal,
 };
 pub use source_seal::{
     SealOutcome, SealRefusal, SealWriter, SourceAuthority, SourceDescriptor, SourceSeal,

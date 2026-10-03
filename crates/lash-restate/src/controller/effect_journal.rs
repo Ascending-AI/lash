@@ -100,11 +100,15 @@ use serde::{Deserialize, Serialize};
 /// Generation 16 changes in place for FIG-4876: references carry K2 owner,
 /// role, location and integrity, and canonical material has one owner record.
 /// JOURNAL_LOGIC_EPOCH moves every affected handler lane in the same landing.
+/// Generation 16 gains, in place, the Run record (FIG-4877): one stamped
+/// `lash:run:{call}:{step}` entry holding a K3 record and the canonical
+/// material it owns. No production handler journals one yet, so no lane moves.
 ///
 /// version_guard(
 ///     shapes(path = "crates/lash-restate/src/controller/journal_payload.rs", cover(PayloadEntry, PayloadReference)),
 ///     shapes(cover(RecordedRuntimeEffect, GaveUpEntry, Stamped, FrontierMark)),
 ///     roots(JournaledEffectRecord),
+///     roots(path = "crates/lash-core-store/src/tool_run/run_event.rs", RunJournalEntry),
 ///     items(EFFECT_JOURNAL_VERSION_FIELD, stamped),
 ///     shapes(
 ///         path = "crates/lash-core-execution/src/runtime/effect/envelope.rs",
@@ -321,7 +325,7 @@ pub(super) fn retired_generation_refusal(
 
 /// The typed refusal of a journal entry stamped with `found` — another
 /// effect-journal generation, or none — for an effect of `effect_kind`.
-fn generation_refusal(
+pub(super) fn generation_refusal(
     effect: &str,
     found: Option<&serde_json::Value>,
     effect_kind: Option<String>,

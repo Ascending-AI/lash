@@ -36,7 +36,7 @@ pub use control::{
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildCancelWatch,
     JournalReplay, ProcessDriveStep, RecordedJournal, RecordedKeyFence, RefusedWriteRange,
-    Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
+    Resolution, ResolveOutcome, RunRecordStep, RuntimeEffectController, ScopeBoundController,
     ScopedEffectController, SegmentProgress, ServedOnlyRange, TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectControllerTaskRequest, EffectControllerTaskRequests};

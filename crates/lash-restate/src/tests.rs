@@ -298,6 +298,7 @@ mod segment_generation_handoff;
 mod segment_redrive_on_the_double;
 mod session_shift_roll_on_the_double;
 mod shift_laws_on_the_double;
+mod singleton_tool_run_on_the_double;
 mod tool_context_conformance;
 mod tool_run_sdk_contract;
 mod trigger_authority;

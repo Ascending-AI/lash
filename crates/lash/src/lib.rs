@@ -1359,7 +1359,7 @@ pub mod durability {
     /// Durable group and journal values returned by effect-host implementors.
     pub use lash_core::runtime::{
         GroupChildBinding, GroupChildCancelWatch, JournalReplay, ProcessDriveStep,
-        RankedGroupSettlement, RecordedJournal, RecordedKeyRange,
+        RankedGroupSettlement, RecordedJournal, RecordedKeyRange, RunRecordStep,
     };
     pub use lash_core::{
         EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,
@@ -1468,6 +1468,11 @@ pub mod runtime {
     pub use lash_core::tool_run::material;
     /// Retained material bundles and the dependency leases that hold them.
     pub use lash_core::tool_run::retention;
+    /// A logical Run's event records (K3). An expansion interface for the Run
+    /// coordinator, nameable so an effect host can journal them; not yet a
+    /// supported host surface.
+    #[doc(hidden)]
+    pub use lash_core::tool_run::run_event;
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
     /// wall-clock default; tests open a backend on their own to make expiry

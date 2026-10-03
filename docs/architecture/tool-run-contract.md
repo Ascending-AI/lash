@@ -128,6 +128,27 @@ reduction order; a recorded record is served, never re-reduced. Each reply
 is keyed by its occurrence: admission, attempt ordinal, Deferred completion
 of an attempt, or cached.
 
+**Run records (K3, FIG-4877).** A Run record is one journaled step of the
+owning handler, `lash:run:{call}:{step}`, holding a `RunJournalEntry`: the
+record and the canonical material it owns, stamped with the effect-journal
+generation. Effect controllers journal it through
+`RuntimeEffectController::record_run_record`; a replay serves it without
+running its step, and every served record passes the `RunLedger` fold and the
+material check before anything acts on it. The singleton route
+(`lash_core::tool_dispatch::run_singleton_tool`) records a simple Done call as
+four records: `admit` (A: the prepared request and every before-check),
+`attempt:1` (X: the body's capture, checked against the recorded declaration),
+`decide` (D: after-checks, or the Run's cancellation read once) and `present`
+(V: presentation bytes distinct from the output, consumed and incorporated in
+the same record). A final that declares adds `declare` between D and V, and V
+then also settles the declarations. A replay whose call drifts from its
+recorded admission (tool name, arguments, owner, or a recorded plugin revision
+this build no longer executes) refuses typed before any body; the recorded
+declaration governs, never the live catalog. The route is an expansion
+interface: production rounds keep their route until FIG-4894, FIG-1863 and
+FIG-4895 move them, so no handler lane moves with it. Reported retries are
+FIG-4879's schedule, and a Deferred attempt hands its call to FIG-4883's seal.
+
 ## Field ownership
 
 | Record | Owns | Refers to |
