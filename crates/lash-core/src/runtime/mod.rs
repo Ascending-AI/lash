@@ -231,9 +231,9 @@ pub use effect::{
     ServedOnlyRange, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolChildDriver,
     ToolCompletionEvent, ToolCompletionWait, ToolDispatchCursor, TriggerLocalExecution,
     TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, effect_groups_unsupported,
-    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
-    validate_replayed_effect_envelope,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnPrelude,
+    effect_groups_unsupported, refuse_unhonored_group_membership,
+    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
 pub use environment::{ParkRefused, ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;

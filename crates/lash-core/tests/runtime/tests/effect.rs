@@ -1168,3 +1168,148 @@ use effect_driver_support::{
     EffectControllerTestCodeExecutor, EffectControllerTestProtocolFactory, PROMPT_REFUSAL,
     PromptRefusingProtocolFactory,
 };
+
+struct PreludeContextHooks {
+    live_revision: Arc<std::sync::atomic::AtomicUsize>,
+    pressure_calls: Arc<std::sync::atomic::AtomicUsize>,
+    prepare_calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::ContextPressureHook for PreludeContextHooks {
+    fn id(&self) -> &'static str {
+        "prelude-pressure"
+    }
+
+    async fn decide(
+        &self,
+        _ctx: &lash_core::plugin::ContextPressureContext<'_>,
+    ) -> Result<lash_core::plugin::ContextPressureDecision, lash_core::plugin::ContextError> {
+        self.pressure_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(
+            if self.live_revision.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                lash_core::plugin::ContextPressureDecision::Record { nodes: Vec::new() }
+            } else {
+                lash_core::plugin::ContextPressureDecision::Continue
+            },
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::TurnContextTransform for PreludeContextHooks {
+    fn id(&self) -> &'static str {
+        "prelude-prepare"
+    }
+
+    async fn transform(
+        &self,
+        _ctx: &lash_core::plugin::TurnTransformContext<'_>,
+        mut input: lash_core::facade_support::PreparedContext,
+    ) -> Result<lash_core::facade_support::PreparedContext, lash_core::plugin::ContextError> {
+        self.prepare_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if self.live_revision.load(std::sync::atomic::Ordering::SeqCst) != 0 {
+            input.messages = lash_core::facade_support::MessageSequence::default();
+        }
+        Ok(input)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn replay_adopts_the_recorded_prelude_despite_changed_live_preparation_and_config() {
+    let double = kernel_double(SEED + 48, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let live_revision = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let pressure_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let prepare_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let hooks = Arc::new(PreludeContextHooks {
+        live_revision: Arc::clone(&live_revision),
+        pressure_calls: Arc::clone(&pressure_calls),
+        prepare_calls: Arc::clone(&prepare_calls),
+    });
+    let factory: Arc<dyn lash_core::plugin::PluginFactory> = Arc::new(StaticPluginFactory::new(
+        lash_core::plugin::PluginDeclaration::initial("prelude-context"),
+        PluginSpec::new()
+            .with_context_pressure_hook(0, hooks.clone())
+            .with_turn_context_transform(0, hooks),
+    ));
+    let recorder = RecordingEffectController::default()
+        .with_controller_owned_replay()
+        .with_strict_replay_by_address();
+    let mut first = runtime_with_plugins_and_tools_and_host(
+        vec![factory.clone()],
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        host_with_effect_recorder(&backend, recorder.clone()),
+    )
+    .await;
+    let run = TurnId::from("recorded-prelude");
+    let original = first
+        .execute_turn(
+            TurnInput::text("retain this prepared context"),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &run),
+            ),
+        )
+        .await
+        .expect("first execution");
+    let (configuration, prelude) = {
+        let records = recorder.strict_replay.outcomes.lock_recover();
+        let configuration = records
+            .values()
+            .find_map(|(_, outcome)| match outcome.as_ref().ok()? {
+                RuntimeEffectOutcome::ResolveTurnConfig { resolved } => Some(resolved.clone()),
+                _ => None,
+            })
+            .expect("recorded config");
+        let prelude = records
+            .values()
+            .find_map(|(_, outcome)| match outcome.as_ref().ok()? {
+                RuntimeEffectOutcome::SyncExecutionEnvironment { prelude, .. } => {
+                    Some(prelude.clone())
+                }
+                _ => None,
+            })
+            .expect("recorded prelude");
+        (configuration, prelude)
+    };
+    assert!(configuration.termination.treat_missing_done_as_failure);
+    assert_eq!(prelude.pressure.len(), 1);
+    assert!(!prelude.context.messages.is_empty());
+    let calls = *recorder.llm_calls.lock_recover();
+    live_revision.store(1, std::sync::atomic::Ordering::SeqCst);
+    let mut host = host_with_effect_recorder(&backend, recorder.clone());
+    host.core.control.termination.treat_missing_done_as_failure = false;
+    let mut replay = runtime_with_plugins_and_tools_and_host(
+        vec![factory],
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        host,
+    )
+    .await;
+    let replayed = replay
+        .execute_turn(
+            TurnInput::text("retain this prepared context"),
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &run),
+            ),
+        )
+        .await
+        .expect("replay uses recorded context before constructing the model request");
+    assert_eq!(replayed.outcome, original.outcome);
+    assert_eq!(
+        *recorder.llm_calls.lock_recover(),
+        calls,
+        "the model effect executes once"
+    );
+    assert_eq!(pressure_calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(prepare_calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(
+        recorder.count_kind(RuntimeEffectKind::SyncExecutionEnvironment),
+        1
+    );
+}

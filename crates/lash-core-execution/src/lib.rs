@@ -849,7 +849,7 @@ pub use runtime::{
     TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
     TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
     TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputState, TurnLaneAdmissionPolicy, WaitKind, WaitState, WakeDelivery,
+    TurnInputState, TurnLaneAdmissionPolicy, TurnPrelude, WaitKind, WaitState, WakeDelivery,
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle,
     WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry,
     WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, WorkerTerminationReceipt,

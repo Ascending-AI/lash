@@ -15,6 +15,30 @@ pub struct ResolvedToolSurface {
 }
 
 impl PluginSession {
+    /// Bind recorded provider identities to this worker's capabilities.
+    pub fn resolve_context_tool_bindings(
+        &self,
+        bindings: &[crate::plugin::PluginCallbackIdentity],
+    ) -> Result<Vec<Arc<dyn crate::ToolProvider>>, PluginError> {
+        bindings
+            .iter()
+            .map(|binding| {
+                self.capabilities()
+                    .contributions
+                    .tool_providers
+                    .iter()
+                    .find(|registered| &registered.identity == binding)
+                    .map(|registered| Arc::clone(&registered.hook))
+                    .ok_or_else(|| {
+                        PluginError::Session(format!(
+                            "recorded context tool binding {}:{} is unavailable",
+                            binding.owner.plugin, binding.key,
+                        ))
+                    })
+            })
+            .collect()
+    }
+
     /// Pin this plugin session's resolved tool surface: its registry and the
     /// catalog its owner's calls resolve against.
     pub fn pin_resolved_tool_surface(&self) -> Result<ResolvedToolSurface, PluginError> {

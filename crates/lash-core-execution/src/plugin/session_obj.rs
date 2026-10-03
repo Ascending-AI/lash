@@ -779,7 +779,7 @@ impl PluginSession {
             if !matches!(decision, ContextPressureDecision::Continue) {
                 decided.push(DecidedContextPressure {
                     plugin_id: registered.identity.owner.plugin.clone(),
-                    hook_id: registered.hook.id(),
+                    hook_id: registered.hook.id().to_owned(),
                     decision,
                 });
             }

@@ -541,8 +541,25 @@ impl SqliteStore {
                     if let Some(superseded) = superseded {
                         return Err(superseded);
                     }
+                    let admission = if commit.turn_commit.operation.key == "final" {
+                        commit.settled_park_run().map(|run|
+                            crate::session_runs::run_admission_conn(tx, &commit.session_id, run)
+                        ).transpose()?.flatten()
+                    } else { None };
+                    let intent_authoritative = commit.validate_admitted_cancel_intent(
+                        admission.as_ref().and_then(|admission| admission.cancel_intent.as_ref())
+                    )?;
                     if let Some(interrupted) = commit.interrupted_turn.as_ref() {
                         let closure = interrupted.settlement.authorization();
+                        if intent_authoritative && !super::turn_input::check_turn_cancellation_conn(
+                            tx, closure.session_id(), closure.binding_id(), closure.admitted_scope(),
+                        )? {
+                            return Err(StoreError::TurnCancelBindingMismatch {
+                                session_id: closure.session_id().clone(), expected: String::new(),
+                                presented: closure.binding_id().into(),
+                            });
+                        }
+
                         if closure.admitted_scope().session_id().is_none() {
                             let scope_id = closure.admitted_scope().journal_identity()
                                 .map_err(|error| StoreError::Backend(error.to_string()))?.key().to_string();
@@ -577,7 +594,7 @@ impl SqliteStore {
                             .optional()
                             .map_err(sqlite_error)?;
                         let expected = encode_json(closure)?;
-                        if stored.as_deref() != Some(expected.as_str()) {
+                        if !intent_authoritative && stored.as_deref() != Some(expected.as_str()) {
                             return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
                                 session_id: closure.session_id().clone(),
                                 turn_id: closure.turn_id().clone(),

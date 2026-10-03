@@ -905,6 +905,11 @@ impl TurnBoundary {
                     let Some(interrupted) = commit.interrupted_turn.as_mut() else {
                         return Err(error);
                     };
+                    if interrupted.admitted_intent.is_some() {
+                        // A newer intent needs turn reassembly before publication.
+                        // Redrive the recorded work rather than patching its terminal.
+                        return Err(error);
+                    }
                     let address = crate::TurnAddress::new(&session_id, interrupted.turn_id());
                     interrupted.observed_intent =
                         store.turn_cancel_request_intent(&address).await?;

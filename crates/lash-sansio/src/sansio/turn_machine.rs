@@ -1,6 +1,14 @@
 use super::*;
 
 impl<M: TurnProtocol> TurnMachine<M> {
+    /// Restore the preparation retained by the environment prelude.
+    pub fn adopt_prepared_messages(&mut self, messages: crate::MessageSequence, first_sync: bool) {
+        if first_sync {
+            self.next_synthetic_message_id = messages.len() as u64;
+        }
+        self.messages = messages;
+    }
+
     pub fn new(
         config: TurnMachineConfig<M>,
         messages: Vec<Message>,

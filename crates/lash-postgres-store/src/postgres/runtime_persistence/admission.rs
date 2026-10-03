@@ -185,6 +185,7 @@ pub(crate) async fn admit_run_postgres(
         executor: request.executor.clone(),
         plugins: request.plugins.clone(),
         trace: Some(trace),
+        cancel_intent: None,
         recorded_by_this_call: prepared.is_some(),
     };
     let Some(prepared) = prepared else {

@@ -548,3 +548,21 @@ carry no cross-build compatibility guarantee.
 Usage is data on the model call's recorded result. Hosts meter spend at the
 `Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
 Lash has no accounting ledger or delivery dependency.
+
+## Preparation and cancellation
+
+The environment prelude retains the early recorded configuration's effect
+address, the accumulated context-pressure decisions through the first frame
+open, the final prepared messages and registered tool-provider identities,
+and the before-turn callback record's address. Configuration remains recorded
+before preparation: pressure and context hooks may issue their own journaled
+summarizer effects and replay by re-execution over those effects. The prelude
+serves the prepared context to downstream protocol work. Live provider handles
+are rebound from their recorded registered identities.
+
+An admission may retain a typed cancellation-intent snapshot in its run record.
+For such a run, the final head transaction validates the admitted snapshot,
+the current intent and the selected cancellation binding. Its cancellation
+closure is derived from durable intent; observer gates are notified after the
+commit and cannot change its decision. Admission producers that do not yet
+retain a snapshot use their existing persisted closure authorization.

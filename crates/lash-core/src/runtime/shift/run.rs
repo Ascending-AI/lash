@@ -215,6 +215,7 @@ impl LashRuntime {
         };
         if let Some(execution) = self.shift_run.as_mut() {
             execution.trace_scope = admission.trace.clone();
+            execution.cancel_intent = admission.cancel_intent.clone();
         }
         let executed_inputs = admission.input_ids();
         let inputs = admission.inputs.map(|admitted| *admitted);

@@ -56,7 +56,7 @@ pub use envelope::{
     RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
     ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    ToolCompletionEvent, ToolCompletionWait, ToolDispatchCursor,
+    ToolCompletionEvent, ToolCompletionWait, ToolDispatchCursor, TurnPrelude,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{

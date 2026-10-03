@@ -39,6 +39,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) turn_id: crate::TurnId,
     pub(super) turn_index: usize,
     pub(super) turn_pipeline: TurnBoundary,
+    pub(super) prelude: Box<crate::runtime::effect::TurnPrelude>,
     /// Most recent provider usage observed during this execution attempt.
     ///
     /// The turn pipeline retains the projection basis captured before the

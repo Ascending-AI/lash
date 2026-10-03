@@ -343,6 +343,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
             interrupted_turn: Some(crate::store::InterruptedTurnClosure {
                 settlement,
                 observed_intent: observed,
+                admitted_intent: None,
             }),
             turn_control_resolver: Some(host.as_ref()),
             recorded_attachment_intent_ids: Default::default(),

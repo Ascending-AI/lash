@@ -621,8 +621,40 @@ impl PostgresStore {
         } else {
             None
         };
+        let admission = if commit.turn_commit.operation.key == "final" {
+            match commit.settled_park_run() {
+                Some(run) => {
+                    crate::session_runs::run_admission_conn(&mut tx, &commit.session_id, run)
+                        .await?
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+        let intent_authoritative = commit.validate_admitted_cancel_intent(
+            admission
+                .as_ref()
+                .and_then(|admission| admission.cancel_intent.as_ref()),
+        )?;
         if let Some(interrupted) = commit.interrupted_turn.as_ref() {
             let closure = interrupted.settlement.authorization();
+            if intent_authoritative
+                && !super::turn_input::check_turn_cancellation_tx(
+                    &mut tx,
+                    closure.session_id(),
+                    closure.binding_id(),
+                    closure.admitted_scope(),
+                )
+                .await?
+            {
+                return Err(StoreError::TurnCancelBindingMismatch {
+                    session_id: closure.session_id().clone(),
+                    expected: String::new(),
+                    presented: closure.binding_id().into(),
+                });
+            }
+
             if closure.admitted_scope().session_id().is_none() {
                 let scope_id = closure
                     .admitted_scope()
@@ -683,7 +715,7 @@ impl PostgresStore {
                     message: error.to_string(),
                 }
             })?;
-            if stored.as_deref() != Some(expected.as_str()) {
+            if !intent_authoritative && stored.as_deref() != Some(expected.as_str()) {
                 return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
                     session_id: closure.session_id().clone(),
                     turn_id: closure.turn_id().clone(),

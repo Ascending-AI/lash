@@ -79,10 +79,12 @@ impl DecodedEffectOutcome for RuntimeEffectOutcome {
     ) -> Result<ServedExecutionEnvironmentSync, RuntimeEffectControllerError> {
         match self {
             Self::SyncExecutionEnvironment {
+                prelude,
                 result,
                 tool_surface,
             } => Ok(ServedExecutionEnvironmentSync {
-                result,
+                prelude,
+                result: *result,
                 tool_surface,
             }),
             other => Err(RuntimeEffectControllerError::wrong_outcome(

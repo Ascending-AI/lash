@@ -685,7 +685,7 @@ pub(crate) async fn unfinished_run_turns_conn(
 
 /// `run`'s recorded admission, read on `conn`: `None` for a run with no
 /// admission.
-async fn run_admission_conn(
+pub(crate) async fn run_admission_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
     run: &TurnId,

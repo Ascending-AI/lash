@@ -137,13 +137,12 @@ pub struct TurnCancelClosureAuthorization {
     observed_intent: TurnCancelIntentSnapshot,
     authorizing_fencing_token: u64,
 }
-/// Authenticated terminal produced by the exact durable promise owner for one
-/// persisted cancellation-closure authorization.
+/// Cancellation closure selected by durable admission and final intent, or by
+/// the promise owner for an admission without an intent snapshot.
 ///
-/// Callers cannot construct this value. Stores accept it instead of a
-/// caller-supplied repair decision, so consuming an authorization necessarily
-/// follows successful settlement by the binding recorded in that
-/// authorization. `base_cancellation` is the immutable first policy acceptor;
+/// Stores validate the admitted authority and durable intent in their final
+/// transaction. Admissions without a snapshot instead require the exact
+/// persisted promise-closure authorization. `base_cancellation` is the immutable first policy acceptor;
 /// `effective_cancellation` may carry a later same-policy timing escalation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnCancelClosureSettlement {

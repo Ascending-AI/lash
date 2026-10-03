@@ -4,15 +4,11 @@
 //! hook. Durable compaction is an explicit Agent Frame transition, not a
 //! rewrite of this prepared context.
 
-use std::sync::Arc;
-
-use crate::ToolProvider;
-
 /// Output of the per-turn context transform pipeline — the messages and
 /// tool providers the runtime hands to the
 /// LLM call.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct PreparedContext {
     pub messages: crate::MessageSequence,
-    pub tool_providers: Vec<Arc<dyn ToolProvider>>,
+    pub tool_providers: Vec<crate::plugin::PluginCallbackIdentity>,
 }

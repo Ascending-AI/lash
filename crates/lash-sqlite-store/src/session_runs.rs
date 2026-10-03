@@ -630,7 +630,7 @@ pub(crate) fn head_ownership_facts_conn(
 
 /// `run`'s recorded admission, read on `conn`: `None` for a run with no
 /// admission.
-fn run_admission_conn(
+pub(crate) fn run_admission_conn(
     conn: &Connection,
     session_id: &SessionId,
     run: &TurnId,

@@ -258,6 +258,7 @@ impl LashRuntime {
                 PreparedLogicalTurn {
                     trace_metadata,
                     messages,
+                    mut prelude,
                     previous_prompt_usage,
                     turn_context,
                     initial_turn_causes,
@@ -325,6 +326,17 @@ impl LashRuntime {
                 turn_scope_id: &trace_turn_id,
             })
             .await?;
+        prelude.context.messages = prepared.messages.clone();
+        if plugins.has_before_turn_hooks() {
+            prelude.before_turn = Some(
+                crate::EffectAddress::new(
+                    scoped_effect_controller.execution_scope().clone(),
+                    format!("plugin-callbacks:before-turn:{trace_turn_id}"),
+                )
+                .map_err(RuntimeEffectControllerError::from)
+                .map_err(RuntimeEffectControllerError::into_runtime_error)?,
+            );
+        }
         for event in &prepared.events {
             recorded_assembly.record(event);
         }
@@ -417,6 +429,7 @@ impl LashRuntime {
         let driver = Box::new(RuntimeTurnDriver {
             session,
             policy: resolved_turn_policy,
+            prelude,
             recorded_assembly,
             host: self.host.clone(),
             turn_id: trace_turn_id.clone(),

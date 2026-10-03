@@ -169,8 +169,11 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                             .retryable_uncommitted_derivation());
                     }
                 };
+                let mut prelude = runner.driver.prelude.clone();
+                prelude.context.messages = runner.messages.clone();
                 Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
-                    result,
+                    prelude,
+                    result: Box::new(result),
                     tool_surface,
                 })
             }
@@ -212,6 +215,7 @@ pub(super) fn turn_effect_executor(
         segment: TurnSegment::new(driver.segment.allowed, None),
         session: driver.session.clone_for_effect(),
         policy: driver.policy.clone(),
+        prelude: driver.prelude.clone(),
         // A step body commits nothing: whatever it would record is dropped
         // with this copy, and the turn's content rides its recorded outcome.
         recorded_assembly: RecordedTurnAssembly::new(),

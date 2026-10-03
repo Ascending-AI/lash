@@ -353,6 +353,7 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
         let crate::runtime::effect::ServedExecutionEnvironmentSync {
+            prelude,
             result,
             tool_surface,
         } = match self
@@ -365,6 +366,16 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
+        let providers = self
+            .session
+            .plugins()
+            .resolve_context_tool_bindings(&prelude.context.tool_providers)
+            .map_err(|error| error.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
+        self.session
+            .set_context_overlay(providers)
+            .map_err(|error| error.into_turn_failure(RuntimeErrorCode::SessionToolRegistry))?;
+        machine.adopt_prepared_messages(prelude.context.messages.clone(), id.0 == 1);
+        self.prelude = prelude;
         // The surface the sync recorded is the one the iteration's tool calls
         // resolve against, whether the sync ran here or was served from the
         // journal (FIG-3672 P7b). Only a sync that built an environment

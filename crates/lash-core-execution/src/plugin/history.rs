@@ -130,7 +130,7 @@ pub struct ContextPressureContext<'run> {
 ///
 /// Core writes it (ADR 0105 §6): `Record` nodes commit with the turn, and an
 /// `OpenFrame` commits on its own before the turn's model call.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ContextPressureDecision {
     /// Leave the session as it is.
     Continue,
@@ -158,10 +158,10 @@ pub enum ContextPressureDecision {
 /// The decision a named hook returned, as core applies it. A hook is named
 /// by the plugin that registered it and its own id, so two plugins that
 /// register hooks with the same id never share a record or frame namespace.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct DecidedContextPressure {
     pub plugin_id: String,
-    pub hook_id: &'static str,
+    pub hook_id: String,
     pub decision: ContextPressureDecision,
 }
 

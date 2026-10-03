@@ -68,6 +68,8 @@ pub struct InterruptedTurnClosure {
     /// Backends compare it atomically before cancellation-dependent
     /// publication.
     pub observed_intent: crate::TurnCancelIntentSnapshot,
+    /// Admission authority retained by the run, independent of observer gates.
+    pub admitted_intent: Option<crate::TurnCancelIntentSnapshot>,
 }
 
 impl InterruptedTurnClosure {
@@ -83,9 +85,8 @@ impl InterruptedTurnClosure {
         self.settlement.authorization().turn_id()
     }
 
-    /// Exact cancellation evidence returned by the authoritative turn gate.
-    /// Absence explicitly selects ordinary non-cancellation re-deferral; a
-    /// store never infers this decision from a request row.
+    /// Cancellation evidence selected by the final intent read, or by the
+    /// settled gate for an admission without a cancellation snapshot.
     #[must_use]
     pub fn cancellation(&self) -> Option<&crate::TurnCancellationEvidence> {
         self.settlement.effective_cancellation()
@@ -802,6 +803,61 @@ impl RuntimeTurnCommitStamp {
 }
 
 impl RuntimeCommit {
+    /// Validate a final turn against the intent admission retained. The store
+    /// reads `admitted` in the same transaction as the head write.
+    pub fn validate_admitted_cancel_intent(
+        &self,
+        admitted: Option<&crate::TurnCancelIntentSnapshot>,
+    ) -> Result<bool, StoreError> {
+        if self.turn_commit.operation.key != "final" {
+            return Ok(false);
+        }
+        let Some(admitted) = admitted else {
+            return Ok(false);
+        };
+        let turn_id = self
+            .turn_commit
+            .operation
+            .turn_id()
+            .or_else(|| self.settled_park_run())
+            .ok_or_else(|| {
+                StoreError::Backend("cancellation admission without a committing turn".into())
+            })?;
+        let refused = || StoreError::TurnCancelIntentChanged {
+            session_id: self.session_id.clone(),
+            turn_id: turn_id.clone(),
+        };
+        let closure = self.interrupted_turn.as_ref().ok_or_else(refused)?;
+        if let crate::TurnCancelIntentSnapshot::Present { request, revision } = admitted {
+            let crate::TurnCancelIntentSnapshot::Present {
+                request: observed,
+                revision: observed_revision,
+            } = &closure.observed_intent
+            else {
+                return Err(refused());
+            };
+            if observed_revision < revision || observed != request {
+                return Err(refused());
+            }
+        }
+        if let Some(request) = closure.observed_intent.request() {
+            let expected = request.evidence();
+            if closure.settlement.base_cancellation() != Some(&expected) {
+                return Err(refused());
+            }
+            let Some(effective) = closure.cancellation() else {
+                return Err(refused());
+            };
+            if effective.undelivered != expected.undelivered
+                || (effective.mode != expected.mode
+                    && !effective.mode.is_stronger_than(expected.mode))
+            {
+                return Err(refused());
+            }
+        }
+        Ok(true)
+    }
+
     /// The run whose park this commit clears: [`Self::park_run`], else the
     /// run whose end it records, else the physical turn it commits (a turn
     /// that runs under no run parks under its own id).

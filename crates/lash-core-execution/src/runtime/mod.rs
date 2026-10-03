@@ -83,7 +83,7 @@ pub use effect::{
     ToolChildScope, ToolChildSessionFacts, ToolCompletionEvent, ToolCompletionWait,
     ToolDispatchCursor, ToolSettlement, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
     TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, UnrecordedSessionSources, effect_groups_unsupported,
+    TurnControlBindingIdError, TurnPrelude, UnrecordedSessionSources, effect_groups_unsupported,
     refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
     validate_replayed_effect_envelope,
 };

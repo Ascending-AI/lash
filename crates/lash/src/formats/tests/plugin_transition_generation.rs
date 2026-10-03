@@ -217,6 +217,15 @@ async fn the_merged_admission_refuses_a_predecessor_before_decoding_and_keeps_it
     predecessor_journal_keeps_its_lane(predecessor_epoch, PredecessorShape::AdmittedHead).await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_environment_prelude_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane() {
+    predecessor_journal_keeps_its_lane(
+        crate::restate::JOURNAL_LOGIC_EPOCH - 1,
+        PredecessorShape::EnvironmentPrelude,
+    )
+    .await;
+}
+
 fn admission_envelope() -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
@@ -252,6 +261,7 @@ fn predecessor_admission_outcome() -> serde_json::Value {
                 executor: lash_core::store::RunExecutor::Run,
                 plugins: Default::default(),
                 trace: None,
+                cancel_intent: None,
                 recorded_by_this_call: false,
             }),
             head_verdict: lash_core::store::AdmittedHeadVerdict::Ready,
@@ -272,6 +282,7 @@ enum PredecessorShape {
     UntaggedTransition,
     TaggedTransition,
     AdmittedHead,
+    EnvironmentPrelude,
 }
 
 async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: PredecessorShape) {
@@ -288,6 +299,15 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
     );
     let envelope = match shape {
         PredecessorShape::AdmittedHead => admission_envelope(),
+        PredecessorShape::EnvironmentPrelude => RuntimeEffectEnvelope::new(
+            RuntimeEffectInvocation::new(
+                EffectAddress::new(lash_core::ExecutionScope::turn(SESSION, RUN), "prelude")
+                    .unwrap(),
+                RuntimeAttribution::for_session(SESSION),
+                "prelude",
+            ),
+            RuntimeEffectCommand::SyncExecutionEnvironment,
+        ),
         _ => transition(),
     };
     let mut old_envelope: serde_json::Value =
@@ -307,6 +327,18 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
     let old_hash = hasher.finalize_hex();
     let outcome = match shape {
         PredecessorShape::AdmittedHead => predecessor_admission_outcome(),
+        PredecessorShape::EnvironmentPrelude => {
+            let outcome = serde_json::json!({
+                "type": "sync_execution_environment",
+                "result": {"Ok": lash_core::sansio::ExecutionEnvironmentSync::default()},
+                "tool_surface": [],
+            });
+            let refusal =
+                serde_json::from_value::<lash_core::RuntimeEffectOutcome>(outcome.clone())
+                    .expect_err("the predecessor sync has no prelude");
+            assert!(refusal.to_string().contains("prelude"), "{refusal}");
+            outcome
+        }
         _ => serde_json::json!({
             "type": "transition_plugins",
             "record": {

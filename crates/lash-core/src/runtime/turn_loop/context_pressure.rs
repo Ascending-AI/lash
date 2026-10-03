@@ -99,6 +99,7 @@ impl ContextPressureWrite<'_> {
 pub(super) struct ContextPressureOutcome {
     /// A frame opened and committed; the turn runs in it.
     pub(super) opened_frame: bool,
+    pub(super) decisions: Vec<crate::plugin::DecidedContextPressure>,
     /// Records decided without a frame, for the turn's graph-append draft.
     pub(super) turn_records: Vec<crate::AppendSessionNodesRequest>,
 }
@@ -133,6 +134,7 @@ impl LashRuntime {
         if !plugin_session.has_context_pressure_hooks() {
             return Ok(ContextPressureOutcome {
                 opened_frame: false,
+                decisions: Vec::new(),
                 turn_records: Vec::new(),
             });
         }
@@ -206,6 +208,7 @@ impl LashRuntime {
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
         drop(ctx);
         drop(manager);
+        let decisions = decided.clone();
 
         let session_id = self.state.session_id.clone();
         let mut turn_records = Vec::new();
@@ -220,7 +223,7 @@ impl LashRuntime {
                 session_id: &session_id,
                 turn_id: trace_turn_id,
                 plugin_id: &plugin_id,
-                hook_id,
+                hook_id: &hook_id,
             };
             match decision {
                 crate::plugin::ContextPressureDecision::Continue => {}
@@ -246,6 +249,7 @@ impl LashRuntime {
                     )
                     .await?;
                     return Ok(ContextPressureOutcome {
+                        decisions,
                         opened_frame: true,
                         turn_records: Vec::new(),
                     });
@@ -253,6 +257,7 @@ impl LashRuntime {
             }
         }
         Ok(ContextPressureOutcome {
+            decisions,
             opened_frame: false,
             turn_records,
         })

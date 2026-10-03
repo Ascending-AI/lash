@@ -505,6 +505,10 @@ impl LashRuntime {
                 ),
                 None => None,
             };
+        let admitted_cancel_intent = self
+            .shift_run
+            .as_ref()
+            .and_then(|execution| execution.cancel_intent.clone());
         let turn_cancel_closure_authorization = match (
             self.session.as_ref().and_then(Session::history_store),
             shift_fence,
@@ -517,7 +521,20 @@ impl LashRuntime {
                     scoped_effect_controller.execution_scope(),
                     &turn_control_binding_id,
                 );
-                if let Some(authorization) = recovered_turn_cancel_closure(
+                if admitted_cancel_intent.is_some() {
+                    let durable = observed
+                        .request()
+                        .map(crate::TurnCancelRequest::evidence)
+                        .or_else(|| assembled_cancellation.clone());
+                    Some(turn_control.closure_authorization(
+                        &turn_control_binding_id,
+                        admitted_scope,
+                        fence,
+                        observed,
+                        honoured_cancel.as_ref(),
+                        durable,
+                    )?)
+                } else if let Some(authorization) = recovered_turn_cancel_closure(
                     store
                         // The exact persisted operation is matched to this
                         // address, binding, and scope below; activation's fence
@@ -569,14 +586,20 @@ impl LashRuntime {
         ) {
             (Some(authorization), Some(observed_intent)) => {
                 Some(crate::store::InterruptedTurnClosure {
-                    settlement: turn_control
-                        .settle_authorized(
-                            turn_control_resolver,
-                            authorization,
-                            honoured_cancel.as_ref(),
-                        )
-                        .await?,
+                    settlement: if admitted_cancel_intent.is_some() {
+                        turn_control
+                            .settle_admitted_intent(authorization.clone(), honoured_cancel.as_ref())
+                    } else {
+                        turn_control
+                            .settle_authorized(
+                                turn_control_resolver,
+                                authorization,
+                                honoured_cancel.as_ref(),
+                            )
+                            .await?
+                    },
                     observed_intent,
+                    admitted_intent: admitted_cancel_intent.clone(),
                 })
             }
             // A turn that commits to a store closes its cancellation gate
@@ -604,9 +627,8 @@ impl LashRuntime {
                     .await?
             }
         };
-        // Interruption derives from the sealed gate evidence. When a durable
-        // cancel races a successor shift, the final commit's shift fence and
-        // head CAS are the arbiters.
+        // Snapshot-bearing admissions derive interruption from durable intent.
+        // The final transaction validates that intent with the fence and head CAS.
         let interrupted = cancellation.is_some();
         if segment_boundary.is_none() || interrupted {
             let opener = match opener {
@@ -924,6 +946,16 @@ impl LashRuntime {
         observer.release_terminal();
         emit_session_events(observer, delivery.events);
         observer.published().await;
+        if admitted_cancel_intent.is_some()
+            && let Err(error) = turn_control
+                .notify_committed_cancellation(turn_control_resolver, cancellation.clone())
+                .await
+        {
+            delivery.turn.errors.push(post_commit_delivery_issue(
+                (&error.code).into(),
+                error.to_string(),
+            ));
+        }
         publish_terminal_after_commit(
             turn_control,
             turn_control_resolver,

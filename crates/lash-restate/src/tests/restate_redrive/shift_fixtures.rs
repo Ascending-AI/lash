@@ -74,6 +74,7 @@ pub(super) async fn execute_shift(
                                 plugins: lash_core::store::plugin_writers::PluginAdmission::default(
                                 ),
                                 trace: None,
+                                cancel_intent: None,
                                 recorded_by_this_call: false,
                             }),
                         },

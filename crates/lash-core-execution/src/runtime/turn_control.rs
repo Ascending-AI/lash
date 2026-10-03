@@ -1096,6 +1096,37 @@ impl ActiveTurnControl {
         )
     }
 
+    /// Admission and the final intent read select cancellation. Gates only
+    /// wake observers; their winner is not an input to this settlement.
+    pub fn settle_admitted_intent(
+        &self,
+        authorization: TurnCancelClosureAuthorization,
+        honoured: Option<&TurnCancellationEvidence>,
+    ) -> TurnCancelClosureSettlement {
+        let base = authorization
+            .observed_intent()
+            .request()
+            .map(TurnCancelRequest::evidence)
+            .or_else(|| match authorization.proposed_base() {
+                TurnCancelClosureProposal::CancelRequested(evidence) if evidence.is_internal() => {
+                    Some(evidence.clone())
+                }
+                TurnCancelClosureProposal::CancelRequested(_) => None,
+                TurnCancelClosureProposal::CompletionSealed => None,
+            });
+        let effective = match (base.as_ref(), honoured) {
+            (Some(base), Some(honoured))
+                if base.undelivered == honoured.undelivered
+                    && (base.request_id == honoured.request_id
+                        || honoured.mode.is_stronger_than(base.mode)) =>
+            {
+                Some(honoured.clone())
+            }
+            _ => base.clone(),
+        };
+        TurnCancelClosureSettlement::new(authorization, base, effective)
+    }
+
     /// Finish an exact operation already persisted by the store. The promise
     /// outcomes remain authoritative, including a legitimate different winner.
     pub async fn settle_authorized(
@@ -1457,6 +1488,26 @@ impl ActiveTurnControl {
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
         let proposed = Self::proposed_terminal(honoured, assembled);
         self.settle_proposed(resolver, proposed, honoured).await
+    }
+
+    /// Notify waiting observers of a committed decision. A previously
+    /// resolved observer gate cannot alter the durable result.
+    pub async fn notify_committed_cancellation(
+        &self,
+        resolver: &dyn AwaitEventResolver,
+        cancellation: Option<TurnCancellationEvidence>,
+    ) -> Result<(), RuntimeError> {
+        let proposed = Self::proposed_terminal(None, cancellation);
+        resolver
+            .resolve_await_event(&self.cancel_key, gate_resolution(proposed)?)
+            .await?;
+        resolver
+            .resolve_await_event(
+                &self.escalation_key,
+                gate_resolution(TurnGateTerminal::CompletionSealed)?,
+            )
+            .await?;
+        Ok(())
     }
 
     pub async fn publish_terminal(

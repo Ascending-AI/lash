@@ -1519,7 +1519,8 @@ pub enum RuntimeEffectOutcome {
         admitted: Box<CheckpointAdmittedSet>,
     },
     SyncExecutionEnvironment {
-        result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
+        prelude: Box<TurnPrelude>,
+        result: Box<Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>>,
         /// The tool surface the sync built: every tool of the catalog the
         /// iteration's calls resolve against, as its definition. The shift
         /// installs it as the catalog, on the live pass and on every replay,
@@ -1679,10 +1680,20 @@ async fn durable_attachment_source(
     Ok(source)
 }
 
-/// A journaled execution-environment sync as served: its result and the tool
-/// surface it recorded (FIG-3672).
+/// Preparation facts retained with the environment render. Pressure hooks
+/// replay through nested effects; consumers adopt these recorded facts.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct TurnPrelude {
+    pub configuration: crate::EffectAddress,
+    pub pressure: Vec<crate::plugin::DecidedContextPressure>,
+    pub context: crate::session_model::context::PreparedContext,
+    pub before_turn: Option<crate::EffectAddress>,
+}
+
+/// A journaled environment's preparation, render result and tool surface.
 #[derive(Debug)]
 pub struct ServedExecutionEnvironmentSync {
+    pub prelude: Box<TurnPrelude>,
     pub result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
     pub tool_surface: Vec<crate::ToolDefinition>,
 }

@@ -433,10 +433,32 @@ impl LashRuntime {
         // post-turn `append_active_read_delta` to deep-clone the session
         // graph (Arc::make_mut with refcount > 1).
         drop(turn_ctx);
+        let prelude = Box::new(crate::runtime::effect::TurnPrelude {
+            configuration: crate::EffectAddress::new(
+                scoped_effect_controller.execution_scope().clone(),
+                format!(
+                    "turn-config:{}",
+                    self.shift_run
+                        .as_ref()
+                        .map_or(&trace_turn_id, |run| run.run())
+                ),
+            )
+            .map_err(RuntimeEffectControllerError::from)
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?,
+            pressure: pressure.decisions,
+            context: prepared_context.clone(),
+            before_turn: None,
+        });
         let messages = prepared_context.messages;
         if let Some(session) = self.session.as_mut() {
             session
-                .set_context_overlay(prepared_context.tool_providers)
+                .set_context_overlay(
+                    plugin_session
+                        .resolve_context_tool_bindings(&prepared_context.tool_providers)
+                        .map_err(|error| {
+                            error.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn)
+                        })?,
+                )
                 .map_err(|err| {
                     RuntimeError::new(RuntimeErrorCode::SessionToolRegistry, err.to_string())
                 })?;
@@ -448,6 +470,7 @@ impl LashRuntime {
                 turn: PreparedLogicalTurn {
                     trace_metadata,
                     messages,
+                    prelude,
                     previous_prompt_usage,
                     turn_context: input.turn_context.clone(),
                     initial_turn_causes,

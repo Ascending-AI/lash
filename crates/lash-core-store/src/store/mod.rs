@@ -830,6 +830,7 @@ impl RuntimeCommit {
         self.interrupted_turn = Some(InterruptedTurnClosure {
             settlement,
             observed_intent,
+            admitted_intent: None,
         });
         self
     }

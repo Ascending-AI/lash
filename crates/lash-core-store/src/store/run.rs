@@ -657,6 +657,11 @@ pub struct RunAdmission {
     /// anchor that one offers. `None` on an admission recorded without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace: Option<lash_trace::DurableTraceScope>,
+    /// Cancellation intent read in the admission transaction. Final commits
+    /// validate this recorded authority before publishing. The nonce admission
+    /// producer populates it; an absent field keeps the existing closure path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
     /// Whether this call recorded the admission. It is the call's receipt,
     /// never stored or journaled: an admission read back from the run's row
     /// or from a journal is one an earlier call recorded.

@@ -69,12 +69,26 @@ fn catalog_refusal() -> lash_core::sansio::ExecutionEnvironmentSyncFailure {
     }
 }
 
+fn test_prelude() -> Box<lash_core::runtime::effect::TurnPrelude> {
+    Box::new(lash_core::runtime::effect::TurnPrelude {
+        configuration: lash_core::EffectAddress::new(
+            lash_core::ExecutionScope::turn("session", "turn"),
+            "turn-config:turn",
+        )
+        .expect("config record address"),
+        pressure: Vec::new(),
+        context: Default::default(),
+        before_turn: None,
+    })
+}
+
 fn synced_environment() -> RuntimeEffectOutcome {
     RuntimeEffectOutcome::SyncExecutionEnvironment {
-        result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
+        prelude: test_prelude(),
+        result: Box::new(Ok(lash_core::sansio::ExecutionEnvironmentSync {
             system_prompt: Arc::from("fig3726 system prompt"),
             ..Default::default()
-        }),
+        })),
         tool_surface: Vec::new(),
     }
 }
@@ -262,7 +276,7 @@ async fn an_environment_sync_store_fault_retries_the_step_without_journaling_it(
         |outcome| {
             matches!(
                 outcome,
-                RuntimeEffectOutcome::SyncExecutionEnvironment { result: Ok(_), .. }
+                RuntimeEffectOutcome::SyncExecutionEnvironment { result, .. } if result.is_ok()
             )
         },
     );
@@ -318,7 +332,8 @@ async fn a_deterministic_environment_sync_refusal_is_the_steps_recorded_outcome(
         envelope,
         Arc::new(|_| {
             Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
-                result: Err(catalog_refusal()),
+                prelude: test_prelude(),
+                result: Box::new(Err(catalog_refusal())),
                 tool_surface: Vec::new(),
             })
         }),
@@ -346,14 +361,13 @@ async fn a_deterministic_environment_sync_refusal_is_the_steps_recorded_outcome(
     let outcome = recorded
         .outcome
         .expect("the journaled outcome is the step's refusal");
-    let RuntimeEffectOutcome::SyncExecutionEnvironment {
-        result: Err(failure),
-        ..
-    } = &outcome
-    else {
+    let RuntimeEffectOutcome::SyncExecutionEnvironment { result, .. } = &outcome else {
         panic!("the journaled outcome: {outcome:?}");
     };
-    assert_eq!(failure, &catalog_refusal());
+    assert_eq!(
+        result.as_ref().as_ref().expect_err("recorded refusal"),
+        &catalog_refusal()
+    );
     assert_eq!(
         serde_json::to_value(&outcome).expect("the outcome encodes")["result"]["Err"],
         serde_json::json!({

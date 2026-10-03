@@ -243,6 +243,7 @@ pub async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical<F, Fut
     commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
         settlement: settled_closure(&authorization, None),
         observed_intent: crate::TurnCancelIntentSnapshot::Absent,
+        admitted_intent: None,
     });
     let receipt = store
         .commit_runtime_state(commit.clone())
@@ -370,6 +371,7 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
     commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
         settlement: settled_closure(&first_authorization, None),
         observed_intent: crate::TurnCancelIntentSnapshot::Absent,
+        admitted_intent: None,
     });
     store
         .commit_runtime_state(commit.clone())
@@ -667,6 +669,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
     stale_commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
         settlement: settled_closure(&exact, None),
         observed_intent: crate::TurnCancelIntentSnapshot::Absent,
+        admitted_intent: None,
     });
     assert!(matches!(
         store.commit_runtime_state(stale_commit).await,
@@ -1227,6 +1230,7 @@ pub(super) async fn turn_cancel_undelivered_crash_matrix(factory: Arc<dyn crate:
                     .turn_cancel_request_intent(&cancel.address)
                     .await
                     .expect("snapshot cancellation intent before final commit"),
+                admitted_intent: None,
             });
             let receipt = store
                 .commit_runtime_state(commit)
@@ -2012,6 +2016,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
     commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
         settlement: settled_closure(&closure_authorization, Some(cancel_evidence(&after_step))),
         observed_intent: stale,
+        admitted_intent: None,
     });
 
     let immediate =
@@ -2065,6 +2070,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
             .turn_cancel_request_intent(&address)
             .await
             .expect("refresh cancellation predicate"),
+        admitted_intent: None,
     });
     let receipt = store
         .commit_runtime_state(commit.clone())

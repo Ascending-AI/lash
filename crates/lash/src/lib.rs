@@ -1471,8 +1471,8 @@ pub mod runtime {
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
         RuntimeProviderConfig, ScopedEffectController, SessionWorkEngine, SleepSpec,
         ToolCompletionEvent, ToolCompletionWait, ToolDispatchCursor, TraceEmitter, TraceRuntime,
-        TurnCancelWait, TurnContext, TurnControlBinding, WorkCadenceError, WorkCadencePolicy,
-        effect_groups_unsupported,
+        TurnCancelWait, TurnContext, TurnControlBinding, TurnPrelude, WorkCadenceError,
+        WorkCadencePolicy, effect_groups_unsupported,
     };
     /// Explicitly unstable internal instrumentation. Phase names may change
     /// with the turn loop. See `docs/architecture/turn-phase-probe.md`.
