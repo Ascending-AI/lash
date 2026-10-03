@@ -1669,9 +1669,9 @@ pub(super) async fn fig1464_over_budget_group_open_replay_under_a_larger_budget_
     );
 }
 
-/// FIG-1767: the eager effect arm (the durable process command) emits
-/// byte-identical journal records before and after collapsing into the shared
-/// helper.
+/// FIG-1767 / FIG-4909: the eager effect arm keeps canonical journal bytes
+/// stable across recording and replay. FIG-4850's payload codec sorts object
+/// fields while preserving the canonical envelope's JSON string verbatim.
 /// The row the FIG-1767 sample command signals: the first id a
 /// sequential-mint registry hands out, so the golden bytes stay fixed.
 fn fig1767_target() -> ProcessId {
@@ -1726,16 +1726,15 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         .expect("register the process the sample command signals")
         .id;
     assert_eq!(fig1767_proc_id, fig1767_target());
-    controller
+    let recorded = controller
         .execute_effect(
             process_envelope.clone(),
-            registry_local_executor(process_registry),
+            registry_local_executor(Arc::clone(&process_registry)),
         )
         .await
         .expect("process command effect execution");
 
-    // Retrieve records produced for DurableProcessCommand. These bytes are the
-    // golden serialization captured from main before the helper extraction.
+    // Pin the payload codec's canonical bytes, including the journal generation.
 
     {
         let process_verdict_key = "lash:fig1767-process-cmd.journal-budget";
@@ -1770,8 +1769,8 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
             .expect("the appended signal event carries its append timestamp");
         let stamp_end = stamp
             + process_record_text[stamp..]
-                .find('}')
-                .expect("the append timestamp closes its object");
+                .find([',', '}'])
+                .expect("the numeric append timestamp ends before the next field or object close");
         let normalized_record = format!(
             "{}\"occurred_at\":0{}",
             &process_record_text[..stamp],
@@ -1779,7 +1778,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             normalized_record,
-            r##"{"effect_journal_version":15,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"signal\":{\"identity\":{\"process_id\":\"p_00000000000070008000000000000001\",\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\"},\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"5fdcfce131d0cc8e7adc35dcd93313066c80d52144bd147c15d430cb6b0391e7"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"p_00000000000070008000000000000001"},"replay":{"key":"process:p_00000000000070008000000000000001:signal.resume:fig1767-signal"}},"semantics":{"signal_wait":{"ordinal":1}},"occurred_at":0}}}}}"##,
+            r##"{"effect_journal_version":16,"envelope":{"hash":"5fdcfce131d0cc8e7adc35dcd93313066c80d52144bd147c15d430cb6b0391e7","json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"signal\":{\"identity\":{\"process_id\":\"p_00000000000070008000000000000001\",\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\"},\"payload\":{\"source\":\"fig1767\"}}}}}"},"outcome":{"Ok":{"result":{"event":{"event_type":"signal.resume","invocation":{"attribution":{},"caused_by":{"process_id":"p_00000000000070008000000000000001","type":"process"},"replay":{"key":"process:p_00000000000070008000000000000001:signal.resume:fig1767-signal"},"subject":{"event_type":"signal.resume","process_id":"p_00000000000070008000000000000001","sequence":1,"type":"process_event"}},"occurred_at":0,"payload":{"source":"fig1767"},"process_id":"p_00000000000070008000000000000001","semantics":{"signal_wait":{"ordinal":1}},"sequence":1},"op":"signal"},"type":"process"}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }
@@ -1792,6 +1791,20 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
             "lash:fig1767-process-cmd"
         ],
         "the eager effect must journal its decisions after its budget verdict and before its recorded effect"
+    );
+
+    context.start_replay();
+    let replayed = RestateRuntimeEffectController::with_options_for_test(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
+    )
+    .execute_effect(process_envelope, registry_local_executor(process_registry))
+    .await
+    .expect("a fresh controller replays the canonical journal entry");
+    assert_eq!(
+        serde_json::to_vec(&replayed).expect("serialize replayed process outcome"),
+        serde_json::to_vec(&recorded).expect("serialize recorded process outcome"),
+        "replay must decode the exact recorded outcome, including its original timestamp"
     );
 }
 
