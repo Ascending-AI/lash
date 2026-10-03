@@ -408,6 +408,7 @@ impl PresentationLocalExecution {
         envelope: RuntimeEffectEnvelope,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::PresentToolResult {
+            plan,
             call_id,
             tool_id,
             tool_name,
@@ -438,10 +439,13 @@ impl PresentationLocalExecution {
             duration_ms: self.duration_ms,
             artifacts,
         };
-        let presentation = self
-            .plugins
-            .present_tool_result(context, self.settlement, &self.attachment_acceptance)
-            .await?;
+        let presentation = Box::pin(self.plugins.present_tool_result(
+            context,
+            self.settlement,
+            &plan,
+            &self.attachment_acceptance,
+        ))
+        .await?;
         Ok(RuntimeEffectOutcome::PresentToolResult {
             presentation: Box::new(presentation),
         })
@@ -801,8 +805,10 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
         duration_ms: u64,
+        plan: &super::PresentationBinding,
     ) -> Self {
-        Self {
+        let refusal = plugins.validate_tool_presentation_plan(plan).err();
+        let executor = Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(
                 PresentationLocalExecution {
                     plugins,
@@ -815,6 +821,11 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             replay_trace: None,
             served_only: None,
             issued: crate::trace::StepIssue::default(),
+        };
+        match refusal {
+            None => executor,
+            Some(error) => executor
+                .serving_only_from_journal(error.into(), Arc::new(CommandJournalGuard::open())),
         }
     }
 

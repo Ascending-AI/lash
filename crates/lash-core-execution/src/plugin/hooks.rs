@@ -28,8 +28,10 @@ pub struct ToolPresentationInput {
     pub context: ToolResultProjectionContext,
 }
 
-/// A registered presentation step, run in registration order inside the
-/// journaled `PresentToolResult` boundary.
+/// A decision-only presentation transform, run in the recorded plan's order
+/// inside `PresentToolResult`. It proposes no namespace state commands.
+/// Only sequential before/after-turn, checkpoint and after-tool result checks
+/// may propose commands; their publication belongs to the Run coordinator.
 pub type ToolPresentationStep =
     Arc<dyn Fn(ToolPresentationInput) -> PluginFuture<crate::ModelToolReturn> + Send + Sync>;
 pub type ToolPresentationPresenter = Arc<

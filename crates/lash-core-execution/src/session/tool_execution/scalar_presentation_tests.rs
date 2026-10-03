@@ -155,7 +155,7 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
     let journal = Arc::new(JournalByEffectId::default());
     let runs = Arc::new(AtomicUsize::new(0));
     let seen_ids = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let execute = || {
+    let execute = |with_step| {
         let context = crate::testing::TestExecutionContextBuilder::over_controller(
             crate::ScopedEffectController::shared(
                 Arc::clone(&journal) as Arc<dyn crate::RuntimeEffectController>,
@@ -163,10 +163,14 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
             )
             .expect("valid turn scope"),
         )
-        .plugin_factories(vec![Arc::new(RecordingStepFactory {
-            runs: Arc::clone(&runs),
-            seen_ids: Arc::clone(&seen_ids),
-        })])
+        .plugin_factories(if with_step {
+            vec![Arc::new(RecordingStepFactory {
+                runs: Arc::clone(&runs),
+                seen_ids: Arc::clone(&seen_ids),
+            })]
+        } else {
+            Vec::new()
+        })
         .provider(Arc::new(EchoTool {
             definition: definition.clone(),
         }))
@@ -199,7 +203,7 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
             })
     };
 
-    let first = execute().await;
+    let first = execute(true).await;
     assert!(presented(&first), "the first run presents through the step");
     assert_eq!(runs.load(Ordering::SeqCst), 1, "the step ran once");
     assert_eq!(
@@ -210,7 +214,7 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
 
     // The redrive: a fresh execution context over the same journal serves
     // every journaled effect, `PresentToolResult` included, from its record.
-    let replayed = execute().await;
+    let replayed = execute(false).await;
     assert!(
         presented(&replayed),
         "the recorded presentation is served on replay"
@@ -375,7 +379,16 @@ async fn a_fast_and_a_slow_run_present_under_one_replay_identity() {
             .expect("the call presents");
     }
     let hashes = recorder.hashes.lock_recover().clone();
-    assert_eq!(hashes.len(), 2, "one presentation per run: {hashes:?}");
+    assert_eq!(
+        hashes.len(),
+        4,
+        "one plan and presentation per run: {hashes:?}"
+    );
+    let hashes: Vec<_> = hashes
+        .into_iter()
+        .filter(|(effect_id, _)| effect_id.ends_with(":present"))
+        .collect();
+    assert_eq!(hashes.len(), 2);
     let presentation = format!("{}:present", crate::ToolCallId::fixture("timed-call"));
     assert!(
         hashes

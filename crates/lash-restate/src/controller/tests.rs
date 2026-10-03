@@ -14,6 +14,7 @@ fn recorded_renderer_refusal_retries_the_uncommitted_presentation() {
     let route = execution::restate_effect_execution(RuntimeEffectEnvelope {
         invocation,
         command: RuntimeEffectCommand::PresentToolResult {
+            plan: Box::default(),
             call_id: lash_core::ToolCallId::fixture("call"),
             tool_id: lash_core::ToolId::new("tool:fixture"),
             tool_name: "fixture".into(),

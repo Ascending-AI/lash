@@ -793,6 +793,7 @@ mod tests {
                     "present",
                 ),
                 RuntimeEffectCommand::PresentToolResult {
+                    plan: Box::default(),
                     call_id: format!("tc_{}", "0".repeat(64)).parse().unwrap(),
                     tool_id: "tool".into(),
                     tool_name: "tool".into(),

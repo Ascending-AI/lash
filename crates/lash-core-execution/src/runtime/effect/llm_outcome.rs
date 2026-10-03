@@ -54,8 +54,8 @@ pub struct AssistantResponsePlan {
 
 /// The stream end state for one recorded response callback.
 ///
-/// A plugin's stream-finished and response registrations pair by their
-/// ordinal within that plugin. Phase 1 records the receiving callback's full
+/// A response registration names its stream-finished callback by key within
+/// the same plugin. Phase 1 records the receiving callback's full
 /// identity, so multiple callbacks and different revisions cannot share state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

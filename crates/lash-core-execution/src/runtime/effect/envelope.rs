@@ -532,6 +532,8 @@ pub enum RuntimeEffectCommand {
     /// live duration from the local executor, and the outcome they fold to is
     /// what replay serves.
     PresentToolResult {
+        /// The recorded presenter and steps, resolved before any callback runs.
+        plan: Box<super::PresentationBinding>,
         call_id: crate::ToolCallId,
         tool_id: crate::ToolId,
         tool_name: String,

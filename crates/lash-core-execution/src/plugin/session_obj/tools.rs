@@ -3,6 +3,11 @@ use std::sync::Arc;
 
 use super::*;
 
+struct ResolvedPresentationPlan<'a> {
+    presenter: Option<&'a RegisteredHook<ToolPresentationPresenter>>,
+    steps: Vec<&'a RegisteredHook<ToolPresentationStep>>,
+}
+
 #[derive(Clone)]
 pub struct ResolvedToolSurface {
     pub registry: Arc<crate::ToolRegistry>,
@@ -150,6 +155,152 @@ impl PluginSession {
             lash_sansio::ToolCatalogBuildError::DuplicateName { name } => {
                 PluginError::ResidentToolDuplicateName { name }
             }
+        })
+    }
+}
+
+impl PluginSession {
+    /// Select the singleton renderer and ordered steps without invoking them.
+    /// The owning admission or presentation boundary records this selection.
+    pub fn tool_presentation_plan(&self) -> crate::runtime::PresentationBinding {
+        let contributions = &self.capabilities().contributions;
+        crate::runtime::PresentationBinding {
+            presenter: contributions
+                .presentation_presenter
+                .as_ref()
+                .map(|registered| registered.identity.clone()),
+            steps: contributions
+                .presentation_steps
+                .iter()
+                .map(|registered| registered.identity.clone())
+                .collect(),
+        }
+    }
+
+    /// Resolve every owed callback before presentation can invoke any of them.
+    pub fn validate_tool_presentation_plan(
+        &self,
+        plan: &crate::runtime::PresentationBinding,
+    ) -> Result<(), PluginError> {
+        self.validate_recorded_admission()?;
+        self.resolve_tool_presentation_plan(plan).map(drop)
+    }
+
+    fn resolve_tool_presentation_plan(
+        &self,
+        plan: &crate::runtime::PresentationBinding,
+    ) -> Result<ResolvedPresentationPlan<'_>, PluginError> {
+        let contributions = &self.capabilities().contributions;
+        let presenter = plan
+            .presenter
+            .as_ref()
+            .map(|callback| {
+                contributions
+                    .presentation_presenter
+                    .as_ref()
+                    .filter(|registered| &registered.identity == callback)
+                    .ok_or_else(|| self.unavailable_callback(callback))
+            })
+            .transpose()?;
+        let steps = plan
+            .steps
+            .iter()
+            .map(|callback| {
+                contributions
+                    .presentation_steps
+                    .iter()
+                    .find(|registered| &registered.identity == callback)
+                    .ok_or_else(|| self.unavailable_callback(callback))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ResolvedPresentationPlan { presenter, steps })
+    }
+
+    /// The presentation boundary (ADR 0099 §6, FIG-3420): folds every
+    /// [`ToolPresentationStep`] in the recorded plan's order, starting
+    /// from `ModelToolReturn::from_output`.
+    ///
+    /// A retryable step error aborts the uncommitted derivation. Other optional
+    /// step errors continue the fold from the
+    /// recorded fallback text return (`ModelToolReturn::text(call_id, tool,
+    /// err)`), so one broken step settles a refusal the model can read instead
+    /// of losing the whole presentation. Attachment-materialization notices
+    /// are then computed under `attachment_acceptance`, the caller's recorded
+    /// environment. Last, the folded return is measured against the
+    /// retention policy and its text retained if it is too long for history
+    /// (FIG-1643). The refs retained through `ctx.artifacts` and the policy
+    /// ride the returned [`crate::runtime::effect::ToolPresentation`] into
+    /// the journal.
+    ///
+    /// A retention that failed anywhere in the chain — the presenter's, a
+    /// step's, or the boundary's own — fails the presentation with a typed
+    /// attachment-store cause: a step that turned the refusal into
+    /// text does not make it the call's return.
+    pub(crate) async fn present_tool_result(
+        &self,
+        ctx: ToolResultProjectionContext,
+        settlement: Arc<crate::runtime::effect::ToolSettlement>,
+        plan: &crate::runtime::PresentationBinding,
+        attachment_acceptance: &crate::provider::AttachmentCapabilitySnapshot,
+    ) -> Result<
+        crate::runtime::effect::ToolPresentation,
+        crate::runtime::effect::RuntimeEffectControllerError,
+    > {
+        use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
+
+        self.validate_recorded_admission()
+            .map_err(crate::RuntimeEffectControllerError::from)?;
+        let callbacks = self
+            .resolve_tool_presentation_plan(plan)
+            .map_err(crate::RuntimeEffectControllerError::from)?;
+        let mut model_return =
+            crate::ModelToolReturn::from_output(ctx.tool_name.clone(), &ctx.output);
+        if let Some(presenter) = callbacks.presenter {
+            model_return = (presenter.hook)(ToolPresentationInput {
+                previous: model_return,
+                settlement: Arc::clone(&settlement),
+                context: ctx.clone(),
+            })
+            .await?;
+        }
+        for registered in callbacks.steps {
+            let input = ToolPresentationInput {
+                previous: model_return,
+                settlement: Arc::clone(&settlement),
+                context: ctx.clone(),
+            };
+            model_return = match (registered.hook)(input).await {
+                Ok(next) => next,
+                Err(err) if err.is_retryable() => {
+                    return Err(crate::RuntimeEffectControllerError::from(
+                        err.into_turn_failure(crate::RuntimeErrorCode::Plugin),
+                    )
+                    .retryable_uncommitted_derivation());
+                }
+                Err(err) => crate::ModelToolReturn::text(ctx.tool_name.clone(), err.to_string()),
+            };
+        }
+        crate::session::tool_execution::surface_attachment_materialization_notices(
+            attachment_acceptance,
+            &ctx.output,
+            &mut model_return,
+        );
+        let retention = ctx.artifacts.retention_policy();
+        crate::runtime::effect::retain_oversized_return(
+            &mut model_return,
+            &ctx.call_id,
+            ctx.artifacts.as_ref(),
+            retention,
+        )
+        .await?;
+        if let Some(failure) = ctx.artifacts.retention_failure() {
+            return Err(failure);
+        }
+        Ok(crate::runtime::effect::ToolPresentation {
+            version: crate::runtime::effect::TOOL_PRESENTATION_VERSION,
+            model_return,
+            artifacts: ctx.artifacts.retained(),
+            retention,
         })
     }
 }

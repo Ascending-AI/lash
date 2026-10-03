@@ -205,9 +205,10 @@ pub use effect::TurnCancelWait;
 /// contracts below name.
 pub use effect::{
     AdmittedHeadVerdict, ChildStreamTruncation, CompactionBase, DecodedChildEvent,
-    IncorporatedGroupRank, ProcessDefinitionLocalExecution, RecordedChildChannel,
-    RecordedChildEvent, RecordedChildStream, ToolAttemptCapture, ToolChildAdmission,
-    ToolChildCompletionRouting, ToolChildScope, ToolPresentation, ToolSettlement,
+    IncorporatedGroupRank, PresentationBinding, ProcessDefinitionLocalExecution,
+    RecordedChildChannel, RecordedChildEvent, RecordedChildStream, ToolAttemptCapture,
+    ToolChildAdmission, ToolChildCompletionRouting, ToolChildScope, ToolPresentation,
+    ToolSettlement,
 };
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{

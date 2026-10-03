@@ -1431,6 +1431,7 @@ pub async fn coordinate_tool_provider_with_services(
                 ),
             },
             std::sync::Arc::new(settlement),
+            &dispatch.plugins.tool_presentation_plan(),
             &dispatch.execution_env_spec.policy.attachment_acceptance,
         )
         .await

@@ -27,9 +27,10 @@ pub use tool_child_driver::{
     ContextSourceInstall, DeploymentToolChildContext, ToolChildContextSource, ToolChildDriver,
     ToolChildHost, opener_for_execution_scope,
 };
+pub(crate) use tool_presentation::record_tool_presentation_plan;
 mod tool_presentation;
 pub use tool_presentation::{
-    SessionPresentationArtifacts, TOOL_PRESENTATION_VERSION, ToolPresentation,
+    PresentationBinding, SessionPresentationArtifacts, TOOL_PRESENTATION_VERSION, ToolPresentation,
     retain_oversized_return,
 };
 mod recorded_stream;

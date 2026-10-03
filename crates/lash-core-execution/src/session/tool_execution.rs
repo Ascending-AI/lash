@@ -705,6 +705,9 @@ impl RuntimeExecutionContext<'_> {
             // presentation steps run once through the journaled `PresentToolResult`
             // effect, keyed by `{call_id}:present`, so a replay serves the recorded
             // `ToolPresentation` and never re-runs a step.
+            let plan =
+                crate::runtime::effect::record_tool_presentation_plan(&self.dispatch, call_id)
+                    .await?;
             let presentation_replay_key = format!("{call_id}:present");
             let scoped = self.dispatch.effect_controller.clone();
             let presentation = match crate::EffectAddress::new(
@@ -720,6 +723,7 @@ impl RuntimeExecutionContext<'_> {
                                 presentation_replay_key,
                             ),
                             crate::RuntimeEffectCommand::PresentToolResult {
+                                plan: Box::new(plan.clone()),
                                 call_id: call_id.clone(),
                                 tool_id,
                                 tool_name: outcome.record.tool.clone(),
@@ -734,6 +738,7 @@ impl RuntimeExecutionContext<'_> {
                             std::sync::Arc::clone(&self.dispatch.attachment_store),
                             self.attachment_acceptance().clone(),
                             duration_ms,
+                            &plan,
                         ),
                     )
                     .await

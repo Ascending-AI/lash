@@ -18,6 +18,7 @@ impl RuntimeSessionServices {
         self: &Arc<Self>,
         lent_controller: crate::ScopedEffectController<'static>,
     ) -> Result<crate::tool_dispatch::ToolDispatchContext<'static>, crate::PluginError> {
+        self.current.plugins.materialize()?;
         let tool_surface = self.current.plugins.pin_resolved_tool_surface()?;
         let effect_controller = lent_controller;
         let direct_completions = self.direct_completion_client(effect_controller.clone(), None);

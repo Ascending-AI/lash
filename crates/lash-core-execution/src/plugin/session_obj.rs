@@ -655,6 +655,17 @@ impl PluginSession {
         }
     }
 
+    fn unavailable_callback(&self, callback: &PluginCallbackIdentity) -> PluginError {
+        PluginError::Runtime(
+            PluginExecutionRefusal {
+                recorded: vec![callback.owner.clone()],
+                available: self.host.plugin_revisions(),
+                callback: Some(callback.clone()),
+            }
+            .into_runtime_error(),
+        )
+    }
+
     pub fn has_assistant_stream_hooks(&self) -> bool {
         !self
             .capabilities()
@@ -985,16 +996,7 @@ impl PluginSession {
                     .assistant_response_hooks
                     .iter()
                     .find(|registered| &registered.identity == callback)
-                    .ok_or_else(|| {
-                        PluginError::Runtime(
-                            PluginExecutionRefusal {
-                                recorded: vec![callback.owner.clone()],
-                                available: self.host.plugin_revisions(),
-                                callback: Some(callback.clone()),
-                            }
-                            .into_runtime_error(),
-                        )
-                    })
+                    .ok_or_else(|| self.unavailable_callback(callback))
             })
             .collect()
     }
@@ -1068,90 +1070,6 @@ impl PluginSession {
             }
         }
         Ok(states)
-    }
-
-    /// The presentation boundary (ADR 0099 §6, FIG-3420): folds every
-    /// registered [`ToolPresentationStep`] in registration order, starting
-    /// from `ModelToolReturn::from_output`.
-    ///
-    /// A retryable step error aborts the uncommitted derivation. Other optional
-    /// step errors continue the fold from the
-    /// recorded fallback text return (`ModelToolReturn::text(call_id, tool,
-    /// err)`), so one broken step settles a refusal the model can read instead
-    /// of losing the whole presentation. Attachment-materialization notices
-    /// are then computed under `attachment_acceptance`, the caller's recorded
-    /// environment. Last, the folded return is measured against the
-    /// retention policy and its text retained if it is too long for history
-    /// (FIG-1643). The refs retained through `ctx.artifacts` and the policy
-    /// ride the returned [`crate::runtime::effect::ToolPresentation`] into
-    /// the journal.
-    ///
-    /// A retention that failed anywhere in the chain — the presenter's, a
-    /// step's, or the boundary's own — fails the presentation with a typed
-    /// attachment-store cause: a step that turned the refusal into
-    /// text does not make it the call's return.
-    pub(crate) async fn present_tool_result(
-        &self,
-        ctx: ToolResultProjectionContext,
-        settlement: Arc<crate::runtime::effect::ToolSettlement>,
-        attachment_acceptance: &crate::provider::AttachmentCapabilitySnapshot,
-    ) -> Result<
-        crate::runtime::effect::ToolPresentation,
-        crate::runtime::effect::RuntimeEffectControllerError,
-    > {
-        use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
-
-        self.validate_recorded_admission()
-            .map_err(crate::RuntimeEffectControllerError::from)?;
-        let mut model_return =
-            crate::ModelToolReturn::from_output(ctx.tool_name.clone(), &ctx.output);
-        if let Some(presenter) = &self.capabilities().contributions.presentation_presenter {
-            model_return = (presenter.hook)(ToolPresentationInput {
-                previous: model_return,
-                settlement: Arc::clone(&settlement),
-                context: ctx.clone(),
-            })
-            .await?;
-        }
-        for registered in &self.capabilities().contributions.presentation_steps {
-            let input = ToolPresentationInput {
-                previous: model_return,
-                settlement: Arc::clone(&settlement),
-                context: ctx.clone(),
-            };
-            model_return = match (registered.hook)(input).await {
-                Ok(next) => next,
-                Err(err) if err.is_retryable() => {
-                    return Err(crate::RuntimeEffectControllerError::from(
-                        err.into_turn_failure(crate::RuntimeErrorCode::Plugin),
-                    )
-                    .retryable_uncommitted_derivation());
-                }
-                Err(err) => crate::ModelToolReturn::text(ctx.tool_name.clone(), err.to_string()),
-            };
-        }
-        crate::session::tool_execution::surface_attachment_materialization_notices(
-            attachment_acceptance,
-            &ctx.output,
-            &mut model_return,
-        );
-        let retention = ctx.artifacts.retention_policy();
-        crate::runtime::effect::retain_oversized_return(
-            &mut model_return,
-            &ctx.call_id,
-            ctx.artifacts.as_ref(),
-            retention,
-        )
-        .await?;
-        if let Some(failure) = ctx.artifacts.retention_failure() {
-            return Err(failure);
-        }
-        Ok(crate::runtime::effect::ToolPresentation {
-            version: crate::runtime::effect::TOOL_PRESENTATION_VERSION,
-            model_return,
-            artifacts: ctx.artifacts.retained(),
-            retention,
-        })
     }
 
     pub fn has_runtime_event_hooks(&self) -> bool {
@@ -1586,6 +1504,7 @@ mod attachment_notice_order_tests {
                     artifacts: Arc::new(super::super::NoPresentationArtifacts),
                 },
                 settlement,
+                &session.tool_presentation_plan(),
                 &crate::provider::AttachmentCapabilitySnapshot::default(),
             )
             .await
@@ -1596,5 +1515,132 @@ mod attachment_notice_order_tests {
             crate::ModelToolReturnPart::text("replacement".to_string())
         );
         assert_eq!(presented.model_return.attachment_notices.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod presentation_plan_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct PresenterFactory {
+        revision: u32,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl PluginFactory for PresenterFactory {
+        fn id(&self) -> &'static str {
+            "plan-presenter"
+        }
+        fn declaration(&self) -> PluginDeclaration {
+            let mut declaration = PluginDeclaration::initial(self.id());
+            declaration.behavior_revision = BehaviorRevision::new(self.revision).unwrap();
+            declaration
+        }
+        fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+            Ok(Arc::new(Presenter(Arc::clone(&self.calls))))
+        }
+    }
+
+    struct Presenter(Arc<AtomicUsize>);
+    impl SessionPlugin for Presenter {
+        fn id(&self) -> &'static str {
+            "plan-presenter"
+        }
+        fn register(&self, registrar: &mut PluginRegistrar) -> Result<(), PluginError> {
+            let calls = Arc::clone(&self.0);
+            registrar.tool_results().presenter(Arc::new(move |input| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async move { Ok(input.previous) })
+            }))
+        }
+    }
+
+    fn session(revision: Option<u32>, calls: &Arc<AtomicUsize>) -> Arc<PluginSession> {
+        crate::testing::test_plugin_host(
+            revision
+                .map(|revision| {
+                    Arc::new(PresenterFactory {
+                        revision,
+                        calls: Arc::clone(calls),
+                    }) as Arc<dyn PluginFactory>
+                })
+                .into_iter()
+                .collect(),
+        )
+        .build_session(PluginSessionRequest::creation(
+            "presentation-plan",
+            Default::default(),
+        ))
+        .unwrap()
+    }
+
+    async fn present(
+        session: &PluginSession,
+        plan: &crate::runtime::PresentationBinding,
+    ) -> Result<crate::runtime::effect::ToolPresentation, crate::RuntimeEffectControllerError> {
+        let output = crate::ToolCallOutput::success("semantic-result");
+        let settlement = Arc::new(crate::runtime::effect::ToolSettlement {
+            version: crate::runtime::effect::TOOL_SETTLEMENT_VERSION,
+            intent_outcomes: Vec::new(),
+            possession: Vec::new(),
+            triggers: Vec::new(),
+            checkpoint_messages: Vec::new(),
+            stream: Default::default(),
+            model_return: crate::ModelToolReturn::from_output("fixture".into(), &output),
+        });
+        session
+            .present_tool_result(
+                ToolResultProjectionContext {
+                    owner: crate::RuntimeOwner::Session("presentation-plan".into()),
+                    call_id: crate::ToolCallId::fixture("call"),
+                    tool_id: crate::ToolId::new("fixture:id"),
+                    tool_name: "fixture".into(),
+                    render: None,
+                    args: serde_json::Value::Null,
+                    output,
+                    duration_ms: 0,
+                    artifacts: Arc::new(NoPresentationArtifacts),
+                },
+                settlement,
+                plan,
+                &crate::provider::AttachmentCapabilitySnapshot::default(),
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn a_recorded_presenter_never_runs_a_missing_or_revised_substitute() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let plan = session(Some(1), &calls).tool_presentation_plan();
+        let plan: crate::runtime::PresentationBinding =
+            serde_json::from_value(serde_json::to_value(plan).unwrap()).unwrap();
+        for revision in [None, Some(2)] {
+            let error = present(&session(revision, &calls), &plan)
+                .await
+                .unwrap_err()
+                .into_runtime_error();
+            assert_eq!(
+                error.code,
+                crate::RuntimeErrorCode::PluginRevisionUnavailable
+            );
+            let Some(crate::RuntimeErrorCause::PluginExecution { refusal }) = error.cause else {
+                panic!("the presenter refusal remains typed");
+            };
+            assert_eq!(refusal.callback, plan.presenter);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn an_explicitly_empty_plan_ignores_an_installed_presenter() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        present(
+            &session(Some(1), &calls),
+            &crate::runtime::PresentationBinding::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }

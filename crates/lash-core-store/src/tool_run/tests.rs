@@ -56,7 +56,7 @@ fn binding() -> AdmittedBinding {
         executable: callback("tools", "tool_provider:0"),
         preparation: callback("tools", "tool_provider:0"),
         presentation: PresentationBinding {
-            presenter: callback("standard", "presentation_presenter"),
+            presenter: Some(callback("standard", "presentation_presenter")),
             steps: vec![callback("render", "presentation_step:0")],
         },
     }
@@ -1531,4 +1531,45 @@ fn an_operation_run_keeps_the_session_operation_identity() {
         serde_json::to_value(operation.input()).unwrap(),
         json!({"input": "operation", "operation_id": "batch-7"})
     );
+}
+
+#[test]
+fn presentation_plans_record_explicit_empty_and_decision_only_callbacks() {
+    let empty = PresentationBinding::default();
+    let encoded = serde_json::to_value(&empty).unwrap();
+    assert_eq!(encoded, json!({"presenter": null, "steps": []}));
+    assert_eq!(
+        serde_json::from_value::<PresentationBinding>(encoded).unwrap(),
+        empty
+    );
+    assert!(serde_json::from_value::<PresentationBinding>(json!({"steps": []})).is_err());
+    assert!(serde_json::from_value::<PresentationBinding>(json!({"presenter": null})).is_err());
+    let plan = binding().presentation;
+    let recorded: PresentationBinding =
+        serde_json::from_value(serde_json::to_value(&plan).unwrap()).unwrap();
+    assert_eq!(recorded, plan);
+    let limits = StateCommandLimits {
+        max_commands: 1,
+        max_encoded_bytes: 256,
+    };
+    for proposer in recorded
+        .callbacks()
+        .chain([&callback("render", "assistant_response:derive")])
+    {
+        let batch = StateCommandBatch {
+            plugin: proposer.owner.clone(),
+            origin: StateCommandOrigin::TurnHook {
+                callback: proposer.clone(),
+                segment: SegmentOrdinal(0),
+            },
+            commands: vec![StateCommand::Set {
+                key: "key".into(),
+                value: json!(1),
+            }],
+        };
+        assert_eq!(
+            batch.check(proposer, limits),
+            Err(StateCommandRefusal::DecisionOnly)
+        );
+    }
 }

@@ -62,6 +62,16 @@ key }`. A resumed call whose bound plugin revision is unavailable refuses
 with `PluginExecutionRefusal` (`plugin_revision_unavailable`) before any
 body, route or identity is chosen.
 
+Presentation binds an optional singleton presenter followed by ordered steps.
+Every entry includes the exact callback key and owning revision. An empty
+plan is explicit and does not adopt callbacks installed later. An owed
+presentation resolves the entire plan before invoking any callback; missing
+keys and changed revisions retain the typed callback refusal. Completed
+presentation replay serves its recorded return without resolving callbacks.
+The current scalar and child completion callers record selection through
+`LanguageRuntimeValue` before `PresentToolResult`; the Run admission owner
+consumes the same K1 binding when it replaces those callers.
+
 **Material (Q4).** A reference carries owner (Run, process or source), role
 (prepared request, attempt output, presentation), location (journal-local or
 retained artifact) and a digest. Retention moves bytes, never identity. A
@@ -111,7 +121,7 @@ kind, driven by the session's keyed turn service, over the existing
 session-operation opener. Its call ids and start keys keep their bytes.
 
 **State (Q5) and hook policy.** Only before-turn, after-turn, checkpoint and
-after-tool (result check) callbacks may return state commands; every other
+after-tool (result check) callbacks on the Run's sequential path may return state commands; every other
 callback is decision-only. Commands are reduced privately, recorded with their
 predecessor, published after durable acceptance, and replayed without running
 a body, hook, reducer or converter. One refusal publishes nothing.

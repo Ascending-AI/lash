@@ -31,11 +31,20 @@ use crate::store::plugin_writers::{
 
 /// The presentation callbacks a call is bound to: the singleton presenter,
 /// then the ordered optional steps.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PresentationBinding {
-    pub presenter: PluginCallbackIdentity,
+    /// None records that the baseline return has no singleton renderer.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub presenter: Option<PluginCallbackIdentity>,
     pub steps: Vec<PluginCallbackIdentity>,
+}
+
+impl PresentationBinding {
+    /// The recorded presenter, when present, followed by the recorded steps.
+    pub fn callbacks(&self) -> impl Iterator<Item = &PluginCallbackIdentity> {
+        self.presenter.iter().chain(&self.steps)
+    }
 }
 
 /// The callbacks admission binds automatically, each with its plugin's
@@ -54,13 +63,9 @@ pub struct AdmittedBinding {
 impl AdmittedBinding {
     /// Every bound callback, executable first.
     pub fn callbacks(&self) -> impl Iterator<Item = &PluginCallbackIdentity> {
-        [
-            &self.executable,
-            &self.preparation,
-            &self.presentation.presenter,
-        ]
-        .into_iter()
-        .chain(&self.presentation.steps)
+        [&self.executable, &self.preparation]
+            .into_iter()
+            .chain(self.presentation.callbacks())
     }
 
     /// Refuse when `available` lacks the exact plugin revision of any bound

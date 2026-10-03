@@ -1395,8 +1395,8 @@ pub mod runtime {
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
     pub use lash_core::runtime::SessionTurnAdmission;
     pub use lash_core::runtime::{
-        AdmittedHeadVerdict, CompactionBase, ToolChildAdmission, ToolChildCompletionRouting,
-        ToolChildScope, ToolPresentation,
+        AdmittedHeadVerdict, CompactionBase, PresentationBinding, ToolChildAdmission,
+        ToolChildCompletionRouting, ToolChildScope, ToolPresentation,
     };
     pub use lash_core::shift::relay::RelayPolicy;
     pub use lash_core::tool_dispatch::ToolAttemptLineage;

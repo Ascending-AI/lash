@@ -47,7 +47,7 @@ fn binding(value: u32) -> AdmittedBinding {
         executable: callback("tool:probe"),
         preparation: callback("tool:probe"),
         presentation: PresentationBinding {
-            presenter: callback("present:probe"),
+            presenter: Some(callback("present:probe")),
             steps: Vec::new(),
         },
     }

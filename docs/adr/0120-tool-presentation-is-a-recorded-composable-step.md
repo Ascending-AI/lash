@@ -18,7 +18,12 @@ Retained full output needs storage shared by the runtime's attachment ports.
 A plugin registers a `ToolPresentationPresenter` through
 `registrar.tool_results().presenter(..)`. Standard protocol supplies the
 required renderer. Optional `ToolPresentationStep`s register through
-`presentation_step(..)` and fold in registration order. Every step receives
+`presentation_step(..)` and fold in recorded registration order.
+The recorded `PresentationBinding` names the optional singleton presenter and
+each step by callback key and owning plugin revision. `presenter: null` with
+`steps: []` is an explicit empty plan. An owed derivation resolves every
+identity before invoking any callback. Missing keys or revisions park with
+`PluginExecutionRefusal`; installed substitutes never replace recorded work. Every step receives
 the prior `ModelToolReturn`, the settlement and its projection context.
 A retryable optional-step error aborts the uncommitted presentation derivation
 and is never model-visible text. Other optional-step errors become fallback
@@ -31,7 +36,7 @@ refuses presentation. The renderer handles authored output and tool values,
 limits characters and lines, keeps head and tail, and records visible ranges.
 Every cut retains full text, including failure output.
 
-Sources: `crates/lash-core-execution/src/plugin/session_obj.rs:700`,
+Sources: `crates/lash-core-execution/src/plugin/session_obj/tools.rs`,
 `crates/lash-core-execution/src/plugin/registrar.rs:229`, and
 `crates/lash-protocol-standard/src/render.rs:419`.
 
@@ -40,7 +45,14 @@ Sources: `crates/lash-core-execution/src/plugin/session_obj.rs:700`,
 Scalar completion and group-child completion execute
 `RuntimeEffectCommand::PresentToolResult` through their scoped controller,
 under `{call_id}:present`. The command contains the call and tool identities,
-name, recorded render configuration, arguments and settled output. Duration
+name, recorded render configuration, arguments, settled output and the
+recorded callback plan. Scalar and child completion first record that plan
+under `{call_id}:presentation_plan` through the existing
+`LanguageRuntimeValue` boundary, with operation `tool-presentation-plan`.
+This selection records no callback decision and invokes no callback. The
+presentation then consumes that record, even when registrations were reordered
+or added after selection. K1 admission uses the same `PresentationBinding`
+when the Run coordinator takes ownership of these callers. Duration
 is a local-executor observation, not part of the command identity.
 
 The outcome is `ToolPresentation { version, model_return, artifacts,
@@ -85,7 +97,7 @@ boundary commits follow [ADR 0124](0124-attachments-are-kept-alive-only-by-their
 A session turn holds its puts through `Execution`; a process holds its puts
 through `ProcessRecord`. A session boundary acquires the retained ids it names.
 
-Sources: `crates/lash-core-execution/src/plugin/session_obj.rs:737`,
+Sources: `crates/lash-core-execution/src/plugin/session_obj/tools.rs`,
 `crates/lash-core-execution/src/runtime/effect/tool_presentation.rs:106`, and
 `crates/lash-protocol-rlm/src/executor/mod.rs:236`.
 

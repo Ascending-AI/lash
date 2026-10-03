@@ -17,10 +17,57 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+pub use lash_core_store::tool_run::PresentationBinding;
 use lash_sansio::sync::MutexExt as _;
 use serde::{Deserialize, Serialize};
 
 use super::executor::RuntimeEffectControllerError;
+
+/// Record selection independently of the callback body. Both current completion
+/// paths consume this same K1 binding; replay never reselects installed hooks.
+pub(crate) async fn record_tool_presentation_plan(
+    context: &crate::tool_dispatch::ToolDispatchContext<'_>,
+    call_id: &crate::ToolCallId,
+) -> Result<PresentationBinding, RuntimeEffectControllerError> {
+    let key = format!("{call_id}:presentation_plan");
+    let controller = &context.effect_controller;
+    let plugins = Arc::clone(&context.plugins);
+    let envelope = super::RuntimeEffectEnvelope::new(
+        super::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(controller.execution_scope().clone(), key.clone())?,
+            context.parentless_attribution(),
+            key,
+        ),
+        super::RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "tool-presentation-plan".into(),
+        },
+    );
+    let recorded = controller
+        .execute_effect(
+            envelope,
+            super::RuntimeEffectLocalExecutor::language_runtime_value_with(move |_| async move {
+                plugins
+                    .validate_recorded_admission()
+                    .map_err(RuntimeEffectControllerError::from)?;
+                let value =
+                    serde_json::to_value(plugins.tool_presentation_plan()).map_err(|error| {
+                        RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::RecordEncodingFailed,
+                            format!("cannot record the presentation callback plan: {error}"),
+                        )
+                    })?;
+                Ok(super::RuntimeEffectOutcome::LanguageRuntimeValue { value })
+            }),
+        )
+        .await?
+        .into_language_runtime_value()?;
+    serde_json::from_value(recorded).map_err(|error| {
+        RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
+            format!("cannot read the recorded presentation callback plan: {error}"),
+        )
+    })
+}
 
 /// The durable format version [`ToolPresentation`] stamps and
 /// [`ToolPresentation::validate`] refuses mismatches against.

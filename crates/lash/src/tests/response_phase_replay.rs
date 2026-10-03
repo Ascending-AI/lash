@@ -1028,3 +1028,274 @@ async fn stream_state_pairs_multiple_callbacks_of_one_plugin_on_cold_replay() {
         format!("{RAW}:first:second")
     );
 }
+
+#[derive(Clone, Copy, Debug)]
+enum PresentationChange {
+    Reordered,
+    Missing,
+    Revision,
+    Empty,
+}
+
+struct PresentationTool(Arc<AtomicUsize>);
+
+fn presentation_tool() -> lash_core::ToolDefinition {
+    test_tool_definition_with_tool_binding(
+        lash_core::ToolDefinition::raw(
+            "tool:presentation-plan",
+            "presentation_plan",
+            "presentation replay fixture",
+            serde_json::json!({"type": "object"}),
+            serde_json::json!({}),
+        )
+        .unwrap(),
+        "presentation_plan",
+    )
+}
+
+#[async_trait]
+impl ToolProvider for PresentationTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![presentation_tool().manifest()]
+    }
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "presentation_plan").then(|| Arc::new(presentation_tool().contract()))
+    }
+    async fn execute(&self, _: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        lash_core::ToolOutcome::ok(serde_json::json!("semantic-result")).into()
+    }
+}
+
+fn presentation_core(
+    engine: &Engine,
+    keys: &[&'static str],
+    revision: u32,
+    bodies: &Arc<AtomicUsize>,
+    callbacks: &Arc<StdMutex<Vec<String>>>,
+) -> LashCore {
+    let provider = crate::testing::TestProvider::builder()
+        .kind("presentation-plan-replay")
+        .complete(|request| async move {
+            let called = request.messages.iter().any(|message| {
+                message
+                    .blocks
+                    .iter()
+                    .any(|block| matches!(block, LlmContentBlock::ToolResult { .. }))
+            });
+            Ok(if called {
+                text_response("done")
+            } else {
+                LlmResponse {
+                    parts: vec![LlmOutputPart::ToolCall {
+                        call_id: "presentation-call".into(),
+                        tool_name: "presentation_plan".into(),
+                        input_json: "{}".into(),
+                        replay: None,
+                    }],
+                    ..Default::default()
+                }
+            })
+        })
+        .build()
+        .into_handle();
+    let mut spec = lash_core::facade_support::PluginSpec::new();
+    for key in keys {
+        let key = *key;
+        let callbacks = Arc::clone(callbacks);
+        spec = spec.with_presentation_step(
+            lash_core::plugin::HookKey::new(key).unwrap(),
+            Arc::new(move |input| {
+                callbacks.lock_recover().push(key.into());
+                let mut next = input.previous;
+                next.parts
+                    .push(lash_core::facade_support::ModelToolReturnPart::text(key));
+                Box::pin(async move { Ok(next) })
+            }),
+        );
+    }
+    let mut declaration = lash_core::plugin::PluginDeclaration::initial("presentation-plan-hooks");
+    declaration.behavior_revision = lash_core::plugin::BehaviorRevision::new(revision).unwrap();
+    LashCore::standard_builder(engine.lash_backend())
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .tools(Arc::new(PresentationTool(Arc::clone(bodies))))
+        .plugin(Arc::new(StaticPluginFactory::new(declaration, spec)))
+        .build(crate::testing::runtime_lease_owner())
+        .unwrap()
+}
+
+async fn owed_presentation_replay(change: PresentationChange) -> Result<()> {
+    let world = world(Storage::SqliteMemory, false).await.unwrap();
+    let engine = Engine::Double(world.double);
+    let bodies = Arc::new(AtomicUsize::new(0));
+    let callbacks = Arc::new(StdMutex::new(Vec::new()));
+    let keys: &[&str] = if matches!(change, PresentationChange::Empty) {
+        &[]
+    } else {
+        &["a", "b"]
+    };
+    let core = presentation_core(&engine, keys, 1, &bodies, &callbacks);
+    let session_id = SessionId::fixture(format!("presentation-{change:?}"));
+    let session = core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    engine.crash_on(
+        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRunResultEnding {
+            suffix: ":present".into(),
+        })
+        .times(u32::MAX),
+    );
+    let first = Arc::new(StdMutex::new(Some(core)));
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    assert!(engine.on_crash({
+        let first = Arc::clone(&first);
+        let dropped = Arc::clone(&dropped);
+        Arc::new(move |_: &str| {
+            let core = first.lock_recover().take();
+            std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(async move { drop(core) });
+            })
+            .join()
+            .unwrap();
+            dropped.store(true, Ordering::SeqCst);
+        })
+    }));
+    let sent = session.send(TurnInput::text("call the tool")).await?;
+    // Sending admits durable input; observation need not keep the first core alive.
+    drop(sent);
+    drop(session);
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while !dropped.load(Ordering::SeqCst) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the first core dies before the presentation result is durable");
+    let Engine::Double(double) = engine else {
+        unreachable!()
+    };
+    let engine = Engine::Double(double.restart().await.expect("restart the worker"));
+    let replay_callbacks = Arc::new(StdMutex::new(Vec::new()));
+    let live_keys: &[&str] = match change {
+        PresentationChange::Reordered => &["b", "a"],
+        PresentationChange::Missing => &["a"],
+        PresentationChange::Revision => &["a", "b"],
+        PresentationChange::Empty => &["a", "b"],
+    };
+    let second = presentation_core(
+        &engine,
+        live_keys,
+        if matches!(change, PresentationChange::Revision) {
+            2
+        } else {
+            1
+        },
+        &bodies,
+        &replay_callbacks,
+    );
+    let Engine::Double(double) = &engine else {
+        unreachable!()
+    };
+    double.server().clear_crashes();
+    let store = lash_core::runtime::live_session_view(&second.store_factory, &session_id)
+        .await?
+        .unwrap();
+    let refused = matches!(
+        change,
+        PresentationChange::Missing | PresentationChange::Revision
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            for run in double.server().invocations() {
+                if run.status == "paused" {
+                    double.server().resume(&run.id);
+                }
+            }
+            if let Some(park) = store.load_turn_park().await.unwrap() {
+                assert!(refused, "an available recorded plan must execute: {park:?}");
+                let lash_core::store::ParkReason::PluginRevisionUnavailable { refusal, .. } =
+                    park.reason
+                else {
+                    panic!("the presentation refusal stays typed: {park:?}");
+                };
+                if let Some(callback) = refusal.callback {
+                    assert_eq!(callback.owner.plugin, "presentation-plan-hooks");
+                    assert_eq!(callback.owner.behavior_revision.get(), 1);
+                    assert_eq!(
+                        callback.key,
+                        if matches!(change, PresentationChange::Missing) {
+                            "presentation_step:b"
+                        } else {
+                            "presentation_step:a"
+                        }
+                    );
+                } else {
+                    assert!(matches!(change, PresentationChange::Revision));
+                    assert!(
+                        refusal
+                            .recorded
+                            .iter()
+                            .any(|owner| owner.plugin == "presentation-plan-hooks"
+                                && owner.behavior_revision.get() == 1)
+                    );
+                }
+                break;
+            }
+            if open_session_invocations(&engine, &session_id)
+                .await
+                .is_empty()
+            {
+                assert!(!refused, "an unavailable callback must park");
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("replay finishes or parks");
+    assert_eq!(
+        bodies.load(Ordering::SeqCst),
+        1,
+        "the protected tool result is replayed"
+    );
+    let expected: &[&str] = if matches!(change, PresentationChange::Reordered) {
+        &["a", "b"]
+    } else {
+        &[]
+    };
+    let invoked = replay_callbacks.lock_recover().clone();
+    assert_eq!(
+        invoked.as_slice(),
+        expected,
+        "presentation invokes only the recorded plan, after validating every callback: {:?}",
+        session_journals(&engine, &session_id).await
+    );
+    drop(second);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn owed_presentation_keeps_recorded_callback_order() -> Result<()> {
+    owed_presentation_replay(PresentationChange::Reordered).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn owed_presentation_missing_callback_parks_before_any_callback() -> Result<()> {
+    owed_presentation_replay(PresentationChange::Missing).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn owed_presentation_changed_revision_parks_before_any_callback() -> Result<()> {
+    owed_presentation_replay(PresentationChange::Revision).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn owed_presentation_empty_plan_ignores_new_steps() -> Result<()> {
+    owed_presentation_replay(PresentationChange::Empty).await
+}

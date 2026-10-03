@@ -1685,6 +1685,9 @@ pub(crate) async fn resolve_model_return(
     // effect under the child's own bound controller, so the folded return is
     // the settlement's recorded `model_return` — replay serves the record and
     // never re-runs a step (ADR 0099 §6, FIG-3420).
+    let plan =
+        crate::runtime::effect::record_tool_presentation_plan(dispatch, &request.call.call_id)
+            .await?;
     let replay_key = format!("{}:present", request.call.call_id);
     let scoped = dispatch.effect_controller.clone();
     let presented =
@@ -1698,6 +1701,7 @@ pub(crate) async fn resolve_model_return(
                             replay_key,
                         ),
                         crate::RuntimeEffectCommand::PresentToolResult {
+                            plan: Box::new(plan.clone()),
                             call_id: request.call.call_id.clone(),
                             tool_id: request.call.tool_id.clone(),
                             tool_name: outcome.record.tool.clone(),
@@ -1712,6 +1716,7 @@ pub(crate) async fn resolve_model_return(
                         Arc::clone(&dispatch.attachment_store),
                         (*dispatch.execution_env_spec.policy.attachment_acceptance).clone(),
                         duration_ms,
+                        &plan,
                     ),
                 )
                 .await
