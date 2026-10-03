@@ -16,7 +16,7 @@ pub(super) struct RestateHostGroupExecutors {
 }
 
 impl GroupExecutors for RestateHostGroupExecutors {
-    fn trace_runtime(&self) -> lash_core::trace::TraceRuntime {
+    fn trace_runtime(&self) -> lash_core::facade_support::TraceRuntime {
         self.controller
             .group_executors
             .get()

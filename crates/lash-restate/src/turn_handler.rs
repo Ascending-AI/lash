@@ -78,7 +78,7 @@ pub(crate) async fn park_refused_group_child(
     sessions: &dyn lash_core::DeploymentStore,
     scope: &lash_core::ExecutionScope,
     refusal: &lash_core::RuntimeEffectControllerError,
-    tracing: &lash_core::trace::TraceRuntime,
+    tracing: &lash_core::facade_support::TraceRuntime,
 ) -> Result<Option<lash_core::store::TurnPark>, lash_core::StoreError> {
     lash_core::park_turn_of_refused_group_child(
         sessions,
