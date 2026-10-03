@@ -69,6 +69,14 @@ they keep progressing while the handler awaits another result. Sequential
 actions may borrow local values. Hosts use the existing SDK re-export and one
 Endpoint.
 
+A started result is settled only once awaited. Dropping its future neither
+cancels nor settles the run, and a successful return drops any run still
+executing without recording it. A run's bounded retry budget counts failed
+attempts since the invocation's last recorded entry, so a sibling's recorded
+result restarts it; concurrent handles share no per-handle budget.
+`tests/server_semantics.rs` in `lash-restate-test` pins these rules with the
+crash, retry and cancellation laws for started runs.
+
 Upgrade note: invocations that journaled `ExecCode` under the pre-fix wrapping
 will diverge on replay after upgrade; they were already panic-looping and need
 an admin `KILL`.

@@ -52,37 +52,6 @@ fn counter(name: &str) -> &'static AtomicUsize {
 
 struct Counter;
 
-struct ParallelRuns {
-    entered: tokio::sync::mpsc::UnboundedSender<usize>,
-    release: [Arc<tokio::sync::Notify>; 3],
-}
-
-#[restate_sdk::service]
-impl ParallelRuns {
-    #[handler]
-    async fn receipts(&self, ctx: Context<'_>) -> HandlerResult<Json<Vec<String>>> {
-        let runs: Vec<_> = (0..3)
-            .map(|index| {
-                let entered = self.entered.clone();
-                let release = Arc::clone(&self.release[index]);
-                ctx.run(move || async move {
-                    entered.send(index).unwrap();
-                    release.notified().await;
-                    Ok(Json(format!("receipt-{index}")))
-                })
-                .name(format!("attempt-{index}"))
-                .retry_policy(RunRetryPolicy::new().max_attempts(1))
-                .start()
-            })
-            .collect();
-        let mut receipts = Vec::new();
-        for run in runs {
-            receipts.push(run.await?.0);
-        }
-        Ok(Json(receipts))
-    }
-}
-
 #[restate_sdk::object]
 impl Counter {
     #[handler]
@@ -337,74 +306,6 @@ fn modes() -> [ServerConfig; 4] {
 // ---------------------------------------------------------------------------
 // Laws
 // ---------------------------------------------------------------------------
-
-/// L01: all bodies enter before any completes, and each has its own receipt.
-#[tokio::test]
-async fn concurrent_runs_record_independent_receipts_in_completion_order() {
-    let (entered, mut entries) = tokio::sync::mpsc::unbounded_channel();
-    let release = std::array::from_fn(|_| Arc::new(tokio::sync::Notify::new()));
-    let endpoint = Endpoint::builder()
-        .bind(ParallelRuns {
-            entered,
-            release: release.clone(),
-        })
-        .build();
-    let server = RestateTestServer::start(endpoint, ServerConfig::default())
-        .await
-        .unwrap();
-    let invocation = send_invocation(&server, "ParallelRuns/receipts", "null").await;
-
-    let mut started = Vec::new();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        for _ in 0..3 {
-            started.push(entries.recv().await.unwrap());
-        }
-    })
-    .await
-    .expect("every independent body enters before any is released");
-    started.sort_unstable();
-    assert_eq!(started, [0, 1, 2]);
-
-    let mut expected = Vec::new();
-    for index in [2, 0, 1] {
-        release[index].notify_one();
-        expected.push(format!("receipt-{index}"));
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let recorded: Vec<String> = server
-                    .journal(&invocation)
-                    .unwrap()
-                    .into_iter()
-                    .filter_map(|entry| entry.run_completion())
-                    .map(|result| serde_json::from_slice(&result.unwrap()).unwrap())
-                    .collect();
-                if recorded.len() >= expected.len() {
-                    assert_eq!(recorded, expected);
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("each released body durably records its own receipt");
-    }
-    assert_eq!(
-        post(
-            &server,
-            &format!("restate/invocation/{invocation}/attach"),
-            "null"
-        )
-        .await,
-        (200, "[\"receipt-0\",\"receipt-1\",\"receipt-2\"]".into())
-    );
-    let names: Vec<String> = server
-        .journal(&invocation)
-        .unwrap()
-        .into_iter()
-        .filter_map(|entry| entry.name)
-        .collect();
-    assert_eq!(names, ["attempt-0", "attempt-1", "attempt-2"]);
-}
 
 #[tokio::test]
 async fn sdk_sleep_deadline_survives_a_held_response_frame() {
@@ -1358,6 +1259,784 @@ async fn a_new_build_serves_new_invocations_while_pinned_ones_finish_on_theirs()
             .all(|(deployment, _)| deployment == build_n.as_str()),
         "no attempt of job one ever dispatched to build N+1"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Concurrent started runs (FIG-4871): eager named handles, configured retry
+// policies, crash cuts and cancellation through Lash's SDK re-export
+// ---------------------------------------------------------------------------
+
+/// What one execution of a call's body does once the test releases it.
+#[derive(Clone, Copy)]
+enum Step {
+    Succeed,
+    /// A retryable failure: the run's retry policy decides what follows.
+    Transient,
+    /// A terminal failure, recorded as the call's result.
+    Refuse,
+}
+
+/// What a `Calls` handler saw, in order, with every crash marked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Observed {
+    Result(usize),
+    Crash,
+}
+
+/// One handle's settlement as the handler read it.
+type Settled = Result<String, (u16, String)>;
+
+/// The bodies of up to three calls. Each execution counts itself and parks
+/// until the test releases it, then does what `script` says for that call
+/// and execution; its receipt `call-<call>@<execution>` names exactly which
+/// execution produced a recorded result.
+struct Bodies {
+    executions: [AtomicUsize; 3],
+    /// Executions dropped while parked: their closure never finished.
+    abandoned: [AtomicUsize; 3],
+    release: [tokio::sync::Notify; 3],
+    script: fn(usize, usize) -> Step,
+    observed: Mutex<Vec<Observed>>,
+}
+
+impl Bodies {
+    fn new(script: fn(usize, usize) -> Step) -> Arc<Self> {
+        Arc::new(Self {
+            executions: Default::default(),
+            abandoned: Default::default(),
+            release: Default::default(),
+            script,
+            observed: Mutex::default(),
+        })
+    }
+
+    fn executions(&self) -> [usize; 3] {
+        std::array::from_fn(|call| self.executions[call].load(Ordering::SeqCst))
+    }
+
+    fn abandoned(&self) -> [usize; 3] {
+        std::array::from_fn(|call| self.abandoned[call].load(Ordering::SeqCst))
+    }
+
+    fn observed(&self) -> Vec<Observed> {
+        self.observed.lock().unwrap().clone()
+    }
+}
+
+fn always_succeed(_call: usize, _execution: usize) -> Step {
+    Step::Succeed
+}
+
+/// Counts a parked execution that is dropped before it finishes.
+struct Parked(Option<(Arc<Bodies>, usize)>);
+
+impl Drop for Parked {
+    fn drop(&mut self) {
+        if let Some((bodies, call)) = self.0.take() {
+            bodies.abandoned[call].fetch_add(1, Ordering::SeqCst);
+        }
+    }
+}
+
+async fn call_body(bodies: Arc<Bodies>, call: usize) -> HandlerResult<Json<String>> {
+    let execution = bodies.executions[call].fetch_add(1, Ordering::SeqCst) + 1;
+    let mut parked = Parked(Some((Arc::clone(&bodies), call)));
+    bodies.release[call].notified().await;
+    parked.0 = None;
+    let receipt = format!("call-{call}@{execution}");
+    match (bodies.script)(call, execution) {
+        Step::Succeed => Ok(Json(receipt)),
+        Step::Transient => Err(HandlerError::from(std::io::Error::other(receipt))),
+        Step::Refuse => Err(TerminalError::new_with_code(418, receipt).into()),
+    }
+}
+
+type CallHandle = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<Json<String>, TerminalError>> + Send>,
+>;
+
+struct Calls {
+    bodies: Arc<Bodies>,
+    retry: RunRetryPolicy,
+}
+
+impl Calls {
+    /// Registers `count` calls named `call-<n>`, each under the configured
+    /// retry policy, before any of them is awaited.
+    fn start(&self, ctx: &Context<'_>, count: usize) -> Vec<CallHandle> {
+        (0..count)
+            .map(|call| {
+                let bodies = Arc::clone(&self.bodies);
+                Box::pin(
+                    ctx.run(move || call_body(bodies, call))
+                        .name(format!("call-{call}"))
+                        .retry_policy(self.retry.clone())
+                        .start(),
+                ) as CallHandle
+            })
+            .collect()
+    }
+}
+
+#[restate_sdk::service]
+impl Calls {
+    /// Starts three calls, then reads every handle in issue order and
+    /// returns how each settled.
+    #[handler]
+    async fn issue(&self, ctx: Context<'_>) -> HandlerResult<Json<Vec<Settled>>> {
+        let mut settled = Vec::new();
+        for (call, handle) in self.start(&ctx, 3).into_iter().enumerate() {
+            let result = handle.await;
+            self.bodies
+                .observed
+                .lock()
+                .unwrap()
+                .push(Observed::Result(call));
+            settled.push(
+                result
+                    .map(|Json(receipt)| receipt)
+                    .map_err(|error| (error.code(), error.message().to_owned())),
+            );
+        }
+        Ok(Json(settled))
+    }
+
+    /// Starts three calls and returns at the first failed handle, in issue
+    /// order, leaving the later calls unread.
+    #[handler]
+    async fn first_failure(&self, ctx: Context<'_>) -> HandlerResult<Json<Vec<String>>> {
+        let mut receipts = Vec::new();
+        for handle in self.start(&ctx, 3) {
+            receipts.push(handle.await?.0);
+        }
+        Ok(Json(receipts))
+    }
+
+    /// Starts two calls, drops the first call's result future and returns
+    /// the second call's receipt.
+    #[handler]
+    async fn drop_first(&self, ctx: Context<'_>) -> HandlerResult<Json<String>> {
+        let mut handles = self.start(&ctx, 2);
+        let second = handles.pop().unwrap();
+        drop(handles);
+        Ok(Json(second.await?.0))
+    }
+}
+
+/// A server for `Calls`, marking every crash in the bodies' observations.
+async fn calls_server(
+    config: ServerConfig,
+    bodies: &Arc<Bodies>,
+    retry: RunRetryPolicy,
+) -> RestateTestServer {
+    let endpoint = Endpoint::builder()
+        .bind(Calls {
+            bodies: Arc::clone(bodies),
+            retry,
+        })
+        .build();
+    let server = RestateTestServer::start(endpoint, config).await.unwrap();
+    let marked = Arc::clone(bodies);
+    assert!(server.on_crash(Arc::new(move |_| {
+        marked.observed.lock().unwrap().push(Observed::Crash);
+    })));
+    server
+}
+
+fn streaming_modes() -> [ServerConfig; 2] {
+    [
+        ServerConfig::default(),
+        ServerConfig::default().protocol(lash_restate_test::ProtocolVersion::V7),
+    ]
+}
+
+/// A retry policy whose delays are short enough for the server to fire on
+/// its own.
+fn bounded(max_attempts: u32) -> RunRetryPolicy {
+    RunRetryPolicy::new()
+        .initial_delay(Duration::from_millis(10))
+        .max_attempts(max_attempts)
+}
+
+async fn until(what: &str, mut done: impl FnMut() -> bool) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !done() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
+}
+
+/// The receipts the journal recorded for its run completions, in stored
+/// order: a value's receipt, or the receipt a failure's message names.
+fn receipts(server: &RestateTestServer, id: &str) -> Vec<String> {
+    server
+        .journal(id)
+        .unwrap()
+        .into_iter()
+        .filter_map(|entry| entry.run_completion())
+        .map(|result| match result {
+            Ok(value) => serde_json::from_slice(&value).unwrap(),
+            Err((_, message)) => message,
+        })
+        .collect()
+}
+
+/// The names the journal's commands carry: only runs are named here.
+fn run_names(server: &RestateTestServer, id: &str) -> Vec<String> {
+    server
+        .journal(id)
+        .unwrap()
+        .into_iter()
+        .filter_map(|entry| entry.name)
+        .collect()
+}
+
+/// What the test waits for after releasing an execution.
+enum Then {
+    /// Its result is in the journal.
+    Recorded,
+    /// Its failure ended the attempt and the server scheduled a retry.
+    Retried,
+    /// The server crashed the attempt on its proposal.
+    Crashed,
+}
+
+/// Releases `execution` of `call` once it has entered, then waits for
+/// `then`.
+async fn release(
+    server: &RestateTestServer,
+    id: &str,
+    bodies: &Bodies,
+    call: usize,
+    execution: usize,
+    then: Then,
+) {
+    let receipt = format!("call-{call}@{execution}");
+    until(&format!("{receipt} enters"), || {
+        bodies.executions[call].load(Ordering::SeqCst) >= execution
+    })
+    .await;
+    assert_eq!(
+        bodies.executions[call].load(Ordering::SeqCst),
+        execution,
+        "{receipt} is the call's newest execution"
+    );
+    let before = server.stats();
+    bodies.release[call].notify_one();
+    match then {
+        Then::Recorded => {
+            until(&format!("{receipt} is recorded"), || {
+                receipts(server, id)
+                    .iter()
+                    .any(|recorded| recorded.contains(&receipt))
+            })
+            .await;
+        }
+        Then::Retried => {
+            until(&format!("{receipt} is retried"), || {
+                server.stats().retries > before.retries
+            })
+            .await;
+        }
+        Then::Crashed => {
+            until(&format!("{receipt}'s proposal crashes the attempt"), || {
+                server.stats().crashes > before.crashes
+            })
+            .await;
+        }
+    }
+}
+
+async fn finished(server: &RestateTestServer, id: &str) -> Result<bytes::Bytes, (u32, String)> {
+    until(&format!("{id} completes"), || server.outcome(id).is_some()).await;
+    server.outcome(id).unwrap()
+}
+
+async fn settled(server: &RestateTestServer, id: &str) -> Vec<Settled> {
+    serde_json::from_slice(&finished(server, id).await.unwrap()).unwrap()
+}
+
+fn ok(receipts: [&str; 3]) -> Vec<Settled> {
+    receipts.map(|receipt| Ok(receipt.to_owned())).into()
+}
+
+/// The order the tests release a batch's first executions in.
+const COMPLETION_ORDER: [usize; 3] = [2, 0, 1];
+
+/// L01: every body enters before any completes; released 2/0/1, each call
+/// records its own receipt in that order and the handler reads them in
+/// issue order. A forced-serial runner never enters all three, and one
+/// batch-sized receipt never records three.
+#[tokio::test]
+async fn concurrent_runs_record_independent_receipts_in_completion_order() {
+    for config in modes() {
+        let bodies = Bodies::new(always_succeed);
+        let server = calls_server(config, &bodies, bounded(1)).await;
+        let id = send_invocation(&server, "Calls/issue", "null").await;
+        until("every body enters before any is released", || {
+            bodies.executions() == [1, 1, 1]
+        })
+        .await;
+        for call in COMPLETION_ORDER {
+            release(&server, &id, &bodies, call, 1, Then::Recorded).await;
+        }
+        assert_eq!(receipts(&server, &id), ["call-2@1", "call-0@1", "call-1@1"]);
+        assert_eq!(
+            settled(&server, &id).await,
+            ok(["call-0@1", "call-1@1", "call-2@1"])
+        );
+        assert_eq!(run_names(&server, &id), ["call-0", "call-1", "call-2"]);
+        assert_eq!(bodies.executions(), [1, 1, 1]);
+    }
+}
+
+/// Where a crash cuts a batch released 2/0/1.
+#[derive(Clone, Copy, Debug)]
+enum Cut {
+    /// The attempt crashes while the calls after the first `n` released
+    /// are still executing.
+    Executing(usize),
+    /// The attempt crashes on the proposal of the `n`-th released call,
+    /// before the server stores or acknowledges it.
+    Proposal(usize),
+    /// The attempt crashes on its output after every result is recorded;
+    /// the double never cuts the terminal frame after it.
+    Output,
+}
+
+/// L02: a crash at any await or finalization boundary keeps every recorded
+/// result without running its body again; only calls without a recorded
+/// result execute again, under the same logical call id. A proposal the
+/// server has not acknowledged is never read by the handler and is not a
+/// result.
+#[tokio::test]
+async fn a_crash_reruns_only_calls_without_a_recorded_result() {
+    let cuts = [
+        Cut::Executing(0),
+        Cut::Executing(1),
+        Cut::Executing(2),
+        Cut::Proposal(0),
+        Cut::Proposal(1),
+        Cut::Proposal(2),
+        Cut::Output,
+    ];
+    for config in modes() {
+        for cut in cuts {
+            let scenario = format!("{cut:?} on {config:?}");
+            let bodies = Bodies::new(always_succeed);
+            let server = calls_server(config.clone(), &bodies, bounded(1)).await;
+            let kept = match cut {
+                Cut::Executing(kept) => kept,
+                Cut::Proposal(kept) => {
+                    server.crash_on(
+                        CrashRule::new(CrashPoint::BeforeRunResult {
+                            name: Some(format!("call-{}", COMPLETION_ORDER[kept])),
+                        })
+                        .service("Calls"),
+                    );
+                    kept
+                }
+                Cut::Output => {
+                    server.crash_on(
+                        CrashRule::new(CrashPoint::BeforeFrame {
+                            ty: lash_restate_test::protocol::MessageType::OutputCommand,
+                        })
+                        .service("Calls"),
+                    );
+                    COMPLETION_ORDER.len()
+                }
+            };
+            let id = send_invocation(&server, "Calls/issue", "null").await;
+            until(&format!("{scenario}: every body enters"), || {
+                bodies.executions() == [1, 1, 1]
+            })
+            .await;
+            let (recorded, rerun) = COMPLETION_ORDER.split_at(kept);
+            for &call in recorded {
+                release(&server, &id, &bodies, call, 1, Then::Recorded).await;
+            }
+            match cut {
+                Cut::Executing(_) => assert!(server.crash(&id), "{scenario}"),
+                Cut::Proposal(_) => {
+                    release(&server, &id, &bodies, rerun[0], 1, Then::Crashed).await;
+                }
+                Cut::Output => {}
+            }
+            for &call in rerun {
+                release(&server, &id, &bodies, call, 2, Then::Recorded).await;
+            }
+
+            let receipt = |call: usize| {
+                let execution = if recorded.contains(&call) { 1 } else { 2 };
+                format!("call-{call}@{execution}")
+            };
+            assert_eq!(
+                receipts(&server, &id),
+                COMPLETION_ORDER.map(receipt),
+                "{scenario}"
+            );
+            assert_eq!(
+                settled(&server, &id).await,
+                [0, 1, 2].map(|call| Settled::Ok(receipt(call))),
+                "{scenario}"
+            );
+            assert_eq!(server.stats().crashes, 1, "{scenario}");
+            assert_eq!(
+                bodies.executions(),
+                [0, 1, 2].map(|call| if recorded.contains(&call) { 1 } else { 2 }),
+                "{scenario}"
+            );
+            assert_eq!(
+                run_names(&server, &id),
+                ["call-0", "call-1", "call-2"],
+                "{scenario}"
+            );
+            let observed = bodies.observed();
+            let before_crash = observed
+                .split(|seen| *seen == Observed::Crash)
+                .next()
+                .unwrap();
+            assert!(
+                before_crash
+                    .iter()
+                    .all(|seen| matches!(seen, Observed::Result(call) if recorded.contains(call))),
+                "{scenario}: the crashed attempt read only recorded results: {observed:?}"
+            );
+        }
+    }
+}
+
+/// A reported retryable failure ends the attempt and is retried under the
+/// call's own policy, apart from any crash: recorded siblings are reused,
+/// unfinished siblings execute again, and each call's command keeps its
+/// logical call id.
+#[tokio::test]
+async fn reported_transient_failures_retry_only_calls_without_a_recorded_result() {
+    fn script(call: usize, execution: usize) -> Step {
+        match (call, execution) {
+            (0, 1) | (1, 2) => Step::Transient,
+            _ => Step::Succeed,
+        }
+    }
+    for config in modes() {
+        let bodies = Bodies::new(script);
+        let server = calls_server(config, &bodies, bounded(5)).await;
+        let id = send_invocation(&server, "Calls/issue", "null").await;
+        until("every body enters", || bodies.executions() == [1, 1, 1]).await;
+        release(&server, &id, &bodies, 2, 1, Then::Recorded).await;
+        release(&server, &id, &bodies, 0, 1, Then::Retried).await;
+        until("the unrecorded calls execute again", || {
+            bodies.executions() == [2, 2, 1]
+        })
+        .await;
+        release(&server, &id, &bodies, 1, 2, Then::Retried).await;
+        release(&server, &id, &bodies, 0, 3, Then::Recorded).await;
+        release(&server, &id, &bodies, 1, 3, Then::Recorded).await;
+
+        assert_eq!(
+            settled(&server, &id).await,
+            ok(["call-0@3", "call-1@3", "call-2@1"])
+        );
+        assert_eq!(receipts(&server, &id), ["call-2@1", "call-0@3", "call-1@3"]);
+        assert_eq!(bodies.executions(), [3, 3, 1]);
+        assert_eq!(bodies.abandoned(), [1, 1, 0]);
+        let stats = server.stats();
+        assert_eq!((stats.retries, stats.crashes), (2, 0));
+        assert_eq!(run_names(&server, &id), ["call-0", "call-1", "call-2"]);
+    }
+}
+
+/// Exhausting a call's bounded policy records a terminal failure as that
+/// call's result while its siblings keep theirs. The budget counts failed
+/// attempts since the invocation's last recorded entry, so a sibling's
+/// result recorded between two failures restarts it: the SDK keeps no
+/// independent retry budget per concurrent handle.
+#[tokio::test]
+async fn exhausting_a_bounded_policy_records_a_terminal_result_for_that_call() {
+    fn script(call: usize, _execution: usize) -> Step {
+        if call == 0 {
+            Step::Transient
+        } else {
+            Step::Succeed
+        }
+    }
+    for config in modes() {
+        // Both siblings recorded before the first failure: three executions.
+        let bodies = Bodies::new(script);
+        let server = calls_server(config.clone(), &bodies, bounded(3)).await;
+        let id = send_invocation(&server, "Calls/issue", "null").await;
+        until("every body enters", || bodies.executions() == [1, 1, 1]).await;
+        release(&server, &id, &bodies, 1, 1, Then::Recorded).await;
+        release(&server, &id, &bodies, 2, 1, Then::Recorded).await;
+        release(&server, &id, &bodies, 0, 1, Then::Retried).await;
+        release(&server, &id, &bodies, 0, 2, Then::Retried).await;
+        release(&server, &id, &bodies, 0, 3, Then::Recorded).await;
+        let settled_calls = settled(&server, &id).await;
+        assert!(
+            matches!(&settled_calls[0], Err((500, message)) if message.contains("call-0@3")),
+            "{settled_calls:?}"
+        );
+        assert_eq!(
+            settled_calls[1..],
+            [Ok("call-1@1".to_owned()), Ok("call-2@1".to_owned())]
+        );
+        assert_eq!(bodies.executions(), [3, 1, 1]);
+        assert_eq!(server.stats().retries, 2);
+
+        // A sibling recorded between the first two failures: four.
+        let bodies = Bodies::new(script);
+        let server = calls_server(config, &bodies, bounded(3)).await;
+        let id = send_invocation(&server, "Calls/issue", "null").await;
+        until("every body enters", || bodies.executions() == [1, 1, 1]).await;
+        release(&server, &id, &bodies, 2, 1, Then::Recorded).await;
+        release(&server, &id, &bodies, 0, 1, Then::Retried).await;
+        until("the unrecorded calls execute again", || {
+            bodies.executions() == [2, 2, 1]
+        })
+        .await;
+        release(&server, &id, &bodies, 1, 2, Then::Recorded).await;
+        release(&server, &id, &bodies, 0, 2, Then::Retried).await;
+        release(&server, &id, &bodies, 0, 3, Then::Retried).await;
+        release(&server, &id, &bodies, 0, 4, Then::Recorded).await;
+        let settled_calls = settled(&server, &id).await;
+        assert!(
+            matches!(&settled_calls[0], Err((500, message)) if message.contains("call-0@4")),
+            "{settled_calls:?}"
+        );
+        assert_eq!(
+            settled_calls[1..],
+            [Ok("call-1@2".to_owned()), Ok("call-2@1".to_owned())]
+        );
+        assert_eq!(bodies.executions(), [4, 2, 1]);
+        assert_eq!(server.stats().retries, 3);
+    }
+}
+
+/// A terminal failure is recorded once as its call's result: no retry, and
+/// its siblings settle independently.
+#[tokio::test]
+async fn a_terminal_failure_is_recorded_once_as_that_calls_result() {
+    fn script(call: usize, _execution: usize) -> Step {
+        if call == 1 {
+            Step::Refuse
+        } else {
+            Step::Succeed
+        }
+    }
+    for config in modes() {
+        let bodies = Bodies::new(script);
+        let server = calls_server(config, &bodies, bounded(5)).await;
+        let id = send_invocation(&server, "Calls/issue", "null").await;
+        until("every body enters", || bodies.executions() == [1, 1, 1]).await;
+        for call in COMPLETION_ORDER {
+            release(&server, &id, &bodies, call, 1, Then::Recorded).await;
+        }
+        assert_eq!(
+            settled(&server, &id).await,
+            [
+                Ok("call-0@1".to_owned()),
+                Err((418, "call-1@1".to_owned())),
+                Ok("call-2@1".to_owned()),
+            ]
+        );
+        assert_eq!(bodies.executions(), [1, 1, 1]);
+        assert_eq!(server.stats().retries, 0);
+    }
+}
+
+/// When the cancel lands relative to the `n`-th released call's result.
+#[derive(Clone, Copy, Debug)]
+enum CancelAt {
+    /// After the first `n` results are recorded.
+    After(usize),
+    /// Just before the server stores the `n`-th released call's proposal,
+    /// after its body finished.
+    BeforeResult(usize),
+}
+
+/// L03: cancellation settles every handle exactly once, by journal order:
+/// a result recorded before the cancel signal stays readable, every other
+/// handle settles as cancelled even when its body finished and its result
+/// was stored after the signal, and a replay chooses the same way. On a
+/// streaming attempt no call still executing at the cancel ever records a
+/// result.
+#[tokio::test]
+async fn cancellation_settles_each_handle_once_by_journal_order() {
+    use lash_restate_test::protocol::MessageType;
+    let cases = [
+        CancelAt::After(0),
+        CancelAt::After(1),
+        CancelAt::After(2),
+        CancelAt::BeforeResult(0),
+        CancelAt::BeforeResult(1),
+        CancelAt::BeforeResult(2),
+    ];
+    for config in modes() {
+        for at in cases {
+            let scenario = format!("{at:?} on {config:?}");
+            let bodies = Bodies::new(always_succeed);
+            let server = calls_server(config.clone(), &bodies, bounded(1)).await;
+            let id = send_invocation(&server, "Calls/issue", "null").await;
+            until(&format!("{scenario}: every body enters"), || {
+                bodies.executions() == [1, 1, 1]
+            })
+            .await;
+            let (before, released_after) = match at {
+                CancelAt::After(kept) => {
+                    let before = &COMPLETION_ORDER[..kept];
+                    for &call in before {
+                        release(&server, &id, &bodies, call, 1, Then::Recorded).await;
+                    }
+                    assert_eq!(server.cancel(&id), Some(true), "{scenario}");
+                    (before, &[][..])
+                }
+                CancelAt::BeforeResult(kept) => {
+                    server.cancel_on(
+                        CrashRule::new(CrashPoint::BeforeRunResult {
+                            name: Some(format!("call-{}", COMPLETION_ORDER[kept])),
+                        })
+                        .service("Calls"),
+                    );
+                    let (before, rest) = COMPLETION_ORDER.split_at(kept);
+                    for &call in before {
+                        release(&server, &id, &bodies, call, 1, Then::Recorded).await;
+                    }
+                    release(&server, &id, &bodies, rest[0], 1, Then::Recorded).await;
+                    assert_eq!(server.stats().scripted_cancels, 1, "{scenario}");
+                    (before, &rest[..1])
+                }
+            };
+            let unreleased: Vec<usize> = COMPLETION_ORDER
+                .into_iter()
+                .filter(|call| !before.contains(call) && !released_after.contains(call))
+                .collect();
+            if config.always_replay {
+                // A closed request stream cannot carry the signal to an
+                // attempt whose bodies still execute: they finish, the
+                // attempt suspends and the replay meets the signal.
+                for &call in &unreleased {
+                    release(&server, &id, &bodies, call, 1, Then::Recorded).await;
+                }
+            }
+
+            let expected: Vec<bool> = (0..3).map(|call| before.contains(&call)).collect();
+            let readable: Vec<bool> = settled(&server, &id)
+                .await
+                .into_iter()
+                .enumerate()
+                .map(|(call, settled)| match settled {
+                    Ok(receipt) => {
+                        assert_eq!(receipt, format!("call-{call}@1"), "{scenario}");
+                        true
+                    }
+                    Err((code, _)) => {
+                        assert_eq!(code, 409, "{scenario}");
+                        false
+                    }
+                })
+                .collect();
+            assert_eq!(readable, expected, "{scenario}");
+
+            let journal = server.journal(&id).unwrap();
+            let signal = journal
+                .iter()
+                .position(|entry| entry.ty == MessageType::SignalNotification)
+                .unwrap_or_else(|| panic!("{scenario}: the cancel signal is journaled"));
+            let recorded_before: Vec<String> = journal[..signal]
+                .iter()
+                .filter_map(|entry| entry.run_completion())
+                .map(|result| serde_json::from_slice(&result.unwrap()).unwrap())
+                .collect();
+            assert_eq!(
+                recorded_before,
+                before
+                    .iter()
+                    .map(|call| format!("call-{call}@1"))
+                    .collect::<Vec<_>>(),
+                "{scenario}"
+            );
+            assert_eq!(bodies.executions(), [1, 1, 1], "{scenario}");
+            if !config.always_replay {
+                let recorded_after = journal[signal..]
+                    .iter()
+                    .filter(|entry| entry.run_completion().is_some())
+                    .count();
+                assert_eq!(recorded_after, released_after.len(), "{scenario}");
+                for call in unreleased {
+                    until(&format!("{scenario}: call-{call} is dropped"), || {
+                        bodies.abandoned()[call] == 1
+                    })
+                    .await;
+                }
+            }
+        }
+    }
+}
+
+/// Returning at a failed handle ends the invocation with that failure; the
+/// calls still executing are dropped with it, never record a result and are
+/// never executed again.
+#[tokio::test]
+async fn a_failed_handle_ends_the_invocation_and_drops_unfinished_siblings() {
+    fn script(call: usize, _execution: usize) -> Step {
+        if call == 0 {
+            Step::Refuse
+        } else {
+            Step::Succeed
+        }
+    }
+    for config in streaming_modes() {
+        let bodies = Bodies::new(script);
+        let server = calls_server(config, &bodies, bounded(5)).await;
+        let id = send_invocation(&server, "Calls/first_failure", "null").await;
+        until("every body enters", || bodies.executions() == [1, 1, 1]).await;
+        release(&server, &id, &bodies, 0, 1, Then::Recorded).await;
+        assert_eq!(
+            finished(&server, &id).await,
+            Err((418, "call-0@1".to_owned()))
+        );
+        until("the unfinished siblings are dropped", || {
+            bodies.abandoned() == [0, 1, 1]
+        })
+        .await;
+        server.settle().await;
+        assert_eq!(receipts(&server, &id), ["call-0@1"]);
+        assert_eq!(bodies.executions(), [1, 1, 1]);
+        assert_eq!(server.stats().retries, 0);
+    }
+}
+
+/// Dropping a result future neither cancels nor settles its call: the
+/// invocation keeps driving the call and records its result while it awaits
+/// another, but a successful return drops a call still executing without
+/// recording anything. Settlement is only what was awaited.
+#[tokio::test]
+async fn dropping_a_result_future_neither_cancels_nor_settles_its_call() {
+    for config in streaming_modes() {
+        let bodies = Bodies::new(always_succeed);
+        let server = calls_server(config.clone(), &bodies, bounded(1)).await;
+        let id = send_invocation(&server, "Calls/drop_first", "null").await;
+        until("both bodies enter", || bodies.executions() == [1, 1, 0]).await;
+        release(&server, &id, &bodies, 0, 1, Then::Recorded).await;
+        release(&server, &id, &bodies, 1, 1, Then::Recorded).await;
+        assert_eq!(finished(&server, &id).await, Ok("\"call-1@1\"".into()));
+        assert_eq!(receipts(&server, &id), ["call-0@1", "call-1@1"]);
+
+        let bodies = Bodies::new(always_succeed);
+        let server = calls_server(config, &bodies, bounded(1)).await;
+        let id = send_invocation(&server, "Calls/drop_first", "null").await;
+        until("both bodies enter", || bodies.executions() == [1, 1, 0]).await;
+        release(&server, &id, &bodies, 1, 1, Then::Recorded).await;
+        assert_eq!(finished(&server, &id).await, Ok("\"call-1@1\"".into()));
+        until("the unawaited call is dropped", || {
+            bodies.abandoned() == [1, 0, 0]
+        })
+        .await;
+        assert_eq!(receipts(&server, &id), ["call-1@1"]);
+        assert_eq!(run_names(&server, &id), ["call-0", "call-1"]);
+    }
 }
 
 // ---------------------------------------------------------------------------
