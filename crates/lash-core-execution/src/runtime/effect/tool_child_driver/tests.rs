@@ -186,14 +186,17 @@ pub(super) fn child_controller() -> ScopedEffectController<'static> {
 }
 
 /// Ruling 1 at the recorded id itself: a live entry that shares the child's
-/// tool id but drifted since admission — a different retry policy here —
-/// loses to the recorded manifest, because the reopen may not consult it for
-/// this call.
+/// tool id but drifted since admission — a different retry policy and a
+/// different declaration here — loses to the recorded manifest, because the
+/// reopen may not consult it for this call (K1: replay never re-reads the
+/// catalog for an admitted capability).
 #[test]
 fn a_live_entry_at_the_childs_own_id_loses_to_the_recorded_manifest() {
     let mut lent = lent();
     let mut drifted = manifest("search");
     drifted.retry_policy = ToolRetryPolicy::Never;
+    drifted.declaration =
+        crate::ToolDeclaration::deferring().with_intents([crate::ToolIntentKind::EmitTrigger]);
     lent.tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(vec![
         crate::ToolDefinition {
             manifest: drifted,
@@ -209,6 +212,11 @@ fn a_live_entry_at_the_childs_own_id_loses_to_the_recorded_manifest() {
         resolved.retry_policy,
         ToolRetryPolicy::safe(4, 10, 100),
         "the recorded retry policy wins over a drifted live entry at the same id"
+    );
+    assert_eq!(
+        resolved.declaration,
+        crate::ToolDeclaration::default(),
+        "the recorded declaration wins over a drifted live entry at the same id"
     );
 }
 

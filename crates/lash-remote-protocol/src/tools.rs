@@ -219,9 +219,4 @@ pub enum RemoteToolRetryPolicy {
         base_delay_ms: u64,
         max_delay_ms: u64,
     },
-    Idempotent {
-        max_attempts: u32,
-        base_delay_ms: u64,
-        max_delay_ms: u64,
-    },
 }

@@ -234,17 +234,12 @@ impl ToolCatalogCoreSupport for ToolCatalog {
 }
 
 pub trait ToolRetryPolicyCoreSupport {
-    fn idempotent(max_attempts: u32, base_delay_ms: u64, max_delay_ms: u64) -> Self;
     fn max_attempts(self) -> u32;
     fn delay_ms_for_retry(self, retry_index: u32, requested_after_ms: Option<u64>) -> u64;
 }
 
 #[doc(hidden)]
 impl ToolRetryPolicyCoreSupport for ToolRetryPolicy {
-    fn idempotent(max_attempts: u32, base_delay_ms: u64, max_delay_ms: u64) -> Self {
-        ToolRetryPolicy::idempotent(max_attempts, base_delay_ms, max_delay_ms)
-    }
-
     fn max_attempts(self) -> u32 {
         ToolRetryPolicy::max_attempts(self)
     }

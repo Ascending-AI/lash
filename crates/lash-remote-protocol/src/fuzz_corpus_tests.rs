@@ -639,7 +639,7 @@ fn plugin_payload_seeds() -> Vec<(&'static str, String, Vec<u8>)> {
                             field: "args".to_string(),
                         },
                     ),
-                    retry_policy: Some(RemoteToolRetryPolicy::Idempotent {
+                    retry_policy: Some(RemoteToolRetryPolicy::Safe {
                         max_attempts: 3,
                         base_delay_ms: 50,
                         max_delay_ms: 1_000,

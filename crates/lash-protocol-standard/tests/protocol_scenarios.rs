@@ -766,6 +766,12 @@ fn standard_intent_tool() -> lash_core::ToolDefinition {
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
     .expect("valid declared tool schemas")
+    .with_declaration(lash_core::ToolDeclaration::default().with_intents([
+        lash_core::ToolIntentKind::StartProcess,
+        lash_core::ToolIntentKind::SignalProcess,
+        lash_core::ToolIntentKind::EmitProcessEvent,
+        lash_core::ToolIntentKind::CancelProcess,
+    ]))
 }
 
 #[async_trait::async_trait]

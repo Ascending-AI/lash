@@ -915,6 +915,17 @@ struct RendezvousLeaves {
 }
 
 impl RendezvousLeaves {
+    /// A leaf's definition: a deferred leaf declares it may defer, so
+    /// admission records that and reserves its completion key.
+    fn definition(&self, name: &str) -> crate::ToolDefinition {
+        let definition = leaf_definition(name);
+        if self.deferred.iter().any(|leaf| leaf == name) {
+            definition.with_declaration(crate::ToolDeclaration::deferring())
+        } else {
+            definition
+        }
+    }
+
     fn owns(&self, name: &str) -> bool {
         self.listed
             .iter()
@@ -928,7 +939,7 @@ impl crate::ToolProvider for RendezvousLeaves {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
         self.listed
             .iter()
-            .map(|name| leaf_definition(name).manifest())
+            .map(|name| self.definition(name).manifest())
             .collect()
     }
 
@@ -936,7 +947,7 @@ impl crate::ToolProvider for RendezvousLeaves {
         self.listed
             .iter()
             .chain(&self.granted)
-            .map(|name| leaf_definition(name))
+            .map(|name| self.definition(name))
             .find(|definition| definition.id() == id)
             .map(|definition| definition.manifest())
     }
@@ -944,12 +955,6 @@ impl crate::ToolProvider for RendezvousLeaves {
     fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
         self.owns(name)
             .then(|| Arc::new(leaf_definition(name).contract()))
-    }
-
-    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
-        self.deferred
-            .iter()
-            .any(|name| leaf_definition(name).id() == tool_id)
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {

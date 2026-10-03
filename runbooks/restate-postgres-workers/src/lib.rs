@@ -879,9 +879,14 @@ fn e2e_tool_definition(
     output_schema: serde_json::Value,
     surface: ToolBinding,
 ) -> ToolDefinition {
-    ToolDefinition::raw(id, name, description, input_schema, output_schema)
+    let definition = ToolDefinition::raw(id, name, description, input_schema, output_schema)
         .expect("valid declared tool schemas")
-        .with_tool_binding(surface)
+        .with_tool_binding(surface);
+    if DEFERRING_TOOL_IDS.contains(&id) {
+        definition.with_declaration(lash::tools::ToolDeclaration::deferring())
+    } else {
+        definition
+    }
 }
 
 #[derive(Clone)]
@@ -897,8 +902,9 @@ struct E2eTools {
 
 type E2eToolFuture<'a> = Pin<Box<dyn Future<Output = ToolOutcome> + Send + 'a>>;
 
-/// Every tool whose body calls `AttemptContext::completion_key()` and parks.
-/// The coordinator only pre-derives a completion key for declared tools, so a
+/// Every tool whose body calls `AttemptContext::completion_key()` and parks;
+/// its definition declares `may_defer`. The coordinator only pre-derives a
+/// completion key for a tool whose admitted declaration may defer, so a
 /// parking tool missing from this list fails its call with
 /// `tool_deferral_not_declared` instead of completing out of band.
 const DEFERRING_TOOL_IDS: &[&str] = &["tool:async_lookup", "tool:durable_input_request"];
@@ -907,12 +913,6 @@ const DEFERRING_TOOL_IDS: &[&str] = &["tool:async_lookup", "tool:durable_input_r
 impl StaticToolExecute for E2eTools {
     async fn execute(&self, call: ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
         self.execute_selected_tool(call).await.into()
-    }
-
-    /// Both parking tools resolve out of band, so the runtime pre-derives the
-    /// completion key their attempt bodies read.
-    fn attempt_may_defer(&self, tool_id: &lash::tools::ToolId) -> bool {
-        DEFERRING_TOOL_IDS.contains(&tool_id.as_str())
     }
 }
 

@@ -74,7 +74,7 @@ async fn execute_once_with_authority<'run>(
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
 ) -> crate::ToolAttemptOutcome {
-    match build_attempt_context(context, prepared, &tool_context, authority.grant()).await {
+    match build_attempt_context(&tool_context, authority.manifest()).await {
         Ok(attempt_context) => {
             execute_attempt_body(context, authority.manifest(), prepared, &attempt_context).await
         }
@@ -104,19 +104,18 @@ async fn execute_attempt_body(
 }
 
 async fn build_attempt_context<'run>(
-    context: &ToolDispatchContext<'_>,
-    prepared: &PreparedToolCall,
     tool_context: &ToolContext<'run>,
-    grant: Option<&crate::ToolExecutionGrant>,
+    admitted: &crate::ToolManifest,
 ) -> Result<crate::AttemptContext<'run>, ToolOutcome> {
     let scoped = tool_context.effect_controller.clone();
     // The key is reserved before the body runs, and only for a declared
     // deferrer on a controller that can route await events across process
     // loss. Report which of the two is missing rather than blaming the
-    // controller for a provider that never declared the capability.
+    // controller for a tool whose admitted declaration never claimed the
+    // capability.
     let completion = match tool_context.completion.load() {
         Some(key) => crate::tool_provider::AttemptCompletionSupport::Available(key),
-        None if !context.attempt_may_defer(&prepared.tool_id, grant) => {
+        None if !admitted.declaration.may_defer => {
             crate::tool_provider::AttemptCompletionSupport::NotDeclared
         }
         None => crate::tool_provider::AttemptCompletionSupport::ControllerUnsupported,

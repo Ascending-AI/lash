@@ -27,7 +27,6 @@ struct DynamicToolProvider {
 }
 struct CountingPrepareProvider {
     prepares: Arc<AtomicUsize>,
-    defer_queries: Arc<AtomicUsize>,
 }
 struct BlockingLiveTool {
     entered: Arc<tokio::sync::Semaphore>,
@@ -191,11 +190,6 @@ impl ToolProvider for CountingPrepareProvider {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
 
-    fn attempt_may_defer(&self, _tool_id: &crate::ToolId) -> bool {
-        self.defer_queries.fetch_add(1, Ordering::SeqCst);
-        true
-    }
-
     async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         ToolOutcome::ok(json!("ok")).into()
     }
@@ -278,10 +272,6 @@ impl LeafToolSourceExecutor for ExternalMockSource {
         }))
         .into()
     }
-
-    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
-        false
-    }
 }
 
 #[async_trait::async_trait]
@@ -335,10 +325,6 @@ impl LeafToolSourceExecutor for ExactResolvingSource {
         self.executions.fetch_add(1, Ordering::SeqCst);
         ToolOutcome::ok(json!(call.name())).into()
     }
-
-    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
-        false
-    }
 }
 
 #[async_trait::async_trait]
@@ -382,10 +368,6 @@ impl ToolSourceExecutor for NamedExactSource {
 impl LeafToolSourceExecutor for NamedExactSource {
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         ToolOutcome::ok(json!(call.name())).into()
-    }
-
-    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
-        false
     }
 }
 
@@ -673,12 +655,10 @@ fn apply_state_rejects_ambiguous_current_source_binding() {
 #[tokio::test]
 async fn single_provider_source_refuses_unknown_id_without_calling_the_provider() {
     let prepares = Arc::new(AtomicUsize::new(0));
-    let defer_queries = Arc::new(AtomicUsize::new(0));
     let source = ToolProviderSource::new(
         "single",
         vec![Arc::new(CountingPrepareProvider {
             prepares: Arc::clone(&prepares),
-            defer_queries: Arc::clone(&defer_queries),
         }) as Arc<dyn ToolProvider>],
     );
 
@@ -705,28 +685,11 @@ async fn single_provider_source_refuses_unknown_id_without_calling_the_provider(
         .expect_err("an unadvertised id is refused before the provider prepare hook runs");
     assert!(format!("{refusal:?}").contains("Unknown tool id"));
 
-    assert!(
-        !source.attempt_may_defer(&tool_id("unadvertised")),
-        "an unadvertised id never reserves a deferred completion key"
-    );
-
     assert_eq!(
         prepares.load(Ordering::SeqCst),
         0,
         "the provider prepare hook is not invoked for an unadvertised id"
     );
-    assert_eq!(
-        defer_queries.load(Ordering::SeqCst),
-        0,
-        "the provider defer capability is not queried for an unadvertised id"
-    );
-
-    assert!(
-        source.attempt_may_defer(&tool_id("advertised")),
-        "an advertised id still reaches the provider"
-    );
-    assert_eq!(defer_queries.load(Ordering::SeqCst), 1);
-
     source
         .prepare_tool_call(crate::ToolPrepareCall {
             tool_id: tool_id("advertised"),

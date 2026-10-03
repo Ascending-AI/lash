@@ -698,10 +698,6 @@ impl lash_core::ToolProvider for PendingEchoTool {
         (name == "echo_tool").then(|| Arc::new(pending_echo_tool_definition().contract()))
     }
 
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        *tool_id == pending_echo_tool_definition().manifest().id
-    }
-
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let key = call
             .context
@@ -742,6 +738,7 @@ fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
+    .with_declaration(lash_core::ToolDeclaration::deferring())
 }
 
 #[tokio::test(flavor = "multi_thread")]

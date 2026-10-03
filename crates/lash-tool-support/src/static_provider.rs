@@ -22,19 +22,13 @@ use lash_core::{
 ///
 /// The provider's manifests and contracts come from the [`ToolDefinition`]s passed to
 /// [`StaticToolProvider::new`]; this trait supplies only the dynamic behavior.
+/// What a tool may do beyond an inline Done result — defer, declare intents —
+/// is declared on its definition with
+/// [`ToolDefinition::with_declaration`](lash_core::ToolDefinition::with_declaration).
 #[async_trait::async_trait]
 pub trait StaticToolExecute: Send + Sync + 'static {
     /// Dispatch on `call.name()` when serving more than one tool.
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome;
-
-    /// A recorded attempt reads its completion key from the sealed
-    /// `AttemptContext`, and the runtime only pre-derives that key for a tool
-    /// that declares it here. Defaults to `false`: a tool that parks without
-    /// declaring it observes a typed refusal instead of a key.
-    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
-        let _ = tool_id;
-        false
-    }
 
     /// Optional argument-preparation hook, mirroring
     /// [`ToolProvider::prepare_tool_call`]. Defaults to the identity transform.
@@ -128,9 +122,5 @@ impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.executor.execute(call).await
-    }
-
-    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
-        self.executor.attempt_may_defer(tool_id)
     }
 }

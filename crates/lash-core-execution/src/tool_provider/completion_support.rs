@@ -10,9 +10,8 @@ pub(crate) enum AttemptCompletionSupport {
     /// The coordinator reserved this key, derived from the call's id, for a
     /// declared deferrer.
     Available(crate::AwaitEventKey),
-    /// The provider never declared
-    /// [`ToolProvider::attempt_may_defer`](super::ToolProvider::attempt_may_defer)
-    /// for this tool, so no key was reserved for it.
+    /// The tool's admitted [`ToolDeclaration`](crate::ToolDeclaration) does not
+    /// declare `may_defer`, so no key was reserved for it.
     NotDeclared,
     /// The effect controller issues no durable await-event keys.
     ControllerUnsupported,
@@ -27,7 +26,7 @@ impl AttemptCompletionSupport {
             Self::Available(key) => Ok(key.clone()),
             Self::NotDeclared => Err(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::ToolDeferralNotDeclared,
-                "this tool did not declare deferred completion: implement ToolProvider::attempt_may_defer (or StaticToolExecute::attempt_may_defer) and return true for it, so the coordinator reserves a completion key before the attempt body runs",
+                "this tool did not declare deferred completion: declare `may_defer` in its manifest's ToolDeclaration (ToolDefinition::with_declaration(ToolDeclaration::deferring())), so admission records it and the coordinator reserves a completion key before the attempt body runs",
             )),
             Self::ControllerUnsupported => Err(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::AwaitEventUnsupported,

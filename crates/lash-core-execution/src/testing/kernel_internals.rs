@@ -64,16 +64,6 @@ pub fn plugin_state_store(
     plugins.plugin_state_store_for_testing(plugin_id)
 }
 
-/// `ToolDispatchContext::attempt_may_defer`: whether a call may park, from its
-/// catalog entry or the grant that admits it.
-pub fn dispatch_attempt_may_defer(
-    context: &crate::tool_dispatch::ToolDispatchContext<'_>,
-    tool_id: &crate::ToolId,
-    grant: Option<&crate::ToolExecutionGrant>,
-) -> bool {
-    context.attempt_may_defer(tool_id, grant)
-}
-
 /// `RuntimeExecutionTracing::emit_tool_call_completed`: the trace a completed
 /// tool call emits, which the retry-trace law reads back. The law calls it
 /// outside any journal, so the call is its own live attempt.

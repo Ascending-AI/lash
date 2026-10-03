@@ -7,6 +7,249 @@ mod tests {
     use std::sync::Arc;
     use std::sync::Mutex;
 
+    const SEED: u64 = 0x5_f730;
+
+    fn granted_tool_definition() -> crate::ToolDefinition {
+        crate::ToolDefinition::raw(
+            "tool:granted_leaf_probe",
+            "granted_leaf_probe",
+            "Proves granted calls run the granted leaf",
+            serde_json::json!({ "type": "object" }),
+            serde_json::json!({ "type": "string" }),
+        )
+        .expect("valid declared tool schemas")
+    }
+
+    struct GrantedLeafTool;
+
+    #[async_trait::async_trait]
+    impl crate::ToolProvider for GrantedLeafTool {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            vec![granted_tool_definition().manifest()]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            (name == "granted_leaf_probe").then(|| Arc::new(granted_tool_definition().contract()))
+        }
+
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            crate::ToolOutcome::ok(serde_json::json!("granted leaf")).into()
+        }
+    }
+
+    async fn granted_call_context_over<'run>(
+        backend: &crate::Backend,
+        scoped: crate::ScopedEffectController<'run>,
+        observer: Arc<dyn crate::engine::ObservationSink>,
+        tools: Arc<dyn crate::ToolProvider>,
+    ) -> crate::RuntimeExecutionContext<'run> {
+        let plugins =
+            crate::support::plugin_host(vec![Arc::new(crate::plugin::StaticPluginFactory::new(
+                crate::plugin::PluginDeclaration::initial("granted_tools"),
+                crate::plugin::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
+            ))])
+            .build_session(PluginSessionRequest::creation(
+                "granted-call-session",
+                Default::default(),
+            ))
+            .expect("plugin session");
+        let attachment_store = Arc::new(crate::RuntimeAttachmentStore::ephemeral(
+            backend.attachment_store(),
+        ));
+        let host = Arc::new(crate::testing::MockSessionManager::default());
+        let dispatch = crate::tool_dispatch::ToolDispatchContext {
+            plugins,
+            tools,
+            tool_registry: None,
+            tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(vec![
+                granted_tool_definition(),
+            ])),
+            sessions: host.clone(),
+            session_lifecycle: host.clone(),
+            session_graph: host,
+            processes: Arc::new(crate::UnavailableProcessService),
+            trigger_router: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
+            effect_controller: scoped,
+            direct_completions: crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+            parent_invocation: None,
+            observation_call_key: None,
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
+            owner: crate::ExecutionOwner::SessionFrame {
+                session_id: SessionId::from("granted-call-session"),
+                agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            },
+            observer,
+            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            attachment_store: Arc::clone(&attachment_store),
+            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
+            turn_context: crate::TurnContext::default(),
+            clock: Arc::new(crate::SystemClock),
+            process_lineage: None,
+            process_originator: None,
+            tool_receipts: None,
+        };
+        let process_env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
+            backend.process_env_store();
+        let dispatch = Arc::new(dispatch);
+        let effect_host: Arc<dyn crate::EffectHost> = backend.effect_host();
+        let wiring =
+            crate::testing::wire_test_tool_children(&dispatch, &process_env_store, &effect_host);
+        let mut context = crate::RuntimeExecutionContext::new(
+            dispatch,
+            process_env_store,
+            attachment_store,
+            Arc::new(crate::ChronologicalProjection::default()),
+            crate::TurnContext::default(),
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
+        );
+        context = context.with_tool_child_host(effect_host);
+        if let Some(guard) = wiring {
+            context = context.with_live_opener_guard(Arc::new(guard));
+        }
+        context
+    }
+
+    fn granted_call() -> crate::ToolExecutionGrant {
+        crate::ToolExecutionGrant::from_definition(
+            crate::plugin::PluginRevision::new(
+                "granted_tools",
+                crate::plugin::BehaviorRevision::ONE,
+            ),
+            granted_tool_definition(),
+        )
+    }
+
+    /// The granted leaf, counting every body that runs.
+    struct CountingLeafTool {
+        executions: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ToolProvider for CountingLeafTool {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            GrantedLeafTool.tool_manifests()
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            GrantedLeafTool.resolve_contract(name)
+        }
+
+        async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            self.executions
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            GrantedLeafTool.execute(call).await
+        }
+    }
+
+    /// K1: a round is admitted whole. One member declared isolated, which no
+    /// process implementation runs, refuses every member of its batch before
+    /// any prepares or starts: no body runs, each member answers the typed
+    /// admission refusal, and the plain sibling names the refused member.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn one_refused_member_starts_no_member_of_its_batch() {
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let backend = double.lash_backend();
+        let handler = double
+            .open_handler(crate::AdmittedScope::turn(
+                SessionId::from("granted-call-session"),
+                crate::TurnId::from("refused-round-turn"),
+            ))
+            .await
+            .expect("open the refused-round handler");
+        let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let context = granted_call_context_over(
+            &backend,
+            handler.scoped(),
+            crate::engine::NullObservationSink::arc(),
+            Arc::new(CountingLeafTool {
+                executions: Arc::clone(&executions),
+            }),
+        )
+        .await;
+        let isolated = crate::ToolExecutionGrant::from_definition(
+            crate::plugin::PluginRevision::new(
+                "granted_tools",
+                crate::plugin::BehaviorRevision::ONE,
+            ),
+            granted_tool_definition().with_declaration(crate::ToolDeclaration {
+                isolated: true,
+                ..crate::ToolDeclaration::default()
+            }),
+        );
+
+        let replies = context
+            .call_tool_batch(vec![
+                ToolInvocation::new(
+                    lash_core_execution::ToolCallId::fixture("round-plain"),
+                    crate::ToolId::from("tool:granted_leaf_probe"),
+                    serde_json::json!({}),
+                )
+                .with_execution_grant(granted_call()),
+                ToolInvocation::new(
+                    lash_core_execution::ToolCallId::fixture("round-isolated"),
+                    crate::ToolId::from("tool:granted_leaf_probe"),
+                    serde_json::json!({}),
+                )
+                .with_execution_grant(isolated),
+            ])
+            .await;
+
+        assert_eq!(
+            executions.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "no member of a refused round runs its body"
+        );
+        let refusals: Vec<_> = replies
+            .replies
+            .iter()
+            .map(|reply| match &reply.output.outcome {
+                crate::ToolCallOutcome::Failure(failure) => {
+                    assert_eq!(failure.code, crate::ToolAdmissionRefusal::CODE);
+                    failure.cause.as_deref().cloned()
+                }
+                other => panic!("a refused member answers its refusal, not {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            refusals,
+            vec![
+                Some(crate::ToolFailureCause::Admission {
+                    refusal: crate::ToolAdmissionRefusal::Sibling { member: 1 },
+                }),
+                Some(crate::ToolFailureCause::Admission {
+                    refusal: crate::ToolAdmissionRefusal::UnsupportedIsolation,
+                }),
+            ]
+        );
+        assert_eq!(
+            replies.settlement_order,
+            vec![0, 1],
+            "a refused round settles in source order before any dispatch"
+        );
+        drop(context);
+        handler
+            .close()
+            .await
+            .expect("close the refused-round handler");
+    }
+
     #[derive(Default)]
     struct ToolLifecycleTraceSink {
         lifecycle: Mutex<Vec<(String, &'static str, Option<String>)>>,

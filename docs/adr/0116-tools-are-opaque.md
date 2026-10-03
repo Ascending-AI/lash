@@ -27,8 +27,11 @@ runtime-owned resolver is `arm_pending_resolver`
 #### 1.1 One trait, one context
 
 Every executable tool registers as a `ToolProvider`. The trait supplies
-manifests, contract resolution, optional preparation, required
-`execute(ToolCall) -> ToolAttemptOutcome`, and `attempt_may_defer`.
+manifests, contract resolution, optional preparation and required
+`execute(ToolCall) -> ToolAttemptOutcome`. What a body may do beyond an inline
+Done result is declared on its manifest as a `ToolDeclaration` (`may_defer`,
+`intents`, `isolated`), which admission records; no live provider hook is
+consulted after admission (FIG-4875).
 `ToolCall::context` is an `AttemptContext`; its constructor accepts that
 context, rather than runtime dispatch state
 (`crates/lash-core-execution/src/tool_provider.rs:1342`, `:1351`, `:1401`).
@@ -373,7 +376,7 @@ since it has no conversation to fork (`rlm.rs:98`, `:212`).
 Execution declares one `SessionTurn` process with definition key
 `lash-subagent-session-turn`, `SessionTurnOutcome::FinalValue`, the host's
 lifetime policy, and inherited originator. It returns pending on that
-`DeclaredStart`; `attempt_may_defer` is true. An optional host timeout becomes
+`DeclaredStart`; its declaration has `may_defer`. An optional host timeout becomes
 the pending deadline (`crates/lash-subagents/src/rlm.rs:137`, `:170`, `:186`,
 `:191`, `:270`). A timeout returns a failure and cancels the child.
 

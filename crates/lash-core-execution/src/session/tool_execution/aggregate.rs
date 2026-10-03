@@ -139,10 +139,20 @@ impl RuntimeExecutionContext<'_> {
         let mut prefix: Vec<Option<bool>> = vec![None; leaf_count];
         let mut entries: Vec<PreparedToolLeafEntry> = Vec::new();
         let mut timers: Vec<(usize, u64)> = Vec::new();
+        // The aggregate's calls are one round: admitted together before any
+        // prepares, and one refused call refuses every call. Timers are not
+        // calls and are not admitted.
+        let refused = self.admit_tool_round(&calls).err();
+        let mut member = 0;
         for (index, leaf) in leaves.into_iter().enumerate() {
             match leaf {
                 ToolAggregateLeaf::Tool(call) => {
-                    match self.prepare_tool_leaf(&batch_id, index, call).await {
+                    let refused = refused.as_ref().map(|refused| refused.refusal_for(member));
+                    member += 1;
+                    match self
+                        .prepare_tool_leaf(&batch_id, index, call, refused)
+                        .await
+                    {
                         ToolLeafPreparation::Prepared(entry) => entries.push(*entry),
                         ToolLeafPreparation::Completed(reply) => {
                             let reply = ToolAggregateLeafReply::Tool(reply);

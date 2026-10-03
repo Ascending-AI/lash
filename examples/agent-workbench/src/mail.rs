@@ -27,9 +27,9 @@ use std::{
 use crate::MAIL_RECEIVED_SOURCE_TYPE;
 use async_trait::async_trait;
 use lash::tools::{
-    EmitTriggerIntent, ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDefinition,
-    ToolDefinitionBindingExt, ToolIntent, ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone,
-    ToolProvider, ToolRetryPolicy,
+    EmitTriggerIntent, ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDeclaration,
+    ToolDefinition, ToolDefinitionBindingExt, ToolIntent, ToolIntentKind, ToolIntents,
+    ToolManifest, ToolOutcome, ToolOutcomeDone, ToolProvider, ToolRetryPolicy,
 };
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use serde::{Deserialize, Serialize};
@@ -382,14 +382,16 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
     let name = tool_name(slug, operation);
     let (input_schema, summary) = operation_schemas(operation);
     let description = format!("{summary} Account `{display_name}` (inbox.{slug}).");
+    // Deleting a message twice leaves the same mailbox, so a reported failure
+    // may retry a delete as safely as a list.
     let retry_policy = match operation {
-        "list" => ToolRetryPolicy::safe(3, 25, 250),
-        "delete" => ToolRetryPolicy::Idempotent {
-            max_attempts: 3,
-            base_delay_ms: 25,
-            max_delay_ms: 250,
-        },
+        "list" | "delete" => ToolRetryPolicy::safe(3, 25, 250),
         _ => ToolRetryPolicy::Never,
+    };
+    // A send declares its `mail.received` emission as a trigger intent.
+    let declaration = match operation {
+        "send" => ToolDeclaration::default().with_intents([ToolIntentKind::EmitTrigger]),
+        _ => ToolDeclaration::default(),
     };
     ToolDefinition::raw(
         format!("tool:{name}"),
@@ -400,6 +402,7 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
     )
     .expect("valid declared tool schemas")
     .with_retry_policy(retry_policy)
+    .with_declaration(declaration)
     .with_tool_binding(ToolBinding::new(["inbox", slug], operation).with_authority_type("Inbox"))
 }
 

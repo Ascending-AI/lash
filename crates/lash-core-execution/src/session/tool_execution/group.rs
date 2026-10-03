@@ -208,8 +208,8 @@ impl RuntimeExecutionContext<'_> {
     /// [`crate::RuntimeErrorCode::RuntimeEffectGroupShape`].
     ///
     /// Completion routing mirrors what `coordinate_tool_invocation` re-derives
-    /// per attempt (attempt_coordinator.rs): `may_defer` is asked of the same
-    /// `attempt_may_defer` seam, and the answer is *recorded* — a `NotNeeded`
+    /// per attempt (attempt_coordinator.rs): `may_defer` is the admitted
+    /// manifest's declaration, and the answer is *recorded* — a `NotNeeded`
     /// or `Unsupported` preparation records `Inline`, which forces the child's
     /// `may_defer` false so its attempt fails on a defer exactly as an
     /// `Unsupported` key does today; an `Issued` preparation records
@@ -402,8 +402,7 @@ impl RuntimeExecutionContext<'_> {
                 .tool_child_completion_routing(
                     controller,
                     &scope,
-                    &leaf.call.call.tool_id,
-                    leaf.admission.grant(),
+                    leaf.admission.manifest().declaration.may_defer,
                     &call_id,
                 )
                 .await?;
@@ -642,17 +641,16 @@ impl RuntimeExecutionContext<'_> {
     }
 
     /// Records one leaf's completion routing from the same two admission facts
-    /// the attempt coordinator consults: whether the tool may defer, and what
-    /// the controller can issue for a completion key.
+    /// the attempt coordinator consults: whether the admitted declaration may
+    /// defer, and what the controller can issue for a completion key.
     async fn tool_child_completion_routing(
         &self,
         controller: &dyn crate::RuntimeEffectController,
         scope: &crate::ExecutionScope,
-        tool_id: &crate::ToolId,
-        grant: Option<&crate::ToolExecutionGrant>,
+        may_defer: bool,
         call_id: &crate::ToolCallId,
     ) -> Result<ToolChildCompletionRouting, crate::RuntimeEffectControllerError> {
-        if !self.dispatch.attempt_may_defer(tool_id, grant) {
+        if !may_defer {
             return Ok(ToolChildCompletionRouting::Inline);
         }
         match controller

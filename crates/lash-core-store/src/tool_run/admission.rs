@@ -18,7 +18,8 @@
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
-use lash_sansio::{ToolCallId, ToolIntentKind};
+use lash_sansio::ToolCallId;
+pub use lash_sansio::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
 use serde::{Deserialize, Serialize};
 
 use super::material::{MaterialOwner, MaterialRef, MaterialRole};
@@ -27,112 +28,6 @@ use crate::effect_opener::EffectOpener;
 use crate::store::plugin_writers::{
     PluginCallbackIdentity, PluginExecutionRefusal, PluginRevision,
 };
-
-/// The author-facing tool declaration: exactly three capabilities.
-///
-/// `ToolManifest.inline` stays catalog policy and is not part of this
-/// declaration; retry and cancel policy are runtime policy
-/// ([`RuntimeCallPolicy`]), not author capabilities.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ToolDeclaration {
-    /// The body may return Deferred and park on a source.
-    pub may_defer: bool,
-    /// The intent kinds a Done result may declare, in vocabulary order
-    /// without duplicates.
-    pub intents: Vec<ToolIntentKind>,
-    /// The call runs as a process from its start, with no inline body. It is
-    /// not spelled as an intent plus Deferred.
-    pub isolated: bool,
-}
-
-/// The shape of a body's outcome, as a declaration checks it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OutcomeShape<'a> {
-    /// A Done result declaring `intents`.
-    Done { intents: &'a [ToolIntentKind] },
-    /// A Deferred result parked on a source.
-    Deferred,
-}
-
-/// Why a declaration, or an outcome under it, is refused.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
-#[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
-pub enum DeclarationRefusal {
-    #[error("intent kind `{}` is declared twice", kind.as_str())]
-    DuplicateIntent { kind: ToolIntentKind },
-    #[error("declared intents are not in vocabulary order")]
-    IntentOrder,
-    /// An isolated call has no inline body, so it cannot declare what only
-    /// an inline body returns.
-    #[error("an isolated call declares an inline capability")]
-    IsolatedInlineCapability,
-    #[error("an inline body returned Deferred without declaring `may_defer`")]
-    UndeclaredDeferral,
-    #[error("a body declared intent kind `{}` it did not declare", kind.as_str())]
-    UndeclaredIntent { kind: ToolIntentKind },
-    #[error("an isolated call produced an inline outcome")]
-    InlineOutcomeFromIsolated,
-}
-
-fn intent_position(kind: ToolIntentKind) -> usize {
-    ToolIntentKind::ALL
-        .iter()
-        .position(|candidate| *candidate == kind)
-        .unwrap_or(usize::MAX)
-}
-
-impl ToolDeclaration {
-    /// Check the declaration itself.
-    ///
-    /// # Errors
-    ///
-    /// The first [`DeclarationRefusal`] found.
-    pub fn validate(&self) -> Result<(), DeclarationRefusal> {
-        let mut seen = BTreeSet::new();
-        for kind in &self.intents {
-            if !seen.insert(intent_position(*kind)) {
-                return Err(DeclarationRefusal::DuplicateIntent { kind: *kind });
-            }
-        }
-        if !self
-            .intents
-            .windows(2)
-            .all(|pair| intent_position(pair[0]) < intent_position(pair[1]))
-        {
-            return Err(DeclarationRefusal::IntentOrder);
-        }
-        if self.isolated && (self.may_defer || !self.intents.is_empty()) {
-            return Err(DeclarationRefusal::IsolatedInlineCapability);
-        }
-        Ok(())
-    }
-
-    /// Check a body's outcome against the declaration, before anything the
-    /// outcome declares is realized.
-    ///
-    /// # Errors
-    ///
-    /// An undeclared Deferred or intent, or any inline outcome of an
-    /// isolated call.
-    pub fn admits(&self, outcome: OutcomeShape<'_>) -> Result<(), DeclarationRefusal> {
-        if self.isolated {
-            return Err(DeclarationRefusal::InlineOutcomeFromIsolated);
-        }
-        match outcome {
-            OutcomeShape::Deferred if !self.may_defer => {
-                Err(DeclarationRefusal::UndeclaredDeferral)
-            }
-            OutcomeShape::Deferred => Ok(()),
-            OutcomeShape::Done { intents } => intents
-                .iter()
-                .find(|kind| !self.intents.contains(kind))
-                .map_or(Ok(()), |kind| {
-                    Err(DeclarationRefusal::UndeclaredIntent { kind: *kind })
-                }),
-        }
-    }
-}
 
 /// The presentation callbacks a call is bound to: the singleton presenter,
 /// then the ordered optional steps.

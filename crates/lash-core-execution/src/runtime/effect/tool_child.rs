@@ -264,12 +264,12 @@ impl ToolChildAdmission {
 /// How a recovered child's completion is routed back to it (ADR 0099 §14).
 ///
 /// Recorded because deriving it at recovery can derive a key nothing will ever
-/// resolve. Completion-key preparation today answers
-/// `Issued | NotNeeded | Unsupported` from two live inputs — whether the tool
-/// may defer (`ToolDispatchContext::attempt_may_defer`, which consults the live
-/// registry or provider) and whether the host routes completions durably. Both
-/// are deployment facts at recovery time and admission facts at formation time,
-/// and only the admission facts are the ones the child was accepted under.
+/// resolve. Completion-key preparation answers
+/// `Issued | NotNeeded | Unsupported` from two inputs — whether the admitted
+/// manifest's declaration may defer, and whether the host routes completions
+/// durably. The second is a deployment fact at recovery time and an admission
+/// fact at formation time, and only the admission facts are the ones the child
+/// was accepted under.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolChildCompletionRouting {

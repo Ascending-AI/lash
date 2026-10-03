@@ -4,11 +4,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::sync::MutexExt;
 use crate::{
     JsonSchema, SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaPurpose,
-    ToolCatalogBuildError,
+    ToolCatalogBuildError, ToolDeclaration,
 };
 
 /// Automatic retry policy for a tool's execution.
 ///
+/// Only a failure the body reports with a safe retry disposition is retried,
+/// and every attempt runs under the call's one stable
+/// [`ToolCallId`](crate::ToolCallId). There is no idempotent variant: the
+/// runtime does not take an author's word that a body is idempotent; the body
+/// keys its external effects on the call id itself (binding Q3).
 #[derive(
     Clone,
     Copy,
@@ -31,13 +36,6 @@ pub enum ToolRetryPolicy {
         base_delay_ms: u64,
         max_delay_ms: u64,
     },
-    /// Retry only failures that explicitly report a safe retry disposition,
-    /// and only when the runtime can provide a stable replay key.
-    Idempotent {
-        max_attempts: u32,
-        base_delay_ms: u64,
-        max_delay_ms: u64,
-    },
 }
 
 impl ToolRetryPolicy {
@@ -49,20 +47,10 @@ impl ToolRetryPolicy {
         }
     }
 
-    pub(crate) fn idempotent(max_attempts: u32, base_delay_ms: u64, max_delay_ms: u64) -> Self {
-        Self::Idempotent {
-            max_attempts,
-            base_delay_ms,
-            max_delay_ms,
-        }
-    }
-
     pub(crate) fn max_attempts(self) -> u32 {
         match self {
             Self::Never => 1,
-            Self::Safe { max_attempts, .. } | Self::Idempotent { max_attempts, .. } => {
-                max_attempts.max(1)
-            }
+            Self::Safe { max_attempts, .. } => max_attempts.max(1),
         }
     }
 
@@ -74,11 +62,6 @@ impl ToolRetryPolicy {
         let (base_delay_ms, max_delay_ms) = match self {
             Self::Never => return 0,
             Self::Safe {
-                base_delay_ms,
-                max_delay_ms,
-                ..
-            }
-            | Self::Idempotent {
                 base_delay_ms,
                 max_delay_ms,
                 ..
@@ -346,6 +329,11 @@ pub struct ToolManifest {
         skip_serializing_if = "is_default_tool_retry_policy"
     )]
     pub retry_policy: ToolRetryPolicy,
+    /// The author's three-capability declaration. Admission records it with
+    /// this manifest; dispatch, recovery and replay read the recorded answer,
+    /// never the live provider.
+    #[serde(default, skip_serializing_if = "ToolDeclaration::is_default")]
+    pub declaration: ToolDeclaration,
 }
 
 /// Heavy tool contract resolved only when a prompt or call needs schemas/docs.
@@ -810,6 +798,7 @@ impl ToolDefinition {
                 bindings: std::collections::BTreeMap::new(),
                 argument_projection: ToolArgumentProjectionPolicy::default(),
                 retry_policy: default_tool_retry_policy(),
+                declaration: ToolDeclaration::default(),
             },
             contract: ToolContract {
                 identity: Some(ToolContractIdentity { id, name }),
@@ -853,6 +842,13 @@ impl ToolDefinition {
 
     pub fn with_retry_policy(mut self, retry_policy: ToolRetryPolicy) -> Self {
         self.manifest.retry_policy = retry_policy;
+        self
+    }
+
+    /// Declares what the tool's body may do beyond an inline Done result:
+    /// return Deferred, declare Lash intents, or run isolated as a process.
+    pub fn with_declaration(mut self, declaration: ToolDeclaration) -> Self {
+        self.manifest.declaration = declaration;
         self
     }
 

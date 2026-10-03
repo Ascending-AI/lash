@@ -316,6 +316,11 @@ fn probe_tool() -> crate::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_retry_policy(crate::ToolRetryPolicy::safe(2, 1, 1))
+    // It parks on a declared start, and its failing first attempt declares
+    // the start as an ordinary intent that the retry discards.
+    .with_declaration(
+        crate::ToolDeclaration::deferring().with_intents([crate::ToolIntentKind::StartProcess]),
+    )
 }
 
 /// A tool whose `Pending` declares one externally owned child: nothing runs
@@ -422,10 +427,6 @@ impl crate::ToolProvider for DeclaringProbe {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
         (name == PROBE_TOOL).then(|| Arc::new(probe_tool().contract()))
-    }
-
-    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == probe_tool().id()
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {

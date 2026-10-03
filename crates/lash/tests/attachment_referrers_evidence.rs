@@ -140,6 +140,7 @@ fn declare_external_definition() -> lash_core::ToolDefinition {
             "additionalProperties": false
         }),
     )
+    .with_declaration(lash_core::ToolDeclaration::deferring())
 }
 
 fn start_turn_child_definition() -> lash_core::ToolDefinition {
@@ -151,6 +152,10 @@ fn start_turn_child_definition() -> lash_core::ToolDefinition {
             "required": ["text"],
             "additionalProperties": false
         }),
+    )
+    .with_declaration(
+        lash_core::ToolDeclaration::default()
+            .with_intents([lash_core::ToolIntentKind::StartProcess]),
     )
 }
 
@@ -284,10 +289,6 @@ impl ToolProvider for BlobTools {
             declare_external_definition().manifest(),
             start_turn_child_definition().manifest(),
         ]
-    }
-
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == declare_external_definition().id()
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {

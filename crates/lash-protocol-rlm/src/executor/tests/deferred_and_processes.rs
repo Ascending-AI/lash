@@ -1397,10 +1397,6 @@ impl lash_core::ToolProvider for TypeScriptProcessInspectionToolProvider {
         ProcessControlToolProvider.resolve_contract(name)
     }
 
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        ProcessControlToolProvider.attempt_may_defer(tool_id)
-    }
-
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         if call.name() == "status_inspect" || call.name() == "tool:status_inspect" {
             *self.inspected_process_id.lock().unwrap() = call
@@ -1454,10 +1450,6 @@ impl lash_core::ToolProvider for ProcessControlToolProvider {
             .into_iter()
             .find(|definition| definition.manifest().name == name)
             .map(|definition| Arc::new(definition.contract()))
-    }
-
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id.as_str() == "tool:await_process"
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

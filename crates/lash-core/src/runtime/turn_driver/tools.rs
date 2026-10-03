@@ -54,6 +54,23 @@ impl RuntimeTurnDriver<'_> {
             let mut results = vec![None; call_count];
             let mut prepared_entries = Vec::new();
             let mut pending = Vec::new();
+            // The step's calls are one round (K1): each is admitted under its
+            // recorded binding when its tool drifted, else under the catalog, and
+            // one refused call refuses every call before any prepares.
+            let mut admitted = Vec::with_capacity(call_count);
+            for call in &calls {
+                admitted.push(
+                    match self.recorded_surface_drift(&prepare_context, &call.tool_name)? {
+                        Some(drift) => Some(drift.recorded_binding().manifest()),
+                        None => crate::tool_dispatch::resolve_callable_manifest(
+                            prepare_context.dispatch(),
+                            &call.tool_name,
+                        ),
+                    },
+                );
+            }
+            let refused =
+                crate::tool_dispatch::admit_tool_round(admitted.iter().map(Option::as_ref)).err();
             for (index, call) in calls.into_iter().enumerate() {
                 let ids = crate::tool_dispatch::ToolCallIds::of_pending(&call);
                 let call_id = ids.call_id.clone();
@@ -74,13 +91,18 @@ impl RuntimeTurnDriver<'_> {
                     .or_else(|| prepare_context.callable_tool_id_by_name(&call.tool_name))
                     .unwrap_or_else(|| crate::ToolId::new(call.tool_name.clone()));
                 let prepare_started = prepare_context.dispatch().clock.now();
-                let preparation = match &drift {
-                    Some(drift) => {
+                let preparation = match (&refused, &drift) {
+                    (Some(refused), _) => {
+                        prepare_context
+                            .refuse_tool_call(call, refused.refusal_for(index), &call_key)
+                            .await
+                    }
+                    (None, Some(drift)) => {
                         prepare_context
                             .prepare_recorded_tool_call(&drift.recorded_binding(), call, &call_key)
                             .await
                     }
-                    None => prepare_context.prepare_tool_call(call, &call_key).await,
+                    (None, None) => prepare_context.prepare_tool_call(call, &call_key).await,
                 };
                 match preparation {
                     crate::tool_dispatch::ToolPreparationOutcome::Prepared(prepared) => {

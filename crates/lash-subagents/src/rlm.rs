@@ -290,10 +290,6 @@ struct PreparedSpawnAgent {
 
 #[async_trait]
 impl StaticToolExecute for RlmSubagentToolsProvider {
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id.as_str() == SPAWN_AGENT_TOOL_ID
-    }
-
     async fn prepare_tool_call(
         &self,
         tool_id: &lash_core::ToolId,
@@ -318,9 +314,6 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
         finalise_tool_result(result).into()
     }
 }
-
-/// The manifest id of `spawn_agent`.
-const SPAWN_AGENT_TOOL_ID: &str = "tool:spawn_agent";
 
 pub fn spawn_agent_tool_definition(capability_names: &[String]) -> ToolDefinition {
     let example_capability = example_capability_name(capability_names);
@@ -383,6 +376,8 @@ fn spawn_agent_definition(capability_names: &[String], examples: Vec<String>) ->
     )
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["agents"], "spawn"))
     .with_output_from_input_schema("output", None)
+    // The child runs as a declared process start the call parks on.
+    .with_declaration(lash_core::ToolDeclaration::deferring())
 }
 
 fn capability_detail_for_tool_description(capability_names: &[String]) -> String {

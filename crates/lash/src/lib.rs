@@ -458,6 +458,10 @@ pub mod tools {
         facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
         turn_outcome_from_tool_control,
     };
+    /// The three capabilities a tool declares with
+    /// [`ToolDefinition::with_declaration`], what refuses a call at admission,
+    /// and what refuses an outcome its declaration does not admit.
+    pub use lash_core::{DeclarationRefusal, OutcomeShape, ToolAdmissionRefusal, ToolDeclaration};
     pub use lash_core::{DeclaredStart, DeclaredStartRefused};
     /// Tool-execution request batches, replies, and child-process observation hooks.
     pub use lash_core::{

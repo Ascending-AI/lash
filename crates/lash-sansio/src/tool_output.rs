@@ -90,7 +90,9 @@ macro_rules! define_tool_intent_kind {
         /// Literal command kind of one recorded declaration.
         ///
         /// Generated from [`tool_intent_variants!`]; never hand-edited.
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(
+            Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema,
+        )]
         #[serde(rename_all = "snake_case")]
         pub enum ToolIntentKind {
             $($variant,)*

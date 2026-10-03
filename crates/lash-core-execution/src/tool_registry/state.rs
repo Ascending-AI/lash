@@ -72,7 +72,6 @@ impl ToolSourceCapture for FrozenToolSourceCapture {
 #[async_trait::async_trait]
 pub(crate) trait LeafToolSourceExecutor: Send + Sync {
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome;
-    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool;
 }
 
 #[async_trait::async_trait]

@@ -55,9 +55,6 @@ impl ToolProvider for Integrator {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         unreachable!("external signature witness")
     }
-    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
-        unreachable!("external signature witness")
-    }
 }
 
 #[lash::async_trait]

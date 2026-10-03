@@ -125,10 +125,6 @@ impl LeafToolSourceExecutor for AdmissionSourceSnapshot {
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         ToolOutcome::ok(json!(self.result.unwrap_or(call.name()))).into()
     }
-
-    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
-        false
-    }
 }
 
 #[async_trait::async_trait]
@@ -180,10 +176,6 @@ impl ToolSourceExecutor for MutableAdmissionSource {
 impl LeafToolSourceExecutor for MutableAdmissionSource {
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         ToolOutcome::ok(json!(call.name())).into()
-    }
-
-    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
-        false
     }
 }
 
@@ -288,10 +280,6 @@ impl ToolSourceExecutor for RoutedAdmissionSource {
 impl LeafToolSourceExecutor for RoutedAdmissionSource {
     async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         ToolOutcome::ok(json!(self.result)).into()
-    }
-
-    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
-        false
     }
 }
 

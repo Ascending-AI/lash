@@ -437,6 +437,9 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
                 bindings: _,
                 argument_projection: _,
                 retry_policy: _,
+                // The declaration is admission policy, like the retry policy:
+                // it never names the logical call.
+                declaration: _,
             } = manifest;
             identity.string(id.as_str());
             identity.optional(source_id.as_deref(), |identity, source_id| {
@@ -597,6 +600,34 @@ impl RuntimeExecutionContext<'_> {
             context.record_nested_effect_error(error);
         }
         preparation
+    }
+
+    /// Settles a call its round's admission refused, without preparing it:
+    /// no hook and no provider callback runs for it.
+    pub async fn refuse_tool_call(
+        &self,
+        pending: crate::sansio::PendingToolCall,
+        refusal: crate::ToolAdmissionRefusal,
+        call_key: &str,
+    ) -> ToolPreparationOutcome {
+        let context = self.with_call_observation_key(self.call_observation_key(call_key));
+        let requested_at_ms = self.dispatch.clock.timestamp_ms();
+        let failure = crate::tool_dispatch::admission_failure(&pending.tool_name, refusal);
+        let outcome = crate::tool_dispatch::normalized_outcome(
+            context.dispatch.as_ref(),
+            &ToolCallIds::of_pending(&pending),
+            pending.tool_name,
+            pending.args,
+            crate::ToolOutcome::failure(failure),
+        )
+        .await;
+        if let Err(error) = context
+            .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
+            .await
+        {
+            context.record_nested_effect_error(error);
+        }
+        ToolPreparationOutcome::Completed(Box::new(outcome))
     }
 
     /// Prepares a call on a tool of the turn's recorded surface whose live

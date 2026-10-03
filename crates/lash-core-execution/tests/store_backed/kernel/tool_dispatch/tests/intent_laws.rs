@@ -84,13 +84,26 @@ async fn register_intent_law_target_observed_by(
         .id
 }
 
+/// A dispatch whose one tool returns `intents`, declaring every kind they use.
 async fn fixed_intent_dispatch_context(
     controller: Arc<IntentReplayController>,
     world: &IntentLawWorld,
     intents: crate::ToolIntents,
     calls: Arc<AtomicUsize>,
 ) -> ToolDispatchContext<'static> {
-    let definition = named_beta_tool("fixed_intent_law");
+    let declaration = crate::ToolDeclaration::default()
+        .with_intents(intents.intents.iter().map(crate::ToolIntent::kind));
+    fixed_intent_dispatch_context_declaring(controller, world, intents, declaration, calls).await
+}
+
+async fn fixed_intent_dispatch_context_declaring(
+    controller: Arc<IntentReplayController>,
+    world: &IntentLawWorld,
+    intents: crate::ToolIntents,
+    declaration: crate::ToolDeclaration,
+    calls: Arc<AtomicUsize>,
+) -> ToolDispatchContext<'static> {
+    let definition = named_beta_tool("fixed_intent_law").with_declaration(declaration);
     let provider: Arc<dyn ToolProvider> = Arc::new(FixedAttemptIntentTools {
         definition,
         intents,
@@ -564,6 +577,58 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
     );
 }
 
+/// K1: an intent kind the tool's admitted declaration does not name refuses
+/// the whole outcome before anything it declared is realized. The body ran
+/// once; the call answers a typed declaration refusal and the event it
+/// declared never reaches its target.
+#[tokio::test]
+async fn an_undeclared_intent_refuses_the_outcome_before_anything_is_realized() {
+    let event_types = ["intent.undeclared"];
+    let world = intent_law_world().await;
+    let registry = Arc::clone(&world.registry);
+    let target = register_intent_law_target(&registry, &event_types).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(None).await);
+    let context = fixed_intent_dispatch_context_declaring(
+        Arc::clone(&controller),
+        &world,
+        recorded_event_intents(&target, &event_types),
+        crate::ToolDeclaration::default().with_intents([crate::ToolIntentKind::SignalProcess]),
+        Arc::clone(&calls),
+    )
+    .await;
+
+    let outcome = run_fixed_intent_attempt(&context).await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "the body runs once");
+    let crate::ToolCallOutcome::Failure(failure) = &outcome.record.output.outcome else {
+        panic!("an undeclared intent refuses the outcome");
+    };
+    assert_eq!(failure.code, "tool_outcome_not_declared");
+    assert_eq!(
+        failure.cause.as_deref(),
+        Some(&crate::ToolFailureCause::Declaration {
+            refusal: crate::DeclarationRefusal::UndeclaredIntent {
+                kind: crate::ToolIntentKind::EmitProcessEvent,
+            },
+        })
+    );
+    assert!(
+        outcome.intents.is_empty(),
+        "no refused intent is carried on"
+    );
+    assert!(outcome.intent_outcomes.is_empty(), "no intent is realized");
+    let events = registry
+        .full_event_window(&target, 0)
+        .await
+        .expect("read the target's events");
+    assert!(
+        events
+            .iter()
+            .all(|event| event.event_type != "intent.undeclared"),
+        "the undeclared event never reaches its target"
+    );
+}
+
 #[tokio::test]
 async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect_abort() {
     let world = intent_law_world().await;
@@ -706,8 +771,12 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
 #[tokio::test]
 async fn retry_drains_only_the_final_attempts_intents() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
-    let definition =
-        named_beta_tool("retry_intents").with_retry_policy(crate::ToolRetryPolicy::safe(2, 0, 0));
+    let definition = named_beta_tool("retry_intents")
+        .with_retry_policy(crate::ToolRetryPolicy::safe(2, 0, 0))
+        .with_declaration(
+            crate::ToolDeclaration::default()
+                .with_intents([crate::ToolIntentKind::EmitProcessEvent]),
+        );
     let calls = Arc::new(AtomicUsize::new(0));
     let world = intent_law_world().await;
     let registry = Arc::clone(&world.registry);

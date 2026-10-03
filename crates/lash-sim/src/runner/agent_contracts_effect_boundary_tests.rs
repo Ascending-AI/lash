@@ -130,10 +130,6 @@ impl lash_core::ToolProvider for RecordingToolProvider {
         self.delegate.resolve_contract(name)
     }
 
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        self.delegate.attempt_may_defer(tool_id)
-    }
-
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.recorder.record_provider_body_invocation(call.name());
         self.delegate.execute(call).await

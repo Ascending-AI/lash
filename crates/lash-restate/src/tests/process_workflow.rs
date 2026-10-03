@@ -936,6 +936,10 @@ impl RecoveryProcessTool {
         )
         .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tools"], "recovery_echo"))
+        .with_declaration(
+            lash_core::ToolDeclaration::default()
+                .with_intents([lash_core::ToolIntentKind::EmitProcessEvent]),
+        )
     }
 }
 

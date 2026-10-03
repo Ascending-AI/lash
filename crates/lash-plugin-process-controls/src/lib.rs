@@ -99,12 +99,6 @@ struct SessionProcessAdminTools {
 
 #[async_trait::async_trait]
 impl StaticToolExecute for SessionProcessAdminTools {
-    /// `await_process` parks, so the runtime pre-derives the completion key its
-    /// recorded attempt reads. Nothing else in this plugin defers.
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id.as_str() == "tool:await_process"
-    }
-
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         if call.name() == "await_process" {
             return execute_process_await_tool_call(call.context, call.args);
@@ -273,6 +267,9 @@ pub fn process_await_tool_definition() -> ToolDefinition {
         }),
     ).expect("valid declared tool schemas")
     .with_examples(vec!["await processes.await({ handle: h })?".into()])
+    // `await_process` parks, so admission records that it may defer and the
+    // runtime pre-derives the completion key its recorded attempt reads.
+    .with_declaration(lash_core::ToolDeclaration::deferring())
     .with_tool_binding(ToolBinding::new(["processes"], "await"))
 }
 
@@ -317,6 +314,10 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
         r#"await processes.cancel({ process_id: "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
         r#"await processes.cancel({ process_id: "subagent:session-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
     ])
+    .with_declaration(
+        lash_core::ToolDeclaration::default()
+            .with_intents([lash_core::ToolIntentKind::CancelProcess]),
+    )
     .with_tool_binding(ToolBinding::new(["processes"], "cancel"))
 }
 
@@ -470,6 +471,22 @@ mod tests {
                 "the contract requires `{name}`, which this handle view omits"
             );
         }
+    }
+
+    #[test]
+    fn await_process_declares_a_deferring_attempt_and_a_handle_typed_argument() {
+        let definition = process_await_tool_definition();
+        assert!(
+            definition.manifest.declaration.may_defer,
+            "the runtime only pre-derives a completion key for a tool that declares it defers"
+        );
+        // A `{"type":"object"}` parameter would refuse a nominally typed cell
+        // handle in the type checker before the handler ran (FIG-2989), which
+        // is exactly what the `x-lash` keyword exists to avoid.
+        assert_eq!(
+            definition.contract.input_schema.canonical.as_value()["properties"]["handle"]["x-lash"],
+            serde_json::json!({ "kind": "process_unknown" })
+        );
     }
 
     /// A handle or id that is present but names no process is refused with

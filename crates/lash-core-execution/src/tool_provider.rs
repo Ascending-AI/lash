@@ -1375,6 +1375,22 @@ impl<'a> ToolCall<'a> {
 /// [`execute`](Self::execute) method that handles every call. Tools that
 /// need session state read it from `call.context`.
 ///
+/// # Declaration
+///
+/// What a body may do beyond an inline Done result is declared on its
+/// manifest as a [`ToolDeclaration`](crate::ToolDeclaration): `may_defer`
+/// for a body that returns Deferred, `intents` for the Lash intent kinds a
+/// Done result declares, and `isolated` for a call that runs as a process
+/// from its start. Admission records the declaration with the manifest the
+/// call was admitted under, and the runtime reads only that recorded answer:
+/// a crash redelivery, a recovered group child or a replayed cell keeps the
+/// capabilities it was admitted with, whatever the provider answers now. An
+/// outcome the declaration does not admit — Deferred without `may_defer`, an
+/// undeclared intent kind — is refused before anything it declares is
+/// realized. No isolated declaration is supported until a process
+/// implementation is bound to it; one refuses at admission, before any body
+/// runs.
+///
 /// Lash contains an `execute` panic as a typed call failure. Containment does
 /// not establish that the host object's own interior-mutability state still
 /// satisfies its invariants; hosts own replacement or repair before reuse.
@@ -1392,8 +1408,23 @@ impl<'a> ToolCall<'a> {
 /// sees the same id, and every other call sees another one, even when the
 /// model's provider repeats its own call id. The provider's id is never
 /// handed to a tool. [`AttemptContext::attempt_number`] counts the runs
-/// separately; a tool that wants a fresh key per attempt combines the two
-/// itself.
+/// separately: a crash redelivers the same attempt number, and only a
+/// reported failure the retry policy accepts advances it. A tool that wants
+/// a fresh key per attempt combines the two itself.
+///
+/// The usual patterns: pass the call id as the idempotency key of an
+/// external API that accepts one; record "call id done" in the same
+/// transaction as the side effect; or check for an existing effect keyed by
+/// the call id before making it. There is no idempotent capability and no
+/// per-call timeout: a body that talks to a slow service bounds its own
+/// wait and reports the failure.
+///
+/// Effects Lash owns — process starts, signals, cancels, events, triggers and
+/// definitions — are not side effects of the body. A body returns them as
+/// declared [`ToolIntents`](crate::ToolIntents), which the runtime realizes
+/// once per intent identity after the attempt's outcome is durable, behind
+/// a first-outcome fence keyed by the call id and the intent's index. A
+/// redelivered attempt that declares the same intents realizes none twice.
 #[async_trait::async_trait]
 pub trait ToolProvider: Send + Sync + 'static {
     fn tool_manifests(&self) -> Vec<ToolManifest>;
@@ -1419,9 +1450,6 @@ pub trait ToolProvider: Send + Sync + 'static {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome;
-    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
-        false
-    }
 }
 
 #[cfg(test)]

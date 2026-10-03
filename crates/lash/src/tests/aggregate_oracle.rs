@@ -356,6 +356,12 @@ fn step_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["oracle"], "step"))
+    // Every step call may park, and a step that emits declares its process
+    // event as an intent.
+    .with_declaration(
+        lash_core::ToolDeclaration::deferring()
+            .with_intents([lash_core::ToolIntentKind::EmitProcessEvent]),
+    )
 }
 
 #[async_trait]
@@ -366,12 +372,6 @@ impl ToolProvider for OracleTools {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
         (name == "oracle_step").then(|| Arc::new(step_definition().contract()))
-    }
-
-    /// Every step call may park, so the runtime pre-derives the completion key
-    /// a `defer` leaf publishes. A call that does not park is unaffected.
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == step_definition().id()
     }
 
     /// A leaf that asks to fail here settles during the batch's preparation

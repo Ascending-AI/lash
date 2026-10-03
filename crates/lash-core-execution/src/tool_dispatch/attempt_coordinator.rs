@@ -178,11 +178,19 @@ pub async fn coordinate_tool_invocation<'run>(
     let mut captures = Vec::new();
     let mut attempts = Vec::new();
 
-    // Whether this attempt may defer is a recorded fact for a group child and a
-    // live one for everyone else. Read once, above the loop, because every
-    // attempt of one invocation is admitted under the same authority.
+    // Whether this attempt may defer is the admitted declaration's answer: the
+    // routing a group child recorded at formation, and otherwise the manifest
+    // the call was admitted under — its grant's, or the dispatch catalog's,
+    // which for a recovered child is the admitted catalog. Never a live
+    // provider. Read once, above the loop, because every attempt of one
+    // invocation is admitted under the same authority.
     let may_defer = match group_child.as_ref().map(|child| &child.completion_routing) {
-        None => context.attempt_may_defer(&call.tool_id, execution_grant.as_deref()),
+        None => super::atomic_attempt::AttemptAuthority::resolve(
+            context,
+            &call.tool_id,
+            execution_grant.as_deref(),
+        )
+        .is_some_and(|authority| authority.manifest().declaration.may_defer),
         Some(crate::runtime::ToolChildCompletionRouting::Inline) => false,
         Some(crate::runtime::ToolChildCompletionRouting::Durable) => true,
     };

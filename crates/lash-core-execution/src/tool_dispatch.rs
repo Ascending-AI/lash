@@ -1,3 +1,4 @@
+mod admission;
 mod atomic_attempt;
 mod attempt_coordinator;
 mod context;
@@ -8,6 +9,7 @@ mod pending_resolver;
 mod preparation;
 mod retry;
 
+pub use admission::{ToolRoundRefusal, admission_failure, admit_tool_round};
 pub use context::{
     REBIND_FIELDS, RebindField, RebindSource, TOOL_CHILD_REBIND_VERSION, ToolDispatchContext,
     ToolTriggerEffectOutcome,

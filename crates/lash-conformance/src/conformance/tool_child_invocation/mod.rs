@@ -390,6 +390,25 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
         if id == LEAF_RETRY || id == LEAF_BILLED {
             definition = definition.with_retry_policy(crate::ToolRetryPolicy::safe(3, 0, 0));
         }
+        if [
+            LEAF_DEFERRED,
+            LEAF_RECOVERY,
+            LEAF_SPEND_DEFERRED,
+            LEAF_PROCESS_PENDING,
+            LEAF_DECLARED_PENDING,
+        ]
+        .contains(&id)
+        {
+            definition = definition.with_declaration(crate::ToolDeclaration::deferring());
+        }
+        // The intent-bearing leaves exercise the whole intent vocabulary
+        // between them, so each declares all of it.
+        if [LEAF_INTENTS, LEAF_COMMIT, LEAF_SPEND_COMMIT, LEAF_FENCE].contains(&id) {
+            definition = definition.with_declaration(
+                crate::ToolDeclaration::default()
+                    .with_intents(crate::ToolIntentKind::ALL.iter().copied()),
+            );
+        }
         definition
     })
     .collect()
@@ -440,14 +459,6 @@ impl crate::ToolProvider for LawLeafProvider {
             .iter()
             .find(|definition| definition.manifest().name == name)
             .map(|definition| Arc::new(definition.contract()))
-    }
-
-    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
-        *tool_id == crate::ToolId::from(LEAF_DEFERRED)
-            || *tool_id == crate::ToolId::from(LEAF_RECOVERY)
-            || *tool_id == crate::ToolId::from(LEAF_SPEND_DEFERRED)
-            || *tool_id == crate::ToolId::from(LEAF_PROCESS_PENDING)
-            || *tool_id == crate::ToolId::from(LEAF_DECLARED_PENDING)
     }
 
     #[expect(

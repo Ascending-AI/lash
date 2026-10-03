@@ -468,18 +468,20 @@ async fn recording_controller_preserves_deferred_tool_completions() {
 
     #[async_trait::async_trait]
     impl lash_core::ToolProvider for DeferredEchoTool {
+        /// The echo tool's manifests, each declaring that it may defer.
         fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-            EchoTool.tool_manifests()
+            EchoTool
+                .tool_manifests()
+                .into_iter()
+                .map(|mut manifest| {
+                    manifest.declaration = lash_core::ToolDeclaration::deferring();
+                    manifest
+                })
+                .collect()
         }
 
         fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
             EchoTool.resolve_contract(name)
-        }
-
-        fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-            self.tool_manifests()
-                .iter()
-                .any(|manifest| &manifest.id == tool_id)
         }
 
         async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

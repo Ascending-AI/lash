@@ -84,7 +84,7 @@ async fn prepare(
     let context = ToolPrepareContext::for_testing(owner, sessions, originator);
     provider(source)
         .prepare_spawn_agent(
-            &lash_core::ToolId::from(SPAWN_AGENT_TOOL_ID),
+            &lash_core::ToolId::from("tool:spawn_agent"),
             spawn_call(),
             &context,
         )

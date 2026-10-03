@@ -95,12 +95,19 @@ fn probe_tool(name: &str) -> crate::ToolDefinition {
 /// a later leaf has settled.
 const SLOW_SYNCHRONOUS_PROBE: &str = "slow_sync_fail";
 
+/// Every probe but the synchronous one parks on an out-of-band completion, so
+/// each declares it may defer and the runtime pre-derives the key those
+/// attempt bodies read.
 fn probe_tools() -> Vec<crate::ToolDefinition> {
     vec![
-        probe_tool("slow_fail"),
-        probe_tool("fast_fail"),
+        deferring_probe_tool("slow_fail"),
+        deferring_probe_tool("fast_fail"),
         probe_tool(SLOW_SYNCHRONOUS_PROBE).with_retry_policy(crate::ToolRetryPolicy::Never),
     ]
+}
+
+fn deferring_probe_tool(name: &str) -> crate::ToolDefinition {
+    probe_tool(name).with_declaration(crate::ToolDeclaration::deferring())
 }
 
 /// How long each tool waits before its completion is delivered. The gap is wide
@@ -127,14 +134,6 @@ impl crate::ToolProvider for LatencyProbeTools {
             .into_iter()
             .find(|tool| tool.name() == name)
             .map(|tool| Arc::new(tool.contract()))
-    }
-
-    /// Every probe but the synchronous one parks on an out-of-band completion,
-    /// so the runtime pre-derives the key those attempt bodies read.
-    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
-        probe_tools()
-            .iter()
-            .any(|tool| tool.id() == tool_id && tool.name() != SLOW_SYNCHRONOUS_PROBE)
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -518,7 +517,10 @@ struct MixedBatchProbeTools {
 }
 
 fn mixed_batch_tools() -> Vec<crate::ToolDefinition> {
-    vec![probe_tool(TOOL_LEAF), probe_tool(PROCESS_AWAIT_LEAF)]
+    vec![
+        deferring_probe_tool(TOOL_LEAF),
+        deferring_probe_tool(PROCESS_AWAIT_LEAF),
+    ]
 }
 
 #[async_trait::async_trait]
@@ -535,10 +537,6 @@ impl crate::ToolProvider for MixedBatchProbeTools {
             .into_iter()
             .find(|tool| tool.name() == name)
             .map(|tool| Arc::new(tool.contract()))
-    }
-
-    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
-        mixed_batch_tools().iter().any(|tool| tool.id() == tool_id)
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {

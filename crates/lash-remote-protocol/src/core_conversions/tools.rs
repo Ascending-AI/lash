@@ -56,15 +56,6 @@ impl From<RemoteToolRetryPolicy> for lash_core::ToolRetryPolicy {
                 base_delay_ms,
                 max_delay_ms,
             },
-            RemoteToolRetryPolicy::Idempotent {
-                max_attempts,
-                base_delay_ms,
-                max_delay_ms,
-            } => Self::Idempotent {
-                max_attempts,
-                base_delay_ms,
-                max_delay_ms,
-            },
         }
     }
 }

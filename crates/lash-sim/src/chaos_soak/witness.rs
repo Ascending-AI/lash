@@ -36,6 +36,7 @@ impl WitnessTool {
             serde_json::json!({"type":"object"}),
         )
         .expect("valid soak witness schemas")
+        .with_declaration(lash_core::ToolDeclaration::deferring())
     }
 }
 
@@ -46,9 +47,6 @@ impl lash_core::ToolProvider for WitnessTool {
     }
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
         (name == "soak_witness").then(|| Arc::new(Self::definition().contract()))
-    }
-    fn attempt_may_defer(&self, tool: &lash_core::ToolId) -> bool {
-        tool == Self::definition().id()
     }
     #[expect(
         clippy::expect_used,

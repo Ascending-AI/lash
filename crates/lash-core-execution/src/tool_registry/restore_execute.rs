@@ -152,17 +152,6 @@ impl ToolRegistry {
             }
         }
     }
-
-    pub(crate) fn attempt_may_defer_for_grant(
-        &self,
-        tool_id: &ToolId,
-        source_id: Option<&str>,
-    ) -> bool {
-        let Ok(source) = self.resolve_granted_execution_source(tool_id, source_id) else {
-            return false;
-        };
-        source.execution().attempt_may_defer(tool_id)
-    }
 }
 
 #[async_trait::async_trait]
@@ -235,10 +224,5 @@ impl ToolProvider for ToolRegistry {
             Err(result) => return result.into(),
         };
         source.execution().execute(call).await
-    }
-
-    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
-        self.resolve_bound_source(tool_id)
-            .is_ok_and(|source| source.execution().attempt_may_defer(tool_id))
     }
 }

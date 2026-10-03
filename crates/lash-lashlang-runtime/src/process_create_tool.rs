@@ -53,6 +53,10 @@ pub fn process_create_tool_definition() -> ToolDefinition {
             "description": "The created process definition.",
         }),
     ).expect("valid declared tool schemas")
+    .with_declaration(
+        lash_core::ToolDeclaration::default()
+            .with_intents([lash_core::ToolIntentKind::PublishDefinition]),
+    )
     .with_tool_binding(lash_core::ToolBinding::new(["processes"], "create"))
 }
 

@@ -115,6 +115,7 @@ struct DeferredLookup {
 
 fn deferred_definition() -> lash_core::ToolDefinition {
     test_tool_definition_with_tool_binding(lash_core::ToolDefinition::raw("tool:app_lookup", "app_lookup", "Look up app state.", serde_json::json!({"type":"object","properties":{"slot":{"type":"integer"}},"additionalProperties":false}), serde_json::json!({"type":"object"})).expect("tool schemas"), "app_lookup")
+    .with_declaration(lash_core::ToolDeclaration::deferring())
 }
 
 #[async_trait]
@@ -125,10 +126,6 @@ impl ToolProvider for DeferredLookup {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
         (name == "app_lookup").then(|| Arc::new(deferred_definition().contract()))
-    }
-
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == deferred_definition().id()
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

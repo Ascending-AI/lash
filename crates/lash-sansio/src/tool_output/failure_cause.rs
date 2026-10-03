@@ -12,4 +12,15 @@ pub enum ToolFailureCause {
     ValueMismatch {
         source: crate::ValueMismatch,
     },
+    /// Admission refused the call, or a member of its round, before any
+    /// member prepared or started.
+    Admission {
+        refusal: crate::ToolAdmissionRefusal,
+    },
+    /// The body's outcome is one its recorded declaration does not admit: a
+    /// Deferred without `may_defer`, or an undeclared intent kind. Nothing
+    /// the outcome declared was realized.
+    Declaration {
+        refusal: crate::DeclarationRefusal,
+    },
 }

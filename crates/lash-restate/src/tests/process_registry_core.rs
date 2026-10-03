@@ -298,6 +298,10 @@ impl ReplayScalarPendingTools {
         )
         .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tools"], "replay_scalar_counter"))
+        .with_declaration(
+            lash_core::ToolDeclaration::default()
+                .with_intents([lash_core::ToolIntentKind::SignalProcess]),
+        )
     }
 
     fn pending_definition() -> lash_core::ToolDefinition {
@@ -319,6 +323,7 @@ impl ReplayScalarPendingTools {
         )
         .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tools"], "replay_pending_input"))
+        .with_declaration(lash_core::ToolDeclaration::deferring())
     }
 }
 
@@ -377,10 +382,6 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
                 lash_core::ToolOutcome::err_fmt(format!("unknown replay tool `{other}`")).into()
             }
         }
-    }
-
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == Self::pending_definition().id()
     }
 }
 

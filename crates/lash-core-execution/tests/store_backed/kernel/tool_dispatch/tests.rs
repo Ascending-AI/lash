@@ -524,8 +524,8 @@ impl ToolProvider for AttemptIntentTools {
                 .completion_key()
                 .expect_err("non-deferable provider receives no completion key")
                 .code,
-            // The provider never declared `attempt_may_defer`, and the refusal
-            // says so rather than blaming the host's effect controller.
+            // The tool never declared `may_defer`, and the refusal says so
+            // rather than blaming the host's effect controller.
             crate::RuntimeErrorCode::ToolDeferralNotDeclared
         );
         crate::ToolAttemptOutcome::done(
@@ -622,16 +622,6 @@ impl ToolProvider for PendingProbeTools {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
-    }
-
-    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == self.definition.id()
-            && matches!(
-                self.mode,
-                PendingProbeMode::PendingWithKey
-                    | PendingProbeMode::FailureThenPending
-                    | PendingProbeMode::AnnouncingWithoutProcess
-            )
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -1184,8 +1174,12 @@ async fn retry_dispatch_context_with_after_observations<'h>(
     exact_dispatch_context_with_plugins(ports, plugins).await
 }
 
+/// The probe declares it may defer: every mode but `MissingKey` parks under
+/// its declaration.
 fn pending_probe_tool(retry_policy: ToolRetryPolicy) -> crate::ToolDefinition {
-    named_beta_tool("pending_probe").with_retry_policy(retry_policy)
+    named_beta_tool("pending_probe")
+        .with_retry_policy(retry_policy)
+        .with_declaration(crate::ToolDeclaration::deferring())
 }
 
 async fn pending_dispatch_context<'h>(
@@ -1195,8 +1189,17 @@ async fn pending_dispatch_context<'h>(
     after_calls: Option<Arc<AtomicUsize>>,
     retry_policy: ToolRetryPolicy,
 ) -> ToolDispatchContext<'h> {
+    let definition = match mode {
+        // This mode parks under no deferral declaration.
+        PendingProbeMode::MissingKey => {
+            named_beta_tool("pending_probe").with_retry_policy(retry_policy)
+        }
+        PendingProbeMode::PendingWithKey
+        | PendingProbeMode::FailureThenPending
+        | PendingProbeMode::AnnouncingWithoutProcess => pending_probe_tool(retry_policy),
+    };
     let provider: Arc<dyn ToolProvider> = Arc::new(PendingProbeTools {
-        definition: pending_probe_tool(retry_policy),
+        definition,
         attempts,
         mode,
     });
@@ -1269,8 +1272,11 @@ fn tool_context_for_prepared<'run>(
         .prepared_call(prepared)
 }
 
+/// A body that parks although its admitted declaration does not declare
+/// `may_defer` is refused typed: no key was reserved, nothing parks, and the
+/// cause names the declaration rather than the missing key.
 #[tokio::test]
-async fn pending_tool_without_completion_key_is_runtime_failure() {
+async fn an_undeclared_deferral_is_refused_typed_before_it_parks() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let context = pending_dispatch_context(
@@ -1293,13 +1299,19 @@ async fn pending_tool_without_completion_key_is_runtime_failure() {
     .await;
 
     let ToolCallLaunch::Done(outcome) = launch else {
-        panic!("missing completion key must fail launch synchronously");
+        panic!("an undeclared deferral must fail launch synchronously");
     };
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
     let ToolCallOutcome::Failure(failure) = &outcome.record.output.outcome else {
         panic!("expected failure output");
     };
-    assert_eq!(failure.code, "pending_tool_missing_completion_key");
+    assert_eq!(failure.code, "tool_outcome_not_declared");
+    assert_eq!(
+        failure.cause.as_deref(),
+        Some(&crate::ToolFailureCause::Declaration {
+            refusal: crate::DeclarationRefusal::UndeclaredDeferral
+        })
+    );
     drop(context);
     handler.close().await.expect("close the dispatch handler");
 }
@@ -1561,7 +1573,15 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
 async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinator() {
     // The process intents run on the engine's process workflow, which reaches
     // the deployment's process worker: install one over the double.
-    let definition = named_beta_tool("attempt_intents");
+    let definition = named_beta_tool("attempt_intents").with_declaration(
+        crate::ToolDeclaration::default().with_intents([
+            crate::ToolIntentKind::StartProcess,
+            crate::ToolIntentKind::SignalProcess,
+            crate::ToolIntentKind::EmitProcessEvent,
+            crate::ToolIntentKind::EmitTrigger,
+            crate::ToolIntentKind::CancelProcess,
+        ]),
+    );
     let calls = Arc::new(AtomicUsize::new(0));
     let target = Arc::new(std::sync::OnceLock::new());
     let provider: Arc<dyn ToolProvider> = Arc::new(AttemptIntentTools {

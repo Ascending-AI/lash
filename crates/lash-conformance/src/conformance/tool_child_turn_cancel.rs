@@ -392,6 +392,7 @@ fn follow_on_pending_tool() -> crate::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_retry_policy(crate::ToolRetryPolicy::safe(2, 1, 1))
+    .with_declaration(crate::ToolDeclaration::deferring())
 }
 
 #[async_trait::async_trait]
@@ -409,10 +410,6 @@ impl crate::ToolProvider for FollowOnPendingTools {
             "conformance_follow_on_pending" => Some(Arc::new(follow_on_pending_tool().contract())),
             _ => None,
         }
-    }
-
-    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == follow_on_pending_tool().id()
     }
 
     #[expect(

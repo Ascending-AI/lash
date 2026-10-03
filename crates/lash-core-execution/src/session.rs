@@ -947,7 +947,6 @@ mod tool_catalog_cache_tests {
         active: Arc<AtomicBool>,
         prepares: Arc<AtomicUsize>,
         executions: Arc<AtomicUsize>,
-        defer_queries: Arc<AtomicUsize>,
         attempts: Arc<AtomicUsize>,
     }
 
@@ -1059,6 +1058,11 @@ mod tool_catalog_cache_tests {
                 serde_json::json!({ "type": "string" }),
             )
             .expect("valid declared tool schemas")
+            .with_declaration(if self.label == "route_a" {
+                crate::ToolDeclaration::deferring()
+            } else {
+                crate::ToolDeclaration::default()
+            })
         }
     }
 
@@ -1091,11 +1095,6 @@ mod tool_catalog_cache_tests {
             self.executions.fetch_add(1, Ordering::SeqCst);
             self.attempts.fetch_add(1, Ordering::SeqCst);
             crate::ToolOutcome::ok(serde_json::json!(format!("attempt_{}", self.label))).into()
-        }
-
-        fn attempt_may_defer(&self, _tool_id: &crate::ToolId) -> bool {
-            self.defer_queries.fetch_add(1, Ordering::SeqCst);
-            self.label == "route_a"
         }
     }
 
@@ -1267,8 +1266,6 @@ mod tool_catalog_cache_tests {
         let b_prepares = Arc::new(AtomicUsize::new(0));
         let a_executions = Arc::new(AtomicUsize::new(0));
         let b_executions = Arc::new(AtomicUsize::new(0));
-        let a_defer_queries = Arc::new(AtomicUsize::new(0));
-        let b_defer_queries = Arc::new(AtomicUsize::new(0));
         let a_attempts = Arc::new(AtomicUsize::new(0));
         let b_attempts = Arc::new(AtomicUsize::new(0));
         let providers = [
@@ -1277,7 +1274,6 @@ mod tool_catalog_cache_tests {
                 active: Arc::clone(&a_active),
                 prepares: Arc::clone(&a_prepares),
                 executions: Arc::clone(&a_executions),
-                defer_queries: Arc::clone(&a_defer_queries),
                 attempts: Arc::clone(&a_attempts),
             }) as Arc<dyn ToolProvider>,
             Arc::new(ReassignableResidentProvider {
@@ -1285,7 +1281,6 @@ mod tool_catalog_cache_tests {
                 active: Arc::clone(&b_active),
                 prepares: Arc::clone(&b_prepares),
                 executions: Arc::clone(&b_executions),
-                defer_queries: Arc::clone(&b_defer_queries),
                 attempts: Arc::clone(&b_attempts),
             }) as Arc<dyn ToolProvider>,
         ];
@@ -1404,9 +1399,10 @@ mod tool_catalog_cache_tests {
         assert_eq!(b_prepares.load(Ordering::SeqCst), 0);
         assert_eq!(a_executions.load(Ordering::SeqCst), 1);
         assert_eq!(b_executions.load(Ordering::SeqCst), 0);
-        assert!(old.tools().attempt_may_defer(&tool_id));
-        assert_eq!(a_defer_queries.load(Ordering::SeqCst), 1);
-        assert_eq!(b_defer_queries.load(Ordering::SeqCst), 0);
+        assert!(
+            old_manifest.declaration.may_defer,
+            "the old surface admits provider A's declaration"
+        );
         assert_eq!(a_attempts.load(Ordering::SeqCst), 1);
         assert_eq!(b_attempts.load(Ordering::SeqCst), 0);
 
@@ -1449,9 +1445,10 @@ mod tool_catalog_cache_tests {
         assert_eq!(b_prepares.load(Ordering::SeqCst), 1);
         assert_eq!(a_executions.load(Ordering::SeqCst), 1);
         assert_eq!(b_executions.load(Ordering::SeqCst), 1);
-        assert!(!fresh.tools().attempt_may_defer(&tool_id));
-        assert_eq!(a_defer_queries.load(Ordering::SeqCst), 1);
-        assert_eq!(b_defer_queries.load(Ordering::SeqCst), 1);
+        assert!(
+            !fresh_manifest.declaration.may_defer,
+            "the fresh surface admits provider B's declaration"
+        );
         assert_eq!(a_attempts.load(Ordering::SeqCst), 1);
         assert_eq!(b_attempts.load(Ordering::SeqCst), 1);
     }

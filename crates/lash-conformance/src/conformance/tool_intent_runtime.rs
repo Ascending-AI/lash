@@ -27,6 +27,9 @@ fn signal_intent_tool() -> crate::ToolDefinition {
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
     .expect("valid declared tool schemas")
+    .with_declaration(
+        crate::ToolDeclaration::default().with_intents([crate::ToolIntentKind::SignalProcess]),
+    )
 }
 
 #[async_trait::async_trait]

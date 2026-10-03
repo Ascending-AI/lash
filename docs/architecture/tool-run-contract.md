@@ -37,7 +37,17 @@ callback slot cannot exist without its key prefix and its state authority.
 ## Binding rulings the seams encode
 
 **Declaration (Q3).** The author declares exactly `may_defer`, `intents` and
-`isolated`. An isolated call is a process from its start with no inline body,
+`isolated`, as the `ToolDeclaration` on the tool's `ToolManifest`
+(`lash_sansio`, re-exported by `tool_run::admission`). Admission records it
+with the manifest the call is admitted under — the catalog's, the grant's, a
+replayed cell's recorded binding or a group child's retained admission — and
+dispatch reads only that record; no provider hook is consulted after
+admission (FIG-4875). A round's calls are admitted together before any
+prepares: an invalid declaration or an isolated declaration with no bound
+process implementation refuses every member with a typed
+`ToolAdmissionRefusal`. An outcome the record does not admit — Deferred
+without `may_defer`, an undeclared intent kind — fails the call with
+`ToolFailureCause::Declaration` before anything it declared is realized. An isolated call is a process from its start with no inline body,
 so it declares neither `may_defer` nor intents. There is no per-call
 timeout, duration, budget or idempotent capability, and the declaration
 refuses those fields when decoding. Retry and cancel policy are recorded

@@ -274,7 +274,9 @@ pub(crate) fn host_environment() -> LashlangHostEnvironment {
     reason = "the example declares valid schemas and bindings"
 )]
 pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
-    use lash::tools::{ToolBinding, ToolDefinition, ToolDefinitionBindingExt};
+    use lash::tools::{
+        ToolBinding, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt, ToolIntentKind,
+    };
     let mut definitions = Vec::new();
     for operation in crate::display::OPERATIONS {
         let properties = operation
@@ -295,7 +297,9 @@ pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
         definitions.push(ToolDefinition::raw(format!("tool:{name}"), name, operation.label,
             serde_json::json!({"type":"object", "properties":properties, "required":operation.fields.iter().map(|field| field.name).collect::<Vec<_>>(), "additionalProperties":false}),
             serde_json::json!({"type":"null"})).expect("display schema")
-            .with_tool_binding(ToolBinding::new(["display"], operation.operation).with_authority_type("ToyDisplay")));
+            .with_tool_binding(ToolBinding::new(["display"], operation.operation).with_authority_type("ToyDisplay"))
+            // A display tool appends its operation to the workflow's event journal.
+            .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::EmitProcessEvent])));
     }
     for operation in crate::sample_tools::OPERATIONS {
         let name = operation.host_operation.replace('.', "_");

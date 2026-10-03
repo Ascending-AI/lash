@@ -726,10 +726,6 @@ impl lash_core::ToolProvider for PendingToolProvider {
         (name == "app_lookup").then(|| Arc::new(pending_tool_definition().contract()))
     }
 
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == pending_tool_definition().id()
-    }
-
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         if call.name() != "app_lookup" {
             return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name()))
@@ -765,6 +761,7 @@ fn pending_tool_definition() -> lash_core::ToolDefinition {
         json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
+    .with_declaration(lash_core::ToolDeclaration::deferring())
 }
 
 pub(super) fn pending_tool_roundtrip_provider() -> ProviderHandle {
@@ -826,6 +823,7 @@ impl SuspendToolProvider {
             json!({ "type": "object" }),
         )
         .expect("valid declared tool schemas")
+        .with_declaration(lash_core::ToolDeclaration::deferring())
     }
 }
 
@@ -837,10 +835,6 @@ impl lash_core::ToolProvider for SuspendToolProvider {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
         (name == self.tool_name).then(|| Arc::new(self.definition().contract()))
-    }
-
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == self.definition().id()
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

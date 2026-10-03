@@ -271,11 +271,6 @@ impl LeafToolSourceExecutor for ToolProviderSource {
         };
         self.providers[provider_idx].execute(call).await
     }
-
-    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
-        self.provider_index_for_id(tool_id)
-            .is_some_and(|index| self.providers[index].attempt_may_defer(tool_id))
-    }
 }
 
 #[derive(Clone)]
@@ -399,11 +394,6 @@ impl LeafToolSourceExecutor for PinnedToolProviderSource {
         // a curated model-facing alias must not reach the provider-facing name.
         let provider_call = ToolCall::new(&route.manifest, call.args, call.context);
         route.provider.execute(provider_call).await
-    }
-
-    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
-        self.route(tool_id)
-            .is_some_and(|route| route.provider.attempt_may_defer(tool_id))
     }
 }
 

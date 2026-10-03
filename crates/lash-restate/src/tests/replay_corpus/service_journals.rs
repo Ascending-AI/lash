@@ -34,29 +34,32 @@ struct CountingTool {
     awaited_child: bool,
 }
 
-fn tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+/// The tool's definition: one that awaits its declared child declares it may
+/// defer.
+fn tool_definition(awaited_child: bool) -> lash_core::ToolDefinition {
+    let definition = lash_core::ToolDefinition::raw(
         format!("tool:{TOOL}"),
         TOOL,
         "Count this call.",
         json!({"type": "object", "properties": {}, "additionalProperties": false}),
         json!({"type": "object"}),
     )
-    .expect("valid declared tool schemas")
+    .expect("valid declared tool schemas");
+    if awaited_child {
+        definition.with_declaration(lash_core::ToolDeclaration::deferring())
+    } else {
+        definition
+    }
 }
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for CountingTool {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![tool_definition().manifest()]
+        vec![tool_definition(self.awaited_child).manifest()]
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == TOOL).then(|| Arc::new(tool_definition().contract()))
-    }
-
-    fn attempt_may_defer(&self, _tool_id: &lash_core::ToolId) -> bool {
-        self.awaited_child
+        (name == TOOL).then(|| Arc::new(tool_definition(self.awaited_child).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

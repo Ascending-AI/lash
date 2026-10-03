@@ -315,6 +315,10 @@ impl ApprovalToolProvider {
         .with_tool_binding(
             ToolBinding::new(["ops"], "apply_change").with_authority_type("Ops"),
         )
+        // The attempt parks on a human decision, so admission records that it
+        // may defer and the runtime pre-derives the completion key the body
+        // reads from its `AttemptContext`.
+        .with_declaration(lash::tools::ToolDeclaration::deferring())
     }
 }
 
@@ -326,12 +330,6 @@ impl ToolProvider for ApprovalToolProvider {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
         (name == APPROVAL_TOOL_NAME).then(|| Arc::new(Self::definition().contract()))
-    }
-
-    /// The attempt parks on a human decision, so the runtime pre-derives the
-    /// completion key the body reads from its `AttemptContext`.
-    fn attempt_may_defer(&self, tool_id: &lash::tools::ToolId) -> bool {
-        tool_id == Self::definition().id()
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {

@@ -205,10 +205,6 @@ impl ToolProvider for BenchmarkEchoTool {
         }
     }
 
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == benchmark_async_tool_definition().id()
-    }
-
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
         (match call.name() {
             "benchmark_echo" => execute_benchmark_echo(call).await,
@@ -390,6 +386,12 @@ fn benchmark_mail_tool_definitions() -> Vec<ToolDefinition> {
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
 fn benchmark_mail_tool_definition(account: &str, operation: &str) -> ToolDefinition {
+    let declaration = match operation {
+        // A send emits `mail.received` as a declared trigger intent.
+        "send" => lash_core::ToolDeclaration::default()
+            .with_intents([lash_core::ToolIntentKind::EmitTrigger]),
+        _ => lash_core::ToolDeclaration::default(),
+    };
     let (input_schema, output_schema, description) = match operation {
         "send" => (
             serde_json::json!({
@@ -440,6 +442,7 @@ fn benchmark_mail_tool_definition(account: &str, operation: &str) -> ToolDefinit
     )
     .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["inbox", account], operation).with_authority_type("Inbox"))
+    .with_declaration(declaration)
 }
 
 async fn execute_benchmark_echo(call: lash_core::ToolCall<'_>) -> ToolOutcome {
@@ -623,6 +626,7 @@ fn benchmark_async_tool_definition() -> ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["tools"], "benchmark_async").with_authority_type("Tools"))
+    .with_declaration(lash_core::ToolDeclaration::deferring())
 }
 
 pub(super) fn benchmark_oblique_tool_definitions() -> Vec<ToolDefinition> {

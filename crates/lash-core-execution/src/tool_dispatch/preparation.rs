@@ -143,17 +143,17 @@ pub async fn prepare_granted_tool_call_with_context(
 /// the call's envelope is the one the journal recorded and it is served from
 /// there without the live tool being consulted.
 ///
-/// A tool whose attempt may defer is the exception: its preparation seals
-/// the declared start its recorded attempt carries (ADR 0116 §4), so its
-/// live provider prepares it.
+/// A tool whose recorded declaration may defer is the exception: its
+/// preparation seals the declared start its recorded attempt carries
+/// (ADR 0116 §4), so its live provider prepares it. The answer is the
+/// recorded binding's, never the drifted live tool's.
 pub async fn prepare_recorded_tool_call_with_context(
     context: &ToolDispatchContext<'_>,
     binding: &crate::ToolDefinition,
     mut pending: crate::sansio::PendingToolCall,
 ) -> ToolPreparationOutcome {
     pending.tool_name = binding.manifest.name.clone();
-    let tool_id = &binding.manifest.id;
-    let preparation = if context.attempt_may_defer(tool_id, None) {
+    let preparation = if binding.manifest.declaration.may_defer {
         ProviderPreparation::Live(None)
     } else {
         ProviderPreparation::Recorded
@@ -185,6 +185,21 @@ async fn prepare_authorized_tool_call_with_context(
 ) -> ToolPreparationOutcome {
     let tool_name = manifest.name.clone();
     let ids = ToolCallIds::of_pending(&pending);
+    // Admission precedes every hook and the provider's own preparation: a
+    // refused call runs no callback of any kind.
+    if let Err(refusal) = super::admission::admit_tool(&manifest) {
+        let failure = super::admission::admission_failure(&tool_name, refusal);
+        return completed_preparation(
+            normalized_outcome(
+                context,
+                &ids,
+                tool_name,
+                pending.args,
+                crate::ToolOutcome::failure(failure),
+            )
+            .await,
+        );
+    }
     let mut pending = pending;
     let mut args = pending.args;
 

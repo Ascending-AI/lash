@@ -31,6 +31,7 @@ pub mod sync;
 mod tool_call_id;
 pub mod tool_catalog;
 pub mod tool_contract;
+mod tool_declaration;
 mod tool_intents;
 pub mod tool_output;
 pub mod turn;
@@ -189,6 +190,9 @@ pub use tool_contract::{
     ToolDefinitionBindingExt, ToolDiscovery, ToolId, ToolManifest, ToolModule, ToolOutputContract,
     ToolRetryPolicy, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
     is_named_type_reference, schema_for,
+};
+pub use tool_declaration::{
+    DeclarationRefusal, OutcomeShape, ToolAdmissionRefusal, ToolDeclaration,
 };
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason,

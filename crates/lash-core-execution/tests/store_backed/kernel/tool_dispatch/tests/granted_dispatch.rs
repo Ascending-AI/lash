@@ -39,10 +39,6 @@ impl ToolProvider for GrantProbeTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == self.definition.id() && matches!(self.mode, GrantProbeMode::PendingWithKey)
-    }
-
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         self.observed_execution_bindings
@@ -50,7 +46,9 @@ impl ToolProvider for GrantProbeTools {
             .push(call.context.tool_execution_binding().clone());
         match self.mode {
             GrantProbeMode::PendingWithKey => {
-                call.context.completion_key().expect("completion key");
+                // Parks whether or not a key was reserved: an undeclared
+                // deferral is the admitted declaration's to refuse.
+                let _ = call.context.completion_key();
                 crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::new())
             }
 
@@ -121,7 +119,12 @@ async fn grant_probe_dispatch<'h>(
     retry_policy: ToolRetryPolicy,
     observed_execution_bindings: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
 ) -> (ToolDispatchContext<'h>, crate::ToolExecutionGrant) {
-    let definition = grant_probe_tool(retry_policy);
+    let definition = match mode {
+        GrantProbeMode::PendingWithKey => {
+            grant_probe_tool(retry_policy).with_declaration(crate::ToolDeclaration::deferring())
+        }
+        GrantProbeMode::InlineAttachment => grant_probe_tool(retry_policy),
+    };
     let provider: Arc<dyn ToolProvider> = Arc::new(GrantProbeTools {
         definition: definition.clone(),
         attempts,
@@ -203,39 +206,63 @@ async fn granted_pending_park_returns_a_pending_launch_under_the_grant_binding()
     handler.close().await.expect("close the dispatch handler");
 }
 
+/// A granted call is admitted under its grant's manifest, so whether it may
+/// defer is the grant's declaration — never a same-id catalog tool's, however
+/// that tool declares. A body that parks anyway is refused typed before
+/// anything parks.
 #[tokio::test]
-async fn unresolvable_grant_source_cannot_borrow_same_id_catalog_deferral() {
+async fn a_grant_admits_its_own_declaration_never_a_same_id_catalog_tools() {
     let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (mut context, mut grant) = grant_probe_dispatch(
+    let (context, deferring_grant) = grant_probe_dispatch(
         crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::PendingWithKey,
-        attempts,
+        Arc::clone(&attempts),
         ToolRetryPolicy::Never,
         observed_execution_bindings,
     )
     .await;
-    let tool_id = grant.manifest().id.clone();
-    context.tool_registry = Some(context.plugins.tool_registry());
-
+    let tool_id = deferring_grant.manifest().id.clone();
     assert!(
         context
             .tool_catalog
             .tools
             .iter()
-            .any(|entry| entry.manifest.id == tool_id),
-        "the collision witness must exist in the admitted catalog"
+            .any(|entry| entry.manifest.id == tool_id && entry.manifest.declaration.may_defer),
+        "the colliding catalog tool must declare deferral"
     );
-    assert!(
-        context.tools.attempt_may_defer(&tool_id),
-        "the colliding catalog provider must support deferral"
-    );
+    let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new("mock", crate::plugin::BehaviorRevision::ONE),
+        grant_probe_tool(ToolRetryPolicy::Never),
+    )
+    .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
+    .with_execution_binding(json!({ "kind": "grant-probe" }));
+    assert!(!grant.manifest().declaration.may_defer);
+    let prepared = grant_prepared_call("grant_probe");
+    let tool_context = tool_context_for_prepared(&context, &prepared);
 
-    grant.source_id = Some("missing-grant-source".to_string());
-    assert!(
-        !crate::dispatch_attempt_may_defer(&context, &tool_id, Some(&grant)),
-        "an unresolvable out-of-catalog grant must not borrow catalog deferral"
+    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
+        &context,
+        prepared,
+        Some(Box::new(grant)),
+        tool_context,
+    )
+    .await;
+
+    let ToolCallLaunch::Done(outcome) = launch else {
+        panic!("an undeclared deferral must settle, never park");
+    };
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    let crate::ToolCallOutcome::Failure(failure) = &outcome.record.output.outcome else {
+        panic!("an undeclared deferral is refused");
+    };
+    assert_eq!(failure.code, "tool_outcome_not_declared");
+    assert_eq!(
+        failure.cause.as_deref(),
+        Some(&crate::ToolFailureCause::Declaration {
+            refusal: crate::DeclarationRefusal::UndeclaredDeferral
+        })
     );
     drop(context);
     handler.close().await.expect("close the dispatch handler");

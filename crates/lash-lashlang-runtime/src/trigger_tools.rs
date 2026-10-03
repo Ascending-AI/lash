@@ -41,6 +41,10 @@ pub fn register_trigger_tool_definition() -> ToolDefinition {
         r#"await triggers.register({ source: timer.Schedule({ expr: "0 8 * * *" }), target: { definition: scan }, inputs: (event) => ({ tick: event }) })"#
             .into(),
     ])
+    .with_declaration(
+        lash_core::ToolDeclaration::default()
+            .with_intents([lash_core::ToolIntentKind::RegisterTrigger]),
+    )
     .with_tool_binding(lash_core::ToolBinding::new(["triggers"], "register"))
 }
 

@@ -231,7 +231,7 @@ impl ProbeArgs {
 )]
 fn probe_definition(name: &str) -> crate::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    crate::ToolDefinition::raw(
+    let definition = crate::ToolDefinition::raw(
         format!("tool:{name}"),
         name,
         "Records the identity its attempt saw and answers with its label.",
@@ -240,7 +240,12 @@ fn probe_definition(name: &str) -> crate::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_tool_binding(crate::ToolBinding::new(["tools"], name))
-    .with_retry_policy(crate::ToolRetryPolicy::safe(3, 1, 1))
+    .with_retry_policy(crate::ToolRetryPolicy::safe(3, 1, 1));
+    if name == DEFERRED {
+        definition.with_declaration(crate::ToolDeclaration::deferring())
+    } else {
+        definition
+    }
 }
 
 /// The probe tools: [`PROBE`], [`DEFERRED`] and [`DRIFTING`].
@@ -304,10 +309,6 @@ impl crate::ToolProvider for IdentityProbes {
         [PROBE, DEFERRED, DRIFTING]
             .contains(&name)
             .then(|| Arc::new(probe_definition(name).contract()))
-    }
-
-    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == probe_definition(DEFERRED).id()
     }
 
     async fn prepare_tool_call(

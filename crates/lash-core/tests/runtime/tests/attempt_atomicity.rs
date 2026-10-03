@@ -552,8 +552,8 @@ impl lash_core::ToolProvider for PureLeafProbeProvider {
         // both survive the cutover.
         assert!(call.context.cancellation_token().is_some());
         assert_eq!(call.context.prepared_payload(), &serde_json::Value::Null);
-        // A tool that never declared `attempt_may_defer` is told exactly that,
-        // instead of being pointed at the host's effect controller.
+        // A tool whose declaration never claimed `may_defer` is told exactly
+        // that, instead of being pointed at the host's effect controller.
         let refusal = call
             .context
             .completion_key()
@@ -563,7 +563,7 @@ impl lash_core::ToolProvider for PureLeafProbeProvider {
             lash_core::RuntimeErrorCode::ToolDeferralNotDeclared
         );
         assert!(
-            refusal.message.contains("attempt_may_defer"),
+            refusal.message.contains("may_defer"),
             "the refusal must name the missing declaration: {}",
             refusal.message
         );

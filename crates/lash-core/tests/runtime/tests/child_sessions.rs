@@ -56,6 +56,10 @@ fn first_turn_process_tool_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object", "additionalProperties": false }),
     )
     .expect("valid declared tool schemas")
+    .with_declaration(
+        lash_core::ToolDeclaration::default()
+            .with_intents([lash_core::ToolIntentKind::StartProcess]),
+    )
 }
 
 #[async_trait::async_trait]

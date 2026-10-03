@@ -361,10 +361,6 @@ impl ToolProvider for PendingAppTools {
         (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == app_tool_definition().id()
-    }
-
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         (async {
             assert_eq!(call.name(), "app_lookup");
@@ -515,6 +511,7 @@ fn app_tool_definition() -> lash_core::ToolDefinition {
         .expect("valid declared tool schemas"),
         "app_lookup",
     )
+    .with_declaration(lash_core::ToolDeclaration::deferring())
 }
 
 struct LongTextTools;

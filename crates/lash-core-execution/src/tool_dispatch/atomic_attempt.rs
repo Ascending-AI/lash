@@ -141,13 +141,6 @@ impl<'grant> AttemptAuthority<'grant> {
         }
     }
 
-    pub(super) fn grant(&self) -> Option<&'grant crate::ToolExecutionGrant> {
-        match self {
-            Self::Catalog(_) => None,
-            Self::Granted(grant) => Some(grant),
-        }
-    }
-
     /// Refuses a prepared call whose identifier does not match the manifest the
     /// authority admitted.
     ///
@@ -216,6 +209,22 @@ async fn announce_pending_park(
     }
 }
 
+/// The failure an outcome its admitted declaration does not admit answers
+/// with. Typed by its [`crate::DeclarationRefusal`], so a host can tell an
+/// authoring defect from a tool's own failure.
+fn declaration_refused(tool_name: &str, refusal: crate::DeclarationRefusal) -> ToolOutcome {
+    ToolOutcome::failure(
+        crate::ToolFailure::runtime(
+            ToolFailureClass::Internal,
+            "tool_outcome_not_declared",
+            format!(
+                "tool `{tool_name}` returned an outcome its declaration does not admit: {refusal}"
+            ),
+        )
+        .with_cause(crate::ToolFailureCause::Declaration { refusal }),
+    )
+}
+
 /// Launches one prepared tool attempt under whichever authority admitted it.
 ///
 /// Catalog calls and granted calls share this body: the authority is resolved
@@ -248,6 +257,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
         ));
     };
     let tool_name = authority.manifest().name.clone();
+    let declaration = authority.manifest().declaration.clone();
     if let Err(failure) = authority.verify_prepared_identity(&prepared) {
         return Ok(attempt_done(
             normalized_outcome(context, &ids, tool_name, args, failure).await,
@@ -273,10 +283,31 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
     let duration_ms = context.clock.now().duration_since(tool_started).as_millis() as u64;
     let (result, intents) = match attempt_result {
         crate::ToolAttemptOutcome::Done { result, intents } => {
-            (ToolOutcome::from_output(result.into_output()), intents)
+            let kinds: Vec<_> = intents
+                .intents
+                .iter()
+                .map(crate::ToolIntent::kind)
+                .collect();
+            match declaration.admits(crate::OutcomeShape::Done { intents: &kinds }) {
+                Ok(()) => (ToolOutcome::from_output(result.into_output()), intents),
+                // An undeclared intent is refused with the whole outcome, before
+                // the attempt is recorded: nothing it declared is realized.
+                Err(refusal) => (
+                    declaration_refused(&tool_name, refusal),
+                    crate::ToolIntents::default(),
+                ),
+            }
         }
         crate::ToolAttemptOutcome::HostFailed(error) => return Err(*error),
         crate::ToolAttemptOutcome::Pending(pending) => {
+            // An undeclared Deferred never parks: no key was reserved for it,
+            // and the refusal names the declaration rather than the key.
+            if let Err(refusal) = declaration.admits(crate::OutcomeShape::Deferred) {
+                let refused = declaration_refused(&tool_name, refusal);
+                return Ok(attempt_done(
+                    normalized_outcome(context, &ids, tool_name, args, refused).await,
+                ));
+            }
             let key =
                 match completion_context.take_completion_key() {
                     Some(key) => key,

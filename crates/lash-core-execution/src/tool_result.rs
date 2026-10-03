@@ -146,7 +146,7 @@ impl DeclaredStart {
     /// The start must name the declaring owner, and the attempt must have
     /// a completion key: the key is what the launched
     /// child's terminal resolves, so a tool that returns a declared start
-    /// answers `attempt_may_defer` for it.
+    /// declares `may_defer` for it.
     pub fn new(
         context: &crate::AttemptContext<'_>,
         start: crate::StartProcessIntent,
@@ -343,8 +343,11 @@ impl PendingCompletion {
 ///
 /// # The completion-key contract
 ///
-/// Before returning [`ToolOutcome::Pending`], a tool **must** first obtain a completion
-/// key by calling [`AttemptContext::completion_key`](crate::AttemptContext::completion_key)
+/// A tool that returns [`ToolOutcome::Pending`] declares `may_defer` on its
+/// manifest's [`ToolDeclaration`](crate::ToolDeclaration); an undeclared tool
+/// that parks fails the call with `tool_outcome_not_declared`. Before
+/// returning `Pending`, it **must** first obtain a completion key by calling
+/// [`AttemptContext::completion_key`](crate::AttemptContext::completion_key)
 /// (reachable through `call.context`). That key names the durable wait the runtime parks
 /// the call on, and is what an external resolver uses to deliver the outcome. Returning
 /// `Pending` *without* having taken a completion key fails the call with the internal

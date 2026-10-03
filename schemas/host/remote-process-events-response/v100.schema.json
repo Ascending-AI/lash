@@ -177,6 +177,98 @@
       ],
       "type": "string"
     },
+    "DeclarationRefusal": {
+      "description": "Why a declaration, or an outcome under it, is refused.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ToolIntentKind"
+            },
+            "refusal": {
+              "const": "duplicate_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "intent_order",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An isolated call has no inline body, so it cannot declare what only\nan inline body returns.",
+          "properties": {
+            "refusal": {
+              "const": "isolated_inline_capability",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "undeclared_deferral",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ToolIntentKind"
+            },
+            "refusal": {
+              "const": "undeclared_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "inline_outcome_from_isolated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
@@ -1921,6 +2013,63 @@
       ],
       "type": "string"
     },
+    "ToolAdmissionRefusal": {
+      "description": "Why admission refused a call before any member of its round started.\n\nOne refused member admits no member: every call of the round answers\nthis refusal, the refused member with its own cause and every sibling\nnaming it.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The tool's recorded declaration is itself invalid.",
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/DeclarationRefusal"
+            },
+            "refusal": {
+              "const": "declaration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The call is declared isolated, and no process implementation is\nbound to run it. An isolated call never falls back to an inline body.",
+          "properties": {
+            "refusal": {
+              "const": "unsupported_isolation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Another member of the same round was refused, so this one does not\nstart either.",
+          "properties": {
+            "member": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "sibling",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "member"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ToolCatalogBuildError": {
       "oneOf": [
         {
@@ -2070,8 +2219,56 @@
             "source"
           ],
           "type": "object"
+        },
+        {
+          "description": "Admission refused the call, or a member of its round, before any\nmember prepared or started.",
+          "properties": {
+            "kind": {
+              "const": "admission",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/ToolAdmissionRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The body's outcome is one its recorded declaration does not admit: a\nDeferred without `may_defer`, or an undeclared intent kind. Nothing\nthe outcome declared was realized.",
+          "properties": {
+            "kind": {
+              "const": "declaration",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/DeclarationRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
         }
       ]
+    },
+    "ToolIntentKind": {
+      "description": "Literal command kind of one recorded declaration.\n\nGenerated from [`tool_intent_variants!`]; never hand-edited.",
+      "enum": [
+        "start_process",
+        "signal_process",
+        "cancel_process",
+        "emit_process_event",
+        "emit_trigger",
+        "get_definition",
+        "publish_definition",
+        "register_trigger"
+      ],
+      "type": "string"
     },
     "ToolView": {
       "additionalProperties": false,

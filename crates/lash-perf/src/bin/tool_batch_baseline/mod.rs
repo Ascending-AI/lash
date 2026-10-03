@@ -133,6 +133,12 @@ impl Tool {
         if matches!(self.branch, Branch::Retry) {
             definition.manifest.retry_policy = lash_core::ToolRetryPolicy::safe(2, 1, 1);
         }
+        if matches!(
+            self.branch,
+            Branch::Deferred | Branch::DeclaredStart | Branch::RaceLoser
+        ) {
+            definition = definition.with_declaration(lash_core::ToolDeclaration::deferring());
+        }
         definition
     }
 }
@@ -143,12 +149,6 @@ impl lash_core::ToolProvider for Tool {
     }
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
         (name == "cost").then(|| Arc::new(self.definition().contract()))
-    }
-    fn attempt_may_defer(&self, _: &lash_core::ToolId) -> bool {
-        matches!(
-            self.branch,
-            Branch::Deferred | Branch::DeclaredStart | Branch::RaceLoser
-        )
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.attempts.fetch_add(1, Ordering::SeqCst);
