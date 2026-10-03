@@ -27,6 +27,7 @@
 //! lives beside the process model in `lash-core-execution`.
 
 pub mod admission;
+pub mod aggregate;
 pub mod continuation;
 pub mod material;
 pub mod operation;
@@ -42,6 +43,7 @@ pub use admission::{
     ExternalCancelPolicy, OutcomeShape, PresentationBinding, RecordedRetryPolicy, RoundAdmission,
     RuntimeCallPolicy, ToolDeclaration,
 };
+pub use aggregate::{AggregateConsumer, AggregateLeaf, AggregatePlan};
 pub use continuation::{ContinuationRefusal, Cut, CutPhase, RunTransfer};
 pub use material::{
     InvalidMaterialDigest, MaterialDigest, MaterialEntry, MaterialLocation, MaterialOwner,

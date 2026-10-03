@@ -38,23 +38,26 @@
 
 use std::collections::BTreeMap;
 
+mod aggregate;
 mod deferred;
+mod drain;
 mod parallel;
+
+pub use aggregate::RunAggregateOutcome;
 
 use lash_sansio::ToolCallId;
 
 use lash_sansio::ToolIntentKind;
 
 use super::singleton_run::{
-    BeforeCheckReply, IsolatedProcessDescriptor, RecordedIsolatedStart, SingletonAttempt,
-    SingletonBodyOutcome, SingletonCapture, SingletonDrift, SingletonPreparedRequest,
-    SingletonRunError, SingletonStart, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
+    BeforeCheckReply, RecordedIsolatedStart, SingletonAttempt, SingletonBodyOutcome,
+    SingletonCapture, SingletonDrift, SingletonPreparedRequest, SingletonRunError, SingletonStart,
+    SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
 };
 use crate::runtime::effect::{AttemptStreamRecorder, ScopedEffectController};
 use crate::runtime::process::{
-    DeclaredStartObligation, DeclaredStartObligationRefusal, DeclaredStartPhase,
-    IsolatedStartRefusal, IsolatedToolStart, ProcessExecutionBoundary, StartCancelDecision,
-    WorkerTerminationReceipt,
+    DeclaredStartObligation, DeclaredStartObligationRefusal, IsolatedStartRefusal,
+    IsolatedToolStart, ProcessExecutionBoundary,
 };
 use crate::store::plugin_writers::PluginRevision;
 use crate::tool_run::{
@@ -576,6 +579,7 @@ pub enum DecidedCall {
     Deferred { source: AwaitEventKey },
 }
 
+#[derive(Clone)]
 enum Handlers<'a> {
     Borrowed(&'a dyn SingletonToolHandlers),
     Owned(std::sync::Arc<dyn SingletonToolHandlers>),
@@ -606,6 +610,12 @@ struct Waiting<'a> {
     attempt: AttemptOrdinal,
 }
 
+struct PresentedCall {
+    decision: CallDecision,
+    presentation: Option<MaterialRef>,
+    launched: Option<ProcessId>,
+}
+
 /// The calls of one logical Run, recorded in its opener journal.
 pub struct RunCoordinator<'a> {
     journal: RunJournal<'a>,
@@ -613,6 +623,9 @@ pub struct RunCoordinator<'a> {
     owed: BTreeMap<u64, Owed<'a>>,
     pending: Vec<parallel::Pending<'a>>,
     attempts: Vec<crate::tool_run::RunAttemptEntry>,
+    handlers: BTreeMap<ToolCallId, Handlers<'a>>,
+    presented: BTreeMap<ToolCallId, PresentedCall>,
+    timers: Vec<parallel::AggregateTimer<'a>>,
     cut: Option<crate::tool_run::Cut>,
     faulted: bool,
     active_frame: bool,
@@ -648,6 +661,9 @@ impl<'a> RunCoordinator<'a> {
             owed: BTreeMap::new(),
             pending: Vec::new(),
             attempts: Vec::new(),
+            handlers: BTreeMap::new(),
+            presented: BTreeMap::new(),
+            timers: Vec::new(),
             cut: None,
             faulted: false,
             active_frame: false,
@@ -693,6 +709,8 @@ impl<'a> RunCoordinator<'a> {
         let (member, request) = self
             .admit(call, handlers, crate::tool_run::RecordedRetryPolicy::Never)
             .await?;
+        self.handlers
+            .insert(call.call_id.clone(), Handlers::Borrowed(handlers));
         let journal = &mut self.journal;
 
         // The result candidate the decision checks, and where it came from.
@@ -773,7 +791,7 @@ impl<'a> RunCoordinator<'a> {
         handlers: &dyn SingletonToolHandlers,
         retry: crate::tool_run::RecordedRetryPolicy,
     ) -> Result<(AdmittedCall, SingletonPreparedRequest), SingletonRunError> {
-        self.admit_round(std::slice::from_ref(call), handlers, retry)
+        self.admit_round(std::slice::from_ref(call), handlers, retry, None)
             .await?
             .pop()
             .ok_or_else(|| boundary(&call.call_id))
@@ -784,6 +802,7 @@ impl<'a> RunCoordinator<'a> {
         calls: &[SingletonToolCall],
         handlers: &dyn SingletonToolHandlers,
         retry: crate::tool_run::RecordedRetryPolicy,
+        aggregate: Option<(&crate::tool_run::AggregatePlan, &dyn crate::Clock)>,
     ) -> Result<Vec<(AdmittedCall, SingletonPreparedRequest)>, SingletonRunError> {
         if self.faulted {
             return Err(RunCutRefusal::InvocationFailed.into());
@@ -791,9 +810,14 @@ impl<'a> RunCoordinator<'a> {
         if let Some(cut) = self.cut {
             return Err(RunCutRefusal::AdmissionFrozen { reason: cut.reason }.into());
         }
-        let Some(first_call) = calls.first() else {
+        if self.journal.ledger.lifecycle() != crate::tool_run::RunLifecycle::Live
+            || self.journal.ledger.aborted()
+        {
+            return Err(RunEventRefusal::AdmissionClosed.into());
+        }
+        if calls.is_empty() && aggregate.is_none() {
             return Ok(Vec::new());
-        };
+        }
         let mut ids = std::collections::BTreeSet::new();
         let mut starts = Vec::with_capacity(calls.len());
         for (index, call) in calls.iter().enumerate() {
@@ -819,9 +843,14 @@ impl<'a> RunCoordinator<'a> {
             }
             starts.push(admit_live(call, handlers, index)?);
         }
+        let name = aggregate.map_or_else(
+            || record_name(&calls[0].call_id, "admit"),
+            |(plan, _)| format!("lash:run:aggregate:{}:admit", plan.key),
+        );
         let journal = &mut self.journal;
         let first = journal.record(Vec::new());
         let owner = journal.materials.owner.clone();
+        let journal_owner = journal.owner.clone();
         let admit = Box::pin(async move {
             let mut members = Vec::with_capacity(calls.len());
             let mut materials = Vec::new();
@@ -835,35 +864,50 @@ impl<'a> RunCoordinator<'a> {
                 .map(u32::try_from)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| error.to_string())?;
-            Ok(RunJournalEntry {
-                record: RunRecord {
-                    events: vec![RunEvent::Admitted {
-                        round: RoundAdmission {
-                            owner: first_call.owner.clone(),
-                            members,
-                            operands,
-                        },
-                    }],
-                    ..first
+            let mut events = vec![RunEvent::Admitted {
+                round: RoundAdmission {
+                    owner: journal_owner,
+                    members,
+                    operands,
                 },
+            }];
+            if let Some((plan, clock)) = aggregate {
+                events.push(RunEvent::AggregateAdmitted {
+                    plan: plan.clone(),
+                    admitted_at_ms: clock.timestamp_ms(),
+                });
+            }
+            Ok(RunJournalEntry {
+                record: RunRecord { events, ..first },
                 materials,
                 state: Vec::new(),
             })
         });
-        let admitted = journal
-            .append(record_name(&first_call.call_id, "admit"), admit)
-            .await?;
+        let admitted = journal.append(name, admit).await?;
         let Some(RunEvent::Admitted { round }) = admitted.events.first() else {
-            return Err(boundary(&first_call.call_id));
+            return Err(RunEventRefusal::AggregateShape {
+                key: aggregate.map_or_else(String::new, |(plan, _)| plan.key.clone()),
+            }
+            .into());
         };
         if round.members.len() != calls.len()
             || round.operands
                 != (0..calls.len())
                     .map(u32::try_from)
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|_| boundary(&first_call.call_id))?
+                    .map_err(|_| RunEventRefusal::AggregateShape {
+                        key: aggregate.map_or_else(String::new, |(plan, _)| plan.key.clone()),
+                    })?
         {
-            return Err(boundary(&first_call.call_id));
+            return Err(RunEventRefusal::AggregateShape {
+                key: aggregate.map_or_else(String::new, |(plan, _)| plan.key.clone()),
+            }
+            .into());
+        }
+        if let Some((plan, _)) = aggregate
+            && !admitted.events.iter().any(|event| matches!(event, RunEvent::AggregateAdmitted { plan: recorded, .. } if recorded == plan))
+        {
+            return Err(RunEventRefusal::AggregateShape { key: plan.key.clone() }.into());
         }
         let admitted = calls
             .iter()
@@ -948,7 +992,8 @@ impl<'a> RunCoordinator<'a> {
                 record: decide_record,
                 rank,
                 address,
-                aborted: journal.ledger.aborted(),
+                aborted: journal.ledger.aborted()
+                    || journal.ledger.lifecycle() != crate::tool_run::RunLifecycle::Live,
             },
         ));
         journal.scoped.admit_journal_write()?;
@@ -977,204 +1022,6 @@ impl<'a> RunCoordinator<'a> {
         Ok(DecidedCall::Ranked {
             rank: *rank,
             decision: decision.clone(),
-        })
-    }
-
-    /// Drain every decided call in rank order: a final's declarations once
-    /// every lower committed final is seated, then its presentation with its
-    /// incorporation (V).
-    ///
-    /// # Errors
-    ///
-    /// A typed [`SingletonRunError`]. A drain asked of a final whose lower
-    /// ranks are not seated refuses with [`RunEventRefusal::DrainFrontier`]
-    /// before it issues anything.
-    pub async fn drain(
-        &mut self,
-    ) -> Result<Vec<(ToolCallId, SingletonTerminal)>, SingletonRunError> {
-        self.begin_frame()?;
-        let result = self.drain_inner().await;
-        self.active_frame = false;
-        self.note_fault(&result);
-        result
-    }
-
-    async fn drain_inner(
-        &mut self,
-    ) -> Result<Vec<(ToolCallId, SingletonTerminal)>, SingletonRunError> {
-        let owed = std::mem::take(&mut self.owed);
-        let mut terminals = Vec::with_capacity(owed.len());
-        for (rank, owed) in owed {
-            let call_id = owed.call_id.clone();
-            terminals.push((call_id, self.present(rank, owed).await?));
-        }
-        Ok(terminals)
-    }
-
-    async fn present(
-        &mut self,
-        rank: u64,
-        owed: Owed<'a>,
-    ) -> Result<SingletonTerminal, SingletonRunError> {
-        let Owed {
-            call_id,
-            handlers,
-            decision,
-            capture,
-        } = owed;
-        let handlers = handlers.get();
-        let journal = &mut self.journal;
-        let (CallDecision::Final { declares, source }, Some(capture)) =
-            (&decision, capture.clone())
-        else {
-            // V: a withheld call is presented by its decision and
-            // incorporated; the stream its body emitted is still the host's.
-            let present = journal.record(presented(&call_id, None));
-            let emitted = capture;
-            let step_call = call_id.clone();
-            journal
-                .append(
-                    record_name(&call_id, "present"),
-                    Box::pin(async move {
-                        if let Some(stream) = emitted.as_ref().and_then(SingletonCapture::stream) {
-                            handlers.emit_stream(&step_call, stream);
-                        }
-                        Ok(RunJournalEntry {
-                            state: Vec::new(),
-                            record: present,
-                            materials: Vec::new(),
-                        })
-                    }),
-                )
-                .await?;
-            return Ok(SingletonTerminal::Withheld { decision });
-        };
-
-        // A final's declarations are issued only after its decision is
-        // durable and every lower committed final is seated, and settle
-        // before its presentation.
-        // Its declared start is admitted with them and drains before they
-        // settle.
-        let mut settle = Vec::new();
-        let mut launched = None;
-        let mut termination = None;
-        if *declares {
-            if !journal.ledger.drain_frontier_open(rank) {
-                return Err(RunEventRefusal::DrainFrontier { call_id }.into());
-            }
-            let obligation = match capture.start() {
-                Some(start) => Some(recorded_obligation(journal, &call_id, start)?),
-                None => None,
-            };
-            let mut issue = vec![RunEvent::DeclarationsIssued {
-                call_id: call_id.clone(),
-            }];
-            if let Some(obligation) = &obligation {
-                issue.push(RunEvent::StartAdmitted {
-                    call_id: call_id.clone(),
-                    start_key: obligation.start_key().clone(),
-                });
-            }
-            let issued = journal.record(issue);
-            journal
-                .append(
-                    record_name(&call_id, "declare"),
-                    Box::pin(async move {
-                        Ok(RunJournalEntry {
-                            state: Vec::new(),
-                            record: issued,
-                            materials: Vec::new(),
-                        })
-                    }),
-                )
-                .await?;
-            if let Some(obligation) = &obligation {
-                let isolated = match &capture {
-                    SingletonCapture::Isolated { binding } => Some(binding.as_ref()),
-                    _ => None,
-                };
-                let (process, receipt) =
-                    drain_start(journal, &call_id, obligation, isolated, handlers).await?;
-                launched = Some(process);
-                termination = receipt;
-            }
-            settle.push(RunEvent::DeclarationsSettled {
-                call_id: call_id.clone(),
-            });
-        }
-
-        // V: presentation, owning only bytes distinct from the output, in one
-        // record with its incorporation.
-        let present_record = journal.record(Vec::new());
-        let owner = journal.materials.owner.clone();
-        let final_capture = capture.clone();
-        let declares = *declares;
-        let step_call = call_id.clone();
-        let descriptor = match (&capture, &launched) {
-            (SingletonCapture::Isolated { binding }, Some(process_id)) => {
-                Some(IsolatedProcessDescriptor {
-                    process_id: process_id.clone(),
-                    start_key: binding.start.start_key.clone(),
-                    boundary: binding.boundary,
-                    termination,
-                })
-            }
-            _ => None,
-        };
-        let present = Box::pin(async move {
-            if declares && !final_capture.intents().is_empty() {
-                handlers
-                    .realize_declarations(&step_call, final_capture.intents())
-                    .await?;
-            }
-            if let Some(stream) = final_capture.stream() {
-                handlers.emit_stream(&step_call, stream);
-            }
-            let text = match descriptor {
-                Some(descriptor) => encode(&descriptor)?,
-                None => handlers.present(&step_call, &final_capture).await?,
-            };
-            let mut owned = Vec::new();
-            let presentation = if final_capture.output() == Some(text.as_str()) {
-                None
-            } else {
-                let (reference, entry) = mint(&owner, MaterialRole::Presentation, text)?;
-                owned.push(entry);
-                Some(reference)
-            };
-            let mut events = settle;
-            events.extend(presented(&step_call, presentation));
-            Ok(RunJournalEntry {
-                state: Vec::new(),
-                record: RunRecord {
-                    events,
-                    ..present_record
-                },
-                materials: owned,
-            })
-        });
-        let presented_record = journal
-            .append(record_name(&call_id, "present"), present)
-            .await?;
-        let presentation = presented_record
-            .events
-            .iter()
-            .find_map(|event| match event {
-                RunEvent::Presented { presentation, .. } => Some(presentation.clone()),
-                _ => None,
-            });
-        let presentation = match presentation.flatten() {
-            Some(reference) => journal.materials.read(&reference)?.to_owned(),
-            None => capture
-                .output()
-                .map(str::to_owned)
-                .ok_or_else(|| boundary(&call_id))?,
-        };
-        Ok(SingletonTerminal::Final {
-            source: source.clone(),
-            capture,
-            presentation,
-            launched,
         })
     }
 }
@@ -1227,146 +1074,11 @@ fn recorded_obligation(
     Ok(obligation)
 }
 
-/// K5 inside the protected drain: register the admitted start under its key,
-/// then discharge it. The Run's cancellation is read once, inside the
-/// discharge step, and the recorded cancel policy decides what it does to
-/// the launched process.
-async fn drain_start(
-    journal: &mut RunJournal<'_>,
-    call_id: &ToolCallId,
-    obligation: &DeclaredStartObligation,
-    isolated: Option<&RecordedIsolatedStart>,
-    handlers: &dyn SingletonToolHandlers,
-) -> Result<(ProcessId, Option<WorkerTerminationReceipt>), SingletonRunError> {
-    let start_key = obligation.start_key().clone();
-    let launch_record = journal.record(Vec::new());
-    let (step_call, key) = (call_id.clone(), start_key.clone());
-    let launch = Box::pin(async move {
-        let process_id = handlers.launch_start(obligation).await?;
-        Ok(RunJournalEntry {
-            state: Vec::new(),
-            record: RunRecord {
-                events: vec![RunEvent::StartLaunched {
-                    call_id: step_call,
-                    start_key: key,
-                    process_id,
-                }],
-                ..launch_record
-            },
-            materials: Vec::new(),
-        })
-    });
-    let launched = journal
-        .append(record_name(call_id, "start:launch"), launch)
-        .await?;
-    let Some(RunEvent::StartLaunched { process_id, .. }) = launched.events.first() else {
-        return Err(RunEventRefusal::StartOrder {
-            call_id: call_id.clone(),
-            start_key,
-        }
-        .into());
-    };
-    let process_id = process_id.clone();
-
-    let engine = isolated
-        .map(|binding| require_isolated_engine(handlers, &binding.engine_kind, binding.boundary))
-        .transpose()?;
-    let hard =
-        isolated.is_some_and(|binding| binding.boundary == ProcessExecutionBoundary::WorkerProcess);
-    let owner = journal.materials.owner.clone();
-    let discharge_record = journal.record(Vec::new());
-    let (step_call, launched_id) = (call_id.clone(), process_id.clone());
-    let discharge = Box::pin(async move {
-        let cancel = handlers.run_cancel_requested()
-            && matches!(
-                obligation.on_cancel(DeclaredStartPhase::Launched),
-                StartCancelDecision::RecoverAndDischarge {
-                    cancel_process: true,
-                    ..
-                }
-            );
-        let mut materials = Vec::new();
-        if cancel && hard {
-            let worker = engine
-                .as_ref()
-                .and_then(|engine| engine.physical_worker())
-                .ok_or("the admitted physical worker is unavailable")?;
-            let receipt = worker
-                .terminate_worker(&launched_id)
-                .await
-                .map_err(|error| error.to_string())?;
-            if receipt.process_id != launched_id {
-                return Err(IsolatedStartRefusal::TerminationOwner.to_string());
-            }
-            let (_, entry) = mint(&owner, MaterialRole::AttemptOutput, encode(&receipt)?)?;
-            materials.push(entry);
-        }
-        handlers
-            .discharge_start(obligation, &launched_id, cancel)
-            .await?;
-        Ok(RunJournalEntry {
-            state: Vec::new(),
-            record: RunRecord {
-                events: vec![RunEvent::StartDischarged {
-                    call_id: step_call,
-                    start_key,
-                    cancelled: cancel,
-                }],
-                ..discharge_record
-            },
-            materials,
-        })
-    });
-    let (record, references) = journal
-        .append_entry(record_name(call_id, "start:discharge"), discharge)
-        .await?;
-    let receipt = match references.first() {
-        Some(reference) => {
-            let receipt: WorkerTerminationReceipt = journal.materials.decode(reference)?;
-            if receipt.process_id != process_id {
-                return Err(IsolatedStartRefusal::TerminationOwner.into());
-            }
-            Some(receipt)
-        }
-        _ => None,
-    };
-    if hard
-        && receipt.is_none()
-        && record.events.iter().any(|event| {
-            matches!(
-                event,
-                RunEvent::StartDischarged {
-                    cancelled: true,
-                    ..
-                }
-            )
-        })
-    {
-        return Err(IsolatedStartRefusal::TerminationMissing.into());
-    }
-    Ok((process_id, receipt))
-}
-
 fn boundary(call_id: &ToolCallId) -> SingletonRunError {
     RunEventRefusal::BoundaryOrder {
         call_id: call_id.clone(),
     }
     .into()
-}
-
-fn presented(call_id: &ToolCallId, presentation: Option<MaterialRef>) -> Vec<RunEvent> {
-    vec![
-        RunEvent::Presented {
-            call_id: call_id.clone(),
-            presentation,
-        },
-        RunEvent::Consumed {
-            call_id: call_id.clone(),
-        },
-        RunEvent::Incorporated {
-            call_id: call_id.clone(),
-        },
-    ]
 }
 
 enum AttemptCaptured {

@@ -1048,6 +1048,9 @@ fn events(records: &[RunRecord]) -> Vec<Vec<&'static str>> {
                     RunEvent::Consumed { .. } => "consumed",
                     RunEvent::Incorporated { .. } => "incorporated",
                     RunEvent::Lifecycle { .. } => "lifecycle",
+                    RunEvent::AggregateAdmitted { .. } => "aggregate",
+                    RunEvent::TimerElapsed { .. } => "timer",
+                    RunEvent::CancelDischarged { .. } => "cancel",
                 })
                 .collect()
         })

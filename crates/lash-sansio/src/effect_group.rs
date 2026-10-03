@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-/// Wake rule recorded in a durable effect group's identity.
+/// Aggregate wake rule. Run-owned aggregates preserve these semantics;
+/// the rule does not require a durable group dispatcher.
 ///
 /// `Promise.all` and `Promise.allSettled` both use [`All`](Self::All): the
 /// caller's early exit on rejection is not a host wake rule. The wire shape

@@ -351,6 +351,17 @@ pub trait SingletonToolHandlers: Send + Sync {
     /// the decision's step (D).
     fn run_cancel_requested(&self) -> bool;
 
+    /// Discharge eligible external cancellation at logical Closing. The
+    /// call id is the dedup key; recovery can repeat an unacknowledged call.
+    /// Ignore-policy calls never invoke this callback.
+    async fn cancel_call(
+        &self,
+        _call_id: &ToolCallId,
+        _source: Option<&AwaitEventKey>,
+    ) -> Result<(), String> {
+        Err("external cancellation requires an installed handler".to_owned())
+    }
+
     /// Realize a final's declared intents behind their exactly-once fences.
     /// A crash before the declarations settle realizes them again, so the
     /// fence is what makes them once.

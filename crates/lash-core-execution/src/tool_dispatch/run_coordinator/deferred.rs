@@ -73,7 +73,7 @@ impl<'a> RunCoordinator<'a> {
         Ok(())
     }
 
-    async fn accept_source(
+    pub(super) async fn accept_source(
         &mut self,
         id: &ToolCallId,
         seal: crate::tool_run::SourceSeal,

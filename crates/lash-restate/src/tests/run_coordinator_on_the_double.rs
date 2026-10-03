@@ -75,6 +75,7 @@ enum Kind {
     Declares(Vec<ToolIntentKind>),
     /// Done, declaring nothing.
     IntentFree,
+    Failed,
     Cached,
     Retry {
         after_ms: u64,
@@ -89,9 +90,11 @@ enum Kind {
 fn call(label: &str, kind: &Kind) -> SingletonToolCall {
     let declaration = match kind {
         Kind::Declares(intents) => ToolDeclaration::default().with_intents(intents.iter().copied()),
-        Kind::IntentFree | Kind::Cached | Kind::Retry { .. } | Kind::Stateful { .. } => {
-            ToolDeclaration::default()
-        }
+        Kind::IntentFree
+        | Kind::Failed
+        | Kind::Cached
+        | Kind::Retry { .. }
+        | Kind::Stateful { .. } => ToolDeclaration::default(),
         Kind::Deferred => ToolDeclaration::deferring(),
     };
     SingletonToolCall {
@@ -129,6 +132,7 @@ struct Probe {
     /// Stream events each body observes into its attempt's stream.
     streams: BTreeMap<ToolCallId, Vec<SessionStreamEvent>>,
     cancel: AtomicBool,
+    cancelled_calls: Mutex<Vec<ToolCallId>>,
     parallel: Option<Arc<tokio::sync::Barrier>>,
     body_barrier: Option<Arc<tokio::sync::Barrier>>,
     parallel_order: Vec<ToolCallId>,
@@ -173,6 +177,7 @@ impl Probe {
             complete_sources: false,
             streams: BTreeMap::new(),
             cancel: AtomicBool::new(false),
+            cancelled_calls: Mutex::new(Vec::new()),
             parallel: None,
             body_barrier: None,
             parallel_order: Vec::new(),
@@ -341,6 +346,9 @@ impl SingletonToolHandlers for Probe {
                     start: None,
                 }
             }
+            Kind::Failed => SingletonBodyOutcome::Failed {
+                output: format!("rejected {call_id}"),
+            },
             Kind::Cached => panic!("a cached admission executes no body"),
             Kind::IntentFree | Kind::Retry { .. } => SingletonBodyOutcome::Done {
                 commands: Default::default(),
@@ -381,6 +389,20 @@ impl SingletonToolHandlers for Probe {
 
     fn run_cancel_requested(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
+    }
+
+    async fn cancel_call(
+        &self,
+        call_id: &ToolCallId,
+        _source: Option<&lash_core::AwaitEventKey>,
+    ) -> Result<(), String> {
+        let mut calls = self.cancelled_calls.lock().unwrap();
+        if !calls.contains(call_id) {
+            calls.push(call_id.clone());
+        }
+        self.gate_open.store(true, Ordering::SeqCst);
+        self.gate_wake.notify_waiters();
+        Ok(())
     }
 
     async fn realize_declarations(
@@ -2171,3 +2193,4 @@ async fn a_deferred_run_waits_for_retained_results_and_replays_its_protected_fin
         1
     );
 }
+mod aggregate;

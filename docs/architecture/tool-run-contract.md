@@ -67,6 +67,35 @@ source transfer belongs to FIG-4891. This seam does not activate production
 handover callers. Its journal logic epoch moves with this landing; stored
 format versions remain frozen.
 
+`RunCoordinator::start_aggregate` records unique leaves, source positions,
+aliases and timer admission time with the round's A. Pending siblings are
+registered before an immediate prefix can answer. Consumer modes remain
+caller policy: `race`, `any`, `all`, `allSettled` and the list batch observe
+the same recorded decisions and timer wakes. `all` reports the first terminal
+rejection; the list batch waits for every leaf and reports the first rejection
+in written order. Duplicate operands execute and consume one unique call.
+An empty race and a pending Deferred source carry no fabricated result.
+
+`consume_aggregate` exposes only the values selected by that consumer. Losing
+calls remain Live under the Run. `beside` polls issued X handles alongside a
+program effect, and protected presentation polls those handles while it drains.
+`drain_protected` records presentation and incorporation without consumption;
+a later consumer records its own `Consumed` fact. Coordination retains material
+references, rather than storing another copy of the loser's output.
+
+The aggregate owner supplies its clock. Timer admission records the original
+instant; recovery registers the remaining wait through the existing Restate
+timer facility.
+
+Only `close` ends the logical Run: it records Closing, freezes admission,
+discharges admitted eligible cancellation, accepts every issued X through its
+durable ACK, drains accepted finals and records Settled. Ignore-policy work
+receives no external cancel. Worker loss leaves recovery to the original engine
+journal. A physical cut retains Live and transfers aggregate plans, deadlines,
+unconsumed material and pending source descriptors through its existing snapshot.
+Production aggregate and continuation callers remain assigned to FIG-4894,
+FIG-1863, FIG-4895, FIG-4739 and FIG-4890.
+
 The plugin registrar mints every callback key from `CallbackSlot`, so a
 callback slot cannot exist without its key prefix and its state authority.
 

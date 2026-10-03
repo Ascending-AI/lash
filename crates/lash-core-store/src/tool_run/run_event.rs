@@ -30,6 +30,7 @@ use lash_sansio::ToolCallId;
 use serde::{Deserialize, Serialize};
 
 use super::admission::{RecordedRetryPolicy, RoundAdmission};
+pub use super::aggregate::{AggregateConsumer, AggregateLeaf, AggregatePlan};
 use super::material::{MaterialEntry, MaterialRef};
 use super::tool_hooks::{AfterCheckVerdict, BeforeSelection, CheckRecord};
 use crate::ProcessId;
@@ -148,6 +149,20 @@ pub enum RunLifecycle {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunEvent {
+    /// Source order, aliases and the timers' recorded admission instant.
+    AggregateAdmitted {
+        plan: AggregatePlan,
+        admitted_at_ms: u64,
+    },
+    /// A generic aggregate timer elapsed, in the Run's recorded schedule.
+    TimerElapsed {
+        aggregate: String,
+        leaf: u32,
+    },
+    /// Eligible external cancellation discharged by logical Closing only.
+    CancelDischarged {
+        call_id: ToolCallId,
+    },
     /// A: a whole round, which issues attempt 1 of every member it selected
     /// to execute.
     Admitted {
@@ -282,6 +297,14 @@ pub struct RunAttemptEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunEventRefusal {
+    #[error("aggregate {key} has an invalid or changed operand mapping")]
+    AggregateShape { key: String },
+    #[error("aggregate {key} was never admitted")]
+    UnknownAggregate { key: String },
+    #[error("aggregate {key} timer {leaf} is out of order")]
+    TimerOrder { key: String, leaf: u32 },
+    #[error("call {call_id} discharged cancellation outside logical Closing")]
+    CancelOrder { call_id: ToolCallId },
     #[error("a record holds no event")]
     EmptyRecord,
     #[error("expected event ordinal {expected}, record starts at {found}")]
@@ -350,6 +373,8 @@ enum StartProgress {
 
 #[derive(Clone, Debug)]
 struct CallState {
+    cancel: super::ExternalCancelPolicy,
+    cancel_discharged: bool,
     selection: BeforeSelection,
     retry: RecordedRetryPolicy,
     /// The attempt issued and not yet recorded.
@@ -376,6 +401,8 @@ pub struct RunLedger {
     aborted: bool,
     last_rank: Option<u64>,
     calls: BTreeMap<ToolCallId, CallState>,
+    aggregates: BTreeMap<String, AggregatePlan>,
+    elapsed: std::collections::BTreeSet<(String, u32)>,
 }
 
 impl RunLedger {
@@ -390,12 +417,54 @@ impl RunLedger {
             aborted: false,
             last_rank: None,
             calls: BTreeMap::new(),
+            aggregates: BTreeMap::new(),
+            elapsed: std::collections::BTreeSet::new(),
         }
     }
 
     #[must_use]
     pub fn lifecycle(&self) -> RunLifecycle {
         self.lifecycle
+    }
+
+    #[must_use]
+    pub fn has_call(&self, call_id: &ToolCallId) -> bool {
+        self.calls.contains_key(call_id)
+    }
+
+    #[must_use]
+    pub fn consumed(&self, call_id: &ToolCallId) -> bool {
+        self.calls.get(call_id).is_some_and(|call| call.consumed)
+    }
+
+    /// Calls whose admitted policy still owes external cancellation at Closing.
+    #[must_use]
+    pub fn eligible_cancellations(&self) -> Vec<ToolCallId> {
+        self.calls
+            .iter()
+            .filter(|(_, call)| {
+                call.selection == BeforeSelection::Execute
+                    && call.cancel == super::ExternalCancelPolicy::CancelExternalWork
+                    && !call.cancel_discharged
+                    && !matches!(
+                        call.decision,
+                        Some((
+                            _,
+                            CallDecision::Final { .. }
+                                | CallDecision::Denied
+                                | CallDecision::Aborted
+                        ))
+                    )
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    #[must_use]
+    pub fn cancel_discharged(&self, call_id: &ToolCallId) -> bool {
+        self.calls
+            .get(call_id)
+            .is_some_and(|call| call.cancel_discharged)
     }
 
     /// Whether an AbortRun decision stopped the Run.
@@ -498,6 +567,56 @@ impl RunLedger {
 
     fn apply(&mut self, event: &RunEvent) -> Result<(), RunEventRefusal> {
         match event {
+            RunEvent::AggregateAdmitted { plan, .. } => {
+                if self.lifecycle != RunLifecycle::Live || self.aborted {
+                    return Err(RunEventRefusal::AdmissionClosed);
+                }
+                plan.validate()?;
+                if self.aggregates.contains_key(&plan.key) {
+                    return Err(RunEventRefusal::AggregateShape {
+                        key: plan.key.clone(),
+                    });
+                }
+                for leaf in &plan.leaves {
+                    if let AggregateLeaf::Call { call_id } = leaf {
+                        self.call(call_id)?;
+                    }
+                }
+                self.aggregates.insert(plan.key.clone(), plan.clone());
+                Ok(())
+            }
+            RunEvent::TimerElapsed { aggregate, leaf } => {
+                if self.lifecycle != RunLifecycle::Live
+                    || !self.aggregates.get(aggregate).is_some_and(|plan| {
+                        matches!(
+                            plan.leaves.get(*leaf as usize),
+                            Some(AggregateLeaf::Timer { .. })
+                        )
+                    })
+                    || !self.elapsed.insert((aggregate.clone(), *leaf))
+                {
+                    return Err(RunEventRefusal::TimerOrder {
+                        key: aggregate.clone(),
+                        leaf: *leaf,
+                    });
+                }
+                Ok(())
+            }
+            RunEvent::CancelDischarged { call_id } => {
+                let closing = self.lifecycle == RunLifecycle::Closing;
+                let call = self.call(call_id)?;
+                if !closing
+                    || call.cancel != super::ExternalCancelPolicy::CancelExternalWork
+                    || matches!(call.decision, Some((_, CallDecision::Final { .. })))
+                    || call.cancel_discharged
+                {
+                    return Err(RunEventRefusal::CancelOrder {
+                        call_id: call_id.clone(),
+                    });
+                }
+                call.cancel_discharged = true;
+                Ok(())
+            }
             RunEvent::Admitted { round } => self.admit(round),
             RunEvent::AttemptRecorded {
                 call_id,
@@ -638,6 +757,8 @@ impl RunLedger {
             self.calls.insert(
                 member.call_id.clone(),
                 CallState {
+                    cancel: member.policy.cancel,
+                    cancel_discharged: false,
                     selection,
                     retry: member.policy.retry.clone(),
                     outstanding: (selection == BeforeSelection::Execute)
@@ -814,7 +935,10 @@ impl RunLedger {
                     Some((_, CallDecision::Final { .. })) => !call.seated || !call.presented,
                     Some(_) => false,
                 };
-                if protected_owed || call.outstanding.is_some() {
+                let cancel_owed = matches!(call.decision, Some((_, CallDecision::Cancelled)))
+                    && call.cancel == super::ExternalCancelPolicy::CancelExternalWork
+                    && !call.cancel_discharged;
+                if protected_owed || cancel_owed || call.outstanding.is_some() {
                     return Err(RunEventRefusal::UnsettledWork {
                         call_id: call_id.clone(),
                     });

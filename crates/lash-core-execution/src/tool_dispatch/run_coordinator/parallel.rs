@@ -3,12 +3,32 @@ use super::*;
 use crate::tool_run::{RecordedRetryPolicy, RunAttemptEntry};
 use futures_util::future::{BoxFuture, FutureExt, Shared, select_all};
 
-type Handle<'a> = Shared<BoxFuture<'a, Result<Ready, RuntimeEffectControllerError>>>;
+pub(super) type Handle<'a> = Shared<BoxFuture<'a, Result<Ready, RuntimeEffectControllerError>>>;
 
 #[derive(Clone)]
-enum Ready {
+pub(super) enum Ready {
     Attempt(std::sync::Arc<RunAttemptEntry>),
     Timer,
+}
+
+pub(super) struct AggregateTimer<'a> {
+    pub key: String,
+    pub leaf: u32,
+    pub handle: Handle<'a>,
+}
+
+#[derive(Clone)]
+enum SelectedWork {
+    Call {
+        work: std::sync::Arc<Work>,
+        ordinal: AttemptOrdinal,
+        timer: bool,
+        delay: u64,
+    },
+    AggregateTimer {
+        key: String,
+        leaf: u32,
+    },
 }
 
 struct Work {
@@ -24,6 +44,45 @@ pub(super) struct Pending<'a> {
     ordinal: AttemptOrdinal,
     timer: bool,
     handle: Handle<'a>,
+}
+
+impl<'a> Pending<'a> {
+    pub(super) fn handle(&self) -> Handle<'a> {
+        self.handle.clone()
+    }
+}
+
+/// Poll the already issued X handles alongside a program effect or protected
+/// drain. Readiness never decides a call: only its recorded schedule does.
+pub(super) async fn poll_beside<F: std::future::Future>(
+    handles: &[Handle<'_>],
+    future: F,
+) -> Result<F::Output, RuntimeEffectControllerError> {
+    tokio::pin!(future);
+    let mut handles: Vec<_> = handles.iter().cloned().map(Some).collect();
+    std::future::poll_fn(|context| {
+        // Issue the program command first on every replay. Once that future
+        // returns, its context may have failed; do not poll another SDK wait.
+        if let std::task::Poll::Ready(output) = future.as_mut().poll(context) {
+            return std::task::Poll::Ready(Ok(output));
+        }
+        for handle in &mut handles {
+            let Some(active) = handle else {
+                continue;
+            };
+            match std::pin::Pin::new(active).poll(context) {
+                std::task::Poll::Ready(Err(error)) => {
+                    return std::task::Poll::Ready(Err(error));
+                }
+                // This polling clone is done. The coordinator still owns
+                // its unpolled clone and accepts the receipt in the schedule.
+                std::task::Poll::Ready(Ok(_)) => *handle = None,
+                std::task::Poll::Pending => {}
+            }
+        }
+        std::task::Poll::Pending
+    })
+    .await
 }
 
 fn captured(
@@ -61,20 +120,29 @@ impl<'a> RunCoordinator<'a> {
         retry: RecordedRetryPolicy,
     ) -> Result<Vec<(ToolCallId, DecidedCall)>, SingletonRunError> {
         self.begin_frame()?;
-        let result = self.start_round_inner(calls, handlers, retry).await;
+        let result = self.start_round_inner(calls, handlers, retry, None).await;
         self.active_frame = false;
         self.note_fault(&result);
         result
     }
 
-    async fn start_round_inner(
+    pub(super) async fn start_round_inner(
         &mut self,
         calls: &'a [SingletonToolCall],
         handlers: std::sync::Arc<dyn SingletonToolHandlers>,
         retry: RecordedRetryPolicy,
+        aggregate: Option<(&crate::tool_run::AggregatePlan, &dyn crate::Clock)>,
     ) -> Result<Vec<(ToolCallId, DecidedCall)>, SingletonRunError> {
-        let admitted = self.admit_round(calls, handlers.as_ref(), retry).await?;
+        let admitted = self
+            .admit_round(calls, handlers.as_ref(), retry, aggregate)
+            .await?;
         let mut decisions = Vec::new();
+        for call in calls {
+            self.handlers.insert(
+                call.call_id.clone(),
+                Handlers::Owned(std::sync::Arc::clone(&handlers)),
+            );
+        }
         // Even an immediate/cached winner cannot bypass registration of a
         // sibling whose admission already owns an executable attempt.
         for (index, (member, request)) in admitted.iter().enumerate() {
@@ -98,6 +166,45 @@ impl<'a> RunCoordinator<'a> {
                     timer: false,
                     handle,
                 });
+            }
+        }
+        if let Some((plan, clock)) = aggregate {
+            let admitted_at_ms = self
+                .journal
+                .records
+                .iter()
+                .flat_map(|record| &record.events)
+                .find_map(|event| match event {
+                    RunEvent::AggregateAdmitted {
+                        plan: recorded,
+                        admitted_at_ms,
+                    } if recorded.key == plan.key => Some(*admitted_at_ms),
+                    _ => None,
+                })
+                .ok_or_else(|| RunEventRefusal::UnknownAggregate {
+                    key: plan.key.clone(),
+                })?;
+            for (index, leaf) in plan.leaves.iter().enumerate() {
+                if let crate::tool_run::AggregateLeaf::Timer { duration_ms } = leaf {
+                    let deadline = admitted_at_ms.saturating_add(*duration_ms);
+                    self.journal.scoped.admit_journal_write()?;
+                    let timer = self
+                        .journal
+                        .scoped
+                        .controller()
+                        .start_run_retry(deadline.saturating_sub(clock.timestamp_ms()));
+                    let handle = async move {
+                        timer.await?;
+                        Ok(Ready::Timer)
+                    }
+                    .boxed()
+                    .shared();
+                    self.timers.push(AggregateTimer {
+                        key: plan.key.clone(),
+                        leaf: index as u32,
+                        handle,
+                    });
+                }
             }
         }
         for (index, (member, _)) in admitted.iter().enumerate() {
@@ -150,34 +257,46 @@ impl<'a> RunCoordinator<'a> {
         result
     }
 
-    async fn progress_inner(
+    pub(super) async fn progress_inner(
         &mut self,
     ) -> Result<Option<(ToolCallId, DecidedCall)>, SingletonRunError> {
-        if self.pending.is_empty() {
+        if self.pending.is_empty() && self.timers.is_empty() {
             return Ok(None);
         }
         let mut decision = None;
         {
             let record = self.journal.record(Vec::new());
             let rank = self.journal.ledger.next_rank();
-            let aborted = self.journal.ledger.aborted();
-            let choices: Vec<_> = self
+            let aborted = self.journal.ledger.aborted()
+                || self.journal.ledger.lifecycle() != crate::tool_run::RunLifecycle::Live;
+            let mut choices: Vec<_> = self
                 .pending
                 .iter()
                 .map(|entry| {
                     (
-                        std::sync::Arc::clone(&entry.work),
-                        entry.ordinal,
-                        entry.timer,
                         entry.handle.clone(),
-                        backoff(
-                            &entry.work.member.policy.retry,
-                            entry.ordinal,
-                            entry.capture.as_ref(),
-                        ),
+                        SelectedWork::Call {
+                            work: std::sync::Arc::clone(&entry.work),
+                            ordinal: entry.ordinal,
+                            timer: entry.timer,
+                            delay: backoff(
+                                &entry.work.member.policy.retry,
+                                entry.ordinal,
+                                entry.capture.as_ref(),
+                            ),
+                        },
                     )
                 })
                 .collect();
+            choices.extend(self.timers.iter().map(|timer| {
+                (
+                    timer.handle.clone(),
+                    SelectedWork::AggregateTimer {
+                        key: timer.key.clone(),
+                        leaf: timer.leaf,
+                    },
+                )
+            }));
             let name = format!("lash:run:schedule:{}", record.first.0);
             let address = crate::EffectAddress::new(
                 self.journal.scoped.execution_scope().clone(),
@@ -212,27 +331,45 @@ impl<'a> RunCoordinator<'a> {
             let selector = async move {
                 needs_selection.notified().await;
                 let (ready, chosen, _) =
-                    select_all(choices.iter().map(|entry| entry.3.clone())).await;
-                let (work, ordinal, timer, _, delay) = &choices[chosen];
-                let _ = send_choice.send((
-                    ready,
-                    std::sync::Arc::clone(work),
-                    *ordinal,
-                    *timer,
-                    *delay,
-                ));
+                    select_all(choices.iter().map(|entry| entry.0.clone())).await;
+                let _ = send_choice.send((ready, choices[chosen].1.clone()));
             };
             let step = Box::pin(async move {
                 needed.notify_one();
-                let (ready, work, ordinal, timer, delay) = receive_choice
+                let (ready, selected_work) = receive_choice
                     .await
                     .map_err(|_| "the owning selection frame ended".to_owned())?;
+                let ready = ready.map_err(|error| error.to_string())?;
+                let (work, ordinal, timer, delay) = match selected_work {
+                    SelectedWork::AggregateTimer { key, leaf } => {
+                        if !matches!(ready, Ready::Timer) {
+                            return Err("aggregate timer returned an X receipt".to_owned());
+                        }
+                        return Ok(RunJournalEntry {
+                            record: RunRecord {
+                                events: vec![RunEvent::TimerElapsed {
+                                    aggregate: key,
+                                    leaf,
+                                }],
+                                ..record
+                            },
+                            materials: Vec::new(),
+                            state: Vec::new(),
+                        });
+                    }
+                    SelectedWork::Call {
+                        work,
+                        ordinal,
+                        timer,
+                        delay,
+                    } => (work, ordinal, timer, delay),
+                };
                 let call = &work.call;
                 let member = &work.member;
                 let handlers = work.handlers.as_ref();
                 let call_id = call.call_id.clone();
                 let mut record = record;
-                match ready.map_err(|error| error.to_string())? {
+                match ready {
                     Ready::Attempt(entry) => {
                         if timer || entry.call_id != call_id || entry.attempt != ordinal {
                             return Err("an X handle returned a different attempt".to_owned());
@@ -335,6 +472,19 @@ impl<'a> RunCoordinator<'a> {
                 .events
                 .first()
                 .ok_or(RunEventRefusal::EmptyRecord)?;
+            if let RunEvent::TimerElapsed { aggregate, leaf } = event {
+                let position = self
+                    .timers
+                    .iter()
+                    .position(|timer| timer.key == *aggregate && timer.leaf == *leaf)
+                    .ok_or_else(|| RunEventRefusal::TimerOrder {
+                        key: aggregate.clone(),
+                        leaf: *leaf,
+                    })?;
+                self.timers.remove(position).handle.await?;
+                self.journal.accept(selected)?;
+                return Ok(None);
+            }
             let position = self
                 .pending
                 .iter()
