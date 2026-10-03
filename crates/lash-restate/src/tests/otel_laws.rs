@@ -69,7 +69,7 @@ async fn run_golden_turn(always_replay: bool) -> Observed {
             let metric = Arc::clone(&metric);
             Box::pin(async move {
                 handler_runs.fetch_add(1, Ordering::SeqCst);
-                let turn = tracing.turn_execution(&session_id, &turn_id, &controller);
+                let turn = tracing.turn_execution(&controller);
                 turn.observe_deferred(move || observation("turn started".to_string()));
                 for step in 0..STEPS {
                     turn.observe_deferred(move || observation(format!("step {step} issued")));
@@ -97,9 +97,8 @@ async fn run_golden_turn(always_replay: bool) -> Observed {
                         .execute_effect(
                             envelope,
                             RuntimeEffectLocalExecutor::testing_in_step(
-                                move |envelope, live| async move {
-                                    let body =
-                                        body_tracing.effect_body(&envelope.invocation, &live);
+                                move |_envelope, live| async move {
+                                    let body = body_tracing.effect_body(&live);
                                     // A live-class metric is recorded under
                                     // the body's permit, which only a body
                                     // that really runs holds.

@@ -616,9 +616,9 @@ fn event_samples() -> Vec<TraceEvent> {
             error_class: lash_trace::TraceStoreErrorClass::StoredDataCorrupt,
             message: "stored SessionHeadMeta data is corrupt".to_string(),
         },
-        TraceEvent::RlmStep {
+        TraceEvent::ProgramStep {
             step_index: 1,
-            outcome: lash_trace::TraceRlmStepOutcome::Ok,
+            outcome: lash_trace::TraceProgramStepOutcome::Ok,
         },
         TraceEvent::ProtocolStep {
             plugin_id: "custom".to_string(),
@@ -699,7 +699,7 @@ trace_event_kinds! {
     DurableTimerResolved => "durable_timer_resolved",
     DurableSegmentBoundary => "durable_segment_boundary",
     StoreErrorObserved => "store_error_observed",
-    RlmStep => "rlm_step",
+    ProgramStep => "program_step",
     ProtocolStep => "protocol_step",
     LanguageExecution => "language_execution",
     TurnCompleted => "turn_completed",
@@ -731,6 +731,38 @@ fn event_samples_cover_every_variant() {
         sampled, canonical,
         "event_samples must pin exactly one representative per TraceEvent variant"
     );
+}
+
+/// Core tracing is seam-neutral: no event names the plugin, durable
+/// substrate, store backend or provider that produced it. Those
+/// implementations report through the shared vocabulary.
+#[test]
+fn trace_event_vocabulary_names_no_seam_implementation() {
+    const IMPLEMENTATIONS: &[&str] = &[
+        "rlm",
+        "lashlang",
+        "restate",
+        "temporal",
+        "sqlite",
+        "postgres",
+        "anthropic",
+        "openai",
+    ];
+    for event in event_samples() {
+        let json = serde_json::to_value(&event).expect("serialize event");
+        let tag = json["type"].as_str().expect("event type tag").to_owned();
+        let variant = format!("{event:?}")
+            .split([' ', '{', '('])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        for name in IMPLEMENTATIONS {
+            assert!(
+                !tag.contains(name) && !variant.contains(name),
+                "trace event `{tag}` names the seam implementation `{name}`"
+            );
+        }
+    }
 }
 
 #[test]
@@ -2134,17 +2166,17 @@ fn durable_step_events_round_trip_at_schema_version_six() {
 fn rlm_compile_link_outcomes_have_pinned_wire_tags() {
     for (outcome, expected) in [
         (
-            lash_trace::TraceRlmStepOutcome::Ok,
-            serde_json::json!({"type":"rlm_step","step_index":3,"outcome":"ok"}),
+            lash_trace::TraceProgramStepOutcome::Ok,
+            serde_json::json!({"type":"program_step","step_index":3,"outcome":"ok"}),
         ),
         (
-            lash_trace::TraceRlmStepOutcome::Failure {
+            lash_trace::TraceProgramStepOutcome::Failure {
                 diagnostic: "expects body".into(),
             },
-            serde_json::json!({"type":"rlm_step","step_index":3,"outcome":"failure","diagnostic":"expects body"}),
+            serde_json::json!({"type":"program_step","step_index":3,"outcome":"failure","diagnostic":"expects body"}),
         ),
     ] {
-        let event = TraceEvent::RlmStep {
+        let event = TraceEvent::ProgramStep {
             step_index: 3,
             outcome,
         };

@@ -249,7 +249,7 @@ fn rejected_deferred_contract_step_is_visible_in_trace_sink() {
         assert!(diagnostic.contains("body"), "{diagnostic}");
         let step = records
             .iter()
-            .find(|r| r.event.kind() == "rlm_step")
+            .find(|r| r.event.kind() == "program_step")
             .expect("rejected step must emit trace evidence");
         let event = serde_json::to_value(&step.event).unwrap();
         assert_eq!(event["step_index"], 7);
@@ -268,7 +268,7 @@ fn successful_compile_step_is_visible_in_trace_sink() {
         assert!(response.error.is_none(), "{:?}", response.error);
         let steps: Vec<_> = records
             .iter()
-            .filter(|r| r.event.kind() == "rlm_step")
+            .filter(|r| r.event.kind() == "program_step")
             .collect();
         assert_eq!(steps.len(), 1);
         let event = serde_json::to_value(&steps[0].event).unwrap();
@@ -288,7 +288,7 @@ fn oversized_link_failure_diagnostic_is_bounded_without_changing_feedback() {
         assert!(diagnostic.chars().count() > 4000);
         let steps: Vec<_> = records
             .iter()
-            .filter(|r| r.event.kind() == "rlm_step")
+            .filter(|r| r.event.kind() == "program_step")
             .collect();
         assert_eq!(steps.len(), 1);
         let event = serde_json::to_value(&steps[0].event).unwrap();

@@ -1531,9 +1531,9 @@ pub mod tracing {
         TraceLashlangNodeObservation, TraceLashlangNodeReport, TraceLashlangNodeTerminalRecord,
         TraceLashlangNodeTerminalStatus, TraceLlmAttemptOutcome, TraceLlmTerminalReason,
         TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution, TraceNormalizedError,
-        TraceProviderFailureKind, TraceRetryAttempt, TraceRetryAttemptDetail, TraceRetryClass,
-        TraceRetryDecision, TraceRetryDeclineCause, TraceRetryWait, TraceRlmStepOutcome,
-        TraceStoreErrorClass, TraceToolAttemptOutcome, TraceToolCallStatus,
+        TraceProgramStepOutcome, TraceProviderFailureKind, TraceRetryAttempt,
+        TraceRetryAttemptDetail, TraceRetryClass, TraceRetryDecision, TraceRetryDeclineCause,
+        TraceRetryWait, TraceStoreErrorClass, TraceToolAttemptOutcome, TraceToolCallStatus,
         TraceTurnCancellationEvidence, TraceTurnCompletionReason, TraceTurnFailureReason,
         TraceTurnOutcome, fold_lashlang_graph,
     };

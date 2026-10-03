@@ -616,32 +616,33 @@ pub enum TraceEvent {
     ObservationProjection {
         projections: Vec<TextProjectionMetadata>,
     },
-    /// A Restate `ctx.run` effect is about to cross its journal command boundary.
+    /// A journaled effect is about to cross its durable substrate's journal
+    /// command boundary.
     JournaledEffectStarted {
         effect_name: String,
         effect_kind: String,
     },
-    /// A Restate `ctx.run` effect returned its recorded or newly executed outcome.
+    /// A journaled effect returned its recorded or newly executed outcome.
     JournaledEffectSettled {
         effect_name: String,
         effect_kind: String,
         status: TraceJournaledEffectStatus,
     },
-    /// A Restate durable wait has issued its park command.
+    /// A durable wait has issued its park command.
     DurableWaitParked {
         wait_kind: String,
     },
-    /// A Restate durable wait resumed with a terminal resolution.
+    /// A durable wait resumed with a terminal resolution.
     DurableWaitResolved {
         started_at_ms: u64,
         wait_kind: String,
         resolution: TraceDurableWaitResolution,
     },
-    /// A Restate durable timer has been issued.
+    /// A durable timer has been issued.
     DurableTimerStarted {
         duration_ms: u64,
     },
-    /// A Restate durable timer resumed or was cancelled.
+    /// A durable timer resumed or was cancelled.
     DurableTimerResolved {
         duration_ms: u64,
         status: TraceDurableTimerStatus,
@@ -659,12 +660,13 @@ pub enum TraceEvent {
         error_class: TraceStoreErrorClass,
         message: String,
     },
-    /// Compile/link evidence emitted before executing an RLM program step.
-    RlmStep {
+    /// Compile/link evidence a protocol plugin reports before it executes a
+    /// program the model submitted as one protocol step.
+    ProgramStep {
         /// Protocol iteration of the submitted program within its turn.
         step_index: usize,
         #[serde(flatten)]
-        outcome: TraceRlmStepOutcome,
+        outcome: TraceProgramStepOutcome,
     },
     ProtocolStep {
         plugin_id: String,
@@ -686,7 +688,7 @@ pub enum TraceEvent {
 /// The compile/link result, independent of the program's later runtime outcome.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
-pub enum TraceRlmStepOutcome {
+pub enum TraceProgramStepOutcome {
     /// The program compiled and linked successfully.
     Ok,
     /// Setup, parsing, or linking rejected the program before execution.
@@ -847,7 +849,7 @@ impl TraceEvent {
                 | "exec_code_started"
                 | "exec_code_completed"
                 | "exec_code_failed"
-                | "rlm_step"
+                | "program_step"
                 | "observation_projection"
                 | "journaled_effect_started"
                 | "journaled_effect_settled"
@@ -876,7 +878,7 @@ impl TraceEvent {
     ///   [`TraceTurnFailureReason`] (`Incomplete`, `InvalidInput`, `MaxTurns`,
     ///   `ToolFailure`, `ProviderError`, `ContextOverflow`, `PluginAbort`,
     ///   `RuntimeError`, `SubmittedError`, or `ToolError`); and
-    /// - [`Self::RlmStep`] when compile/link failed; and
+    /// - [`Self::ProgramStep`] when compile/link failed; and
     /// - [`Self::LanguageExecution`] for
     ///   [`TraceLanguageExecutionPayload::NodeFailed`] or
     ///   [`TraceLanguageExecutionPayload::ExecutionFinished`] with
@@ -890,9 +892,9 @@ impl TraceEvent {
             Self::LlmCallFailed { .. }
             | Self::EffectEnvelopeDiff { .. }
             | Self::StoreErrorObserved { .. } => true,
-            Self::RlmStep { outcome, .. } => match outcome {
-                TraceRlmStepOutcome::Ok => false,
-                TraceRlmStepOutcome::Failure { .. } => true,
+            Self::ProgramStep { outcome, .. } => match outcome {
+                TraceProgramStepOutcome::Ok => false,
+                TraceProgramStepOutcome::Failure { .. } => true,
             },
             Self::JournaledEffectSettled { status, .. } => status.is_failed(),
             Self::DurableTimerResolved { status, .. } => status.is_failed(),
@@ -979,7 +981,7 @@ impl TraceEvent {
             Self::ExecCodeStarted { .. } => "exec_code_started",
             Self::ExecCodeCompleted { .. } => "exec_code_completed",
             Self::ExecCodeFailed { .. } => "exec_code_failed",
-            Self::RlmStep { .. } => "rlm_step",
+            Self::ProgramStep { .. } => "program_step",
             Self::ObservationProjection { .. } => "observation_projection",
             Self::JournaledEffectStarted { .. } => "journaled_effect_started",
             Self::JournaledEffectSettled { .. } => "journaled_effect_settled",

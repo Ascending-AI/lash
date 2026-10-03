@@ -4166,7 +4166,7 @@
       "type": "object"
     },
     {
-      "description": "A Restate `ctx.run` effect is about to cross its journal command boundary.",
+      "description": "A journaled effect is about to cross its durable substrate's journal\ncommand boundary.",
       "properties": {
         "effect_kind": {
           "type": "string"
@@ -4187,7 +4187,7 @@
       "type": "object"
     },
     {
-      "description": "A Restate `ctx.run` effect returned its recorded or newly executed outcome.",
+      "description": "A journaled effect returned its recorded or newly executed outcome.",
       "properties": {
         "effect_kind": {
           "type": "string"
@@ -4212,7 +4212,7 @@
       "type": "object"
     },
     {
-      "description": "A Restate durable wait has issued its park command.",
+      "description": "A durable wait has issued its park command.",
       "properties": {
         "type": {
           "const": "durable_wait_parked",
@@ -4229,7 +4229,7 @@
       "type": "object"
     },
     {
-      "description": "A Restate durable wait resumed with a terminal resolution.",
+      "description": "A durable wait resumed with a terminal resolution.",
       "properties": {
         "resolution": {
           "$ref": "#/$defs/TraceDurableWaitResolution"
@@ -4256,7 +4256,7 @@
       "type": "object"
     },
     {
-      "description": "A Restate durable timer has been issued.",
+      "description": "A durable timer has been issued.",
       "properties": {
         "duration_ms": {
           "format": "uint64",
@@ -4275,7 +4275,7 @@
       "type": "object"
     },
     {
-      "description": "A Restate durable timer resumed or was cancelled.",
+      "description": "A durable timer resumed or was cancelled.",
       "properties": {
         "duration_ms": {
           "format": "uint64",
@@ -4354,7 +4354,7 @@
       "type": "object"
     },
     {
-      "description": "Compile/link evidence emitted before executing an RLM program step.",
+      "description": "Compile/link evidence a protocol plugin reports before it executes a\nprogram the model submitted as one protocol step.",
       "oneOf": [
         {
           "description": "The program compiled and linked successfully.",
@@ -4396,7 +4396,7 @@
           "type": "integer"
         },
         "type": {
-          "const": "rlm_step",
+          "const": "program_step",
           "type": "string"
         }
       },

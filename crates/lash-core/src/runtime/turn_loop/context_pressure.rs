@@ -241,7 +241,7 @@ impl LashRuntime {
                         frame_records,
                         task,
                         seed,
-                        scoped_effect_controller.execution_scope(),
+                        scoped_effect_controller,
                         shift_fence,
                     )
                     .await?;
@@ -269,7 +269,7 @@ impl LashRuntime {
         records: Vec<(String, Vec<crate::SessionAppendNode>)>,
         task: String,
         seed: Vec<crate::SessionAppendNode>,
-        committing: &crate::ExecutionScope,
+        committing: &ScopedEffectController<'_>,
         shift_fence: Option<&ShiftFence>,
     ) -> Result<(), RuntimeError> {
         let opened = match self.open_context_pressure_frame(write, records, seed).await {
@@ -281,7 +281,12 @@ impl LashRuntime {
         };
         let frame_node_id = opened.result.frame_node_id.clone();
         if let Err(error) = self
-            .persist_context_pressure_frame(write, opened, committing, shift_fence)
+            .persist_context_pressure_frame(
+                write,
+                opened,
+                committing.execution_scope(),
+                shift_fence,
+            )
             .await
         {
             // Nothing of the frame is durable: drop it from resident state,
@@ -294,11 +299,7 @@ impl LashRuntime {
         let tracing = &self.host.core.tracing;
         if tracing.is_observed() {
             tracing
-                .unreplayed(Some(crate::trace::turn_trace_scope(
-                    &self.state.session_id,
-                    &crate::TurnId::from(write.turn_id),
-                    tracing.clock().timestamp_ms(),
-                )))
+                .unreplayed(committing.trace_scope().cloned())
                 .observe(|| {
                     (
                         lash_trace::TraceContext::default()

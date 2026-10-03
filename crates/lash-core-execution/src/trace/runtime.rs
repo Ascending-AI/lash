@@ -220,29 +220,16 @@ impl TraceRuntime {
         )
     }
 
-    /// The standing of the shift code of one physical turn, under that turn's
-    /// scope.
-    pub fn turn_execution(
-        &self,
-        session_id: &crate::SessionId,
-        turn_id: &crate::TurnId,
-        controller: &crate::ScopedEffectController<'_>,
-    ) -> TraceStanding {
-        let _ = (session_id, turn_id);
-        let scope = controller.trace_scope().cloned();
-        self.shift(scope, controller)
+    /// The standing of the shift code that issues its steps through
+    /// `controller`, under the scope that controller retained.
+    pub fn turn_execution(&self, controller: &crate::ScopedEffectController<'_>) -> TraceStanding {
+        self.shift(controller.trace_scope().cloned(), controller)
     }
 
-    /// The standing of the recorded body of the effect `invocation` names
-    /// while it really runs, under the scope the effect belongs to.
-    pub fn effect_body(
-        &self,
-        invocation: &crate::RuntimeEffectInvocation,
-        live: &Arc<LiveStep>,
-    ) -> TraceStanding {
-        let _ = invocation;
-        let scope = live.scope.clone();
-        self.body(scope, live)
+    /// The standing of a recorded effect body while it really runs, under the
+    /// scope its step was issued in.
+    pub fn effect_body(&self, live: &Arc<LiveStep>) -> TraceStanding {
+        self.body(live.scope.clone(), live)
     }
 
     /// The standing of a recorded step's body while it really runs.
@@ -946,26 +933,6 @@ impl TraceStanding {
     }
 }
 
-/// The scope of one physical turn.
-///
-/// The turn's admission retains no anchor of its own yet, so the scope is
-/// untraced and starts at `started_at_ms`.
-pub fn turn_trace_scope(
-    session_id: &crate::SessionId,
-    turn_id: &crate::TurnId,
-    started_at_ms: u64,
-) -> DurableTraceScope {
-    DurableTraceScope {
-        scope: TraceScopeId::admission(TraceScopeOwner::Turn {
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
-        }),
-        cause: TraceCause::Root,
-        anchor: TraceAnchor::Untraced,
-        started_at_ms,
-    }
-}
-
 /// The scope of one tool call of the turn `turn` scopes, parented to the
 /// turn's anchor. A standing under any other scope has no tool scope.
 pub fn tool_trace_scope(
@@ -993,43 +960,4 @@ pub fn tool_trace_scope(
         anchor: TraceAnchor::Untraced,
         started_at_ms,
     })
-}
-
-/// The scope an effect's observations belong to: the turn its invocation is
-/// attributed to, else the turn or process its execution scope names. A
-/// session- or runtime-level operation has none.
-pub fn effect_trace_scope(
-    invocation: &crate::RuntimeEffectInvocation,
-    started_at_ms: u64,
-) -> Option<DurableTraceScope> {
-    if let (Some(session_id), Some(turn_id)) = (
-        invocation.attribution.session_id.as_ref(),
-        invocation.attribution.turn_id.as_ref(),
-    ) {
-        return Some(turn_trace_scope(session_id, turn_id, started_at_ms));
-    }
-    match invocation.execution_scope() {
-        crate::ExecutionScope::Turn {
-            session_id,
-            turn_id,
-        } => Some(turn_trace_scope(session_id, turn_id, started_at_ms)),
-        crate::ExecutionScope::Process { process_id } => {
-            Some(process_trace_scope(process_id, started_at_ms))
-        }
-        crate::ExecutionScope::SessionOperation { .. }
-        | crate::ExecutionScope::SessionDelete { .. }
-        | crate::ExecutionScope::RuntimeOperation { .. } => None,
-    }
-}
-
-/// The scope of a registered process.
-pub fn process_trace_scope(process_id: &crate::ProcessId, started_at_ms: u64) -> DurableTraceScope {
-    DurableTraceScope {
-        scope: TraceScopeId::admission(TraceScopeOwner::Process {
-            process_id: process_id.clone(),
-        }),
-        cause: TraceCause::Root,
-        anchor: TraceAnchor::Untraced,
-        started_at_ms,
-    }
 }

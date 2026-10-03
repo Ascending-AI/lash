@@ -545,11 +545,11 @@ impl LashRuntime {
                 &trace_turn_id,
                 "shift",
             ),
-            trace: self.host.core.tracing.turn_execution(
-                &self.state.session_id,
-                &trace_turn_id,
-                &scoped_effect_controller,
-            ),
+            trace: self
+                .host
+                .core
+                .tracing
+                .turn_execution(&scoped_effect_controller),
             segment,
         });
         let protocol_run_offset = 0;

@@ -41,7 +41,7 @@ pub use boundary::TraceBoundaryReceipt;
 mod runtime;
 pub use runtime::{
     JournalFrontier, LiveStep, StepIssue, TraceEmitter, TraceRuntime, TraceStanding,
-    effect_trace_scope, process_trace_scope, tool_trace_scope, turn_trace_scope,
+    tool_trace_scope,
 };
 
 /// Invocation-owned identity is authoritative, including absent fields; host-owned run
@@ -666,17 +666,25 @@ mod span_identity_tests {
     use super::*;
     use std::sync::Arc;
 
+    fn turn_scope(started_at_ms: u64) -> lash_trace::DurableTraceScope {
+        lash_trace::DurableTraceScope {
+            scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
+                session_id: "session".into(),
+                turn_id: "turn".into(),
+            }),
+            cause: lash_trace::TraceCause::Root,
+            anchor: lash_trace::TraceAnchor::Untraced,
+            started_at_ms,
+        }
+    }
+
     #[test]
     fn a_live_body_cannot_authorize_a_logical_terminal() {
         let directory = tempfile::tempdir().expect("trace directory");
         let path = directory.path().join("terminal.jsonl");
         let runtime = TraceRuntime::default()
             .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)));
-        let standing = runtime.unreplayed(Some(turn_trace_scope(
-            &crate::SessionId::from("session"),
-            &crate::TurnId::from("turn"),
-            100,
-        )));
+        let standing = runtime.unreplayed(Some(turn_scope(100)));
         standing.transition(
             standing.body_permit(),
             200,
@@ -732,14 +740,7 @@ mod span_identity_tests {
             crate::AdmittedScope::turn("session", "turn"),
         )
         .expect("scope");
-        let standing = runtime.shift(
-            Some(turn_trace_scope(
-                &crate::SessionId::from("session"),
-                &crate::TurnId::from("turn"),
-                1,
-            )),
-            &scoped,
-        );
+        let standing = runtime.shift(Some(turn_scope(1)), &scoped);
         standing.observe(|| {
             constructions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             (

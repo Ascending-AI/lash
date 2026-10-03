@@ -215,11 +215,7 @@ impl LashRuntime {
         self.host
             .core
             .tracing
-            .turn_execution(
-                &self.state.session_id,
-                &trace_turn_id,
-                &scoped_effect_controller,
-            )
+            .turn_execution(&scoped_effect_controller)
             .observe(|| {
                 (
                     lash_trace::TraceContext::default()

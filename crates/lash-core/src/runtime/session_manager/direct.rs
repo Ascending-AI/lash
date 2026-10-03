@@ -266,7 +266,7 @@ impl DirectCompletionCapability {
         let tracing = &current.host.core.tracing;
         let replay_trace = crate::RuntimeEffectReplayTrace::for_divergence(
             tracing,
-            crate::trace::effect_trace_scope(&envelope.invocation, tracing.clock().timestamp_ms()),
+            context.effect_controller.trace_scope().cloned(),
             crate::trace::trace_context_from_effect_invocation(&envelope.invocation),
         );
         let local_executor = crate::RuntimeEffectLocalExecutor::direct(

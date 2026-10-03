@@ -651,11 +651,11 @@ impl LashRuntime {
         }
 
         turn_pipeline.finalize_turn_read_state(new_messages, interrupted);
-        let turn_trace = self.host.core.tracing.turn_execution(
-            &self.state.session_id,
-            &trace_turn_id,
-            scoped_effect_controller,
-        );
+        let turn_trace = self
+            .host
+            .core
+            .tracing
+            .turn_execution(scoped_effect_controller);
         for diagnostic in turn_pipeline.take_projection_diagnostics() {
             turn_trace.observe(|| {
                 (

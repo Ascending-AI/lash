@@ -133,7 +133,6 @@ pub mod facade_support {
     /// a step's issue and its standing), public in every feature variant.
     pub use lash_core_execution::trace::{
         JournalFrontier, LiveStep, StepIssue, TraceBoundaryReceipt, TraceRuntime, TraceStanding,
-        effect_trace_scope,
     };
     pub use lash_core_ids::operational_metrics::StoreObserver;
     pub use lash_core_llm::core_internal::ProviderCompletionSideband;

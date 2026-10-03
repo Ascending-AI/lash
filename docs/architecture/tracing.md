@@ -45,33 +45,29 @@ export guarantee. Trace delivery does not decide control flow or billing.
 
 ## Integration status
 
-At the FIG-4835 review of `f9dfed0c61`, the adapter, retained admission
-provenance, transport attempt links and shared plugin runtime are present.
-Whole-arc acceptance remains open pending the FIG-4830 integration follow-up:
+Production admission proposes an SDK candidate and retains the selected
+anchor before it dispatches children. Turn, tool, wait, run and process
+terminals emit from committed first-writer receipts, with their retained
+times. Model attempts report the provider's actual responses.
+`tests::otel_laws::golden_tree_survives_replay_and_redrive` checks the
+exported SDK tree across replay, redrive, adapter recreation and a second
+send.
 
-- Production admission does not call the scope factory. Run admission
-  explicitly offers `Untraced`, and the projector skips untraced scopes.
-  The engine must persist the selected candidate before dispatching children.
-- Production sites do not yet emit `DomainCompleted` or
-  `LlmAttemptCompleted`. Adapter fixtures alone do not prove run, process,
-  send, intent or provider-attempt spans are emitted by the engine.
-- Turn, tool and process observations still construct temporary untraced
-  scopes and use attempt observations. They need the retained scopes and
-  terminal receipts for logical completion identities and durations.
-- Replay-only wait resolutions and process conclusion need committed
-  ownership. Several transition metric callers still pass no permit and
-  consequently publish no counter.
-- `emit_unscoped` still uses the obsolete random-ID record constructor.
-- Shift observations construct their records and read the clock before the
-  replay frontier grants permission. The replay cost law needs to cover that
-  producer path, as well as the emitter's early return.
-- The existing P3 law checks replayed record labels and a body counter. It
-  does not yet prove the full exported parent/link tree, retained timestamps,
-  adapter recreation or a second independent send into the same session.
+Core tracing names no plugin, durable substrate, store backend or LLM
+provider. Events, scopes and instruments use the engine's typed vocabulary.
+For example, a protocol plugin reports compile/link evidence as
+`program_step`, and every backend uses the neutral `lash.store.pool.*`
+instruments through its `StoreObserver`.
+
+These producer gaps remain open under FIG-4830's tool arc (R01):
+
+- the successful scalar `call_command_tool` path has no tool request or
+  completion receipt;
+- process-owned tool calls have no typed tool scope;
+- `report_undispatched_tool_call` has no retained request to complete;
+- the `lash.runtime_commit.budgeted_size` histogram is unbound at its
+  commit callers;
+- deferred `AwaitToolCompletions` waits have no wait receipt.
 
 The six tracing rulings and laws P1-P8 define acceptance. Passing a registry
 or compile check cannot close these producer gaps.
-
-The review also found backend-specific physical pool metric names in the
-shared registry and instruments; FIG-4843 renamed them to the neutral
-`lash.store.pool.*` contract this document links.

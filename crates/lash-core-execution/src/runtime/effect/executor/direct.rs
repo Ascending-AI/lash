@@ -18,7 +18,7 @@ impl LocalDirectEffectRunner {
         let traced = self
             .live
             .as_ref()
-            .map(|live| self.tracing.effect_body(invocation, live))
+            .map(|live| self.tracing.effect_body(live))
             .filter(crate::trace::TraceStanding::is_observed)
             .map(|standing| {
                 let context = super::super::direct_trace_context(

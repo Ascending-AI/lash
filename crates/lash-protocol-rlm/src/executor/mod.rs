@@ -1471,14 +1471,14 @@ fn emit_step_trace(ctx: &RuntimeExecutionContext<'_>, result: Result<(), &str>) 
             invocation,
         );
         let outcome = match result {
-            Ok(()) => lash_trace::TraceRlmStepOutcome::Ok,
-            Err(diagnostic) => lash_trace::TraceRlmStepOutcome::Failure {
+            Ok(()) => lash_trace::TraceProgramStepOutcome::Ok,
+            Err(diagnostic) => lash_trace::TraceProgramStepOutcome::Failure {
                 diagnostic: lash_sansio::session_model::truncate_raw_error(diagnostic),
             },
         };
         (
             context,
-            lash_trace::TraceEvent::RlmStep {
+            lash_trace::TraceEvent::ProgramStep {
                 step_index,
                 outcome,
             },
