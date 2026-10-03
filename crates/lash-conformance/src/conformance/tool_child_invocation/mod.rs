@@ -14,9 +14,9 @@
 //! * a **plain** leaf settles with its resolved `ModelToolReturn`;
 //! * a **retry** leaf's failed attempt is journaled — the successful second
 //!   attempt settles the child, and the settlement records the retry;
-//! * a **deferred** leaf parks on its own journaled await at handler level and
-//!   settles only when an out-of-band resolution lands against the key it
-//!   took — the group serves nothing for it in between;
+//! * a **deferred** leaf settles dispatch with its admitted call and original
+//!   completion key before an out-of-band resolution lands. The Run owns the
+//!   final result, and replay serves the unchanged deferred dispatch;
 //! * a **granted** leaf executes under its recorded `ToolExecutionGrant`, which
 //!   is authority the live catalog never saw;
 //! * an **intents** leaf's declarations are realized by the child after its

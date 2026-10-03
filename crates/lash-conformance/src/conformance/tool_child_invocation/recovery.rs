@@ -23,25 +23,11 @@ fn recovery_group(
     )
 }
 
-/// The recovery law: an opener that is not live on this host leaves its child
-/// accepted — not failed, not run — and the child completes once the same
-/// opener registers on the recovering host (ADR 0099 §1, W1).
-///
-/// Two shapes of the same statement:
-///
-/// * On a tier with a durable journal the group outlives the worker that
-///   opened it. The crash phase opens it and parks its deferred child, then
-///   dies. A successor host whose resolver is wired but whose opener is absent
-///   drains the group and reports the child as `NoExecutor` — the typed "not
-///   mine", not a failure and not an execution. Registering the same
-///   `EffectOpener` on the successor and draining again runs the child to a
-///   settlement a reopen serves, and the leaf's body never runs twice: the
-///   journaled `Pending` attempt is replayed, the deferred resolver is
-///   re-armed, and the out-of-band resolution is what settles it.
-/// * On a drain-less tier the observable
-///   edge is the first open: with the opener unregistered the open is refused
-///   before anything is journaled, and the identical group opens and settles
-///   once the opener registers.
+/// An absent opener refuses the first open before executing the child. The
+/// identical group dispatches once that opener registers (ADR 0099 §1, W1).
+/// Deferred dispatch returns its original completion key without awaiting the
+/// result. Resolution belongs to the Run and leaves the recorded dispatch
+/// unchanged on replay (FIG-4740).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -102,37 +88,66 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
             opener,
             tokio_util::sync::CancellationToken::new(),
         );
+        let group = recovery_group(
+            &scope,
+            &session_id,
+            &group_key,
+            &env_ref,
+            ToolChildCompletionRouting::Durable,
+            recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
+        );
         let mut handle = scoped
             .controller()
-            .open_effect_group(recovery_group(
-                &scope,
-                &session_id,
-                &group_key,
-                &env_ref,
-                ToolChildCompletionRouting::Durable,
-                recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
-            ))
+            .open_effect_group(group.clone())
             .await
             .expect("the identical group opens once the opener is live");
         let key = scenario
             .observation
             .parked_key(&format!("{group_key}-call-0"))
             .await;
-        host.resolve_await_event(
-            &key,
-            crate::Resolution::Ok(serde_json::json!({ "leaf": "recovery", "via": "resolver" })),
-        )
-        .await
-        .expect("the parked child's key resolves");
+        await_key_registered(&host, &session_id, &key).await;
         let settlement = next_settlement(&scoped, &mut handle, 0).await;
-        let Ok(crate::RuntimeEffectOutcome::ToolInvocation { outcome, .. }) = &settlement.outcome
+        let Ok(crate::RuntimeEffectOutcome::ToolInvocationDeferred { completion }) =
+            &settlement.outcome
         else {
-            panic!("the recovered child settles a tool invocation: {settlement:?}")
+            panic!("the recovered child settles its deferred dispatch: {settlement:?}")
         };
-        assert!(
-            format!("{:?}", outcome.record.output).contains("resolver"),
-            "the settled output carries the out-of-band resolution"
+        assert_eq!(
+            completion.request.call.call_id,
+            leaf_call_id(&format!("{group_key}-call-0"))
         );
+        assert_eq!(completion.pending.call_id, completion.request.call.call_id);
+        assert_eq!(completion.pending.key, key);
+        assert_eq!(completion.request.execution_env, env_ref);
+        let resolved = host
+            .resolve_await_event(
+                &key,
+                crate::Resolution::Ok(serde_json::json!({ "leaf": "recovery", "via": "resolver" })),
+            )
+            .await
+            .expect("the deferred dispatch's key resolves");
+        assert_eq!(resolved, crate::ResolveOutcome::Accepted);
+        scoped
+            .controller()
+            .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
+            .await
+            .expect("the dispatched group closes");
+        let mut replay = scoped
+            .controller()
+            .open_effect_group(group)
+            .await
+            .expect("the recovered dispatch reopens");
+        let replayed = next_settlement(&scoped, &mut replay, 0).await;
+        assert_eq!(
+            serde_json::to_value(&replayed.outcome).expect("encode replayed dispatch"),
+            serde_json::to_value(&settlement.outcome).expect("encode recorded dispatch"),
+            "resolution cannot replace the recorded deferred dispatch"
+        );
+        scoped
+            .controller()
+            .close_effect_group(replay, crate::LoserPolicy::RunToCompletion)
+            .await
+            .expect("the replayed group closes");
         assert_eq!(
             scenario.observation.executions_of("law_recovery").len(),
             1,

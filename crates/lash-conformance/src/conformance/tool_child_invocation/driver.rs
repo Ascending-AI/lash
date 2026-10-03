@@ -85,7 +85,7 @@ fn lane_group(
 }
 
 /// The lane law: every child runs through the handler-level driver and its
-/// settlement carries the semantic record ADR 0099 §6 specifies.
+/// dispatch carries either its final semantic record or its deferred descriptor.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -188,26 +188,15 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
         .await
         .expect("a group of tool children opens when their opener is live");
 
-    // The deferred leaf parks on its key; the law resolves it out of band,
-    // through the same host surface an external resolver would use.
-    let observation = Arc::clone(&scenario.observation);
-    let resolver = Arc::clone(&host);
+    // Dispatch must settle while the external result is still outstanding.
     let deferred_call = format!("{group_key}-call-2");
-    let resolve = crate::task::spawn(async move {
-        let key = observation.parked_key(&deferred_call).await;
-        resolve_when_registered(
-            &resolver,
-            key,
-            crate::Resolution::Ok(serde_json::json!({ "leaf": "deferred", "via": "resolver" })),
-        )
-        .await;
-    });
+    let deferred_key = scenario.observation.parked_key(&deferred_call).await;
+    await_key_registered(&host, &session_id, &deferred_key).await;
 
     let mut settlements: Vec<crate::GroupSettlement> = Vec::new();
     for rank in 0..8 {
         settlements.push(next_settlement(&scoped, &mut handle, rank).await);
     }
-    resolve.await.expect("the resolver task joins");
     scoped
         .controller()
         .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
@@ -224,30 +213,59 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
         "every child settles exactly once, at every rank"
     );
 
-    // Every settlement is a ToolInvocation carrying a valid settlement, and the
-    // recorded return is the presentation the opener incorporates verbatim.
-    let outcomes: Vec<(
-        crate::tool_dispatch::ToolDispatchOutcome,
-        crate::runtime::effect::ToolSettlement,
-    )> = settlements
+    // Done dispatches retain their presentation. Deferred dispatch retains the
+    // admitted call and completion key for its Run instead of a tool result.
+    let outcomes: std::collections::BTreeMap<_, _> = settlements
         .iter()
-        .map(|group_settlement| match &group_settlement.outcome {
+        .filter_map(|group_settlement| match &group_settlement.outcome {
             Ok(crate::RuntimeEffectOutcome::ToolInvocation {
                 outcome,
                 settlement,
             }) => {
                 settlement.validate().expect("the settlement validates");
-                ((**outcome).clone(), (**settlement).clone())
+                Some((
+                    group_settlement.position,
+                    (outcome.as_ref(), settlement.as_ref()),
+                ))
+            }
+            Ok(crate::RuntimeEffectOutcome::ToolInvocationDeferred { completion })
+                if group_settlement.position == 2 =>
+            {
+                assert_eq!(
+                    completion.request.call.call_id,
+                    leaf_call_id(&deferred_call)
+                );
+                assert_eq!(completion.pending.call_id, completion.request.call.call_id);
+                assert_eq!(
+                    completion.request.call.tool_id,
+                    crate::ToolId::from(LEAF_DEFERRED)
+                );
+                assert_eq!(completion.pending.key, deferred_key);
+                assert_eq!(completion.request.execution_env, scenario.env_ref);
+                None
             }
             other => panic!(
-                "rank {} settled to something that is not a tool invocation: {other:?}",
+                "position {} has an unexpected dispatch outcome: {other:?}",
                 group_settlement.position
             ),
         })
         .collect();
+    assert_eq!(
+        outcomes.len(),
+        7,
+        "only the deferred leaf has no final result"
+    );
+    let resolved = host
+        .resolve_await_event(
+            &deferred_key,
+            crate::Resolution::Ok(serde_json::json!({ "leaf": "deferred", "via": "resolver" })),
+        )
+        .await
+        .expect("the deferred dispatch's key resolves");
+    assert_eq!(resolved, crate::ResolveOutcome::Accepted);
 
     // The plain leaf: a first execution settles with its resolved return.
-    let plain = &outcomes[0];
+    let plain = &outcomes[&0];
     assert!(
         matches!(
             plain.0.record.output.outcome,
@@ -265,7 +283,7 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
     // The retry leaf: the first attempt's journaled failure is visible as a
     // recorded attempt, and the retry settles the child — one driver owns the
     // whole loop.
-    let retry = &outcomes[1];
+    let retry = &outcomes[&1];
     let retry_runs = scenario.observation.executions_of("law_retry");
     assert_eq!(
         retry_runs.iter().map(|run| run.attempt).collect::<Vec<_>>(),
@@ -275,15 +293,6 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
     assert!(
         !retry.0.attempts.is_empty(),
         "the journaled retry attempts ride the outcome"
-    );
-
-    // The deferred leaf: parked at handler level, settled by the out-of-band
-    // resolution, which becomes the child's output.
-    let deferred = &outcomes[2];
-    let deferred_text = format!("{:?}", deferred.0.record.output);
-    assert!(
-        deferred_text.contains("resolver"),
-        "the deferred leaf's settled output carries the resolution: {deferred_text}"
     );
 
     // The granted leaf: the recorded grant's execution binding reached the
@@ -299,7 +308,7 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
     // The intents leaf: both declarations were realized by the child after the
     // attempt committed, and the settlement carries the realized outcomes plus
     // the started process's possession.
-    let intents = &outcomes[4];
+    let intents = &outcomes[&4];
     let kinds: Vec<crate::ToolIntentKind> = intents
         .1
         .intent_outcomes
@@ -386,27 +395,27 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
     // Neither runtime-owned resolver can park on a service that cannot attach
     // a terminal. The declared start still retains the admitted launch receipt.
     for position in [6, 7] {
-        let crate::ToolCallOutcome::Failure(failure) = &outcomes[position].0.record.output.outcome
+        let crate::ToolCallOutcome::Failure(failure) = &outcomes[&position].0.record.output.outcome
         else {
             panic!(
                 "a resolver without terminal attachment must settle a refusal: {:?}",
-                outcomes[position].0.record.output
+                outcomes[&position].0.record.output
             );
         };
         assert_eq!(failure.code, "pending_tool_resolver_unarmed");
     }
-    assert!(outcomes[6].1.intent_outcomes.is_empty());
+    assert!(outcomes[&6].1.intent_outcomes.is_empty());
     let [
         crate::ToolIntentExecutionOutcome::Executed {
             identity,
             realized: crate::ToolIntentRealized::StartProcess(_),
             ..
         },
-    ] = outcomes[7].1.intent_outcomes.as_slice()
+    ] = outcomes[&7].1.intent_outcomes.as_slice()
     else {
         panic!(
             "the declared pending call retains one launch receipt: {:?}",
-            outcomes[7].1.intent_outcomes
+            outcomes[&7].1.intent_outcomes
         );
     };
     assert_eq!(
@@ -430,22 +439,11 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
     let mut replayed_intents = None;
     for rank in 0..8 {
         let settlement = next_settlement(&scoped, &mut replay_handle, rank).await;
-        let Ok(crate::RuntimeEffectOutcome::ToolInvocation {
-            outcome,
-            settlement: child,
-        }) = &settlement.outcome
-        else {
-            panic!("the retained rank carries a tool settlement");
-        };
         assert_eq!(
-            serde_json::to_value(outcome).expect("encode replay outcome"),
-            serde_json::to_value(&outcomes[settlement.position].0)
-                .expect("encode recorded outcome")
-        );
-        assert_eq!(
-            serde_json::to_value(child).expect("encode replay settlement"),
-            serde_json::to_value(&outcomes[settlement.position].1)
-                .expect("encode recorded settlement")
+            serde_json::to_value(&settlement.outcome).expect("encode replay dispatch"),
+            serde_json::to_value(&settlements[settlement.position].outcome)
+                .expect("encode recorded dispatch"),
+            "replay preserves each final or deferred dispatch at its original position"
         );
         if settlement.position == 4 {
             replayed_intents = Some(settlement.outcome);
@@ -464,10 +462,11 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
         panic!("rank 4 replayed to something that is not a tool invocation")
     };
     assert_eq!(
-        replayed.intent_outcomes, outcomes[4].1.intent_outcomes,
+        replayed.intent_outcomes, outcomes[&4].1.intent_outcomes,
         "replay preserves the complete ordered intent receipts and identities"
     );
     assert_eq!(scenario.observation.executions_of("law_intents").len(), 1);
+    assert_eq!(scenario.observation.executions_of("law_deferred").len(), 1);
     assert_eq!(scenario.observation.executions_of("law_granted").len(), 1);
     assert_eq!(
         scenario
@@ -496,11 +495,11 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
         1
     );
     assert_eq!(
-        replayed.possession, outcomes[4].1.possession,
+        replayed.possession, outcomes[&4].1.possession,
         "the settlement's possession is the recorded one after replay"
     );
     assert_eq!(
-        replayed.model_return, outcomes[4].1.model_return,
+        replayed.model_return, outcomes[&4].1.model_return,
         "the settlement's recorded return is unchanged on replay"
     );
 }
