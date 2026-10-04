@@ -13,8 +13,8 @@ use anyhow::{Context, Result, anyhow, ensure};
 use lash::AwaitEventKey;
 use lash::tools::{
     CancelHint, PendingCompletion, StaticToolExecute, StaticToolProvider, ToolAttemptOutcome,
-    ToolCall, ToolDeclaration, ToolDefinition, ToolIntent, ToolIntents, ToolOutcome,
-    ToolOutcomeDone, ToolProvider,
+    ToolCall, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt, ToolIntent, ToolIntents,
+    ToolOutcome, ToolOutcomeDone, ToolProvider,
 };
 use serde::{Deserialize, Serialize};
 
@@ -107,7 +107,9 @@ impl ToolBodies {
                     BodyResult::EmitEvent { .. } | BodyResult::EmitToReceiver { .. } => ToolDeclaration::default()
                         .with_intents([lash::tools::ToolIntentKind::EmitProcessEvent]),
                 };
-                Ok(definition.with_declaration(declaration))
+                Ok(definition
+                    .with_tool_binding(lash::tools::ToolBinding::new(["tools"], label))
+                    .with_declaration(declaration))
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Arc::new(StaticToolProvider::new(definitions, self)))
