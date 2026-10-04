@@ -18,6 +18,7 @@ pub(crate) const DEV_PROVIDER_SCENARIO_ENV: &str = "AGENT_WORKBENCH_DEV_PROVIDER
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DevProviderScenario {
+    McpFixture,
     AuthFailureOnce,
     RateLimitOnce,
     PartialOutputFailure,
@@ -43,6 +44,7 @@ impl DevProviderScenario {
             return Ok(None);
         }
         let scenario = match value {
+            "mcp-fixture" => Self::McpFixture,
             "auth-failure-once" => Self::AuthFailureOnce,
             "rate-limit-once" => Self::RateLimitOnce,
             "partial-output-failure" => Self::PartialOutputFailure,
@@ -66,7 +68,7 @@ impl DevProviderScenario {
             }
             other => bail!(
                 "invalid {DEV_PROVIDER_SCENARIO_ENV} `{other}`; expected one of: \
-                 auth-failure-once, rate-limit-once, partial-output-failure, failed-process, \
+                 mcp-fixture, auth-failure-once, rate-limit-once, partial-output-failure, failed-process, \
                  exec-blocked, tool-value, rendered-surface, transcript-projection, code-failure, retry-reset-partial, \
                  replay-route-change, valid-empty-completion"
             ),
@@ -76,6 +78,7 @@ impl DevProviderScenario {
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Self::McpFixture => "mcp-fixture",
             Self::AuthFailureOnce => "auth-failure-once",
             Self::RateLimitOnce => "rate-limit-once",
             Self::PartialOutputFailure => "partial-output-failure",
@@ -146,6 +149,7 @@ impl DevProviderScenario {
     /// scenario — the turn never reaches a terminal state and the row hangs.
     fn scripted_cell(self, call: usize) -> Option<String> {
         Some(match (self, call) {
+            (Self::McpFixture, _) => return None,
             (Self::AuthFailureOnce, 0)
             | (Self::RateLimitOnce, 0)
             | (Self::PartialOutputFailure, 0)
@@ -301,6 +305,7 @@ impl Provider for DevFailureProvider {
     ) -> std::result::Result<LlmResponse, LlmTransportError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         match self.scenario {
+            DevProviderScenario::McpFixture => Ok(mcp_fixture_response(&request)),
             DevProviderScenario::AuthFailureOnce if call == 0 => {
                 send_delta(&request, "provider authentication check started");
                 Err(
@@ -505,6 +510,58 @@ fn send_reasoning(request: &LlmRequest, text: &str) {
             text: text.to_string(),
         });
     }
+}
+
+fn mcp_fixture_response(request: &LlmRequest) -> LlmResponse {
+    if let Ok(path) = std::env::var("AGENT_WORKBENCH_MCP_PROVIDER_LOG") {
+        use std::io::Write as _;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            && let Ok(value) = serde_json::to_string(request)
+        {
+            let _ = writeln!(file, "{value}");
+        }
+    }
+    // Sampling is a real nested provider request under its own host profile.
+    if request.model.key().as_str() == "mcp-sampling" {
+        return streamed_response(request, "Host-generated summary.");
+    }
+    let prompt_index = request.messages.iter().rposition(|message| message.role == LlmRole::User
+        && message.blocks.iter().any(|block| matches!(block, LlmContentBlock::Text { text, .. } if text.contains("MCP-"))));
+    let prompt = prompt_index
+        .map(|index| {
+            request.messages[index]
+                .blocks
+                .iter()
+                .filter_map(|block| match block {
+                    LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                    _ => None,
+                })
+                .collect::<Vec<&str>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    if prompt_index.is_some_and(|index| {
+        request.messages[index + 1..]
+            .iter()
+            .any(|message| message.role == LlmRole::Assistant)
+    }) {
+        return streamed_response(request, &finish_cell("\"peer interruption settled\""));
+    }
+    let body = if prompt.contains("MCP-DEPTH") {
+        r#"const summary = await workspace_stdio.sample_summary({text: "workbench"});
+const form = await workspace_stdio.elicit_confirmation({});
+const url = await workspace_stdio.elicit_via_url({});
+const roots = await workspace_stdio.list_host_roots({});
+finish({summary: summary, form: form, url: url, roots: roots});"#
+    } else if prompt.contains("MCP-DETACHED") {
+        "finish(\"badge tool is detached\");"
+    } else {
+        "const badge = await workspace_http.workspace_badge({}); finish(\"workspace badge came back\");"
+    };
+    streamed_response(request, &cell(body))
 }
 
 #[cfg(test)]

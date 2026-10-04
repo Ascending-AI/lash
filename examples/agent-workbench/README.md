@@ -76,6 +76,28 @@ Validate the example build and unit tests:
 kiln test //examples/agent-workbench:agent-workbench__unit_test
 ```
 
+## MCP integrations
+
+The workbench owns MCP integrations through `GET /api/mcp/servers`,
+`POST /api/mcp/servers` with `{"name":"workspace_http","url":"http://127.0.0.1:3032/mcp","token":"workbench-mcp-fixture-token"}`,
+and `DELETE /api/mcp/servers/{name}`. Attach and detach use the public MCP
+factory; the next turn receives the refreshed catalog.
+
+The workbench binary also serves a deterministic peer with
+`agent-workbench mcp-fixture stdio`, or `agent-workbench mcp-fixture http`
+with `AGENT_WORKBENCH_MCP_ADDR=127.0.0.1:3032`. The HTTP fixture requires
+the bearer token above. Set `AGENT_WORKBENCH_MCP_FIXTURE_BIN` to the same
+binary to connect the stdio fixture beside search at host startup.
+Its tools exercise provider-backed sampling, form and URL elicitation,
+workspace roots, and a stored binary attachment. `AGENT_WORKBENCH_SEARCH_MCP_URL`
+overrides the search peer URL for an isolated fixture run.
+
+S28 is `s28_workbench_mcp_peer_restart` in the upgrade harness. It uses
+`tests/mcp_peer_restart.py` to compare two browser contexts, HTTP responses,
+SQLite records and actual Restate V7 tool outcomes while killing and restarting
+the independently owned HTTP peer. `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=mcp-fixture`
+provides deterministic RLM requests without a model service.
+
 ## Coverage
 
 The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the

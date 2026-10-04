@@ -53,23 +53,6 @@ pub(crate) fn configure_workbench_plugins(
     plugins.push(mcp);
 }
 
-/// Construction is deliberately infallible for an unreachable server: only a
-/// configuration error fails, while a down server stays registered and
-/// reconnects in the background.
-pub(crate) async fn build_search_mcp(url: &str) -> AnyhowResult<Arc<lash::mcp::McpPluginFactory>> {
-    Ok(Arc::new(
-        lash::mcp::McpPluginFactory::builder(BTreeMap::from([(
-            WORKBENCH_SEARCH_MCP_SERVER.to_string(),
-            lash::mcp::McpServerConfig::streamable_http(
-                lash::mcp::McpStreamableHttpTransport::new(url),
-            ),
-        )]))
-        .build()
-        .await
-        .context("connect agent-workbench MCP servers")?,
-    ))
-}
-
 /// The `LASH_RLM_CHANNEL` value the workbench's RLM protocol factory is built
 /// with, read the same way for the serving engine and for the registration
 /// engine so both compose the same factories — and bind the same generation.
@@ -173,7 +156,8 @@ pub(crate) async fn bound_workbench_engine(
             .context("open the registration core's scratch deferred-tool grants")?,
         approvals: approvals::WorkbenchApprovals::in_memory()
             .context("open the registration core's scratch approval ledger")?,
-        mcp: build_search_mcp(WORKBENCH_SEARCH_MCP_URL).await?,
+        // Bind the same MCP declaration without starting another live peer.
+        mcp: Arc::new(lash::mcp::McpPluginFactory::empty()),
     };
     let _core = workbench_core_builder(
         host_backend,
@@ -429,7 +413,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // unreachable server: the pool keeps reconnecting in the background and
     // the model-facing tools appear once it is up, so an offline boot degrades
     // to "no web tools" rather than refusing to start.
-    let mcp_search = build_search_mcp(WORKBENCH_SEARCH_MCP_URL).await?;
+    let search_url = std::env::var("AGENT_WORKBENCH_SEARCH_MCP_URL")
+        .unwrap_or_else(|_| WORKBENCH_SEARCH_MCP_URL.into());
+    let mcp_search =
+        crate::mcp_host::factory(&search_url, provider.clone(), model.clone(), &data_dir).await?;
     for status in mcp_search.server_statuses() {
         eprintln!(
             "agent-workbench MCP server {}: connected={}, tools={}, last_error={}",
@@ -446,7 +433,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         subagent_registry,
         deferred_tools,
         approvals: approvals.clone(),
-        mcp: mcp_search,
+        mcp: Arc::clone(&mcp_search) as Arc<dyn PluginFactory>,
     };
     // Deployment policy example. Choose these limits for the host's workload
     // before build(); session settings instead use recorded config commands.
@@ -676,7 +663,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/work/{process_id}/await", get(await_work))
         .route("/api/lashlang-graphs", get(list_lashlang_graphs))
         .route("/api/lashlang-graph/{graph_key}", get(lashlang_graph))
-        .with_state(state.clone());
+        .with_state(state.clone())
+        .merge(crate::mcp_host::router(Arc::clone(&mcp_search)));
         #[cfg(feature = "provider-wire-fixtures")]
         let app = if dev_provider_scenario
             == Some(failure_provider::DevProviderScenario::ValidEmptyCompletion)
@@ -997,30 +985,6 @@ mod startup_tests {
                 .to_string()
                 .starts_with("agent-workbench: OPENROUTER_API_KEY is not set"),
             "unexpected startup refusal: {error:#}"
-        );
-    }
-
-    /// An offline boot must degrade to "no web tools", never refuse to start.
-    ///
-    /// `build_search_mcp` is the exact construction path `async_main` uses; an
-    /// unreachable URL keeps the server registered for background reconnect and
-    /// reports it as not connected.
-    #[tokio::test]
-    async fn unreachable_search_mcp_degrades_without_failing_startup() {
-        let factory = build_search_mcp("http://127.0.0.1:1/mcp")
-            .await
-            .expect("an unreachable MCP server must not fail workbench startup");
-        let statuses = factory.server_statuses();
-
-        assert!(
-            statuses
-                .iter()
-                .any(|status| status.server_name == WORKBENCH_SEARCH_MCP_SERVER),
-            "the search server must stay registered while it reconnects: {statuses:?}"
-        );
-        assert!(
-            statuses.iter().all(|status| !status.health.is_connected()),
-            "an unreachable server must stay disconnected: {statuses:?}"
         );
     }
 }

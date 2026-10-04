@@ -1,0 +1,262 @@
+//! Host policy for server-to-client MCP requests in the workbench.
+
+use std::num::NonZeroUsize;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use lash::LlmProfileMetadata;
+use lash::direct::{
+    DirectLlmClient, DirectMessage, DirectPart, DirectRequest, DirectRole, LlmTerminalReason,
+    NonNegativeFiniteF64,
+};
+use lash::mcp::{
+    CreateElicitationOutcome, CreateElicitationRequestParams, CreateMessageOutcome,
+    ElicitationAction, ElicitationCapability, FormElicitationCapability, McpElicitationHandler,
+    McpElicitationRequest, McpProtocolError, McpRootsProvider, McpRootsRequest, McpSamplingHandler,
+    McpSamplingRequest, McpUrlElicitationComplete, Root, SamplingMessage, SamplingMessageContent,
+    UrlElicitationCapability,
+};
+use lash::provider::{LlmResponse, ProviderHandle};
+use rmcp::model::Role;
+use serde_json::{Map, Value};
+
+/// The workbench's direct provider-backed implementation of MCP sampling.
+pub struct DemoSamplingHandler {
+    provider: ProviderHandle,
+    model: LlmProfileMetadata,
+}
+
+impl DemoSamplingHandler {
+    pub fn new(provider: ProviderHandle, model: LlmProfileMetadata) -> Self {
+        Self { provider, model }
+    }
+}
+
+#[async_trait]
+impl McpSamplingHandler for DemoSamplingHandler {
+    async fn create_message(
+        &self,
+        request: McpSamplingRequest<'_>,
+    ) -> Result<CreateMessageOutcome, McpProtocolError> {
+        let params = request.params;
+        if request.context.server_name() != "workspace_stdio" {
+            return Err(McpProtocolError::invalid_params(
+                "the workbench sampling policy only trusts its bundled stdio server",
+                None,
+            ));
+        }
+        if params.tools.is_some() || params.tool_choice.is_some() {
+            return Err(McpProtocolError::invalid_params(
+                "the workbench host exposes basic MCP sampling without tool use",
+                None,
+            ));
+        }
+        if params.include_context.is_some() {
+            return Err(McpProtocolError::invalid_params(
+                "the workbench host does not expose MCP context inclusion",
+                None,
+            ));
+        }
+
+        let mut messages = Vec::new();
+        for message in &params.messages {
+            let role = match message.role {
+                Role::User => DirectRole::User,
+                Role::Assistant => DirectRole::Assistant,
+            };
+            let mut parts = Vec::new();
+            for content in message.content.iter() {
+                match content {
+                    SamplingMessageContent::Text(text) => {
+                        parts.push(DirectPart::Text(text.text.clone()));
+                    }
+                    _ => {
+                        return Err(McpProtocolError::invalid_params(
+                            "the workbench sampling demo accepts text messages only",
+                            None,
+                        ));
+                    }
+                }
+            }
+            messages.push(DirectMessage { role, parts });
+        }
+
+        let mut direct = DirectRequest::text("");
+        direct.instructions = params.system_prompt.as_deref().map(Arc::from);
+        direct.messages = messages;
+        direct.generation.output_token_cap = NonZeroUsize::new(params.max_tokens as usize);
+        direct.generation.stop_sequences = params.stop_sequences.clone().unwrap_or_default();
+        direct.generation.temperature = params
+            .temperature
+            .map(f64::from)
+            .map(NonNegativeFiniteF64::new)
+            .transpose()
+            .map_err(|error| McpProtocolError::invalid_params(error.to_string(), None))?;
+
+        let mut client = DirectLlmClient::new(
+            self.provider.clone(),
+            lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
+                lash::LlmProfileKey::new("mcp-sampling"),
+                self.model.clone(),
+            )),
+        );
+        let result = tokio::select! {
+            result = client.complete(direct) => {
+                result.map_err(|error| McpProtocolError::internal_error(error.to_string(), None))?
+            }
+            () = request.context.cancellation_token().cancelled() => {
+                return Err(McpProtocolError::internal_error(
+                    "the MCP sampling request was cancelled",
+                    None,
+                ));
+            }
+        };
+        let stop_reason = match result.terminal_reason {
+            LlmTerminalReason::OutputLimit => CreateMessageOutcome::STOP_REASON_END_MAX_TOKEN,
+            _ => CreateMessageOutcome::STOP_REASON_END_TURN,
+        };
+        Ok(CreateMessageOutcome::new(
+            SamplingMessage::assistant_text(LlmResponse::full_text(&result)),
+            self.model.wire_model.clone(),
+        )
+        .with_stop_reason(stop_reason))
+    }
+}
+
+/// MCP servers whose prompts this host is willing to answer at all.
+///
+/// Elicitation is the server asking the *host* to act, so the trust decision is
+/// the host's and it is made by server name, before the prompt is read.
+const TRUSTED_SERVERS: [&str; 2] = ["workspace_stdio", "workspace_http"];
+
+/// The answers this host will give an MCP form without a human present.
+///
+/// Keyed by the exact prompt *and* the field, never by the field alone.
+/// Elicitation is a consent primitive: a book keyed only by field name would
+/// answer `answer: yes` to any question a trusted server thought to phrase with
+/// that field, which is blind consent wearing a policy's clothes. Standing
+/// consent is only meaningful for a question the host has actually read.
+fn answer_book(prompt: &str, field: &str) -> Option<Value> {
+    match (prompt, field) {
+        ("May the workbench MCP demo continue?", "answer") => {
+            Some(Value::String("yes".to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// Deterministic example UI policy for the bundled servers' form and URL prompts.
+pub struct DemoElicitationHandler;
+
+#[async_trait]
+impl McpElicitationHandler for DemoElicitationHandler {
+    fn capability(&self) -> ElicitationCapability {
+        ElicitationCapability {
+            form: Some(FormElicitationCapability::default()),
+            url: Some(UrlElicitationCapability::default()),
+        }
+    }
+
+    async fn create_elicitation(
+        &self,
+        request: McpElicitationRequest<'_>,
+    ) -> Result<CreateElicitationOutcome, McpProtocolError> {
+        if request.context.cancellation_token().is_cancelled() {
+            return Err(McpProtocolError::internal_error(
+                "the MCP elicitation request was cancelled",
+                None,
+            ));
+        }
+        if !TRUSTED_SERVERS.contains(&request.context.server_name()) {
+            return Ok(CreateElicitationOutcome::new(ElicitationAction::Decline));
+        }
+        match request.params {
+            CreateElicitationRequestParams::FormElicitationParams {
+                message,
+                requested_schema,
+                ..
+            } => {
+                // The fixture runs without a human, so the host answers
+                // from a fixed book keyed by the prompt and the field. A
+                // question the book has not read is declined, never guessed.
+                let mut content = Map::new();
+                for name in requested_schema.properties.keys() {
+                    let Some(answer) = answer_book(message, name) else {
+                        eprintln!(
+                            "workbench has no answer on file for MCP form field `{name}` \
+                             of prompt {message:?}; declining"
+                        );
+                        return Ok(CreateElicitationOutcome::new(ElicitationAction::Decline));
+                    };
+                    content.insert(name.clone(), answer);
+                }
+                // The book is keyed by name, not by type, so its answer can still be the wrong
+                // shape for this server's schema.
+                match request.accept(Value::Object(content)) {
+                    Ok(result) => Ok(result),
+                    Err(error) => {
+                        eprintln!(
+                            "workbench declined an MCP form its answer book cannot satisfy: {}",
+                            error.message()
+                        );
+                        Ok(CreateElicitationOutcome::new(ElicitationAction::Decline))
+                    }
+                }
+            }
+            CreateElicitationRequestParams::UrlElicitationParams {
+                message,
+                url,
+                elicitation_id,
+                ..
+            } => {
+                let approved = message == "Approve the workbench MCP demo in the browser"
+                    && url == "https://example.invalid/workbench/approval"
+                    && !elicitation_id.is_empty();
+                Ok(CreateElicitationOutcome::new(if approved {
+                    ElicitationAction::Accept
+                } else {
+                    ElicitationAction::Decline
+                }))
+            }
+        }
+    }
+
+    async fn url_elicitation_complete(&self, notification: McpUrlElicitationComplete<'_>) {
+        eprintln!(
+            "workbench MCP URL elicitation completed: server={}, elicitation_id={}",
+            notification.context.server_name(),
+            notification.elicitation_id
+        );
+    }
+}
+
+/// Workspace roots supplied by the example host.
+pub struct DemoRootsProvider {
+    roots: Vec<Root>,
+}
+
+impl DemoRootsProvider {
+    pub fn new(workspace: &std::path::Path) -> Self {
+        Self {
+            roots: vec![
+                Root::new(format!("file://{}", workspace.display())).with_name("workbench"),
+            ],
+        }
+    }
+}
+
+#[async_trait]
+impl McpRootsProvider for DemoRootsProvider {
+    async fn list_roots(
+        &self,
+        request: McpRootsRequest<'_>,
+    ) -> Result<Vec<Root>, McpProtocolError> {
+        if request.context.cancellation_token().is_cancelled() {
+            return Err(McpProtocolError::internal_error(
+                "the MCP roots request was cancelled",
+                None,
+            ));
+        }
+        Ok(self.roots.clone())
+    }
+}

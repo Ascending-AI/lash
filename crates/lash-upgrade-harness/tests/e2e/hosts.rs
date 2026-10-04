@@ -251,3 +251,115 @@ fn s29_workbench_kill_after_acceptance() -> Result<()> {
         .build()?
         .block_on(workbench_browser::run())
 }
+
+#[test]
+#[ignore = "prebuilt workbench, Playwright and private Restate supplied by a Kiln gate"]
+fn s28_workbench_mcp_peer_restart() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(s28_workbench())
+}
+async fn s28_workbench() -> Result<()> {
+    use lash_upgrade_harness::e2e::{
+        cluster::{ClusterControl as _, LocalCluster},
+        host_adapters::workbench::WorkbenchHost,
+    };
+    use std::collections::BTreeMap;
+    let root = PathBuf::from(required("LASH_E2E_HOST_ARTIFACTS")?);
+    let deadline = Instant::now() + Duration::from_secs(360);
+    let mut lease = CaseLease::new("s28", root.join("s28"), deadline)?;
+    let port: u16 = required("LASH_E2E_PORT_BASE")?.parse()?;
+    lease.ports.extend([port + 20, port + 21, port + 22]);
+    let candidate = required("LASH_E2E_CANDIDATE_SHA")?;
+    let identity = |role: &str, path: PathBuf| -> Result<ArtifactIdentity> {
+        Ok(ArtifactIdentity {
+            role: role.into(),
+            sha256: lash_core::stable_hash::sha256_hex(&std::fs::read(&path)?),
+            path,
+            candidate_sha: candidate.clone(),
+            generation: lash_restate::JOURNAL_LOGIC_EPOCH.to_string(),
+        })
+    };
+    let workbench = identity("workbench", required("LASH_E2E_WORKBENCH_BIN")?.into())?;
+    let server = identity(
+        "restate-server",
+        required("LASH_RESTATE_SERVER_BIN")?.into(),
+    )?;
+    let mut cluster = LocalCluster::new(port, deadline);
+    let environment = BTreeMap::from([
+        (
+            "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO".into(),
+            "mcp-fixture".into(),
+        ),
+        (
+            "AGENT_WORKBENCH_SEARCH_MCP_URL".into(),
+            "http://127.0.0.1:1/mcp".into(),
+        ),
+        (
+            "AGENT_WORKBENCH_MCP_FIXTURE_BIN".into(),
+            workbench.path.display().to_string(),
+        ),
+        (
+            "AGENT_WORKBENCH_MCP_PROVIDER_LOG".into(),
+            lease
+                .directory
+                .join("provider-requests.jsonl")
+                .display()
+                .to_string(),
+        ),
+        (
+            "AGENT_WORKBENCH_MCP_STDIO_PID".into(),
+            lease.directory.join("stdio-peer.pid").display().to_string(),
+        ),
+    ]);
+    let mut host = WorkbenchHost::new(
+        format!("http://127.0.0.1:{}", port + 1),
+        format!("http://127.0.0.1:{}", port),
+        port + 20,
+        port + 21,
+    )?
+    .configure(environment)?;
+    let result = async {
+        cluster.boot(&server, 1, &mut lease).await?;
+        host.boot_mcp(&workbench, &mut lease).await?;
+        let ready = host.boot(&workbench, &mut lease).await?;
+        let score = host.mcp_oracle(&PathBuf::from(required("LASH_E2E_REPO")?),
+            &PathBuf::from(required("LASH_E2E_PYTHON")?), &mut lease).await?;
+        std::fs::write(lease.directory.join("host-evidence.json"), serde_json::to_vec_pretty(
+            &json!({"scenario":"S28","selected":1,"executed":1,"ready":ready,"scorecard":score,"artifacts":[workbench,server]}))?)?;
+        anyhow::Ok(())
+    }.await;
+    let host_cleanup = host.stop().await;
+    let cluster_cleanup = cluster.finish().await;
+    std::fs::write(
+        lease.directory.join("cleanup.json"),
+        serde_json::to_vec_pretty(&json!({
+            "host":host_cleanup.as_ref().ok(),"cluster":cluster_cleanup.as_ref().ok(),
+            "host_error":host_cleanup.as_ref().err().map(ToString::to_string),"cluster_error":cluster_cleanup.as_ref().err().map(ToString::to_string),
+            "scenario_error":result.as_ref().err().map(ToString::to_string)
+        }))?,
+    )?;
+    result?;
+    let host_cleanup = host_cleanup?;
+    let cluster_cleanup = cluster_cleanup?;
+    ensure!(
+        !host_cleanup.is_empty()
+            && !cluster_cleanup.is_empty()
+            && host_cleanup
+                .iter()
+                .chain(&cluster_cleanup)
+                .all(|receipt| receipt.closed),
+        "S28 lifetime remains open"
+    );
+    let pid: u32 = std::fs::read_to_string(lease.directory.join("stdio-peer.pid"))?
+        .trim()
+        .parse()?;
+    ensure!(
+        !PathBuf::from(format!("/proc/{pid}")).exists(),
+        "stdio MCP peer survived workbench shutdown"
+    );
+    println!("S28 selected=1 executed=1 MCP gates=10 reload/no-duplicate=1 cleanup=closed");
+    Ok(())
+}

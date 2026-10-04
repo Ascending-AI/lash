@@ -53629,6 +53629,7 @@
         "lash-sim",
         "percent-encoding",
         "reqwest",
+        "rmcp",
         "rusqlite",
         "serde",
         "serde_json",

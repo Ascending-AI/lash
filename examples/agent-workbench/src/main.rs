@@ -13,6 +13,9 @@ mod failure_provider;
 #[path = "../../shared/local_restate.rs"]
 mod local_restate;
 mod mail;
+mod mcp_fixture;
+mod mcp_host;
+mod mcp_policy;
 mod restate;
 mod restate_ingress;
 #[path = "../../shared/shutdown_marker.rs"]
@@ -248,7 +251,11 @@ fn main() -> AnyhowResult<()> {
         .context("build agent-workbench tokio runtime")?
         .block_on(async {
             let mut args = std::env::args().skip(1);
-            if args.next().as_deref() == Some("register-deployment") {
+            let command = args.next();
+            if command.as_deref() == Some("mcp-fixture") {
+                return mcp_fixture::serve().await;
+            }
+            if command.as_deref() == Some("register-deployment") {
                 let endpoint_url = args
                     .next()
                     .context("usage: agent-workbench register-deployment <endpoint-url>")?;

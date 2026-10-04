@@ -15,7 +15,12 @@ use crate::e2e::{
     host::{HostAdapter, HostCommand, HostObservation, HostReady},
 };
 
+mod mcp;
+
 pub struct WorkbenchHost {
+    mcp: Option<HostProcess>,
+    mcp_artifact: Option<ArtifactIdentity>,
+    mcp_cleanup: Vec<CleanupReceipt>,
     ingress: String,
     admin: String,
     http_port: u16,
@@ -35,6 +40,9 @@ pub struct WorkbenchHost {
 impl WorkbenchHost {
     pub fn new(ingress: String, admin: String, http_port: u16, endpoint_port: u16) -> Result<Self> {
         Ok(Self {
+            mcp: None,
+            mcp_artifact: None,
+            mcp_cleanup: Vec::new(),
             ingress,
             admin,
             http_port,
@@ -58,7 +66,12 @@ impl WorkbenchHost {
         ensure!(
             environment.keys().all(|key| matches!(
                 key.as_str(),
-                "AGENT_WORKBENCH_PROVIDER_URL"
+                "AGENT_WORKBENCH_MCP_STDIO_PID"
+                    | "AGENT_WORKBENCH_MCP_PROVIDER_LOG"
+                    | "AGENT_WORKBENCH_MCP_FIXTURE_BIN"
+                    | "AGENT_WORKBENCH_SEARCH_MCP_URL"
+                    | "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO"
+                    | "AGENT_WORKBENCH_PROVIDER_URL"
                     | "AGENT_WORKBENCH_PROTOCOL"
                     | "AGENT_WORKBENCH_TOOL_FIXTURE"
                     | "AGENT_WORKBENCH_RESTATE_ADVERTISE_URL"
@@ -485,17 +498,22 @@ impl HostAdapter for WorkbenchHost {
     }
     fn stop(&mut self) -> Step<'_, Vec<CleanupReceipt>> {
         Box::pin(async move {
-            if let Some(process) = self.process.as_mut() {
-                self.cleanup.extend(
-                    process
-                        .stop(
-                            Instant::now() + Duration::from_secs(30),
-                            Some("agent-workbench shutdown complete"),
-                        )
-                        .await?,
-                );
-                self.process = None;
-            }
+            self.cleanup.extend(std::mem::take(&mut self.mcp_cleanup));
+            let host = match self.process.as_mut() {
+                Some(process) => process.stop(
+                    Instant::now() + Duration::from_secs(30),
+                    Some("agent-workbench shutdown complete"),
+                ).await,
+                None => Ok(Vec::new()),
+            };
+            let peer = match self.mcp.as_mut() {
+                Some(process) => process.stop(Instant::now() + Duration::from_secs(10), None).await,
+                None => Ok(Vec::new()),
+            };
+            self.cleanup.extend(host?);
+            self.cleanup.extend(peer?);
+            self.process = None;
+            self.mcp = None;
             Ok(self.cleanup.clone())
         })
     }

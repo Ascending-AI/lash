@@ -210,8 +210,7 @@ pub(crate) async fn retrieve_attachment(
     };
     Response::builder()
         .status(StatusCode::OK)
-        // StoredAttachment is bytes-only by design; image/png is host knowledge from this
-        // PNG-only upload contract, not metadata supplied by the blob store.
+        // MCP can retain arbitrary binary resources beside PNG uploads.
         .header(header::CONTENT_TYPE, "image/png")
         .header("x-content-type-options", "nosniff")
         .header(header::CACHE_CONTROL, "private, no-store")

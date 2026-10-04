@@ -425,6 +425,14 @@ kinds = ["bin-unit-test"]
 data = ["native//:node"]
 env = { LASH_WORKBENCH_TEST_NODE = "$(location native//:node)" }
 
+# S28 uses the workbench's own MCP subcommand and browser/native-journal oracle.
+[[rule]]
+packages = ["lash-upgrade-harness"]
+kinds = ["test"]
+targets = ["e2e_hosts"]
+data = ["//examples/agent-workbench:agent-workbench", "native//:restate", "//examples/agent-workbench:package_files"]
+env = { LASH_E2E_WORKBENCH_BIN = "$(location //examples/agent-workbench:agent-workbench)", LASH_RESTATE_SERVER_BIN = "$(location native//:restate)" }
+
 # --- Test-run requests --------------------------------------------------------
 
 # A test run's request comes from its measured row in test-run-sizes.json.
