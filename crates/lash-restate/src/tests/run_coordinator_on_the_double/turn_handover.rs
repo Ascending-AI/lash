@@ -143,8 +143,7 @@ async fn turn_receipts(side: CrashSide) {
                             probe.gate_wake.notify_waiters();
                         }
                         capturing.await.unwrap();
-                        let snapshot = opener.boundary_snapshot(reason).unwrap();
-                        snapshot
+                        opener.boundary_snapshot(reason).unwrap()
                     };
                     let transfer = snapshot.run.as_ref().unwrap();
                     assert_eq!(transfer.attempts.len(), 3);

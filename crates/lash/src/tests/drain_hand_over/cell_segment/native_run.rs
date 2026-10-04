@@ -298,15 +298,15 @@ impl CellRun {
                     .await
                     .unwrap()
                     .unwrap();
-                if let Some(wait) = record.wait {
-                    if let Some(view) = double.server().invocations().into_iter().find(|view| {
+                if let Some(wait) = record.wait
+                    && let Some(view) = double.server().invocations().into_iter().find(|view| {
                         view.target.starts_with("LashProcessWorkflow/")
                             && view.target.contains(process.process_id.as_str())
                             && view.target.ends_with("/run")
                             && view.blocked_on_server == Some(true)
-                    }) {
-                        break (view, wait.kind);
-                    }
+                    })
+                {
+                    break (view, wait.kind);
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
@@ -565,9 +565,6 @@ async fn cancel_cell(storage: Storage, sleep: bool) -> Result<()> {
         ] {
             let mut run =
                 CellRun::start(storage, if sleep { SLEEP } else { PROCESS }, Cut::None).await?;
-            eprintln!(
-                "cancellation case: sleep={sleep}, successor={successor}, operation={operation:?}, after={after}"
-            );
             let original_process = if sleep {
                 None
             } else {
@@ -751,8 +748,7 @@ async fn cancel_cell(storage: Storage, sleep: bool) -> Result<()> {
                 .expect("identical source starts a fresh process");
             }
             let output = tokio::time::timeout(WEDGE, fresh.output()).await.unwrap_or_else(|_| panic!(
-                "fresh Run wedged at successor={successor} {operation:?} after={after}, now={}, timers={:?}, invocations={:?}",
-                double.server().now_ms(), double.server().timers(), double.server().invocations(),
+                "fresh Run never settled at successor={successor} {operation:?} after={after}",
             ))?;
             assert_eq!(
                 output.final_value(),

@@ -124,7 +124,7 @@ impl PreparedTurn {
         }
         let session_id = self.turn_pipeline.state().session_id.clone();
         let work_identity = request.trace_turn_id.to_string();
-        super::run_head_advancing_commit_attempt(
+        Box::pin(super::run_head_advancing_commit_attempt(
             session_id.clone(),
             work_identity.clone(),
             // A turn that reached its commit, cancelled or not, commits: its
@@ -144,7 +144,7 @@ impl PreparedTurn {
                 );
                 Box::pin(self.commit_after_admission(request)).await
             },
-        )
+        ))
         .await
     }
 
