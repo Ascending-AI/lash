@@ -875,14 +875,9 @@ impl RuntimeSessionState {
         }) else {
             return false;
         };
-        let record = self.session_graph.data_mut().node_mut(index);
-        let crate::session_graph::SessionNodePayload::Event {
-            event: crate::SessionHistoryRecord::Conversation(message),
-        } = &mut record.payload
-        else {
+        if !self.session_graph.mark_conversation_reply(index, marker) {
             return false;
-        };
-        message.reply_marker = Some(marker);
+        }
         self.refresh_current_frame_projection();
         true
     }

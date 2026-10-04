@@ -345,6 +345,44 @@ impl SessionGraphCache {
         }
     }
 
+    pub(crate) fn replace_conversation_reply(&mut self, event: &SessionHistoryRecord) {
+        let SessionHistoryRecord::Conversation(conversation) = event else {
+            return;
+        };
+        let message = conversation.to_message();
+        let read = self
+            .active_read
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(index) = read.active_events.iter().position(|existing| matches!(
+            existing, SessionHistoryRecord::Conversation(existing) if existing.id == conversation.id
+        )) {
+            let mut tail = read.active_events[index..].to_vec();
+            tail[0] = event.clone();
+            read.active_events.replace_from(index, tail);
+        }
+        if let Some(index) = read
+            .active_messages
+            .iter()
+            .position(|existing| existing.id == message.id)
+        {
+            let mut tail = read.active_messages[index..].to_vec();
+            tail[0] = message.clone();
+            read.active_messages.replace_from(index, tail);
+        }
+        for pending in &mut read.pending_events {
+            if matches!(pending, SessionHistoryRecord::Conversation(existing) if existing.id == conversation.id)
+            {
+                *pending = event.clone();
+            }
+        }
+        for pending in &mut read.pending_messages {
+            if pending.id == message.id {
+                *pending = message.clone();
+            }
+        }
+    }
+
     pub(crate) fn append_node(
         &mut self,
         node_index: usize,

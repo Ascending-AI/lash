@@ -136,6 +136,7 @@ pub(super) fn materialize_turn_reply(
             if let Some(protocol_reply) = protocol_reply {
                 if let Some(part_id) = reply_part_id(protocol_reply) {
                     let message_id = protocol_reply.id.clone();
+                    drop(read_model);
                     state.mark_pending_turn_reply(
                         &message_id,
                         crate::TurnReply::mint(turn_id.clone(), part_id),
