@@ -140,7 +140,10 @@ fn declare_external_definition() -> lash_core::ToolDefinition {
             "additionalProperties": false
         }),
     )
-    .with_declaration(lash_core::ToolDeclaration::deferring())
+    .with_declaration(
+        lash_core::ToolDeclaration::deferring()
+            .with_intents([lash_core::ToolIntentKind::StartProcess]),
+    )
 }
 
 fn start_turn_child_definition() -> lash_core::ToolDefinition {
