@@ -81,7 +81,13 @@ fn response(request: &LlmRequest) -> LlmResponse {
     let start = request
         .messages
         .iter()
-        .rposition(|message| message.role == LlmRole::User)
+        .rposition(|message| {
+            message.role == LlmRole::User
+                && message
+                    .blocks
+                    .iter()
+                    .any(|block| matches!(block, LlmContentBlock::Text { .. }))
+        })
         .unwrap_or(0);
     let text = request.messages[start..]
         .iter()

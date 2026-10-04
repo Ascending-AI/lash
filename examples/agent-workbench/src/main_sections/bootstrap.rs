@@ -1,5 +1,13 @@
 use super::*;
 
+fn workbench_restate_namespace() -> AnyhowResult<lash::restate::RestateNamespace> {
+    Ok(std::env::var("AGENT_WORKBENCH_RESTATE_NAMESPACE")
+        .ok()
+        .map(|namespace| namespace.parse())
+        .transpose()?
+        .unwrap_or_default())
+}
+
 /// Outer bound on one workbench turn: how many model calls a single send may
 /// spend. Generous, because a real workbench task legitimately takes many
 /// steps; finite, because no send should be able to run forever.
@@ -86,7 +94,8 @@ pub(crate) async fn register_deployment_command(endpoint_url: &str) -> AnyhowRes
         .context("open the registration engine's scratch store set")?;
     let engine = lash::restate::RestateEngine::new(
         Arc::new(stores),
-        lash::restate::RestateConfig::new(ingress_url, admin_url, authority),
+        lash::restate::RestateConfig::new(ingress_url, admin_url, authority)
+            .with_namespace(workbench_restate_namespace()?),
     );
     match engine.register_deployment(endpoint_url).await {
         Ok(()) => Ok(()),
@@ -172,11 +181,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         );
         scenario.provider()
     } else {
-        ProviderHandle::new(
+        ProviderHandle::new(crate::e2e_live_budget::install(
             OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
                 .with_compat(OpenAiCompat::openrouter())
                 .into_components(),
-        )
+        )?)
     };
     let selection = LlmProfileSelection {
         model: model.clone(),
@@ -259,6 +268,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             ),
             restate_authority_id.clone(),
         )
+        .with_namespace(workbench_restate_namespace()?)
         .with_process_event_sink(Arc::clone(&process_event_sink)),
     ));
     let attachment_store = stores.stores.attachment_store();

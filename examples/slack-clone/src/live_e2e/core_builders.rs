@@ -162,7 +162,7 @@ pub(super) struct LiveCore {
     /// default, since a core keeps none.
     session_spec: lash::SessionSpec,
     _deployment: crate::local_restate::LocalDeployment,
-    _server: Arc<crate::local_restate::LocalRestateServer>,
+    _server: Option<Arc<crate::local_restate::LocalRestateServer>>,
 }
 
 impl std::ops::Deref for LiveCore {
@@ -176,15 +176,35 @@ impl std::ops::Deref for LiveCore {
 /// A core's substrate on the shared restate-server: its namespace there,
 /// and the engine over a fresh SQLite memory store set that reaches it.
 struct LiveEngine {
-    server: Arc<crate::local_restate::LocalRestateServer>,
+    server: Option<Arc<crate::local_restate::LocalRestateServer>>,
     restate: crate::local_restate::LocalRestate,
     engine: Arc<lash::restate::RestateEngine>,
+    endpoint: std::net::SocketAddr,
 }
 
 /// The shared restate-server, in a namespace of `label`'s own.
 async fn live_engine(label: &str) -> Result<LiveEngine> {
-    let server = crate::local_restate::LocalRestateServer::shared("slack-live").await?;
-    let restate = server.core(label)?;
+    static INCARNATION: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+    let mut endpoint = std::net::SocketAddr::from(([127, 0, 0, 1], 0));
+    let (server, restate) = if let Ok(namespace) = std::env::var("LASH_E2E_LIVE_NAMESPACE") {
+        let incarnation = INCARNATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        endpoint = std::env::var("LASH_E2E_LIVE_ENDPOINT_ADDR")?.parse()?;
+        endpoint.set_port(
+            endpoint
+                .port()
+                .checked_add(incarnation)
+                .context("live endpoint port overflow")?,
+        );
+        (
+            None,
+            crate::local_restate::LocalRestate::from_env("the E2E controller")?
+                .in_namespace(&format!("{namespace}-{label}-{incarnation}"))?,
+        )
+    } else {
+        let server = crate::local_restate::LocalRestateServer::shared("slack-live").await?;
+        let restate = server.core(label)?;
+        (Some(server), restate)
+    };
     let stores = lash::sqlite::SqliteStoreSet::memory()
         .await
         .map_err(|error| anyhow::anyhow!("open a SQLite memory store set: {error}"))?;
@@ -193,6 +213,7 @@ async fn live_engine(label: &str) -> Result<LiveEngine> {
         server,
         restate,
         engine,
+        endpoint,
     })
 }
 
@@ -209,7 +230,11 @@ async fn serve_live_core(
     .context("build the live-E2E process worker")?;
     let deployment = live
         .restate
-        .serve(&live.engine, live.engine.endpoint_builder(worker)?.build())
+        .serve_at(
+            &live.engine,
+            live.endpoint,
+            live.engine.endpoint_builder(worker)?.build(),
+        )
         .await?;
     Ok(LiveCore {
         core,

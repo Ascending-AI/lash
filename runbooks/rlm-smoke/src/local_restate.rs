@@ -18,6 +18,7 @@ pub(crate) struct LocalRestate {
     pub(crate) ingress_url: String,
     pub(crate) admin_url: String,
     pub(crate) authority: lash::restate::RestateAuthorityId,
+    namespace: lash::restate::RestateNamespace,
 }
 
 impl LocalRestate {
@@ -35,6 +36,11 @@ impl LocalRestate {
             admin_url: read("RESTATE_ADMIN_URL")?,
             authority: lash::restate::RestateAuthorityId::new(read("RESTATE_AUTHORITY_ID")?)
                 .map_err(|error| anyhow::anyhow!("RESTATE_AUTHORITY_ID: {error}"))?,
+            namespace: std::env::var("LASH_E2E_RESTATE_NAMESPACE")
+                .ok()
+                .map(|namespace| namespace.parse())
+                .transpose()?
+                .unwrap_or_default(),
         })
     }
 
@@ -49,7 +55,8 @@ impl LocalRestate {
                 self.ingress_url.clone(),
                 self.admin_url.clone(),
                 self.authority.clone(),
-            ),
+            )
+            .with_namespace(self.namespace.clone()),
         ))
     }
 

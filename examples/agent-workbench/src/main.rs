@@ -5,6 +5,8 @@ mod approvals;
 #[path = "../../shared/attachment_acceptance.rs"]
 mod attachment_acceptance;
 mod deferred_tools;
+#[path = "../../shared/e2e_live_budget.rs"]
+mod e2e_live_budget;
 mod execution_graphs;
 mod failure_provider;
 #[cfg(feature = "provider-wire-fixtures")]
