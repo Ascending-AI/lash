@@ -152,6 +152,8 @@ impl WorkspaceHttpMcpServer {
         &self,
         Parameters(NoArguments {}): Parameters<NoArguments>,
     ) -> Result<CallToolResult, ErrorData> {
+        #[cfg(feature = "e2e")]
+        crate::e2e_mcp::badge_entered().await?;
         let blob = base64_standard(BADGE_BYTES);
         Ok(CallToolResult::success(vec![
             Content::text("The workspace badge is attached."),

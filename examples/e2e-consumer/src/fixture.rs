@@ -4,16 +4,18 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use lash::direct::{LlmContentBlock, LlmOutputPart};
+use lash::direct::LlmOutputPart;
 use lash::plugins::{
     FormatVersion, PluginDeclaration, PluginError, PluginFactory, PluginOperation,
     PluginOperationOutcome, PluginRegistrar, PluginSessionContext, PluginTask, SessionParam,
     SessionPlugin,
 };
+use lash::provider::{LlmContentBlock, LlmRole};
 use lash::provider::{LlmRequest, LlmResponse, ProviderHandle};
 use lash::sync::MutexExt as _;
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition, ToolOutcome,
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition,
+    ToolOutcome,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -76,27 +78,43 @@ pub fn provider() -> ProviderHandle {
 fn response(request: &LlmRequest) -> LlmResponse {
     // Restrict the result search to this turn's last user message. Previous
     // turns' tool replies cannot suppress a fresh tool call.
-    let start = request.messages.iter().rposition(|message| {
-        message.role == lash::direct::LlmRole::User
-    }).unwrap_or(0);
-    let text = request.messages[start..].iter().flat_map(|message| &message.content)
+    let start = request
+        .messages
+        .iter()
+        .rposition(|message| message.role == LlmRole::User)
+        .unwrap_or(0);
+    let text = request.messages[start..]
+        .iter()
+        .flat_map(|message| message.blocks.iter())
         .filter_map(|block| match block {
-            LlmContentBlock::Text { text, .. } => Some(text.as_str()),
+            LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
             _ => None,
-        }).next().unwrap_or("echo");
+        })
+        .next()
+        .unwrap_or("echo");
     let completed = request.messages[start..].iter().any(|message| {
-        message.content.iter().any(|block| matches!(block, LlmContentBlock::ToolResult { .. }))
+        message
+            .blocks
+            .iter()
+            .any(|block| matches!(block, LlmContentBlock::ToolResult { .. }))
     });
     let part = if completed {
-        LlmOutputPart::Text { text: format!("echo:{text}"), response_meta: None }
+        LlmOutputPart::Text {
+            text: format!("echo:{text}"),
+            response_meta: None,
+        }
     } else {
         LlmOutputPart::ToolCall {
-            call_id: "provider-echo".into(), tool_name: "echo".into(),
+            call_id: "provider-echo".into(),
+            tool_name: "echo".into(),
             input_json: json!({"text": text, "hold": text.starts_with("hold:")}).to_string(),
             replay: None,
         }
     };
-    LlmResponse { parts: vec![part], ..LlmResponse::default() }
+    LlmResponse {
+        parts: vec![part],
+        ..LlmResponse::default()
+    }
 }
 
 pub struct EchoTask;
@@ -119,38 +137,60 @@ impl PluginTask for EchoTask {}
 pub struct ConsumerPlugin(pub Arc<Controls>);
 
 impl PluginFactory for ConsumerPlugin {
-    fn id(&self) -> &'static str { "external-consumer" }
-    fn declaration(&self) -> PluginDeclaration { PluginDeclaration::initial(self.id()) }
+    fn id(&self) -> &'static str {
+        "external-consumer"
+    }
+    fn declaration(&self) -> PluginDeclaration {
+        PluginDeclaration::initial(PluginFactory::id(self))
+    }
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(Self(self.0.clone())))
     }
 }
 
 impl SessionPlugin for ConsumerPlugin {
-    fn id(&self) -> &'static str { "external-consumer" }
+    fn id(&self) -> &'static str {
+        "external-consumer"
+    }
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         let definition = ToolDefinition::raw(
             "consumer:echo", "echo", "Echo the admitted text",
             json!({"type":"object", "properties":{"text":{"type":"string"}, "hold":{"type":"boolean"}}, "required":["text","hold"], "additionalProperties":false}),
             json!({"type":"string"}),
         ).map_err(|error| PluginError::Session(error.to_string()))?;
-        reg.tools().provider(Arc::new(StaticToolProvider::new(vec![definition], Echo(self.0.clone()))))?;
+        reg.tools().provider(Arc::new(StaticToolProvider::new(
+            vec![definition],
+            Echo(self.0.clone()),
+        )))?;
         let controls = self.0.clone();
-        reg.operations().typed_task::<EchoTask, _, _>(move |ctx, text| {
-            let controls = controls.clone();
-            async move {
-                if text.starts_with("hold:") {
-                    controls.enter(BodyReceipt { key: text.clone(), call_id: "operation-task".into(), attempt: 1 }, &ctx.cancellation_token).await;
+        reg.operations()
+            .typed_task::<EchoTask, _, _>(move |ctx, text| {
+                let controls = controls.clone();
+                async move {
+                    if text.starts_with("hold:") {
+                        controls
+                            .enter(
+                                BodyReceipt {
+                                    key: text.clone(),
+                                    call_id: "operation-task".into(),
+                                    attempt: 1,
+                                },
+                                &ctx.cancellation_token,
+                            )
+                            .await;
+                    }
+                    Ok(PluginOperationOutcome::new(text))
                 }
-                Ok(PluginOperationOutcome::new(text))
-            }
-        })?;
+            })?;
         Ok(())
     }
 }
 
 #[derive(Deserialize)]
-struct EchoArgs { text: String, hold: bool }
+struct EchoArgs {
+    text: String,
+    hold: bool,
+}
 
 struct Echo(Arc<Controls>);
 
@@ -162,14 +202,25 @@ impl StaticToolExecute for Echo {
             Err(error) => return ToolOutcome::err_fmt(error).into(),
         };
         if args.hold {
-            let stop = call.context.cancellation_token().cloned().unwrap_or_default();
-            self.0.enter(BodyReceipt {
-                key: args.text.clone(), call_id: call.context.call_id().to_string(),
-                attempt: call.context.attempt_number(),
-            }, &stop).await;
+            let stop = call
+                .context
+                .cancellation_token()
+                .cloned()
+                .unwrap_or_default();
+            self.0
+                .enter(
+                    BodyReceipt {
+                        key: args.text.clone(),
+                        call_id: call.context.call_id().to_string(),
+                        attempt: call.context.attempt_number(),
+                    },
+                    &stop,
+                )
+                .await;
         } else {
             self.0.entered.lock_recover().push(BodyReceipt {
-                key: args.text.clone(), call_id: call.context.call_id().to_string(),
+                key: args.text.clone(),
+                call_id: call.context.call_id().to_string(),
                 attempt: call.context.attempt_number(),
             });
         }

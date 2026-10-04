@@ -275,7 +275,7 @@ targets = ["append_cost", "dialect_cost"]
 serial = true
 
 [[rule]]
-packages = ["agent-service", "agent-workbench", "slack-clone", "toolbench", "workflow-graph-roundtrip"]
+packages = ["agent-service", "agent-workbench", "slack-clone", "toolbench", "workflow-graph-roundtrip", "rlm-smoke-host"]
 kinds = ["bin", "test", "example", "bench"]
 compile_data = ["//examples:shared_rust_sources"]
 

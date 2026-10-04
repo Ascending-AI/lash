@@ -26,6 +26,8 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(180);
 /// TypeScript is the sole RLM language (ADR 0096).
 const RLM_LANGUAGE_ID: &str = "typescript";
 
+#[path = "../../../examples/shared/e2e_live_budget.rs"]
+mod e2e_live_budget;
 mod local_restate;
 
 #[derive(Debug, Parser)]
@@ -462,11 +464,11 @@ async fn main() -> Result<()> {
     let prompt = std::fs::read_to_string(args.scenario_dir.join("prompt.md"))
         .context("read scenario prompt")?;
 
-    let provider = ProviderHandle::new(
+    let provider = ProviderHandle::new(e2e_live_budget::install(
         OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
             .with_compat(OpenAiCompat::openrouter())
             .into_components(),
-    );
+    )?);
     // One SQLite file store set under the data directory holds the sessions
     // and the compiled Lashlang artifacts; the local restate-server's engine
     // journals every turn over it (ADR 0104).
@@ -546,6 +548,13 @@ async fn main() -> Result<()> {
                 lash::MaxToolCalls::new(1024),
             )
             .no_progress_budget(lash::NoProgressBudget::bounded(4))
+            .generation(lash::direct::GenerationOptions {
+                output_token_cap: std::env::var("LASH_E2E_OUTPUT_TOKEN_CAP")
+                    .ok()
+                    .map(|value| value.parse())
+                    .transpose()?,
+                ..Default::default()
+            })
             .plugin(
                 lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
                 lash::rlm::RlmCreateExtras::default(),

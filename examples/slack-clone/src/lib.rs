@@ -41,5 +41,7 @@ pub mod secrets;
 pub mod store;
 pub mod wire;
 
+#[cfg(feature = "e2e")]
+mod e2e_mcp;
 #[cfg(test)]
 mod tests;

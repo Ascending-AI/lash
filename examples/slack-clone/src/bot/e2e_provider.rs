@@ -79,6 +79,12 @@ impl State {
             return text("Host-generated summary.");
         }
         let marker = latest_journey_marker(request);
+        if marker == Some("FIG4937-MCP-RECONNECT") {
+            return match self.next("mcp-reconnect") {
+                0 => tool(&WORKSPACE_BADGE_TOOL, json!({})),
+                _ => text("The interrupted MCP admission settled."),
+            };
+        }
         if marker == Some("FIG1341-MCP-DEPTH") {
             return match self.next("mcp") {
                 0 => tool(
@@ -180,7 +186,7 @@ fn thread_root_seed(request: &str) -> Option<String> {
 }
 
 fn latest_journey_marker(request: &str) -> Option<&'static str> {
-    const MARKERS: [&str; 7] = [
+    const MARKERS: [&str; 8] = [
         "FIG1341-ROOM-MENTION",
         "FIG1341-THREAD-ONE",
         "FIG1341-THREAD-TWO",
@@ -188,6 +194,7 @@ fn latest_journey_marker(request: &str) -> Option<&'static str> {
         "FIG1341-MCP-DEPTH",
         "FIG1341-MCP-ATTACH",
         "FIG1341-MCP-DETACHED",
+        "FIG4937-MCP-RECONNECT",
     ];
     let value: serde_json::Value = serde_json::from_str(request).ok()?;
     value

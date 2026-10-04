@@ -47,6 +47,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--artifact-dir", type=Path, required=True)
+    parser.add_argument("--controller-url", help="H6 controller owns all host kill/restart actions")
+    parser.add_argument("--controller-stdio", action="store_true")
+    parser.add_argument("--bot-log", type=Path)
+    parser.add_argument("--scenario", choices=("S28", "S29"), action="append")
     return parser.parse_args()
 
 
@@ -70,6 +74,8 @@ class Journey:
         )
         self.trace_path = self.data_root / "bot" / "lash" / "trace.jsonl"
         self.bot_log = args.state_dir / "run" / f"bot-{self.state_key}.log"
+        if args.bot_log is not None:
+            self.bot_log = args.bot_log
         self.bot_pid_file = args.state_dir / "run" / f"bot-{self.state_key}.pid"
         self.provider_log = args.state_dir / "provider" / "provider-requests.jsonl"
         self.score: list[dict[str, Any]] = []
@@ -83,6 +89,22 @@ class Journey:
         self.kill_drive_epoch = 0
         self.kill_drive_admission = ""
         self.kill_started = 0.0
+        self.executed: list[str] = []
+
+    def controller(self, body: dict[str, Any]) -> dict[str, Any]:
+        if self.args.controller_stdio:
+            print("H6_CONTROL " + json.dumps(body), flush=True)
+            line = sys.stdin.readline()
+            if not line:
+                raise AssertionError("controller closed before acknowledging its action")
+            receipt = json.loads(line)
+        elif self.args.controller_url:
+            receipt = self.http_json(f"{self.args.controller_url}/control", method="POST", body=body)
+        else:
+            raise AssertionError("host action requires an E2E controller")
+        if "error" in receipt:
+            raise AssertionError(f"controller action failed: {receipt['error']}")
+        return receipt
 
     def gate(
         self,
@@ -109,6 +131,9 @@ class Journey:
             "schema": "lash.slack-clone.full-host-scorecard.v1",
             "layers": list(LAYERS),
             "assertions": self.score,
+            "selected": len(self.args.scenario or ("S28", "S29")),
+            "executed": len(self.executed),
+            "scenarios": self.executed,
             "verdict": "FAIL" if any(row["verdict"] == "FAIL" for row in self.score) else "PASS",
         }
         (self.args.artifact_dir / "scorecard.json").write_text(
@@ -581,6 +606,11 @@ class Journey:
         return pid, expected_start
 
     def kill_bot_group(self) -> None:
+        if self.args.controller_url or self.args.controller_stdio:
+            receipt = self.controller({"action": "bot-kill", "event": self.kill_event})
+            if receipt.get("reaped") is not True:
+                raise AssertionError(f"controller did not reap the bot: {receipt}")
+            return
         pid, _ = self.read_verified_pid()
         if os.getpgid(pid) != pid:
             raise AssertionError(f"bot process {pid} is not its owned process-group leader")
@@ -588,6 +618,12 @@ class Journey:
         self.poll("bot process exit", lambda: not Path(f"/proc/{pid}").exists(), timeout=10)
 
     def restart_bot(self) -> None:
+        if self.args.controller_url or self.args.controller_stdio:
+            receipt = self.controller({"action": "bot-restart"})
+            if receipt.get("ready") is not True:
+                raise AssertionError(f"controller did not ready the new bot incarnation: {receipt}")
+            self.bot_log = Path(receipt["log"])
+            return
         log_path = self.args.artifact_dir / "05-restart-command.log"
         log = log_path.open("wb")
         process = subprocess.Popen(
@@ -935,6 +971,44 @@ class Journey:
         self.screenshot("08-mcp-attach")
         self.write_extract("08-mcp-attach")
 
+    def checkpoint_mcp_peer_reconnect(self) -> None:
+        """R6/L07/L12: kill the real peer after its admitted body entered."""
+        if not (self.args.controller_url or self.args.controller_stdio):
+            raise AssertionError("S28 peer faults require the E2E controller")
+        attached = self.admin("/admin/mcp/servers", method="POST", body={
+            "name": self.mcp_http_server, "url": self.mcp_http_url, "token": self.mcp_http_token,
+        })
+        badge_tool = "mcp__workspace_http__workspace_badge"
+        if attached.get("connected") is not True or badge_tool not in attached.get("tools", []):
+            raise AssertionError(f"MCP peer did not connect: {attached}")
+        before_bots = len([row for row in self.dom_rows(self.pages["ada"]) if row["bot"]])
+        self.send_main(self.pages["ada"], f"<@{self.bot_user}> FIG4937-MCP-RECONNECT enter the badge body")
+        entered = self.args.state_dir / "mcp-gates" / "badge-entered"
+        self.poll("real MCP badge body entered", entered.exists)
+        event = self.wait_ledger("FIG4937-MCP-RECONNECT", "accepted")
+        receipt = self.controller({"action": "mcp-restart", "event": event["event_id"]})
+        self.gate("08-peer-reconnect", "bot", "entered MCP peer was killed, reaped and restarted on the same address", receipt.get("reaped") is True and receipt.get("ready") is True, "controller-faults.json")
+        for page in self.pages.values():
+            expect(page.locator("#stream .msg.is-bot")).to_have_count(before_bots + 1, timeout=45_000)
+        row = self.wait_ledger("FIG4937-MCP-RECONNECT", "replied")
+        turn = f"mention:{row['channel_id']}:{row['message_ts']}"
+        completions = self.traces_for_turn(turn, "tool_call_completed")
+        # The interrupted admission may complete or fail typed. Neither
+        # result is inferred from the provider's canned assistant message.
+        failures = []
+        for record in completions:
+            output = record.get("output") or record.get("event", {}).get("output") or {}
+            outcome = output.get("outcome", {})
+            if outcome.get("status") != "success":
+                failures.append(outcome.get("payload"))
+        self.gate("08-peer-reconnect", "trace", "one admitted badge call resolves or retains a typed transport failure", len(completions) == 1 and self.trace_tool_name(completions[0]) == badge_tool and (self.trace_tool_succeeded(completions[0]) or (len(failures) == 1 and isinstance(failures[0], dict) and bool(failures[0].get("cause")))), "08-peer-reconnect-four-layers.json")
+        # Detach the failed session; the existing exact attachment oracle
+        # then attaches the recovered endpoint and independently checks its
+        # bytes, sampling/elicitation, catalog and attribution.
+        self.admin(f"/admin/mcp/servers/{self.mcp_http_server}", method="DELETE")
+        self.screenshot("08-peer-reconnect")
+        self.write_extract("08-peer-reconnect", extra={"fault": receipt})
+
     def normalized_dom(self, page: Page) -> list[tuple[str, bool, str]]:
         return [(row["ts"], row["bot"], row["text"]) for row in self.dom_rows(page)]
 
@@ -987,10 +1061,19 @@ class Journey:
                 self.checkpoint_room_mention()
                 self.checkpoint_thread()
                 self.checkpoint_redelivery()
-                self.checkpoint_kill_restart()
-                self.checkpoint_mcp_depth()
-                self.checkpoint_mcp_runtime_attach()
+                selected = self.args.scenario or ("S28", "S29")
+                if "S29" in selected:
+                    self.checkpoint_kill_restart()
+                    self.executed.append("S29")
+                if "S28" in selected:
+                    self.checkpoint_mcp_depth()
+                    if self.args.controller_url or self.args.controller_stdio:
+                        self.checkpoint_mcp_peer_reconnect()
+                    self.checkpoint_mcp_runtime_attach()
+                    self.executed.append("S28")
                 self.checkpoint_reload()
+                if len(self.executed) != len(selected):
+                    raise AssertionError(f"scenario count mismatch: selected={selected}, executed={self.executed}")
             except Exception:
                 for name, page in self.pages.items():
                     try:

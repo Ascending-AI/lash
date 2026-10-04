@@ -40,6 +40,10 @@ name = "rolling"
 path = "tests/rolling/main.rs"
 
 [[test]]
+name = "e2e_hosts"
+path = "tests/e2e/hosts.rs"
+
+[[test]]
 name = "e2e"
 path = "tests/e2e/main.rs"
 

@@ -129,9 +129,12 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // The engine is the local restate-server's, over the bot's SQLite store
     // set (ADR 0104): the server drives every channel turn in the endpoint's
     // handlers, and the bot only sends.
-    let restate = crate::local_restate::LocalRestate::from_env(
+    let mut restate = crate::local_restate::LocalRestate::from_env(
         "`scripts/slack-clone-dev.sh up`, which runs a restate-server beside the bot",
     )?;
+    if let Ok(namespace) = std::env::var("SLACK_CLONE_RESTATE_NAMESPACE") {
+        restate = restate.in_namespace(&namespace)?;
+    }
     let stores = runtime::open_stores(&runtime_config.data_dir).await?;
     let engine = restate.engine(Arc::new(stores));
     let built = runtime::build_core(
