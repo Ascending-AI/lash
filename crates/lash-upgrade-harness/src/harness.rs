@@ -56,12 +56,12 @@ pub struct Services {
 
 impl Services {
     /// `RESTATE_INGRESS_URL`, `RESTATE_ADMIN_URL` and
-    /// `LASH_POSTGRES_DATABASE_URL`, all required.
+    /// `LASH_POSTGRES_DATABASE_URL` is optional for SQLite-only cases.
     pub fn from_env() -> Result<Self> {
         Ok(Self {
             ingress_url: required_env("RESTATE_INGRESS_URL")?,
             admin_url: required_env("RESTATE_ADMIN_URL")?,
-            postgres_url: required_env(POSTGRES_URL_ENV)?,
+            postgres_url: std::env::var(POSTGRES_URL_ENV).unwrap_or_default(),
         })
     }
 
@@ -75,6 +75,10 @@ impl Services {
     /// [`fresh_postgres_database`](Self::fresh_postgres_database) from
     /// async code.
     pub async fn create_postgres_database(&self, name: &str) -> Result<String> {
+        ensure!(
+            !self.postgres_url.is_empty(),
+            "{POSTGRES_URL_ENV} is required for a PostgreSQL case"
+        );
         let database = name.replace('-', "_");
         ensure!(
             database
@@ -827,6 +831,49 @@ pub struct ServingNode {
 }
 
 impl ServingNode {
+    /// Start an owned prebuilt service using the same kill/reap guard as upgrade nodes.
+    pub fn spawn(command: &mut Command, log_path: &Path) -> Result<Self> {
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_path)?;
+        let child = command
+            .stdin(Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log)
+            .spawn()?;
+        Ok(Self {
+            child: Some(child),
+            ready: None,
+            log_path: log_path.to_owned(),
+            register_trigger: None,
+        })
+    }
+
+    pub fn pid(&self) -> Result<u32> {
+        self.child
+            .as_ref()
+            .map(Child::id)
+            .context("process has been reaped")
+    }
+
+    /// A spontaneous service exit fails readiness and subsequent barrier probes.
+    pub fn assert_running(&mut self) -> Result<()> {
+        let child = self.child.as_mut().context("process has been reaped")?;
+        if let Some(status) = child.try_wait()? {
+            bail!("owned service exited {status}: {}", self.log_tail());
+        }
+        Ok(())
+    }
+
+    pub fn kill_and_reap(&mut self) -> Result<()> {
+        self.assert_running()?;
+        let child = self.child.as_mut().context("process has been reaped")?;
+        child.kill()?;
+        child.wait()?;
+        self.child = None;
+        Ok(())
+    }
     /// Request one later registration of `uri` from a node served with
     /// [`ServeOptions::register_later`], through its own bound engine.
     pub fn register(&mut self, uri: &str) -> Result<RegisterReport> {
@@ -959,6 +1006,10 @@ pub struct Case {
 impl Case {
     /// A roll over PostgreSQL, isolated under `name` on the shared server.
     pub fn postgres(name: &str, services: &Services, scratch: &Path) -> Result<Self> {
+        ensure!(
+            !services.postgres_url.is_empty(),
+            "{POSTGRES_URL_ENV} is required for a PostgreSQL case"
+        );
         Self::new(
             name,
             StoreSpec::Postgres(services.postgres_url.clone()),

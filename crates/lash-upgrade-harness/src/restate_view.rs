@@ -71,11 +71,54 @@ impl RestateView {
         self.namespace.service_name(service)
     }
 
-    async fn query<T: serde::de::DeserializeOwned>(&self, sql: &str) -> Result<Vec<T>> {
+    pub async fn query<T: serde::de::DeserializeOwned>(&self, sql: &str) -> Result<Vec<T>> {
         self.admin
             .query_json(sql)
             .await
             .map_err(|error| anyhow!("Restate SQL `{sql}`: {error}"))
+    }
+
+    /// Retrieve the real V2 journal and correlate completions with their Run slots.
+    pub async fn journal(
+        &self,
+        work: &crate::e2e::control::WorkIdentity,
+        invocation: &str,
+        protocol: u32,
+    ) -> Result<Vec<crate::e2e::evidence::JournalFact>> {
+        #[derive(Deserialize)]
+        struct Target {
+            target_service_name: String,
+            pinned_service_protocol_version: Option<u32>,
+        }
+        let targets: Vec<Target> = self.query(&format!(
+            "SELECT target_service_name, pinned_service_protocol_version FROM sys_invocation WHERE id = {}", sql_literal(invocation))).await?;
+        let target = targets
+            .first()
+            .ok_or_else(|| anyhow!("invocation {invocation} is absent"))?;
+        anyhow::ensure!(
+            target.pinned_service_protocol_version == Some(protocol) && protocol == 7,
+            "invocation did not negotiate V7"
+        );
+        let prefix = self.service_name("");
+        anyhow::ensure!(
+            target.target_service_name.starts_with(&prefix),
+            "invocation is outside case namespace"
+        );
+        let rows = self.query(&format!("SELECT index, entry_type, name, version, entry_json FROM sys_journal WHERE id = {} ORDER BY index", sql_literal(invocation))).await?;
+        crate::e2e::evidence::decode_journal(rows, work, invocation, &self.admin_url, protocol)
+    }
+
+    /// Retire only through Restate's non-forced administrative preconditions.
+    /// A failed query is an error, never evidence that the deployment drained.
+    pub async fn retire_deployment(&self, id: &str) -> Result<()> {
+        let url = format!("{}/deployments/{id}", self.admin_url);
+        self.http
+            .delete(&url)
+            .send()
+            .await?
+            .error_for_status()
+            .with_context(|| format!("non-forced retirement of {id}"))?;
+        Ok(())
     }
 
     /// Every value one object holds, by state key, as the JSON it stores.

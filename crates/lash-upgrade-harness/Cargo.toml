@@ -35,6 +35,10 @@ path = "tests/phase_a/main.rs"
 name = "rolling"
 path = "tests/rolling/main.rs"
 
+[[test]]
+name = "e2e"
+path = "tests/e2e/main.rs"
+
 [lints]
 workspace = true
 
@@ -50,7 +54,8 @@ lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-restate = { workspace = true }
 lash-restate-test = { workspace = true }
 anyhow = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "http2"] }
+prost = { workspace = true }
 sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true, features = ["derive"] }

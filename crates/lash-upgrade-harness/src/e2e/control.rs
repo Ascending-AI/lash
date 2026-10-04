@@ -11,6 +11,12 @@ pub struct WorkIdentity {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BarrierKind {
+    AdmissionDurable,
+    RunCancelRecorded,
+    RetryBackoffEntered,
+    PublicationRequest,
+    PublicationRefused,
+    SuccessorFence,
     BodyEntered,
     SideEffectAccepted,
     XProposed,
@@ -29,6 +35,9 @@ pub enum BarrierKind {
     TransportConnected,
     BeforeAck,
     WorkerReaped,
+    StartAdmitted,
+    StartRegistered,
+    ConsumerHoldDischarged,
     ParkCommitted,
     TelemetryFlushed,
 }
@@ -49,6 +58,7 @@ pub enum Fault {
     KillHost { target: String },
     KillVm { target: String },
     RestartRestate { node: u32 },
+    KillRestate { node: u32 },
     DropConnection { target: String },
     PartitionLink { from: u32, to: u32 },
     HealLink { from: u32, to: u32 },
@@ -87,4 +97,331 @@ pub trait Control {
     fn await_barrier<'a>(&'a mut self, barrier: &'a Barrier) -> Step<'a, BarrierProof>;
     fn inject<'a>(&'a mut self, fault: Fault, proof: &'a BarrierProof) -> Step<'a, FaultReceipt>;
     fn tool<'a>(&'a mut self, command: ToolControl) -> Step<'a, ()>;
+}
+
+/// File control is deliberately outside the invocation journal. Durable phases
+/// are published by an evidence reader, never by a tool body reporting success.
+pub struct FileBarriers {
+    directory: std::path::PathBuf,
+    deadline: std::time::Instant,
+}
+impl FileBarriers {
+    pub fn new(
+        directory: std::path::PathBuf,
+        deadline: std::time::Instant,
+    ) -> anyhow::Result<Self> {
+        std::fs::create_dir_all(&directory)?;
+        Ok(Self {
+            directory,
+            deadline,
+        })
+    }
+    fn path(&self, barrier: &Barrier, suffix: &str) -> anyhow::Result<std::path::PathBuf> {
+        let key = lash_core::stable_hash::sha256_hex(&serde_json::to_vec(barrier)?);
+        Ok(self.directory.join(format!("{key}.{suffix}")))
+    }
+    pub fn hold(&self, barrier: &Barrier) -> anyhow::Result<()> {
+        crate::node::write_atomically(&self.path(barrier, "hold")?, &serde_json::to_vec(barrier)?)
+    }
+    pub fn release(&self, barrier: &Barrier) -> anyhow::Result<()> {
+        crate::node::write_atomically(
+            &self.path(barrier, "release")?,
+            &serde_json::to_vec(barrier)?,
+        )
+    }
+    pub fn publish(&self, proof: &BarrierProof) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !proof.artifact.is_empty(),
+            "barrier lacks evidence provenance"
+        );
+        anyhow::ensure!(
+            !proof.barrier.kind.durable() || proof.journal_index.is_some(),
+            "durable barrier lacks decoded journal index"
+        );
+        crate::node::write_atomically(
+            &self.path(&proof.barrier, "reached")?,
+            &serde_json::to_vec(proof)?,
+        )
+    }
+    pub async fn await_proof(&self, barrier: &Barrier) -> anyhow::Result<BarrierProof> {
+        loop {
+            match std::fs::read(self.path(barrier, "reached")?) {
+                Ok(bytes) => {
+                    let proof: BarrierProof = serde_json::from_slice(&bytes)?;
+                    anyhow::ensure!(proof.barrier == *barrier, "barrier identity mismatch");
+                    anyhow::ensure!(
+                        !barrier.kind.durable() || proof.journal_index.is_some(),
+                        "durable barrier lacks journal proof"
+                    );
+                    return Ok(proof);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+            anyhow::ensure!(
+                std::time::Instant::now() < self.deadline,
+                "barrier {:?} was missed",
+                barrier
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    }
+    /// Tool bodies publish only body/transport facts and then await an explicit release.
+    pub async fn enter(&self, barrier: &Barrier, artifact: String) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !barrier.kind.durable(),
+            "body cannot certify journal durability"
+        );
+        self.publish(&BarrierProof {
+            barrier: barrier.clone(),
+            artifact,
+            journal_index: None,
+        })?;
+        while self.path(barrier, "hold")?.exists() && !self.path(barrier, "release")?.exists() {
+            anyhow::ensure!(
+                std::time::Instant::now() < self.deadline,
+                "held barrier was not released"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        Ok(())
+    }
+}
+impl BarrierKind {
+    pub fn durable(&self) -> bool {
+        matches!(
+            self,
+            Self::AdmissionDurable
+                | Self::XDurable
+                | Self::DDurable
+                | Self::VDurable
+                | Self::ContinuationPublished
+                | Self::SuccessorAdmitted
+                | Self::SourceSealed
+                | Self::ParkCommitted
+                | Self::RunCancelRecorded
+                | Self::SuccessorFence
+                | Self::StartAdmitted
+                | Self::StartRegistered
+                | Self::ConsumerHoldDischarged
+                | Self::RetryBackoffEntered
+        )
+    }
+}
+
+pub mod transport;
+
+/// Shared controller for real owned child handles, identity-keyed fixture
+/// gates and journal-backed durable cuts. Product controls remain adapters.
+pub struct CoreControl {
+    pub barriers: FileBarriers,
+    pub reader: Box<dyn super::evidence::EvidenceReader + Send>,
+    pub cluster: Option<super::cluster::LocalCluster>,
+    pub host: Option<Box<dyn super::host::HostAdapter + Send>>,
+    processes: std::collections::BTreeMap<String, (u32, crate::harness::ServingNode)>,
+    observed: Vec<BarrierProof>,
+    pub receipts: Vec<FaultReceipt>,
+}
+impl CoreControl {
+    pub fn new(
+        barriers: FileBarriers,
+        reader: Box<dyn super::evidence::EvidenceReader + Send>,
+    ) -> Self {
+        Self {
+            barriers,
+            reader,
+            cluster: None,
+            host: None,
+            processes: Default::default(),
+            observed: Vec::new(),
+            receipts: Vec::new(),
+        }
+    }
+    pub fn own_process(
+        &mut self,
+        target: String,
+        incarnation: u32,
+        process: crate::harness::ServingNode,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.processes.contains_key(&target),
+            "target incarnation is already owned"
+        );
+        self.processes.insert(target, (incarnation, process));
+        Ok(())
+    }
+}
+impl Control for CoreControl {
+    fn await_barrier<'a>(&'a mut self, barrier: &'a Barrier) -> Step<'a, BarrierProof> {
+        Box::pin(async move {
+            let proof = if barrier.kind.durable() {
+                loop {
+                    for (_, process) in self.processes.values_mut() {
+                        process.assert_running()?;
+                    }
+                    let evidence = self.reader.collect(&barrier.work).await?;
+                    if let Some(fact) = evidence
+                        .journals
+                        .iter()
+                        .find(|fact| journal_matches(fact, barrier))
+                    {
+                        let path = self.barriers.path(barrier, "journal.json")?;
+                        crate::node::write_atomically(&path, &serde_json::to_vec(fact)?)?;
+                        let proof = BarrierProof {
+                            barrier: barrier.clone(),
+                            artifact: path.display().to_string(),
+                            journal_index: Some(fact.index),
+                        };
+                        self.barriers.publish(&proof)?;
+                        break proof;
+                    }
+                    anyhow::ensure!(
+                        std::time::Instant::now() < self.barriers.deadline,
+                        "durable barrier was missed: {barrier:?}"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            } else {
+                self.barriers.await_proof(barrier).await?
+            };
+            self.observed.push(proof.clone());
+            Ok(proof)
+        })
+    }
+    fn inject<'a>(&'a mut self, fault: Fault, proof: &'a BarrierProof) -> Step<'a, FaultReceipt> {
+        Box::pin(async move {
+            use super::cluster::ClusterControl;
+            anyhow::ensure!(
+                self.observed
+                    .iter()
+                    .any(|observed| observed.barrier == proof.barrier
+                        && observed.artifact == proof.artifact
+                        && observed.journal_index == proof.journal_index),
+                "fault was not armed by an observed exact barrier"
+            );
+            let incarnation = match &fault {
+                Fault::KillHost { target } | Fault::KillVm { target } => {
+                    let (incarnation, process) = self
+                        .processes
+                        .get_mut(target)
+                        .ok_or_else(|| anyhow::anyhow!("fault targets an unowned process"))?;
+                    process.kill_and_reap()?;
+                    *incarnation
+                }
+                Fault::KillRestate { node } => {
+                    let receipt = self
+                        .cluster
+                        .as_mut()
+                        .ok_or_else(|| anyhow::anyhow!("no cluster is owned"))?
+                        .kill(*node, proof)
+                        .await?;
+                    receipt.target_incarnation
+                }
+                Fault::RestartRestate { node } => {
+                    let cluster = self
+                        .cluster
+                        .as_mut()
+                        .ok_or_else(|| anyhow::anyhow!("no cluster is owned"))?;
+                    let receipt = cluster.kill(*node, proof).await?;
+                    cluster.restart(*node).await?;
+                    receipt.target_incarnation
+                }
+                Fault::PartitionLink { from, to } => {
+                    self.cluster
+                        .as_mut()
+                        .ok_or_else(|| anyhow::anyhow!("no cluster is owned"))?
+                        .partition(*from, *to)
+                        .await?;
+                    0
+                }
+                Fault::HealLink { from, to } => {
+                    self.cluster
+                        .as_mut()
+                        .ok_or_else(|| anyhow::anyhow!("no cluster is owned"))?
+                        .heal(*from, *to)
+                        .await?;
+                    0
+                }
+                _ => anyhow::bail!("fault requires a registered product adapter: {fault:?}"),
+            };
+            let receipt = FaultReceipt {
+                fault,
+                proof: proof.clone(),
+                target_incarnation: incarnation,
+            };
+            self.receipts.push(receipt.clone());
+            Ok(receipt)
+        })
+    }
+    fn tool<'a>(&'a mut self, command: ToolControl) -> Step<'a, ()> {
+        Box::pin(async move {
+            match command {
+                ToolControl::Hold(barrier) => self.barriers.hold(&barrier),
+                ToolControl::Release(barrier) => self.barriers.release(&barrier),
+                ToolControl::Resolve { work, value } => {
+                    let host = self.host.as_mut().ok_or_else(|| {
+                        anyhow::anyhow!("source resolution needs a registered host adapter")
+                    })?;
+                    host.command(super::host::HostCommand::Process {
+                        action: "resolve-source".into(),
+                        input: serde_json::json!({"work":work,"value":value}),
+                    })
+                    .await?;
+                    Ok(())
+                }
+            }
+        })
+    }
+}
+fn journal_matches(fact: &super::evidence::JournalFact, barrier: &Barrier) -> bool {
+    use super::evidence::DecodedRecord;
+    use lash_core_store::tool_run::RunEvent;
+    if fact.work != barrier.work {
+        return false;
+    }
+    let call_matches =
+        |call: &lash_core::ToolCallId| barrier.work.call.as_deref() == Some(call.as_str());
+    match &fact.decoded {
+        Some(DecodedRecord::Attempt(attempt)) => {
+            barrier.kind == BarrierKind::XDurable
+                && call_matches(&attempt.call_id)
+                && barrier.work.ordinal == Some(attempt.attempt.get())
+        }
+        Some(DecodedRecord::Run(entry)) => entry.record.events.iter().any(|event| match event {
+            RunEvent::StartAdmitted { call_id, .. } => {
+                barrier.kind == BarrierKind::StartAdmitted && call_matches(call_id)
+            }
+            RunEvent::StartLaunched { call_id, .. } => {
+                barrier.kind == BarrierKind::StartRegistered && call_matches(call_id)
+            }
+            RunEvent::StartDischarged { call_id, .. } => {
+                barrier.kind == BarrierKind::ConsumerHoldDischarged && call_matches(call_id)
+            }
+            RunEvent::Lifecycle { state } => {
+                barrier.kind == BarrierKind::RunCancelRecorded
+                    && *state == lash_core_store::tool_run::RunLifecycle::Closing
+            }
+            RunEvent::Admitted { .. } => barrier.kind == BarrierKind::AdmissionDurable,
+            RunEvent::AttemptRecorded {
+                call_id, attempt, ..
+            } => {
+                barrier.kind == BarrierKind::XDurable
+                    && call_matches(call_id)
+                    && barrier.work.ordinal == Some(attempt.get())
+            }
+            RunEvent::Decided { call_id, .. } => {
+                barrier.kind == BarrierKind::DDurable && call_matches(call_id)
+            }
+            RunEvent::Presented { call_id, .. } => {
+                barrier.kind == BarrierKind::VDurable && call_matches(call_id)
+            }
+            RunEvent::RetryScheduled { call_id, .. }
+            | RunEvent::RetryTimerRegistered { call_id, .. } => {
+                barrier.kind == BarrierKind::RetryBackoffEntered && call_matches(call_id)
+            }
+            _ => false,
+        }),
+        Some(DecodedRecord::Transfer(_)) => barrier.kind == BarrierKind::ContinuationPublished,
+        None => false,
+    }
 }

@@ -1209,6 +1209,7 @@ PACKAGE_DEPS = {
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
             "lashlang": "//crates/lashlang:lashlang",
+            "prost": "//third-party/rust:p0264",
             "reqwest": "//third-party/rust:p0296",
             "serde": "//third-party/rust:p0331",
             "serde_json": "//third-party/rust:p0338",

@@ -3126,6 +3126,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-vm-client",
  "lash-runtime",
+ "prost",
  "reqwest",
  "rusqlite",
  "serde",
