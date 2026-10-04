@@ -459,16 +459,6 @@ pub const GUARDED_SURFACES: &[GuardedSurface] = &[
         reads: SurfaceReads::Mutable,
     },
     GuardedSurface {
-        constant: "EFFECT_GROUP_STATE_FORMAT_VERSION",
-        owner: "lash-restate",
-        reads: SurfaceReads::Mutable,
-    },
-    GuardedSurface {
-        constant: "EFFECT_GROUP_PAYLOAD_FORMAT_VERSION",
-        owner: "lash-restate",
-        reads: SurfaceReads::Mutable,
-    },
-    GuardedSurface {
         constant: "DURABLE_WAIT_REGISTRY_FORMAT_VERSION",
         owner: "lash-restate",
         reads: SurfaceReads::Mutable,

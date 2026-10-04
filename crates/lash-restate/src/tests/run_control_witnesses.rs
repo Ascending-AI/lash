@@ -1,7 +1,7 @@
 //! Control operations against the same handlers on the double and live server.
 mod refusal_classification;
 
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 use lash_core::engine::*;
 use lash_core::store::*;
 use lash_core::{

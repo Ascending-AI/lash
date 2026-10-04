@@ -1072,14 +1072,11 @@ pub fn prepare_process_registration(
     Ok(registration)
 }
 
-/// The refusal of a start whose consuming call was abandoned: the call's
-/// consumer hold `key` was marked, so the opener that cancelled the call has
-/// already drained what the hold owed (ADR 0116 §3.4). It carries the group
-/// child's cancel-decided code, which is data an existing variant already
-/// carries rather than a shape an older build could not read.
+/// A start whose consumer hold was abandoned by its cancelled logical Run.
+/// The opener already owns the drain of the hold's obligations.
 pub fn abandoned_consumer_refusal(start_key: Option<&crate::StartKey>, key: &str) -> PluginError {
     PluginError::Runtime(crate::RuntimeError::new(
-        crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
+        crate::RuntimeErrorCode::RuntimeToolRunCancelDecided,
         format!(
             "cannot register process start {start_key:?}: the call holding it under `{key}` \
              was abandoned"

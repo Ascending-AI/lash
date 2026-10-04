@@ -3,8 +3,6 @@ pub use recorded_keys::{RecordedKeyRange, RecordedKeys};
 mod envelope;
 #[doc(hidden)]
 pub mod executor;
-mod group;
-mod group_executors;
 #[cfg(any(test, feature = "testing"))]
 mod layered_host;
 mod llm_outcome;
@@ -37,31 +35,26 @@ pub use envelope::{
     RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
     ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    ToolCompletionEvent, ToolCompletionWait, ToolDispatchCursor, TurnPrelude,
+    TurnPrelude,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CommandJournalGuard, CompletionKeyPreparation, EffectHost, EffectJournalIdentity,
     EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, GroupChildCancelWatch, JournalReplay, ProcessDefinitionLocalExecution,
-    ProcessDriveStep, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
-    RecordedJournal, RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome,
-    RunRecordStep, RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
+    ExternalCompletionError, JournalReplay, ProcessDefinitionLocalExecution, ProcessDriveStep,
+    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, RecordedJournal,
+    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RunRecordStep,
+    RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectLocalExecutor, RuntimeSleepOptions, ScopeBoundController, ScopedEffectController,
     SegmentProgress, ServedOnlyRange, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
     TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
     TurnControlBindingIdError, turn_control_binding_id_for_scope,
 };
-pub use group::{
-    EffectGroupHandle, EffectGroupMembership, GroupChildBinding, GroupReopen, GroupSettlement,
-    GroupWakePolicy, IncorporatedGroupRank, LoserPolicy, RankedGroupSettlement, RuntimeEffectGroup,
-    refuse_unhonored_group_membership,
-};
-pub use group_executors::GroupExecutors;
 pub use identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
 };
+pub use lash_sansio::GroupWakePolicy;
 pub use lash_sansio::{CausalRef, EffectAddress};
 #[cfg(any(test, feature = "testing"))]
 pub use layered_host::{EffectLayer, LayeredEffectHost};
@@ -76,7 +69,7 @@ pub use validation::{
 pub use executor::{AdmittedProcess, EffectControllerTaskRequest, ProcessRunner, ServedOnly};
 pub use executor::{
     EffectControllerTaskRequests, EffectTaskController, drive_effect_controller_task,
-    effect_groups_unsupported, own_effect_controller_task,
+    own_effect_controller_task,
 };
 pub use executor::{RUN_SEAL_OPERATION, TurnCancelWait};
 pub use outcome::{

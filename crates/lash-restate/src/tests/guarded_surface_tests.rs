@@ -9,7 +9,6 @@ use lash_core_store::testing::guarded_surfaces::{self as laws, SurfaceProbe};
 use lash_core::FleetFormat;
 
 use crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMATS;
-use crate::effect_group::{EFFECT_GROUP_PAYLOAD_FAMILY, EFFECT_GROUP_STATE_FORMATS};
 use crate::object_state::{FORMAT_FIELD, StampedValue, StoredValueFormats, decode_stamped_bytes};
 use crate::session_shifts::TURN_OUTCOME_FORMATS;
 
@@ -61,14 +60,6 @@ macro_rules! family_probe {
 
 fn probes() -> Vec<SurfaceProbe> {
     vec![
-        family_probe!(
-            EFFECT_GROUP_STATE_FORMAT_VERSION,
-            &EFFECT_GROUP_STATE_FORMATS
-        ),
-        family_probe!(
-            EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
-            EFFECT_GROUP_PAYLOAD_FAMILY.formats
-        ),
         family_probe!(
             DURABLE_WAIT_REGISTRY_FORMAT_VERSION,
             &DURABLE_WAIT_REGISTRY_FORMATS

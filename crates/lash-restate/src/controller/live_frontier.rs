@@ -103,8 +103,7 @@ where
 /// `recorded` runs inside the marker's closure, which the journal runs once:
 /// the attempt that first issues the sleep observes its start there.
 ///
-/// `failure` answers a marker the engine failed: the sleep's controller tells
-/// the engine's cancellation of a group child apart from a fault there.
+/// `failure` maps the engine failure of a marker to the controller fault.
 pub(super) async fn pass_sleep_frontier<'ctx, C>(
     context: &C,
     invocation: &RuntimeEffectInvocation,

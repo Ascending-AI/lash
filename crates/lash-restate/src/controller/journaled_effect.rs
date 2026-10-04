@@ -17,16 +17,14 @@ use restate_sdk::serde::Json;
 use super::context::RestateControllerContext;
 use super::effect_journal::{EFFECT_JOURNAL_VERSION, JournaledEffectRecord, JournaledEntry};
 use super::journal_budget::{
-    JournaledBudgetVerdict, budget_verdict, gave_up_over_budget_entry, group_open_budget_verdict,
-    group_open_gave_up_over_budget, journalable_recorded_effect, recorded_effect_from_journal,
-    unjournalable_envelope_give_up,
+    JournaledBudgetVerdict, budget_verdict, gave_up_over_budget_entry, journalable_recorded_effect,
+    recorded_effect_from_journal, unjournalable_envelope_give_up,
 };
 use super::journal_payload::PayloadEntry;
 use super::{
     RecordedRuntimeEffect, RestateEffectError, RestateRuntimeEffectController,
     execute_restate_journaled_effect, restate_effect_name, validate_recorded_effect_envelope,
 };
-use crate::effect_group::EffectGroupOpenRequest;
 
 /// Whether a journaled run records a fault of its body as its outcome.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,41 +89,6 @@ where
                 )
                 .map_err(RestateEffectError::Refused),
             ),
-        }
-    }
-
-    /// The pre-flight gate for an effect-group open, mirroring
-    /// [`Self::journaled_budget_give_up`] for the durable process command.
-    ///
-    /// Opening a group is not a recorded effect: it is a run of engine calls
-    /// (probe, dispatch pre-flight, open) whose requests carry every child's
-    /// envelope and each land in the journal. A group whose open cannot be
-    /// journaled must give up before the first of them, so the verdict is
-    /// journaled in its own slot ahead of the open and the journaled verdict
-    /// decides: a replay under a larger budget reproduces the give-up instead
-    /// of opening the group, and a replayed `Proceed` never turns into a
-    /// give-up that abandons a group it already opened. An `Err` means the
-    /// open must not reach the engine at all.
-    pub(super) async fn refuse_over_budget_group_open<'run>(
-        &'run self,
-        group: &RuntimeEffectInvocation,
-        request: &EffectGroupOpenRequest,
-    ) -> Result<(), RuntimeEffectControllerError>
-    where
-        'ctx: 'run,
-    {
-        // As for the process command: no configured budget, no slot.
-        let Some(payload_budget) = self.options.journaled_effect_byte_budget else {
-            return Ok(());
-        };
-        let group_name = restate_effect_name(group);
-        let verdict = group_open_budget_verdict(&group_name, payload_budget, request);
-        match self.journal_budget_verdict(&group_name, verdict).await {
-            Ok(JournaledBudgetVerdict::Proceed) => Ok(()),
-            Ok(JournaledBudgetVerdict::GaveUpOverBudget { budget }) => {
-                Err(group_open_gave_up_over_budget(&group_name, budget))
-            }
-            Err(error) => Err(error.into()),
         }
     }
 

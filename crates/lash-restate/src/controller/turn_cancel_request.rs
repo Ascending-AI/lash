@@ -45,10 +45,9 @@ fn restate_turn_cancel_wait_request(
     restate_turn_cancel_gate_request(authority_id, scope).map(Some)
 }
 
-/// The gate request an effect-group wait races, from the wait's observed
-/// turn scope (FIG-3672 P9). A group wait carries no invocation to cross-check,
-/// so only a turn scope names a gate; a process scope, or none, races nothing.
-pub(super) fn restate_group_turn_cancel_wait_request(
+/// A Run source wait observes a turn gate only for a turn scope.
+/// Process waits use the workflow cancellation promise.
+pub(super) fn restate_run_turn_cancel_wait_request(
     authority_id: &RestateAuthorityId,
     turn_cancel: &lash_core::TurnCancelWait,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {

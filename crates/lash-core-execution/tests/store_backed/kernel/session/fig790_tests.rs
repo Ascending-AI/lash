@@ -64,35 +64,6 @@ impl crate::RuntimeEffectController for DeletedSessionProcessEffectController {
             },
         ))
     }
-
-    async fn open_effect_group(
-        &self,
-        _group: crate::RuntimeEffectGroup,
-    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported(
-            "DeletedSessionProcessEffectController",
-        ))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::runtime::TurnCancelWait,
-    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported(
-            "DeletedSessionProcessEffectController",
-        ))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: crate::EffectGroupHandle,
-        _disposition: crate::LoserPolicy,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported(
-            "DeletedSessionProcessEffectController",
-        ))
-    }
 }
 
 impl Default for RecordingProcessEffectController {
@@ -198,35 +169,6 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                 format!("unexpected process command: {command:?}"),
             )),
         }
-    }
-
-    async fn open_effect_group(
-        &self,
-        _group: crate::RuntimeEffectGroup,
-    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported(
-            "RecordingProcessEffectController",
-        ))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::runtime::TurnCancelWait,
-    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported(
-            "RecordingProcessEffectController",
-        ))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: crate::EffectGroupHandle,
-        _disposition: crate::LoserPolicy,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported(
-            "RecordingProcessEffectController",
-        ))
     }
 }
 

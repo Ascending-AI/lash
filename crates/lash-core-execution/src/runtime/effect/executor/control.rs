@@ -10,9 +10,6 @@ use tokio_util::sync::CancellationToken;
 use crate::{AdmittedScope, RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
-use super::super::group::{
-    EffectGroupHandle, GroupSettlement, LoserPolicy, RankedGroupSettlement, RuntimeEffectGroup,
-};
 use super::TurnControlBinding;
 use super::await_event_support::await_event_scope_not_retirable;
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancelWait};
@@ -29,17 +26,6 @@ pub use retirement::*;
 pub use scope::facade_ops;
 pub use scope::*;
 pub use task::*;
-
-/// A live watch of one effect-group child's durable cancel fact (FIG-3904).
-///
-/// `cancelled` completes `Ok` once the child's cancel is decided and stays
-/// pending while it is not; a child that settled first leaves it pending. An
-/// `Err` is a fault of this watch, never a cancel: callers retry it on the
-/// shared cancel-watch ladder.
-#[async_trait::async_trait]
-pub trait GroupChildCancelWatch: Send + Sync {
-    async fn cancelled(&self) -> Result<(), RuntimeError>;
-}
 
 /// An engine's verdict on one effect journal (ADR 0113 §2.5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,50 +97,8 @@ pub trait EffectHost: AwaitEventResolver {
         Ok(None)
     }
 
-    /// The group-child-bound twin of [`scoped_static`](Self::scoped_static)
-    /// (ADR 0099 §4, FIG-3470).
-    ///
-    /// A controller minted here mints every semantic admission it serves —
-    /// the child's nested attempts, its intents' sinks — *under* `binding`'s
-    /// recorded child, fenced by the substrate's own arbitration: the SQL
-    /// claim refuses the insert once the minting replay row's cancel
-    /// disposition has committed, and the Restate handler asks the serialized
-    /// group index. A bound controller is the only controller a group child's
-    /// nested work may run through: an unbound one would admit semantic writes
-    /// whose minting child was already cancel-decided.
-    ///
-    /// The default refuses rather than lending an unfenced controller, the
-    /// same posture as
-    /// the group's durable commit point:
-    /// a host without substrate-owned admission has no group-child controller
-    /// to lend.
-    fn scoped_for_group_child(
-        &self,
-        _admitted: AdmittedScope,
-        _binding: crate::GroupChildBinding,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        Err(
-            super::effect_groups_unsupported("durable group-child admission binding")
-                .into_runtime_error(),
-        )
-    }
-
-    /// A controller that an engine handler built over its own invocation
-    /// context, routed through this host's stack: whatever wraps the
-    /// controllers this host lends ([`scoped`](Self::scoped),
-    /// [`scoped_for_group_child`](Self::scoped_for_group_child)) wraps this
-    /// one too, for as long as the handler's borrow lives.
-    ///
-    /// A handler-driven engine (Restate) mints the controllers of a group's
-    /// children (tool, timer and durable wait) and of a process segment from
-    /// the invocation's own context, never from this host, so without this
-    /// step their effects would bypass every layer the host's other effects
-    /// cross. Each is routed exactly once, where the engine hands it to core:
-    /// group children through the resolver
-    /// ([`GroupExecutors::route_handler_child_controller`](crate::GroupExecutors::route_handler_child_controller)),
-    /// segments in `DurableProcessWorker`. A turn handler's controller is the
-    /// embedder's to route. The default is the controller unchanged: a host
-    /// that wraps nothing has nothing to add.
+    /// Route a process segment's handler controller through this host's layers.
+    /// A turn handler's controller is the embedder's to route.
     fn route_handler_child_controller<'run>(
         &self,
         controller: ScopedEffectController<'run>,
@@ -404,27 +348,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         Ok(lent_stop.is_cancelled())
     }
 
-    /// Whether the effect-group child this controller executes has a durable
-    /// cancel fact, read as a recorded peek at one of its step boundaries
-    /// (ADR 0105 §4, FIG-3904).
-    ///
-    /// An engine that records the fact answers the answer it recorded, so a
-    /// replay takes the branch the first execution took. A controller that
-    /// executes no group child answers `false`. Forwarding wrappers forward.
-    async fn observe_group_child_cancel(&self) -> Result<bool, RuntimeEffectControllerError> {
-        Ok(false)
-    }
-
-    /// The execution-side watch of the effect-group child's cancel fact that a
-    /// recorded step body of this child races (ADR 0105 §3, §4, FIG-3904).
-    ///
-    /// Execution-side only: the step records whatever its body returned, so a
-    /// replay serves that and never consults the watch. `None` for every
-    /// controller that executes no group child. Forwarding wrappers forward.
-    fn group_child_cancel_watch(&self) -> Option<Arc<dyn GroupChildCancelWatch>> {
-        None
-    }
-
     /// Run one registry step of a process drive whose answer the engine
     /// records under `name` (FIG-3673): a process body's wait-state writes.
     ///
@@ -563,233 +486,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
-
-    /// Open — or replay — a group of independently journaled child effects.
-    ///
-    /// Returns once the group is durably recorded, **not** when a child settles.
-    ///
-    /// The one parameter is the group itself: **envelopes, and nothing else**.
-    /// A caller does not supply the code that runs a child, because a caller
-    /// cannot: three of the four paths that execute a grouped child — a retry, a
-    /// drain of a group whose caller is gone, and an engine tier's own child
-    /// invocation — happen where no caller is in scope, so a host that could
-    /// only run what a caller handed it could not honor the contract at all. The
-    /// host resolves every child from its journaled envelope through its
-    /// registered [`GroupExecutors`](super::super::group_executors::GroupExecutors),
-    /// which is the same seam the loser drain resolves through, so one host has
-    /// one answer to "what code runs this child" on every path.
-    ///
-    /// The `'static` property is unchanged and still ratified — children must
-    /// outlive the caller's future under
-    /// [`LoserPolicy::RunToCompletion`], and the borrow-scoped
-    /// `RuntimeEffectLocalExecutor<'_>` taken by
-    /// [`execute_effect`](Self::execute_effect) carries the one lifetime this
-    /// contract exists to break — it just lives at the resolver now rather than
-    /// at the argument.
-    ///
-    /// **A child with no runner is a routing fact, not an outcome.** On a
-    /// **first open** a host resolves *all* of the group's children **before it
-    /// records the group**, and refuses the whole open with a typed
-    /// [`RuntimeEffectGroupShape`](crate::RuntimeErrorCode::RuntimeEffectGroupShape)
-    /// error if any child resolves to `None`. Recording first and discovering
-    /// the gap later would leave a recorded group holding a child that can never
-    /// settle, so every rank above it is unservable and the caller waits forever
-    /// — the same failure the retired executor-vec arity check existed to
-    /// prevent, now unrepresentable by absence because there is no vec to
-    /// misalign. **The refusal must journal nothing, including the group row**:
-    /// a host that recorded the group and then refused would answer the retry as
-    /// a reopen, and a reopen passes the miss through, so the second attempt
-    /// would succeed around a child that can never settle — a strand one attempt
-    /// later, which is worse than the refusal it replaced. On a **reopen** the
-    /// same miss is not an open refusal: the group is already journaled, and a
-    /// deployment that has lost one child's runner is the drain's `NoExecutor`
-    /// case (ADR 0065).
-    ///
-    /// A host with **no registered resolver at all** is a different fact from a
-    /// child it cannot route, and answers differently: it refuses all three
-    /// methods with
-    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
-    /// built through
-    /// [`effect_groups_unsupported`](super::effect_groups_unsupported). Such a
-    /// refusal journals nothing.
-    ///
-    /// Generic aggregate hosts use the Run coordinator's records. Controllers
-    /// that do not serve the legacy group transport inherit a typed refusal.
-    ///
-    /// A reopen must be fenced on group shape: a host that finds a recorded group
-    /// under this key whose child count or wake rule differs from the group
-    /// passed here must refuse rather than reopen, because a shrunk child vec
-    /// under one key silently renumbers every rank above the truncation and the
-    /// per-child envelope-hash fence cannot see it.
-    ///
-    /// The default errors loudly rather than mis-executing a group, matching
-    /// [`AwaitEventResolver::cancel_await_events_for_session`]: an out-of-tree
-    /// controller that has not implemented groups fails closed with a named
-    /// error.
-    async fn open_effect_group(
-        &self,
-        _group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        Err(super::effect_groups_unsupported(
-            "this runtime effect controller",
-        ))
-    }
-
-    /// Register this controller's envelope-to-executor resolver, once.
-    ///
-    /// One controller has one answer to "what code runs this journaled grouped
-    /// child", so a second registration of a *different* resolver is refused
-    /// and re-registering the resolver already held is a no-op.
-    ///
-    /// Defaulted to the same `EffectGroupUnsupported` refusal the three group
-    /// methods give, and for the same reason: a controller with nowhere to put
-    /// a resolver is a controller that does no groups at all. It is defaulted
-    /// rather than required because — unlike the three methods above, whose
-    /// defaults FIG-2266 deleted — this is wiring a host performs *on* a
-    /// controller, and a controller that does no groups has a correct and
-    /// unambiguous answer to it.
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn super::super::group_executors::GroupExecutors>,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        let _ = executors;
-        Err(super::effect_groups_unsupported(
-            "this runtime effect controller",
-        ))
-    }
-
-    /// The bound group-child controller for hosts that are thin projections
-    /// over this controller and own no scope-minting surface of their own:
-    /// the substrate answers with the same controller
-    /// [`EffectHost::scoped_for_group_child`] would lend — every admission it
-    /// serves minted under `binding` (FIG-3470). Defaults to the unsupported
-    /// refusal: a controller without substrate-owned admission has no bound
-    /// controller to lend.
-    fn group_child_scoped_controller(
-        &self,
-        _admitted: AdmittedScope,
-        _binding: crate::GroupChildBinding,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        Err(
-            super::effect_groups_unsupported("durable group-child admission binding")
-                .into_runtime_error(),
-        )
-    }
-
-    /// Await the next settlement in the group's durable settlement order.
-    ///
-    /// The obligation, stated engine-portably: **settlement `n` of a group is a
-    /// durable fact, and every replay observes the same child at position `n`.**
-    /// A host must not re-derive position `n` by racing live children once `n`
-    /// has been decided. How the fact is stored is the host's business — a SQL
-    /// row, a Restate journal entry, a Temporal history event.
-    ///
-    /// Settlements are served by *rank* — the child holding the
-    /// `(handle.consumed() + 1)`-th smallest sequence — never by literal sequence
-    /// equality, because sequences are monotonic without being gapless.
-    ///
-    /// The handle is the sole cursor of record and is taken by `&mut`: an
-    /// implementation calls [`EffectGroupHandle::advance`] on exactly the
-    /// settlements it returns and keeps no per-caller consumption state of its
-    /// own, which is what makes consumption exactly-once across a crash. See
-    /// [`EffectGroupHandle`] for the full normative rule.
-    ///
-    /// Cancellation returns
-    /// [`RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled`](crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled)
-    /// and leaves the cursor and the durable rank untouched, so a later await
-    /// resumes at the same rank. `cancel` names what may cancel the await: its
-    /// execution's cooperative token, and — when it observes one — the turn's
-    /// cancellation gate, which the engine races the rank wait against the
-    /// way it races any wait it records (FIG-3672 P9: an `Immediate` stop, or
-    /// an escalation, wins; an `AfterStep` stop alone does not). Exhaustion
-    /// has no code because it is the caller's arithmetic: check
-    /// [`EffectGroupHandle::is_exhausted`] rather than awaiting past the last
-    /// child.
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut EffectGroupHandle,
-        _cancel: TurnCancelWait,
-    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
-        Err(super::effect_groups_unsupported(
-            "this runtime effect controller",
-        ))
-    }
-
-    /// Read the group's settlement at `rank` without advancing any caller
-    /// cursor (ADR 0099 §8): the recorded terminal and the child's durable
-    /// identity, or `None` until every rank up to `rank` has seated — a rank
-    /// is reserved at its child's commit and may seat before a lower one, but
-    /// no read is served past an unseated rank (FIG-4308). The
-    /// incorporation prefix record reads the journal through this seam —
-    /// consumption order belongs to the handle, but an incorporated prefix is
-    /// an opener fact that must not move a cursor to read.
-    ///
-    /// The default refuses: a
-    /// controller that cannot read back a group's recorded ranks cannot carry
-    /// the §6 incorporation record either.
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
-        let _ = (group_key, rank);
-        Err(super::effect_groups_unsupported(
-            "durable group settlement read",
-        ))
-    }
-
-    /// Release the caller's interest in the group.
-    ///
-    /// Under [`LoserPolicy::RunToCompletion`] the remaining children keep
-    /// running under host ownership and journal their own settlements; the host
-    /// owns their redrive. Under [`LoserPolicy::Cancel`] the host cancels
-    /// them and journals each cancellation as that child's terminal. Either way
-    /// the caller may not observe further settlements.
-    ///
-    /// `disposition` may only **narrow** the one the group declared at open:
-    /// resolve it through
-    /// [`LoserPolicy::resolve_close`] and refuse a widening request. The
-    /// declared disposition is authoritative — it is journaled with the group
-    /// row, so a group abandoned by a crash before its close is drained under it
-    /// too, and no policy is invented at drain time.
-    ///
-    /// Close is **idempotent**, and its failure is retryable. Taking the handle
-    /// by value blocks reuse only in-process: the handle is `Deserialize`, so a
-    /// crash between a successful close and the continuation commit means a
-    /// replayed frame closes the same group again by construction. A second close
-    /// under the same disposition must therefore succeed rather than raise on a
-    /// healthy replay path.
-    async fn close_effect_group(
-        &self,
-        _handle: EffectGroupHandle,
-        _disposition: LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        Err(super::effect_groups_unsupported(
-            "this runtime effect controller",
-        ))
-    }
-
-    /// Wait at the durable §5 barrier: resolve once every committed sibling
-    /// ranked below `rank` in `group_key` has seated, or retirement released
-    /// the wait.
-    ///
-    /// A child with intents to drain emits its nested semantic commands only
-    /// once this resolves, so drains are admitted in rank order. The barrier
-    /// is lifted by siblings' seats, never by time, and the wait is the
-    /// engine's durable wake for each blocking sibling's seat. A retirement
-    /// release is not proof of seating: the semantic-admission fence still
-    /// refuses any intent under a retired group. Nothing here sleeps
-    /// on a clock. The default refuses: a
-    /// controller that cannot answer the durable barrier cannot order drains
-    /// either.
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        let _ = (group_key, rank);
-        Err(super::effect_groups_unsupported("durable drain barrier"))
-    }
 
     /// The recorded-frontier read (FIG-3586): every journal row this
     /// controller's scope holds inside `range`, compared bytewise.

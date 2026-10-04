@@ -112,12 +112,12 @@ impl World {
             Endpoint::builder(),
             crate::services::LashServiceParts {
                 effect_host: &host,
-                ingress: RestateIngressClient::new(connection.clone()),
+
                 admin: crate::RestateAdminClient::new(connection.clone()),
                 materials: stores.process_env_store(),
                 attachments: stores.session_store_factory()
                     as Arc<dyn lash_core::AttachmentReferrers>,
-                sessions: stores.session_store_factory(),
+
                 process_workflow: LashProcessWorkflowImpl::new_for_test(
                     Arc::clone(&runner),
                     Arc::clone(&registry),

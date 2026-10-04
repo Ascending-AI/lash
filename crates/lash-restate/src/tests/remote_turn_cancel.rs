@@ -1,4 +1,4 @@
-use super::effect_group_conformance::LiveConformanceHarness;
+use super::conformance_harness::LiveConformanceHarness;
 use super::*;
 use lash::remote::turn_control::RemoteTurnCancelRequest;
 use lash_core::facade_support::{

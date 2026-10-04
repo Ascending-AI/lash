@@ -145,11 +145,6 @@ pub struct GenerationDrainStatus {
     /// which revokes the waits their runs registered with the engine, has
     /// not run. Not per generation, as stalled obligations are not.
     pub closing_sessions: u64,
-    /// Committed effect-group children whose group dispatches on the
-    /// generation's lane and whose seat is still owed (FIG-4454): the
-    /// engine's count ([`DeploymentRegistry::undrained_group_children`]),
-    /// since a group's record lives in the engine, not the store.
-    pub undrained_group_children: u64,
     /// Unfinished engine invocations pinned to a deployment serving this
     /// generation, including the predecessor's wait, attach, terminal read
     /// and session shift until they return. Independent of the SQL counts.
@@ -165,7 +160,7 @@ pub struct GenerationDrainStatus {
 impl GenerationDrainStatus {
     /// Compose the status over `drain`'s reads, `session_delete`'s closing
     /// sessions, the stalled counts of the ledgers `obligation_ledger` hands
-    /// out and the engine's undrained group children `registry` reports,
+    /// out and the engine's unfinished invocations `registry` reports,
     /// stamped `now_ms`.
     pub async fn collect(
         drain: &dyn GenerationDrainStore,
@@ -183,13 +178,6 @@ impl GenerationDrainStatus {
             .map(|marked| marked.marked_at_ms);
         let work = drain.generation_work(generation).await?;
         let closing_sessions = session_delete.count_closing().await?;
-        let undrained_group_children = registry
-            .undrained_group_children(generation)
-            .await
-            .map_err(|error| StoreError::StorageFailure {
-                backend: "engine deployment registry",
-                message: error.to_string(),
-            })?;
         let unfinished_invocations =
             registry
                 .unfinished_invocations(generation)
@@ -211,7 +199,6 @@ impl GenerationDrainStatus {
             parked_turns: work.parked_turns,
             in_flight_turns: work.in_flight_turns,
             closing_sessions,
-            undrained_group_children,
             unfinished_invocations,
             stalled_obligations,
             checked_at: now_ms,
@@ -220,7 +207,7 @@ impl GenerationDrainStatus {
 
     /// True only when the generation is marked draining, it holds no live
     /// process, no parked process or turn and no in-flight turn, no session
-    /// is closing, no committed group child on its lane owes its seat, and
+    /// is closing, and
     /// no unfinished engine invocation is pinned to a deployment serving it.
     ///
     /// Stalled obligations do not hold it (ADR 0115 §3.5, FIG-4076). They
@@ -235,7 +222,6 @@ impl GenerationDrainStatus {
             && self.parked_turns == 0
             && self.in_flight_turns == 0
             && self.closing_sessions == 0
-            && self.undrained_group_children == 0
             && self.unfinished_invocations == 0
     }
 }
@@ -253,7 +239,6 @@ impl serde::Serialize for GenerationDrainStatus {
             parked_turns: u64,
             in_flight_turns: u64,
             closing_sessions: u64,
-            undrained_group_children: u64,
             unfinished_invocations: u64,
             stalled_obligations: &'a BTreeMap<ObligationKind, u64>,
             checked_at: u64,
@@ -267,7 +252,6 @@ impl serde::Serialize for GenerationDrainStatus {
             parked_turns: self.parked_turns,
             in_flight_turns: self.in_flight_turns,
             closing_sessions: self.closing_sessions,
-            undrained_group_children: self.undrained_group_children,
             unfinished_invocations: self.unfinished_invocations,
             stalled_obligations: &self.stalled_obligations,
             checked_at: self.checked_at,
@@ -290,7 +274,6 @@ mod tests {
             parked_turns: 0,
             in_flight_turns: 0,
             closing_sessions: 0,
-            undrained_group_children: 0,
             unfinished_invocations: 0,
             stalled_obligations: ObligationKind::ALL
                 .into_iter()
@@ -315,14 +298,13 @@ mod tests {
 
     #[test]
     fn work_pinned_to_the_generation_holds_the_drain() {
-        let holds: [fn(&mut GenerationDrainStatus); 8] = [
+        let holds: [fn(&mut GenerationDrainStatus); 7] = [
             |status| status.draining_since_ms = None,
             |status| status.live_processes = 1,
             |status| status.parked_processes = 1,
             |status| status.parked_turns = 1,
             |status| status.in_flight_turns = 1,
             |status| status.closing_sessions = 1,
-            |status| status.undrained_group_children = 1,
             |status| status.unfinished_invocations = 1,
         ];
         for hold in holds {

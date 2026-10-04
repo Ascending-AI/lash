@@ -15,7 +15,6 @@ use std::fmt;
 use super::effect_journal::{
     GaveUpEntry, JournaledEffectRecord, RecordedRuntimeEffect, retired_generation_refusal, stamped,
 };
-use crate::effect_group::EffectGroupOpenRequest;
 
 /// The pre-flight budget verdict for an effect that runs outside the run
 /// closure.
@@ -115,42 +114,6 @@ fn poisoned_effect_record(
         envelope,
         outcome: Err(poisoned_effect_error(effect, reason)),
     }
-}
-
-/// The pre-flight budget verdict for an effect-group open.
-///
-/// The open's journaled payload is its request: the group's shape, whose
-/// membership retains every child's canonical envelope. The dispatch
-/// pre-flight call carries the same children unescaped, so the open request is
-/// the largest entry the open proposes, and a verdict that clears it clears the
-/// whole open.
-pub(super) fn group_open_budget_verdict(
-    group: &str,
-    payload_budget: u64,
-    request: &EffectGroupOpenRequest,
-) -> JournaledBudgetVerdict {
-    match record_exceeds_budget(Some(payload_budget), request) {
-        Err((true, _)) => {
-            tracing::error!(
-                %group,
-                budget = %payload_budget,
-                "effect group open exceeds the durable journal budget; giving up before the group is opened"
-            );
-            JournaledBudgetVerdict::GaveUpOverBudget {
-                budget: payload_budget,
-            }
-        }
-        _ => JournaledBudgetVerdict::Proceed,
-    }
-}
-
-/// The typed give-up a journaled over-budget group-open verdict renders: the
-/// same failure an over-budget recorded effect reports.
-pub(super) fn group_open_gave_up_over_budget(
-    group: &str,
-    budget: u64,
-) -> RuntimeEffectControllerError {
-    poisoned_effect_error(group, PoisonReason::OverBudget { budget })
 }
 
 /// Measure a journal entry against the journal payload budget.

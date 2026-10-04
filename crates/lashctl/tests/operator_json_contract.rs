@@ -36,8 +36,7 @@ fn run(args: &[&str], database_url: Option<&str>) -> (i32, Value) {
     (code, body)
 }
 
-/// A stand-in for a Restate admin API whose server holds no effect-group
-/// index record: `POST /query` answers no rows. Its URL.
+/// The URL of a Restate admin API that serves an empty deployment fleet.
 fn empty_admin() -> String {
     use std::io::{BufRead, BufReader, Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind the admin stand-in");
@@ -63,7 +62,7 @@ fn empty_admin() -> String {
             }
             let mut request = vec![0_u8; length];
             let _ = reader.read_exact(&mut request);
-            let body = json!({"rows": []}).to_string();
+            let body = json!({"deployments": []}).to_string();
             let _ = write!(
                 stream,
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
@@ -313,7 +312,7 @@ async fn operator_json_contract_postgres() {
             .as_array()
             .expect("components")
             .len(),
-        7
+        5
     );
     assert_eq!(
         empty_version["result"]["wires"]["restate"],
@@ -362,7 +361,6 @@ async fn operator_json_contract_postgres() {
             "parked_turns",
             "stalled",
             "stalled_obligations",
-            "undrained_group_children",
         ],
     );
     assert_eq!(before["result"]["stalled"], json!([]));

@@ -680,7 +680,7 @@ impl<'run> ProductionToolHandlers<'run> {
             }
             RunAggregateOutcome::HostControl { call_id, decision } => {
                 let mut error = crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+                    crate::RuntimeErrorCode::RuntimeToolRunAwaitCancelled,
                     format!("tool {call_id}: {decision:?}"),
                 );
                 error.cause = Some(crate::RuntimeErrorCause::ToolRunControl {

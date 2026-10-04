@@ -14,10 +14,6 @@ use lash_core::engine::UpgradePolicy;
 use crate::compat::RESTATE_WIRE_VERSION;
 use crate::controller::{EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION};
 use crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION;
-use crate::effect_group::{
-    EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
-    EFFECT_GROUP_STATE_FORMAT_VERSION,
-};
 use crate::process::RESTATE_PROCESS_JOURNAL_VERSION;
 use crate::session_shifts::{LASH_SESSION_SHIFT_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION};
 
@@ -77,35 +73,11 @@ static DURABLE_FORMATS: &[EngineDurableFormat] = &[
         unwalkable_reason: UNWALKABLE_REASON,
     },
     EngineDurableFormat {
-        id: "restate.effect_group_state_format",
-        name: "Restate effect-group state format",
-        version: EFFECT_GROUP_STATE_FORMAT_VERSION as u32,
-        constant: "EFFECT_GROUP_STATE_FORMAT_VERSION",
-        upgrade_policy: UpgradePolicy::Migrate,
-        unwalkable_reason: UNWALKABLE_REASON,
-    },
-    EngineDurableFormat {
         id: "restate.wire",
         name: "Restate handler wire",
         version: RESTATE_WIRE_VERSION,
         constant: "RESTATE_WIRE_VERSION",
         upgrade_policy: UpgradePolicy::Coexist,
-        unwalkable_reason: UNWALKABLE_REASON,
-    },
-    EngineDurableFormat {
-        id: "restate.effect_group_dispatch_journal",
-        name: "Restate effect-group dispatch journal",
-        version: EFFECT_GROUP_DISPATCH_JOURNAL_VERSION,
-        constant: "EFFECT_GROUP_DISPATCH_JOURNAL_VERSION",
-        upgrade_policy: UpgradePolicy::Drain,
-        unwalkable_reason: UNWALKABLE_REASON,
-    },
-    EngineDurableFormat {
-        id: "restate.effect_group_payload_format",
-        name: "Restate effect-group payload format",
-        version: EFFECT_GROUP_PAYLOAD_FORMAT_VERSION as u32,
-        constant: "EFFECT_GROUP_PAYLOAD_FORMAT_VERSION",
-        upgrade_policy: UpgradePolicy::Migrate,
         unwalkable_reason: UNWALKABLE_REASON,
     },
     EngineDurableFormat {

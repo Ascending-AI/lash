@@ -1,7 +1,7 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
 reads = 100
-outputs = 141
+outputs = 139
 
 [[surfaces]]
 name = "workbench"
@@ -175,8 +175,6 @@ row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", 
 "crates/lash-restate/src/tests/replay_corpus/service_journals.rs#run_workload" = { reads = 0, outputs = 1, kind = "output-read", reason = "run_workload asserts the typed program result independently of rendered rows." }
 "crates/lash-restate-test/tests/crash_windows/worker_crashes.rs#setup_crash_case" = { reads = 0, outputs = 1, kind = "output-read", reason = "setup_crash_case asserts the typed program result independently of rendered rows." }
 "crates/lash-restate-test/tests/crash_windows/worker_verdicts.rs#a_refused_cell_reservation_replays_into_a_host_with_capacity" = { reads = 0, outputs = 1, kind = "output-read", reason = "a_refused_cell_reservation_replays_into_a_host_with_capacity asserts the typed program result independently of rendered rows." }
-"crates/lash-restate-test/tests/crash_windows.rs#a_presentation_put_before_its_journal_crash_replays_one_presentation" = { reads = 0, outputs = 1, kind = "output-read", reason = "a_presentation_put_before_its_journal_crash_replays_one_presentation asserts the typed program result independently of rendered rows." }
-"crates/lash-restate-test/tests/crash_windows.rs#group_close_and_retirement_crash_matrix" = { reads = 0, outputs = 1, kind = "output-read", reason = "group_close_and_retirement_crash_matrix asserts the typed program result independently of rendered rows." }
 "crates/lash-restate-test/tests/crash_windows.rs#cell_parity" = { reads = 0, outputs = 3, kind = "output-read", reason = "cell_parity asserts the typed program result independently of rendered rows." }
 "crates/lash-restate-test/tests/host_send_wait.rs#answer" = { reads = 0, outputs = 1, kind = "output-read", reason = "answer asserts the typed program result independently of rendered rows." }
 "crates/lash-restate-test/tests/namespaces.rs#run_turn" = { reads = 0, outputs = 1, kind = "output-read", reason = "run_turn asserts the typed program result independently of rendered rows." }

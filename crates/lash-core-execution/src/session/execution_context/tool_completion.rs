@@ -20,7 +20,7 @@ impl RuntimeExecutionContext<'_> {
             let owner =
                 crate::EffectOpener::for_scope(&self.admitted_scope()).map_err(|error| {
                     crate::RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                        crate::RuntimeErrorCode::RuntimeToolRunShape,
                         error.to_string(),
                     )
                 })?;
@@ -116,7 +116,7 @@ impl RuntimeExecutionContext<'_> {
                         }
                         serde_json::to_value(receipt.record).map_err(|error| {
                             crate::RuntimeEffectControllerError::new(
-                                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                                crate::RuntimeErrorCode::RuntimeToolRunShape,
                                 error.to_string(),
                             )
                         })
@@ -126,7 +126,7 @@ impl RuntimeExecutionContext<'_> {
             let request: crate::store::ToolRequestReceipt = serde_json::from_value(recorded)
                 .map_err(|error| {
                     crate::RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                        crate::RuntimeErrorCode::RuntimeToolRunShape,
                         error.to_string(),
                     )
                 })?;
@@ -174,7 +174,7 @@ impl RuntimeExecutionContext<'_> {
             let attempts = attempts.to_vec();
             let intent_outcomes = serde_json::to_value(intent_outcomes).map_err(|error| {
                 crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    crate::RuntimeErrorCode::RuntimeToolRunShape,
                     error.to_string(),
                 )
             })?;
@@ -195,7 +195,7 @@ impl RuntimeExecutionContext<'_> {
                             payload_digest: request.payload_digest.clone(),
                             result: serde_json::to_value(&record).map_err(|e| {
                                 crate::RuntimeEffectControllerError::new(
-                                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                                    crate::RuntimeErrorCode::RuntimeToolRunShape,
                                     e.to_string(),
                                 )
                             })?,
@@ -209,7 +209,7 @@ impl RuntimeExecutionContext<'_> {
                             serde_json::from_value(receipt.record.intent_outcomes.clone())
                                 .map_err(|error| {
                                     crate::RuntimeEffectControllerError::new(
-                                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                                        crate::RuntimeErrorCode::RuntimeToolRunShape,
                                         error.to_string(),
                                     )
                                 })?;
@@ -241,7 +241,7 @@ impl RuntimeExecutionContext<'_> {
                         let stored: crate::ToolCallRecord =
                             serde_json::from_value(receipt.record.result.clone()).map_err(|e| {
                                 crate::RuntimeEffectControllerError::new(
-                                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                                    crate::RuntimeErrorCode::RuntimeToolRunShape,
                                     e.to_string(),
                                 )
                             })?;

@@ -85,7 +85,7 @@ pub(super) async fn an_abandoned_consumer_hold_fences_registration(
         matches!(
             &refused,
             PluginError::Runtime(error)
-                if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided
+                if error.code == crate::RuntimeErrorCode::RuntimeToolRunCancelDecided
         ),
         "the refusal is the abandoned call's cancel: {refused:?}"
     );

@@ -132,16 +132,6 @@ impl lash_core::testing::EffectLayer for RejectingEffectController {
             format!("rejected {}", envelope.command.kind().as_str()),
         ))
     }
-
-    async fn open_effect_group(
-        &self,
-        _inner: &dyn RuntimeEffectController,
-        _group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RejectingEffectController",
-        ))
-    }
 }
 
 #[derive(Default)]
@@ -172,16 +162,6 @@ impl lash_core::testing::EffectLayer for WrongOutcomeEffectController {
             return local_executor.execute(envelope).await;
         }
         Ok(RuntimeEffectOutcome::Sleep)
-    }
-
-    async fn open_effect_group(
-        &self,
-        _inner: &dyn RuntimeEffectController,
-        _group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "WrongOutcomeEffectController",
-        ))
     }
 }
 
@@ -646,20 +626,6 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                     suspended: false,
                 })),
             }),
-            command @ (RuntimeEffectCommand::ArmToolCompletion { .. }
-            | RuntimeEffectCommand::AwaitToolCompletions { .. }) => {
-                inner
-                    .execute_effect(
-                        RuntimeEffectEnvelope::new(envelope.invocation, command),
-                        local_executor,
-                    )
-                    .await
-            }
-            command @ RuntimeEffectCommand::IncorporateGroupSettlements { .. } => {
-                local_executor
-                    .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
-                    .await
-            }
             // The recorded presentation boundary (FIG-3420): delegated like
             // every other command this double journals — the local executor
             // runs the step chain once and the record above is what replay

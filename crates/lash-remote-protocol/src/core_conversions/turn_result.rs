@@ -302,7 +302,7 @@ impl From<lash_core::ToolIntentRefusalReason> for RemoteToolIntentRefusalReason 
                 recorded: recorded.into(),
             },
             Core::CommandFailed { cause } => Self::CommandFailed { cause },
-            Core::MintingGroupChildCancelled => Self::MintingGroupChildCancelled,
+            Core::MintingRunCancelled => Self::MintingRunCancelled,
             Core::DeclaredStartIdentityMismatch { expected, recorded } => {
                 Self::DeclaredStartIdentityMismatch {
                     expected: Box::new((*expected).into()),

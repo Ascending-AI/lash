@@ -2,7 +2,6 @@
 
 pub use crate::attachments::PersistenceReferrersAdapter;
 pub use crate::runtime::default_queued_drain_policy;
-pub use crate::runtime::effect::GroupExecutors;
 pub use crate::runtime::reconcile_pruned_trigger_deliveries_interleaved;
 pub use crate::runtime::state::RuntimeCheckpointComponents;
 pub use crate::runtime::state::{append_session_nodes_to_state_with_clock, boundary_operation};

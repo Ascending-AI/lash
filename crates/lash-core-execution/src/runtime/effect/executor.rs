@@ -32,10 +32,10 @@ pub use await_event_support::await_event_scope_not_retirable;
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
-    EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildCancelWatch,
-    JournalReplay, ProcessDriveStep, RecordedJournal, RecordedKeyFence, RefusedWriteRange,
-    Resolution, ResolveOutcome, RunRecordStep, RuntimeEffectController, ScopeBoundController,
-    ScopedEffectController, SegmentProgress, ServedOnlyRange, TurnCancelClosureOwnerBinding,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDriveStep,
+    RecordedJournal, RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome,
+    RunRecordStep, RuntimeEffectController, ScopeBoundController, ScopedEffectController,
+    SegmentProgress, ServedOnlyRange, TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectControllerTaskRequest, EffectControllerTaskRequests};
 pub use control::{EffectTaskController, drive_effect_controller_task, own_effect_controller_task};
@@ -45,27 +45,6 @@ pub use lash_core_store::effect_opener::EffectOpener;
 #[cfg(feature = "testing")]
 pub(crate) use process_local::process_terminal_resolution;
 
-/// The one typed refusal a controller that does not implement durable effect
-/// groups returns from `open_effect_group`, `await_next_settlement` and
-/// `close_effect_group`.
-///
-/// Since FIG-2266 the three group methods have no default bodies, so every
-/// controller answers the question in its own source: it implements groups, or
-/// it calls this. Before that a `supports_effect_groups()` flag defaulted to
-/// `false` beside three methods that defaulted to refusing, which made "I have
-/// not thought about groups" and "I refuse groups" the same program text — and
-/// made a delegating wrapper that forgot to forward look coherent while
-/// silently denying a capability its inner controller had.
-///
-/// `controller` names the refusing type, so the error says which link in a
-/// wrapper chain answered rather than only that something did.
-#[must_use]
-pub fn effect_groups_unsupported(controller: &str) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(
-        crate::RuntimeErrorCode::EffectGroupUnsupported,
-        format!("{controller} does not implement durable effect groups"),
-    )
-}
 pub use lash_core_store::turn_control_binding::admitted_turn_cancel_scope;
 pub use lash_core_store::turn_control_binding::turn_control_binding_id_for_scope;
 pub use lash_core_store::turn_control_binding::{TurnControlBindingId, TurnControlBindingIdError};
@@ -1212,14 +1191,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         let RuntimeEffectEnvelope {
             invocation,
             command,
-            group,
         } = envelope;
         match command {
             RuntimeEffectCommand::Trigger { command } => {
-                crate::runtime::effect::refuse_unhonored_group_membership(
-                    group.as_deref(),
-                    "trigger",
-                )?;
                 self.execute_trigger(invocation, *command).await
             }
             command => {
@@ -1227,7 +1201,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     RuntimeEffectEnvelope {
                         invocation,
                         command,
-                        group,
                     },
                     effect_attempt,
                 )

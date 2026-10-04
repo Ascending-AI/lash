@@ -1,17 +1,8 @@
 {
   "scenario": "service-LashDurableWaitIndex",
   "service": "LashDurableWaitIndex",
-  "generation": "53eef6ec33bb",
+  "generation": "899e972d3383",
   "handlers": {
-    "group_child_membership": [
-      [
-        "InputCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateCommand",
-        "OutputCommand"
-      ]
-    ],
     "is_revoked": [
       [
         "InputCommand",
@@ -30,33 +21,14 @@
         "OutputCommand"
       ]
     ],
-    "record_group_child": [
-      [
-        "InputCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateCommand",
-        "SetStateCommand wait-index/v2/group-child/replay-corpus-turn:group:replay-corpus-session:replay-corpus-turn:1:0:tool_batch:3:child:0",
-        "OutputCommand"
-      ]
-    ],
     "register": [
       [
         "InputCommand",
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "GetLazyStateCommand",
+        "GetLazyStateCommand",
         "SetStateCommand wait-index/v2/wait/#",
-        "OutputCommand"
-      ]
-    ],
-    "register_awakeable": [
-      [
-        "InputCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateCommand",
-        "CallCommand LashDurableWaitWorkflow/peek",
-        "SetStateCommand wait-index/v2/metadata",
         "OutputCommand"
       ]
     ],
@@ -97,6 +69,8 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
         "CallCommand LashDurableWaitWorkflow/resolve",
         "SetStateCommand wait-index/v2/metadata",
         "OutputCommand"
@@ -105,15 +79,6 @@
         "InputCommand",
         "GetLazyStateCommand",
         "GetLazyStateCommand",
-        "GetLazyStateCommand",
-        "CallCommand LashDurableWaitWorkflow/resolve",
-        "SetStateCommand wait-index/v2/wait/#",
-        "CompleteAwakeableCommand",
-        "SetStateCommand wait-index/v2/metadata",
-        "OutputCommand"
-      ],
-      [
-        "InputCommand",
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "GetLazyStateCommand",
@@ -142,15 +107,6 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "SetStateCommand wait-index/v2/wait/#",
-        "OutputCommand"
-      ]
-    ],
-    "unregister_awakeable": [
-      [
-        "InputCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateCommand",
-        "SetStateCommand wait-index/v2/metadata",
         "OutputCommand"
       ]
     ]

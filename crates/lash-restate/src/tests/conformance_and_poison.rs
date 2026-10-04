@@ -3,7 +3,6 @@ use lash_core::TurnFailureCode;
 
 // No store-family macros: Restate certifies an engine adapter over borrowed memory/SQLite stores.
 // No SQL-journal retirement/fencing macros: replay lives in workflow history, not SQL rows.
-// No store effect-group drain macro: queued durable drain is a storage-side protocol.
 
 fn operation_effect_invocation(
     operation_id: impl Into<String>,
@@ -268,18 +267,18 @@ pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::Plug
 // FIG-4376's execution-control laws on a live server: a redrive replays the
 // run's recorded config, turn budget included, from the server's journal.
 mod recorded_execution_controls_live {
-    use super::effect_group_conformance;
+    use super::conformance_harness;
 
     async fn live_harness(
         law: &str,
     ) -> (
-        effect_group_conformance::LiveConformanceHarness,
+        conformance_harness::LiveConformanceHarness,
         &'static str,
         std::sync::Arc<dyn lash_core::EffectHost>,
         std::sync::Arc<dyn lash_core::StoreSet>,
         std::sync::Arc<dyn lash_conformance::ConformanceTurnRunner>,
     ) {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -316,7 +315,7 @@ lash_conformance::turn_runner_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
         let harness =
-            Arc::new(effect_group_conformance::LiveConformanceHarness::start_for_tools().await);
+            Arc::new(conformance_harness::LiveConformanceHarness::start_for_tools().await);
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -358,7 +357,7 @@ lash_conformance::turn_runner_tests!(
 lash_conformance::migrated_tools_redrive_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -393,7 +392,7 @@ lash_conformance::migrated_tools_redrive_tests!(
 lash_conformance::frame_open_redrive_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -410,7 +409,7 @@ lash_conformance::frame_open_redrive_tests!(
 lash_conformance::queued_input_runs_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -429,7 +428,7 @@ lash_conformance::queued_input_runs_tests!(
 lash_conformance::bound_trigger_duplicate_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -446,7 +445,7 @@ lash_conformance::bound_trigger_duplicate_tests!(
 /// handler attempt Restate redelivers, and a scope close delivers its
 /// children's cancels through the engine's process port.
 fn declared_start_tier(
-    harness: &effect_group_conformance::LiveConformanceHarness,
+    harness: &conformance_harness::LiveConformanceHarness,
 ) -> lash_conformance::DeclaredStartTier {
     let backend = harness.law_backend();
     lash_conformance::DeclaredStartTier {
@@ -486,7 +485,7 @@ fn declared_start_tier(
 lash_conformance::declared_start_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let tier = declared_start_tier(&harness);
         (harness, tier)
     }
@@ -500,7 +499,7 @@ lash_conformance::declared_start_tests!(
 lash_conformance::tool_batch_parallelism_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -536,7 +535,7 @@ lash_conformance::tool_batch_parallelism_tests!(
 lash_conformance::batch_sugar_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -566,7 +565,7 @@ lash_conformance::batch_sugar_tests!(
 lash_conformance::tool_call_identity_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         // Restate state outlives a run, so each run names its own sessions.
         let tier = lash_conformance::ToolCallIdentityTier {
             prefix: format!("restate-tool-call-identity-{}", harness.run_nonce()),
@@ -585,7 +584,7 @@ lash_conformance::tool_call_identity_tests!(
 lash_conformance::vm_broker_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         // Restate state outlives a run: each run names its own sessions.
         let prefix = format!("restate-vm-broker-{}", harness.run_nonce());
         let runner = harness.turn_runner();
@@ -600,7 +599,7 @@ lash_conformance::vm_broker_tests!(
 lash_conformance::segment_redrive_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         // Restate state outlives a run: each run names its own processes.
         let prefix: &'static str =
             Box::leak(format!("restate-segment-redrive-{}", harness.run_nonce()).into_boxed_str());
@@ -617,7 +616,7 @@ lash_conformance::segment_redrive_tests!(
 lash_conformance::admitted_head_redrive_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+        let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -754,92 +753,16 @@ lash_conformance::wake_delivery_conflict_tests!({
 lash_conformance::session_config_settlement_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+        let harness = conformance_harness::LiveConformanceHarness::start().await;
         let make = harness.backend_factory();
         (harness, make)
     }
 );
 
-super::effect_group_routing_miss::live_routing_miss_tests!();
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-async fn live_restate_effect_group_design_witnesses() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-    tokio::time::timeout(Duration::from_secs(240), harness.run_design_witnesses())
-        .await
-        .expect("Restate design witnesses exceeded 240 seconds");
-    harness.finish().await;
-}
-
-/// The group index answers its own notices on live Restate (FIG-4344):
-/// every transition answers its subscribers before and after it, a refusal
-/// answers READY, and a subscription is idempotent, bounded and withdrawable.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-async fn live_restate_group_index_answers_its_own_notices() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-    tokio::time::timeout(Duration::from_secs(240), async {
-        super::effect_group_notification_index::every_transition_answers_its_subscribers(&harness)
-            .await;
-        super::effect_group_notification_index::a_refusal_answers_its_ready_subscribers(&harness)
-            .await;
-        super::effect_group_notification_index::a_subscription_is_idempotent_bounded_and_withdrawable(
-            &harness,
-        )
-        .await;
-    })
-    .await
-    .expect("the group-notice laws exceeded 240 seconds");
-    harness.finish().await;
-}
-
-/// The width-4 gated batch on live Restate with its notices owned by the
-/// group index (FIG-4344): every member answers.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-async fn live_restate_a_batch_with_index_owned_notices_answers_every_member() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
-    let label = format!("restate-notice-batch-{}", harness.run_nonce());
-    tokio::time::timeout(
-        Duration::from_secs(180),
-        super::effect_group_seat_chain::run_batch_over(&harness, &label, harness.law_stores()),
-    )
-    .await
-    .expect("the notice batch exceeded 180 seconds");
-    harness.finish().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-async fn live_restate_close_releases_an_unstarted_wait_child() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-    tokio::time::timeout(
-        Duration::from_secs(60),
-        harness.run_unstarted_wait_child_release_witness(),
-    )
-    .await
-    .expect("Restate unstarted-wait-child witness exceeded 60 seconds");
-    harness.finish().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-async fn live_restate_settled_children_release_their_cancel_watches() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-    tokio::time::timeout(
-        Duration::from_secs(90),
-        harness.run_settled_children_release_their_cancel_watches_witness(),
-    )
-    .await
-    .expect("Restate settled-cancel-watch witness exceeded 90 seconds");
-    harness.finish().await;
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
 async fn live_restate_executing_effect_quiescence_witness() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+    let harness = conformance_harness::LiveConformanceHarness::start().await;
     tokio::time::timeout(
         Duration::from_secs(240),
         harness.run_executing_effect_quiescence_witness(),
@@ -849,23 +772,10 @@ async fn live_restate_executing_effect_quiescence_witness() {
     harness.finish().await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-async fn live_restate_fig1464_over_budget_group_open_gives_up_before_the_group_is_opened() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-    tokio::time::timeout(
-        Duration::from_secs(120),
-        harness.run_group_open_budget_witness(),
-    )
-    .await
-    .expect("Restate group-open budget witness exceeded 120 seconds");
-    harness.finish().await;
-}
-
 lash_conformance::effect_host_await_event_witness_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = Arc::new(effect_group_conformance::LiveConformanceHarness::start().await);
+        let harness = Arc::new(conformance_harness::LiveConformanceHarness::start().await);
         let make = harness.effect_host_factory();
         let make_catalog = harness.session_catalog_factory();
         let witness_harness = Arc::clone(&harness);
@@ -889,7 +799,7 @@ lash_conformance::effect_host_await_event_witness_tests!(
 /// server double: the same endpoint and the same laws, with the Restate
 /// server simulated in process — no sockets, no Docker, virtual time.
 mod on_the_server_double {
-    use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+    use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
     use super::*;
 
     // The session-config settlement laws on the Restate backend: its engine
@@ -986,39 +896,6 @@ mod on_the_server_double {
     });
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn effect_group_design_witnesses() {
-        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
-        tokio::time::timeout(Duration::from_secs(240), harness.run_design_witnesses())
-            .await
-            .expect("design witnesses on the server double exceeded 240 seconds");
-        harness.finish().await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn close_releases_an_unstarted_wait_child() {
-        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
-        tokio::time::timeout(
-            Duration::from_secs(60),
-            harness.run_unstarted_wait_child_release_witness(),
-        )
-        .await
-        .expect("unstarted-wait-child witness on the server double exceeded 60 seconds");
-        harness.finish().await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn settled_children_release_their_cancel_watches() {
-        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
-        tokio::time::timeout(
-            Duration::from_secs(90),
-            harness.run_settled_children_release_their_cancel_watches_witness(),
-        )
-        .await
-        .expect("settled-cancel-watch witness on the server double exceeded 90 seconds");
-        harness.finish().await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn executing_effect_quiescence_witness() {
         let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
         tokio::time::timeout(
@@ -1027,18 +904,6 @@ mod on_the_server_double {
         )
         .await
         .expect("quiescence witness on the server double exceeded 240 seconds");
-        harness.finish().await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn fig1464_over_budget_group_open_gives_up_before_the_group_is_opened() {
-        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
-        tokio::time::timeout(
-            Duration::from_secs(120),
-            harness.run_group_open_budget_witness(),
-        )
-        .await
-        .expect("group-open budget witness on the server double exceeded 120 seconds");
         harness.finish().await;
     }
 }
@@ -1303,84 +1168,6 @@ pub(super) async fn fig1464_over_budget_give_up_replays_identically_under_a_larg
         context.runs.lock_recover().as_slice(),
         ["lash:restate-budget-flip", "lash:restate-budget-flip"],
         "the redrive must consume the same journal slot, not add one"
-    );
-}
-
-/// A one-child effect group under a runtime-operation scope, for the FIG-3564
-/// group-open budget laws.
-pub(super) fn fig3564_budget_group(operation: &str) -> lash_core::RuntimeEffectGroup {
-    let scope = ExecutionScope::runtime_operation(operation);
-    let child = RuntimeEffectEnvelope::new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(scope.clone(), format!("{operation}:child:0"))
-                .expect("valid group child address"),
-            lash_core::RuntimeAttribution::none(),
-            "fig3564-child",
-        ),
-        RuntimeEffectCommand::LanguageRuntimeValue {
-            operation: "fig3564-child".to_string(),
-        },
-    );
-    lash_core::RuntimeEffectGroup::try_new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(scope, format!("{operation}:group"))
-                .expect("valid group address"),
-            lash_core::RuntimeAttribution::none(),
-            "fig3564-group",
-        ),
-        operation,
-        vec![child],
-        lash_core::GroupWakePolicy::All,
-        lash_core::LoserPolicy::RunToCompletion,
-    )
-    .expect("a valid one-child group")
-}
-
-/// FIG-1464 / FIG-3564 deciding risk: the verdict reads a process-configured
-/// budget, so a redrive under a larger budget must replay the journaled
-/// give-up rather than re-decide it and open the group the first attempt
-/// refused.
-#[tokio::test]
-pub(super) async fn fig1464_over_budget_group_open_replay_under_a_larger_budget_never_opens() {
-    let context = Arc::new(ReplayableRecordingContext::default());
-    let group = || fig3564_budget_group("fig1464-budget-flip-group");
-
-    let recorded = RestateRuntimeEffectController::with_options_for_test(
-        Arc::clone(&context),
-        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
-    )
-    .open_effect_group(group())
-    .await
-    .expect_err("the over-budget group open must give up");
-
-    context.replaying.store(true, Ordering::SeqCst);
-    let replayed = RestateRuntimeEffectController::with_options_for_test(
-        Arc::clone(&context),
-        // Big enough that a verdict re-decided from live config would proceed
-        // to the engine, which this context does not serve.
-        RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
-    )
-    .open_effect_group(group())
-    .await
-    .expect_err("the journaled verdict must still give up");
-
-    assert_eq!(
-        replayed.code,
-        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned,
-        "the replay must render the journaled give-up: {}",
-        replayed.message
-    );
-    assert_eq!(
-        replayed.message, recorded.message,
-        "the replayed give-up must render the journaled verdict, not the new budget"
-    );
-    assert_eq!(
-        context.runs.lock_recover().as_slice(),
-        [
-            "lash:fig1464-budget-flip-group:group.journal-budget",
-            "lash:fig1464-budget-flip-group:group.journal-budget"
-        ],
-        "the redrive must consume the same verdict slot and add none"
     );
 }
 
@@ -1819,18 +1606,6 @@ pub(super) fn llm_spec() -> lash_core::LlmRequestSpec {
     }
 }
 
-pub(super) fn prepared_tool_call() -> lash_core::PreparedToolCall {
-    lash_core::PreparedToolCall {
-        call_id: lash_core::ToolCallId::fixture("call-1"),
-        provider_call_id: None,
-        tool_id: "tool:tool".into(),
-        tool_name: "tool".into(),
-        args: serde_json::json!({}),
-        replay: None,
-        prepared_payload: serde_json::Value::Null,
-    }
-}
-
 pub(super) fn prepared_tool_call_with(
     call_id: &str,
     tool_name: &str,
@@ -2063,7 +1838,7 @@ pub(super) fn recovery_artifact_store() -> lashlang::LashlangArtifacts {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires isolated native Restate and PostgreSQL services"]
 async fn live_attachment_materialization_turn_witnesses() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
+    let harness = conformance_harness::LiveConformanceHarness::start_for_tools().await;
     let directory = tempfile::tempdir().expect("file store directory");
     let attachments = tempfile::tempdir().expect("PostgreSQL attachments");
     #[expect(

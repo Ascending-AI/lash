@@ -1733,9 +1733,8 @@ class RestateSuiteSelectionTests(unittest.TestCase):
 
     def test_the_restate_execution_path_selects_the_suites(self) -> None:
         for path in (
-            # #2106's diff: the effect-group dispatch path and the workers
-            # runbook binary.
-            "crates/lash-restate/src/controller/group_commit.rs",
+            # The native Run controller and workers runbook binary.
+            "crates/lash-restate/src/controller/run_record.rs",
             "crates/lash-core-execution/src/tool_dispatch.rs",
             "crates/lash-core-execution/src/session/tool_execution.rs",
             "runbooks/restate-postgres-workers/src/bin/worker.rs",
@@ -1745,7 +1744,7 @@ class RestateSuiteSelectionTests(unittest.TestCase):
             # The suite's law catalogue expands into its test binary.
             "crates/lash-conformance/src/lib.rs",
             # The endpoints and runbooks the suites mount.
-            "crates/lash-restate/src/effect_group/dispatch.rs",
+            "crates/lash-restate/src/controller/run_record.rs",
             # The facade crate owns the public-process-command suite
             # (//crates/lash:integration__test), so it is a suite owner.
             "crates/lash/tests/integration/public_process_command_replay.rs",

@@ -18,7 +18,6 @@ use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
 mod fig1127;
-mod fig1416;
 
 mod fig2471;
 use crate::runtime_support::effect_recording_authority as recording_authority;

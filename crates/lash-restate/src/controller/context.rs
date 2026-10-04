@@ -28,24 +28,13 @@ pub use super::process_scheduling::ProcessWorkflowStartFailure;
 
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::compat::Reply;
 use crate::durable_wait::process_terminal::RestateProcessTerminalRequest;
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitEffectRequest,
-    RestateDurableWaitGroupChildMembershipRequest, RestateDurableWaitGroupRequest,
     RestateDurableWaitIndexRequest, RestateDurableWaitResolveRequest,
     RestateDurableWaitResolveResponse, RestateTurnCancelGate, RestateTurnCancelRaceOutcome,
     RestateTurnCancelWake, RestateTurnGatePeek, durable_wait_index_object_key,
     register_turn_cancel_gate, restate_await_event_key_for_authority, retire_turn_cancel_gate,
-};
-use crate::effect_group::{
-    EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse,
-    EffectGroupChildCancelRequest, EffectGroupCloseRequest, EffectGroupCloseResponse,
-    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupDispatchRequest,
-    EffectGroupNotice, EffectGroupNotification, EffectGroupOpenRequest, EffectGroupOpenResponse,
-    EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
-    EffectGroupReadRankResponse, EffectGroupSubscribeRequest, EffectGroupSubscribeResponse,
-    EffectGroupUnsubscribeRequest,
 };
 use crate::process::{
     RestateProcessCancelRequest, RestateProcessWorkflowInput, RestateProcessWorkflowOutput,
@@ -53,11 +42,8 @@ use crate::process::{
 };
 
 #[macro_use]
-mod child_cancel;
-#[macro_use]
 mod index_calls;
 mod gate_race;
-mod tool_completion;
 #[macro_use]
 mod segment_wait;
 #[macro_use]
@@ -69,9 +55,6 @@ pub use contract::RestateControllerContext;
 mod run_bridge;
 mod wake;
 pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
-pub use child_cancel::GroupChildCancelArm;
-pub use child_cancel::GroupChildCancelRace;
-use child_cancel::race_group_child_cancel;
 use gate_race::{TurnGateRace, race_turn_cancel_gate, race_turn_gate};
 pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome, TurnSleepOutcome, TurnWaitOutcome};
 #[cfg(test)]
@@ -184,16 +167,6 @@ async fn race_process_cancel<'run, T>(
         }
     }
     guarded.await.map(RestateTurnCancelRaceOutcome::Completed)
-}
-
-/// The default every unregistered group-index call shares: a pinned refusal
-/// naming the handler, so a wiring miss surfaces as a typed terminal error
-/// rather than a silent `Ok`.
-fn unregistered_group_index<'run, T>(handler: &'static str) -> crate::JournaledFuture<'run, T>
-where
-    T: Send + 'run,
-{
-    Box::pin(async move { Err(TerminalError::new(format!("{handler} is not registered"))) })
 }
 
 macro_rules! impl_process_cancel_peek {
@@ -433,47 +406,7 @@ macro_rules! impl_restate_controller_context {
 
                 run_source_methods!($context, $promises, 'ctx);
 
-                fn arm_tool_completion<'run>(
-                    &'run self, namespace: &'run crate::RestateNamespace,
-                    key: lash_core::AwaitEventKey,
-                ) -> crate::JournaledFuture<'run, ()> where 'ctx: 'run {
-                    Box::pin(tool_completion::arm(self, namespace, key))
-                }
 
-                fn await_tool_completions<'run>(
-                    &'run self, namespace: &'run crate::RestateNamespace,
-                    waits: Vec<lash_core::ToolCompletionWait>, dispatch: Option<lash_core::ToolDispatchCursor>,
-                    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-                    generation: Option<lash_core::engine::BuildGeneration>,
-                    process_cancel: ProcessCancelRace,
-                ) -> TurnCancelRaceFuture<'run, lash_core::ToolCompletionEvent> where 'ctx: 'run {
-                    let context: &'run $context<'run> = self;
-                    let promise = if turn_cancel.is_none() && process_cancel == ProcessCancelRace::Raced {
-                        let Some(promise) = process_cancel_promise!($promises, $context, 'run, context) else {
-                            return Box::pin(async { Err(TerminalError::new("a process cancel race needs a workflow promise surface")) });
-                        };
-                        Some(promise)
-                    } else { None };
-                    let hand_over = if turn_cancel.is_none() && generation.is_some() && process_cancel == ProcessCancelRace::Raced {
-                        process_hand_over_promise!($promises, $context, 'run, context)
-                    } else { None };
-                    use restate_sdk::context::DurableFuture;
-                    let awakeables = tool_completion::WaitAwakeables {
-                        completion: Box::new(move |position| {
-                            let (id, wait) = context.awakeable::<Json<RestateTurnCancelWake>>();
-                            (id, erase_gate_wait(wait.map_ok(move |Json(wake)| match wake {
-                                RestateTurnCancelWake::SessionRevoked => tool_completion::CompletionWake::Revoked,
-                                _ => tool_completion::CompletionWake::Completion { position },
-                            })))
-                        }),
-                        dispatch: Box::new(move || {
-                            let (id, wait) = context.awakeable::<Json<EffectGroupNotification>>();
-                            (id, erase_gate_wait(wait.map_ok(|_| tool_completion::CompletionWake::DispatchReady)))
-                        }),
-                        gate: Box::new(move || gate_awakeable(context)),
-                    };
-                    Box::pin(tool_completion::wait(context, namespace, tool_completion::WaitRequest { waits, dispatch, turn_cancel, generation }, awakeables, promise, hand_over))
-                }
 
                 process_signal_wait_method!($promises, $context, 'ctx);
 
@@ -558,304 +491,17 @@ macro_rules! impl_restate_controller_context {
                         Ok(())
                     })
                 }
-                fn scope_group_record<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    index_key: String,
-                    group_key: String,
-                ) -> crate::JournaledFuture<'run, bool>
-                where
-                    'ctx: 'run,
-                {
-                    let call = namespace.durable_wait_registry(self, index_key)
-                        .record_group(RestateDurableWaitGroupRequest { group_key })
-                        .call();
-                    Box::pin(async move {
-                        let admitted = call.await?.into_body();
-                        Ok(admitted)
-                    })
-                }
 
-                fn effect_group_probe<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    group_key: String,
-                ) -> crate::JournaledFuture<'run, EffectGroupProbeResponse>
-                where
-                    'ctx: 'run,
-                {
-                    let call = namespace.effect_group_state(self, group_key)
-                        .probe()
-                        .call();
-                    Box::pin(async move {
-                        let response = call.await?.into_body();
-                        Ok(response)
-                    })
-                }
 
-                fn effect_group_preflight<'run>(
-                    &'run self,
-                    group_key: String,
-                    children: Vec<lash_core::RuntimeEffectEnvelope>,
-                    route: String,
-                ) -> crate::JournaledFuture<'run, Option<usize>>
-                where
-                    'ctx: 'run,
-                {
-                    let call = self
-                        .request::<crate::Call<Vec<lash_core::RuntimeEffectEnvelope>>, Reply<Option<usize>>>(
-                            restate_sdk::context::RequestTarget::workflow(
-                                route, group_key, "preflight",
-                            ),
-                            crate::Call::journaled(children),
-                        )
-                        .call();
-                    Box::pin(async move { call.await.map(Reply::into_body) })
-                }
 
-                fn effect_group_open<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    group_key: String,
-                    request: EffectGroupOpenRequest,
-                ) -> crate::JournaledFuture<'run, EffectGroupOpenResponse>
-                where
-                    'ctx: 'run,
-                {
-                    let call = namespace.effect_group_state(self, group_key)
-                        .open(request)
-                        .call();
-                    Box::pin(async move {
-                        let response = call.await?.into_body();
-                        Ok(response)
-                    })
-                }
 
-                fn effect_group_submit<'run>(
-                    &'run self,
-                    request: EffectGroupDispatchRequest,
-                    route: String,
-                ) -> crate::JournaledFuture<'run, String>
-                where
-                    'ctx: 'run,
-                {
-                    let handle = self
-                        .request::<crate::Call<EffectGroupDispatchRequest>, Reply<()>>(
-                            restate_sdk::context::RequestTarget::workflow(
-                                route,
-                                request.group_key.clone(),
-                                "run",
-                            ),
-                            crate::Call::journaled(request),
-                        )
-                        .send();
-                    Box::pin(async move {
-                        let handle = handle.await?;
-                        Ok(handle.invocation_id().to_owned())
-                    })
-                }
 
-                fn effect_group_read_rank<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    group_key: String,
-                    request: EffectGroupReadRankRequest,
-                ) -> crate::JournaledFuture<'run, EffectGroupReadRankResponse>
-                where
-                    'ctx: 'run,
-                {
-                    let call = namespace.effect_group_state(self, group_key)
-                        .read_rank(request)
-                        .call();
-                    Box::pin(async move {
-                        let response = call.await?.into_body();
-                        Ok(response)
-                    })
-                }
 
-                fn effect_group_payload_get<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    payload_key: String,
-                ) -> crate::JournaledFuture<'run, EffectGroupPayloadGetResponse>
-                where
-                    'ctx: 'run,
-                {
-                    let call = namespace.effect_group_payload(self, payload_key)
-                        .get()
-                        .call();
-                    Box::pin(async move {
-                        let response = call.await?.into_body();
-                        Ok(response)
-                    })
-                }
 
-                fn effect_group_close<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    group_key: String,
-                    request: EffectGroupCloseRequest,
-                ) -> crate::JournaledFuture<'run, EffectGroupCloseResponse>
-                where
-                    'ctx: 'run,
-                {
-                    let call = namespace.effect_group_state(self, group_key)
-                        .close(request)
-                        .call();
-                    Box::pin(async move {
-                        let response = call.await?.into_body();
-                        Ok(response)
-                    })
-                }
-                fn scope_group_child_membership<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    index_key: String,
-                    replay_key: String,
-                ) -> crate::JournaledFuture<'run, Option<String>>
-                where
-                    'ctx: 'run,
-                {
-                    let call = namespace.durable_wait_registry(self, index_key)
-                        .group_child_membership(
-                            RestateDurableWaitGroupChildMembershipRequest {
-                                replay_key: replay_key.clone(),
-                            },
-                        )
-                        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-                        .call();
-                    Box::pin(async move { call.await.map(Reply::into_body) })
-                }
 
-                fn effect_group_commit_child<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    group_key: String,
-                    request: EffectGroupCommitChildRequest,
-                ) -> crate::JournaledFuture<'run, EffectGroupCommitChildResponse>
-                where
-                    'ctx: 'run,
-                {
-                    let call = namespace.effect_group_state(self, group_key)
-                        .commit_child(request)
-                        .call();
-                    Box::pin(async move { call.await.map(Reply::into_body) })
-                }
 
-                fn effect_group_admit_semantic<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    group_key: String,
-                    request: EffectGroupAdmitSemanticRequest,
-                ) -> crate::JournaledFuture<'run, EffectGroupAdmitSemanticResponse>
-                where
-                    'ctx: 'run,
-                {
-                    let call = namespace.effect_group_state(self, group_key)
-                        .admit_semantic(request)
-                        .call();
-                    Box::pin(async move { call.await.map(Reply::into_body) })
-                }
 
-                fn effect_group_child_cancel<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    group_key: String,
-                    position: usize,
-                ) -> crate::JournaledFuture<'run, Option<EffectGroupNotification>>
-                where
-                    'ctx: 'run,
-                {
-                    let call = namespace.effect_group_state(self, group_key)
-                        .child_cancel(EffectGroupChildCancelRequest { position })
-                        .call();
-                    Box::pin(async move { call.await.map(Reply::into_body) })
-                }
 
-                fn await_effect_group_notice<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    group_key: String,
-                    notice: EffectGroupNotice,
-                    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-                    process_cancel: ProcessCancelRace,
-                ) -> TurnCancelRaceFuture<'run, EffectGroupNotification>
-                where
-                    'ctx: 'run,
-                {
-                    Box::pin(async move {
-                        // The awakeable first, then its subscription: the
-                        // index completes it only after it recorded it.
-                        let (awakeable_id, awakeable) =
-                            self.awakeable::<Json<EffectGroupNotification>>();
-                        let subscribed = namespace
-                            .effect_group_state(self, group_key.clone())
-                            .subscribe(EffectGroupSubscribeRequest {
-                                notice,
-                                awakeable_id: awakeable_id.clone(),
-                            })
-                            .call()
-                            .await?
-                            .into_body();
-                        match subscribed {
-                            EffectGroupSubscribeResponse::Notified { notification } => {
-                                return Ok(RestateTurnCancelRaceOutcome::Completed(notification));
-                            }
-                            EffectGroupSubscribeResponse::Refused { outstanding } => {
-                                return Err(crate::effect_group::subscription_refused(
-                                    &group_key,
-                                    outstanding,
-                                ));
-                            }
-                            EffectGroupSubscribeResponse::Subscribed => {}
-                        }
-                        let wait = erase_gate_wait(awakeable);
-                        let outcome = match turn_cancel {
-                            None => {
-                                let promise = match process_cancel {
-                                    ProcessCancelRace::Raced => {
-                                        process_cancel_promise!($promises, $context, 'run, self)
-                                    }
-                                    ProcessCancelRace::NotRaced => None,
-                                };
-                                match promise {
-                                    Some(promise) => race_process_cancel(promise, wait).await?,
-                                    None => RestateTurnCancelRaceOutcome::Completed(wait.await?),
-                                }
-                            }
-                            Some(turn_cancel) => {
-                                let Some(session_id) =
-                                    turn_cancel.key.scope.session_id().cloned()
-                                else {
-                                    return Err(TerminalError::new(
-                                        "turn cancellation gate is missing its session id",
-                                    ));
-                                };
-                                // The subscription's awakeable, then the
-                                // gate's awakeable, then its registration: the
-                                // geometry every guarded durable wait has.
-                                race_turn_cancel_gate(
-                                    self,
-                                    namespace,
-                                    &SessionId::from(session_id),
-                                    turn_cancel,
-                                    || gate_awakeable(self),
-                                    move || wait,
-                                )
-                                .await?
-                            }
-                        };
-                        if !matches!(outcome, RestateTurnCancelRaceOutcome::Completed(_)) {
-                            // The other arm won: drop the subscriber, off the
-                            // critical path.
-                            let _unsubscribe = namespace
-                                .effect_group_state(self, group_key)
-                                .unsubscribe(EffectGroupUnsubscribeRequest { awakeable_id })
-                                .send();
-                        }
-                        Ok(outcome.map(Json::into_inner))
-                    })
-                }
 
                 fn peek_process_cancel_requested<'run>(
                     &'run self,
@@ -867,9 +513,6 @@ macro_rules! impl_restate_controller_context {
                 }
             }
 
-            impl<'ctx> GroupChildCancelRace<'ctx> for $context<'ctx> {
-                group_child_cancel_methods!('ctx);
-            }
         )+
     };
 }

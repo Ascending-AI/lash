@@ -58,10 +58,10 @@ class SessionsTest(unittest.TestCase):
 class ObjectsTest(unittest.TestCase):
     def test_the_ledger_keeps_counts_not_every_object_key(self):
         preflight = {'upgraded': False, 'families': [{
-            'service': 'EffectGroupIndex', 'component': 'restate-effect-group-state', 'newest': 2, 'objects': 55,
+            'service': 'LashDurableWaitIndex', 'component': 'restate-durable-wait-registry', 'newest': 2, 'objects': 55,
             'pending': [{'key': f'k{index}', 'format': 1} for index in range(40)]}]}
         self.assertEqual(upgrade.objects_summary(preflight), {'upgraded': False, 'families': [
-            {'service': 'EffectGroupIndex', 'newest': 2, 'objects': 55, 'pending': 40}]})
+            {'service': 'LashDurableWaitIndex', 'newest': 2, 'objects': 55, 'pending': 40}]})
         sweep = {'swept': [{'key': f'k{index}'} for index in range(300)], 'remaining': []}
         self.assertEqual(upgrade.objects_summary(sweep), {'swept': 300, 'remaining': [], 'remaining_total': 0})
 

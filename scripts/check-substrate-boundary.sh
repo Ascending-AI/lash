@@ -309,7 +309,7 @@ fi
 # generation lane a recorded route names — never the name a generated typed
 # client bakes into the request target. Shared services keep their typed
 # clients until FIG-3803 epoch-names them.
-pinned_client_forbidden='(workflow_client|object_client|service_client)::[[:space:]]*<[[:space:]]*(LashProcessWorkflowClient|EffectGroupDispatchClient|LashSessionClient|LashTurnClient)'
+pinned_client_forbidden='(workflow_client|object_client|service_client)::[[:space:]]*<[[:space:]]*(LashProcessWorkflowClient|LashSessionClient|LashTurnClient)'
 capture_search "pinned-service typed client" "$pinned_client_forbidden" "$tmp_dir/rule4f.raw" "${rule4_runs[@]}"
 : >"$tmp_dir/rule4f.hits"
 while IFS=: read -r file line source; do
@@ -340,16 +340,14 @@ fi
 #   crates/lash-core/src/runtime/shift{.rs,/**}
 #                                        -- the session shift and its admission
 #   crates/lash-core-execution/src/session{,.rs}, tool_dispatch{,.rs},
-#   runtime/effect/group*.rs
-#                                        -- execution-side session and group
-#                                           child shift code
+#                                        -- execution-side session and tool Run code
 #   crates/lash-protocol-rlm/src/{executor,projection}/**
 #                                        -- the code cell's host bridge
 #   crates/lashlang/src/**               -- the VM crate (the plan's V/ prefix)
 #   crates/lash-lashlang-runtime/src/**  -- the lashlang runtime
 #
 # The inventory's "R/ handler code outside ctx.run closures" is approximated by
-# a path filter on the Restate handler modules -- controller/, effect_group{.rs,/},
+# a path filter on the Restate handler modules -- controller/,
 # process/, durable_wait.rs and session_shifts.rs -- because a line lint cannot tell handler code
 # from a ctx.run closure body. That over-catches legal recorded bodies; those
 # sites are simply allowlisted like the rest.
@@ -402,14 +400,11 @@ shift_paths=(
   crates/lash-core-execution/src/session
   crates/lash-core-execution/src/tool_dispatch.rs
   crates/lash-core-execution/src/tool_dispatch
-  crates/lash-core-execution/src/runtime/effect/group*.rs
   crates/lash-protocol-rlm/src/executor
   crates/lash-protocol-rlm/src/projection
   crates/lashlang/src
   crates/lash-lashlang-runtime/src
   crates/lash-restate/src/controller
-  crates/lash-restate/src/effect_group
-  crates/lash-restate/src/effect_group.rs
   crates/lash-restate/src/process
   crates/lash-restate/src/durable_wait.rs
   crates/lash-restate/src/session_shifts.rs

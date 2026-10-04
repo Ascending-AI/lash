@@ -2803,16 +2803,6 @@
         }
       ]
     },
-    "GroupChildCapability": {
-      "description": "A capability a deployment needs to execute an effect-group child, and\nwhose absence is a fact of the deployment's wiring rather than of one\nattempt (FIG-4550).",
-      "oneOf": [
-        {
-          "const": "group_executors",
-          "description": "The resolver that maps a recorded group child to the code that runs\nit: the host serves the lane with none registered.",
-          "type": "string"
-        }
-      ]
-    },
     "HeaderRefusal": {
       "description": "Why a receiver refused a header.",
       "oneOf": [
@@ -9374,7 +9364,7 @@
         {
           "properties": {
             "reason": {
-              "const": "minting_group_child_cancelled",
+              "const": "minting_run_cancelled",
               "type": "string"
             }
           },
@@ -12877,23 +12867,6 @@
           "required": [
             "kind",
             "referrer"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "The typed half of [`RuntimeErrorCode::RuntimeEffectGroupChildUnroutable`].",
-          "properties": {
-            "kind": {
-              "const": "effect_group_child_unroutable",
-              "type": "string"
-            },
-            "missing": {
-              "$ref": "#/$defs/GroupChildCapability"
-            }
-          },
-          "required": [
-            "kind",
-            "missing"
           ],
           "type": "object"
         },

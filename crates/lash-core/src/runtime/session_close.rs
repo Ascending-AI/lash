@@ -87,8 +87,7 @@ pub enum SessionCloseError {
     /// closure pins, `StoreError::TurnCancelClosureLifecyclePinned`).
     #[error(transparent)]
     Store(#[from] StoreError),
-    /// The runtime refused (among them the effect-group pins,
-    /// `EffectGroupLifecyclePinned`), or its recorded step failed.
+    /// The runtime refused, or its recorded step failed.
     #[error(transparent)]
     Runtime(#[from] RuntimeError),
 }

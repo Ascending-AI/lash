@@ -4,9 +4,8 @@
 //! Run. Its replies remain in caller order beside the durable settlement
 //! order used by settlement-selecting consumers.
 
+use super::group::tool_call_limit_failure;
 use super::*;
-
-use super::group::{ToolAggregateConsumer, tool_call_limit_failure};
 
 impl RuntimeExecutionContext<'_> {
     #[expect(

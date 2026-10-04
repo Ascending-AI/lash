@@ -2,7 +2,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::{ProcessEffectOutcome, RuntimeEffectController};
+    use crate::{ProcessEffectOutcome, RuntimeEffectController, RuntimeEffectControllerError};
 
     #[tokio::test]
     async fn a_journaled_environment_load_keeps_its_bytes_after_the_source_pin_ends() {
@@ -891,30 +891,10 @@ mod tests {
             _envelope: crate::RuntimeEffectEnvelope,
             _local_executor: crate::RuntimeEffectLocalExecutor<'_>,
         ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-            Err(crate::effect_groups_unsupported("SignalResolutions"))
-        }
-
-        async fn open_effect_group(
-            &self,
-            _group: crate::RuntimeEffectGroup,
-        ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-            Err(crate::effect_groups_unsupported("SignalResolutions"))
-        }
-
-        async fn await_next_settlement(
-            &self,
-            _handle: &mut crate::EffectGroupHandle,
-            _cancel: crate::runtime::TurnCancelWait,
-        ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
-            Err(crate::effect_groups_unsupported("SignalResolutions"))
-        }
-
-        async fn close_effect_group(
-            &self,
-            _handle: crate::EffectGroupHandle,
-            _disposition: crate::LoserPolicy,
-        ) -> Result<(), crate::RuntimeEffectControllerError> {
-            Err(crate::effect_groups_unsupported("SignalResolutions"))
+            Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::EngineEffectController,
+                "SignalResolutions does not execute effects",
+            ))
         }
     }
 

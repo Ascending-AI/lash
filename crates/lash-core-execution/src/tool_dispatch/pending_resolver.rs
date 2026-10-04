@@ -518,15 +518,12 @@ async fn cancel_owned_process(
     match site.processes.cancel(&site.owner, process_id, scope).await {
         Ok(_) => Ok(CancelDischarge::Met),
         Err(error) => match super::intent_executor::declared_start_fault(&error) {
-            // The invocation that owns the call can journal nothing more: a
-            // group child whose group decided the cancel. That group's
-            // opener drains the obligation from its own journal
-            // (`discharge_abandoned_call`).
+            // A cancelled logical owner leaves the obligation to the
+            // opener that drains its abandoned call.
             Some(fault)
                 if matches!(
                     fault.code,
-                    crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided
-                        | crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
+                    crate::RuntimeErrorCode::RuntimeToolRunCancelDecided
                 ) =>
             {
                 tracing::warn!(

@@ -9,7 +9,7 @@
 //! step suspends the handler, and every resumption replays the journal up to
 //! the next step, which then runs live: a new live suffix after each replay.
 
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 use super::*;
 use lash_core::{AdmittedScope, CancellationToken};
 
@@ -731,103 +731,4 @@ async fn a_replay_only_wait_resolution_emits_once_from_its_sql_receipt() {
     ));
     assert_ne!(records[0].id, records[1].id);
     assert!(records[0].timestamp <= records[1].timestamp);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn deferred_completion_wait_receipts_survive_handler_replay() {
-    let backend = lash_restate_test::backend(
-        0x4832,
-        lash_restate_test::ServerConfig::default().always_replay(true),
-    )
-    .await
-    .unwrap();
-    let sink = Arc::new(RecordingTraceSink::default());
-    let tracing = lash_core::facade_support::RuntimeHostConfig::new(
-        backend.lash_backend(),
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    )
-    .tracing
-    .with_trace_sink(sink.clone());
-    let scope = lash_trace::DurableTraceScope {
-        scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
-            session_id: "deferred-receipts".into(),
-            turn_id: "turn".into(),
-        }),
-        cause: lash_trace::TraceCause::Root,
-        anchor: lash_trace::TraceAnchor::Untraced,
-        started_at_ms: 1,
-    };
-    let attempt: lash_restate_test::HandlerAttempt = Arc::new(move |scoped| {
-        let tracing = tracing.clone();
-        let scope = scope.clone();
-        Box::pin(async move {
-            let scoped = scoped.with_trace_scope(scope);
-            tracing.turn_execution(&scoped);
-            let key = scoped
-                .controller()
-                .await_event_key(
-                    scoped.execution_scope(),
-                    lash_core::AwaitEventWaitIdentity::Custom {
-                        key: "deferred-receipt".into(),
-                    },
-                )
-                .await
-                .unwrap();
-            scoped
-                .controller()
-                .resolve_await_event(&key, Resolution::Ok(serde_json::json!("resolved")))
-                .await
-                .unwrap();
-            let invocation = lash_core::RuntimeEffectInvocation::new(
-                lash_core::EffectAddress::new(scoped.execution_scope().clone(), "deferred-wait")
-                    .unwrap(),
-                lash_core::RuntimeAttribution::none(),
-                "deferred-wait",
-            );
-            let outcome = scoped
-                .execute_effect(
-                    RuntimeEffectEnvelope::new(
-                        invocation,
-                        RuntimeEffectCommand::AwaitToolCompletions {
-                            waits: vec![lash_core::ToolCompletionWait { key }],
-                            dispatch: None,
-                            transferable: true,
-                        },
-                    ),
-                    RuntimeEffectLocalExecutor::await_event(CancellationToken::new()),
-                )
-                .await
-                .unwrap();
-            assert!(matches!(
-                outcome,
-                RuntimeEffectOutcome::AwaitToolCompletions {
-                    event: lash_core::ToolCompletionEvent::Resolved { .. }
-                }
-            ));
-        })
-    });
-    backend
-        .run_in_handler(AdmittedScope::turn("deferred-receipts", "turn"), attempt)
-        .await
-        .unwrap();
-    let records = sink.records.lock_recover();
-    let waits = records
-        .iter()
-        .filter(|record| {
-            matches!(
-                record.event,
-                lash_trace::TraceEvent::DurableWaitParked { .. }
-                    | lash_trace::TraceEvent::DurableWaitResolved { .. }
-            )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        waits.len(),
-        2,
-        "one wait request and one resolution across handler replay"
-    );
-    assert!(
-        matches!(&waits[1].event, lash_trace::TraceEvent::DurableWaitResolved { wait_kind, resolution: lash_trace::TraceDurableWaitResolution::Ok, .. } if wait_kind == "tool_completion")
-    );
 }

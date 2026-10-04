@@ -15,10 +15,10 @@ use std::sync::Arc;
 
 use lash_sansio::SessionId;
 
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 
 /// A per-fixture seed/discriminator for the standalone `RestateTestBackend`
-/// fixtures, kept in step with `effect_group_conformance::nonce`.
+/// fixtures, kept in step with `conformance_harness::nonce`.
 fn nonce() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -34,11 +34,7 @@ impl RestateSessionAdministration {
         build_generation: lash_core::engine::BuildGeneration,
     ) -> Self {
         let connection = connection.into();
-        let effect_host = Arc::new(RestateEffectHost::new(
-            connection,
-            authority_id.clone(),
-            build_generation.clone(),
-        ));
+        let effect_host = Arc::new(RestateEffectHost::new(connection, authority_id.clone()));
         Self {
             administration: administration.with_effect_host(effect_host),
             authority_id,

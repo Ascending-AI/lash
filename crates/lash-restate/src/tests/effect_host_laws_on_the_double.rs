@@ -4,7 +4,7 @@
 //! entering a handler, so the laws port unchanged. The await-event and
 //! journaled-effect legs live in their own mounts.
 
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 
 lash_conformance::effect_host_tests!({
     let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;

@@ -4,7 +4,7 @@
 //! journal, and a lost substrate is the invocation killed and purged, then
 //! submitted afresh under its key.
 
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 
 lash_conformance::segment_redrive_tests!({
     let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;

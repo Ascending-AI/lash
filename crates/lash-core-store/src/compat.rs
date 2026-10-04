@@ -30,10 +30,6 @@ impl ComponentId {
     pub const SQLITE_REGISTRY: Self = Self("sqlite-registry");
     /// The SQLite trigger database; its stamp is its `lash_compat` row.
     pub const SQLITE_TRIGGERS: Self = Self("sqlite-triggers");
-    /// Every `EffectGroupIndex` object; its stamp is the object's `_compat`.
-    pub const RESTATE_EFFECT_GROUP_STATE: Self = Self("restate-effect-group-state");
-    /// Every `EffectGroupPayload` object; its stamp is the object's `_compat`.
-    pub const RESTATE_EFFECT_GROUP_PAYLOAD: Self = Self("restate-effect-group-payload");
     /// Every `LashDurableWaitIndex` object; its stamp is the object's `_compat`.
     pub const RESTATE_DURABLE_WAIT_REGISTRY: Self = Self("restate-durable-wait-registry");
 
@@ -752,16 +748,6 @@ pub const DESCRIPTORS: &[CompatDescriptor] = &[
     store(ComponentId::SQLITE_CORE, SQLITE_CORE_SCHEMA_VERSION),
     store(ComponentId::SQLITE_REGISTRY, SQLITE_REGISTRY_SCHEMA_VERSION),
     store(ComponentId::SQLITE_TRIGGERS, SQLITE_TRIGGERS_SCHEMA_VERSION),
-    CompatDescriptor {
-        component: ComponentId::RESTATE_EFFECT_GROUP_STATE,
-        reads: RESTATE_OBJECT_FAMILY_FORMATS,
-        writes: RESTATE_OBJECT_FAMILY_FORMATS,
-    },
-    CompatDescriptor {
-        component: ComponentId::RESTATE_EFFECT_GROUP_PAYLOAD,
-        reads: RESTATE_OBJECT_FAMILY_FORMATS,
-        writes: RESTATE_OBJECT_FAMILY_FORMATS,
-    },
     CompatDescriptor {
         component: ComponentId::RESTATE_DURABLE_WAIT_REGISTRY,
         reads: RESTATE_OBJECT_FAMILY_FORMATS,

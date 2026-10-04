@@ -11,205 +11,6 @@ mod helpers;
 pub(super) use helpers::runtime_invocation;
 use helpers::{TestTurnCancelWakeStep, test_turn_cancel_wake_step};
 
-#[test]
-pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
-    let cases = vec![
-        (
-            RuntimeEffectCommand::Sleep {
-                spec: lash_core::SleepSpec::For { duration_ms: 1 },
-            },
-            "timer",
-        ),
-        (
-            RuntimeEffectCommand::process(ProcessCommand::List {
-                selection: lash_core::ProcessListSelection::Observed {
-                    session_scope: lash_core::SessionScope::new("session"),
-                    mode: lash_core::ProcessListMode::Live,
-                },
-            }),
-            "direct_process",
-        ),
-        (
-            RuntimeEffectCommand::AwaitEvent {
-                key: restate_await_event_key(
-                    &durable_turn_scope("session", "turn"),
-                    AwaitEventWaitIdentity::Custom {
-                        key: "event".to_string(),
-                    },
-                )
-                .expect("await-event key"),
-            },
-            "await_event",
-        ),
-        (
-            RuntimeEffectCommand::ArmToolCompletion {
-                key: restate_await_event_key(
-                    &durable_turn_scope("session", "turn"),
-                    AwaitEventWaitIdentity::Custom {
-                        key: "tool-arm".into(),
-                    },
-                )
-                .expect("tool completion key"),
-            },
-            "arm_tool_completion",
-        ),
-        (
-            RuntimeEffectCommand::AwaitToolCompletions {
-                waits: vec![lash_core::ToolCompletionWait {
-                    key: restate_await_event_key(
-                        &durable_turn_scope("session", "turn"),
-                        AwaitEventWaitIdentity::Custom {
-                            key: "tool-wait".into(),
-                        },
-                    )
-                    .expect("tool completion key"),
-                }],
-                dispatch: None,
-                transferable: true,
-            },
-            "await_tool_completions",
-        ),
-        (
-            RuntimeEffectCommand::PeekAwaitEvent {
-                key: restate_await_event_key(
-                    &durable_turn_scope("session", "turn"),
-                    AwaitEventWaitIdentity::Custom {
-                        key: "peek-event".to_string(),
-                    },
-                )
-                .expect("peek-await-event key"),
-            },
-            "peek_await_event",
-        ),
-        (
-            RuntimeEffectCommand::LlmCall {
-                request: helpers::llm_spec_for_profile("test"),
-            },
-            "journaled_run",
-        ),
-        (
-            RuntimeEffectCommand::Direct {
-                request: helpers::llm_spec_for_profile("test"),
-                usage_source: "test".to_string(),
-            },
-            "journaled_run",
-        ),
-        (
-            RuntimeEffectCommand::ToolAttempt {
-                call: Box::new(prepared_tool_call()),
-                execution_grant: None,
-                attempt: 1,
-                max_attempts: 1,
-            },
-            "journaled_run",
-        ),
-        (
-            RuntimeEffectCommand::ExecCode {
-                code: "1 + 1".to_string(),
-            },
-            // The interpreter is composite: it can issue nested timers,
-            // waits, tools, and model calls. Rebuild it on handler replay and
-            // let those child effects use their own stable journal keys.
-            "direct_local",
-        ),
-        (
-            RuntimeEffectCommand::LanguageRuntimeValue {
-                operation: "deferred_tool_resolution:v2:[\"web.fetch\"]".to_string(),
-            },
-            // FIG-2910 intentionally consumes one Restate journal ordinal
-            // before any dependent effect in a resource-bearing ExecCode body.
-            // Pre-cutover in-flight bodies must be drained or recreated; this
-            // command is never folded into the outer DirectLocal run.
-            "journaled_run",
-        ),
-        (
-            RuntimeEffectCommand::Checkpoint {
-                checkpoint: lash_core::CheckpointKind::AfterWork,
-            },
-            "journaled_run",
-        ),
-        (
-            RuntimeEffectCommand::SyncExecutionEnvironment,
-            "journaled_run",
-        ),
-        (
-            RuntimeEffectCommand::AcceptTurnInput {
-                draft: Box::new(lash_core::PendingTurnInputDraft::new(
-                    "session",
-                    lash_core::TurnInputIngress::next_turn(),
-                    lash_core::TurnInput::text("accepted"),
-                )),
-            },
-            "journaled_run",
-        ),
-        (
-            RuntimeEffectCommand::Trigger {
-                command: Box::new(lash_core::TriggerCommand::List {
-                    owner_scope: lash_core::TriggerOwnerScope::session("session"),
-                    filter: lash_core::TriggerSubscriptionFilter::default(),
-                }),
-            },
-            "journaled_run",
-        ),
-    ];
-
-    for (command, expected) in cases {
-        let kind = command.kind();
-        // A grouped child on an arm that rebuilds the envelope into a target with
-        // no membership slot must be refused, not silently stripped: those arms
-        // record no canonical envelope, so the wake rule has no hash to fold
-        // into and the group's identity fence would simply vanish.
-        let grouped =
-            RuntimeEffectEnvelope::new(runtime_invocation(kind, "classification"), command.clone())
-                .in_effect_group(
-                    "scope:group:batch:0",
-                    0,
-                    lash_core::GroupWakePolicy::First,
-                    lash_core::LoserPolicy::RunToCompletion,
-                );
-        let grouped_result = restate_effect_execution(grouped);
-        let carries_membership = matches!(
-            expected,
-            "direct_local" | "durable_tool_batch" | "journaled_run"
-        );
-        match grouped_result {
-            Ok(_) => assert!(
-                carries_membership,
-                "the {expected} arm drops group membership silently; it must refuse instead"
-            ),
-            Err(error) => {
-                assert!(
-                    !carries_membership,
-                    "the {expected} arm can carry membership and must not refuse it: {error}"
-                );
-                assert_eq!(
-                    error.code,
-                    lash_core::RuntimeErrorCode::RuntimeEffectGroupShape,
-                    "an unhonored membership must be a typed group-shape refusal"
-                );
-            }
-        }
-
-        let execution = restate_effect_execution(RuntimeEffectEnvelope::new(
-            runtime_invocation(kind, "classification"),
-            command,
-        ))
-        .expect("an ungrouped effect classifies");
-        let actual = match execution {
-            RestateEffectExecution::DirectProcess { .. } => "direct_process",
-            RestateEffectExecution::DurableProcessCommand { .. } => "durable_process_command",
-            RestateEffectExecution::DirectLocal { .. } => "direct_local",
-            RestateEffectExecution::Timer { .. } => "timer",
-            RestateEffectExecution::AwaitEvent { .. } => "await_event",
-            RestateEffectExecution::ArmToolCompletion { .. } => "arm_tool_completion",
-            RestateEffectExecution::AwaitToolCompletions { .. } => "await_tool_completions",
-            RestateEffectExecution::PeekAwaitEvent { .. } => "peek_await_event",
-            RestateEffectExecution::JournaledRun { .. } => "journaled_run",
-        };
-        assert_eq!(actual, expected);
-    }
-}
-
 #[macro_use]
 mod attempt;
 pub(crate) use attempt::{AttemptEnd, AttemptFailure, run_json_or_end_attempt};
@@ -242,7 +43,6 @@ pub(super) struct RecordingContext {
     pub(super) process_attachments:
         Mutex<Vec<crate::durable_wait::process_terminal::RestateProcessTerminalRequest>>,
     pub(super) scope_effect_begins: AtomicUsize,
-    pub(super) scope_group_records: AtomicUsize,
     pub(super) awaited_replay_keys: Mutex<Vec<String>>,
     pub(super) awaited_requests: Mutex<Vec<RestateDurableWaitAwaitRequest>>,
     awaited_events: Mutex<HashMap<String, Resolution>>,
@@ -256,20 +56,6 @@ pub(super) struct RecordingContext {
     /// session's revocation awaits its answer: the read answers `409`.
     pub(super) cancel_revocation_read: AtomicBool,
     pub(super) turn_cancel_gate: TestTurnCancelGate,
-    /// Every effect-group notice awaited, in order, by group.
-    pub(super) group_notices: Mutex<Vec<(String, crate::effect_group::EffectGroupNotice)>>,
-    /// The turn-cancel gate each effect-group notice raced, when it raced one.
-    pub(super) group_notice_turn_cancels: Mutex<Vec<RestateDurableWaitAwaitRequest>>,
-    /// What the index's `read_rank` answers; unregistered when unset.
-    pub(super) group_rank_read: Mutex<Option<crate::effect_group::EffectGroupReadRankResponse>>,
-    /// What every awaited notice answers; the raced turn gate wins when unset,
-    /// and an unraced notice is then answered `Drained`.
-    pub(super) group_notice_answer:
-        Mutex<Option<Result<crate::effect_group::EffectGroupNotification, TerminalError>>>,
-    /// Each group child's cancel fact as its index records it, by group and
-    /// position; a child absent from it has none.
-    pub(super) group_child_cancel_facts:
-        Mutex<HashMap<(String, usize), crate::effect_group::EffectGroupNotification>>,
 }
 
 #[derive(Default)]
@@ -312,15 +98,6 @@ impl RecordingContext {
         self.cancel_after_runs
             .lock_recover()
             .push(format!(".{operation}:v1"));
-    }
-
-    /// The engine cancels the invocation while the next frontier marker
-    /// awaits its answer: the marker's closure ran, and the step answers
-    /// `409`.
-    pub(super) fn cancel_after_next_frontier_marker(&self) {
-        self.cancel_after_runs
-            .lock_recover()
-            .push(":frontier".to_owned());
     }
 
     /// The next submission is refused, after another delivery of the start
@@ -490,8 +267,6 @@ impl RecordingContext {
     }
 }
 
-impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx> for Arc<RecordingContext> {}
-
 impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     fn invocation_id(&self) -> &str {
         "RecordingContext"
@@ -529,113 +304,6 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             });
         }
         Box::pin(async move { Ok(()) })
-    }
-
-    fn scope_group_record<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        _index_key: String,
-        _group_key: String,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        self.scope_group_records.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { Ok(true) })
-    }
-
-    fn scope_group_child_membership<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        _index_key: String,
-        _replay_key: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        Box::pin(async { Ok(None) })
-    }
-
-    fn effect_group_read_rank<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        _group_key: String,
-        _request: crate::effect_group::EffectGroupReadRankRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        crate::effect_group::EffectGroupReadRankResponse,
-                        TerminalError,
-                    >,
-                > + Send
-                + 'run,
-        >,
-    >
-    where
-        'ctx: 'run,
-    {
-        let answer = self.group_rank_read.lock_recover().clone();
-        Box::pin(async move {
-            answer.ok_or_else(|| TerminalError::new("EffectGroupIndex/read_rank is not registered"))
-        })
-    }
-
-    fn effect_group_child_cancel<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        group_key: String,
-        position: usize,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        Option<crate::effect_group::EffectGroupNotification>,
-                        TerminalError,
-                    >,
-                > + Send
-                + 'run,
-        >,
-    >
-    where
-        'ctx: 'run,
-    {
-        let fact = self
-            .group_child_cancel_facts
-            .lock_recover()
-            .get(&(group_key, position))
-            .cloned();
-        Box::pin(async move { Ok(fact) })
-    }
-
-    fn await_effect_group_notice<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        group_key: String,
-        notice: crate::effect_group::EffectGroupNotice,
-        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        _process_cancel: ProcessCancelRace,
-    ) -> TestTurnCancelRaceFuture<'run, crate::effect_group::EffectGroupNotification>
-    where
-        'ctx: 'run,
-    {
-        self.group_notices.lock_recover().push((group_key, notice));
-        let raced = turn_cancel.is_some();
-        if let Some(turn_cancel) = turn_cancel {
-            self.group_notice_turn_cancels
-                .lock_recover()
-                .push(turn_cancel);
-        }
-        let answer = self.group_notice_answer.lock_recover().clone();
-        Box::pin(async move {
-            Ok(match answer {
-                Some(answer) => RestateTurnCancelRaceOutcome::Completed(answer?),
-                None if raced => RestateTurnCancelRaceOutcome::TurnCancelled,
-                None => RestateTurnCancelRaceOutcome::Completed(
-                    crate::effect_group::EffectGroupNotification::Drained,
-                ),
-            })
-        })
     }
 
     fn sleep_send<'run>(
@@ -1061,10 +729,6 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) append_missing_on_replay: AtomicBool,
     pub(super) peek_records: Mutex<Vec<Option<Resolution>>>,
     pub(super) peek_cursor: AtomicUsize,
-    /// What each journaled read of a group child's cancel fact answered.
-    pub(super) child_cancel_records:
-        Mutex<Vec<Option<crate::effect_group::EffectGroupNotification>>>,
-    pub(super) child_cancel_cursor: AtomicUsize,
     /// Live process cancellation state, standing in for the resolved
     /// `process_cancel_requested` workflow promise (FIG-3149).
     pub(super) process_cancel_committed: AtomicBool,
@@ -1112,7 +776,6 @@ impl ReplayableRecordingContext {
         self.replaying.store(true, Ordering::SeqCst);
         self.append_missing_on_replay.store(false, Ordering::SeqCst);
         self.peek_cursor.store(0, Ordering::SeqCst);
-        self.child_cancel_cursor.store(0, Ordering::SeqCst);
         self.process_cancel_peek_cursor.store(0, Ordering::SeqCst);
         self.process_cancel_race_cursor.store(0, Ordering::SeqCst);
     }
@@ -1121,7 +784,6 @@ impl ReplayableRecordingContext {
         self.replaying.store(true, Ordering::SeqCst);
         self.append_missing_on_replay.store(true, Ordering::SeqCst);
         self.peek_cursor.store(0, Ordering::SeqCst);
-        self.child_cancel_cursor.store(0, Ordering::SeqCst);
         self.process_cancel_peek_cursor.store(0, Ordering::SeqCst);
         self.process_cancel_race_cursor.store(0, Ordering::SeqCst);
     }
@@ -1233,19 +895,6 @@ impl ReplayableRecordingContext {
             .collect::<Vec<_>>();
         envelopes.sort_by(|left, right| left.0.cmp(&right.0));
         envelopes
-    }
-
-    pub(super) fn recorded_runtime_effects(
-        &self,
-    ) -> std::collections::BTreeMap<String, RecordedRuntimeEffect> {
-        self.records
-            .lock_recover()
-            .iter()
-            .filter(|(effect_name, _)| !is_process_command_journal_fact(effect_name))
-            .map(|(effect_name, bytes)| {
-                (effect_name.clone(), decode_recorded_runtime_effect(bytes))
-            })
-            .collect()
     }
 
     pub(super) fn install_recorded_runtime_effects(
@@ -1382,11 +1031,6 @@ fn decode_recorded_runtime_effect(bytes: &[u8]) -> RecordedRuntimeEffect {
     serde_json::from_value(unwrapped).expect("recorded runtime effect")
 }
 
-impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx>
-    for Arc<ReplayableRecordingContext>
-{
-}
-
 impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     fn invocation_id(&self) -> &str {
         "ReplayableRecordingContext"
@@ -1441,22 +1085,6 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     {
         self.events
             .attach_process_terminal(&crate::services::DEFAULT_NAMESPACE, request)
-    }
-
-    fn scope_group_child_membership<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        index_key: String,
-        replay_key: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        self.events.scope_group_child_membership(
-            &crate::services::DEFAULT_NAMESPACE,
-            index_key,
-            replay_key,
-        )
     }
 
     fn sleep_send<'run>(
@@ -1731,49 +1359,6 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             self.record_process_cancel_race(process_cancel, &outcome);
             outcome
         })
-    }
-
-    fn effect_group_child_cancel<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        group_key: String,
-        position: usize,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        Option<crate::effect_group::EffectGroupNotification>,
-                        TerminalError,
-                    >,
-                > + Send
-                + 'run,
-        >,
-    >
-    where
-        'ctx: 'run,
-    {
-        let fact = if self.replaying.load(Ordering::SeqCst) {
-            let position = self.child_cancel_cursor.fetch_add(1, Ordering::SeqCst);
-            self.child_cancel_records
-                .lock_recover()
-                .get(position)
-                .cloned()
-                .ok_or_else(|| {
-                    TerminalError::new(format!(
-                        "missing recorded group-child cancel read at position {position}"
-                    ))
-                })
-        } else {
-            let fact = self
-                .events
-                .group_child_cancel_facts
-                .lock_recover()
-                .get(&(group_key, position))
-                .cloned();
-            self.child_cancel_records.lock_recover().push(fact.clone());
-            Ok(fact)
-        };
-        Box::pin(async move { fact })
     }
 
     fn peek_event<'run>(

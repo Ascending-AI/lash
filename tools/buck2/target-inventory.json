@@ -54170,10 +54170,6 @@
     }
   ],
   "restate_suite_targets": {
-    "admission-fence": {
-      "live": "//crates/lash-restate:restate_admission_fence_live",
-      "replay": "//crates/lash-restate:restate_admission_fence_replay"
-    },
     "attachment-attach": {
       "live": "//crates/lash-restate:restate_attachment_attach_live",
       "replay": "//crates/lash-restate:restate_attachment_attach_replay"
@@ -54221,10 +54217,6 @@
     "namespaces": {
       "live": "//crates/lash-restate-test:restate_namespaces_live",
       "replay": "//crates/lash-restate-test:restate_namespaces_replay"
-    },
-    "paused-group-children": {
-      "live": "//crates/lash-restate:restate_paused_group_children_live",
-      "replay": "//crates/lash-restate:restate_paused_group_children_replay"
     },
     "process-await": {
       "live": "//crates/lash-restate:restate_process_await_live",
@@ -54313,16 +54305,12 @@
       "//crates/lash-restate-test:restate_server_double_replay",
       "//crates/lash-restate-test:restate_session_shifts_live",
       "//crates/lash-restate-test:restate_session_shifts_replay",
-      "//crates/lash-restate:restate_admission_fence_live",
-      "//crates/lash-restate:restate_admission_fence_replay",
       "//crates/lash-restate:restate_attachment_attach_live",
       "//crates/lash-restate:restate_attachment_attach_replay",
       "//crates/lash-restate:restate_effect_group_live",
       "//crates/lash-restate:restate_effect_group_replay",
       "//crates/lash-restate:restate_json_decode_live",
       "//crates/lash-restate:restate_json_decode_replay",
-      "//crates/lash-restate:restate_paused_group_children_live",
-      "//crates/lash-restate:restate_paused_group_children_replay",
       "//crates/lash-restate:restate_process_await_live",
       "//crates/lash-restate:restate_process_await_replay",
       "//crates/lash-restate:restate_refused_successor_drain_live",

@@ -1,9 +1,5 @@
 use super::*;
 
-pub(super) fn closed_run_cancel_prefix(run: &lash_core::TurnId) -> String {
-    format!("turn/{}/{}:", run.as_str().len(), run.as_str())
-}
-
 fn belongs_to_closed_run(
     key: &AwaitEventKey,
     session_id: &SessionId,
@@ -117,11 +113,7 @@ pub(super) async fn retire_run(
     let detached = super::process_terminal::detach(namespace, &ctx, &mut metadata, |key| {
         belongs_to_closed_run(key, &request.session_id, &request.run)
     });
-    let before = metadata.cancel_decided.len() + metadata.awakeables.len();
-    let prefix = closed_run_cancel_prefix(&request.run);
-    metadata
-        .cancel_decided
-        .retain(|id| !id.starts_with(&prefix));
+    let before = metadata.awakeables.len();
     let mut retained = Vec::with_capacity(metadata.awakeables.len());
     for entry in std::mem::take(&mut metadata.awakeables) {
         if belongs_to_closed_run(&entry.key, &request.session_id, &request.run) {
@@ -131,7 +123,7 @@ pub(super) async fn retire_run(
         }
     }
     metadata.awakeables = retained;
-    if detached || metadata.cancel_decided.len() + metadata.awakeables.len() != before {
+    if detached || metadata.awakeables.len() != before {
         object_state::set_stamped(
             &ctx,
             DURABLE_WAIT_INDEX_METADATA_KEY,

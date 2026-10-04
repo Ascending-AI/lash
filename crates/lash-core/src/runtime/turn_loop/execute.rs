@@ -636,7 +636,7 @@ fn aborted_by_turn_cancel(code: &RuntimeErrorCode) -> bool {
     matches!(
         code,
         RuntimeErrorCode::RuntimeEffectSleepCancelled
-            | RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
+            | RuntimeErrorCode::RuntimeToolRunAwaitCancelled
             | RuntimeErrorCode::TurnControlWaitCancelled
     )
 }

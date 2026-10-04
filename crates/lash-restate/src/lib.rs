@@ -87,7 +87,6 @@ mod compat;
 mod controller;
 mod deployment_registry;
 mod durable_wait;
-mod effect_group;
 mod effect_host;
 mod engine;
 mod formats;
@@ -121,42 +120,19 @@ pub use compat::{
 };
 
 pub use controller::{
-    EFFECT_JOURNAL_VERSION, GroupChildCancelArm, GroupChildCancelRace,
-    PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION, ProcessCancelRace, ProcessWorkflowStartFailure,
-    RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
-    SignalWaitOutcome, TurnSleepOutcome, TurnWaitOutcome,
+    EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION, ProcessCancelRace,
+    ProcessWorkflowStartFailure, RestateEffectControllerOptions, RestateEffectError,
+    RestateRuntimeEffectController, SignalWaitOutcome, TurnSleepOutcome, TurnWaitOutcome,
 };
 pub use deployment_registry::RestateDeploymentRegistry;
 pub use durable_wait::{
     DURABLE_WAIT_REGISTRY_FORMAT_VERSION, ProcessTerminalDelivery, ProcessTerminalSubscription,
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitAwakeableRequest,
-    RestateDurableWaitCancelDecidedRequest, RestateDurableWaitClassification,
-    RestateDurableWaitEffectRequest, RestateDurableWaitGroupRequest,
+    RestateDurableWaitClassification, RestateDurableWaitEffectRequest,
     RestateDurableWaitHandOverRequest, RestateDurableWaitIndexRequest,
     RestateDurableWaitRegistration, RestateDurableWaitResolveRefusal,
     RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse, RestateDurableWaitScope,
     RestateDurableWaitSettleRequest, RestateProcessTerminalRequest, RestateTurnGatePeek,
-};
-pub use effect_group::{
-    EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
-    EFFECT_GROUP_STATE_FORMAT_VERSION, EffectGroupAdmissionRequest, EffectGroupAdmissionResponse,
-    EffectGroupAdoptRequest, EffectGroupCleanup, EffectGroupCleanupFacts, EffectGroupCloseOutcome,
-    EffectGroupCloseRequest, EffectGroupCloseResponse, EffectGroupDispatchRequest,
-    EffectGroupDispatchState, EffectGroupFinishRetirementResponse, EffectGroupMembership,
-    EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadGetResponse,
-    EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse, EffectGroupPhase,
-    EffectGroupProbeAdoptResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
-    EffectGroupReadRankResponse, EffectGroupRecordSettlementRequest,
-    EffectGroupRecordSettlementResponse, EffectGroupRefusal, EffectGroupRefusalRequest,
-    EffectGroupRegisterDispatchRequest, EffectGroupRegisterDispatchResponse,
-    EffectGroupRegisterRefusalResponse, EffectGroupRetireResponse,
-    EffectGroupRetirementCancelResponse, EffectGroupSettlementRecord,
-    EffectGroupSettlementTerminal, EffectGroupShape,
-};
-pub use effect_group::{
-    EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse,
-    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupCommittedFinal,
-    EffectGroupNotice, EffectGroupNotification, EffectGroupServedRank, EffectGroupStateLiveRecord,
 };
 pub use effect_host::RestateEffectHost;
 pub use engine::{RestateConfig, RestateEngine, RestateRegistrationError, deployment_path};
@@ -208,7 +184,6 @@ pub(crate) use durable_wait::{
     LashDurableWaitWorkflowImpl,
 };
 #[cfg(test)]
-pub(crate) use effect_group::{EffectGroupDispatch, EffectGroupDispatchImpl};
 #[cfg(test)]
 pub(crate) use process::{
     LashProcessWorkflow, LashProcessWorkflowImpl, RestateCoreProcessRunner, RestateProcessRunner,

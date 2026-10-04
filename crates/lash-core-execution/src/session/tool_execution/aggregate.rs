@@ -25,8 +25,6 @@
 
 use super::*;
 
-pub(crate) use super::group::ToolAggregateConsumer;
-
 /// One unique leaf of an aggregate, in first-appearance order.
 pub enum ToolAggregateLeaf {
     /// A logical call to admit in the owning Run.

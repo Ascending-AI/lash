@@ -6,7 +6,6 @@ use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
     ToolFailure, ToolFailureClass, TurnActivityId, TurnEvent,
 };
-use std::sync::Arc;
 
 /// v3 (FIG-3586) retires the opener occurrence ordinal v2 folded into the
 /// batch identity.
@@ -410,7 +409,6 @@ impl ToolBatchReplies {
 mod aggregate;
 #[path = "tool_execution/batch.rs"]
 mod batch;
-mod deferred;
 mod group;
 
 pub use aggregate::{

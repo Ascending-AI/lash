@@ -24,9 +24,7 @@ use serde::Serialize;
 
 use crate::llm::types::{LlmOutputSpec, LlmToolChoice};
 
-use super::{
-    EffectGroupMembership, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-};
+use super::{RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation};
 
 /// The canonical JSON an envelope journals: the envelope itself, except that a
 /// model request's content is replaced by its digest.
@@ -67,7 +65,6 @@ pub(super) fn journaled_envelope_json(
                     crate::stable_hash::stable_json_string(&JournaledBusinessEnvelope {
                         invocation: &envelope.invocation,
                         command: &command,
-                        group: envelope.group.as_deref(),
                     })
                 }
                 None => crate::stable_hash::stable_json_string(envelope),
@@ -77,7 +74,6 @@ pub(super) fn journaled_envelope_json(
     crate::stable_hash::stable_json_string(&JournaledEnvelope {
         invocation: &envelope.invocation,
         command,
-        group: envelope.group.as_deref(),
     })
 }
 
@@ -87,8 +83,6 @@ pub(super) fn journaled_envelope_json(
 struct JournaledBusinessEnvelope<'a> {
     invocation: &'a RuntimeEffectInvocation,
     command: &'a RuntimeEffectCommand,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    group: Option<&'a EffectGroupMembership>,
 }
 
 /// [`RuntimeEffectEnvelope`]'s field order and names, over the journaled
@@ -97,8 +91,6 @@ struct JournaledBusinessEnvelope<'a> {
 struct JournaledEnvelope<'a> {
     invocation: &'a RuntimeEffectInvocation,
     command: JournaledLlmCommand<'a>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    group: Option<&'a EffectGroupMembership>,
 }
 
 /// [`RuntimeEffectCommand`]'s tag and field names for the two model-request

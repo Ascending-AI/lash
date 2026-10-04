@@ -40,41 +40,6 @@ impl lash_core::RuntimeEffectController for CrossingCounter {
             ),
         ))
     }
-
-    async fn open_effect_group(
-        &self,
-        _group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.crossings.fetch_add(1, Ordering::SeqCst);
-        Err(lash_core::RuntimeEffectControllerError::new(
-            lash_core::RuntimeErrorCode::RuntimeStore,
-            "a refused predecessor opened an effect group",
-        ))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::TurnCancelWait,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.crossings.fetch_add(1, Ordering::SeqCst);
-        Err(lash_core::RuntimeEffectControllerError::new(
-            lash_core::RuntimeErrorCode::RuntimeStore,
-            "a refused predecessor awaited an effect group",
-        ))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.crossings.fetch_add(1, Ordering::SeqCst);
-        Err(lash_core::RuntimeEffectControllerError::new(
-            lash_core::RuntimeErrorCode::RuntimeStore,
-            "a refused predecessor closed an effect group",
-        ))
-    }
 }
 
 struct StoredBytesArtifactStore {

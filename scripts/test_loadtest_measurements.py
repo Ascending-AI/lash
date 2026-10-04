@@ -549,7 +549,7 @@ class MeasurementsTests(unittest.TestCase):
         run, operations, samples, witness = evidence()
         middle = copy.deepcopy(samples[-1])
         middle.update(monotonic_ns=50, collection_finished_ns=55)
-        middle['invocations'].append(dict(id='inboxed-child', target_service_name='EffectGroupIndex', target_service_key='child', invoked_by_id='one', status='inboxed'))
+        middle['invocations'].append(dict(id='inboxed-child', target_service_name='LashDurableWaitIndex', target_service_key='child', invoked_by_id='one', status='inboxed'))
         middle['journals'].append(dict(id='inboxed-child', journal={'entries': 0, 'bytes': 0}))
         for sample in [samples[0], middle, samples[1]]:
             sample['cancellation_commands'] = []
@@ -1192,62 +1192,6 @@ class MeasurementsTests(unittest.TestCase):
         witness['fault_rows'] = 1
         with self.assertRaisesRegex(ValueError, 'fault witness counter mismatch'):
             m.reconcile_witness(run, operations, witness, witness_evidence(operations))
-
-
-class ToolCostMeasurementsTests(unittest.TestCase):
-    def test_pinned_receipts_reconcile_and_reject_incomplete_evidence(self):
-        import gzip
-        archive = Path(__file__).resolve().parents[1] / 'crates/lash-perf/testdata/tool-cost/e4735b406286c266e6ef2965242634afcd35d6a5/receipts.jsonl.gz'
-        seen = set()
-        first = None
-        with gzip.open(archive, 'rt') as source:
-            for line in source:
-                receipt = json.loads(line)
-                counts = m.tool_cost_census(receipt)
-                if receipt['fixture']['branch'] == 'done':
-                    self.assertFalse(counts['tool_route']['raw_target_met'])
-                    self.assertFalse(counts['tool_route']['source_target_met'])
-                    if receipt['fixture']['payload_bytes'] == 1048576:
-                        self.assertFalse(counts['boundary_complete'])
-                        self.assertTrue(counts['codec_refusals'])
-                    else:
-                        self.assertTrue(counts['boundary_complete'])
-                fixture = receipt['fixture']
-                key = (fixture['branch'], fixture['width'], fixture['payload_bytes'])
-                self.assertNotIn(key, seen)
-                seen.add(key)
-                if first is None and key == ('done', 1, 32):
-                    first = receipt
-        self.assertTrue({('done', width, size) for width in (1, 2, 16)
-                         for size in (32, 8192, 262144, 65536, 1048576)} <= seen)
-        self.assertTrue({(branch, width, 32) for branch in
-                         ('retry', 'deferred', 'declared-start', 'cancel', 'race-loser',
-                          'turn-transfer', 'process-transfer') for width in (1, 2, 16)} <= seen)
-        self.assertIsNotNone(first)
-        for mutation, reason in [
-                ('entry', 'incomplete raw journal'),
-                ('bytes', 'payload byte mismatch'),
-                ('sql', 'SQL trace population mismatch'),
-                ('ancestor', 'missing invocation ancestor')]:
-            with self.subTest(mutation=mutation):
-                receipt = copy.deepcopy(first)
-                if mutation == 'entry':
-                    receipt['journal'].pop()
-                elif mutation == 'bytes':
-                    receipt['journal'][0]['payload_bytes'] += 1
-                elif mutation == 'sql':
-                    receipt['sql']['rows'].pop()
-                else:
-                    receipt['invocations'][0]['invoked_by_id'] = 'omitted-parent'
-                with self.assertRaisesRegex(ValueError, reason):
-                    m.tool_cost_census(receipt)
-        receipt = copy.deepcopy(first)
-        leaf = next(row for row in receipt['invocations']
-                    if row['target_service_name'] == 'EffectGroupIndex'
-                    and row['target_handler_name'] == 'read_rank')
-        receipt['invocations'].remove(leaf)
-        with self.assertRaisesRegex(ValueError, 'missing called invocation descendant'):
-            m.tool_route_census(receipt)
 
 
 if __name__ == '__main__':

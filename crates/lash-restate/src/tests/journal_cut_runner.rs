@@ -164,7 +164,7 @@ impl ConformanceTurnRunner for JournalCutRunner {
 mod served_process_start_on_the_server_double {
     use std::sync::Arc;
 
-    use super::super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+    use super::super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 
     /// The subagent plugin under a capability registry holding `names`.
     fn subagents(names: &[&str]) -> Arc<dyn lash_core::facade_support::PluginFactory> {
@@ -225,7 +225,7 @@ mod served_only_outside_a_run {
     };
     use lash_sansio::{SessionId, TurnId};
 
-    use super::super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+    use super::super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 
     struct NoopProcessWork;
 

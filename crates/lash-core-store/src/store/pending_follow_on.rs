@@ -100,24 +100,6 @@ pub struct RunOpenerState {
     pub run: Option<Box<crate::tool_run::RunTransfer>>,
     /// The settlements already incorporated by any earlier cell or segment.
     pub incorporation: crate::effect_opener::IncorporationLedger,
-    /// Groups whose consumers stopped before exhaustion, in formation order.
-    pub groups: Vec<RunOpenerGroup>,
-}
-
-/// A retained group's consumer cursor and tool-call reservation.
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct RunOpenerGroup {
-    /// The durable group's identity, reused by the successor.
-    pub group_key: String,
-    /// The group's fixed number of children.
-    pub children: usize,
-    /// The settled prefix the consumer has already consumed.
-    pub consumed: usize,
-    /// The tool-call reservation this group continues to hold.
-    pub held_tool_calls: usize,
 }
 
 /// Material edges moved by the same transaction that publishes or retires a

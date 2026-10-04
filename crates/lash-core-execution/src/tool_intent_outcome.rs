@@ -81,10 +81,10 @@ pub enum ToolIntentRefusalReason {
     CommandFailed {
         cause: crate::ToolIntentCommandFailure,
     },
-    /// The group child whose emission minted this intent is cancel-decided:
+    /// The logical Run whose emission minted this intent is cancel-decided:
     /// ADR 0099 §4 forbids new semantic admission under a cancelled
     /// invocation, so the intent is refused before any of its commands run.
-    MintingGroupChildCancelled,
+    MintingRunCancelled,
     /// A declared start whose identity is not the one its call's declaring
     /// attempt derives for index 0 (ADR 0116 §3.1): another call's, another
     /// execution scope's or minting emission's, a nonzero index, or a replay
@@ -110,7 +110,7 @@ impl ToolIntentRefusalReason {
             Self::ForeignTriggerOwnerScope { .. } => "foreign_trigger_owner_scope".into(),
             Self::ForeignTriggerActor { .. } => "foreign_trigger_actor".into(),
             Self::CommandFailed { cause } => cause.code(),
-            Self::MintingGroupChildCancelled => "minting_group_child_cancelled".into(),
+            Self::MintingRunCancelled => "minting_run_cancelled".into(),
             Self::DeclaredStartIdentityMismatch { .. } => "declared_start_identity_mismatch".into(),
         }
     }
@@ -154,8 +154,8 @@ impl ToolIntentRefusalReason {
                 "{code}: the registration names actor {recorded:?}; the attempt resolves {expected:?}"
             ),
             Self::CommandFailed { cause } => format!("{code}: {cause}"),
-            Self::MintingGroupChildCancelled => {
-                format!("{code}: the group child whose emission minted the intent was cancelled")
+            Self::MintingRunCancelled => {
+                format!("{code}: the logical Run whose emission minted the intent was cancelled")
             }
             Self::DeclaredStartIdentityMismatch { expected, recorded } => format!(
                 "{code}: the start was declared as `{}`; its call derives `{}`",

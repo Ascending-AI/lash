@@ -42,7 +42,6 @@ impl RuntimeErrorCause {
             | Self::MissingRecordedProcessConfig { .. }
             | Self::SessionDeleted { .. }
             | Self::ArtifactReferrerEnded { .. }
-            | Self::EffectGroupChildUnroutable { .. }
             | Self::RunShapeRefused { .. }
             | Self::ConfigRefused { .. }
             | Self::MaxToolCallsExceeded { .. }

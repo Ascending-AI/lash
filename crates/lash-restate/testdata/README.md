@@ -12,8 +12,8 @@ journals. Do not edit fixture contents by hand.
   ids elided as `#`.
 
 The workload initializes the session's durable-wait index through `reinstate`
-before starting the turn. Otherwise `register` and `record_group_child` race to
-initialize it, moving the bootstrap commands between their handler journals.
+before starting the turn, keeping the bootstrap commands in its initialization
+journal rather than a later wait-registration handler.
 The initialization remains part of the recorded corpus.
 
 The service list is derived:

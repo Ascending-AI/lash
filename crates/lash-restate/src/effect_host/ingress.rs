@@ -237,17 +237,9 @@ pub(super) async fn await_restate_await_event_via_ingress(
                 key,
                 Resolution::Cancelled,
             ).await;
-            // A cancel-decided child's key refuses the release (ADR 0099 §4):
-            // the waiter was cancelled either way.
             match outcome {
                 Ok(ResolveOutcome::AlreadyResolved { terminal }) => Ok(terminal),
                 Ok(ResolveOutcome::Accepted | ResolveOutcome::UnknownOrRevoked) => {
-                    Ok(Resolution::Cancelled)
-                }
-                Err(error)
-                    if error.code
-                        == lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided =>
-                {
                     Ok(Resolution::Cancelled)
                 }
                 Err(error) => Err(error),

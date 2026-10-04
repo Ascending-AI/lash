@@ -22,11 +22,9 @@
     },
     "effect_omissions": {},
     "event_sequence": 0,
-    "held_tool_calls": {},
     "incorporation_ledger": {
       "incorporated": []
     },
-    "outstanding_groups": [],
     "pending_summary": [],
     "signal_wait_ordinals": {},
     "started_process_ids": [],

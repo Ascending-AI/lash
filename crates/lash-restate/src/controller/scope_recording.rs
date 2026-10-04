@@ -1,7 +1,7 @@
 //! One scope's view of the in-handler controller.
 //!
 //! Forwards every call to the handler controller and records executing
-//! effects of runtime operations and opened groups in the scope's index.
+//! effects of runtime operations in the scope's index.
 //! Process effects are protected by their segment's journal pin instead.
 
 use lash_sansio::SessionId;
@@ -9,9 +9,9 @@ use std::sync::Arc;
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectGroupHandle, ExecutionScope, GroupSettlement, LoserPolicy, Resolution, ResolveOutcome,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeError,
 };
 use restate_sdk::errors::TerminalError;
 
@@ -19,18 +19,13 @@ use super::{RestateControllerContext, RestateRuntimeEffectController};
 use crate::durable_wait::durable_wait_index_key_for_scope;
 
 /// One scope's view of the in-handler controller: forwards everything, and
-/// records runtime-operation effects and opened groups in the scope's index.
+/// records runtime-operation effects in the scope's index.
 /// A process segment pins its index once until it can issue no more effects.
 pub(super) struct ScopeRecordingController<'run, 'ctx, C> {
     pub(super) inner: HandlerController<'run, 'ctx, C>,
     /// The admitted scope this controller serves: the claim address its
     /// effects fence on and, for a process, the incarnation it runs under.
     pub(super) admitted: lash_core::AdmittedScope,
-    /// The group child this controller's semantic admissions are minted
-    /// under, when it was bound by
-    /// [`RestateRuntimeEffectController::scoped_effect_controller_for_group_child`]
-    /// (FIG-3470). `None` for an unbound scope controller.
-    pub(super) binding: Option<lash_core::GroupChildBinding>,
     pub(super) run_records: lash_core::facade_support::RunRecordObserver,
 }
 
@@ -83,17 +78,6 @@ where
         }
     }
 
-    /// The fence's refusal of an admission under a cancel-decided child.
-    fn cancel_decided(replay_key: &str) -> RuntimeEffectControllerError {
-        RuntimeEffectControllerError::new(
-            lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
-            format!(
-                "the group child that minted replay key `{replay_key}` is cancel-decided; \
-                 ADR 0099 §4 forbids a new semantic admission under it"
-            ),
-        )
-    }
-
     fn record_error(operation: &str, error: TerminalError) -> RuntimeEffectControllerError {
         crate::wire::typed_terminal(error.message()).unwrap_or_else(|| {
             RuntimeEffectControllerError::from(RuntimeError::new(
@@ -116,16 +100,9 @@ where
     where
         Self: 'a,
     {
-        // A rebound scope controller is a different admission domain: the
-        // binding survives only while the scope it was minted under does.
-        let binding = self
-            .binding
-            .clone()
-            .filter(|binding| binding.child.execution_scope == *admitted.scope());
         Arc::new(ScopeRecordingController {
             inner: self.inner.clone(),
             admitted,
-            binding,
             run_records: Default::default(),
         })
     }
@@ -268,16 +245,6 @@ where
         self.inner.observe_process_cancel(lent_stop).await
     }
 
-    async fn observe_group_child_cancel(&self) -> Result<bool, RuntimeEffectControllerError> {
-        self.inner.observe_group_child_cancel().await
-    }
-
-    fn group_child_cancel_watch(
-        &self,
-    ) -> Option<std::sync::Arc<dyn lash_core::GroupChildCancelWatch>> {
-        self.inner.group_child_cancel_watch()
-    }
-
     async fn record_process_drive_step(
         &self,
         name: String,
@@ -361,51 +328,6 @@ where
                 ),
             ));
         }
-        // §4's admission fence (FIG-3470): a bound controller asks the
-        // serialized group index before every effect it serves, so a nested
-        // admission minted under a cancel-decided child refuses here rather
-        // than executing under ambient authority. The journaled call makes
-        // the answer replay-stable.
-        if let Some(binding) = &self.binding {
-            match self
-                .inner
-                .context
-                .effect_group_admit_semantic(
-                    &self.inner.namespace,
-                    binding.membership.group_key.clone(),
-                    crate::effect_group::EffectGroupAdmitSemanticRequest {
-                        replay_key: binding.child.replay_key.clone(),
-                    },
-                )
-                .await
-                .map_err(|error| {
-                    // The engine's cancellation of the child's invocation,
-                    // which the index requests once it decided the child's
-                    // cancel, is that decided cancel (FIG-3904).
-                    if error.code() == 409 {
-                        Self::cancel_decided(&binding.child.replay_key)
-                    } else {
-                        Self::record_error("admit_semantic", error)
-                    }
-                })? {
-                crate::effect_group::EffectGroupAdmitSemanticResponse::Admitted => {}
-                crate::effect_group::EffectGroupAdmitSemanticResponse::CancelDecided => {
-                    return Err(Self::cancel_decided(&binding.child.replay_key));
-                }
-                crate::effect_group::EffectGroupAdmitSemanticResponse::UnknownChild
-                | crate::effect_group::EffectGroupAdmitSemanticResponse::UnknownGroup => {
-                    return Err(RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::RuntimeEffectGroupShape,
-                        format!(
-                            "the group index holds no live child `{}` in group `{}` to admit \
-                             under; the binding derives from a retained membership and cannot \
-                             name a child the group does not contain",
-                            binding.child.replay_key, binding.membership.group_key
-                        ),
-                    ));
-                }
-            }
-        }
         if matches!(self.admitted.scope(), ExecutionScope::Process { .. }) {
             return self.inner.execute_effect(envelope, local_executor).await;
         }
@@ -433,64 +355,6 @@ where
             .await
             .map_err(|error| Self::record_error("end_effect", error))?;
         outcome
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        group.validate_execution_scope(self.admitted.scope())?;
-        if let Some(index_key) = self.index_key()
-            && !self
-                .inner
-                .context
-                .scope_group_record(
-                    &self.inner.namespace,
-                    index_key,
-                    group.group_key().to_string(),
-                )
-                .await
-                .map_err(|error| Self::record_error("record_group", error))?
-        {
-            return Err(self.scope_retired());
-        }
-        self.inner
-            .open_effect_group_opened_by(group, &self.admitted)
-            .await
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut EffectGroupHandle,
-        cancel: lash_core::TurnCancelWait,
-    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<Option<lash_core::RankedGroupSettlement>, lash_core::RuntimeEffectControllerError>
-    {
-        self.inner.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: EffectGroupHandle,
-        disposition: LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.inner
-            .await_group_child_drain_admission(group_key, rank)
-            .await
     }
 
     async fn read_recorded_journal(

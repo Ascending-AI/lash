@@ -126,9 +126,7 @@ pub(super) async fn attach(
     let object = registry.admit(&ctx).await?;
     let address = receiver_address(ctx.key(), &subscription.receiver)?;
     let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
-    if metadata.revoked
-        || metadata.is_cancel_decided(&subscription.receiver.scope, &subscription.receiver.wait)?
-    {
+    if metadata.revoked {
         return Ok(Reply::at(wire, false));
     }
     if object_state::get_stamped::<IndexedWait>(
@@ -287,7 +285,6 @@ pub(super) async fn deliver(
     let address = receiver_address(ctx.key(), &subscription.receiver)?;
     let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
     if metadata.revoked
-        || metadata.is_cancel_decided(&subscription.receiver.scope, &subscription.receiver.wait)?
         || !metadata.process_sources.contains(subscription)
         || object_state::get_stamped::<IndexedWait>(
             &ctx,

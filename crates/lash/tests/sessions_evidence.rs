@@ -305,13 +305,6 @@ fn drain_area_witnesses() {
             lash::runtime::RuntimeErrorCode::RuntimeEffectAttachmentStore
         )
     });
-    // W0106: lash::runtime::RuntimeErrorCode::RuntimeEffectGroupChildCancelled [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
-        )
-    });
     // W0107: lash::runtime::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
@@ -1163,8 +1156,6 @@ fn drain_area_witnesses() {
             let _ = protocol_iteration;
         }
     });
-    // W0379: lash_core::facade_support::refuse_unhonored_group_membership [function]
-    let _ = lash_core::facade_support::refuse_unhonored_group_membership;
     // W0380: lash_core::facade_support::validate_replayed_effect_envelope [function]
     let _ = lash_core::facade_support::validate_replayed_effect_envelope;
     // W0381: lash::runtime::OutputState [enum]
@@ -1469,13 +1460,6 @@ fn drain_area_witnesses() {
     // W0481: lash::durability::ProcessLocalExecution::effect_controller [field]
     field_witness(|value: &lash::durability::ProcessLocalExecution| {
         let _ = &value.effect_controller;
-    });
-    // W0484: lash::runtime::RuntimeErrorCode::RuntimeEffectGroupDrainDeferred [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::RuntimeEffectGroupDrainDeferred
-        )
     });
     // W0485: lash::runtime::ExecutionScope::from_journal_key [function]
     let _ = lash::runtime::ExecutionScope::from_journal_key;

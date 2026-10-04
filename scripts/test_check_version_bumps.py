@@ -1114,8 +1114,7 @@ AUDITED_GUARDS = {
     ),
     "crates/lash-sansio/src/process_cursor.rs:PROCESS_CURSOR_VERSION": ("ProcessId",),
     "crates/lash-restate/src/compat.rs:RESTATE_WIRE_VERSION": (
-        "VersionRange", "RestateCompatError", "EffectGroupOpenRequest",
-        "EffectGroupCommitChildResponse", "EffectGroupChildRequest", "EffectGroupNotice",
+        "VersionRange", "RestateCompatError",
         "RestateDurableWaitAwaitRequest", "RestateProcessWorkflowInput",
         "RestateSessionShiftRequest", "ObjectUpgradeResponse",
         "BuildGeneration", "AwaitEventKey",

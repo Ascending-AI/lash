@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use lash_core::EffectHost;
 
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 
 /// The turn crash laws' fixture on the server double: the endpoint's
 /// own turn runner, host and session catalog. A crash kills the turn's
@@ -37,8 +37,6 @@ lash_conformance::turn_crash_error_return_tests!({ turn_crash_runner_fixture().a
 lash_conformance::turn_crash_level_1_tests!(parked: &[]; {
     turn_crash_runner_fixture().await
 });
-
-lash_conformance::effect_layer_group_child_tests!({ turn_crash_runner_fixture().await });
 
 // A drain crashed after its final commit and redriven through the session
 // shift replays its recorded admission and seal and reads the

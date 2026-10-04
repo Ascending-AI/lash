@@ -216,12 +216,10 @@ pub(super) struct LashlangSegmentState {
     /// consumed cursor. A boundary is never declined because a loser is
     /// unsettled; the successor segment reattaches these cursors and the
     /// process terminal closes them.
-    pub(super) outstanding_groups: Vec<lash_core::EffectGroupHandle>,
     /// The tool calls each held group counts against the session's
     /// `max_tool_calls` (FIG-4546), by group key. The successor segment is
     /// the same process, so it holds the same calls: it reuses these
     /// reservations rather than counting the groups again or not at all.
-    pub(super) held_tool_calls: BTreeMap<String, usize>,
     /// The complete tool Run, sealed after local durable acceptance.
     #[serde(deserialize_with = "deserialize_tool_run")]
     pub(super) tool_run: Option<Box<lash_core::tool_run::RunTransfer>>,
@@ -281,8 +279,6 @@ pub(super) fn capture_segment(
         incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
         pending_summary: host.effect_summary.pending(),
         effect_omissions: host.effect_summary.omissions(),
-        outstanding_groups: host.ctx.outstanding_groups_snapshot(),
-        held_tool_calls: host.ctx.held_tool_calls_snapshot(),
         tool_run: tool_run.map(Box::new),
         // The worker released at this boundary settled its measured usage,
         // so the budget holds everything the body consumed so far.

@@ -1,8 +1,7 @@
 //! Engine-control refusals over SQLite files and the Restate double.
 use super::*;
 use crate::tests::{
-    conformance_and_poison::external_registration,
-    effect_group_committed_recovery::HarnessStoreTier,
+    conformance_and_poison::external_registration, harness_store_tiers::HarnessStoreTier,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

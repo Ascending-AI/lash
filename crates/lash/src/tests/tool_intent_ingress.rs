@@ -926,31 +926,6 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
             .insert(replay_key, outcome.clone());
         Ok(outcome)
     }
-
-    async fn open_effect_group(
-        &self,
-        _group: lash_core::RuntimeEffectGroup,
-    ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
-    {
-        Err(lash_core::effect_groups_unsupported("KeyJournalController"))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::TurnCancelWait,
-    ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
-    {
-        Err(lash_core::effect_groups_unsupported("KeyJournalController"))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
-    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported("KeyJournalController"))
-    }
 }
 
 /// A controller-owned tier that parks its first admission forever, as a
@@ -1074,37 +1049,6 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(outcome.clone());
         Ok(outcome)
-    }
-
-    async fn open_effect_group(
-        &self,
-        _group: lash_core::RuntimeEffectGroup,
-    ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
-    {
-        Err(lash_core::effect_groups_unsupported(
-            "AdmissionCrashController",
-        ))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::TurnCancelWait,
-    ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
-    {
-        Err(lash_core::effect_groups_unsupported(
-            "AdmissionCrashController",
-        ))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
-    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "AdmissionCrashController",
-        ))
     }
 }
 

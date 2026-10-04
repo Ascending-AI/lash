@@ -35,7 +35,6 @@
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"
 filters = [
-  "live_effect_group_sdk_preconditions",
   "tests::conformance_and_poison::",
   # FIG-4236: the usage accounting engine laws on a live server.
   # FIG-4651: the live-fault park laws on a live server and on the double
@@ -43,11 +42,6 @@ filters = [
   "tests::live_fault_park_on_the_double::",
 ]
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
-# The admission-fence law is registered by name in its own suite (FIG-4395),
-# not by the module sweep here.
-skips = [
-  "tests::conformance_and_poison::a_cancel_decided_before_a_sink_is_refused_at_the_sink",
-]
 shards = 3
 # The barrier laws drive width-64 tool groups (ADR 0116 §7.1) through five
 # producers, thirty scenarios on the live leg; each scenario writes a progress
@@ -59,18 +53,6 @@ timeout_seconds = 360
 [suites.effect-group.replay]
 # Every replay failure gates the suite. Remaining held-back laws have their
 # own ticket and reason in scripts/restate-divergences/.
-
-# The admission-fence law's live leg (FIG-4395, ADR 0099 §4, FIG-3470): a
-# cancel-decided effect-group child mints no new semantic admission beneath
-# it. One law, one endpoint bind — the effect-group-conformance-e2e recipe
-# runs this suite beside effect-group.
-[suites.admission-fence]
-label = "//crates/lash-restate:lash-restate__unit_test"
-cwd = "crates/lash-restate"
-filters = ["tests::conformance_and_poison::a_cancel_decided_before_a_sink_is_refused_at_the_sink"]
-endpoints = ["EG_RESTATE_ENDPOINT"]
-shards = 1
-timeout_seconds = 180
 
 [suites.agent-workbench]
 ci_driver = "scripts/agent-workbench-restate-e2e.sh"
@@ -158,26 +140,6 @@ filters = ["tests::run_control_witnesses::live_"]
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 shards = 1
 timeout_seconds = 240
-
-# Paused children of run-opened effect groups (FIG-4630): the laws let the
-# engine exhaust a group child's retries. Restate's default policy pauses such
-# an invocation and keeps its journal; the shards' bounded policy kills it, so
-# this suite's servers keep the short schedule and restore the pause.
-[suites.paused-group-children]
-label = "//crates/lash-restate:lash-restate__unit_test"
-cwd = "crates/lash-restate"
-filters = ["tests::paused_group_children::live_"]
-endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
-shards = 1
-timeout_seconds = 300
-
-[suites.paused-group-children.live.server_env]
-RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS = "8"
-RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS = "pause"
-
-[suites.paused-group-children.replay.server_env]
-RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS = "8"
-RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS = "pause"
 
 [suites.session-shifts]
 label = "//crates/lash-restate-test:session_shifts__test"

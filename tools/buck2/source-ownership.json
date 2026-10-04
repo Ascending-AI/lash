@@ -132,8 +132,7 @@
       ],
       "effect_model": [
         "tests/effect_model.rs",
-        "tests/runtime/effect/envelope.rs",
-        "tests/runtime/effect/group.rs"
+        "tests/runtime/effect/envelope.rs"
       ],
       "store_backed": [
         "tests/store_backed.rs",

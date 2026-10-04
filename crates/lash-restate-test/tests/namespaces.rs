@@ -575,8 +575,6 @@ async fn cores_in_distinct_namespaces_share_one_server_without_cross_talk() {
         for service in [
             "LashSession",
             "LashTurn",
-            "EffectGroupDispatch",
-            "EffectGroupIndex",
             "LashProcessWorkflow",
             "LashDurableWaitIndex",
         ] {
@@ -735,12 +733,7 @@ async fn live_restate_cores_in_distinct_namespaces_share_one_server_without_cros
             .into_iter()
             .map(|row| row.target)
             .collect();
-        for service in [
-            "LashSession",
-            "LashTurn",
-            "EffectGroupDispatch",
-            "LashProcessWorkflow",
-        ] {
+        for service in ["LashSession", "LashTurn", "LashProcessWorkflow"] {
             let name = backend.service_name(service);
             assert!(
                 targets.iter().any(|target| {

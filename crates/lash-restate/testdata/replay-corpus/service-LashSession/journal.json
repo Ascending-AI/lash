@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashSession",
   "service": "LashSession",
-  "generation": "53eef6ec33bb",
+  "generation": "899e972d3383",
   "handlers": {
     "shift": [
       [

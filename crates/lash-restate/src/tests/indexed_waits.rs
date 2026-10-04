@@ -1,5 +1,5 @@
-use super::effect_group_committed_recovery::HarnessStoreTier;
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
+use super::harness_store_tiers::HarnessStoreTier;
 use super::*;
 
 async fn index_rows(

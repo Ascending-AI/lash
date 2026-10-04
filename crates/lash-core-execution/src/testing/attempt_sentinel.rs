@@ -265,14 +265,6 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.observe_process_cancel(lent_stop).await
     }
 
-    async fn observe_group_child_cancel(&self) -> Result<bool, RuntimeEffectControllerError> {
-        self.inner.observe_group_child_cancel().await
-    }
-
-    fn group_child_cancel_watch(&self) -> Option<std::sync::Arc<dyn crate::GroupChildCancelWatch>> {
-        self.inner.group_child_cancel_watch()
-    }
-
     async fn record_process_drive_step(
         &self,
         name: String,
@@ -371,62 +363,6 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
             self.ledger.close_attempt();
         }
         outcome
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: crate::RuntimeEffectGroup,
-    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn crate::GroupExecutors>,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
-    }
-
-    fn group_child_scoped_controller(
-        &self,
-        admitted: crate::AdmittedScope,
-        binding: crate::GroupChildBinding,
-    ) -> Result<Option<crate::ScopedEffectController<'static>>, crate::RuntimeError> {
-        self.inner.group_child_scoped_controller(admitted, binding)
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut crate::EffectGroupHandle,
-        cancel: crate::runtime::TurnCancelWait,
-    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<Option<crate::runtime::effect::RankedGroupSettlement>, RuntimeEffectControllerError>
-    {
-        self.inner.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: crate::EffectGroupHandle,
-        disposition: crate::LoserPolicy,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        self.inner
-            .await_group_child_drain_admission(group_key, rank)
-            .await
     }
 
     async fn read_recorded_journal(

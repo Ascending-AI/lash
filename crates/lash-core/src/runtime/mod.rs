@@ -203,43 +203,38 @@ pub use effect::TurnCancelWait;
 pub use effect::{
     ATTEMPT_STREAM_BYTE_BUDGET, AdmittedHeadVerdict, AttemptStream, AttemptStreamBuilder,
     AttemptStreamChannel, AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation,
-    CompactionBase, DecodedStreamEvent, IncorporatedGroupRank, PresentationBinding,
-    ProcessDefinitionLocalExecution, ToolAttemptCapture, ToolPresentation,
+    CompactionBase, DecodedStreamEvent, PresentationBinding, ProcessDefinitionLocalExecution,
+    ToolAttemptCapture, ToolPresentation,
 };
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointAdmittedSet, CommandJournalGuard,
-    CompletionKeyPreparation, EffectAddress, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
-    ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupChildCancelWatch,
-    GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, JournalReplay, LlmRequestSpec,
-    LlmStreamRecord, LoserPolicy, ProcessCommand, ProcessDriveStep, ProcessEffectOutcome,
-    ProcessListSelection, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
-    RankedGroupSettlement, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
-    RefusedWriteRange, Resolution, ResolveOutcome, RunRecordStep,
-    RuntimeAssistantResponseHooksOutcome, RuntimeAttribution, RuntimeAwaitEventOptions,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    CompletionKeyPreparation, EffectAddress, EffectHost, EffectJournalIdentity,
+    EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
+    ExternalCompletionError, GroupWakePolicy, JournalReplay, LlmRequestSpec, LlmStreamRecord,
+    ProcessCommand, ProcessDriveStep, ProcessEffectOutcome, ProcessListSelection,
+    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, RecordedJournal,
+    RecordedKeyFence, RecordedKeyRange, RecordedKeys, RefusedWriteRange, Resolution,
+    ResolveOutcome, RunRecordStep, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
+    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
     RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnly,
-    ServedOnlyRange, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolCompletionEvent,
-    ToolCompletionWait, ToolDispatchCursor, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
-    TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, TurnPrelude, effect_groups_unsupported,
-    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
-    validate_replayed_effect_envelope,
+    ServedOnlyRange, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
+    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnPrelude,
+    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
 pub use environment::{ParkRefused, ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;
 use error::session_commit_error;
 pub use error::{
-    ExecutableGeneration, ExecutableGenerationRefusal, GroupChildCapability, RuntimeError,
-    RuntimeErrorCause, RuntimeErrorCode, SessionStateVersionRefusal, StoredDataCorruption,
-    TurnFailureCause,
+    ExecutableGeneration, ExecutableGenerationRefusal, RuntimeError, RuntimeErrorCause,
+    RuntimeErrorCode, SessionStateVersionRefusal, StoredDataCorruption, TurnFailureCause,
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{

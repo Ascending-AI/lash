@@ -38,12 +38,9 @@ pub enum RuntimeEffectKind {
     AssistantResponseHooks,
     Direct,
     ToolAttempt,
-    ArmToolCompletion,
-    AwaitToolCompletions,
     /// The opener-journaled record of a group's incorporated settlement prefix
     /// (ADR 0099 §6): which ranks the opener applied before an externally
     /// effective step, so replay restores exactly that mapping.
-    IncorporateGroupSettlements,
     /// The recorded decisions of a sequential callback slot with the
     /// resolutions of the state commands it returned (K10, FIG-4878): a
     /// turn's before-turn or after-turn callbacks, or the result checks of a
@@ -134,9 +131,6 @@ impl RuntimeEffectKind {
             Self::AssistantResponseHooks => "assistant_response_hooks",
             Self::Direct => "direct",
             Self::ToolAttempt => "tool_attempt",
-            Self::ArmToolCompletion => "arm_tool_completion",
-            Self::AwaitToolCompletions => "await_tool_completions",
-            Self::IncorporateGroupSettlements => "incorporate_group_settlements",
             Self::PresentToolResult => "present_tool_result",
             Self::ToolParentEnd => "tool_parent_end",
             Self::Trigger => "trigger",

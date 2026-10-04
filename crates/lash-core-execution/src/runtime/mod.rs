@@ -61,28 +61,24 @@ pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan, AssistantStreamHookState,
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointAdmittedSet, CommandJournalGuard,
-    CompletionKeyPreparation, EffectAddress, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
-    ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupChildCancelWatch,
-    GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, JournalReplay, LlmRequestSpec,
-    LlmStreamRecord, LoserPolicy, PresentationBinding, ProcessCommand, ProcessDriveStep,
-    ProcessEffectOutcome, ProcessListSelection, ProcessLocalExecution, ProcessOutcomeObserver,
-    ProcessTurnCancellation, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
-    RefusedWriteRange, Resolution, ResolveOutcome, RunRecordStep,
-    RuntimeAssistantResponseHooksOutcome, RuntimeAttribution, RuntimeAwaitEventOptions,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    CompletionKeyPreparation, EffectAddress, EffectHost, EffectJournalIdentity,
+    EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
+    ExternalCompletionError, GroupWakePolicy, JournalReplay, LlmRequestSpec, LlmStreamRecord,
+    PresentationBinding, ProcessCommand, ProcessDriveStep, ProcessEffectOutcome,
+    ProcessListSelection, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
+    RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RefusedWriteRange,
+    Resolution, ResolveOutcome, RunRecordStep, RuntimeAssistantResponseHooksOutcome,
+    RuntimeAttribution, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
     RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnly,
     ServedOnlyRange, SleepSpec, TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_PRESENTATION_VERSION,
-    ToolAttemptCapture, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolCompletionEvent,
-    ToolCompletionWait, ToolDispatchCursor, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
-    TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, TurnPrelude, effect_groups_unsupported,
-    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
-    validate_replayed_effect_envelope,
+    ToolAttemptCapture, ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution,
+    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnPrelude,
+    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
@@ -217,9 +213,8 @@ pub use lash_core_llm::turn_vocabulary::{
 
 pub use lash_core_store::effect_opener::EffectOpenerError;
 pub use lash_core_store::runtime_error::{
-    ExecutableGeneration, ExecutableGenerationRefusal, GroupChildCapability, RuntimeError,
-    RuntimeErrorCause, RuntimeErrorCode, SessionStateVersionRefusal, StoredDataCorruption,
-    TurnFailureCause,
+    ExecutableGeneration, ExecutableGenerationRefusal, RuntimeError, RuntimeErrorCause,
+    RuntimeErrorCode, SessionStateVersionRefusal, StoredDataCorruption, TurnFailureCause,
 };
 
 pub use crate::direct_completion_client::DirectCompletionClient;

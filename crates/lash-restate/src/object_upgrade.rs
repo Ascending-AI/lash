@@ -31,7 +31,7 @@ use crate::{RestateAdminClient, RestateHttpError, RestateIngressClient, RestateN
 /// writes for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UpgradableFamily {
-    /// The family's service, by its unqualified name (`EffectGroupIndex`).
+    /// The family's service, by its unqualified name (`LashDurableWaitIndex`).
     pub service: &'static str,
     pub component: ComponentId,
     pub newest: u32,
@@ -377,10 +377,6 @@ mod tests {
 
     fn family_of(service: &str) -> &'static ObjectFamily {
         match service {
-            "EffectGroupIndex" | "EffectGroupDrainIndex" => {
-                &crate::effect_group::EFFECT_GROUP_STATE_FAMILY
-            }
-            "EffectGroupPayload" => &crate::effect_group::EFFECT_GROUP_PAYLOAD_FAMILY,
             "LashDurableWaitIndex" => &crate::durable_wait::DURABLE_WAIT_REGISTRY_FAMILY,
             other => panic!("no family serves {other}"),
         }
@@ -548,112 +544,6 @@ mod tests {
     #[cfg(feature = "synthetic-next")]
     fn predecessor() -> u32 {
         UPGRADABLE_OBJECT_FAMILIES[0].newest - 1
-    }
-
-    /// Law: `preflight_lists_unupgraded_objects`. The preflight lists every
-    /// object whose `_compat` names an older format, and none at the newest.
-    #[cfg(feature = "synthetic-next")]
-    #[test]
-    fn preflight_lists_unupgraded_objects() {
-        let server = Server::with_objects(FleetFormat::from_version(2), 3, predecessor());
-        {
-            let mut objects = server.objects.lock().expect("objects");
-            let groups = objects.get_mut("EffectGroupIndex").expect("groups");
-            groups.insert(
-                "current".to_owned(),
-                (
-                    Some(ObjectCompat::fresh(predecessor() + 1)),
-                    BTreeMap::new(),
-                ),
-            );
-        }
-        let preflight = block_on(preflight_objects(&server)).expect("preflight");
-        assert!(!preflight.upgraded());
-        assert_eq!(preflight.families.len(), 4);
-        for family in &preflight.families {
-            let expected_objects = if family.service == "EffectGroupIndex" {
-                4
-            } else {
-                3
-            };
-            assert_eq!(family.objects, expected_objects, "{}", family.service);
-            assert_eq!(family.pending.len(), 3, "{}", family.service);
-            assert!(
-                family
-                    .pending
-                    .iter()
-                    .all(|pending| pending.format == predecessor() && pending.key != "current"),
-                "{family:?}"
-            );
-        }
-        // Nothing the preflight reads is written.
-        assert!(server.upgrades.lock().expect("upgrades").is_empty());
-    }
-
-    /// Law: `object_sweep_resumes_after_crash_and_completes`. A sweep killed
-    /// with an upgrade in flight leaves the objects it upgraded current and
-    /// the rest listed; the next sweep upgrades exactly what the preflight
-    /// lists, each object once, and the preflight ends empty.
-    #[cfg(feature = "synthetic-next")]
-    #[test]
-    fn object_sweep_resumes_after_crash_and_completes() {
-        let server = Server::with_objects(FleetFormat::from_version(2), 4, predecessor());
-        let every = pending_keys(&block_on(preflight_objects(&server)).expect("preflight"));
-        assert_eq!(every.len(), 16);
-
-        server.crash_after(4);
-        let mut seen = Vec::new();
-        let crashed = block_on(sweep_objects(&server, |object| {
-            seen.push((object.service.clone(), object.key.clone()));
-        }));
-        assert!(
-            matches!(crashed, Err(ObjectUpgradeError::Engine { .. })),
-            "{crashed:?}"
-        );
-        // Four answered, and the fifth committed before the crash.
-        assert_eq!(seen.len(), 4);
-        let left = pending_keys(&block_on(preflight_objects(&server)).expect("preflight"));
-        assert_eq!(left.len(), every.len() - 5);
-        assert!(seen.iter().all(|object| !left.contains(object)));
-
-        let resumed = block_on(sweep_objects(&server, |_| {})).expect("the resumed sweep");
-        assert!(resumed.remaining.is_empty(), "{resumed:?}");
-        let resumed_keys = resumed
-            .swept
-            .iter()
-            .map(|object| (object.service.clone(), object.key.clone()))
-            .collect::<Vec<_>>();
-        assert_eq!(resumed_keys, left);
-        assert!(resumed.swept.iter().all(|object| object.outcome
-            == ObjectUpgradeResponse::Upgraded {
-                from: predecessor(),
-                format: predecessor() + 1,
-            }));
-
-        // Each object was upgraded exactly once, and every value and record is
-        // at the newest format.
-        let mut upgraded = server.upgrades.lock().expect("upgrades").clone();
-        upgraded.sort();
-        let mut expected = every.clone();
-        expected.sort();
-        assert_eq!(upgraded, expected);
-        for ((service, key), (compat, stamps)) in server.formats() {
-            let newest = family_of(&service).formats.newest();
-            assert_eq!(compat, newest, "{service} {key}");
-            assert!(
-                stamps.iter().all(|stamp| *stamp == newest),
-                "{service} {key}"
-            );
-        }
-        assert!(
-            block_on(preflight_objects(&server))
-                .expect("preflight")
-                .upgraded()
-        );
-
-        // A sweep of a swept fleet does nothing.
-        let again = block_on(sweep_objects(&server, |_| {})).expect("a second sweep");
-        assert!(again.swept.is_empty() && again.remaining.is_empty());
     }
 
     /// Before finalize the sweep refuses at its first object and rewrites

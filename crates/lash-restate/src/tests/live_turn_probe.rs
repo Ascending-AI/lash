@@ -547,8 +547,8 @@ pub(super) struct LiveTurnRunner {
     connection: crate::RestateConnection,
     /// Where the runner kills and purges a crashed process segment's
     /// invocation for [`SegmentRecovery::SubstrateLost`](lash_conformance::SegmentRecovery::SubstrateLost).
-    admin: super::effect_group_conformance::HarnessAdmin,
-    process_runner: std::sync::Arc<super::effect_group_conformance::LawProcessRunner>,
+    admin: super::conformance_harness::HarnessAdmin,
+    process_runner: std::sync::Arc<super::conformance_harness::LawProcessRunner>,
     /// The invocations a law left open, by scope: each one's probe key and
     /// its ingress call, which returns once the invocation completes.
     open: tokio::sync::Mutex<HashMap<String, OpenInvocation>>,
@@ -579,8 +579,8 @@ const SEGMENT_RECOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_
 impl LiveTurnRunner {
     pub(super) fn shared(
         connection: crate::RestateConnection,
-        admin: super::effect_group_conformance::HarnessAdmin,
-        process_runner: std::sync::Arc<super::effect_group_conformance::LawProcessRunner>,
+        admin: super::conformance_harness::HarnessAdmin,
+        process_runner: std::sync::Arc<super::conformance_harness::LawProcessRunner>,
     ) -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self {
             connection,
@@ -793,7 +793,7 @@ impl LiveTurnRunner {
 impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
     async fn await_group_quiescence(&self, group_keys: &[String]) {
         loop {
-            let open = super::effect_group_conformance::open_invocations(&self.admin)
+            let open = super::conformance_harness::open_invocations(&self.admin)
                 .await
                 .into_values()
                 .any(|target| {
@@ -811,7 +811,7 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
     /// On the server double, the finished scenario's completed journals are
     /// dropped; a live server keeps its own retention.
     async fn scenario_finished(&self) {
-        if let super::effect_group_conformance::HarnessAdmin::InProcess { server } = &self.admin {
+        if let super::conformance_harness::HarnessAdmin::InProcess { server } = &self.admin {
             server.drop_completed_journals();
         }
     }

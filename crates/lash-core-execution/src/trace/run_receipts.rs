@@ -93,7 +93,7 @@ impl RunRecordObserver {
             },
             _ => tool_owner(&EffectOpener::for_scope(&bound.admitted).map_err(|error| {
                 RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    crate::RuntimeErrorCode::RuntimeToolRunShape,
                     error.to_string(),
                 )
             })?),

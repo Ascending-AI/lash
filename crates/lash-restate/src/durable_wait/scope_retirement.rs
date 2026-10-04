@@ -12,11 +12,10 @@ use crate::compat::{Call, Reply};
 use super::source_seal::{load_sources, retire_sources};
 use super::{
     DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX, DURABLE_WAIT_INDEX_EFFECT_PREFIX,
-    DURABLE_WAIT_INDEX_GROUP_PREFIX, DURABLE_WAIT_INDEX_METADATA_KEY,
-    DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX, DURABLE_WAIT_REGISTRY_FORMATS,
-    RestateDurableWaitProcessJournalRequest, durable_wait_index_key_for_scope,
-    load_durable_wait_index_metadata, load_indexed_waits, object_state, resolve_indexed_waits,
-    revoke_durable_wait_awakeable,
+    DURABLE_WAIT_INDEX_METADATA_KEY, DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX,
+    DURABLE_WAIT_REGISTRY_FORMATS, RestateDurableWaitProcessJournalRequest,
+    durable_wait_index_key_for_scope, load_durable_wait_index_metadata, load_indexed_waits,
+    object_state, resolve_indexed_waits, revoke_durable_wait_awakeable,
 };
 
 /// Revoke the index: fence it, revoke its awakeables, and cancel its waits.
@@ -67,8 +66,7 @@ pub(super) async fn revoke_index(
             || !metadata.process_receivers.is_empty()
             || has_open_sources))
         || (process_scope && has_open_sources)
-        || ((only_if_quiescent || process_scope)
-            && !scope_effects_and_groups_are_quiescent(ctx, namespace).await?)
+        || ((only_if_quiescent || process_scope) && !scope_effects_are_quiescent(ctx).await?)
     {
         return Ok(false);
     }
@@ -136,14 +134,8 @@ async fn process_journals_are_quiescent(
     Ok(true)
 }
 
-/// Whether nothing recorded by `begin_effect` or `record_group` is still
-/// live: no executing effect, and every recorded group's index reports no
-/// unsettled child. A group found settled is forgotten here, so a caller
-/// that never closed it does not fence its scope forever.
-async fn scope_effects_and_groups_are_quiescent(
-    ctx: &ObjectContext<'_>,
-    namespace: &crate::RestateNamespace,
-) -> Result<bool, TerminalError> {
+/// Whether every execution marker recorded by `begin_effect` has ended.
+async fn scope_effects_are_quiescent(ctx: &ObjectContext<'_>) -> Result<bool, TerminalError> {
     let keys = ctx.get_keys().await?;
     if keys
         .iter()
@@ -151,25 +143,7 @@ async fn scope_effects_and_groups_are_quiescent(
     {
         return Ok(false);
     }
-    let mut live = false;
-    for (state_key, group_key) in keys.iter().filter_map(|state_key| {
-        state_key
-            .strip_prefix(DURABLE_WAIT_INDEX_GROUP_PREFIX)
-            .map(|group_key| (state_key, group_key))
-    }) {
-        let unsettled = namespace
-            .effect_group_state(ctx, group_key.to_string())
-            .unsettled_children()
-            .call()
-            .await?
-            .into_body();
-        if unsettled > 0 {
-            live = true;
-        } else {
-            ctx.clear(state_key);
-        }
-    }
-    Ok(!live)
+    Ok(true)
 }
 
 pub(super) async fn register_process_journal(

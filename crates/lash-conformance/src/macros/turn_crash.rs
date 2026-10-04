@@ -79,14 +79,6 @@ macro_rules! turn_crash_admission_cells_tests {
     };
 }
 
-/// Register the engine-neutral layer law: a layer over the tier's effect
-/// host observes the effects of the group children its turns open. The
-/// fixture is the runner fixture of [`turn_crash_runner_tests!`].
-#[macro_export]
-macro_rules! effect_layer_group_child_tests {
-    ($(#[$attr:meta])* $fixture:block) => {};
-}
-
 /// Register only the level-one crash matrix. Its crashes kill the turn's
 /// execution where it stands, so a tier whose crashed attempt keeps running
 /// work it cannot stop registers it with its own attributes.

@@ -11,7 +11,7 @@ impl OpenerState {
         &self,
         reason: crate::BoundaryReason,
     ) -> Result<crate::store::RunOpenerState, RuntimeEffectControllerError> {
-        let registry = self.groups.lock_recover();
+        let registry = self.run_state.lock_recover();
         if registry.active_run {
             return Err(ContinuationRefusal::NotQuiescent.into());
         }
@@ -45,7 +45,7 @@ impl OpenerState {
         clock: &dyn crate::Clock,
     ) -> Result<RunCoordinator<'a>, SingletonRunError> {
         let transfer = {
-            let mut registry = self.groups.lock_recover();
+            let mut registry = self.run_state.lock_recover();
             if registry.active_run {
                 return Err(
                     RuntimeEffectControllerError::from(ContinuationRefusal::NotQuiescent).into(),
@@ -66,12 +66,12 @@ impl OpenerState {
     }
 
     pub fn holds_tool_run(&self) -> bool {
-        let registry = self.groups.lock_recover();
+        let registry = self.run_state.lock_recover();
         registry.active_run || registry.run.is_some()
     }
 
     pub(crate) fn finish_run(&self) {
-        let mut registry = self.groups.lock_recover();
+        let mut registry = self.run_state.lock_recover();
         registry.active_run = false;
         registry.run = None;
     }
@@ -85,11 +85,11 @@ impl OpenerState {
         reason: crate::BoundaryReason,
         materials: &dyn crate::store::ToolMaterialStore,
     ) -> Result<(), SingletonRunError> {
-        self.groups.lock_recover().active_run = true;
+        self.run_state.lock_recover().active_run = true;
         run.request_cut(reason);
         let mut transfer = run.quiesce().await?;
         run.retain_cut(&mut transfer, materials).await?;
-        let mut registry = self.groups.lock_recover();
+        let mut registry = self.run_state.lock_recover();
         registry.run = Some(Box::new(transfer));
         registry.active_run = false;
         Ok(())

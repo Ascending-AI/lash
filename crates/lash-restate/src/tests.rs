@@ -12,15 +12,13 @@ use crate::controller::RestateEffectControllerOptions;
 use crate::controller::context::{ProcessCancelRace, guard_restate_context_future};
 use crate::controller::effect_journal::JournaledEffectRecord;
 use crate::controller::{
-    RecordedRuntimeEffect, RestateEffectExecution, restate_await_event_turn_cancel_wait_request,
-    restate_effect_execution, restate_effect_name, restate_timer_turn_cancel_wait_request,
-    validate_recorded_effect_envelope,
+    RecordedRuntimeEffect, restate_await_event_turn_cancel_wait_request, restate_effect_name,
+    restate_timer_turn_cancel_wait_request, validate_recorded_effect_envelope,
 };
 use crate::durable_wait::{
-    DURABLE_WAIT_PROMISE_KEY, LASH_REPLAY_KEY_HEADER, RestateDurableWaitIndexMetadata,
-    RestateDurableWaitRunRequest, RestateTurnCancelWake, durable_wait_address_from_state_key,
-    durable_wait_index_state_key, restate_await_event_key, restate_await_event_key_for_authority,
-    split_cancellable_waits,
+    DURABLE_WAIT_PROMISE_KEY, RestateDurableWaitIndexMetadata, RestateTurnCancelWake,
+    durable_wait_address_from_state_key, durable_wait_index_state_key, restate_await_event_key,
+    restate_await_event_key_for_authority, split_cancellable_waits,
 };
 use crate::process::{
     boundary_must_be_declined, handler_error_from_plugin, process_segment_workflow_key,
@@ -67,10 +65,10 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 /// The drain generation every test-built controller and host names: the
-/// build the effect-group harness's endpoint serves, so a group a test's
-/// host opens dispatches on a lane that endpoint binds (FIG-4454).
+/// build the conformance harness's endpoint serves, so recorded owner work
+/// uses a lane that endpoint binds (FIG-4454).
 pub(crate) fn test_build_generation() -> lash_core::engine::BuildGeneration {
-    lash_core::engine::BuildGeneration::for_test(effect_group_conformance::HARNESS_BUILD)
+    lash_core::engine::BuildGeneration::for_test(conformance_harness::HARNESS_BUILD)
 }
 
 fn test_restate_authority_id() -> RestateAuthorityId {
@@ -261,17 +259,6 @@ pub(super) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
 mod compat_on_the_double;
 mod declared_start_run_drain_on_the_double;
 mod determinism;
-mod effect_group_child_cancel;
-mod effect_group_committed_recovery;
-mod effect_group_conformance;
-mod effect_group_generation_routing;
-mod effect_group_notification_index;
-mod effect_group_rank_reservation;
-pub(crate) mod effect_group_routing_miss;
-mod effect_group_sdk_preconditions;
-mod effect_group_seat_chain;
-mod effect_group_settlement_wakes;
-mod effect_group_shape;
 mod effect_host_laws_on_the_double;
 mod endpoint_protocol;
 mod folded_generation_sentinel_on_the_double;
@@ -387,7 +374,6 @@ async fn deployment_host_raw_scoped_controller_refuses_wrong_scope_before_ingres
     let host = RestateEffectHost::new(
         RestateConnection::with_transport("https://restate.example", transport.clone()),
         test_restate_authority_id(),
-        crate::tests::test_build_generation(),
     );
     let scoped = host
         .scoped(durable_admission(&ExecutionScope::process(
@@ -432,57 +418,6 @@ async fn deployment_host_raw_scoped_controller_refuses_wrong_scope_before_ingres
         "scope refusal must precede the retired-scope probe and effect ingress"
     );
     assert_eq!(local_executions.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn restate_scope_controller_refuses_wrong_scope_group_before_index_or_handoff() {
-    let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let admitted =
-        ExecutionScope::process(lash_core::ProcessId::fixture("admitted-restate-process"));
-    let scoped = controller
-        .process_scope_for_test(durable_admission(&admitted))
-        .expect("scoped Restate controller");
-    let group_key = "restate-scope-group";
-    let child = RuntimeEffectEnvelope::new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(
-                ExecutionScope::process(lash_core::ProcessId::fixture("wrong-restate-process")),
-                format!("{group_key}:child:0"),
-            )
-            .expect("wrong-scope child address"),
-            lash_core::RuntimeAttribution::none(),
-            "restate-scope-admission-child",
-        ),
-        RuntimeEffectCommand::LanguageRuntimeValue {
-            operation: "scope-admission-child".to_string(),
-        },
-    );
-    let group = lash_core::RuntimeEffectGroup::try_new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(admitted, format!("{group_key}:group"))
-                .expect("admitted group address"),
-            lash_core::RuntimeAttribution::none(),
-            "restate-scope-admission-group",
-        ),
-        group_key,
-        vec![child],
-        lash_core::GroupWakePolicy::All,
-        lash_core::LoserPolicy::RunToCompletion,
-    )
-    .expect("the independently valid group assembles before admission");
-
-    let error = scoped
-        .controller()
-        .open_effect_group(group)
-        .await
-        .expect_err("wrong-scope Restate group must be refused");
-
-    assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::RuntimeEffectScopeMismatch
-    );
-    assert_eq!(context.scope_group_records.load(Ordering::SeqCst), 0);
 }
 
 fn registry_process_wiring(registry: Arc<dyn ProcessRegistry>) -> lash_core::ProcessWorkWiring {
@@ -1256,8 +1191,6 @@ mod cancelled_turn_withheld_input_on_the_double;
 mod commit_retry_store;
 mod conformance_and_poison;
 mod direct_turn_acceptance_on_the_double;
-mod drain_barrier;
-mod durable_wait_run_retirement;
 mod durable_wait_source_seal;
 mod durable_wait_turn_gate_peek;
 mod effect_execution;
@@ -1421,8 +1354,6 @@ pub(crate) async fn created_session(
 
 mod admin_namespace_filters;
 mod lost_run_recovery;
-
-mod json_decode_ingress;
 
 /// L02: a sibling's registered wake requests progress without terminating X.
 #[restate_sdk::workflow]
@@ -1600,3 +1531,7 @@ async fn l02_terminal_observation_preserves_the_outer_handler_notification() {
         "terminal observation must not fabricate a successful handler output"
     );
 }
+mod conformance_harness;
+mod harness_store_tiers;
+
+mod wait_generation_endpoint;

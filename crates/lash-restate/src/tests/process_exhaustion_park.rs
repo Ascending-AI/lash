@@ -86,11 +86,11 @@ impl OwnerProcessWorld {
             Endpoint::builder(),
             crate::services::LashServiceParts {
                 effect_host: &host,
-                ingress: ingress.clone(),
+
                 admin: admin.clone(),
                 materials: stores.process_env_store(),
                 attachments: sessions.clone() as Arc<dyn lash_core::AttachmentReferrers>,
-                sessions: sessions.clone(),
+
                 process_workflow: LashProcessWorkflowImpl::new_for_test(
                     runner,
                     registry.clone(),

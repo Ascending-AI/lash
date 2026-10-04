@@ -92,12 +92,6 @@ pub(super) async fn register_awakeable(
     if metadata.revoked {
         return Ok(Reply::at(wire, RestateDurableWaitRegistration::Revoked));
     }
-    // A key its owning group child's cancel decision closed has ended,
-    // whether or not its wait ever registered: no resolve of it lands.
-    if metadata.is_cancel_decided(&request.key.scope, &request.key.wait)? {
-        resolve_durable_wait_awakeable(&ctx, &request, &Resolution::Cancelled);
-        return Ok(Reply::at(wire, RestateDurableWaitRegistration::Registered));
-    }
     if let Some(terminal) = source_seal::event_terminal(registry, &ctx, &address).await? {
         resolve_durable_wait_awakeable(&ctx, &request, &terminal);
         return Ok(Reply::at(wire, RestateDurableWaitRegistration::Registered));
@@ -202,17 +196,6 @@ pub(super) async fn resolve(
         return Ok(Reply::at(
             wire,
             RestateDurableWaitResolveResponse::Outcome(ResolveOutcome::UnknownOrRevoked),
-        ));
-    }
-    // §4, W17: the owning group child's cancel decision closed this key.
-    // Checked before any retained terminal, because the close's own
-    // release of the child's wait may have retained one since.
-    if metadata.is_cancel_decided(&request.key.scope, &request.key.wait)? {
-        return Ok(Reply::at(
-            wire,
-            RestateDurableWaitResolveResponse::Refused(
-                RestateDurableWaitResolveRefusal::CancelDecided,
-            ),
         ));
     }
     if let Some(response) = source_seal::resolve_completion(

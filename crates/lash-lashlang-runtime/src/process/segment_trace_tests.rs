@@ -565,8 +565,6 @@ async fn capture_parked_loop_segment() {
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
-        outstanding_groups: Vec::new(),
-        held_tool_calls: Default::default(),
         tool_run: None,
         worker_recovery: Default::default(),
     };
@@ -653,8 +651,6 @@ fn a_segment_state_without_its_worker_recovery_ledger_is_a_typed_format_rejectio
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: Vec::new(),
         effect_omissions: Default::default(),
-        outstanding_groups: Vec::new(),
-        held_tool_calls: Default::default(),
         tool_run: None,
         worker_recovery: Default::default(),
     })
@@ -840,8 +836,6 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: writer.pending(),
         effect_omissions: writer.omissions(),
-        outstanding_groups: Vec::new(),
-        held_tool_calls: Default::default(),
         tool_run: None,
         worker_recovery: Default::default(),
     })

@@ -45,20 +45,16 @@
 //!   hands to the newest build, and under its **generation** name
 //!   (`LashProcessWorkflow_g<G>`, [`Lane::Generation`]), which only builds of
 //!   drain generation `G` serve. Work that must reach the build that started
-//!   it is sent to the generation name: an effect group's children by their
-//!   opener, a redrive by the recorded route, and a process successor the
+//!   it is sent to the generation name: a redrive by the recorded route, and a process successor the
 //!   newest build refused by the drain of its sender's generation
 //!   (FIG-4750), whose start there records the lane as its route.
-//!   `EffectGroupDispatch` binds only its generation name: every opener
-//!   records its build's lane, so no call needs a stable dispatcher binding.
 //! - A **shared** service holds state every build reads and writes: the
-//!   durable-wait workflow and index, and the effect-group
-//!   index and payload objects. Its name is never split by generation, so a
+//!   durable-wait workflow and index. Its name is never split by generation, so a
 //!   waiter on one build and a resolver on another address the same promise.
 //!
 //! A route is data. Whoever sends work to a pinned service records the
 //! [`ServiceRoute`] it sent under beside the thing it routes (the segment
-//! handover, the effect-group index record), and every later call reads the
+//! handover), and every later call reads the
 //! recorded route back ([`ServiceRoute::parse`]) instead of recomputing a
 //! name from its own build: Restate scopes workflow keys and idempotency keys
 //! by service name, so a recomputed name would start the work a second time.
@@ -66,17 +62,12 @@
 //! A host's own services are named once, under their stable names. A host
 //! submits work to the engine and never executes it (ADR 0104): no host handler
 //! runs a lash turn, so no host service carries a journal that needs a
-//! generation lane. A controller or effect host a host builds still names its
-//! build's generation (FIG-4454): an effect group it opens dispatches on that
-//! build's `EffectGroupDispatch` lane, as a group a lash handler opens does,
-//! so no group's children escape their opener's build through the stable
-//! name.
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use lash_core::engine::BuildGeneration;
-use restate_sdk::context::{ContextClient, Request, RequestTarget, RunRetryPolicy};
+use restate_sdk::context::{ContextClient, Request, RequestTarget};
 use restate_sdk::endpoint::{Builder, HandlerOptions, ServiceOptions};
 use restate_sdk::service::macro_support::{ServiceBoxFuture, service_definition};
 use restate_sdk::service::{Discoverable, Service};
@@ -87,12 +78,6 @@ use crate::durable_wait::{
     LashDurableWaitRegistry as _, LashDurableWaitRegistryImpl, LashDurableWaitWorkflow as _,
     LashDurableWaitWorkflowImpl,
 };
-use crate::effect_group::drain_index::{EffectGroupDrainIndex as _, EffectGroupDrainIndexImpl};
-use crate::effect_group::{
-    EffectGroupDispatch as _, EffectGroupDispatchImpl, EffectGroupPayload as _,
-    EffectGroupPayloadImpl, EffectGroupState as _, EffectGroupStateImpl,
-};
-use crate::ingress::RestateIngressClient;
 use crate::object_state::FleetView;
 use crate::process::{LashProcessWorkflow as _, LashProcessWorkflowImpl, RestateProcessRunner};
 use crate::session_shifts::{
@@ -127,7 +112,7 @@ pub(crate) const CLAIM_AUTHORITY_METADATA: &str = "lash.authority";
 /// in the admin API's SQL `LIKE`, so neither may appear in one.
 ///
 /// Every durable name a deployment records (a workflow key, a route in an
-/// effect-group index or a segment handover) is addressed under its
+/// recorded owner receipt or a segment handover) is addressed under its
 /// namespace, so changing a deployment's namespace starts a new deployment:
 /// its predecessor's work stays under the old names.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -245,8 +230,7 @@ impl RestateNamespace {
         LASH_SERVICES.iter().find_map(|&service| {
             let rest = name.strip_prefix(service.base_name())?;
             if rest.is_empty() {
-                return (service.lane_class() != LaneClass::GenerationOnly)
-                    .then(|| self.stable(service));
+                return Some(self.stable(service));
             }
             let generation = BuildGeneration::parse(rest.strip_prefix("_g")?).ok()?;
             service
@@ -313,16 +297,13 @@ pub(crate) enum LaneClass {
     /// Journal-bearing: bound under its stable name and under each build's
     /// generation name.
     Pinned,
-    /// Journal-bearing: every caller names its build, so only the
-    /// generation name is bound.
-    GenerationOnly,
     /// State-holding: bound under its stable name only.
     Shared,
 }
 
 impl LaneClass {
     pub(crate) const fn is_pinned(self) -> bool {
-        matches!(self, Self::Pinned | Self::GenerationOnly)
+        matches!(self, Self::Pinned)
     }
 }
 
@@ -373,14 +354,6 @@ lash_services! {
     DurableWaitRegistry => "LashDurableWaitIndex", Shared, object(crate::durable_wait::DURABLE_WAIT_REGISTRY_FAMILY);
     /// The segment runner a process submission starts and awaits.
     ProcessWorkflow => "LashProcessWorkflow", Pinned;
-    /// An effect group's lifecycle and settlement rank.
-    EffectGroupState => "EffectGroupIndex", Shared, object(crate::effect_group::EFFECT_GROUP_STATE_FAMILY);
-    /// The derived group directory keyed by drain generation.
-    EffectGroupDrainIndex => "EffectGroupDrainIndex", Shared, object(crate::effect_group::EFFECT_GROUP_STATE_FAMILY);
-    /// An effect group's successful result bytes.
-    EffectGroupPayload => "EffectGroupPayload", Shared, object(crate::effect_group::EFFECT_GROUP_PAYLOAD_FAMILY);
-    /// Sends an effect group's children and runs each one.
-    EffectGroupDispatch => "EffectGroupDispatch", GenerationOnly;
     /// One session's shift: admits runs and runs each in its `LashTurn`
     /// (FIG-3600).
     SessionShifts => "LashSession", Pinned;
@@ -565,19 +538,11 @@ lash_clients! {
             -> bool;
         release_process_journal(crate::durable_wait::RestateDurableWaitProcessJournalRequest)
             -> ();
-        record_group(crate::durable_wait::RestateDurableWaitGroupRequest) -> bool;
-        record_group_child(crate::durable_wait::RestateDurableWaitGroupChildRequest)
-            -> bool;
-        group_child_membership(
-            crate::durable_wait::RestateDurableWaitGroupChildMembershipRequest
-        ) -> Option<String>;
     }
 
     /// Calls to one `LashDurableWaitWorkflow`.
     DurableWaitWorkflowCalls, durable_wait_workflow: DurableWaitWorkflow workflow,
     pinned to crate::durable_wait::LashDurableWaitWorkflowClient {
-        await_resolution(crate::durable_wait::RestateDurableWaitAwaitRequest)
-            -> lash_core::Resolution;
         peek() -> Option<lash_core::Resolution>;
         resolve(crate::durable_wait::RestateDurableWaitResolveRequest)
             -> lash_core::ResolveOutcome;
@@ -588,56 +553,7 @@ lash_clients! {
 
 
 
-    /// Calls to one `EffectGroupIndex` object.
-    EffectGroupStateCalls, effect_group_state: EffectGroupState object,
-    pinned to crate::effect_group::EffectGroupStateClient {
-        probe() -> crate::effect_group::EffectGroupProbeResponse;
-        unsettled_children() -> usize;
-        open(crate::effect_group::EffectGroupOpenRequest)
-            -> crate::effect_group::EffectGroupOpenResponse;
-        probe_and_adopt(crate::effect_group::EffectGroupAdoptRequest)
-            -> crate::effect_group::EffectGroupProbeAdoptResponse;
-        register_dispatch(crate::effect_group::EffectGroupRegisterDispatchRequest)
-            -> crate::effect_group::EffectGroupRegisterDispatchResponse;
-        register_refusal(crate::effect_group::EffectGroupRefusalRequest)
-            -> crate::effect_group::EffectGroupRegisterRefusalResponse;
-        admit_child(crate::effect_group::EffectGroupAdmissionRequest)
-            -> crate::effect_group::EffectGroupAdmissionResponse;
-        commit_child(crate::effect_group::EffectGroupCommitChildRequest)
-            -> crate::effect_group::EffectGroupCommitChildResponse;
-        admit_semantic(crate::effect_group::EffectGroupAdmitSemanticRequest)
-            -> crate::effect_group::EffectGroupAdmitSemanticResponse;
-        record_settlement(crate::effect_group::EffectGroupRecordSettlementRequest)
-            -> crate::effect_group::EffectGroupRecordSettlementResponse;
-        read_rank(crate::effect_group::EffectGroupReadRankRequest)
-            -> crate::effect_group::EffectGroupReadRankResponse;
-        close(crate::effect_group::EffectGroupCloseRequest)
-            -> crate::effect_group::EffectGroupCloseResponse;
-        retire() -> crate::effect_group::EffectGroupRetireResponse;
-        finish_retirement() -> crate::effect_group::EffectGroupFinishRetirementResponse;
-        retirement_cancel() -> crate::effect_group::EffectGroupRetirementCancelResponse;
-        subscribe(crate::effect_group::EffectGroupSubscribeRequest)
-            -> crate::effect_group::EffectGroupSubscribeResponse;
-        unsubscribe(crate::effect_group::EffectGroupUnsubscribeRequest) -> ();
-        child_cancel(crate::effect_group::EffectGroupChildCancelRequest)
-            -> Option<crate::effect_group::EffectGroupNotification>;
-    }
 
-    /// Calls to one generation's group directory.
-    EffectGroupDrainIndexCalls, effect_group_drain_index: EffectGroupDrainIndex object,
-    pinned to crate::effect_group::drain_index::EffectGroupDrainIndexClient {
-        register(String) -> ();
-    }
-
-    /// Calls to one `EffectGroupPayload` object.
-    EffectGroupPayloadCalls, effect_group_payload: EffectGroupPayload object,
-    pinned to crate::effect_group::EffectGroupPayloadClient {
-        put(crate::effect_group::EffectGroupPayloadPutRequest)
-            -> crate::effect_group::EffectGroupPayloadPutResponse;
-        get() -> crate::effect_group::EffectGroupPayloadGetResponse;
-        retire() -> ();
-        delete_bytes() -> ();
-    }
 }
 
 /// A handler-side call to `handler` of the workflow `key` under `route`:
@@ -769,7 +685,6 @@ pub(crate) fn lanes(
             namespace.stable(service),
             namespace.generation(service, generation.clone()),
         ],
-        LaneClass::GenerationOnly => vec![namespace.generation(service, generation.clone())],
     }
 }
 
@@ -788,16 +703,10 @@ pub(crate) fn lash_service_routes(
 
 /// What the lash services of one deployment run over.
 pub(crate) struct LashServiceParts<'a, R> {
-    /// The deployment's effect host: effect-group children route through the
-    /// resolver registered on it and run under its authority.
+    /// The deployment's effect host, which names its durable authority.
     pub(crate) effect_host: &'a RestateEffectHost,
-    /// The ingress the effect-group dispatcher watches cancellation through.
-    pub(crate) ingress: RestateIngressClient,
     /// The engine's existing admin client, shared with execution release.
     pub(crate) admin: crate::RestateAdminClient,
-    /// The session catalog a session-scope group child checks its state
-    /// generation in before it runs (FIG-3619).
-    pub(crate) sessions: Arc<dyn lash_core::DeploymentStore>,
     /// The deployment's attachment referrers, which a parked process await
     /// acquires the waiter's edges through (ADR 0124).
     pub(crate) materials: Arc<dyn lash_core::store::ToolMaterialStore>,
@@ -841,9 +750,7 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
 ) -> Builder {
     let LashServiceParts {
         effect_host,
-        ingress,
         admin,
-        sessions,
         attachments,
         materials,
         process_workflow,
@@ -880,19 +787,6 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
         &namespace,
         fleet.clone(),
     );
-    // Dispatcher preflight and child runs retry `ctx.run` without a cap: a
-    // child's failure is its recorded outcome, never a dispatcher giving up.
-    let dispatch = |route: ServiceRoute| {
-        EffectGroupDispatchImpl::new(
-            effect_host,
-            ingress.clone(),
-            admin.clone(),
-            RunRetryPolicy::new(),
-            Arc::clone(&sessions),
-            route,
-            build_generation.clone(),
-        )
-    };
     let wire = WireSource {
         reads,
         fleet: fleet.clone(),
@@ -924,45 +818,11 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
                     claimed().enable_lazy_state(true),
                     &wire,
                 ),
-                // Lazy, so each index handler loads only the keys it reads:
-                // a width-n group runs O(n) handlers, and none of the
-                // per-child ones reads the retained membership (FIG-4068).
-                LashService::EffectGroupState => bind_as(
-                    builder,
-                    EffectGroupStateImpl::new(namespace.clone(), fleet.clone()).serve(),
-                    &name,
-                    claimed().enable_lazy_state(true),
-                    &wire,
-                ),
-                LashService::EffectGroupDrainIndex => bind_as(
-                    builder,
-                    EffectGroupDrainIndexImpl {
-                        fleet: fleet.clone(),
-                    }
-                    .serve(),
-                    &name,
-                    claimed().enable_lazy_state(true),
-                    &wire,
-                ),
-                LashService::EffectGroupPayload => bind_as(
-                    builder,
-                    EffectGroupPayloadImpl::new(fleet.clone()).serve(),
-                    &name,
-                    claimed(),
-                    &wire,
-                ),
                 LashService::ProcessWorkflow => bind_as(
                     builder,
                     process_workflow.on_route(route.clone()).serve(),
                     &name,
                     claimed().handler("run", run_options.clone()),
-                    &wire,
-                ),
-                LashService::EffectGroupDispatch => bind_as(
-                    builder,
-                    dispatch(route.clone()).serve(),
-                    &name,
-                    claimed(),
                     &wire,
                 ),
                 LashService::SessionShifts => bind_as(
@@ -1038,7 +898,6 @@ mod tests {
             format!("LashProcessWorkflow_g{generation}0"),
             // A shared service is never split by generation.
             format!("LashDurableWaitWorkflow_g{generation}"),
-            format!("EffectGroupIndex_g{generation}"),
             // Another namespace's names are not the default namespace's.
             "tb.LashSession".to_owned(),
         ] {

@@ -459,26 +459,6 @@ lash_rust_feature_test(
 load("//tools/buck2:test_rules.bzl", "lash_restate_suite")
 
 lash_restate_suite(
-    name = "restate_admission_fence_live",
-    test = ":lash-restate__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "admission-fence",
-    leg = "live",
-    shard_count = 1,
-)
-
-lash_restate_suite(
-    name = "restate_admission_fence_replay",
-    test = ":lash-restate__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "admission-fence",
-    leg = "replay",
-    shard_count = 1,
-)
-
-lash_restate_suite(
     name = "restate_attachment_attach_live",
     test = ":lash-restate__unit_test__rust_test",
     env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
@@ -534,26 +514,6 @@ lash_restate_suite(
     env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     timeout_seconds = 900,
     suite = "json-decode",
-    leg = "replay",
-    shard_count = 1,
-)
-
-lash_restate_suite(
-    name = "restate_paused_group_children_live",
-    test = ":lash-restate__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "paused-group-children",
-    leg = "live",
-    shard_count = 1,
-)
-
-lash_restate_suite(
-    name = "restate_paused_group_children_replay",
-    test = ":lash-restate__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "paused-group-children",
     leg = "replay",
     shard_count = 1,
 )

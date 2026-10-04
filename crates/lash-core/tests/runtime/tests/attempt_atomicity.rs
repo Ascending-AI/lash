@@ -118,66 +118,6 @@ impl lash_core::RuntimeEffectController for ControllerOwnedTier<'_> {
             .execute_effect(envelope, local_executor)
             .await
     }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.controller().open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.controller().register_group_executors(executors)
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::TurnCancelWait,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .controller()
-            .await_next_settlement(handle, cancel)
-            .await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner
-            .controller()
-            .read_group_settlement(group_key, rank)
-            .await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .controller()
-            .close_effect_group(handle, disposition)
-            .await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .controller()
-            .await_group_child_drain_admission(group_key, rank)
-            .await
-    }
 }
 
 struct Fixtures {
@@ -1359,66 +1299,6 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier<'_> {
             .await?;
         self.journal.lock_recover()[ordinal].outcome = Some(outcome.clone());
         Ok(outcome)
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.controller().open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.controller().register_group_executors(executors)
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::TurnCancelWait,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .controller()
-            .await_next_settlement(handle, cancel)
-            .await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner
-            .controller()
-            .read_group_settlement(group_key, rank)
-            .await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .controller()
-            .close_effect_group(handle, disposition)
-            .await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .controller()
-            .await_group_child_drain_admission(group_key, rank)
-            .await
     }
 }
 

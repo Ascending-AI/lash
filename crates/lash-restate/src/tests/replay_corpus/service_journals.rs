@@ -1,7 +1,7 @@
 //! The journals lash's own Restate services write, recorded from the real
 //! handlers on the in-process server double (FIG-4805).
 //!
-//! One workload runs a session turn with a tool call (an effect group), a
+//! One workload runs a session turn with a native tool call, a
 //! process and a K4 durable source, each
 //! through the deployment's bound services. A service's journal is the
 //! ordered commands its handlers wrote; notifications, which the server
@@ -315,20 +315,6 @@ async fn until(server: &RestateTestServer, what: &str, ready: impl Fn(&[Invocati
     .unwrap_or_else(|_| panic!("{what}: {:#?}", server.invocations()));
 }
 
-/// Whether an invocation waits on the server rather than on its own work.
-fn parked(view: &InvocationView) -> bool {
-    view.status == "suspended" || view.blocked_on_server == Some(true)
-}
-
-fn runs(view: &InvocationView, service: &str, handler: &str) -> bool {
-    view.target
-        .split('/')
-        .next()
-        .and_then(lash_service)
-        .is_some_and(|served| served == service)
-        && view.target.ends_with(&format!("/{handler}"))
-}
-
 /// The lash service a registered name serves: its stable name or one of its
 /// generation lanes.
 fn lash_service(registered: &str) -> Option<&'static str> {
@@ -394,36 +380,12 @@ async fn run_workload() -> (RestateTestBackend, lash_core::engine::BuildGenerati
         .await
         .expect("initialize the session's wait index");
 
-    // The turn: a model call that asks for the tool, the tool as an
-    // effect-group child, and a second call that answers. The tool answers
-    // only once the turn is parked on its group and the child's cancel watch
-    // is parked on the index, so every handler takes the parked path.
+    // The native tool attempt is recorded in the owning turn's journal.
     let turn = session
         .send(lash::TurnInput::text("count once"))
         .id(TURN)
         .output();
     let tool = async {
-        until(&server, "the turn never parked on its group", |views| {
-            let ended = |service, handler| {
-                views
-                    .iter()
-                    .any(|view| runs(view, service, handler) && view.status == "completed")
-            };
-            let parks = |service, handler| {
-                views
-                    .iter()
-                    .any(|view| runs(view, service, handler) && parked(view))
-            };
-            ended("LashDurableWaitIndex", "register_awakeable")
-                && parks("LashTurn", "run")
-                && parks("EffectGroupIndex", "await_notice")
-                && views.iter().all(|view| {
-                    view.status == "completed"
-                        || parked(view)
-                        || runs(view, "EffectGroupDispatch", "child")
-                })
-        })
-        .await;
         release.add_permits(1);
     };
     let (output, ()) = tokio::time::timeout(BOUND, async { tokio::join!(turn, tool) })

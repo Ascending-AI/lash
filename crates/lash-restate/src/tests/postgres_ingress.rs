@@ -371,7 +371,7 @@ async fn partial_signal_replay_rejects_changed_request_before_resolution_on_post
 // FIG-4389's recorded termination law on the double with the law's runtime
 // over PostgreSQL, plain and always-replay.
 mod recorded_termination {
-    use super::super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+    use super::super::conformance_harness::{HarnessServer, LiveConformanceHarness};
     use super::*;
 
     async fn harness(

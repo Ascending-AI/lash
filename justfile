@@ -162,22 +162,6 @@ effect-group-conformance-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite run-control --leg replay \
     --artifacts "$artifacts"
 
-  # A paused group child parks, resumes or is released by what its group
-  # still needs (FIG-4630): servers that pause an exhausted invocation.
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite paused-group-children --leg live \
-    --artifacts "$artifacts"
-
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite paused-group-children --leg replay \
-    --artifacts "$artifacts"
-
-  # The admission-fence law is its own named suite (FIG-4395): same recipe,
-  # same legs.
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite admission-fence --leg live \
-    --artifacts "$artifacts"
-
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite admission-fence --leg replay \
-    --artifacts "$artifacts"
-
   # The remote turn-cancellation law (FIG-4650): a remote AfterStep cancel
   # waits for the committed step boundary, on both legs.
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite remote-cancellation --leg live \

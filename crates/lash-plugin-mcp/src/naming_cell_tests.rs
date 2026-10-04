@@ -224,26 +224,6 @@ impl lash_core::RuntimeEffectController for RecordedBindings {
             value: self.0.clone(),
         })
     }
-    async fn open_effect_group(
-        &self,
-        _: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported("binding record"))
-    }
-    async fn await_next_settlement(
-        &self,
-        _: &mut lash_core::EffectGroupHandle,
-        _: lash_core::TurnCancelWait,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported("binding record"))
-    }
-    async fn close_effect_group(
-        &self,
-        _: lash_core::EffectGroupHandle,
-        _: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported("binding record"))
-    }
 }
 
 #[tokio::test]

@@ -7,8 +7,8 @@
 
 use std::sync::Arc;
 
-use super::effect_group_committed_recovery::HarnessStoreTier;
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
+use super::harness_store_tiers::HarnessStoreTier;
 
 /// Ends the turns a law deliberately left rested.
 type Release =

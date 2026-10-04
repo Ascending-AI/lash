@@ -4,7 +4,7 @@
 //! preimages are preserved across the engine cutover.
 
 use super::{AwaitEventWaitIdentity, ExecutionScope};
-use crate::{RuntimeError, RuntimeErrorCode};
+use crate::RuntimeError;
 
 /// version_guard(
 ///     items(promise_key_preimage),
@@ -91,19 +91,6 @@ pub fn derive_key_id(
         AWAIT_EVENT_FAMILY_VERSION,
         &preimage,
     ))
-}
-
-/// The typed refusal a completion delivered after its owning group child's
-/// cancel decision earns (ADR 0099 §4, W17): the same
-/// `RuntimeEffectGroupChildCancelDecided` a late final record earns, because
-/// both are completions reaching a child whose cancel disposition already won
-/// the linearization point.
-pub fn cancel_decided_refusal() -> RuntimeError {
-    RuntimeError::new(
-        RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
-        "the group child that owns this completion key is cancel-decided; ADR 0099 §4 \
-         refuses a completion delivered after its cancel decision, and nothing was written",
-    )
 }
 
 /// Compare authentication bytes without branching on their contents.

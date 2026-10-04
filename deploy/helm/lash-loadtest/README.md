@@ -393,7 +393,7 @@ do this cleanup explicitly. An incomplete census retains its metric/histogram
 outputs with `qualification.status=INCOMPLETE` and exits unsuccessfully. Missing
 or vanished internal completions are never excused as inferred cancellations.
 The collector retains run-owned `sys_journal` signal commands with their exact
-target invocation IDs. A disappeared inboxed `EffectGroupIndex` call is explained
+target invocation IDs. A disappeared inboxed descendant invocation is explained
 only by a recorded built-in cancel signal targeting that ID, matching Restate
 1.7.12's cancel-before-start contract. Such calls need no completed journal.
 Unexplained disappearances fail qualification when the cancellation census is

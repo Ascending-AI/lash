@@ -27,10 +27,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
-    CompletionKeyPreparation, EffectGroupHandle, EffectHost, EffectJournalRetirement,
-    ExecutionScope, GroupChildBinding, GroupExecutors, GroupSettlement, LoserPolicy,
-    RankedGroupSettlement, Resolution, ResolveOutcome, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    CompletionKeyPreparation, EffectHost, EffectJournalRetirement, ExecutionScope, Resolution,
+    ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController, SegmentProgress,
 };
 use crate::{RuntimeError, RuntimeErrorCode, SessionId};
@@ -109,41 +107,6 @@ pub trait EffectLayer: Send + Sync + 'static {
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         inner.execute_effect(envelope, local_executor).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        inner.open_effect_group(group).await
-    }
-
-    async fn await_next_settlement(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        handle: &mut EffectGroupHandle,
-        cancel: crate::runtime::TurnCancelWait,
-    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
-        inner.await_next_settlement(handle, cancel).await
-    }
-
-    async fn read_group_settlement(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
-        inner.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        handle: EffectGroupHandle,
-        disposition: LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        inner.close_effect_group(handle, disposition).await
     }
 
     async fn resolve_await_event(
@@ -435,14 +398,6 @@ impl EffectHost for LayeredEffectHost {
         self.layered_option(self.inner.scoped_static(admitted)?)
     }
 
-    fn scoped_for_group_child(
-        &self,
-        admitted: AdmittedScope,
-        binding: GroupChildBinding,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        self.layered_option(self.inner.scoped_for_group_child(admitted, binding)?)
-    }
-
     /// The inner host's routing first, then this host's layer: a child an
     /// engine handler executes crosses every layer of the stack, innermost
     /// first, as the controllers this host lends do.
@@ -702,14 +657,6 @@ impl RuntimeEffectController for LayeredController<'_> {
         self.inner.as_ref().observe_process_cancel(lent_stop).await
     }
 
-    async fn observe_group_child_cancel(&self) -> Result<bool, RuntimeEffectControllerError> {
-        self.inner.as_ref().observe_group_child_cancel().await
-    }
-
-    fn group_child_cancel_watch(&self) -> Option<std::sync::Arc<dyn crate::GroupChildCancelWatch>> {
-        self.inner.as_ref().group_child_cancel_watch()
-    }
-
     async fn record_process_drive_step(
         &self,
         name: String,
@@ -797,77 +744,6 @@ impl RuntimeEffectController for LayeredController<'_> {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.layer
             .execute_effect(self.inner.as_ref(), envelope, local_executor)
-            .await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        self.layer
-            .open_effect_group(self.inner.as_ref(), group)
-            .await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn GroupExecutors>,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.inner.as_ref().register_group_executors(executors)
-    }
-
-    /// The inner substrate mints the bound child, and the layer still sees its
-    /// traffic: a child's effects cross the same seam its parent's do.
-    fn group_child_scoped_controller(
-        &self,
-        admitted: AdmittedScope,
-        binding: GroupChildBinding,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        self.inner
-            .as_ref()
-            .group_child_scoped_controller(admitted, binding)?
-            .map(|scoped| LayeredEffectHost::layer_scoped(scoped, Arc::clone(&self.layer)))
-            .transpose()
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut EffectGroupHandle,
-        cancel: crate::runtime::TurnCancelWait,
-    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
-        self.layer
-            .await_next_settlement(self.inner.as_ref(), handle, cancel)
-            .await
-    }
-
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
-        self.layer
-            .read_group_settlement(self.inner.as_ref(), group_key, rank)
-            .await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: EffectGroupHandle,
-        disposition: LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.layer
-            .close_effect_group(self.inner.as_ref(), handle, disposition)
-            .await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.inner
-            .as_ref()
-            .await_group_child_drain_admission(group_key, rank)
             .await
     }
 

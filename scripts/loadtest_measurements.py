@@ -474,106 +474,74 @@ def _journal_json(row):
 
 
 def tool_route_census(receipt):
-    """Locate admission-to-incorporation by journal identities, then follow calls."""
+    """Count the native admission through owner completion and all descendants."""
     invocations = {row['id']: row for row in receipt['invocations']}
     entries = defaultdict(list)
-    targets = {}
-    primitives = {'RunCommand', 'CallCommand', 'OneWayCallCommand', 'SleepCommand',
-                  'AwakeableCommand', 'CompleteAwakeableCommand'}
     for row in receipt['journal']:
         entries[row['id']].append(row)
+    targets = {}
+    for row in receipt['journal']:
         if row['entry_type'] == 'CallInvocationIdCompletionNotification':
             fields = _protobuf_fields(base64.b64decode(row['payload_base64']))
             targets[(row['id'], fields.get(1, [0])[0])] = fields[16][0].decode()
-    call_targets = {}
     for row in receipt['journal']:
         if row['entry_type'] in {'CallCommand', 'OneWayCallCommand'}:
             fields = _protobuf_fields(base64.b64decode(row['payload_base64']))
             target = targets[(row['id'], fields.get(10, [0])[0])]
             require(target in invocations, 'missing called invocation descendant')
-            call_targets[(row['id'], row['index'])] = target
-    presentation = []
+    native = []
     for identity, rows in entries.items():
+        commands = {}
         for row in rows:
-            if row['entry_type'] == 'RunCommand' and (row['name'] or '').endswith(':present'):
-                completion_id = _protobuf_fields(base64.b64decode(row['payload_base64'])).get(11, [0])[0]
-                result = next(item for item in rows if item['entry_type'] == 'RunCompletionNotification' and
-                              _protobuf_fields(base64.b64decode(item['payload_base64'])).get(1, [0])[0] == completion_id)
-                presentation.append(dict(id=identity, command_index=row['index'], result_index=result['index'],
-                                         payload_bytes=result['payload_bytes'], output_copies=result['output_copies'],
-                                         output_decimal_copies=result['output_decimal_copies']))
-    if receipt['fixture']['branch'] != 'done':
-        return dict(presentation_records=presentation, boundary='whole Run census; ordinary budget does not apply to this branch')
-    opener = next(row['id'] for row in receipt['journal']
-                  if row['entry_type'] == 'RunCommand' and (row['name'] or '').endswith(':requests'))
-    rows = entries[opener]
-    start = next(row['index'] for row in rows if (row['name'] or '').endswith(':requests'))
-    complete = receipt['branch_observation']['boundary_complete']
-    if complete:
-        incorporated = max(row['index'] for row in rows if 'effect-group-incorporate:' in (row['name'] or ''))
-        end = next(row['index'] for row in rows if row['index'] > incorporated and row['entry_type'] == 'RunCommand')
-    else:
-        end = rows[-1]['index'] + 1
-    selected = [row for row in rows if start <= row['index'] < end]
-    selected_ids = {call_targets[(row['id'], row['index'])] for row in selected
-                    if row['entry_type'] in {'CallCommand', 'OneWayCallCommand'}}
+            if row['entry_type'] == 'RunCommand':
+                fields = _protobuf_fields(base64.b64decode(row['payload_base64']))
+                commands[fields.get(11, [0])[0]] = row
+        for row in rows:
+            if row['entry_type'] != 'RunCompletionNotification':
+                continue
+            value = _journal_json(row)
+            if isinstance(value, dict) and isinstance(value.get('record'), dict):
+                fields = _protobuf_fields(base64.b64decode(row['payload_base64']))
+                command = commands.get(fields.get(1, [0])[0])
+                require(command is not None, 'native Run receipt has no issuing command')
+                native.append((identity, command, value['record']))
+    admissions = [(identity, command) for identity, command, record in native
+                  if any(event['event'] == 'admitted' for event in record['events'])]
+    require(admissions, 'no native Run admission in tool cost receipt')
+    owner_ids = {identity for identity, _ in admissions}
+    selected_ids = set(owner_ids)
     while True:
-        children = {row['id'] for row in invocations.values() if row['invoked_by_id'] in selected_ids}
-        if children <= selected_ids:
+        descendants = {row['id'] for row in invocations.values()
+                       if row['invoked_by_id'] in selected_ids}
+        if descendants <= selected_ids:
             break
-        selected_ids |= children
-    selected.extend(row for row in receipt['journal'] if row['id'] in selected_ids)
+        selected_ids |= descendants
+    starts = {identity: min(command['index'] for owner, command in admissions if owner == identity)
+              for identity in owner_ids}
+    selected = [row for row in receipt['journal'] if row['id'] in selected_ids
+                and (row['id'] not in starts or row['index'] >= starts[row['id']])]
+    primitives = {'RunCommand', 'CallCommand', 'OneWayCallCommand', 'SleepCommand',
+                  'AwakeableCommand', 'CompleteAwakeableCommand'}
     source = Counter(row['entry_type'] for row in selected if row['entry_type'] in primitives)
     raw = Counter(row['entry_type'] for row in selected)
-    responses = []
-    for identity in selected_ids:
-        invocation = invocations[identity]
-        if invocation['target_service_name'] == 'EffectGroupIndex' and invocation['target_handler_name'] in {'subscribe', 'read_rank'}:
-            data = {row['entry_type']: _journal_json(row) for row in entries[identity]
-                    if row['entry_type'] in {'InputCommand', 'OutputCommand'}}
-            responses.append(dict(id=identity, handler=invocation['target_handler_name'], **data))
-    ready = [row for row in responses if row['handler'] == 'subscribe' and row['InputCommand']['notice']['type'] == 'ready']
-    reads = [row for row in responses if row['handler'] == 'read_rank' and row['InputCommand']['run']]
-    # The first read is identified by its calling command's journal position.
-    read_ids = {row['id'] for row in reads}
-    first_id = next(call_targets[(row['id'], row['index'])] for row in sorted(selected, key=lambda row: row['index'])
-                    if row['id'] == opener and row['entry_type'] == 'CallCommand' and call_targets[(row['id'], row['index'])] in read_ids)
-    first_read = next(row for row in reads if row['id'] == first_id)['OutputCommand']
+    events = Counter(event['event'] for _, _, record in native for event in record['events'])
     width = receipt['fixture']['width']
-    assumptions = dict(no_intents=receipt['branch_observation']['no_declared_intents'],
-                       immediately_done=receipt['branch_observation']['attempts'] == width,
-                       no_attachments=receipt['branch_observation']['no_attachments'],
-                       ready_already_true=len(ready) == 1 and ready[0]['OutputCommand']['type'] == 'notified',
-                       all_ranks_seated_on_first_read=first_read['type'] == 'settled_run' and len(first_read['ranks']) == width,
-                       one_ready_awakeable=source['AwakeableCommand'] == 1,
-                       single_consuming_read=len(reads) == 1)
-    latency = dict(tool_admission_to_incorporation_ms=None,
-                   boundary='request-binding Run command observed to next model Run command after incorporation')
-    opener_view = invocations[opener]
-    runs = [row for row in rows if row['entry_type'] == 'RunCommand']
-    timestamps = [frame[2] for frame in opener_view['endpoint_response_frames'] if frame[0] == 'RunCommand']
-    if complete and opener_view['attempts'] == 1:
-        require(len(runs) == len(timestamps), 'Run journal/frame timeline mismatch')
-        observed = {row['index']: timestamp for row, timestamp in zip(runs, timestamps)}
-        require(observed[end] >= observed[start], 'negative tool incorporation interval')
-        latency['tool_admission_to_incorporation_ms'] = (observed[end] - observed[start]) / 1e6
-    else:
-        latency['unavailable_reason'] = 'incomplete boundary or replayed opener'
+    complete = receipt['branch_observation']['boundary_complete']
+    if receipt['fixture']['branch'] == 'done' and complete:
+        for event in ('attempt_recorded', 'decided', 'presented', 'incorporated'):
+            require(events[event] == width, f'incomplete native {event} population')
     budget = 1 + 3 * width
-    # Response values can include giant rendered payload arrays. Preserve the raw
-    # bytes in the receipt; the summary keeps only the branch evidence.
-    branch_responses = [dict(id=row['id'], handler=row['handler'], input=row['InputCommand'],
-                            result_type=row['OutputCommand']['type'],
-                            seated_ranks=len(row['OutputCommand'].get('ranks', []))) for row in responses]
-    return dict(boundary_complete=complete, latency=latency, presentation_records=presentation, opener=opener, opener_indices=[start, end], descendant_ids=sorted(selected_ids),
-                source_commands=sum(source.values()), source_by_kind=dict(source),
-                raw_engine_records=sum(raw.values()), raw_by_kind=dict(raw),
-                common_run_source_commands=receipt['source']['total'] - sum(source.values()),
-                historical_estimate=14 + 19 * width, historical_assumptions=assumptions,
-                historical_branch_matches=all(assumptions.values()), branch_responses=branch_responses,
-                target_budget=budget, source_target_met=sum(source.values()) <= budget,
-                raw_target_met=sum(raw.values()) <= budget,
-                boundary='opener request binding through incorporation and close, plus every called descendant')
+    result = dict(boundary_complete=complete, descendant_ids=sorted(selected_ids - owner_ids),
+                  native_events=dict(events), source_commands=sum(source.values()),
+                  source_by_kind=dict(source), raw_engine_records=sum(raw.values()),
+                  raw_by_kind=dict(raw), target_budget=budget,
+                  source_target_met=sum(source.values()) <= budget,
+                  raw_target_met=sum(raw.values()) <= budget,
+                  boundary='native round admission through owner completion and scope close, including descendants')
+    if len(owner_ids) == 1:
+        result['opener'] = next(iter(owner_ids))
+    return result
+
 
 def tool_sql_transactions(sql):
     """Group interleaved connection-worker traces; retain every statement index."""
@@ -731,7 +699,7 @@ def cancellation_census(samples, owned, disappeared):
                 require(isinstance(command['target_invocation_id'], str), 'missing cancellation target invocation ID')
                 targets.setdefault(command['target_invocation_id'], []).append(identity)
     explained = [row['id'] for row in disappeared if row['status'] == 'inboxed'
-                 and row.get('target_service_name') == 'EffectGroupIndex' and row['id'] in targets]
+                 and row['id'] in targets]
     return {'available': available, 'commands': len(commands), 'target_invocation_ids': sorted(targets),
             'explained_inbox_ids': sorted(explained),
             'unexplained_disappearance_ids': sorted(row['id'] for row in disappeared if row['id'] not in explained)}

@@ -176,28 +176,6 @@ also journals its cancellation and revocation observations. Terminal attachment
 commands return the same observed value, so pending tool calls settle without
 opening a wait. Non-terminal or cancelled children and closed control gates use the attach and durable-wait path.
 
-## Stuck effect-group dispatcher retirement
-
-Effect-group retirement tombstones the index before it cancels and durably
-joins the adopted `EffectGroupDispatch` invocation. If that dispatcher's
-endpoint is gone, the join deliberately remains pending: the tombstone prevents
-new child execution, while the saga waits for a terminal it can prove.
-
-Inspect the retired index cleanup and copy its exact `dispatcher.id`. Confirm
-that the invocation is the `EffectGroupDispatch/run` execution for the affected
-group key. Then terminate only that recorded invocation:
-
-```text
-restate invocation kill <dispatcher-invocation-id>
-```
-
-Do not kill by service name, wildcard, or process match. Once the exact
-invocation is terminal, the saga's durable attach completes and engine redrive
-continues child cancellation, all `3N+1` retained wait fences, payload-byte
-deletion, and the final tombstone-only reduction. Verify that the index reports
-`Retired`, a late READY or RANK registration resolves as `Retired`, and a late
-payload put returns `Retired`.
-
 The wait workflow owns Restate promises and durable deadline timers for every
 Lash execution scope. The virtual-object index serializes wait registration,
 session-wide cancellation, and permanent revocation during session deletion.
@@ -212,8 +190,7 @@ controller, so Restate journals the observation before any turn effect. A
 pre-registered cancellation is therefore still observed before execution, and
 handler replay reuses the original observation instead of branching on a later
 out-of-band ingress result. After that, cancellation reaches a turn only as
-journaled facts (ADR 0105 §3): durable waits and effect-group notices race
-the turn's gate in the journal, the turn peeks the gate at its step
+journaled facts (ADR 0105 §3): durable waits race the turn's gate in the journal, the turn peeks the gate at its step
 boundaries, and a model call's `ctx.run` body watches the gate itself and
 records whether it was stopped. That watch, and a host-local stop forwarded to
 the gate, are the only users of the deployment-level ingress controller;

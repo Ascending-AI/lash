@@ -6,7 +6,7 @@
 //! through the endpoint's real handlers with the Restate server simulated in
 //! process.
 
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 
 lash_conformance::session_close_tests!({
     let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;

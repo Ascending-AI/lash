@@ -156,13 +156,6 @@ impl RuntimeEffectController for FencedRestateController {
         self.controller.wants_segment_boundary(progress)
     }
 
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn GroupExecutors>,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.controller.register_group_executors(executors)
-    }
-
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -174,67 +167,6 @@ impl RuntimeEffectController for FencedRestateController {
         self.refuse_if_retired().await?;
         self.controller
             .execute_effect(envelope, local_executor)
-            .await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        group.validate_execution_scope(self.admitted.scope())?;
-        self.refuse_if_retired().await?;
-        // The group is a live child of this scope until its index reports
-        // every child settled: recorded in the scope's index so a
-        // `WhenQuiescent` retirement counts it (FIG-2499).
-        if self.admitted.scope().session_id().is_none()
-            && !self
-                .controller
-                .record_scope_group(self.admitted.scope(), group.group_key())
-                .await?
-        {
-            let identity = self.admitted.scope().journal_identity()?;
-            return Err(lash_core::facade_support::scope_status::scope_retired(
-                identity.key(),
-            ));
-        }
-        self.controller
-            .open_effect_group_opened_by(group, &self.admitted)
-            .await
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut EffectGroupHandle,
-        cancel: lash_core::TurnCancelWait,
-    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
-        self.controller.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<Option<lash_core::RankedGroupSettlement>, lash_core::RuntimeEffectControllerError>
-    {
-        self.controller.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: EffectGroupHandle,
-        disposition: LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.controller
-            .close_effect_group(handle, disposition)
-            .await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.controller
-            .await_group_child_drain_admission(group_key, rank)
             .await
     }
 

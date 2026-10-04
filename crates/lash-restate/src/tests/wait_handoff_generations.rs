@@ -7,8 +7,8 @@
 //! hands its open wait to a successor segment on N+1, and the successor
 //! waits on the same wait again.
 
-use super::effect_group_generation_routing::{RunLog, build_endpoint, build_endpoint_reading};
 use super::segment_generation_handoff::{GatePoint, GatedContinuations};
+use super::wait_generation_endpoint::{build_endpoint, build_endpoint_reading};
 use super::*;
 use lash_restate_test::{
     DeploymentHooks, Refusal, RestateTestServer, ResumeDeployment, ServerConfig,
@@ -48,10 +48,9 @@ impl Roll {
         let stores = lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("open the shared store set");
-        let log = RunLog::default();
-        let (_, endpoint_n) = build_endpoint(&connection, &stores, "N", &log).await;
+        let (_, endpoint_n) = build_endpoint(&connection, &stores, "N").await;
         let (host_next, endpoint_next) =
-            build_endpoint_reading(&connection, &stores, "N+1", &log, next_reads).await;
+            build_endpoint_reading(&connection, &stores, "N+1", next_reads).await;
         let retiring = Arc::new(AtomicBool::new(false));
         let refusing = Arc::clone(&retiring);
         let deployment_n = server
@@ -388,7 +387,6 @@ impl HandOff {
         let host = Arc::new(RestateEffectHost::in_namespace(
             connection.clone(),
             test_restate_authority_id(),
-            generation.clone(),
             crate::RestateNamespace::default(),
         ));
 
@@ -397,11 +395,11 @@ impl HandOff {
             Endpoint::builder(),
             crate::services::LashServiceParts {
                 effect_host: &host,
-                ingress: ingress.clone(),
+
                 admin: crate::RestateAdminClient::new(connection.clone()),
                 materials,
                 attachments: Arc::clone(sessions) as Arc<dyn lash_core::AttachmentReferrers>,
-                sessions: Arc::clone(sessions),
+
                 process_workflow: LashProcessWorkflowImpl::new(
                     Arc::new(crate::process::RestateCoreProcessRunner::new(worker)),
                     Arc::clone(registry),

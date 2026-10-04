@@ -571,8 +571,7 @@ impl<'run> ScopedEffectController<'run> {
                 | crate::RuntimeEffectCommand::AwaitEvent { .. }
                 | crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
                 | crate::RuntimeEffectCommand::LoadExecutionEnv { .. }
-                | crate::RuntimeEffectCommand::PresentToolResult { .. }
-                | crate::RuntimeEffectCommand::IncorporateGroupSettlements { .. } => false,
+                | crate::RuntimeEffectCommand::PresentToolResult { .. } => false,
                 crate::RuntimeEffectCommand::Process { command } => !matches!(
                     command.as_ref(),
                     crate::ProcessCommand::Await { .. }

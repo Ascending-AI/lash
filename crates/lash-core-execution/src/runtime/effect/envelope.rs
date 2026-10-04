@@ -20,7 +20,6 @@ use crate::{
 };
 
 use super::executor::RuntimeEffectControllerError;
-use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
 use super::llm_outcome::{AssistantResponsePlan, AssistantStreamHookState, LlmStreamRecord};
 use super::tool_attempt_capture::ToolAttemptCapture;
 
@@ -198,31 +197,19 @@ impl<'de> Deserialize<'de> for RuntimeEffectInvocation {
 pub struct RuntimeEffectEnvelope {
     pub invocation: RuntimeEffectInvocation,
     pub command: RuntimeEffectCommand,
-    /// This effect's membership in a durable effect group, when it is a group
-    /// child (FIG-1416).
-    ///
-    /// Optional and **omitted when absent**, so an ungrouped effect's canonical
-    /// encoding stays byte-identical to what it was before groups existed and
-    /// no pre-existing recorded `envelope_hash` is invalidated. Boxed to keep
-    /// the envelope inside its measured size budget below.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub group: Option<Box<EffectGroupMembership>>,
 }
 
 #[derive(Deserialize)]
 struct RuntimeEffectEnvelopeWire {
     invocation: RuntimeEffectInvocation,
     command: RuntimeEffectCommand,
-    #[serde(default)]
-    group: Option<Box<EffectGroupMembership>>,
 }
 
 impl TryFrom<RuntimeEffectEnvelopeWire> for RuntimeEffectEnvelope {
     type Error = RuntimeEffectControllerError;
 
     fn try_from(wire: RuntimeEffectEnvelopeWire) -> Result<Self, Self::Error> {
-        let mut envelope = Self::try_new(wire.invocation, wire.command)?;
-        envelope.group = wire.group;
+        let envelope = Self::try_new(wire.invocation, wire.command)?;
         Ok(envelope)
     }
 }
@@ -253,34 +240,7 @@ impl RuntimeEffectEnvelope {
         Ok(Self {
             invocation,
             command,
-            group: None,
         })
-    }
-
-    /// Prefer
-    /// [`RuntimeEffectGroup::try_new`](super::group::RuntimeEffectGroup::try_new),
-    /// which stamps every child from its own index and checks agreement; reach
-    /// for this only to build a child whose membership you then hand to that
-    /// constructor for validation.
-    ///
-    /// The membership folds into [`stable_hash`](Self::stable_hash), so a replay
-    /// whose wake rule, loser disposition, or position drifted is refused by the
-    /// existing envelope-hash fence rather than executed under the new rule.
-    #[must_use]
-    pub fn in_effect_group(
-        mut self,
-        group_key: impl Into<String>,
-        position: usize,
-        wake: GroupWakePolicy,
-        loser_disposition: LoserPolicy,
-    ) -> Self {
-        self.group = Some(Box::new(EffectGroupMembership {
-            group_key: group_key.into(),
-            position,
-            wake,
-            loser_disposition,
-        }));
-        self
     }
 
     /// Hashes the canonical envelope for effect-host implementors so replay comparison is stable
@@ -403,33 +363,6 @@ pub enum SleepSpec {
     },
 }
 
-/// Serializable command emitted at Lash's nondeterministic runtime boundary.
-/// An armed completion the caller still owns.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ToolCompletionWait {
-    pub key: crate::AwaitEventKey,
-}
-
-/// The next dispatch settlement competing with deferred logical completions.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ToolDispatchCursor {
-    pub group_key: String,
-    pub rank: u64,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "event", rename_all = "snake_case")]
-pub enum ToolCompletionEvent {
-    Resolved {
-        position: usize,
-        resolution: crate::Resolution,
-    },
-    DispatchReady,
-    HandedOver,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeEffectCommand {
@@ -473,26 +406,7 @@ pub enum RuntimeEffectCommand {
         attempt: u32,
         max_attempts: u32,
     },
-    /// Durably arm a deferred dispatch's completion key.
-    ArmToolCompletion {
-        key: crate::AwaitEventKey,
-    },
-    /// The Run waits on its settled dispatch's original completion key.
-    AwaitToolCompletions {
-        waits: Vec<ToolCompletionWait>,
-        dispatch: Option<ToolDispatchCursor>,
-        transferable: bool,
-    },
-    /// Record the opener's incorporated settlement prefix of a durable effect
-    /// group (ADR 0099 §6): the journaled mapping from group identity to the
-    /// ranks the opener applied, written before an externally effective step
-    /// that reads those facts. Replay restores exactly the recorded ranks and
-    /// never a later one. `through_rank` is the prefix bound the opener chose
-    /// at record time; the outcome lists what was actually incorporated.
-    IncorporateGroupSettlements {
-        group_key: String,
-        through_rank: u64,
-    },
+
     /// The recorded presentation boundary (ADR 0099 §6, FIG-3420): folds the
     /// session's ordered presentation steps over this settled output once and
     /// journals the resulting [`ToolPresentation`](super::ToolPresentation).
@@ -716,11 +630,7 @@ impl RuntimeEffectCommand {
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
-            Self::ArmToolCompletion { .. } => RuntimeEffectKind::ArmToolCompletion,
-            Self::AwaitToolCompletions { .. } => RuntimeEffectKind::AwaitToolCompletions,
-            Self::IncorporateGroupSettlements { .. } => {
-                RuntimeEffectKind::IncorporateGroupSettlements
-            }
+
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::IngestTriggerOccurrence { .. } => RuntimeEffectKind::IngestTriggerOccurrence,
@@ -1318,17 +1228,7 @@ pub enum RuntimeEffectOutcome {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         capture: Option<Box<ToolAttemptCapture>>,
     },
-    ArmToolCompletion {},
-    AwaitToolCompletions {
-        event: ToolCompletionEvent,
-    },
-    /// The group-settlement prefix an
-    /// [`IncorporateGroupSettlements`](RuntimeEffectCommand::IncorporateGroupSettlements)
-    /// command incorporated: the recorded mapping replay re-applies, rank by
-    /// rank, and nothing past it (ADR 0099 §6).
-    IncorporateGroupSettlements {
-        incorporated: Vec<super::group::IncorporatedGroupRank>,
-    },
+
     /// What the [`PresentToolResult`](RuntimeEffectCommand::PresentToolResult)
     /// boundary journaled: the folded `ModelToolReturn` plus every artifact a
     /// step retained while the chain ran. Replay serves this record verbatim —

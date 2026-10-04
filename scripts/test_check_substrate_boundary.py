@@ -46,7 +46,6 @@ FIXTURE_DIRS = [
     "crates/lashlang/src",
     "crates/lash-lashlang-runtime/src",
     "crates/lash-restate/src/controller",
-    "crates/lash-restate/src/effect_group",
     "crates/lash-restate/src/process",
 ]
 FIXTURE_FILES = [
@@ -54,8 +53,6 @@ FIXTURE_FILES = [
     "crates/lash-core/src/runtime/turn_boundary.rs",
     "crates/lash-core-execution/src/session.rs",
     "crates/lash-core-execution/src/tool_dispatch.rs",
-    "crates/lash-core-execution/src/runtime/effect/group.rs",
-    "crates/lash-restate/src/effect_group.rs",
     "crates/lash-restate/src/durable_wait.rs",
 ]
 FIXTURE_SHIFT_FILE = "crates/lash-core/src/runtime/logical_turn.rs"

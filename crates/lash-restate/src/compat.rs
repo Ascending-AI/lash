@@ -27,9 +27,6 @@ pub use lash_sansio::VersionRange;
 ///     shapes(cover(Call, Reply, ObjectCompat)),
 ///     roots(path = "crates/lash-restate/src/wire.rs", RestateCompatError, CallDecodeError),
 ///     roots(
-///         path = "crates/lash-restate/src/effect_group/payload.rs", EffectGroupPayloadPutRequest,
-///     ),
-///     roots(
 ///         path = "crates/lash-restate/src/process/mod.rs", RestateProcessWorkflowInput,
 ///         RestateProcessWorkflowPayload, RestateProcessWorkflowOutput,
 ///         RestateProcessCancelRequest, RestateProcessCompleteRequest, RestateProcessAwaitRequest,
@@ -44,17 +41,6 @@ pub use lash_sansio::VersionRange;
 ///     items(
 ///         path = "crates/lash-restate/src/wire.rs", wire_unsupported, incompatible,
 ///         restate_compat_error_in,
-///     ),
-///     shapes(
-///         path = "crates/lash-restate/src/effect_group/messages.rs",
-///         path = "crates/lash-restate/src/effect_group/wire.rs",
-///         path = "crates/lash-restate/src/effect_group/notifications.rs",
-///         path = "crates/lash-restate/src/effect_group/dispatch.rs",
-///         cover(
-///             EffectGroupOpenRequest, EffectGroupCommitChildRequest,
-///             EffectGroupCommitChildResponse, EffectGroupAdmitSemanticRequest, EffectGroupNotice,
-///             EffectGroupDispatchRequest, EffectGroupChildRequest,
-///         ),
 ///     ),
 ///     shapes(
 ///         path = "crates/lash-restate/src/durable_wait/messages.rs",

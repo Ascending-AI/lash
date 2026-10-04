@@ -39,7 +39,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     pub(in crate::runtime) fn take_opener_for_commit(
         &self,
     ) -> Result<OpenerForCommit<'run>, RuntimeError> {
-        let context = if self.opener_state.holds_groups() || self.opener_state.holds_tool_run() {
+        let context = if self.opener_state.holds_tool_run() {
             let context = self
                 .execution_context_observing(
                     crate::engine::NullObservationSink::arc(),
@@ -123,7 +123,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     }
 
     async fn close_turn_groups(&self) -> Result<(), RuntimeError> {
-        if !self.opener_state.holds_groups() && !self.opener_state.holds_tool_run() {
+        if !self.opener_state.holds_tool_run() {
             return Ok(());
         }
         // The closing pass's emissions have no host lane: the old code
@@ -136,21 +136,13 @@ impl<'run> RuntimeTurnDriver<'run> {
             .map_err(|error| {
                 RuntimeError::new(
                     RuntimeErrorCode::ToolCatalogResolutionFailed,
-                    format!("the turn's effect groups could not be closed: {error}"),
+                    format!("the turn's Run could not be closed: {error}"),
                 )
             })?;
-        let closed = context
+        context
             .close_opener_groups()
             .await
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
-        if !closed.pending.is_empty() {
-            tracing::debug!(
-                session_id = %self.session_id,
-                turn_id = %self.turn_id,
-                pending = ?closed.pending,
-                "turn end left effect groups closing with obligations owed elsewhere",
-            );
-        }
         Ok(())
     }
 }

@@ -491,7 +491,7 @@ async fn drain_sealed_final(
         None if intents.is_empty() => Vec::new(),
         None => {
             return Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                crate::RuntimeErrorCode::RuntimeToolRunShape,
                 format!(
                     "the committed final of `{recorded_call_id}` declares intents but names \
                      no attempt that minted them"

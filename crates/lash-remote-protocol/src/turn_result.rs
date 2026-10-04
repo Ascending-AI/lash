@@ -681,7 +681,7 @@ pub enum RemoteToolIntentRefusalReason {
     CommandFailed {
         cause: lash_core_execution::ToolIntentCommandFailure,
     },
-    MintingGroupChildCancelled,
+    MintingRunCancelled,
     DeclaredStartIdentityMismatch {
         expected: Box<RemoteToolIntentIdentity>,
         recorded: Box<RemoteToolIntentIdentity>,

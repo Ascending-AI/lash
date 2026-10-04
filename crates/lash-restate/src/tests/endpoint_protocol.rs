@@ -13,25 +13,6 @@ use std::task::{Context, Poll};
 
 pub(super) const RESTATE_INVOCATION_CONTENT_TYPE: &str = "application/vnd.restate.invocation.v6";
 
-pub(super) fn endpoint_on_route<S>(dispatcher: S, route: &crate::services::ServiceRoute) -> Endpoint
-where
-    S: restate_sdk::service::Service<
-            Future = restate_sdk::service::macro_support::ServiceBoxFuture,
-        > + restate_sdk::service::Discoverable
-        + Send
-        + Sync
-        + 'static,
-{
-    let mut discovery = S::discover();
-    discovery.name = restate_sdk::discovery::ServiceName::try_from(route.name().into_owned())
-        .expect("the fixture's route is a valid service name");
-    Endpoint::builder()
-        .bind(restate_sdk::service::macro_support::service_definition(
-            dispatcher, discovery,
-        ))
-        .build()
-}
-
 pub(super) struct FusedChannelBody {
     pub(super) receiver: tokio::sync::mpsc::Receiver<Bytes>,
 }
@@ -283,25 +264,6 @@ pub(super) fn decode_call_frame(frame: &[u8]) -> Option<RestateCallFrame> {
     })
 }
 
-/// Every `CallCommand` in `output`, in journal order, as its called handler and
-/// its JSON parameter.
-pub(super) fn restate_call_parameters(output: &[u8]) -> Option<Vec<(String, serde_json::Value)>> {
-    restate_message_frames(output, 0x040D)?
-        .into_iter()
-        .map(|frame| {
-            let call = decode_call_frame(frame)?;
-            let parameter = protobuf_len_field(frame.get(8..)?, 3)?;
-            let parameter = serde_json::from_slice(parameter).ok()?;
-            let parameter = if is_lash_service(&call.service) {
-                call_body(parameter)?
-            } else {
-                parameter
-            };
-            Some((call.handler, parameter))
-        })
-        .collect()
-}
-
 /// Whether `service` names a lash service under any namespace and lane:
 /// its handlers read a Call and answer a Reply (ADR 0115).
 pub(super) fn is_lash_service(service: &str) -> bool {
@@ -324,17 +286,6 @@ fn is_reply_envelope(value: &serde_json::Value) -> bool {
             && object.get("wire").is_some_and(serde_json::Value::is_u64)
             && object.contains_key("body")
     })
-}
-
-/// The body of the Call a lash handler was sent; `None` for anything else.
-fn call_body(parameter: serde_json::Value) -> Option<serde_json::Value> {
-    if !is_call_envelope(&parameter) {
-        return None;
-    }
-    let serde_json::Value::Object(mut call) = parameter else {
-        return None;
-    };
-    call.remove("body")
 }
 
 /// A bare fixture answer to a call to `service`, in the Reply a lash handler
@@ -629,7 +580,6 @@ pub(super) fn durable_wait_index_call_response(
         "end_effect" | "release_process_journal" => Some(serde_json::Value::Null),
         // The stub answers "no membership", which is the honest answer for
         // every row these protocol tests settle: none mints a durable group.
-        "group_child_membership" => Some(serde_json::Value::Null),
         _ => None,
     }
 }

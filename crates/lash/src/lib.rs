@@ -700,8 +700,8 @@ pub mod persistence {
         HydratedCheckpointComponent, HydratedSessionCheckpoint, InterruptedTurnClosure,
         OperationId, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
         ParkId, ParkReason, ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, ProcessPark,
-        ProcessParkKey, ProcessParkQuery, RunContinuation, RunOpenerGroup, RunOpenerState,
-        RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator, RuntimeTurnCommitStamp,
+        ProcessParkKey, ProcessParkQuery, RunContinuation, RunOpenerState, RuntimeCommit,
+        RuntimeCommitReceipt, RuntimeStoreDecorator, RuntimeTurnCommitStamp,
         SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
         SuspendedCell, TurnChange, TurnChangeCursor, TurnChangeKind, TurnChangePage,
         TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkOrigin, TurnParkQuery,
@@ -786,12 +786,12 @@ pub mod plugins {
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
         AttemptStream, AttemptStreamChannel, AttemptStreamEvent, AttemptStreamTruncation,
-        DecodedStreamEvent, IncorporatedGroupRank, ToolAttemptCapture,
+        DecodedStreamEvent, ToolAttemptCapture,
     };
     pub use lash_core::session::{
-        CompletedProtocolToolCall, Incorporated, IncorporationLedger, OpenerGroupsClosed,
-        SettlementSource, ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply,
-        ToolAggregateOutcome, ToolAggregateRequest, ToolRunAggregateCursor, ToolRunAggregatePoll,
+        CompletedProtocolToolCall, Incorporated, IncorporationLedger, SettlementSource,
+        ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome,
+        ToolAggregateRequest, ToolRunAggregateCursor, ToolRunAggregatePoll,
     };
     pub use lash_core::tool_dispatch::{
         ArmedResolver, LaunchReceipt, PendingToolDispatchOutcome, ToolCallIds, ToolDispatchOutcome,
@@ -1371,8 +1371,7 @@ pub mod durability {
     };
     /// Durable group and journal values returned by effect-host implementors.
     pub use lash_core::runtime::{
-        GroupChildBinding, GroupChildCancelWatch, JournalReplay, ProcessDriveStep,
-        RankedGroupSettlement, RecordedJournal, RecordedKeyRange, RunRecordStep,
+        JournalReplay, ProcessDriveStep, RecordedJournal, RecordedKeyRange, RunRecordStep,
     };
     pub use lash_core::tool_dispatch::{RunAttemptHandle, RunAttemptStep, RunRetryTimer};
     pub use lash_core::{
@@ -1424,8 +1423,7 @@ pub mod runtime {
 
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
     pub use lash_core::{
-        GroupReopen, ProtocolSessionExtension, ScopeBoundController, ServedOnly,
-        TurnControlAttachment,
+        ProtocolSessionExtension, ScopeBoundController, ServedOnly, TurnControlAttachment,
     };
     pub use lash_core_store::runtime_error::EffectErrorJournalPolicy;
     pub use lash_core_store::store::FollowOnRecoveryAnswer;
@@ -1439,9 +1437,6 @@ pub mod runtime {
     };
     pub use lash_sansio::{CheckpointDelivery, EffectIdentityError};
 
-    /// The capability an unroutable effect-group child's deployment lacks,
-    /// named by [`RuntimeErrorCause::EffectGroupChildUnroutable`].
-    pub use lash_core::GroupChildCapability;
     /// The lazy binding of a recorded model that
     /// [`RuntimeEffectLocalExecutor::direct`] takes: bound only when an
     /// unjournaled completion's body runs.
@@ -1471,19 +1466,17 @@ pub mod runtime {
     pub use lash_core::runtime::{
         AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantResponsePlan,
         AssistantStreamHookState, AwaitEventResolver, CheckpointAdmittedSet,
-        CompletionKeyPreparation, DirectCompletionClient, EffectAddress, EffectGroupHandle,
-        EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
-        GroupSettlement, GroupWakePolicy, LlmRequestSpec, LlmStreamRecord, LoserPolicy,
-        NoSessionWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
+        CompletionKeyPreparation, DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost,
+        EventSink, ExecutionScope, GroupWakePolicy, LlmRequestSpec, LlmStreamRecord, NoSessionWork,
+        NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
         ProcessListSelection, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
         RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
+        RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind,
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
-        RuntimeProviderConfig, ScopedEffectController, SessionWorkEngine, SleepSpec,
-        ToolCompletionEvent, ToolCompletionWait, ToolDispatchCursor, TraceEmitter, TraceRuntime,
-        TurnCancelWait, TurnContext, TurnControlBinding, TurnPrelude, WorkCadenceError,
-        WorkCadencePolicy, effect_groups_unsupported,
+        RuntimeProviderConfig, ScopedEffectController, SessionWorkEngine, SleepSpec, TraceEmitter,
+        TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding, TurnPrelude,
+        WorkCadenceError, WorkCadencePolicy,
     };
     /// Explicitly unstable internal instrumentation. Phase names may change
     /// with the turn loop. See `docs/architecture/turn-phase-probe.md`.

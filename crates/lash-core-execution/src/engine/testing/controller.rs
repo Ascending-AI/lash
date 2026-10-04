@@ -9,14 +9,10 @@
 
 use super::cx::LocalTestCx;
 use crate::{
-    AdmittedScope, AwaitEventResolver, EffectGroupHandle, GroupSettlement, LoserPolicy,
-    RecordedJournal, RecordedKeyRange, RecordedKeys, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    AdmittedScope, AwaitEventResolver, RecordedJournal, RecordedKeyRange, RecordedKeys,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, ScopedEffectController,
-    effect_groups_unsupported,
 };
-
-const HARNESS: &str = "the local determinism test context";
 
 impl LocalTestCx {
     /// A scoped controller over this context for `admitted`: hand it to work
@@ -53,29 +49,6 @@ impl RuntimeEffectController for LocalTestCx {
             local_executor.execute(envelope),
         )
         .await
-    }
-
-    async fn open_effect_group(
-        &self,
-        _group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        Err(effect_groups_unsupported(HARNESS))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut EffectGroupHandle,
-        _cancel: crate::runtime::TurnCancelWait,
-    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
-        Err(effect_groups_unsupported(HARNESS))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: EffectGroupHandle,
-        _disposition: LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        Err(effect_groups_unsupported(HARNESS))
     }
 
     async fn read_recorded_journal(

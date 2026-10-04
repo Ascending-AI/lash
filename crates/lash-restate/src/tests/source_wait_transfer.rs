@@ -122,11 +122,11 @@ pub(super) async fn endpoint(
         Endpoint::builder(),
         crate::services::LashServiceParts {
             effect_host: &host,
-            ingress: RestateIngressClient::new(connection.clone()),
+
             admin: crate::RestateAdminClient::new(connection.clone()),
             materials: stores.tool_material_store(),
             attachments: stores.attachment_referrers(),
-            sessions: stores.session_store_factory(),
+
             process_workflow: LashProcessWorkflowImpl::new_for_test(
                 Arc::new(NoRun),
                 stores.process_registry(),

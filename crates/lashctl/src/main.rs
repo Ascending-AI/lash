@@ -670,7 +670,6 @@ fn drain_status_result(status: &GenerationDrainStatus, stalled: &[StalledObligat
         "parked_turns": status.parked_turns,
         "in_flight_turns": status.in_flight_turns,
         "closing_sessions": status.closing_sessions,
-        "undrained_group_children": status.undrained_group_children,
         "stalled_obligations": status.stalled_obligations.iter().map(|(kind, count)| (kind.label(), *count)).collect::<std::collections::BTreeMap<_, _>>(),
         "stalled": stalled.iter().map(stalled_result).collect::<Vec<_>>(),
         "drained": status.drained(),

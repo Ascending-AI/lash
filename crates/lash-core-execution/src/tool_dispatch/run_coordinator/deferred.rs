@@ -297,8 +297,7 @@ impl<'a> RunCoordinator<'a> {
                 {
                     Ok(selected) => selected,
                     Err(error)
-                        if error.code
-                            == crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled =>
+                        if error.code == crate::RuntimeErrorCode::RuntimeToolRunAwaitCancelled =>
                     {
                         // The gate is a request. Each source's reply decides
                         // whether its real result already won.

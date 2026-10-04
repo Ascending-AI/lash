@@ -649,8 +649,6 @@ mod tests {
             "SELECT id FROM sys_invocation WHERE status = 'paused' AND last_failure IS NOT NULL",
             "SELECT id, target_service_name, target_service_key, target_handler_name, retry_count, last_failure, last_failure_error_code FROM sys_invocation WHERE status = 'paused' AND target_service_name = 'LashProcessWorkflow'",
             "SELECT id, target, target_service_name, target_service_key, target_handler_name, status, completion_result, completion_failure FROM sys_invocation WHERE (target_service_name = 'LashProcessWorkflow' OR target_service_name LIKE 'LashProcessWorkflow_g%') AND target_handler_name = 'run' AND target_service_key IN ('p_01x', 'p_01y#2')",
-            "SELECT service_name, service_key, value_utf8 FROM state WHERE key = 'effect-group/v1/state'",
-            "SELECT service_key, value_utf8 FROM state WHERE service_name = 'EffectGroupIndex' AND key = '_compat'",
         ] {
             Parser::new(sql).and_then(Parser::query).unwrap();
         }
@@ -665,7 +663,7 @@ mod tests {
     fn like_matches_prefixes_and_infixes() {
         assert!(like("LashProcessWorkflow", "Lash%"));
         assert!(like("LashProcessWorkflow", "%Process%"));
-        assert!(!like("EffectGroupIndex", "Lash%"));
+        assert!(!like("HostObject", "Lash%"));
         assert!(like("exact", "exact"));
     }
 }

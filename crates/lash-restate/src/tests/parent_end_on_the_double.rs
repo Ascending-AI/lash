@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use lash_core::engine::{RunOutcome, ShiftRequest, ShiftRequestId};
 use lash_core::{ProcessId, ProcessRegistry, ScopeId, SessionId, TurnId};
 
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 
 const PAGE: std::num::NonZeroUsize = std::num::NonZeroUsize::MIN.saturating_add(15);
 

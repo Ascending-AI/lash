@@ -82,35 +82,6 @@ impl RuntimeEffectController for RecordingEffectHostController {
             )),
         }
     }
-
-    async fn open_effect_group(
-        &self,
-        _group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingEffectHostController",
-        ))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::TurnCancelWait,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingEffectHostController",
-        ))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingEffectHostController",
-        ))
-    }
 }
 
 #[derive(Clone, Default)]
@@ -364,65 +335,6 @@ pub async fn effect_controller_segmentation_vector(
             local_executor: RuntimeEffectLocalExecutor<'_>,
         ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
             self.inner.execute_effect(envelope, local_executor).await
-        }
-
-        async fn open_effect_group(
-            &self,
-            group: lash_core::RuntimeEffectGroup,
-        ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-            self.inner.open_effect_group(group).await
-        }
-
-        fn register_group_executors(
-            &self,
-            executors: Arc<dyn lash_core::GroupExecutors>,
-        ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-            self.inner.register_group_executors(executors)
-        }
-
-        fn group_child_scoped_controller(
-            &self,
-            admitted: lash_core::AdmittedScope,
-            binding: lash_core::GroupChildBinding,
-        ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError>
-        {
-            self.inner.group_child_scoped_controller(admitted, binding)
-        }
-
-        async fn await_next_settlement(
-            &self,
-            handle: &mut lash_core::EffectGroupHandle,
-            cancel: lash_core::TurnCancelWait,
-        ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-            self.inner.await_next_settlement(handle, cancel).await
-        }
-        async fn read_group_settlement(
-            &self,
-            group_key: &str,
-            rank: u64,
-        ) -> Result<
-            Option<lash_core::runtime::effect::RankedGroupSettlement>,
-            lash_core::RuntimeEffectControllerError,
-        > {
-            self.inner.read_group_settlement(group_key, rank).await
-        }
-
-        async fn close_effect_group(
-            &self,
-            handle: lash_core::EffectGroupHandle,
-            disposition: lash_core::LoserPolicy,
-        ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-            self.inner.close_effect_group(handle, disposition).await
-        }
-
-        async fn await_group_child_drain_admission(
-            &self,
-            group_key: &str,
-            rank: u64,
-        ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-            self.inner
-                .await_group_child_drain_admission(group_key, rank)
-                .await
         }
     }
 

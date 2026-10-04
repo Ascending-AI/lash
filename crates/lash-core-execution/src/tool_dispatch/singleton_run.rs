@@ -708,7 +708,7 @@ impl SingletonRunError {
             Self::Ledger(cause) => crate::tool_run::ContinuationRefusal::Records { cause }.into(),
             Self::Admission(refusal) => {
                 let mut error = RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    crate::RuntimeErrorCode::RuntimeToolRunShape,
                     refusal.to_string(),
                 );
                 error.cause = Some(crate::RuntimeErrorCause::ToolRunAdmissionRefused {
@@ -743,10 +743,8 @@ impl SingletonRunError {
 }
 
 fn run_refusal(cause: crate::RuntimeErrorCause, message: String) -> RuntimeEffectControllerError {
-    let mut error = RuntimeEffectControllerError::new(
-        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-        message,
-    );
+    let mut error =
+        RuntimeEffectControllerError::new(crate::RuntimeErrorCode::RuntimeToolRunShape, message);
     error.cause = Some(cause);
     error
 }

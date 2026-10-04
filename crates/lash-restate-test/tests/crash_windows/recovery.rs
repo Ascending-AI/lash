@@ -916,6 +916,3 @@ async fn live_restate_process_recovery_external_generation_and_terminal_fault_ma
         terminal_case(Engine::live("terminal-fault", Some(1)).await, point).await;
     }
 }
-
-#[path = "recovery/engine.rs"]
-mod engine;

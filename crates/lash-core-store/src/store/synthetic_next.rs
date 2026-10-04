@@ -216,8 +216,6 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
     owner_decoder("NATIVE_TRANSPORT_VERSION"),
     owner_tree("NATIVE_DRIVER_STATE_VERSION", lift_native_driver_state),
     owner_decoder("SQLITE_BLOB_ENVELOPE_VERSION"),
-    owner_tree("EFFECT_GROUP_STATE_FORMAT_VERSION", lift_object_body),
-    owner_tree("EFFECT_GROUP_PAYLOAD_FORMAT_VERSION", lift_object_body),
     owner_tree("DURABLE_WAIT_REGISTRY_FORMAT_VERSION", lift_object_body),
     owner_tree("LASH_TURN_OUTCOME_FORMAT_VERSION", lift_object_body),
 ];
@@ -278,8 +276,6 @@ pub(super) const WRITER_PINS: &[WriterPin] = &[
     owner_pin("NATIVE_TRANSPORT_VERSION"),
     owner_pin("NATIVE_DRIVER_STATE_VERSION"),
     owner_pin("SQLITE_BLOB_ENVELOPE_VERSION"),
-    owner_pin("EFFECT_GROUP_STATE_FORMAT_VERSION"),
-    owner_pin("EFFECT_GROUP_PAYLOAD_FORMAT_VERSION"),
     owner_pin("DURABLE_WAIT_REGISTRY_FORMAT_VERSION"),
     owner_pin("LASH_TURN_OUTCOME_FORMAT_VERSION"),
     owner_pin("RESTATE_WIRE_VERSION"),

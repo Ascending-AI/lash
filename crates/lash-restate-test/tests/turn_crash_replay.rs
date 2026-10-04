@@ -21,7 +21,6 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
 
 use lash_core::engine::RunOutcome;
 use lash_core::llm::transport::LlmTransportError;
@@ -30,13 +29,11 @@ use lash_core::store::RunStore as _;
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::protocol::generated::CallCommandMessage;
 use lash_restate_test::{
-    CrashPoint, CrashRule, RestateTestBackend, SESSION_SHIFT_SERVICE, ServerConfig,
-    TURN_DRIVER_SERVICE,
+    CrashPoint, CrashRule, RestateTestBackend, ServerConfig, TURN_DRIVER_SERVICE,
 };
 use prost::Message as _;
 use serde_json::json;
 
-const DISPATCH: &str = "EffectGroupDispatch";
 const TOOL: &str = "count_call";
 
 fn response(parts: Vec<LlmOutputPart>) -> LlmResponse {
@@ -388,66 +385,6 @@ fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String
         break;
     }
     points
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
-    let seed = 0x3665;
-    let started = Instant::now();
-    let reference = run_turn(seed, None, ServerConfig::default()).await;
-    assert_eq!(reference.answer, "done");
-    assert_eq!(reference.tool_executions, 1);
-    assert_eq!(reference.crashes, 0);
-    if let Some((_, _, _, _, entries)) = reference
-        .journals
-        .iter()
-        .find(|(_, service, _, _, _)| service == TURN_DRIVER_SERVICE)
-    {
-        for (index, entry) in entries.iter().filter(|(ty, _)| ty.is_command()).enumerate() {
-            println!("run workflow command {index}: {entry:?}");
-        }
-    }
-    let mut cases = 0;
-    let mut violations = Vec::new();
-    for service in [SESSION_SHIFT_SERVICE, TURN_DRIVER_SERVICE, DISPATCH] {
-        let points = crash_points(&reference, service);
-        assert!(!points.is_empty(), "{service} has journal points");
-        for (rule, lost_run) in points {
-            let label = format!("{service} {:?}", rule.point);
-            let run = run_turn(seed, Some(rule), ServerConfig::default()).await;
-            cases += 1;
-            let lost_llm = lost_run.is_some() && service == TURN_DRIVER_SERVICE;
-            let lost_tool = lost_run.is_some() && service == DISPATCH;
-            let expected_llm = if lost_llm {
-                reference.llm_calls..=reference.llm_calls + 1
-            } else {
-                reference.llm_calls..=reference.llm_calls
-            };
-            let expected_tool = if lost_tool { 1..=2 } else { 1..=1 };
-            if run.crashes != 1
-                || run.answer != reference.answer
-                || !expected_llm.contains(&run.llm_calls)
-                || !expected_tool.contains(&run.tool_executions)
-            {
-                violations.push(format!(
-                    "{label} ({lost_run:?}): crashes={} answer={:?} llm_calls={} tool={}",
-                    run.crashes, run.answer, run.llm_calls, run.tool_executions
-                ));
-            }
-        }
-    }
-    println!(
-        "turn crash matrix: {cases} journal points in {:?}, {} violations",
-        started.elapsed(),
-        violations.len()
-    );
-    for violation in &violations {
-        println!("{violation}");
-    }
-    assert!(
-        violations.is_empty(),
-        "crash points that did not recover (FIG-3678):\n{violations:#?}"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -24,18 +24,7 @@ pub async fn execute_final_tool_intents(
         ));
     }
 
-    // ADR 0099 §4: once the group child whose emission minted this batch is
-    // cancel-decided, no new semantic admission may be created beneath it. The
-    // fence is not a read this executor performs — the controller lent to this
-    // child carries its `GroupChildBinding`, so every intent's journaled sink
-    // admits itself under the substrate's own arbitration of the child's own
-    // replay row (the minting replay-row claim, the native group mutex, or the
-    // serialized index handler), and a cancel that lands between intents
-    // surfaces as the typed `RuntimeEffectGroupChildCancelDecided` refusal
-    // from the next admission.
-    // The decision can land mid-batch, so the refusal latches: once one
-    // admission reports it, the remaining intents refuse without reaching
-    // their sinks — `Cancelled` is terminal.
+    // Once a semantic admission is cancelled, remaining intents cannot mint work.
     let mut minting_cancelled = false;
     let mut outcomes = Vec::with_capacity(intents.intents.len());
     for (index, intent) in intents.intents.iter().enumerate() {
@@ -51,7 +40,7 @@ pub async fn execute_final_tool_intents(
                 index,
                 intent.kind(),
                 Some(identity),
-                crate::ToolIntentRefusalReason::MintingGroupChildCancelled,
+                crate::ToolIntentRefusalReason::MintingRunCancelled,
             ));
             continue;
         }
@@ -86,14 +75,14 @@ pub async fn execute_final_tool_intents(
                 return Err(error);
             }
             Err(crate::PluginError::RuntimeEffectController(error))
-                if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided =>
+                if error.code == crate::RuntimeErrorCode::RuntimeToolRunCancelDecided =>
             {
                 minting_cancelled = true;
                 refused(
                     index,
                     intent.kind(),
                     Some(identity),
-                    crate::ToolIntentRefusalReason::MintingGroupChildCancelled,
+                    crate::ToolIntentRefusalReason::MintingRunCancelled,
                 )
             }
             Err(error) => refused(
@@ -197,8 +186,7 @@ pub(crate) fn declared_start_fault(
     match error {
         crate::PluginError::RuntimeEffectController(error)
             if error.code.is_replay_mismatch()
-                || error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided
-                || error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
+                || error.code == crate::RuntimeErrorCode::RuntimeToolRunCancelDecided
                 || error.turn_failure_cause() != crate::TurnFailureCause::Outcome =>
         {
             Some(error.clone())

@@ -435,10 +435,6 @@ async fn run_lashlang_process_scoped(
         }
         ctx.restore_started_process_ids(&segment_state.started_process_ids);
         ctx.restore_incorporation_ledger(segment_state.incorporation_ledger.clone());
-        ctx.restore_outstanding_groups(
-            std::mem::take(&mut segment_state.outstanding_groups),
-            &segment_state.held_tool_calls,
-        );
     }
     let owner = ctx.clone();
     owner

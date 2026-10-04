@@ -27,14 +27,7 @@ pub struct RestateDurableWaitResolveRequest {
     pub resolution: Resolution,
 }
 
-/// What `LashDurableWaitIndex/resolve` answers: the promise's first-writer
-/// outcome, or the typed refusal a completion delivered to a cancel-decided
-/// group child's key earns (ADR 0099 §4, W17).
-///
-/// The encoding is a superset of [`ResolveOutcome`]'s: an outcome encodes
-/// exactly as before, so a journal that recorded this handler's answer before
-/// the refusal existed still replays, and the refusal is the one further
-/// `status` no outcome carries.
+/// The promise's first-writer outcome or a typed native source refusal.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum RestateDurableWaitResolveResponse {
@@ -46,35 +39,21 @@ pub enum RestateDurableWaitResolveResponse {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RestateDurableWaitResolveRefusal {
-    CancelDecided,
     Source {
         refusal: lash_core::tool_run::SourceRefusal,
     },
 }
 
 impl RestateDurableWaitResolveResponse {
-    /// The host-facing answer: the outcome, or
-    /// `RuntimeEffectGroupChildCancelDecided`.
+    /// The host-facing outcome or typed source refusal.
     pub fn into_result(self) -> Result<ResolveOutcome, RuntimeError> {
         match self {
             Self::Outcome(outcome) => Ok(outcome),
             Self::Refused(RestateDurableWaitResolveRefusal::Source { refusal }) => {
                 Err(lash_core::RuntimeEffectControllerError::from(refusal).into_runtime_error())
             }
-            Self::Refused(RestateDurableWaitResolveRefusal::CancelDecided) => {
-                Err(lash_core::facade_support::await_event_identity::cancel_decided_refusal())
-            }
         }
     }
-}
-
-/// Closes the completion key `scope`/`wait` names, because the group child
-/// that owns it is cancel-decided (ADR 0099 §4, W17). Sent by the group index
-/// that decides the child, to the index object that owns `scope`'s waits.
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitCancelDecidedRequest {
-    pub scope: ExecutionScope,
-    pub wait: AwaitEventWaitIdentity,
 }
 
 #[cfg(test)]
@@ -118,28 +97,6 @@ pub struct RestateDurableWaitEffectRequest {
 pub struct RestateDurableWaitProcessJournalRequest {
     pub process_id: lash_core::ProcessId,
     pub invocation_id: crate::RestateInvocationId,
-}
-
-/// One effect group opened under a scope's index (FIG-2499).
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitGroupRequest {
-    pub group_key: String,
-}
-
-/// One group child's durable membership binding under its own scope's index:
-/// the replay key the §4 boundary names and the group the dispatch admitted
-/// it to. The row is the Restate twin of the SQL tiers' `group_key` column —
-/// who asked carries no weight; the record decides (FIG-3409).
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitGroupChildRequest {
-    pub replay_key: String,
-    pub group_key: String,
-}
-
-/// The membership read [`RestateDurableWaitGroupChildRequest`] records.
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitGroupChildMembershipRequest {
-    pub replay_key: String,
 }
 
 /// One session catalog whose durable cancellation closure may still depend on

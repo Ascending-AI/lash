@@ -62,22 +62,6 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    /// Unpacks the recorded incorporation prefix of a durable effect group.
-    pub(crate) fn into_incorporate_group_settlements(
-        self,
-    ) -> Result<
-        Vec<crate::runtime::effect::group::IncorporatedGroupRank>,
-        RuntimeEffectControllerError,
-    > {
-        match self {
-            Self::IncorporateGroupSettlements { incorporated } => Ok(incorporated),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::IncorporateGroupSettlements,
-                other.kind(),
-            )),
-        }
-    }
-
     /// Unpacks the recorded presentation of one settled tool result.
     ///
     /// Validates the record rather than trusting it: a journal entry written
@@ -235,11 +219,6 @@ impl RuntimeEffectOutcome {
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
-            Self::ArmToolCompletion { .. } => RuntimeEffectKind::ArmToolCompletion,
-            Self::AwaitToolCompletions { .. } => RuntimeEffectKind::AwaitToolCompletions,
-            Self::IncorporateGroupSettlements { .. } => {
-                RuntimeEffectKind::IncorporateGroupSettlements
-            }
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::IngestTriggerOccurrence { .. } => RuntimeEffectKind::IngestTriggerOccurrence,

@@ -16,8 +16,7 @@ use crate::engine::testing::{
     DeterminismCheck, FailureCause, LocalEngine, LocalTestCx, ReplayMode, RunMode,
 };
 use crate::{
-    AdmittedScope, EffectGroupHandle, GroupSettlement, LoserPolicy, RecordedJournal,
-    RecordedKeyRange, RecordedKeys, RuntimeEffectController, RuntimeEffectGroup,
+    AdmittedScope, RecordedJournal, RecordedKeyRange, RecordedKeys, RuntimeEffectController,
 };
 
 /// The gate pair's live state, shared by every run of one check: what an
@@ -86,29 +85,6 @@ impl RuntimeEffectController for GateEngine<'_> {
                 })
             })
             .await
-    }
-
-    async fn open_effect_group(
-        &self,
-        _group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("the gate engine"))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut EffectGroupHandle,
-        _cancel: crate::runtime::TurnCancelWait,
-    ) -> Result<GroupSettlement, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("the gate engine"))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: EffectGroupHandle,
-        _disposition: LoserPolicy,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("the gate engine"))
     }
 
     async fn read_recorded_journal(

@@ -75,14 +75,8 @@ impl crate::testing::EffectLayer for SeamLayer {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let operation = match &envelope.command {
             crate::RuntimeEffectCommand::ToolAttempt { call, .. } => Some((
-                if envelope.group.is_some() {
-                    EffectOperation::GroupChild {
-                        name: call.tool_name.clone(),
-                    }
-                } else {
-                    EffectOperation::ToolAttempt {
-                        name: call.tool_name.clone(),
-                    }
+                EffectOperation::ToolAttempt {
+                    name: call.tool_name.clone(),
                 },
                 true,
             )),
@@ -143,47 +137,6 @@ impl crate::testing::EffectLayer for SeamLayer {
         });
         self.control
             .around(operation, inner.execute_effect(envelope, wrapped))
-            .await
-    }
-
-    async fn open_effect_group(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        let operation = TurnSeamOperation::Effect(EffectOperation::GroupOpen {
-            children: group.children().len(),
-        });
-        self.control
-            .around(operation, inner.open_effect_group(group))
-            .await
-    }
-
-    async fn await_next_settlement(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::TurnCancelWait,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.control
-            .around_completion(
-                TurnSeamOperation::Effect(EffectOperation::GroupSettle),
-                inner.await_next_settlement(handle, cancel),
-            )
-            .await
-    }
-
-    async fn close_effect_group(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.control
-            .around(
-                TurnSeamOperation::Effect(EffectOperation::GroupClose),
-                inner.close_effect_group(handle, disposition),
-            )
             .await
     }
 
@@ -280,41 +233,6 @@ impl crate::testing::EffectLayer for RoutedSeamLayer {
                 "the group child's execution died with the crashed process",
             )),
             outcome = seam.execute_effect(inner, envelope, executor) => outcome,
-        }
-    }
-
-    async fn open_effect_group(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        match self.seam() {
-            Some(seam) => seam.open_effect_group(inner, group).await,
-            None => inner.open_effect_group(group).await,
-        }
-    }
-
-    async fn await_next_settlement(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::TurnCancelWait,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        match self.seam() {
-            Some(seam) => seam.await_next_settlement(inner, handle, cancel).await,
-            None => inner.await_next_settlement(handle, cancel).await,
-        }
-    }
-
-    async fn close_effect_group(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        match self.seam() {
-            Some(seam) => seam.close_effect_group(inner, handle, disposition).await,
-            None => inner.close_effect_group(handle, disposition).await,
         }
     }
 

@@ -22,7 +22,6 @@ fn recorded_renderer_refusal_retries_the_uncommitted_presentation() {
             args: serde_json::Value::Null,
             output: Box::new(lash_core::ToolCallOutput::success("output")),
         },
-        group: None,
     })
     .expect("presentation route");
     assert!(matches!(
@@ -99,7 +98,6 @@ fn a_direct_completion_retries_an_unbound_llm_profile_instead_of_recording_it() 
             },
             usage_source: "compaction".into(),
         },
-        group: None,
     })
     .expect("direct route");
     assert!(matches!(
@@ -226,108 +224,6 @@ fn restate_trace_projection_uses_shared_parent_precedence_and_scoped_nodes() {
         Some("host:explicit-parent")
     );
     assert_eq!(explicit.run_id.as_deref(), Some("restate-host-run"));
-}
-
-/// FIG-4649: a typed refusal a handler's terminal error carries has one
-/// class, whichever service the controller called. An object whose `_compat`
-/// record refuses this build, and a stored value whose stamp it does not
-/// read, are terminal with their typed cause on the effect-group path, the
-/// journaled-effect path, the durable-wait path and the process-command path
-/// alike.
-#[test]
-fn a_typed_terminal_refusal_has_one_class_on_every_controller_path() {
-    let refusal = lash_core_store::compat::CompatRefusal::Unstamped {
-        component: "effect-group index".to_string(),
-        writing_release: None,
-    };
-    let stamp = crate::object_state::stored_format_error(
-        "effect group",
-        "group",
-        Some(u64::from(crate::effect_group::EFFECT_GROUP_STATE_FORMAT_VERSION) + 1),
-        &crate::effect_group::EFFECT_GROUP_STATE_FORMATS,
-    );
-    type MakeTerminal = Box<dyn Fn() -> TerminalError>;
-    let terminals: [(&str, MakeTerminal); 2] = [
-        (
-            "object _compat refusal",
-            Box::new({
-                let refusal = refusal.clone();
-                move || crate::wire::incompatible(refusal.clone())
-            }),
-        ),
-        (
-            "stored value stamp refusal",
-            Box::new({
-                let stamp = stamp.clone();
-                move || TerminalError::new(stamp.to_record())
-            }),
-        ),
-    ];
-    for (name, terminal) in terminals {
-        // The engine prefixes a handler's message with its own words.
-        let prefixed =
-            || TerminalError::new(format!("[500] handler failed: {}", terminal().message()));
-        let paths = [
-            (
-                "effect group",
-                effect_group_engine_error("EffectGroupIndex/open", terminal()),
-            ),
-            (
-                "journaled effect",
-                RuntimeEffectControllerError::from(RestateEffectError::Terminal {
-                    effect: "effect".into(),
-                    terminal: terminal(),
-                }),
-            ),
-            (
-                "durable wait",
-                crate::wire::lash_terminal(&terminal(), RuntimeErrorCode::EngineEffectController),
-            ),
-            (
-                "process command",
-                process_command::process_command_journal_error("await control", terminal()),
-            ),
-            (
-                "prefixed by the engine",
-                crate::wire::lash_terminal(&prefixed(), RuntimeErrorCode::EngineEffectController),
-            ),
-        ];
-        for (path, error) in paths {
-            assert_eq!(
-                error.code,
-                RuntimeErrorCode::EngineObjectStateFormatUnsupported,
-                "{name} on the {path} path: {error:?}"
-            );
-            assert!(
-                error.is_terminal() && !error.code.is_retryable(),
-                "{name} on the {path} path: {error:?}"
-            );
-            let runtime = error.into_runtime_error();
-            assert!(
-                runtime.is_terminal() && !runtime.is_retryable(),
-                "{name} on the {path} path: {runtime:?}"
-            );
-        }
-    }
-    let typed = crate::wire::lash_terminal(
-        &crate::wire::incompatible(refusal.clone()),
-        RuntimeErrorCode::EngineEffectController,
-    );
-    assert_eq!(typed.compat_refusal(), Some(&refusal));
-    let replayed: RuntimeEffectControllerError =
-        serde_json::from_value(serde_json::to_value(&typed).expect("encode")).expect("decode");
-    assert_eq!(replayed.compat_refusal(), Some(&refusal));
-
-    // A terminal with no typed refusal keeps each path's own code.
-    let untyped = || TerminalError::new("the service is not registered");
-    assert_eq!(
-        crate::wire::lash_terminal(&untyped(), RuntimeErrorCode::EngineEffectController).code,
-        RuntimeErrorCode::EngineEffectController
-    );
-    assert_eq!(
-        effect_group_engine_error("EffectGroupIndex/open", untyped()).code,
-        RuntimeErrorCode::RuntimeEffectGroupShape
-    );
 }
 
 /// FIG-4649: a recorded step journals a plugin operation's failure exactly

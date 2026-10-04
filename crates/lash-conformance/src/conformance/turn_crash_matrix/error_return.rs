@@ -151,17 +151,9 @@ fn is_commit_seam(operation: &TurnSeamOperation) -> bool {
     )
 }
 
-/// Whether the seam op dispatches new effect work. The failed child's own
-/// group settles and closes after its attempt errors: consuming that
-/// settlement and releasing the group is how the error reaches the turn, the
-/// group-path twin of a batch returning its failed reply (FIG-3397), not a
-/// dispatch.
+/// Whether the seam operation dispatches effect work.
 fn is_dispatch_seam(operation: &TurnSeamOperation) -> bool {
     matches!(operation, TurnSeamOperation::Effect(_))
-        && !matches!(
-            operation,
-            TurnSeamOperation::Effect(EffectOperation::GroupSettle | EffectOperation::GroupClose)
-        )
 }
 
 /// Sweep every error-return placement through one scripted turn per backend

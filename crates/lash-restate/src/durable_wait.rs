@@ -62,7 +62,6 @@ pub use self::source_seal::{
     RestateSourceSubscribeRequest,
 };
 
-use self::run_retirement::closed_run_cancel_prefix;
 use crate::compat::{Call, Reply};
 use crate::ingress::RestateAuthorityId;
 use crate::object_state::{
@@ -152,7 +151,7 @@ pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
 pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// The stored format every value the durable-wait index keeps under its
 /// `wait-index/v2/` keys stamps into its object-state envelope (FIG-3814):
-/// metadata, indexed wait, marker, and membership rows alike. It is also
+/// metadata, indexed waits, execution markers and source seals alike. It is also
 /// the family format of every `LashDurableWaitIndex` object's `_compat`
 /// record (ADR 0115 §3.2). Bump it when a stored shape under those keys
 /// changes, and register the previous format's lift in
@@ -171,10 +170,8 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 ///     roots(path = "crates/lash-restate/src/ingress.rs", RestateInvocationId),
 ///     items(
 ///         DURABLE_WAIT_REGISTRY_FORMATS, DURABLE_WAIT_INDEX_METADATA_KEY,
-///         DURABLE_WAIT_INDEX_WAIT_PREFIX,
-///         DURABLE_WAIT_INDEX_EFFECT_PREFIX, DURABLE_WAIT_INDEX_GROUP_PREFIX,
-///         DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX,
-///         DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX, DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX,
+///         DURABLE_WAIT_INDEX_WAIT_PREFIX, DURABLE_WAIT_INDEX_EFFECT_PREFIX,
+///         DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX, DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX,
 ///     ),
 ///     items(
 ///         path = "crates/lash-restate/src/durable_wait/source_seal.rs",
@@ -206,7 +203,7 @@ pub(crate) const DURABLE_WAIT_REGISTRY_FAMILY: ObjectFamily = ObjectFamily {
     formats: &DURABLE_WAIT_REGISTRY_FORMATS,
 };
 /// version_surface = "coexist"
-/// version_guard(items(DURABLE_WAIT_INDEX_METADATA_KEY, fence_cancel_decided, load_durable_wait_index_metadata, peek_turn_gate, read_durable_wait_index_metadata, register_awakeable, reinstate, resolve, unregister_awakeable), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", revoke_index))
+/// version_guard(items(DURABLE_WAIT_INDEX_METADATA_KEY, load_durable_wait_index_metadata, peek_turn_gate, read_durable_wait_index_metadata, register_awakeable, reinstate, resolve, unregister_awakeable), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", revoke_index))
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_WAIT_PREFIX, durable_wait_address_from_state_key, durable_wait_index_state_key, load_indexed_waits))
@@ -227,16 +224,7 @@ const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", process_journal_key, process_journals_are_quiescent))
 const DURABLE_WAIT_INDEX_PROCESS_JOURNAL_PREFIX: &str = "wait-index/v2/process-journal/";
-/// An effect group opened under the scope, keyed by group key; cleared once
-/// the group's index reports no unsettled child.
-/// version_surface = "coexist"
-/// version_guard(items(DURABLE_WAIT_INDEX_GROUP_PREFIX, durable_wait_index_group_key), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", scope_effects_and_groups_are_quiescent))
-const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v2/group/";
-/// A group child's replay-key-to-group binding, keyed by replay key: the
-/// membership a §4 boundary commit resolves its group from (FIG-3409).
-/// version_surface = "coexist"
-/// version_guard(items(DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX, durable_wait_index_group_child_key))
-const DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX: &str = "wait-index/v2/group-child/";
+/// A participant holding scope closure until its recorded work ends.
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX, durable_wait_index_closure_participant_key), items(path = "crates/lash-restate/src/durable_wait/scope_retirement.rs", revoke_index))
 const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v2/closure-participant/";
@@ -321,14 +309,6 @@ pub(crate) struct RestateDurableWaitIndexMetadata {
     revoked: bool,
     #[serde(default)]
     awakeables: Vec<RestateDurableWaitAwakeableRequest>,
-    /// Completion keys their owning group child's cancel decision closed, by
-    /// the key's authority-free identity (`await_event_identity::derive_key_id`),
-    /// so the group index that decides the child can name them (ADR 0099 §4,
-    /// W17). Turn fences include their run so CloseRunScope can retire
-    /// them; older unscoped ids remain readable. The set is absent from the
-    /// encoding while empty.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
-    cancel_decided: std::collections::BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     process_sources: Vec<ProcessTerminalSubscription>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -337,50 +317,6 @@ pub(crate) struct RestateDurableWaitIndexMetadata {
     process_unsubscribed: Vec<AwaitEventKey>,
 }
 
-impl RestateDurableWaitIndexMetadata {
-    fn is_cancel_decided(
-        &self,
-        scope: &ExecutionScope,
-        wait: &AwaitEventWaitIdentity,
-    ) -> Result<bool, TerminalError> {
-        if self.cancel_decided.is_empty() {
-            return Ok(false);
-        }
-        let id = cancel_decided_id(scope, wait)?;
-        Ok(self.cancel_decided.contains(&id)
-            || cancel_scope_run(scope).is_some_and(|run| {
-                self.cancel_decided
-                    .contains(&format!("{}{id}", closed_run_cancel_prefix(&run)))
-            }))
-    }
-}
-
-fn cancel_scope_run(scope: &ExecutionScope) -> Option<lash_core::TurnId> {
-    match scope {
-        ExecutionScope::Turn { turn_id, .. } => {
-            Some(lash_core::store::PhysicalTurn::split_turn_id(turn_id).0)
-        }
-        ExecutionScope::SessionOperation {
-            session_id,
-            operation_id,
-        } => Some(
-            lash_core::tool_run::OperationRun {
-                session_id: session_id.clone(),
-                operation_id: operation_id.clone(),
-            }
-            .run_id(),
-        ),
-        _ => None,
-    }
-}
-
-fn cancel_decided_id(
-    scope: &ExecutionScope,
-    wait: &AwaitEventWaitIdentity,
-) -> Result<String, TerminalError> {
-    lash_core::facade_support::await_event_identity::derive_key_id(scope, wait)
-        .map_err(|error| TerminalError::new(error.to_string()))
-}
 pub(crate) fn restate_durable_wait_request(key: &AwaitEventKey) -> RestateDurableWaitAwaitRequest {
     RestateDurableWaitAwaitRequest { key: key.clone() }
 }
@@ -683,14 +619,6 @@ pub trait LashDurableWaitRegistry {
     async fn resolve(
         call: Call<RestateDurableWaitResolveRequest>,
     ) -> HandlerResult<Reply<RestateDurableWaitResolveResponse>>;
-    /// Close a cancel-decided group child's completion key: every resolve of
-    /// it from now on is refused, typed, and writes nothing (ADR 0099 §4,
-    /// W17). A waiter that already holds a terminal keeps it; the key is
-    /// named by its authority-free identity, because the group index that
-    /// decides the child does not hold the minting authority.
-    async fn fence_cancel_decided(
-        call: Call<RestateDurableWaitCancelDecidedRequest>,
-    ) -> HandlerResult<Reply<()>>;
     async fn cancel_all(call: Call<()>) -> HandlerResult<Reply<()>>;
     async fn revoke_all(call: Call<()>) -> HandlerResult<Reply<()>>;
     /// [`revoke_all`](Self::revoke_all) only when no durable wait or awakeable
@@ -717,22 +645,6 @@ pub trait LashDurableWaitRegistry {
         call: Call<RestateDurableWaitProcessJournalRequest>,
     ) -> HandlerResult<Reply<()>>;
     async fn end_effect(call: Call<RestateDurableWaitEffectRequest>) -> HandlerResult<Reply<()>>;
-    /// Record an effect group opened under this scope, answering whether the
-    /// scope admits it (`false` once revoked). The scope is not quiescent
-    /// while the group's index still reports an unsettled child.
-    async fn record_group(call: Call<RestateDurableWaitGroupRequest>)
-    -> HandlerResult<Reply<bool>>;
-    /// Record one group child's durable membership under this scope,
-    /// answering whether the scope admits it (`false` once revoked).
-    async fn record_group_child(
-        call: Call<RestateDurableWaitGroupChildRequest>,
-    ) -> HandlerResult<Reply<bool>>;
-    /// The group `replay_key` is a committed member of under this scope, or
-    /// `None` when no dispatch admitted one — the §4 boundary's answer to
-    /// "which group's index owns this child's final" (FIG-3409).
-    async fn group_child_membership(
-        call: Call<RestateDurableWaitGroupChildMembershipRequest>,
-    ) -> HandlerResult<Reply<Option<String>>>;
     async fn register_closure_participant(
         call: Call<RestateTurnCancelClosureParticipantRequest>,
     ) -> HandlerResult<Reply<bool>>;
@@ -1004,7 +916,6 @@ async fn read_outstanding_waits(
     let mut outstanding = Vec::new();
     for wait in load_indexed_waits_in(ctx, &keys).await? {
         if wait.terminal.is_none()
-            && !metadata.is_cancel_decided(&wait.key.scope, &wait.key.wait)?
             && sources
                 .iter()
                 .all(|(_, source)| source.descriptor.source != wait.key || source.seal.is_none())
@@ -1016,10 +927,6 @@ async fn read_outstanding_waits(
         if source.seal.is_none()
             && source.descriptor.authority
                 == lash_core::tool_run::SourceAuthority::ExternalCompletion
-            && !metadata.is_cancel_decided(
-                &source.descriptor.source.scope,
-                &source.descriptor.source.wait,
-            )?
         {
             outstanding.push(source.descriptor.source);
         }
@@ -1076,14 +983,6 @@ fn store_indexed_wait(
 
 fn durable_wait_index_effect_key(replay_key: &str) -> String {
     format!("{DURABLE_WAIT_INDEX_EFFECT_PREFIX}{replay_key}")
-}
-
-fn durable_wait_index_group_key(group_key: &str) -> String {
-    format!("{DURABLE_WAIT_INDEX_GROUP_PREFIX}{group_key}")
-}
-
-fn durable_wait_index_group_child_key(replay_key: &str) -> String {
-    format!("{DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX}{replay_key}")
 }
 
 fn durable_wait_index_closure_participant_key(participant_id: &str) -> String {
@@ -1269,50 +1168,6 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         subscriptions::resolve(self, ctx, call).await
     }
 
-    async fn fence_cancel_decided(
-        &self,
-        ctx: ObjectContext<'_>,
-        call: Call<RestateDurableWaitCancelDecidedRequest>,
-    ) -> HandlerResult<Reply<()>> {
-        let (wire, request) = call.open()?;
-        let object = self.admit(&ctx).await?;
-        let expected = durable_wait_index_key_for_scope(&request.scope);
-        if expected != ctx.key() {
-            return Err(TerminalError::new(format!(
-                "cancel-decided completion fence for scope {expected} addressed index {}",
-                ctx.key()
-            ))
-            .into());
-        }
-        let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
-        let id = cancel_decided_id(&request.scope, &request.wait)?;
-        let id = if let Some(run) = cancel_scope_run(&request.scope) {
-            format!("{}{id}", closed_run_cancel_prefix(&run))
-        } else {
-            id
-        };
-        if metadata.revoked {
-            return Ok(Reply::at(wire, ()));
-        }
-        // The closed key's wait is over, parked or not: wake what watches it.
-        let woke = wake_ended_waits(
-            &self.namespace,
-            &ctx,
-            &mut metadata,
-            &Resolution::Cancelled,
-            |key| key.scope == request.scope && key.wait == request.wait,
-        );
-        if metadata.cancel_decided.insert(id) || woke {
-            object_state::set_stamped(
-                &ctx,
-                DURABLE_WAIT_INDEX_METADATA_KEY,
-                object.writer,
-                metadata,
-            );
-        }
-        Ok(Reply::at(wire, ()))
-    }
-
     async fn cancel_all(&self, ctx: ObjectContext<'_>, call: Call<()>) -> HandlerResult<Reply<()>> {
         let (wire, ()) = call.open()?;
         let object = self.admit(&ctx).await?;
@@ -1435,81 +1290,6 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         call: Call<RestateDurableWaitProcessJournalRequest>,
     ) -> HandlerResult<Reply<()>> {
         scope_retirement::release_process_journal(self, ctx, call).await
-    }
-
-    async fn record_group(
-        &self,
-        ctx: ObjectContext<'_>,
-        call: Call<RestateDurableWaitGroupRequest>,
-    ) -> HandlerResult<Reply<bool>> {
-        let (wire, request) = call.open()?;
-        let object = self.admit(&ctx).await?;
-        let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
-        if metadata.revoked {
-            return Ok(Reply::at(wire, false));
-        }
-        object_state::set_stamped(
-            &ctx,
-            &durable_wait_index_group_key(&request.group_key),
-            object.writer,
-            true,
-        );
-        Ok(Reply::at(wire, true))
-    }
-
-    async fn record_group_child(
-        &self,
-        ctx: ObjectContext<'_>,
-        call: Call<RestateDurableWaitGroupChildRequest>,
-    ) -> HandlerResult<Reply<bool>> {
-        let (wire, request) = call.open()?;
-        let object = self.admit(&ctx).await?;
-        let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
-        if metadata.revoked {
-            return Ok(Reply::at(wire, false));
-        }
-        // A process-scoped child can outlive the segment that opened its
-        // group. Its group's unsettled count pins retirement after that
-        // segment releases its journal pin.
-        if ctx
-            .key()
-            .strip_prefix("scope:")
-            .and_then(ExecutionScope::from_journal_key)
-            .is_some_and(|scope| matches!(scope, ExecutionScope::Process { .. }))
-        {
-            object_state::set_stamped(
-                &ctx,
-                &durable_wait_index_group_key(&request.group_key),
-                object.writer,
-                true,
-            );
-        }
-        object_state::set_stamped(
-            &ctx,
-            &durable_wait_index_group_child_key(&request.replay_key),
-            object.writer,
-            request.group_key,
-        );
-        Ok(Reply::at(wire, true))
-    }
-
-    async fn group_child_membership(
-        &self,
-        ctx: ObjectContext<'_>,
-        call: Call<RestateDurableWaitGroupChildMembershipRequest>,
-    ) -> HandlerResult<Reply<Option<String>>> {
-        let (wire, request) = call.open()?;
-        let object = self.admit(&ctx).await?;
-        let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
-        Ok(Reply::at(
-            wire,
-            object_state::get_stamped::<String>(
-                &ctx,
-                &durable_wait_index_group_child_key(&request.replay_key),
-                &DURABLE_WAIT_REGISTRY_FORMATS,
-            )
-            .await?,
-        ))
     }
 
     async fn register_closure_participant(

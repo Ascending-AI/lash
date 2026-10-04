@@ -27,14 +27,7 @@ use std::sync::{Arc, Mutex};
 mod session_turn_starts;
 use session_turn_starts::{
     a_session_turn_start_retried_after_the_host_changed_what_it_passes_keeps_its_retained_start,
-    session_turn_start, start_on, unstated_session_turn_start,
-};
-#[path = "llm_profiles/parked_group.rs"]
-mod parked_group;
-use parked_group::{
-    a_paused_group_retire_parks_its_process_opener, a_paused_group_retire_parks_its_run_opener,
-    a_paused_group_run_parks_its_process_opener, a_paused_group_run_parks_its_run_opener,
-    a_process_opened_group_child_parks_resumes_and_reparks_idempotently,
+    start_on, unstated_session_turn_start,
 };
 
 use lash::direct::LlmOutputPart;
@@ -603,29 +596,6 @@ async fn answer_after_redrive(session: &lash::LashSession, run: &str) -> String 
         .assistant_message()
         .expect("the run answers with text")
         .to_string()
-}
-
-/// Every live park, as the host's park surface lists it: the work, its park,
-/// and the refusals the park counts.
-async fn listed_parks(
-    core: &LashCore,
-) -> Vec<(lash::ParkedWorkRef, lash::persistence::ParkId, u32, u64)> {
-    let limit = std::num::NonZeroUsize::new(8).expect("non-zero");
-    core.parked_work()
-        .list(&lash::ParkedWorkQuery::all(limit))
-        .await
-        .expect("the park surface lists parked work")
-        .records
-        .into_iter()
-        .map(|record| {
-            (
-                record.target,
-                record.park_id,
-                record.attempts,
-                record.last_refused_ms,
-            )
-        })
-        .collect()
 }
 
 /// One park reconcile pass of the engine, run until a pass read the engine
@@ -1431,70 +1401,6 @@ async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(
     assert_eq!(kimi.calls(), 0);
 }
 
-const ASK_MODEL: &str = "ask_model";
-
-fn ask_model_definition() -> lash::tools::ToolDefinition {
-    lash::tools::ToolDefinition::raw(
-        "tool:ask_model",
-        ASK_MODEL,
-        "Ask the session's model one question through a direct completion.",
-        serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
-        serde_json::json!({"type": "string"}),
-    )
-    .expect("valid declared tool schemas")
-}
-
-/// A tool whose attempt makes one direct completion on the session's model.
-/// Its first attempt retires the key first, and it reports a completion that
-/// failed as its own failed result, as a tool that swallows the error would.
-struct AskModel {
-    catalog: Arc<LiveCatalog>,
-    retired: AtomicBool,
-    settled: Arc<Mutex<Vec<Result<String, String>>>>,
-}
-
-#[async_trait::async_trait]
-impl lash::tools::ToolProvider for AskModel {
-    fn tool_manifests(&self) -> Vec<lash::tools::ToolManifest> {
-        vec![ask_model_definition().manifest()]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash::tools::ToolContract>> {
-        (name == ASK_MODEL).then(|| Arc::new(ask_model_definition().contract()))
-    }
-
-    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
-        if !self.retired.swap(true, Ordering::SeqCst) {
-            self.catalog.serve(LlmProfileRegistry::new());
-        }
-        let completed = call
-            .context
-            .direct_completions()
-            .complete(
-                lash::direct::DirectRequest::text("a direct question"),
-                "ask-model",
-            )
-            .await;
-        match completed {
-            Ok(completion) => {
-                self.settled
-                    .lock()
-                    .expect("settled attempts")
-                    .push(Ok(completion.text.clone()));
-                lash::tools::ToolOutcome::ok(serde_json::json!(completion.text)).into()
-            }
-            Err(error) => {
-                self.settled
-                    .lock()
-                    .expect("settled attempts")
-                    .push(Err(error.to_string()));
-                lash::tools::ToolOutcome::err_fmt(format!("the direct completion failed: {error}"))
-                    .into()
-            }
-        }
-    }
-}
-
 const ASK_TWICE: &str = "ask_twice";
 
 fn ask_twice_definition() -> lash::tools::ToolDefinition {
@@ -1751,162 +1657,6 @@ async fn a_completion_before_a_bind_fault_is_retried_only_while_unrecorded(
         0,
         "no attempt ran its tool past the bind fault, of {} attempts",
         entered.load(Ordering::SeqCst)
-    );
-}
-
-/// How long after a park is listed its sender's answer may still arrive: far
-/// inside the second a follower's store poll backs off to.
-const AT_THE_PARK_COMMIT: std::time::Duration = std::time::Duration::from_millis(250);
-
-/// A sender awaiting its output learns of a park where it is recorded
-/// (FIG-4618). The run of a paused group child is parked while its own execution
-/// still waits for the child in this process, holding the open session's
-/// resident runtime. The handle answers Parked, with the typed cause, at the
-/// park's commit and from the recorded state: it waits neither for the run to
-/// release the runtime nor for its next store poll, which by then is a second
-/// away. Before, it answered only once the redriven run had settled.
-async fn a_send_answers_parked_at_the_park_commit_while_its_runs_execution_is_resident(
-    tier: Tier,
-    replay: bool,
-    seed: u64,
-) {
-    let Some(double) = double(tier, replay, seed).await else {
-        return;
-    };
-    let session_id = "keys-resident-park";
-    let run = "keys-resident-park-run";
-    let calls = Arc::new(AtomicUsize::new(0));
-    let provider = || {
-        let calls = Arc::clone(&calls);
-        lash::testing::TestProvider::builder()
-            .kind(KIND)
-            .complete(move |_| {
-                let response = match calls.fetch_add(1, Ordering::SeqCst) {
-                    0 => LlmResponse {
-                        parts: vec![LlmOutputPart::ToolCall {
-                            call_id: "ask-1".to_string(),
-                            tool_name: ASK_MODEL.to_string(),
-                            input_json: "{}".to_string(),
-                            replay: None,
-                        }],
-                        ..LlmResponse::default()
-                    },
-                    1 => text("the direct answer"),
-                    _ => text("kimi answers"),
-                };
-                async move { Ok(response) }
-            })
-            .build()
-            .into_handle()
-    };
-    let catalog = LiveCatalog::serving(registry_of(KIMI, "kimi-k3", provider()));
-    let tools: Arc<dyn lash::plugins::PluginFactory> =
-        Arc::new(lash::plugins::StaticPluginFactory::new(
-            lash::plugins::PluginDeclaration::initial("keys-ask-model"),
-            lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskModel {
-                catalog: Arc::clone(&catalog),
-                retired: AtomicBool::new(false),
-                settled: Arc::new(Mutex::new(Vec::new())),
-            })),
-        ));
-    let core = core_over(&double, &catalog, vec![tools]);
-    let session = created_on(&core, session_id, KIMI).await;
-    let handle = session
-        .send(TurnInput::text("ask the model through the tool"))
-        .id(run)
-        .await
-        .expect("the session accepts the input");
-    // The sender awaits its output from the start, so its follower is at
-    // rest, its store poll backed off, when the park is recorded.
-    let sender = tokio::spawn(async move {
-        let answer = handle.output().await;
-        (answer, std::time::Instant::now())
-    });
-
-    let paused = await_parked_on(&double, KIMI).await;
-    let dispatch = double.double.service_name("EffectGroupDispatch");
-    assert!(
-        paused.target.starts_with(&dispatch) && paused.target.ends_with("/child"),
-        "the engine stopped the tool's group child: {paused:?}"
-    );
-
-    // The park is recorded by a reconcile pass, or by the recovery interval
-    // ahead of it; either way it is listed no earlier than its commit.
-    let listed = async {
-        tokio::time::timeout(std::time::Duration::from_secs(60), async {
-            loop {
-                if !listed_parks(&core).await.is_empty() {
-                    return std::time::Instant::now();
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-            }
-        })
-        .await
-        .expect("the paused child's run is parked")
-    };
-    let (_, listed) = tokio::join!(reconcile_pass(&double), listed);
-
-    let (answer, answered) = tokio::time::timeout(std::time::Duration::from_secs(30), sender)
-        .await
-        .expect("the sender is answered while its run's execution still holds the resident runtime")
-        .expect("the sender's task completes");
-    let status = match answer {
-        Err(lash::EmbedError::Send(error)) => match *error {
-            lash::SendError::NotSettled { status, .. } => status,
-            other => panic!("the run is parked, got: {other:?}"),
-        },
-        other => panic!("the run is parked, got: {other:?}"),
-    };
-    let lash::TurnStatus::Parked(parked) = status else {
-        panic!("the run is parked, got: {status:?}");
-    };
-    assert_eq!(parked.run, lash::TurnId::from(run));
-    assert_eq!(
-        parked.reason.code(),
-        lash::persistence::ParkReasonCode::EngineRetryExhausted,
-        "the answer carries the park's typed cause: {parked:?}"
-    );
-    assert_eq!(
-        parked.reason.profile_key(),
-        Some(&LlmProfileKey::new(KIMI)),
-        "the answer carries the unbindable key typed: {parked:?}"
-    );
-    let after = answered.saturating_duration_since(listed);
-    assert!(
-        after < AT_THE_PARK_COMMIT,
-        "the park's commit answers the sender, not its next store poll: answered {after:?} \
-         after the park was listed"
-    );
-    // Nothing moved the run meanwhile: its child is still paused, and its
-    // run still waits for it.
-    assert_eq!(
-        double
-            .double
-            .server()
-            .invocations()
-            .iter()
-            .find(|view| view.id == paused.id)
-            .map(|view| view.status),
-        Some("paused"),
-        "the answer came while the child was still paused"
-    );
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "the run made no further model call before the answer"
-    );
-
-    // The park's redrive still completes the run.
-    let [(work, park_id, _, _)] = listed_parks(&core).await.try_into().expect("one park");
-    catalog.serve(registry_of(KIMI, "kimi-k3", provider()));
-    core.parked_work()
-        .redrive(&work, park_id)
-        .await
-        .expect("the operator redrives the parked run");
-    assert_eq!(
-        answer_after_redrive(&session, run).await,
-        "kimi answers",
-        "the redriven run completes once the key is served"
     );
 }
 
@@ -2203,20 +1953,6 @@ tiered!(
     0x4632_1200
 );
 tiered!(
-    a_send_answers_parked_at_the_park_commit_while_its_runs_execution_is_resident,
-    0x4618_1100
-);
-tiered!(
     a_host_process_start_refuses_unsupported_inherited_reasoning_before_recording,
     0x4603_1100
 );
-
-tiered!(
-    a_process_opened_group_child_parks_resumes_and_reparks_idempotently,
-    0x4617_1100
-);
-
-tiered!(a_paused_group_run_parks_its_run_opener, 0x4617_2100);
-tiered!(a_paused_group_run_parks_its_process_opener, 0x4617_2200);
-tiered!(a_paused_group_retire_parks_its_run_opener, 0x4617_2300);
-tiered!(a_paused_group_retire_parks_its_process_opener, 0x4617_2400);

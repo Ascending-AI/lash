@@ -24,29 +24,6 @@ impl RuntimeEffectController for EffectAdmissionProbe {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(RuntimeEffectOutcome::Sleep)
     }
-
-    async fn open_effect_group(
-        &self,
-        _group: crate::RuntimeEffectGroup,
-    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("EffectAdmissionProbe"))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::runtime::TurnCancelWait,
-    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("EffectAdmissionProbe"))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: crate::EffectGroupHandle,
-        _disposition: crate::LoserPolicy,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("EffectAdmissionProbe"))
-    }
 }
 
 fn sleep_envelope(scope: ExecutionScope, replay_key: &str) -> RuntimeEffectEnvelope {
@@ -131,181 +108,6 @@ async fn task_proxy_refuses_wrong_scope_before_handoff() {
         requests.try_recv(),
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
     ));
-}
-
-fn test_group(scope: ExecutionScope, key: &str) -> RuntimeEffectGroup {
-    RuntimeEffectGroup::try_new(
-        crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(scope.clone(), format!("{key}:group"))
-                .expect("valid group address"),
-            crate::RuntimeAttribution::none(),
-            "group",
-        ),
-        key,
-        vec![sleep_envelope(scope, &format!("{key}:child:0"))],
-        crate::GroupWakePolicy::All,
-        crate::LoserPolicy::RunToCompletion,
-    )
-    .expect("a one-child group assembles")
-}
-
-#[tokio::test]
-async fn task_proxy_group_open_refuses_wrong_scope_before_handoff() {
-    let probe = EffectAdmissionProbe::default();
-    let (scoped, mut requests) = EffectTaskController::scoped(
-        &probe,
-        AdmittedScope::runtime_operation("admitted-group-scope"),
-    )
-    .expect("scoped task proxy");
-
-    let error = scoped
-        .controller()
-        .open_effect_group(test_group(
-            ExecutionScope::runtime_operation("foreign-group-scope"),
-            "group-foreign",
-        ))
-        .await
-        .expect_err("a group under a foreign scope must be refused");
-
-    assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectScopeMismatch);
-    assert!(matches!(
-        requests.try_recv(),
-        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-    ));
-}
-
-#[tokio::test]
-async fn task_proxy_group_await_carries_a_live_cancellation() {
-    let probe = EffectAdmissionProbe::default();
-    let (scoped, mut requests) = EffectTaskController::scoped(
-        &probe,
-        AdmittedScope::runtime_operation("admitted-group-scope"),
-    )
-    .expect("scoped task proxy");
-    let mut handle =
-        EffectGroupHandle::restored("group-cancel:0", 2, 0).expect("a valid restored cursor");
-    let cancel = CancellationToken::new();
-
-    let await_call = scoped.controller().await_next_settlement(
-        &mut handle,
-        crate::runtime::TurnCancelWait::unobserved(cancel.clone()),
-    );
-    let service = async {
-        let EffectControllerTaskRequest::AwaitNextSettlement {
-            handle,
-            cancel,
-            response,
-        } = requests.recv().await.expect("a settlement request")
-        else {
-            panic!("expected a group settlement request");
-        };
-        // The token in the request is the caller's own: cancelling the await
-        // is what wakes the task side, so it stays live for the whole await.
-        cancel.cancellation().cancelled().await;
-        let _ = response.send((
-            handle,
-            Err(RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
-                "the await was cancelled",
-            )),
-        ));
-    };
-    let cancel_after_arrival = async {
-        tokio::task::yield_now().await;
-        cancel.cancel();
-    };
-    let (result, (), ()) = tokio::join!(await_call, service, cancel_after_arrival);
-
-    let error = result.expect_err("a cancelled await returns its typed error");
-    assert_eq!(
-        error.code,
-        RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
-    );
-    assert_eq!(
-        handle.consumed(),
-        0,
-        "a cancelled await leaves the caller's cursor untouched"
-    );
-}
-
-#[tokio::test]
-async fn task_proxy_group_calls_fail_closed_when_the_task_is_gone() {
-    let probe = EffectAdmissionProbe::default();
-    let (scoped, requests) = EffectTaskController::scoped(
-        &probe,
-        AdmittedScope::runtime_operation("admitted-group-scope"),
-    )
-    .expect("scoped task proxy");
-    drop(requests);
-
-    let scope = ExecutionScope::runtime_operation("admitted-group-scope");
-    let open_error = scoped
-        .controller()
-        .open_effect_group(test_group(scope, "group-closed-task"))
-        .await
-        .expect_err("a group open on a closed task must return a typed error");
-    assert_eq!(
-        open_error.code,
-        RuntimeErrorCode::RuntimeEffectControllerTaskClosed
-    );
-
-    let mut handle =
-        EffectGroupHandle::restored("group-closed-task:0", 1, 0).expect("a valid restored cursor");
-    let await_error = scoped
-        .controller()
-        .await_next_settlement(
-            &mut handle,
-            crate::runtime::TurnCancelWait::unobserved(CancellationToken::new()),
-        )
-        .await
-        .expect_err("a settlement await on a closed task must return a typed error");
-    assert_eq!(
-        await_error.code,
-        RuntimeErrorCode::RuntimeEffectControllerTaskClosed
-    );
-    assert_eq!(
-        handle.consumed(),
-        0,
-        "a send failure leaves the caller's cursor untouched"
-    );
-
-    let close_error = scoped
-        .controller()
-        .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
-        .await
-        .expect_err("a group close on a closed task must return a typed error");
-    assert_eq!(
-        close_error.code,
-        RuntimeErrorCode::RuntimeEffectControllerTaskClosed
-    );
-}
-
-#[tokio::test]
-async fn task_proxy_group_open_reports_a_dropped_response() {
-    let probe = EffectAdmissionProbe::default();
-    let (scoped, mut requests) = EffectTaskController::scoped(
-        &probe,
-        AdmittedScope::runtime_operation("admitted-group-scope"),
-    )
-    .expect("scoped task proxy");
-
-    let open_call = scoped.controller().open_effect_group(test_group(
-        ExecutionScope::runtime_operation("admitted-group-scope"),
-        "group-dropped",
-    ));
-    let accept_then_drop = async {
-        match requests.recv().await.expect("a group-open request") {
-            EffectControllerTaskRequest::OpenEffectGroup { response, .. } => drop(response),
-            _ => panic!("expected a group-open request"),
-        }
-    };
-    let (result, ()) = tokio::join!(open_call, accept_then_drop);
-
-    let error = result.expect_err("a dropped response must return a typed error");
-    assert_eq!(
-        error.code,
-        RuntimeErrorCode::RuntimeEffectControllerTaskClosed
-    );
 }
 
 #[test]
@@ -463,29 +265,6 @@ impl RuntimeEffectController for SelfParkingKeyProbe {
         self.key_served.notified().await;
         Ok(RuntimeEffectOutcome::Sleep)
     }
-
-    async fn open_effect_group(
-        &self,
-        _group: crate::RuntimeEffectGroup,
-    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("SelfParkingKeyProbe"))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::runtime::TurnCancelWait,
-    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("SelfParkingKeyProbe"))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: crate::EffectGroupHandle,
-        _disposition: crate::LoserPolicy,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("SelfParkingKeyProbe"))
-    }
 }
 
 /// The shift loop polls each in-flight request at most once per task poll,
@@ -561,29 +340,6 @@ impl RuntimeEffectController for HeldEffects {
         self.settled
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(RuntimeEffectOutcome::Sleep)
-    }
-
-    async fn open_effect_group(
-        &self,
-        _group: crate::RuntimeEffectGroup,
-    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("HeldEffects"))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::runtime::TurnCancelWait,
-    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("HeldEffects"))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: crate::EffectGroupHandle,
-        _disposition: crate::LoserPolicy,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("HeldEffects"))
     }
 }
 

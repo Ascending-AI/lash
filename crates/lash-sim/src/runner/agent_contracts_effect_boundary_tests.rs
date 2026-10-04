@@ -29,13 +29,6 @@ fn process_effect_outcome_contract_normalizes_only_opaque_replay_identity() {
 struct ToolAttemptInvariantRecorder {
     tool_attempt_envelopes: Mutex<Vec<String>>,
     provider_body_invocations: Mutex<Vec<String>>,
-    /// Every `Sleep` envelope the layer saw, with its group key when the
-    /// envelope carried membership. Restate dispatch resolves a wait child's
-    /// membership from the group's durable record and drops `envelope.group`
-    /// before executing the wait on the child's own journal, so a grouped
-    /// timer arrives as a plain effect — it reaching the layer at all is what
-    /// proves the child was routed through the host's stack.
-    sleep_envelopes: Mutex<Vec<Option<String>>>,
 }
 
 impl ToolAttemptInvariantRecorder {
@@ -49,10 +42,6 @@ impl ToolAttemptInvariantRecorder {
         self.provider_body_invocations
             .lock_recover()
             .push(tool_name.to_string());
-    }
-
-    fn record_sleep(&self, group_key: Option<String>) {
-        self.sleep_envelopes.lock_recover().push(group_key);
     }
 
     /// `provider_tools` names the tools this recorder's `ToolProvider` owns.
@@ -87,8 +76,7 @@ impl ToolAttemptInvariantRecorder {
     }
 }
 
-/// Records every tool attempt — and every `Sleep` — that crosses the effect
-/// boundary of the contract world's host.
+/// Records every tool attempt that crosses the contract world's effect boundary.
 struct ToolAttemptRecordingLayer {
     recorder: Arc<ToolAttemptInvariantRecorder>,
 }
@@ -101,15 +89,8 @@ impl lash_core::testing::EffectLayer for ToolAttemptRecordingLayer {
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        match &envelope.command {
-            lash_core::RuntimeEffectCommand::ToolAttempt { call, .. } => {
-                self.recorder.record_tool_attempt(&call.tool_name);
-            }
-            lash_core::RuntimeEffectCommand::Sleep { .. } => {
-                self.recorder
-                    .record_sleep(envelope.group.as_ref().map(|group| group.group_key.clone()));
-            }
-            _ => {}
+        if let lash_core::RuntimeEffectCommand::ToolAttempt { call, .. } = &envelope.command {
+            self.recorder.record_tool_attempt(&call.tool_name);
         }
         inner.execute_effect(envelope, local_executor).await
     }
@@ -312,63 +293,6 @@ finish(await handle);
         "segment envelope contract failed: {result:?}"
     );
     recorder.assert_every_provider_invocation_has_tool_attempt_envelope(&["envelope_probe"]);
-}
-
-#[tokio::test]
-async fn lashlang_race_timer_child_crosses_the_host_layer() {
-    let recorder = Arc::new(ToolAttemptInvariantRecorder::default());
-    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(RecordingToolProvider {
-        recorder: Arc::clone(&recorder),
-        delegate: Arc::new(BatchEnvelopeProbeTools),
-    });
-    let (core, _, engine) = agent_process_contract_core_with_effect_layer(
-        "lash_runtime race timer child layer",
-        vec![
-            r#"<typescript>
-const winner = await Promise.race([tools.envelope_probe({ value: "a" }), sleep(60000)]);
-finish(winner);
-</typescript>"#,
-        ],
-        Some(tools),
-        recording_layer(Arc::clone(&recorder)),
-    )
-    .await
-    .expect("build race timer contract");
-    let session = crate::open_created_session(
-        "lash_runtime race timer child layer",
-        &core,
-        "sim-agent-race-timer-child-layer",
-    )
-    .await
-    .expect("open race timer contract session");
-
-    let outcome = engine
-        .run_turn(
-            &session,
-            "sim-agent-race-timer-child-layer-turn",
-            Arc::new(RuntimeProofRecordingEvents::default()),
-            contract_turn("Race a tool call against a timer."),
-        )
-        .await
-        .expect("run race timer contract handler");
-
-    // The race's timer is a group child: its Sleep envelope reaches the layer
-    // only because Restate dispatch routes wait children through the host.
-    let tool_attempt_envelopes = recorder.tool_attempt_envelopes.lock_recover().clone();
-    assert_eq!(
-        tool_attempt_envelopes.as_slice(),
-        ["envelope_probe"],
-        "the race must record exactly one envelope_probe ToolAttempt; \
-         tool_attempt_envelopes={tool_attempt_envelopes:?}"
-    );
-    assert!(
-        !recorder.sleep_envelopes.lock_recover().is_empty(),
-        "the race's timer child crossed no Sleep envelope through the host layer"
-    );
-
-    // Whether the turn itself succeeds is `a_race_turn_on_restate_succeeds`'s
-    // verdict; this law is about what crossed the layer.
-    drop(outcome);
 }
 
 /// A race whose tool wins ends its turn cleanly on Restate.

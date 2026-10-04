@@ -13,17 +13,10 @@ use lash_restate_test::{CrashPoint, CrashRule, RestateTestServer, ServerConfig};
 
 use super::session_shift_roll_on_the_double::{BUILD_N_URI, SessionRoll, generation, session_lane};
 use super::test_restate_authority_id;
-use crate::compat::{
-    COMPAT_KEY, Call, ObjectCompat, RELEASE_LINE, RESTATE_WIRE, Reply, VersionRange,
-};
+use crate::compat::{COMPAT_KEY, ObjectCompat, RELEASE_LINE};
 use crate::durable_wait::{
-    LashDurableWaitRegistry as _, RestateDurableWaitEffectRequest, RestateDurableWaitIndexRequest,
-    RestateDurableWaitRegistration, RestateTurnGatePeek,
-};
-use crate::effect_group::{
-    EffectGroupAdmissionResponse, EffectGroupPayload as _, EffectGroupPayloadGetResponse,
-    EffectGroupPayloadImpl, EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse,
-    EffectGroupProbeResponse, EffectGroupState as _, EffectGroupStateImpl,
+    LashDurableWaitRegistry as _, RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
+    RestateTurnGatePeek,
 };
 use crate::object_state::StampedValue;
 use crate::wire::RestateCompatError;
@@ -37,8 +30,6 @@ async fn object_families() -> (RestateTestServer, crate::RestateIngressClient) {
     let server = RestateTestServer::new(ServerConfig::default().with_seed(0x4048_0001))
         .expect("start the server double");
     let endpoint = restate_sdk::endpoint::Endpoint::builder()
-        .bind(EffectGroupStateImpl::default().serve())
-        .bind(EffectGroupPayloadImpl::default().serve())
         .bind(crate::LashDurableWaitRegistryImpl::default().serve())
         .build();
     server
@@ -67,7 +58,7 @@ fn compat_refusal(error: &crate::RestateHttpError) -> RestateCompatError {
 
 /// The newest format of every object family: the one a fresh object is
 /// stamped at, whatever the build.
-const NEWEST: u32 = crate::EFFECT_GROUP_STATE_FORMAT_VERSION as u32;
+const NEWEST: u32 = crate::DURABLE_WAIT_REGISTRY_FORMAT_VERSION as u32;
 
 fn compat_bytes(format: u32, min_reader: u32, min_writer: u32) -> Vec<u8> {
     serde_json::to_vec(&ObjectCompat {
@@ -98,30 +89,14 @@ struct Family {
     shared: Option<(&'static str, serde_json::Value)>,
 }
 
-fn families() -> [Family; 3] {
-    [
-        Family {
-            service: "EffectGroupIndex",
-            component: "restate-effect-group-state",
-            value_key: "effect-group/v1/state",
-            exclusive: ("finish_retirement", serde_json::Value::Null),
-            shared: Some(("probe", serde_json::Value::Null)),
-        },
-        Family {
-            service: "EffectGroupPayload",
-            component: "restate-effect-group-payload",
-            value_key: "effect-group/v1/payload",
-            exclusive: ("delete_bytes", serde_json::Value::Null),
-            shared: Some(("get", serde_json::Value::Null)),
-        },
-        Family {
-            service: "LashDurableWaitIndex",
-            component: "restate-durable-wait-registry",
-            value_key: "wait-index/v2/effect/replay",
-            exclusive: ("reinstate", serde_json::Value::Null),
-            shared: None,
-        },
-    ]
+fn families() -> [Family; 1] {
+    [Family {
+        service: "LashDurableWaitIndex",
+        component: "restate-durable-wait-registry",
+        value_key: "wait-index/v2/effect/replay",
+        exclusive: ("reinstate", serde_json::Value::Null),
+        shared: None,
+    }]
 }
 
 async fn call(
@@ -288,122 +263,6 @@ async fn each_family_refuses_a_compat_record_above_this_build_with_zero_state_ch
         );
         assert_eq!(server.object_state(service, &unstamped), before);
     }
-}
-
-/// Clearing an object keeps its `_compat` record: the payload's
-/// `delete_bytes` and the wait index's revocation, which clears every other
-/// value, leave it, so a stale handler cannot recreate the state.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn clearing_an_object_keeps_its_compat_record() {
-    let (server, ingress) = object_families().await;
-    let put = ingress
-        .call_lash_object::<_, EffectGroupPayloadPutResponse>(
-            "EffectGroupPayload",
-            "cleared",
-            "put",
-            &EffectGroupPayloadPutRequest {
-                bytes: b"answer".to_vec(),
-            },
-        )
-        .await
-        .expect("put the payload");
-    assert_eq!(put, EffectGroupPayloadPutResponse::Written);
-    ingress
-        .call_lash_object::<_, ()>("EffectGroupPayload", "cleared", "delete_bytes", &())
-        .await
-        .expect("delete the bytes");
-    assert_eq!(
-        server.object_state("EffectGroupPayload", "cleared"),
-        [(COMPAT_KEY.to_owned(), compat_bytes(NEWEST, NEWEST, NEWEST))]
-            .into_iter()
-            .collect(),
-        "only the record survives the clear"
-    );
-    let got = ingress
-        .call_lash_object::<_, EffectGroupPayloadGetResponse>(
-            "EffectGroupPayload",
-            "cleared",
-            "get",
-            &(),
-        )
-        .await
-        .expect("read the cleared payload");
-    assert_eq!(got, EffectGroupPayloadGetResponse::Missing);
-
-    let begun = ingress
-        .call_lash_object::<_, bool>(
-            "LashDurableWaitIndex",
-            "revoked",
-            "begin_effect",
-            &RestateDurableWaitEffectRequest {
-                replay_key: "replay".to_owned(),
-            },
-        )
-        .await
-        .expect("record an effect");
-    assert!(begun);
-    ingress
-        .call_lash_object::<_, ()>("LashDurableWaitIndex", "revoked", "revoke_all", &())
-        .await
-        .expect("revoke the index");
-    let state = server.object_state("LashDurableWaitIndex", "revoked");
-    assert_eq!(
-        state.get(COMPAT_KEY),
-        Some(&compat_bytes(NEWEST, NEWEST, NEWEST)),
-        "the revocation's clear kept the record: {state:?}"
-    );
-    assert!(
-        !state.contains_key("wait-index/v2/effect/replay"),
-        "the revocation cleared every other value: {state:?}"
-    );
-}
-
-/// A call whose range holds no version this build answers is refused typed,
-/// carrying both ranges, before any state is read or written.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_disjoint_wire_is_refused_typed_before_any_state() {
-    let (server, ingress) = object_families().await;
-    let peer = VersionRange::new(RESTATE_WIRE.max() + 1, RESTATE_WIRE.max() + 2).expect("range");
-    let error = ingress
-        .call_object_json::<_, Reply<EffectGroupAdmissionResponse>>(
-            "EffectGroupIndex",
-            "disjoint",
-            "admit_child",
-            &Call::stating(
-                peer,
-                serde_json::json!({ "a": "shape this build has never seen" }),
-            ),
-        )
-        .await
-        .expect_err("a disjoint wire is refused");
-    assert_eq!(
-        compat_refusal(&error),
-        RestateCompatError::WireUnsupported {
-            local: RESTATE_WIRE,
-            peer,
-        }
-    );
-    assert!(
-        server
-            .object_state("EffectGroupIndex", "disjoint")
-            .is_empty(),
-        "nothing was written, not even a _compat record"
-    );
-    let probe = ingress
-        .call_object_json::<_, Reply<EffectGroupProbeResponse>>(
-            "EffectGroupIndex",
-            "disjoint",
-            "probe",
-            &Call::new(()),
-        )
-        .await
-        .expect("an overlapping wire is answered");
-    assert_eq!(
-        probe.wire,
-        RESTATE_WIRE.max(),
-        "the reply is at the selected wire"
-    );
-    assert_eq!(probe.body, EffectGroupProbeResponse::Absent);
 }
 
 /// ADR 0115 §3.1: a shift pinned to build N sends its admitted run to the
@@ -765,44 +624,4 @@ async fn each_family_refuses_a_pre_release_compat_record_with_zero_state_change(
             "{service}: a refused call changed nothing"
         );
     }
-}
-
-/// FIG-4819: a pre-release worker still draining on the same service names
-/// calls at wire 1, the version 1.0 answers. Its envelope states no release
-/// line, and the handler refuses it typed before it decodes the body or
-/// reads or writes any state.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_pre_release_call_is_refused_typed_before_any_state() {
-    let (server, ingress) = object_families().await;
-    for (handler, body) in [
-        ("probe", serde_json::Value::Null),
-        (
-            "admit_child",
-            serde_json::json!({ "a": "shape changed in place before the cut" }),
-        ),
-    ] {
-        let error = ingress
-            .call_object_json::<_, serde_json::Value>(
-                "EffectGroupIndex",
-                "pre-release-caller",
-                handler,
-                &serde_json::json!({
-                    "wire": { "min": RESTATE_WIRE.min(), "max": RESTATE_WIRE.max() },
-                    "body": body,
-                }),
-            )
-            .await
-            .expect_err("a pre-release call is refused");
-        assert_eq!(
-            compat_refusal(&error),
-            pre_release(lash_core_store::compat::RESTATE_WIRE_COMPONENT),
-            "{handler}"
-        );
-    }
-    assert!(
-        server
-            .object_state("EffectGroupIndex", "pre-release-caller")
-            .is_empty(),
-        "nothing was written, not even a _compat record"
-    );
 }

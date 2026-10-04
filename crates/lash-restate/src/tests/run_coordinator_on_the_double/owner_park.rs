@@ -274,12 +274,12 @@ impl World {
             crate::services::LashServiceParts {
                 effect_host: &host,
                 materials: stores.process_env_store(),
-                ingress,
+
                 admin,
                 attachments: factory.clone() as Arc<dyn lash_core::AttachmentReferrers>,
-                sessions: factory,
+
                 process_workflow: crate::process::LashProcessWorkflowImpl::new_for_test(
-                    Arc::new(super::super::effect_group_conformance::LawProcessRunner::default()),
+                    Arc::new(super::super::conformance_harness::LawProcessRunner::default()),
                     stores.process_registry(),
                     stores.process_continuations(),
                 ),

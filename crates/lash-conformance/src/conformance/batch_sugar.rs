@@ -728,12 +728,6 @@ pub async fn batch_admission_and_identity_contract(
     );
 }
 
-/// The forbidden legacy group opens observed by the L21 route witness.
-#[derive(Default)]
-struct GroupOpens {
-    opened: Mutex<std::collections::BTreeSet<String>>,
-}
-
 /// L05/L21: singleton rounds and expanded batches preserve their logical
 /// calls and source slots while executing in the opener's Run, without a
 /// ToolInvocation child group.
@@ -744,8 +738,7 @@ pub async fn standard_rounds_and_batches_use_the_run(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     factories: BatchSugarFactories,
 ) {
-    let opens = Arc::new(GroupOpens::default());
-    let mut law = SugarTurn::new(
+    let law = SugarTurn::new(
         prefix,
         "run-route",
         &host,
@@ -768,7 +761,6 @@ pub async fn standard_rounds_and_batches_use_the_run(
             ]),
         ],
     );
-    law.layer = Some(Arc::clone(&opens) as Arc<dyn crate::testing::EffectLayer>);
     let turn = law.run(&runner).await;
     let context = format!("{prefix}/standard-run-route");
     assert_finished(&context, &turn);
@@ -816,25 +808,6 @@ pub async fn standard_rounds_and_batches_use_the_run(
         "{context}: preparation failures retain their original source slots"
     );
     assert_no_member_is_a_call(&context, &turn);
-    assert_eq!(
-        opens.opened.lock_recover().len(),
-        0,
-        "{context}: singleton and batch attempts belong to the Run, never child groups"
-    );
-}
-
-#[async_trait::async_trait]
-impl crate::testing::EffectLayer for GroupOpens {
-    async fn open_effect_group(
-        &self,
-        inner: &dyn crate::RuntimeEffectController,
-        group: crate::RuntimeEffectGroup,
-    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        self.opened
-            .lock_recover()
-            .insert(group.group_key().to_string());
-        inner.open_effect_group(group).await
-    }
 }
 
 /// The transcript and the host's records show one call and one result per

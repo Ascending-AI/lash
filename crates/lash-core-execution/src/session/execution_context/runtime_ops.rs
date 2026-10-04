@@ -238,12 +238,12 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
     fn opener_state(&self) -> OpenerState {
         OpenerState {
             ledger: Arc::clone(&self.incorporation_ledger),
-            groups: Arc::clone(&self.opener_groups),
+            run_state: Arc::clone(&self.opener_groups),
         }
     }
     fn with_opener_state(mut self, state: OpenerState) -> Self {
         self.incorporation_ledger = state.ledger;
-        self.opener_groups = state.groups;
+        self.opener_groups = state.run_state;
         self
     }
 }

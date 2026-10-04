@@ -46,8 +46,8 @@ impl Completions {
 
     /// Resolves `key`'s wait, first writer wins.
     ///
-    /// A key whose owning effect-group child is already cancel-decided is
-    /// refused with a typed [`lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided`]
+    /// A key whose logical owner is already cancel-decided is
+    /// refused with a typed [`lash_core::RuntimeErrorCode::RuntimeToolRunCancelDecided`]
     /// runtime error and nothing is written (ADR 0099 §4): the completion
     /// arrived after the cancel decision, so it is late.
     pub async fn resolve(

@@ -9,7 +9,6 @@ use lash_core::{
     AwaitEventKey, ProcessCommand, RuntimeEffectCommand, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectOutcome,
     RuntimeErrorCode, SleepSpec, facade_support::CanonicalRuntimeEffectEnvelope,
-    facade_support::refuse_unhonored_group_membership,
     facade_support::validate_replayed_effect_envelope,
 };
 use restate_sdk::errors::TerminalError;
@@ -41,16 +40,7 @@ pub(crate) enum RestateEffectExecution {
         invocation: RuntimeEffectInvocation,
         key: AwaitEventKey,
     },
-    ArmToolCompletion {
-        invocation: RuntimeEffectInvocation,
-        key: AwaitEventKey,
-    },
-    AwaitToolCompletions {
-        invocation: RuntimeEffectInvocation,
-        waits: Vec<lash_core::ToolCompletionWait>,
-        dispatch: Option<lash_core::ToolDispatchCursor>,
-        transferable: bool,
-    },
+
     PeekAwaitEvent {
         invocation: RuntimeEffectInvocation,
         key: AwaitEventKey,
@@ -68,8 +58,6 @@ impl RestateEffectExecution {
             | Self::DurableProcessCommand { invocation, .. }
             | Self::Timer { invocation, .. }
             | Self::AwaitEvent { invocation, .. }
-            | Self::ArmToolCompletion { invocation, .. }
-            | Self::AwaitToolCompletions { invocation, .. }
             | Self::PeekAwaitEvent { invocation, .. } => invocation,
             Self::DirectLocal { envelope } | Self::JournaledRun { envelope, .. } => {
                 &envelope.invocation
@@ -97,40 +85,26 @@ impl RestateEffectExecution {
 /// it also names the command this attempt was trying to write, not the
 /// journal's contents. FIG-790 was the incident that exposed this SDK
 /// diagnostic inversion.
-///
-/// Fallible because four of its arms rebuild the envelope into a target with no
-/// slot for [`EffectGroupMembership`] — `Timer`, `AwaitEvent`, `PeekAwaitEvent`,
-/// and both `Process` arms record no canonical envelope at all, so on this tier
-/// those commands have no envelope-hash fence to fold a wake rule into. A grouped
-/// child reaching them is refused rather than silently stripped of its
-/// membership. Worth naming for the Restate layer: `Sleep` and `AwaitEvent` are
-/// exactly the two children of the design's deadline/signal select, so this is
-/// the refusal that layer must convert into real child invocations.
 pub(crate) fn restate_effect_execution(
     envelope: RuntimeEffectEnvelope,
 ) -> Result<RestateEffectExecution, RuntimeEffectControllerError> {
     let RuntimeEffectEnvelope {
         invocation,
         command,
-        group,
     } = envelope;
     Ok(match command {
         RuntimeEffectCommand::Process { command }
             if matches!(command.as_ref(), ProcessCommand::Signal { .. }) =>
         {
-            refuse_unhonored_group_membership(group.as_deref(), "restate durable process command")?;
             RestateEffectExecution::DurableProcessCommand {
                 invocation,
                 command,
             }
         }
-        RuntimeEffectCommand::Process { command } => {
-            refuse_unhonored_group_membership(group.as_deref(), "restate direct process")?;
-            RestateEffectExecution::DirectProcess {
-                invocation,
-                command,
-            }
-        }
+        RuntimeEffectCommand::Process { command } => RestateEffectExecution::DirectProcess {
+            invocation,
+            command,
+        },
         // ADR 0103: the one command that replays by re-execution
         // (`RuntimeEffectCommand::replays_by_reexecution`) is never recorded;
         // the direct local call re-runs it on every replay, and the nested
@@ -139,46 +113,15 @@ pub(crate) fn restate_effect_execution(
             envelope: RuntimeEffectEnvelope {
                 invocation,
                 command,
-                group,
             },
         },
         // Deliberately not `JournaledRun`, and unreachable on the group path.
-        // A tool invocation is ADR 0099 §2's handler-level driver: retry,
-        // completion-key derivation and resolver arming are coordination,
-        // and §2 forbids coordination inside a recorded body ("A recorded body
-        // must not emit commands into an ordinal-addressed journal"). The
-        // `EffectGroupDispatch::child` handler resolves the group executor
-        // and executes it at handler level with a ctx-bound admitted controller;
-        // the driver's own atomic effects arrive here individually. This arm
-        // remains the guard for any path that tries to execute the command
-        // itself as one recorded step.
-        RuntimeEffectCommand::Sleep { spec } => {
-            refuse_unhonored_group_membership(group.as_deref(), "restate timer")?;
-            RestateEffectExecution::Timer { invocation, spec }
-        }
+        RuntimeEffectCommand::Sleep { spec } => RestateEffectExecution::Timer { invocation, spec },
         RuntimeEffectCommand::AwaitEvent { key } => {
-            refuse_unhonored_group_membership(group.as_deref(), "restate await event")?;
             RestateEffectExecution::AwaitEvent { invocation, key }
         }
-        RuntimeEffectCommand::ArmToolCompletion { key } => {
-            refuse_unhonored_group_membership(group.as_deref(), "restate tool completion arm")?;
-            RestateEffectExecution::ArmToolCompletion { invocation, key }
-        }
-        RuntimeEffectCommand::AwaitToolCompletions {
-            waits,
-            dispatch,
-            transferable,
-        } => {
-            refuse_unhonored_group_membership(group.as_deref(), "restate tool completion wait")?;
-            RestateEffectExecution::AwaitToolCompletions {
-                invocation,
-                waits,
-                dispatch,
-                transferable,
-            }
-        }
+
         RuntimeEffectCommand::PeekAwaitEvent { key } => {
-            refuse_unhonored_group_membership(group.as_deref(), "restate peek await event")?;
             RestateEffectExecution::PeekAwaitEvent { invocation, key }
         }
         command @ (RuntimeEffectCommand::TraceBoundary { .. }
@@ -188,13 +131,11 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::DrawRunStart { .. }
         | RuntimeEffectCommand::RecordCompactionBase { .. }
         | RuntimeEffectCommand::RenderCompactionPrompt { .. }
-        | RuntimeEffectCommand::ResolveConfigTransaction { .. }
-        | RuntimeEffectCommand::IncorporateGroupSettlements { .. }) => {
+        | RuntimeEffectCommand::ResolveConfigTransaction { .. }) => {
             RestateEffectExecution::JournaledRun {
                 envelope: RuntimeEffectEnvelope {
                     invocation,
                     command,
-                    group,
                 },
                 engine_faults: EngineFaults::Recorded,
             }
@@ -260,7 +201,6 @@ pub(crate) fn restate_effect_execution(
             envelope: RuntimeEffectEnvelope {
                 invocation,
                 command,
-                group,
             },
             engine_faults: EngineFaults::Retried,
         },

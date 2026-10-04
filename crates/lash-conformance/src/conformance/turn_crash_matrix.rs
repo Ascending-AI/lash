@@ -192,27 +192,12 @@ enum ProviderOperation {
 }
 
 /// Effect calls are identified from the real envelope command.
-///
-/// `GroupChild` is a tool-attempt envelope that arrived carrying group
-/// membership — the same command under a different authority, which is the
-/// state an attempt-only vocabulary cannot name (FIG-3429). The group
-/// lifecycle calls are seam operations of their own: an open is where retained
-/// membership is written, a settlement is where a journaled rank is consumed,
-/// and a close is where the caller releases its losers.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 enum EffectOperation {
     ToolAttempt {
         name: String,
     },
-    GroupChild {
-        name: String,
-    },
-    GroupOpen {
-        children: usize,
-    },
-    GroupSettle,
-    GroupClose,
     /// A direct turn's journaled acceptance write (ADR 0069 §6). The reference
     /// turn is a drain and never accepts; the direct-turn acceptance scenario
     /// ([`direct_turn_acceptance_crash_after_store_commit_admits_one_row`])
@@ -384,26 +369,6 @@ impl SeamControl {
             self.stop_here().await;
         }
         let output = future.await;
-        if self.matches(&operation, CrashPlacement::InsideCall) {
-            self.stop_here().await;
-        }
-        output
-    }
-
-    /// `around` for a wait whose result is produced by work running beside
-    /// it: a group settlement is awaited while its child runs, so recording
-    /// the wait's entry would pin a race between the two. The boundary still
-    /// stops before the wait; the operation is recorded when the settlement
-    /// is returned, which is always after the child's own seam traffic.
-    async fn around_completion<T, F>(&self, operation: TurnSeamOperation, future: F) -> T
-    where
-        F: Future<Output = T>,
-    {
-        if self.matches(&operation, CrashPlacement::Boundary) {
-            self.stop_here().await;
-        }
-        let output = future.await;
-        self.record(operation.clone());
         if self.matches(&operation, CrashPlacement::InsideCall) {
             self.stop_here().await;
         }
@@ -1063,9 +1028,7 @@ fn generated_points(trace: &[TurnSeamOperation]) -> Vec<TurnCrashPoint> {
         if matches!(operation, TurnSeamOperation::Effect(_)) {
             if matches!(
                 operation,
-                TurnSeamOperation::Effect(
-                    EffectOperation::ToolAttempt { .. } | EffectOperation::GroupChild { .. }
-                )
+                TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
             ) {
                 points.push(TurnCrashPoint {
                     operation: operation.clone(),

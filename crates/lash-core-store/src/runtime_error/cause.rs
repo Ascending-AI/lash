@@ -143,10 +143,7 @@ pub enum RuntimeErrorCause {
     ArtifactReferrerEnded {
         referrer: Box<crate::artifact_referrer::ArtifactReferrer>,
     },
-    /// The typed half of [`RuntimeErrorCode::RuntimeEffectGroupChildUnroutable`].
-    EffectGroupChildUnroutable {
-        missing: GroupChildCapability,
-    },
+
     /// The recorded model key this worker could not bind (FIG-4404).
     /// A deployment serving the key repairs this retryable cause.
     LlmProfileUnavailable {
@@ -193,35 +190,6 @@ impl RuntimeErrorCause {
     }
 }
 
-/// A capability a deployment needs to execute an effect-group child, and
-/// whose absence is a fact of the deployment's wiring rather than of one
-/// attempt (FIG-4550).
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum GroupChildCapability {
-    /// The resolver that maps a recorded group child to the code that runs
-    /// it: the host serves the lane with none registered.
-    GroupExecutors,
-}
-
-impl GroupChildCapability {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::GroupExecutors => "group_executors",
-        }
-    }
-}
-
-impl std::fmt::Display for GroupChildCapability {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
 impl RuntimeEffectControllerError {
     /// The typed refusal of a Lash object whose compatibility record refuses
     /// this build: terminal by its cause on every path that carries it.
@@ -244,17 +212,6 @@ impl RuntimeEffectControllerError {
             RuntimeErrorCause::Compat { refusal } => Some(refusal),
             _ => None,
         }
-    }
-
-    /// The typed refusal of an effect-group child that the deployment serving
-    /// its lane can never execute, naming the capability it lacks (FIG-4550).
-    pub fn group_child_unroutable(
-        missing: GroupChildCapability,
-        message: impl Into<String>,
-    ) -> Self {
-        let mut error = Self::new(RuntimeErrorCode::RuntimeEffectGroupChildUnroutable, message);
-        error.cause = Some(RuntimeErrorCause::EffectGroupChildUnroutable { missing });
-        error
     }
 }
 

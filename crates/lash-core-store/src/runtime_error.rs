@@ -14,7 +14,7 @@ pub use attachment_retention::{AttachmentRetentionFailure, AttachmentRetentionSt
 mod cause;
 mod classification;
 mod controller;
-pub use cause::{GroupChildCapability, RuntimeErrorCause, StoredDataCorruption};
+pub use cause::{RuntimeErrorCause, StoredDataCorruption};
 pub use controller::RuntimeEffectControllerError;
 pub(crate) mod llm_profile_unavailable;
 mod run_shape;
@@ -220,11 +220,9 @@ pub enum RuntimeErrorCode {
     AwaitEventUnknownOrRevoked,
     AwaitEventUnsupported,
     CancelStartGateUnavailable,
-    EffectGroupUnsupported,
     EffectJournalRetirementUnsupported,
     EffectScopeRetired,
     EffectScopeNotQuiescent,
-    EffectGroupLifecyclePinned,
     AwaitEventScopeNotRetirable,
     InvalidAwaitEventWaitIdentity,
     InvalidTurnCancelRequest,
@@ -467,35 +465,13 @@ pub enum RuntimeErrorCode {
     RuntimeEffectEnvelopeCanonicalDecode,
     RuntimeEffectEnvelopeCanonicalHashInvariant,
     RuntimeEffectEnvelopeHash,
-    /// A cancelled group await leaves its durable rank untouched for retry.
-    RuntimeEffectGroupAwaitCancelled,
-    /// A group's `Cancel` loser disposition made this child terminal.
-    RuntimeEffectGroupChildCancelled,
-    /// The child's cancel decision already won the group's durable
-    /// linearization point, so its late final record was refused and nothing
-    /// was journaled (ADR 0099 §4, W17).
-    RuntimeEffectGroupChildCancelDecided,
-    /// A successor attaching a retained child invocation id found the
-    /// original's retention expired; the retained invocation is gone and the
-    /// child is never re-run under a fresh identity (ADR 0099 §8).
-    RuntimeEffectGroupChildAttachExpired,
-    /// A child's final was committed at the group's durable linearization
-    /// point by an invocation that ended before its seat, and the invocation
-    /// seating it cannot realize that final: the committed outcome and any
-    /// intents it declared are reported lost rather than replaced by the
-    /// seating invocation's own refusal (ADR 0099 §5).
-    RuntimeEffectGroupChildCommittedFinalLost,
-    /// The deployment serving the child's lane lacks a capability the child
-    /// needs, named by [`RuntimeErrorCause::EffectGroupChildUnroutable`].
-    RuntimeEffectGroupChildUnroutable,
-    /// Drain deferred while this host still works the group or its children.
-    /// Retry succeeds once it finishes; permanent refusal uses
-    /// `RuntimeEffectGroupShape`.
-    RuntimeEffectGroupDrainDeferred,
-    /// A durable effect group was assembled with children that disagree with the
-    /// group they claim to belong to, or an effect carrying group membership
-    /// reached a command shape that cannot honor it.
-    RuntimeEffectGroupShape,
+    /// A cancelled logical aggregate wait can be resumed by its owner.
+    RuntimeToolRunAwaitCancelled,
+    /// The logical owner's durable cancellation already won, so a new
+    /// completion or semantic admission is refused.
+    RuntimeToolRunCancelDecided,
+    /// Native Run admission, material or receipt state is inconsistent.
+    RuntimeToolRunShape,
     /// An awaited aggregate nothing can ever settle — `Promise.race([])`.
     /// ECMA-262 leaves such a promise pending forever; the host ends the
     /// execution with this typed failure instead of parking it, the analogue
@@ -661,11 +637,9 @@ impl RuntimeErrorCode {
             Self::AwaitEventUnknownOrRevoked => "await_event_unknown_or_revoked",
             Self::AwaitEventUnsupported => "await_event_unsupported",
             Self::CancelStartGateUnavailable => "cancel_start_gate_unavailable",
-            Self::EffectGroupUnsupported => "effect_group_unsupported",
             Self::EffectJournalRetirementUnsupported => "effect_journal_retirement_unsupported",
             Self::EffectScopeRetired => "effect_scope_retired",
             Self::EffectScopeNotQuiescent => "effect_scope_not_quiescent",
-            Self::EffectGroupLifecyclePinned => "effect_group_lifecycle_pinned",
             Self::AwaitEventScopeNotRetirable => "await_event_scope_not_retirable",
             Self::InvalidAwaitEventWaitIdentity => "invalid_await_event_wait_identity",
             Self::InvalidTurnCancelRequest => "invalid_turn_cancel_request",
@@ -769,20 +743,9 @@ impl RuntimeErrorCode {
                 "runtime_effect_envelope_canonical_hash_invariant"
             }
             Self::RuntimeEffectEnvelopeHash => "runtime_effect_envelope_hash",
-            Self::RuntimeEffectGroupAwaitCancelled => "runtime_effect_group_await_cancelled",
-            Self::RuntimeEffectGroupChildCancelled => "runtime_effect_group_child_cancelled",
-            Self::RuntimeEffectGroupChildCancelDecided => {
-                "runtime_effect_group_child_cancel_decided"
-            }
-            Self::RuntimeEffectGroupChildAttachExpired => {
-                "runtime_effect_group_child_attach_expired"
-            }
-            Self::RuntimeEffectGroupChildCommittedFinalLost => {
-                "runtime_effect_group_child_committed_final_lost"
-            }
-            Self::RuntimeEffectGroupChildUnroutable => "runtime_effect_group_child_unroutable",
-            Self::RuntimeEffectGroupDrainDeferred => "runtime_effect_group_drain_deferred",
-            Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
+            Self::RuntimeToolRunAwaitCancelled => "runtime_tool_run_await_cancelled",
+            Self::RuntimeToolRunCancelDecided => "runtime_tool_run_cancel_decided",
+            Self::RuntimeToolRunShape => "runtime_tool_run_shape",
             Self::AggregateAwaitUnsettled => "aggregate_await_unsettled",
             Self::MaxToolCallsExceeded => "max_tool_calls_exceeded",
             Self::RuntimeEffectInvocationSubject => "runtime_effect_invocation_subject",
@@ -943,11 +906,9 @@ impl RuntimeErrorCode {
             "await_event_unknown_or_revoked" => Self::AwaitEventUnknownOrRevoked,
             "await_event_unsupported" => Self::AwaitEventUnsupported,
             "cancel_start_gate_unavailable" => Self::CancelStartGateUnavailable,
-            "effect_group_unsupported" => Self::EffectGroupUnsupported,
             "effect_journal_retirement_unsupported" => Self::EffectJournalRetirementUnsupported,
             "effect_scope_retired" => Self::EffectScopeRetired,
             "effect_scope_not_quiescent" => Self::EffectScopeNotQuiescent,
-            "effect_group_lifecycle_pinned" => Self::EffectGroupLifecyclePinned,
             "await_event_scope_not_retirable" => Self::AwaitEventScopeNotRetirable,
             "invalid_await_event_wait_identity" => Self::InvalidAwaitEventWaitIdentity,
             "invalid_turn_cancel_request" => Self::InvalidTurnCancelRequest,
@@ -1050,20 +1011,9 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectEnvelopeCanonicalHashInvariant
             }
             "runtime_effect_envelope_hash" => Self::RuntimeEffectEnvelopeHash,
-            "runtime_effect_group_await_cancelled" => Self::RuntimeEffectGroupAwaitCancelled,
-            "runtime_effect_group_child_cancelled" => Self::RuntimeEffectGroupChildCancelled,
-            "runtime_effect_group_child_cancel_decided" => {
-                Self::RuntimeEffectGroupChildCancelDecided
-            }
-            "runtime_effect_group_child_attach_expired" => {
-                Self::RuntimeEffectGroupChildAttachExpired
-            }
-            "runtime_effect_group_child_committed_final_lost" => {
-                Self::RuntimeEffectGroupChildCommittedFinalLost
-            }
-            "runtime_effect_group_child_unroutable" => Self::RuntimeEffectGroupChildUnroutable,
-            "runtime_effect_group_drain_deferred" => Self::RuntimeEffectGroupDrainDeferred,
-            "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
+            "runtime_tool_run_await_cancelled" => Self::RuntimeToolRunAwaitCancelled,
+            "runtime_tool_run_cancel_decided" => Self::RuntimeToolRunCancelDecided,
+            "runtime_tool_run_shape" => Self::RuntimeToolRunShape,
             "aggregate_await_unsettled" => Self::AggregateAwaitUnsettled,
             "max_tool_calls_exceeded" => Self::MaxToolCallsExceeded,
             "runtime_effect_invocation_subject" => Self::RuntimeEffectInvocationSubject,
@@ -1397,7 +1347,6 @@ impl RuntimeError {
             | RuntimeErrorCause::VmWorker { .. }
             | RuntimeErrorCause::ArtifactReferrerEnded { .. }
             | RuntimeErrorCause::Compat { .. }
-            | RuntimeErrorCause::EffectGroupChildUnroutable { .. }
             | RuntimeErrorCause::IngressReservedSourceKey { .. }
             | RuntimeErrorCause::LlmProfileUnavailable { .. }
             | RuntimeErrorCause::AttachmentRetention { .. }

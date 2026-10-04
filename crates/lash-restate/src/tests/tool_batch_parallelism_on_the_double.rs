@@ -4,7 +4,7 @@
 //! `ConformanceTurnProbe` handler, where native calls and expanded `batch`
 //! members run as calls of the logical opener's Run.
 
-use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+use super::conformance_harness::{HarnessServer, LiveConformanceHarness};
 
 /// The standard protocol, which expands `batch` into the Run's tool round.
 pub(super) fn standard_factories()

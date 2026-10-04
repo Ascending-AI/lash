@@ -608,13 +608,6 @@ impl DeploymentRegistry for Deployments {
     ) -> Result<Vec<RetainedDeployment>, DeploymentRegistryError> {
         Ok(self.0.lock().expect("deployments").clone())
     }
-
-    async fn undrained_group_children(
-        &self,
-        _generation: &BuildGeneration,
-    ) -> Result<u64, DeploymentRegistryError> {
-        Ok(0)
-    }
 }
 
 /// Exit the finalizing process after either partial-set commit, then recover

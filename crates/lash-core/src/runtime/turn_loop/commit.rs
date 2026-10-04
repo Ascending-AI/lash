@@ -394,7 +394,7 @@ impl LashRuntime {
             ),
         )
         .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
-        if !opener.holds_groups() {
+        if !opener.holds_tool_run() {
             return Ok(None);
         }
         let services = self

@@ -86,17 +86,6 @@ pub trait DeploymentRegistry: Send + Sync {
         &self,
         generation: &BuildGeneration,
     ) -> Result<u64, DeploymentRegistryError>;
-
-    /// The committed effect-group children whose group dispatches on a lane
-    /// of `generation`, in any namespace, and whose seat is still owed
-    /// (FIG-4454): each one's drain runs, or is recovered, on that lane, so
-    /// the generation's deployment cannot retire before it seats. The
-    /// group's own record is the obligation of record, whoever opened the
-    /// group — a host-built opener has no run the store counts.
-    async fn undrained_group_children(
-        &self,
-        generation: &BuildGeneration,
-    ) -> Result<u64, DeploymentRegistryError>;
 }
 
 /// The registry of an engine that keeps no deployments: it serves no lane
@@ -119,13 +108,6 @@ impl DeploymentRegistry for NoDeployments {
     ) -> Result<Vec<RetainedDeployment>, DeploymentRegistryError> {
         Ok(Vec::new())
     }
-
-    async fn undrained_group_children(
-        &self,
-        _generation: &BuildGeneration,
-    ) -> Result<u64, DeploymentRegistryError> {
-        Ok(0)
-    }
 }
 
 /// A finalize that must not run yet. Nothing changed.
@@ -136,7 +118,7 @@ pub enum FinalizeRefusal {
     /// it was never marked draining.
     #[error(
         "generation {} has not drained: marked draining {}, {} live and {} parked processes, \
-         {} parked and {} in-flight turns, {} closing sessions, {} undrained group children, \
+         {} parked and {} in-flight turns, {} closing sessions, \
          {} unfinished engine invocations; \
          run `lashctl drain {}` and wait for `lashctl drain-status {}` to read drained",
         status.generation.as_str(),
@@ -146,7 +128,6 @@ pub enum FinalizeRefusal {
         status.parked_turns,
         status.in_flight_turns,
         status.closing_sessions,
-        status.undrained_group_children,
         status.unfinished_invocations,
         status.generation.as_str(),
         status.generation.as_str()
@@ -287,13 +268,6 @@ mod tests {
         ) -> Result<Vec<RetainedDeployment>, DeploymentRegistryError> {
             Ok(self.0.clone())
         }
-
-        async fn undrained_group_children(
-            &self,
-            _generation: &BuildGeneration,
-        ) -> Result<u64, DeploymentRegistryError> {
-            Ok(0)
-        }
     }
 
     fn status(marked: bool, parked_turns: u64) -> GenerationDrainStatus {
@@ -305,7 +279,6 @@ mod tests {
             parked_turns,
             in_flight_turns: 0,
             closing_sessions: 0,
-            undrained_group_children: 0,
             unfinished_invocations: 0,
             stalled_obligations: BTreeMap::new(),
             checked_at: 9,

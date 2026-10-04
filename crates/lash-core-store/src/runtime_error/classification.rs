@@ -180,16 +180,12 @@ impl RuntimeErrorCode {
             Self::AwaitEventUnsupported => Terminal,
             // the cancel start gate was unavailable to this attempt; a retry reaches it.
             Self::CancelStartGateUnavailable => Retryable,
-            // the host has no effect-group wiring.
-            Self::EffectGroupUnsupported => Terminal,
             // the host cannot retire journals.
             Self::EffectJournalRetirementUnsupported => Terminal,
             // the scope is durably retired.
             Self::EffectScopeRetired => Terminal,
             // retirement was asked of a scope with live work; the same request is refused.
             Self::EffectScopeNotQuiescent => Terminal,
-            // the group lifecycle is durably pinned.
-            Self::EffectGroupLifecyclePinned => Terminal,
             // the scope's await events forbid retirement.
             Self::AwaitEventScopeNotRetirable => Terminal,
             // a malformed wait identity.
@@ -366,22 +362,12 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectEnvelopeCanonicalHashInvariant => Terminal,
             // hashing the same envelope fails the same way.
             Self::RuntimeEffectEnvelopeHash => Terminal,
-            // the await was cancelled in this process and its durable rank is untouched for a redrive.
-            Self::RuntimeEffectGroupAwaitCancelled => Redrivable,
-            // the group's loser disposition durably made the child terminal.
-            Self::RuntimeEffectGroupChildCancelled => Terminal,
-            // the child's cancel durably won the group's linearization point.
-            Self::RuntimeEffectGroupChildCancelDecided => Terminal,
-            // the retained invocation expired and is never re-run.
-            Self::RuntimeEffectGroupChildAttachExpired => Terminal,
-            // the committed final's invocation is gone and nothing can realize it.
-            Self::RuntimeEffectGroupChildCommittedFinalLost => Terminal,
-            // the deployment's wiring lacks a capability the child needs.
-            Self::RuntimeEffectGroupChildUnroutable => Terminal,
-            // this host still works the group; a later drain succeeds.
-            Self::RuntimeEffectGroupDrainDeferred => Retryable,
-            // the group was assembled inconsistently.
-            Self::RuntimeEffectGroupShape => Terminal,
+            // the owner can resume its cancelled logical aggregate wait.
+            Self::RuntimeToolRunAwaitCancelled => Redrivable,
+            // the logical owner durably cancelled before the new admission.
+            Self::RuntimeToolRunCancelDecided => Terminal,
+            // native Run admission or receipt state is inconsistent.
+            Self::RuntimeToolRunShape => Terminal,
             // an awaited aggregate nothing can settle; the same program awaits it again.
             Self::AggregateAwaitUnsettled => Terminal,
             // the recorded tool-call limit refuses the same call again.

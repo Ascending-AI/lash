@@ -1333,7 +1333,7 @@ impl<'a> RunCoordinator<'a> {
         )
         .map_err(|error| {
             RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                crate::RuntimeErrorCode::RuntimeToolRunShape,
                 error.to_string(),
             )
         })?;

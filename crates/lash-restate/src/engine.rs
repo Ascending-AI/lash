@@ -143,10 +143,9 @@ impl RestateEngine {
             namespace,
             run_effect_budget,
         } = config.clone();
-        let effect_host = Arc::new(RestateEffectHost::on_generation(
+        let effect_host = Arc::new(RestateEffectHost::in_deployment_namespace(
             connection.clone(),
             authority.clone(),
-            generation.clone(),
             namespace.clone(),
         ));
         let process = Arc::new(RestateProcessDeployment::in_namespace(
@@ -250,9 +249,9 @@ impl RestateEngine {
             restate_sdk::endpoint::Endpoint::builder(),
             LashServiceParts {
                 effect_host: &self.effect_host,
-                ingress: RestateIngressClient::new(self.connection.clone()),
+
                 admin: self.admin.clone(),
-                sessions: self.stores.session_store_factory(),
+
                 materials: self.stores.tool_material_store(),
                 attachments: self.stores.attachment_referrers(),
                 process_workflow: self.process.workflow(
