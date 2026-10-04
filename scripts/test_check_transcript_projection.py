@@ -18,7 +18,7 @@ class TranscriptProjectionTests(unittest.TestCase):
         self.write("examples/agent-workbench/tests/transcript_projection_harness.mjs", "export const SURFACES = ['host'];\n")
         self.write("examples/host/asset.html", "// BEGIN ROWS\nfunction render() {}\n// END ROWS\n")
         self.write("examples/host/src/render.rs", "fn render(view: View) { view.transcript(); }\n")
-        self.prefix = f"row_kinds = {kinds!r}\n[cardinality]\nreads = 0\noutputs = 0\n"
+        self.prefix = f"row_kinds = {kinds!r}\n"
         self.surface = f"""
 [[surfaces]]
 name = 'host'
@@ -36,9 +36,8 @@ row_kinds = {kinds!r}
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source)
 
-    def registry(self, entries="", reads=0, outputs=0):
-        prefix = self.prefix.replace("reads = 0", f"reads = {reads}").replace("outputs = 0", f"outputs = {outputs}")
-        self.write("scripts/transcript-projection-sites.toml", prefix + self.surface + "\n[sites]\n" + entries)
+    def registry(self, entries=""):
+        self.write("scripts/transcript-projection-sites.toml", self.prefix + self.surface + "\n[sites]\n" + entries)
 
     def errors(self):
         return "\n".join(gate.check(self.root))
@@ -71,12 +70,12 @@ row_kinds = {kinds!r}
 
     def test_registered_function_cannot_grow_a_second_selection(self):
         self.write("crates/probe/src/main.rs", "fn probe(output: Output) { assert(output.assistant_message()); output.final_value(); }")
-        self.registry('"crates/probe/src/main.rs#probe" = { reads = 0, outputs = 1, kind = "output-read", reason = "typed result assertion" }', outputs=1)
+        self.registry('"crates/probe/src/main.rs#probe" = { reads = 0, outputs = 1, kind = "output-read", reason = "typed result assertion" }')
         self.assertIn("scrape counts changed", self.errors())
 
     def test_evidence_read_cannot_select_output(self):
         self.write("crates/probe/src/main.rs", "fn probe(output: Output) { output.tool_value(); }")
-        self.registry('"crates/probe/src/main.rs#probe" = { reads = 0, outputs = 1, kind = "evidence-read", reason = "effect evidence" }', outputs=1)
+        self.registry('"crates/probe/src/main.rs#probe" = { reads = 0, outputs = 1, kind = "evidence-read", reason = "effect evidence" }')
         self.assertIn("evidence-read cannot select", self.errors())
 
     def test_own_namespace_id_parser_is_red(self):
@@ -90,6 +89,10 @@ row_kinds = {kinds!r}
     def test_new_kind_requires_every_surface_to_handle_it(self):
         self.write("crates/lash-core-store/src/transcript/mod.rs", "pub enum TranscriptRowKind {\nSecret,\n}")
         self.assertIn("row kind coverage changed", self.errors())
+
+    def test_stored_cardinality_totals_are_red(self):
+        self.write("scripts/transcript-projection-sites.toml", self.prefix + "[cardinality]\nreads = 0\noutputs = 0\n" + self.surface + "\n[sites]\n")
+        self.assertIn("derived from [sites], not stored", self.errors())
 
     def test_deleted_harness_marker_is_red(self):
         self.write("examples/host/asset.html", "function render() {}")

@@ -8,6 +8,12 @@ only thing besides a binary's own listing that decides which shard a case runs
 on. A case the table does not name is spread round-robin, and a name the binary
 no longer lists is ignored: a stale table costs balance, never coverage.
 
+Nobody hand-edits the table. A lane that adds, renames or removes cases
+changes nothing here: the round-robin fallback covers an unmeasured case and
+a stale name is ignored until the next refresh replaces the row. The only
+membership edit is dropping the row of a target that stops being sharded,
+which the graph contracts require of every row.
+
 The durations come from the JUnit reports the test runner writes. A case
 carries a `time` only when libtest reports one, so measure with `--report-time`:
 

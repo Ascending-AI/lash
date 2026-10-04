@@ -7,7 +7,8 @@ depends on the termination kind. Hosts style rows; they do not select replies.
 
 Two independent scrapes inventory committed-truth reads and even single
 turn-output accessor calls. Each function's exact counts and disposition are
-reviewed in transcript-projection-sites.toml. Render assets must participate in
+reviewed in transcript-projection-sites.toml; the checker derives their totals
+from [sites], so the file stores none. Render assets must participate in
 the same production-JavaScript row harness.
 """
 
@@ -106,9 +107,12 @@ def check(root: Path) -> list[str]:
             errors.append(f"missing reviewed disposition or reason: {key}")
         if site["kind"] == "evidence-read" and found[key]["outputs"]:
             errors.append(f"evidence-read cannot select turn output: {key}")
+    if "cardinality" in registry:
+        errors.append("[cardinality] totals are derived from [sites], not stored: transcript-projection-sites.toml")
     for scrape_name in ("reads", "outputs"):
         cardinality = sum(counts[scrape_name] > 0 for counts in found.values())
-        if cardinality != registry["cardinality"][scrape_name]:
+        expected = sum(site[scrape_name] > 0 for site in registered.values())
+        if cardinality != expected:
             errors.append(f"{scrape_name} cardinality changed: {cardinality}")
     kind_source = (root / "crates/lash-core-store/src/transcript/mod.rs").read_text()
     kind_body = re.search(r"pub enum TranscriptRowKind\s*\{([^}]+)\}", kind_source)

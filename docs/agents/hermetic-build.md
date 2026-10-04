@@ -608,7 +608,11 @@ alone, so the shards are disjoint and their union is the listing.
   name order, starting from the lightest shard; a test with no row is split
   round-robin entirely. A name the binary no longer lists is ignored, so a
   stale table costs balance, never coverage. A feature-lane variant uses its
-  ordinary label's row.
+  ordinary label's row. Nobody hand-edits the table: adding, renaming or
+  removing cases changes nothing in it, since unmeasured cases take the
+  round-robin default and stale names are ignored until the next refresh
+  replaces the row. The only membership edit is dropping the row of a target
+  that stops being sharded.
 - **Exclusion.** A shard runs the binary under `--exact` with one `--skip` per
   listed case that is not its own. libtest applies `--exact` to skips, so a
   case whose name contains another's is assigned on its own.
