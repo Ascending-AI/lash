@@ -3059,7 +3059,7 @@
           "state": "ready",
           "hold_reason": null,
           "registration": {
-            "commit": "c3ddc7018faf7b7661ee2a5a742cc8abf40db625",
+            "commit": "701146c054b6a4345de747db539d999076389e2e",
             "label": "//crates/lash-upgrade-harness:e2e_hosts__test",
             "test": "s28_workbench_mcp_peer_restart"
           },
