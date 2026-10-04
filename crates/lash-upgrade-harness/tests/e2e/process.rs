@@ -38,16 +38,12 @@ async fn s17_operation_drop_and_follow_sqlite_memory() -> Result<()> {
         session.durable().unfinished_run().await?.is_none(),
         "operation retained admission"
     );
-    let invocation = double
-        .server()
-        .invocations()
-        .into_iter()
-        .find(|invocation| {
-            invocation.target.contains("LashTurn")
-                && invocation.target.contains(run.as_str())
-                && invocation.target.ends_with("/run")
-        })
-        .ok_or_else(|| anyhow::anyhow!("no operation journal"))?;
+    let invocation = lash_upgrade_harness::node::h3::operation_invocation(
+        &double,
+        &lash::SessionId::fixture("s17-operation"),
+        &run,
+    )
+    .await?;
     let journal = double
         .server()
         .journal(&invocation.id)
@@ -193,6 +189,120 @@ async fn s21_cancelled_source_refuses_revival_sqlite_memory() -> Result<()> {
             == SourceSubscribeReply::Sealed {
                 seal: SourceSeal::Cancelled
             }
+    );
+    Ok(())
+}
+
+/// S18/L07: cancellation wakes a real suspended application timer without
+/// firing it. Both an active follower and a late follower read the same store
+/// terminal; the exact final wait-routing claim is guarded by FIG-4897.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s18_cancel_suspended_application_timer_sqlite_memory() -> Result<()> {
+    use lash_upgrade_harness::node::h3::rlm::fixture;
+    let (core, double) = fixture(
+        0x493418,
+        "await sleep(86400000); finish(\"timer-elapsed\");",
+    )
+    .await?;
+    let session_id = lash::SessionId::fixture("s18-application-timer");
+    core.session(session_id.clone())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "upgrade-harness-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(8),
+        )))
+        .await?;
+    let session = core.session(session_id.clone()).open().await?;
+    let handle = session
+        .send(lash::TurnInput::text("await the application timer"))
+        .id("s18-timer-input")
+        .await?;
+    tokio::time::timeout(std::time::Duration::from_secs(10), double.server().settle()).await?;
+    let run = handle
+        .run()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("timer input not admitted"))?;
+    drop(handle);
+    let invocation =
+        lash_upgrade_harness::node::h3::operation_invocation(&double, &session_id, &run).await?;
+    if invocation.status != "suspended" {
+        let outcome = session.run(run.clone()).outcome().await?;
+        anyhow::bail!(
+            "application timer did not wait: {invocation:?}; terminal={:?}",
+            outcome.status()
+        );
+    }
+    ensure!(
+        invocation.status == "suspended" && invocation.suspensions > 0,
+        "operation timer never actually suspended: {invocation:?}"
+    );
+    let suspended_id = invocation.id.clone();
+    let application_timers = double.server().timers();
+    ensure!(
+        !application_timers.is_empty(),
+        "application sleep registered no real timer"
+    );
+    let before = double.server().now_ms();
+    ensure!(
+        double
+            .stores()
+            .session_store_factory()
+            .run_terminal(&session_id, &run)
+            .await?
+            .is_none(),
+        "suspended operation already has a terminal"
+    );
+    let follow = session.run(run.clone()).outcome();
+    let receipt = session.run(run.clone()).cancel().await?;
+    ensure!(
+        matches!(receipt, lash::CancelReceipt::Requested { .. }),
+        "public cancellation did not address the admitted operation: {receipt:?}"
+    );
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), follow).await??;
+    ensure!(
+        outcome.run() == Some(&run) && outcome.status() == lash::TurnStatus::Cancelled,
+        "cancelled timer did not settle its own Run: {outcome:?}"
+    );
+    let terminal = double
+        .stores()
+        .session_store_factory()
+        .run_terminal(&session_id, &run)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("cancelled operation has no store terminal"))?;
+    ensure!(
+        terminal.kind() == lash_core::store::RunTerminalKind::Cancelled,
+        "stored timer terminal is not cancellation"
+    );
+    ensure!(
+        double.server().now_ms().saturating_sub(before) < 86_400_000,
+        "cancellation waited for the application timer"
+    );
+    let late = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        session.durable().run(run.clone()).outcome(),
+    )
+    .await??;
+    ensure!(
+        late.run() == Some(&run) && late.status() == lash::TurnStatus::Cancelled,
+        "late follower lost the cancelled terminal"
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(10), double.server().settle()).await?;
+    let pending: Vec<_> = double
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|invocation| {
+            (invocation.id == suspended_id || invocation.target.ends_with("/await_terminal"))
+                && invocation.status != "completed"
+        })
+        .collect();
+    ensure!(
+        pending.is_empty(),
+        "cancel retained operation/attach waits: {pending:?}"
+    );
+    ensure!(
+        session.durable().unfinished_run().await?.is_none(),
+        "cancel retained admission"
     );
     Ok(())
 }

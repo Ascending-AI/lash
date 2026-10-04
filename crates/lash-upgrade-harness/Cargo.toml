@@ -52,7 +52,7 @@ workspace = true
 
 [dependencies]
 lash-vm-client = { workspace = true }
-lash = { workspace = true, features = ["restate", "sqlite", "typescript"] }
+lash = { workspace = true, features = ["restate", "sqlite", "typescript", "rlm"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true }
 lash-lashlang-runtime = { workspace = true }

@@ -1,19 +1,16 @@
-//! Native operation fixtures for suspended cancellation and Deferred ownership.
+//! Native operation fixture for Deferred ownership.
 use super::*;
 use lash_core::facade_support::{PluginOperation, PluginSpec, PluginTask, SessionParam};
 use lash_core::plugin::{PluginOperationOutcome, PluginTaskContext};
 use lash_core::tool_dispatch::{
     RunCoordinator, SingletonBodyOutcome, SingletonToolCall, SingletonToolHandlers,
 };
-use lash_core::tool_run::{
-    AggregateConsumer, AggregateLeaf, AggregatePlan, SegmentOrdinal, ToolDeclaration,
-};
+use lash_core::tool_run::{SegmentOrdinal, ToolDeclaration};
 use std::sync::Arc;
 
 pub(super) const DEFERRED: &str = "e2e.h3.deferred";
-pub(super) const SLEEP: &str = "e2e.h3.sleep";
 
-pub(super) fn register(spec: PluginSpec, clock: Arc<dyn lash_core::Clock>) -> PluginSpec {
+pub(super) fn register(spec: PluginSpec) -> PluginSpec {
     spec.with_plugin_task_typed::<Deferred, _, _>(|ctx, label| async move {
         let call = call(&ctx, &label, ToolDeclaration::deferring())?;
         let token = ctx.cancellation_token.clone();
@@ -46,33 +43,6 @@ pub(super) fn register(spec: PluginSpec, clock: Arc<dyn lash_core::Clock>) -> Pl
             .ok_or_else(|| "H3 Deferred completed without its retained result".to_owned())?;
         let output: String = serde_json::from_str(&output).map_err(|error| error.to_string())?;
         Ok(PluginOperationOutcome::new(output))
-    })
-    .with_plugin_task_typed::<Sleep, _, _>(move |ctx, duration| {
-        let clock = clock.clone();
-        async move {
-            let call = call(&ctx, "sleep", ToolDeclaration::default())?;
-            let mut run = RunCoordinator::open(
-                &ctx.scoped_effect_controller,
-                call.owner,
-                call.segment,
-                call.available,
-            );
-            let plan = AggregatePlan {
-                key: "s18-application-timer".into(),
-                leaves: vec![AggregateLeaf::Timer {
-                    duration_ms: duration,
-                }],
-                operands: vec![0],
-            };
-            run.admit_aggregate(&plan, clock.as_ref())
-                .await
-                .map_err(|error| error.to_string())?;
-            run.consume_aggregate(&plan.key, AggregateConsumer::All)
-                .await
-                .map_err(|error| error.to_string())?;
-            run.close().await.map_err(|error| error.to_string())?;
-            Ok(PluginOperationOutcome::new("timer-elapsed".to_owned()))
-        }
     })
 }
 
@@ -120,7 +90,6 @@ fn call(
 }
 
 struct Deferred;
-struct Sleep;
 macro_rules! task {
     ($ty:ty, $name:expr, $args:ty) => {
         impl PluginOperation for $ty {
@@ -140,7 +109,6 @@ macro_rules! task {
     };
 }
 task!(Deferred, DEFERRED, String);
-task!(Sleep, SLEEP, u64);
 
 struct Pending(Echo);
 #[lash_core::async_trait]

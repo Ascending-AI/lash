@@ -23,6 +23,8 @@ use super::{RestateArgs, StoreArgs};
 const PLUGIN: &str = "e2e-h3";
 const TASK: &str = "e2e.h3.operation";
 
+pub mod retirement;
+pub mod rlm;
 mod tasks;
 
 /// Node controls deliberately preserve the public Run vocabulary.
@@ -49,10 +51,6 @@ pub enum H3Command {
     Deferred {
         key: String,
     },
-    Sleep {
-        key: String,
-        duration_ms: u64,
-    },
     Resolve {
         source: lash_core::AwaitEventKey,
         value: serde_json::Value,
@@ -70,10 +68,7 @@ pub enum H3Command {
 
 /// Register the fixture on both the submitter and the serving node. Its
 /// revision is identical across the candidate/synthetic successor pair.
-pub(super) fn plugin(
-    namespace: &str,
-    clock: Arc<dyn lash_core::Clock>,
-) -> Arc<StaticPluginFactory> {
+pub(super) fn plugin(namespace: &str) -> Arc<StaticPluginFactory> {
     let namespace = namespace.to_owned();
     let spec = lash_core::facade_support::PluginSpec::new()
         .with_plugin_task_typed::<Operation, _, _>(move |ctx, output| {
@@ -136,7 +131,7 @@ pub(super) fn plugin(
                 Ok(lash_core::plugin::PluginOperationOutcome::new(output))
             }
         });
-    let spec = tasks::register(spec, clock);
+    let spec = tasks::register(spec);
     Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial(PLUGIN),
         spec,
@@ -268,15 +263,6 @@ pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
             drop(handle);
             Ok(serde_json::json!({"run": run, "admitted": true}))
         }
-        H3Command::Sleep { key, duration_ms } => {
-            let handle = session
-                .plugin_operations()
-                .start_task_raw(tasks::SLEEP, serde_json::json!(duration_ms), key)
-                .await?;
-            let run = handle.run().clone();
-            drop(handle);
-            Ok(serde_json::json!({"run": run, "admitted": true}))
-        }
         H3Command::Resolve { source, value } => {
             use lash_core::AwaitEventResolver as _;
             let outcome = engine
@@ -357,6 +343,41 @@ pub async fn double_fixture_replay(
     .await?;
     let core = super::core(double.lash_backend(), &super::ProviderArgs::default())?;
     Ok((core, double))
+}
+
+/// Resolve a public logical Run through the authoritative executor admission;
+/// the physical Restate key is an ingress request, not the public Run string.
+pub async fn operation_invocation(
+    double: &lash_restate_test::RestateTestBackend<dyn lash::StoreSet>,
+    session: &lash::SessionId,
+    run: &lash::TurnId,
+) -> Result<lash_restate_test::InvocationView> {
+    let stores = double.stores().session_store_factory();
+    let key = lash_restate::recorded_turn_invocation_key(stores.as_ref(), session, run)
+        .await?
+        .ok_or_else(|| anyhow!("Run {run} has no retained executor admission"))?;
+    let suffix = format!("/{key}/run");
+    let service = double.service_name("LashTurn");
+    let matches: Vec<_> = double
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|invocation| {
+            let route = invocation.target.split('/').next().unwrap_or_default();
+            (route == service || route.starts_with(&format!("{service}_g")))
+                && invocation.target.ends_with(&suffix)
+        })
+        .collect();
+    if matches.len() != 1 {
+        bail!(
+            "Run {run} executor {key} has {} physical journals",
+            matches.len()
+        );
+    }
+    Ok(matches
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("missing operation journal"))?)
 }
 
 /// The real durable-wait registry boundary used by S21. Material is retained
