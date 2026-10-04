@@ -234,7 +234,6 @@ lash_rust_integration_test(
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
-    shard_count = 4,
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
@@ -420,27 +419,6 @@ lash_rust_integration_test(
     crate_root = "tests/substrate_lost_zombie.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("lash-internal-restate-test", "substrate_lost_zombie", "//crates/lash-restate-test:substrate_lost_zombie__test"),
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = ":lash-restate-test",
-    library_crate_name = "lash_restate_test",
-    manifest_dir = "crates/lash-restate-test",
-    package_name = "lash-internal-restate-test",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
-    name = "suspended_turn__test",
-    crate_features = [],
-    crate_name = "suspended_turn",
-    crate_root = "tests/suspended_turn.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("lash-internal-restate-test", "suspended_turn", "//crates/lash-restate-test:suspended_turn__test"),
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",

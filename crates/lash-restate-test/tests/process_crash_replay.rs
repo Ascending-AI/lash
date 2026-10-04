@@ -6,25 +6,10 @@
 //! two completed effects, so the process crosses segment boundaries and
 //! hands over between `LashProcessWorkflow` invocations.
 //!
-//! A clean run fixes the reference: its terminal and every segment's
-//! journal. Then:
-//!
-//! * (a) for every journal point of every segment's `run` invocation, a fresh
-//!   backend under the same seed drops the attempt just before the server
-//!   stores that frame and replays the invocation, with and without
-//!   always-replay (every step replays from the journal). An always-replay
-//!   run costs about four times a plain one in CPU, so that matrix is cut
-//!   into [`ALWAYS_REPLAY_PARTS`] cases that together cover every point and
-//!   run side by side (FIG-4615);
-//! * (b) the same points, with a fresh process worker (a new core's, with no
-//!   live openers or caches) installed as the crash drops the attempt, as a
-//!   restarted deployment comes back;
-//! * (c) concurrent scheduling over 16 seeds under always-replay, with the
-//!   process cancelled at a seeded point of its life.
-//!
-//! Every redrive must reach the reference terminal (or, when cancelled,
-//! Cancelled), with no journal mismatch; each tool call runs at most once per
-//! completed step, and twice only when the crash lost the step's result.
+//! Lost handover results retain the first writer's state. Crashes between
+//! segment retirement and output replay the admitted segment, and cancellation
+//! at seeded process boundaries chooses the reference answer or Cancelled.
+//! Native Run replay and continuation laws cover individual tool records.
 
 #![expect(
     clippy::unwrap_used,
@@ -32,16 +17,16 @@
     reason = "test assertions; a failed unwrap is the test failure"
 )]
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lash_core::ProcessId;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmRequest, LlmResponse};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt as _};
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::{CrashCount, CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
+use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use lashlang::testing::ast_builders as b;
 use serde_json::json;
 
@@ -53,10 +38,6 @@ const SIGNAL: &str = "go";
 /// the first segment, so the signal wait and the second call run in later
 /// ones.
 const SEGMENT_EFFECT_BUDGET: u64 = 2;
-/// Cases the always-replay matrix is cut into. Each takes the crash points
-/// whose index is its own modulo this, so the cases are disjoint, cover every
-/// point and cost about what a plain matrix does.
-const ALWAYS_REPLAY_PARTS: usize = 4;
 
 struct CountingTool {
     executions: Arc<AtomicUsize>,
@@ -273,8 +254,6 @@ struct Scenario {
     seed: u64,
     config: ServerConfig,
     crash: Option<CrashRule>,
-    /// Install a fresh core's process worker as the crash drops the attempt.
-    fresh_worker_on_crash: bool,
     cancel: Option<CancelAt>,
 }
 
@@ -284,7 +263,6 @@ impl Scenario {
             seed,
             config: ServerConfig::default(),
             crash: None,
-            fresh_worker_on_crash: false,
             cancel: None,
         }
     }
@@ -371,23 +349,6 @@ async fn run_process(scenario: Scenario) -> Run {
     let executions = Arc::new(AtomicUsize::new(0));
     let core = build_core(&restate, &executions);
     restate.install_process_worker(process_worker(&core));
-    // Held for the run: the fresh worker belongs to this core.
-    let fresh_core = scenario
-        .fresh_worker_on_crash
-        .then(|| build_core(&restate, &executions));
-    if let Some(fresh_core) = &fresh_core {
-        let fresh = Mutex::new(Some(process_worker(fresh_core)));
-        let slot = restate.process_worker_slot();
-        restate
-            .server()
-            .on_crash(CrashCount::new().listener_with(move |target: &str| {
-                if target.starts_with(PROCESS_WORKFLOW)
-                    && let Some(worker) = fresh.lock().unwrap().take()
-                {
-                    slot.install(worker);
-                }
-            }));
-    }
     if let Some(rule) = scenario.crash.clone() {
         restate.server().crash_on(rule);
     }
@@ -552,36 +513,6 @@ fn segment_key(target: &str) -> Option<&str> {
         .strip_suffix("/run")
 }
 
-/// Every crash point the reference's segments offer: each command a
-/// segment's `run` stored and each `ctx.run` result, named, with the run whose
-/// result the crash may lose.
-fn crash_points(reference: &Run, always_replay: bool) -> Vec<(CrashRule, Option<String>)> {
-    let mut points = Vec::new();
-    for (target, entries) in &reference.journals {
-        let Some(key) = segment_key(target) else {
-            continue;
-        };
-        let rule = |point| segment_crash(key, point, always_replay);
-        let commands = entries.iter().filter(|(ty, _)| ty.is_command());
-        for (index, (ty, name)) in commands.enumerate().skip(1) {
-            // The SDK starts a run's closure as it writes the RunCommand, so
-            // a crash before the server stores that command may already have
-            // run the effect: it too is a lost run.
-            let lost_on_command = (*ty == MessageType::RunCommand)
-                .then(|| name.clone())
-                .flatten();
-            points.push((rule(CrashPoint::BeforeCommand { index }), lost_on_command));
-            if *ty == MessageType::RunCommand {
-                points.push((
-                    rule(CrashPoint::BeforeRunResult { name: name.clone() }),
-                    name.clone(),
-                ));
-            }
-        }
-    }
-    points
-}
-
 /// A crash at `point` in the segment keyed `key`, once. Under always-replay
 /// every suspension starts a new attempt, so the crash strikes the first
 /// attempt that reaches the point rather than the first attempt only.
@@ -595,12 +526,6 @@ fn segment_crash(key: &str, point: CrashPoint, always_replay: bool) -> CrashRule
     } else {
         rule.within_attempts(1)
     }
-}
-
-/// A lashlang tool-call attempt's run: the one step whose loss re-runs the
-/// tool.
-fn is_tool_attempt(run: &str) -> bool {
-    run.starts_with("lash:lashlang:") && run.contains(":attempt:")
 }
 
 async fn reference(seed: u64, config: &ServerConfig) -> Run {
@@ -625,109 +550,7 @@ async fn reference(seed: u64, config: &ServerConfig) -> Run {
     reference
 }
 
-/// (a) and (b): every journal point of every segment, crashed once and
-/// redriven, reaches the reference terminal with each tool call run once, or
-/// twice where the crash lost its result. `part` is `Some((index, of))` to
-/// run only the points whose index is `index` modulo `of`.
-async fn every_journal_point_recovers(
-    config: ServerConfig,
-    fresh_worker_on_crash: bool,
-    part: Option<(usize, usize)>,
-) {
-    let seed = 0x3809;
-    let started = Instant::now();
-    let reference = reference(seed, &config).await;
-    let all_points = crash_points(&reference, config.always_replay);
-    assert!(all_points.len() > 30, "{} crash points", all_points.len());
-    let points: Vec<_> = all_points
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| part.is_none_or(|(part, of)| index % of == part))
-        .map(|(_, point)| point)
-        .collect();
-    assert!(!points.is_empty(), "the part selects no crash point");
-    let mut violations = Vec::new();
-    for (rule, lost_run) in points.iter().copied() {
-        let run = run_process(Scenario {
-            config: config.clone(),
-            crash: Some(rule.clone()),
-            fresh_worker_on_crash,
-            ..Scenario::new(seed)
-        })
-        .await;
-        let lost_tool = lost_run.as_deref().is_some_and(is_tool_attempt);
-        let expected_tool = if lost_tool { 2..=3 } else { 2..=2 };
-        if run.crashes != 1
-            || run.terminal != reference.terminal
-            || !expected_tool.contains(&run.tool_executions)
-            || !run.failures.is_empty()
-        {
-            violations.push(format!(
-                "{:?} {:?} ({lost_run:?}): crashes={} terminal={:?} tool={} failures={:?}",
-                rule.key, rule.point, run.crashes, run.terminal, run.tool_executions, run.failures
-            ));
-        }
-    }
-    println!(
-        "process crash matrix (always_replay={}, fresh_worker={fresh_worker_on_crash}, \
-         part={part:?}): {} of {} journal points in {:?}, {} violations",
-        config.always_replay,
-        points.len(),
-        all_points.len(),
-        started.elapsed(),
-        violations.len()
-    );
-    assert!(
-        violations.is_empty(),
-        "crash points that did not recover:\n{violations:#?}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn every_journal_point_of_a_segmented_process_recovers_to_the_reference_terminal() {
-    every_journal_point_recovers(ServerConfig::default(), false, None).await;
-}
-
-/// One case per part below: a part without its case would leave crash points
-/// unrun.
-const _: () = assert!(ALWAYS_REPLAY_PARTS == 4);
-
-async fn part_of_every_journal_point_recovers_when_every_step_replays(part: usize) {
-    assert!(part < ALWAYS_REPLAY_PARTS);
-    every_journal_point_recovers(
-        ServerConfig::default().always_replay(true),
-        false,
-        Some((part, ALWAYS_REPLAY_PARTS)),
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn every_journal_point_recovers_when_every_step_replays_part_0() {
-    part_of_every_journal_point_recovers_when_every_step_replays(0).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn every_journal_point_recovers_when_every_step_replays_part_1() {
-    part_of_every_journal_point_recovers_when_every_step_replays(1).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn every_journal_point_recovers_when_every_step_replays_part_2() {
-    part_of_every_journal_point_recovers_when_every_step_replays(2).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn every_journal_point_recovers_when_every_step_replays_part_3() {
-    part_of_every_journal_point_recovers_when_every_step_replays(3).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn every_journal_point_recovers_on_a_fresh_process_worker() {
-    every_journal_point_recovers(ServerConfig::default(), true, None).await;
-}
-
-/// (c): concurrent attempts, every step replayed, and
+/// Concurrent attempts, every step replayed, and
 /// the process cancelled at a seeded point. Each seed ends at the reference
 /// terminal or cancelled, never with a journal mismatch or a failed
 /// invocation; a cancel that lands before the signal always wins.

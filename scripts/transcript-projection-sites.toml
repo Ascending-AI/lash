@@ -1,7 +1,7 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
 reads = 102
-outputs = 138
+outputs = 137
 
 [[surfaces]]
 name = "workbench"
@@ -194,7 +194,6 @@ row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", 
 "crates/lash-restate-test/tests/namespaces.rs#run_turn" = { reads = 0, outputs = 1, kind = "output-read", reason = "run_turn asserts the typed program result independently of rendered rows." }
 "crates/lash-restate-test/tests/session_send.rs#transcript" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "transcript inspects recorded state for a law assertion." }
 "crates/lash-restate-test/tests/session_send.rs#a_dropped_child_turn_leaves_the_child_session_reusable" = { reads = 0, outputs = 1, kind = "output-read", reason = "a_dropped_child_turn_leaves_the_child_session_reusable asserts the typed program result independently of rendered rows." }
-"crates/lash-restate-test/tests/suspended_turn.rs#finish_with_activities" = { reads = 0, outputs = 1, kind = "output-read", reason = "finish_with_activities asserts the typed program result independently of rendered rows." }
 "crates/lash-sansio/src/sansio/tests.rs#checkpoint_messages_resume_prepare_protocol_iteration" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "checkpoint_messages_resume_prepare_protocol_iteration inspects recorded state for a law assertion." }
 "crates/lash-sim/src/request_snapshot.rs#second_history_bearing_turn_snapshots_the_full_assembled_provider_request" = { reads = 0, outputs = 2, kind = "output-read", reason = "second_history_bearing_turn_snapshots_the_full_assembled_provider_request exposes programmatic execution results or provider data, not a transcript renderer." }
 "crates/lash-sim/src/response_body_budget.rs#witness" = { reads = 0, outputs = 1, kind = "output-read", reason = "witness exposes programmatic execution results or provider data, not a transcript renderer." }

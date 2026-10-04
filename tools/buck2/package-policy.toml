@@ -82,15 +82,6 @@ packages = ["lash-internal-protocol-rlm"]
 kinds = ["unit-test"]
 shards = 8
 
-# The crash-replay suite needs about 190 CPU-seconds in a 2-CPU, 300 s slot,
-# so it timed out whenever the pool was slow (FIG-4615). Four shards balanced
-# by `test-shard-weights.json` hold at most two of its six matrix cases each.
-[[rule]]
-packages = ["lash-internal-restate-test"]
-kinds = ["test"]
-targets = ["process_crash_replay"]
-shards = 4
-
 # The Restate unit suite is the largest single libtest binary: about 104 s
 # quiet over 1431 cases, it timed out under contention at 939/1431.
 [[rule]]

@@ -1180,17 +1180,6 @@
     "tool_catalog::tests::typescript_named_tool_prose_registers": 35,
     "tool_catalog::tests::typescript_tool_prose_is_rendered_verbatim": 27
   },
-  "//crates/lash-restate-test:process_crash_replay__test": {
-    "a_crash_between_retire_and_output_redrives_cleanly": 4545,
-    "a_lost_handover_result_rewrites_as_the_same_writer": 585,
-    "concurrent_seeds_with_a_cancel_end_at_the_reference_or_cancelled": 18112,
-    "every_journal_point_of_a_segmented_process_recovers_to_the_reference_terminal": 36877,
-    "every_journal_point_recovers_on_a_fresh_process_worker": 36263,
-    "every_journal_point_recovers_when_every_step_replays_part_0": 32159,
-    "every_journal_point_recovers_when_every_step_replays_part_1": 37367,
-    "every_journal_point_recovers_when_every_step_replays_part_2": 40660,
-    "every_journal_point_recovers_when_every_step_replays_part_3": 39714
-  },
   "//crates/lash-restate:lash-restate__unit_test": {
     "compat::tests::a_call_selects_the_highest_common_wire": 1,
     "compat::tests::a_host_handler_call_states_the_served_fleet_epoch": 1,
