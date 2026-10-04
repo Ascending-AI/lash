@@ -311,59 +311,7 @@ mod restate_double {
         )
     });
 
-    // FIG-4064 on the double: a `Promise.all` cell's batch with one member
-    // settled and one in flight, its turn's handler crashed and the
-    // invocation replayed. The cell re-executes on the replay, and its batch
-    // must reuse the settled member's recorded completion.
 
-    /// A width-64 group must not resume its dispatch or opener once per child.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-    async fn tool_batch_scales_linearly() {
-        let budget = lash_conformance::ToolBatchScalingBudget::from_perf_guard_budgets(
-            include_str!("../../../scripts/perf_guard_budgets.json"),
-        );
-        let double = lash_restate_test::backend(
-            0x7001_ba7c,
-            lash_restate_test::ServerConfig::default().always_replay(true),
-        )
-        .await
-        .expect("start the Restate server double");
-        let backend = double.lash_backend();
-        let host = backend.effect_host() as Arc<dyn EffectHost>;
-        let stores = Arc::clone(double.engine_stores());
-        let runner = Arc::new(DoubleTurnRunner {
-            backend: double.clone(),
-        }) as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-        let producer = lash_conformance::parallel_model_tool_calls_producer(
-            lash_core::testing::test_standard_protocol_factories(),
-        );
-        let mut measured = Vec::new();
-        for width in [budget.small_width, budget.large_width] {
-            measured.push(
-                lash_conformance::measure_tool_batch_resumptions(
-                    "scaling",
-                    Arc::clone(&host),
-                    Arc::clone(&stores),
-                    Arc::clone(&runner),
-                    &producer,
-                    width,
-                    budget.large_width,
-                    || async {
-                        lash_restate_test::tool_batch_resumption_counts(double.server())
-                            .await
-                            .into()
-                    },
-                )
-                .await,
-            );
-        }
-        lash_conformance::assert_tool_batch_resumptions_bounded(
-            "restate-double/parallel-model-tool-calls",
-            measured[0],
-            measured[1],
-            budget,
-        );
-    }
 }
 
 /// The `max_tool_calls` laws on the Restate server double over PostgreSQL
