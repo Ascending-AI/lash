@@ -6,7 +6,6 @@
 use super::*;
 use crate::controller::context::{ProcessWorkflowStartFailure, ResolveEventFuture};
 use crate::durable_wait::RestateDurableWaitResolveResponse;
-use lash_core::ProcessEventLogTestSupport as _;
 
 mod helpers;
 pub(super) use helpers::runtime_invocation;

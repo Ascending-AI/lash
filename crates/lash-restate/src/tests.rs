@@ -302,17 +302,16 @@ mod turn_laws_on_the_double;
 mod wait_handoff_generations;
 use endpoint_protocol::{
     admission_journal, admitted_invocation_body, durable_wait_index_call_response,
-    encode_call_replay, encode_captured_run_and_call_replay, encode_captured_run_command_replay,
-    encode_completed_gate_sleep_replay, encode_journal_retry, encode_process_segment_send_replay,
-    encode_process_terminal_delivery_replay, encode_recorded_commands_replay,
-    encode_recorded_commands_with_invocations_replay, encode_run_replay, invoke_endpoint,
-    invoke_endpoint_body, invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses,
+    encode_call_replay, encode_completed_gate_sleep_replay, encode_journal_retry,
+    encode_process_segment_send_replay, encode_process_terminal_delivery_replay,
+    encode_recorded_commands_replay, encode_recorded_commands_with_invocations_replay,
+    encode_run_replay, invoke_endpoint, invoke_endpoint_body, invoke_endpoint_body_open,
+    invoke_endpoint_body_with_json_call_responses,
     invoke_endpoint_body_with_json_call_responses_then_suspend,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
     invoke_process_workflow_body, invoke_process_workflow_endpoint, restate_call_frames,
-    restate_command_frame_types, restate_completed_promise, restate_error_code,
-    restate_error_message, restate_message_types, restate_output_failure_message,
-    restate_output_json, restate_recorded_commands, with_admission,
+    restate_completed_promise, restate_error_code, restate_error_message, restate_message_types,
+    restate_output_failure_message, restate_output_json, restate_recorded_commands, with_admission,
 };
 
 fn registry_local_executor(

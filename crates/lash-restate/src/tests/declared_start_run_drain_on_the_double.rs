@@ -138,6 +138,7 @@ struct Starter {
     slow: bool,
     materials: std::sync::OnceLock<Arc<dyn lash_core::store::ToolMaterialStore>>,
     ingress: std::sync::OnceLock<crate::RestateIngressClient>,
+    launch_workflow: bool,
 }
 
 impl Starter {
@@ -160,6 +161,7 @@ impl Starter {
             slow: false,
             materials: Default::default(),
             ingress: Default::default(),
+            launch_workflow: false,
         })
     }
 
@@ -237,6 +239,9 @@ impl SingletonToolHandlers for Starter {
                         error.to_string(),
                     )
                 })?;
+        }
+        if self.launch_workflow {
+            return Ok(());
         }
         let output = lash_core::ProcessAwaitOutput::from_tool_output(
             lash_core::ToolCallOutput::success(serde_json::json!(OUTPUT)),
@@ -392,11 +397,33 @@ impl SingletonToolHandlers for Starter {
             .map_err(|_| "the start names a definition".to_owned())?;
         let record = self
             .registry
-            .register_process(registration)
+            .register_process(registration.clone())
             .await
             .map_err(|error| error.to_string())?;
         if let Some(engine) = &self.worker {
             engine.launch(&record.id);
+        }
+        if self.launch_workflow {
+            let _: crate::RestateProcessWorkflowOutput = self
+                .ingress
+                .get()
+                .ok_or("the child start has no ingress")?
+                .call_lash_workflow(
+                    "LashProcessWorkflow",
+                    record.id.as_str(),
+                    "run",
+                    &crate::RestateProcessWorkflowPayload::from(
+                        crate::RestateProcessWorkflowInput {
+                            process_id: record.id.clone(),
+                            registration,
+                            execution_context: Default::default(),
+                            segment_ordinal: 0,
+                            sender_generation: super::test_build_generation(),
+                        },
+                    ),
+                )
+                .await
+                .map_err(|error| error.to_string())?;
         }
         self.launches.lock().unwrap().push(record.id.clone());
         Ok(record.id)
@@ -1467,3 +1494,4 @@ async fn a_deferred_start_replays_one_identity_and_consumes_its_terminal() {
     }
 }
 mod process_transfer;
+mod terminal_failure;
