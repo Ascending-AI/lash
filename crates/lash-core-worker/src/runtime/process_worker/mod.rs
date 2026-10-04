@@ -355,8 +355,9 @@ impl DurableProcessWorker {
                 .await?;
             return Err(error);
         }
-        let execution_context =
-            execution_context.with_execution_write_authority(execution_write_authority);
+        let execution_context = execution_context
+            .with_execution_write_authority(execution_write_authority)
+            .with_plugin_admission(plugin_admission.clone());
         let originator_scope = if let crate::ProcessOriginator::Session { session_id, .. } =
             &registration.provenance.originator
         {

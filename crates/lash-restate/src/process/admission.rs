@@ -327,6 +327,7 @@ impl SegmentStarted {
         admitted: lash_core::AdmittedScope,
         segment_ordinal: u64,
         authority: Option<ProcessExecutionWriteAuthority>,
+        plugins: Option<lash_core::store::plugin_writers::PluginAdmission>,
     ) -> Self {
         let process_id = match admitted.scope() {
             lash_core::ExecutionScope::Process { process_id } => process_id.clone(),
@@ -341,7 +342,7 @@ impl SegmentStarted {
             }),
             generation: None,
             build_generation: None,
-            plugins: None,
+            plugins: plugins.map(Box::new),
         }
     }
 }

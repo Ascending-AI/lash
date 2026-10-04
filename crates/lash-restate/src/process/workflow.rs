@@ -762,6 +762,10 @@ where
             scoped_effect_controller.admitted_scope().clone(),
             segment_ordinal,
             execution_context.execution_write_authority.clone(),
+            self.runner
+                .admit_plugins()
+                .await
+                .map_err(handler_error_from_plugin)?,
         );
         match self
             .run_registration(
