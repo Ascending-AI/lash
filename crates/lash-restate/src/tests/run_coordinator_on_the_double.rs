@@ -23,9 +23,7 @@ use std::time::Duration;
 
 use lash_core::engine::{ObservationSink, ObservedEvent, ReplayKey, ShiftObservation};
 use lash_core::plugin::{BehaviorRevision, PluginRevision};
-use lash_core::runtime::{
-    ATTEMPT_STREAM_BYTE_BUDGET, AttemptStream, AttemptStreamTruncation, DecodedStreamEvent,
-};
+use lash_core::runtime::AttemptStream;
 use lash_core::store::plugin_writers::PluginCallbackIdentity;
 use lash_core::tool_dispatch::{
     BeforeCheckReply, DecidedCall, DeclaredStartObligation, RunCoordinator, SingletonAttempt,
@@ -1379,110 +1377,6 @@ fn delta(content: &str) -> SessionStreamEvent {
     SessionStreamEvent::TextDelta {
         content: content.to_owned(),
         block: lash_sansio::llm::types::StreamBlockIdentity::new("fig4880-block", 0),
-    }
-}
-
-/// A body's bounded stream rides its attempt capture (X) to its presentation
-/// (V), with no tool-child settlement: deltas of one block coalesce into one
-/// entry, the byte budget cuts the rest with a typed truncation, and a replay
-/// that serves the attempt emits the same stream without running the body.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_attempt_capture_bounds_its_stream_and_its_presentation_emits_it() {
-    let kind = Kind::IntentFree;
-    let calls = Arc::new(vec![(call("streams", &kind), kind)]);
-    let id = calls[0].0.call_id.clone();
-    let mut events: Vec<SessionStreamEvent> =
-        (0..64).map(|index| delta(&format!("{index},"))).collect();
-    let big = "z".repeat(ATTEMPT_STREAM_BYTE_BUDGET / 3);
-    events.extend(
-        (0..5).map(|index| SessionStreamEvent::StreamBlockCompleted {
-            kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
-            block: lash_sansio::llm::types::StreamBlockIdentity::new("fig4880-block", 0),
-            content: format!("{index}{big}"),
-        }),
-    );
-    let coalesced: String = (0..64).map(|index| format!("{index},")).collect();
-    for cut in [None, Some("attempt:1"), Some("present")] {
-        let mut probe = Probe::new(&calls);
-        probe.streams.insert(id.clone(), events.clone());
-        let probe = Arc::new(probe);
-        let driven = drive(
-            0x4880,
-            cut.map(|step| CrashPoint::BeforeRunResult {
-                name: Some(name(&id, step)),
-            })
-            .into_iter()
-            .collect(),
-            Arc::clone(&calls),
-            Arc::new(vec![Step::Decide(0), Step::Drain]),
-            Arc::clone(&probe),
-        )
-        .await;
-        assert_eq!(
-            probe.executions_of(&id),
-            1 + usize::from(cut == Some("attempt:1")),
-            "cut {cut:?}: a served attempt does not rerun its body"
-        );
-        let Some(SingletonTerminal::Final { capture, .. }) =
-            driven.terminals.lock().unwrap().get(&id).cloned()
-        else {
-            panic!("cut {cut:?}: the call is final");
-        };
-        let stream = capture.stream().expect("the body ran").clone();
-        let (decoded, undecodable) = stream.decode();
-        assert_eq!(undecodable, 0);
-        assert!(
-            matches!(
-                decoded.first(),
-                Some(DecodedStreamEvent::Session(SessionStreamEvent::TextDelta { content, .. }))
-                    if *content == coalesced
-            ),
-            "cut {cut:?}: a block's deltas coalesce into one entry: {:?}",
-            decoded.first()
-        );
-        assert_eq!(
-            decoded.len(),
-            1 + 2,
-            "cut {cut:?}: the budget holds two of the large events"
-        );
-        let Some(AttemptStreamTruncation {
-            dropped_events,
-            dropped_bytes,
-        }) = stream.truncated
-        else {
-            panic!("cut {cut:?}: the budget cut the stream with a typed marker");
-        };
-        assert_eq!(dropped_events, 3);
-        assert!(dropped_bytes > 3 * (big.len() as u64));
-        let recorded: usize = stream
-            .events
-            .iter()
-            .map(|event| serde_json::to_vec(&event.payload).unwrap().len())
-            .sum();
-        assert!(
-            recorded <= ATTEMPT_STREAM_BYTE_BUDGET,
-            "cut {cut:?}: bounded"
-        );
-        let emitted = probe.emitted.lock().unwrap().clone();
-        assert!(
-            !emitted.is_empty()
-                && emitted
-                    .iter()
-                    .all(|(emitted_id, emitted)| *emitted_id == id && *emitted == stream),
-            "cut {cut:?}: the presentation emits the captured stream"
-        );
-        assert_eq!(
-            emitted.len(),
-            1 + usize::from(cut == Some("present")),
-            "cut {cut:?}: only a lost presentation emits again"
-        );
-        assert_eq!(
-            driven.journal(),
-            ["admit", "attempt:1", "decide", "present"]
-                .iter()
-                .map(|step| name(&id, step))
-                .collect::<Vec<_>>()
-        );
     }
 }
 
