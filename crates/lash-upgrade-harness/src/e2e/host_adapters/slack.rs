@@ -426,6 +426,12 @@ impl HostAdapter for SlackHost {
     ) -> Step<'a, HostReady> {
         Box::pin(async move {
             ensure!(self.lease.is_none(), "Slack case already booted");
+            self.stdio_mcp.verify()?;
+            std::fs::create_dir_all(&lease.directory)?;
+            std::fs::write(
+                lease.directory.join("slack-stdio-mcp-artifact.json"),
+                serde_json::to_vec_pretty(&self.stdio_mcp)?,
+            )?;
             self.lease = Some(CaseLease {
                 gate_id: lease.gate_id.clone(),
                 namespace: lease.namespace.clone(),

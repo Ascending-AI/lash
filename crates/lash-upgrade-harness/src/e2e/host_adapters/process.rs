@@ -71,6 +71,12 @@ impl HostProcess {
             .iter()
             .filter(|process| process.role == role)
             .count() as u32;
+        std::fs::write(
+            lease
+                .directory
+                .join(format!("{role}-{incarnation}-artifact.json")),
+            serde_json::to_vec_pretty(artifact)?,
+        )?;
         let log = lease.directory.join(format!("{role}-{incarnation}.log"));
         let out = File::create(&log)?;
         let mut command = Command::new(&artifact.path);
