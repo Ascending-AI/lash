@@ -1604,7 +1604,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                     "process workflow start is unsupported",
                 )));
             };
-            let process_task_context = Arc::clone(&context);
+            // A started workflow has its own invocation journal. Sharing
+            // the parent's journal aliases their plugin-transition records.
+            let process_task_context = Arc::new(ReplayableRecordingContext {
+                events: Arc::clone(&context.events),
+                process_worker: Mutex::new(Some(worker.clone())),
+                ..ReplayableRecordingContext::default()
+            });
             let process_task_id = process_id.clone();
             let process_task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
                 let controller = RestateRuntimeEffectController::new_for_test(process_task_context);
