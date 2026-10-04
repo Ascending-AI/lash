@@ -134,10 +134,7 @@ impl RuntimeObservation {
             tool_catalog,
             plugin_services,
             process_registry: runtime.host.process_registry().cloned(),
-            queue_store: runtime
-                .session
-                .as_ref()
-                .and_then(|session| session.history_store()),
+            queue_store: runtime.services.store.clone(),
             effect_host: runtime.effect_host(),
             ingress: runtime.ingress_relay(),
             authority_fingerprint,
