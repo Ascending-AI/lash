@@ -54121,6 +54121,7 @@
           "kind": "test",
           "label": "//crates/lash-upgrade-harness:h1_recovery__test",
           "tags": [
+            "cargo-service-gate",
             "manual"
           ]
         },

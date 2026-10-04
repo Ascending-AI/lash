@@ -1,1 +1,1 @@
-(package(lash-upgrade-harness) & kind(test) & binary(h1_recovery))
+none()

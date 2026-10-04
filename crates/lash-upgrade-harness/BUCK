@@ -289,6 +289,7 @@ lash_rust_integration_test(
     package_name = "lash-upgrade-harness",
     rustc_env = {},
     tags = [
+        "cargo-service-gate",
         "manual",
     ],
     version = "0.0.0-dev",
@@ -573,6 +574,7 @@ lash_rust_feature_test(
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
+        "cargo-service-gate",
         "feature-lane",
         "manual",
     ],
@@ -604,6 +606,7 @@ lash_rust_feature_test(
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_398ebb90)"},
     tags = [
+        "cargo-service-gate",
         "feature-lane",
         "manual",
     ],
