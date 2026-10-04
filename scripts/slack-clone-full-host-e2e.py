@@ -1068,13 +1068,28 @@ class Journey:
         completions = self.tool_receipts_for_turn(turn, terminal=True)
         # The interrupted admission may complete or fail typed. Neither
         # result is inferred from the provider's canned assistant message.
-        failures = []
-        for record in completions:
-            output = record.get("output") or record.get("event", {}).get("output") or {}
-            outcome = output.get("outcome", {})
-            if outcome.get("status") != "success":
-                failures.append(outcome.get("payload"))
-        self.gate("08-peer-reconnect", "trace", "one admitted badge call resolves or retains a typed transport failure", len(completions) == 1 and self.receipt_tool_name(completions[0]) == badge_tool and (self.receipt_tool_succeeded(completions[0]) or (len(failures) == 1 and isinstance(failures[0], dict) and bool(failures[0].get("cause")))), "08-peer-reconnect-four-layers.json")
+        failures = [record["output"]["outcome"]["payload"] for record in completions
+                    if record["output"]["outcome"]["status"] == "failure"]
+        typed_transport_failure = False
+        if len(failures) == 1:
+            failure = failures[0]
+            # MCP's typed transport cause is recorded in ToolFailure.raw;
+            # ToolFailure.cause names admission/schema refusals instead.
+            envelope = failure.get("raw") or {}
+            raw = envelope.get("value", {}) if envelope.get("$lash_tool_value") == "untrusted_json" else {}
+            timeout = (raw.get("kind") == "call_timeout"
+                       and isinstance(raw.get("timeout_ms"), int) and raw["timeout_ms"] > 0
+                       and isinstance(raw.get("deadline"), bool)
+                       and failure.get("class") == "timeout"
+                       and failure.get("code") == ("mcp_call_deadline_exceeded" if raw["deadline"] else "mcp_call_timeout"))
+            disconnected = (raw.get("kind") == "connection_lost"
+                            and raw.get("cause", {}).get("kind") in ("transport_closed", "transport_send")
+                            and failure.get("class") == "unavailable"
+                            and failure.get("code") == "mcp_connection_lost")
+            typed_transport_failure = (failure.get("source") == "plugin"
+                                       and raw.get("server") == self.mcp_http_server
+                                       and (timeout or disconnected))
+        self.gate("08-peer-reconnect", "trace", "one admitted badge call resolves or retains a typed transport failure", len(completions) == 1 and self.receipt_tool_name(completions[0]) == badge_tool and (self.receipt_tool_succeeded(completions[0]) or typed_transport_failure), "08-peer-reconnect-four-layers.json")
         # Detach the failed session; the existing exact attachment oracle
         # then attaches the recovered endpoint and independently checks its
         # bytes, sampling/elicitation, catalog and attribution.
