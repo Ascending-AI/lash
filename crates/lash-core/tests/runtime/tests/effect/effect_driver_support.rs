@@ -29,7 +29,7 @@ struct EffectControllerTestProtocolPlugin {
 
 impl lash_core::facade_support::SessionPlugin for EffectControllerTestProtocolPlugin {
     fn id(&self) -> &'static str {
-        "effect_controller_test_protocol"
+        "test_protocol"
     }
 
     fn register(
@@ -81,7 +81,7 @@ struct PromptRefusingProtocolPlugin;
 
 impl lash_core::facade_support::SessionPlugin for PromptRefusingProtocolPlugin {
     fn id(&self) -> &'static str {
-        "effect_controller_test_protocol"
+        "test_protocol"
     }
 
     fn register(
@@ -174,7 +174,7 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
                 language: "code".to_string(),
                 code: "print('effect controller')".to_string(),
                 driver_state: lash_core::ProtocolDriverState::new(
-                    "effect_controller_test_protocol",
+                    "test_protocol",
                     serde_json::Value::Null,
                 ),
             },
