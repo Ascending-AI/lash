@@ -1406,10 +1406,9 @@ pub async fn producer_terminal_status_must_match_materialized_outcome(
             ProcessEventAppendRequest::new(
                 "producer.failed",
                 serde_json::json!({
-                    "out": {
-                        "type": "success",
-                        "value": 1
-                    }
+                    "out": crate::ProcessAwaitOutput::from_tool_output(
+                        crate::ToolCallOutput::success(serde_json::json!(1)),
+                    )
                 }),
             )
             .with_replay_key(format!("{process_id}:producer.failed")),
