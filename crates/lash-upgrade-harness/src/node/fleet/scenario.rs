@@ -392,6 +392,13 @@ pub async fn s15_minority_partition_cannot_create_another_winner(
     );
     assert_same_owner(work, &cancel?.work)?;
     release?;
+    // Preserve the actual majority journal before Attach, so a blocked
+    // observer cannot erase the failover/cancellation facts (FIG-4965).
+    let majority_evidence = fixture.capture(work, Some(minority.node)).await?;
+    std::fs::write(
+        lease.directory.join("majority-before-attach.json"),
+        serde_json::to_vec_pretty(&majority_evidence)?,
+    )?;
     let answer = fixture
         .follower()
         .command(HostCommand::Attach {

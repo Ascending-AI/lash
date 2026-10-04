@@ -256,10 +256,15 @@ impl FleetSnapshot {
         let lash_core::store::RunTerminalCause::Committed { turn, .. } = &self.terminal else {
             anyhow::bail!("fleet Run did not finish with a committed outcome");
         };
+        // The SQL turn_id column stores the full operation identity, including
+        // its execution scope and reserved final key, rather than a bare TurnId.
+        let terminal_operation =
+            lash_core::store::OperationId::turn(self.session.clone(), turn.clone(), "final")
+                .storage_key()?;
         ensure!(
             self.commits
                 .iter()
-                .filter(|receipt| receipt.turn == turn.as_str())
+                .filter(|receipt| receipt.turn == terminal_operation)
                 .count()
                 == 1,
             "expected one commit for the Run's terminal physical turn"

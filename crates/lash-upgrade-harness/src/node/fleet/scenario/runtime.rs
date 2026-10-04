@@ -207,6 +207,15 @@ impl Client {
                 *work = Some(reply.work.clone());
             }
             self.observations.push(reply.clone());
+            write(
+                &self
+                    .config
+                    .as_ref()
+                    .context("host configuration missing")?
+                    .directory
+                    .join("observations.json"),
+                &self.observations,
+            )?;
         }
         Ok(reply)
     }
@@ -949,7 +958,7 @@ impl FleetFixture for RuntimeFixture {
     }
     fn snapshot<'a>(&'a mut self, work: &'a WorkIdentity) -> Step<'a, FleetSnapshot> {
         Box::pin(async move {
-            FleetSnapshot::read(
+            let snapshot = FleetSnapshot::read(
                 self.pool.as_ref().context("PG pool missing")?,
                 self.stores
                     .as_ref()
@@ -959,7 +968,9 @@ impl FleetFixture for RuntimeFixture {
                 &lash::SessionId::parse(format!("{}-fleet", self.namespace))?,
                 &lash::TurnId::parse(&work.run)?,
             )
-            .await
+            .await?;
+            write(&self.directory.join("store-snapshot.json"), &snapshot)?;
+            Ok(snapshot)
         })
     }
     fn publication_epoch(&self) -> Result<u64> {
