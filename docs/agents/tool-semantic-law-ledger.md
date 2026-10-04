@@ -50,6 +50,12 @@ The F04 baseline is F01 `736db467f449e41f58f1f715838548b90341d7c1`. Sam’s dele
 | <a id="s3"></a>S3 | L12,L13 | `suite::source_material_reads_refuse_typed_without_a_fresh_body` | `//crates/lash-sqlite-store:conformance_memory__test` |
 | <a id="p1"></a>P1 | L15 | `tool_cost::tests::l15_census_tracks_native_run_records_and_all_descendants` | `//crates/lash-perf:tool_batch_baseline__bin__unit_test` |
 
+## Executed receipts
+
+The first exact double run executed R1–R38 once: 37 passed. R5 hit an SDK replay mismatch at `run_coordinator_on_the_double.rs:924` while replaying the unrelated Run’s close; the untouched helper originated in `ec80f95c327`. The orchestrator assigned this baseline failure to FIG-4942 and directed F04 to continue without changing its oracle. Receipt: `.buck2/test-invocations/20261004T155019-t7y795td/test-report.json`.
+
+S1–S3 passed on SQLite memory (3 executed), and P1 passed (1 executed, all three widths). Their receipts are `.buck2/test-invocations/20261004T155022-vd0hlspm/test-report.json` and `.buck2/test-invocations/20261004T155021-s7i2tq59/test-report.json`. L1 executed once and failed at `native_run.rs:750` because the fresh Run did not settle at the first pre-cancel cut (121.30 s); its untouched assertion originated in `4f296437553`. Receipt: `.buck2/test-invocations/20261004T155021-hd2h0xps/test-report.json`. This native defect was reported for the separate fix-forward lane. The lane report records the surviving identity-helper checks and final gates. No red-side bug witness was needed: this landing retires old tests and adds a cost-census law; it changes no production behavior.
+
 ## Deleted cases in this landing
 
 Conformance rows name the law template; its removed registration mounts are listed below. Test-only routing builders, record observers and dead exports are deleted with their consumers. A dispatcher/proxy/rank-read assertion describes the retired API itself; the linked native law covers its observable semantics, without recreating that API.
@@ -188,7 +194,7 @@ Conformance rows name the law template; its removed registration mounts are list
 
 Removed catalogues: `effect_group_host_tests`, `effect_group_close_race_tests`, `effect_group_cancelled_child_terminal_tests`, `effect_host_await_event_tests`, `tool_child_invocation_tests`, `tool_child_committed_recovery_tests`, `tool_child_live_fault_tests`, `tool_child_unroutable_tests`, `tool_child_turn_cancel_tests`, `tool_batch_group_tests`, and `tool_batch_crash_redrive_tests`. Their implementation helpers and all mounts disappear in the same landing. The `turn_runner_tests`, `cell_binding_drift_tests`, `tool_call_identity_tests` and crash-matrix catalogues lose only retired cases.
 
-The deleted `lash-internal-restate-test/tool_child_drift` target loses its BUCK inventory, aggregate membership and three orphan size records. Surviving timings, budgets and build rules are unchanged.
+The deleted `lash-internal-restate-test/tool_child_drift` target loses its BUCK inventory, aggregate membership , three orphan size records, 113 retired law weights and 2 orphan compile evidence entries. Surviving timings, budgets and build rules are unchanged.
 
 ## Coordinated definition closures
 
@@ -366,7 +372,7 @@ All 179 F04-participating rows from the normative map are accounted for below, i
 | M0491 | `crates/lash-restate/src/tests/usage_accounting_on_the_double.rs` | Already absent at F01; keep predecessor deletion, no compatibility port. | [R2](#r2) (L02,L17), [R12](#r12) (L03,L04), [R22](#r22) (L12) |
 | M0492 | `crates/lash-restate/src/tests/wait_handoff_generations.rs` | Current domain tests survive. Retired service/index/trait constructor or codec membership stays with Z02; semantic contract is native. | [R33](#r33) (L02,L07), [R15](#r15) (L09), [R35](#r35) (L11), [R37](#r37) (L02,L12) |
 | M0510 | `crates/lash-sansio/src/session_model/stream_event_tests.rs` | Current domain tests survive. Retired service/index/trait constructor or codec membership stays with Z01; semantic contract is native. | [R2](#r2) (L02,L17), [R12](#r12) (L03,L04), [R22](#r22) (L12) |
-| M0513 | `crates/lash-sim/src/backend.rs` | RestateTestBackend wrapper survives; documentation states engine journal versus SQL facts. No alternate SQL effect engine. | [R14](#r14) (L05,L06,L09) |
+| M0513 | `crates/lash-sim/src/backend.rs` | RestateTestBackend wrapper survives; documentation states engine journal versus SQL facts. The wrapper preserves that ownership. | [R14](#r14) (L05,L06,L09) |
 | M0516 | `crates/lash-sim/src/crash_matrix/cases/child_cancel.rs` | Deleted here with obsolete law/support consumers. | [R4](#r4) (L03,L17), [R12](#r12) (L03,L04), [R13](#r13) (L06,L16) |
 | M0517 | `crates/lash-sim/src/crash_matrix/mod.rs` | Removed obsolete consumers/registration; independent current tests survive. Residual definition/codec probes: Z01. | [R2](#r2) (L02,L17), [R12](#r12) (L03,L04), [R22](#r22) (L12) |
 | M0526 | `crates/lash-sim/tests/cross_backend_store_differential.rs` | Current domain tests survive. Retired service/index/trait constructor or codec membership stays with Z01; semantic contract is native. | [R33](#r33) (L02,L07), [R15](#r15) (L09), [R35](#r35) (L11), [R37](#r37) (L02,L12) |
