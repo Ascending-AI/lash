@@ -20,8 +20,6 @@ pub use tool_child::{
 };
 pub(crate) mod tool_child_driver;
 pub(crate) use tool_child_driver::runtime_ops as tool_child_runtime_ops;
-#[cfg(feature = "testing")]
-pub(crate) use tool_child_driver::validate_recorded_authorities;
 pub use tool_child_driver::{
     ContextSourceInstall, DeploymentToolChildContext, ToolChildContextSource, ToolChildDriver,
     ToolChildHost, opener_for_execution_scope,

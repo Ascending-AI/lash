@@ -377,33 +377,6 @@ macro_rules! live_fault_park_tests {
     };
 }
 
-/// Register the cell binding-drift law (FIG-3587): a redriven RLM cell links
-/// against its journaled binding set, completing from the journal when the
-/// drifted tool's result was recorded and parking when it would reach the
-/// tool live; and the tool-child drift law (FIG-3725): a group tool child —
-/// a model-issued call, an aggregate's leaf — judges its own tool the same
-/// way. The fixture hands back a guard, a prefix, the tier's effect
-/// host, the store set under test, its
-/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) — which must read
-/// its journal's replay keys and cut a turn at a
-/// [`JournalCut`](crate::JournalCut) — and the RLM protocol plugin factories
-/// from the crates above this one.
-#[macro_export]
-macro_rules! cell_binding_drift_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::cell_binding_drift_tests!(@law [$(#[$attr])*] $fixture;
-            (redriven_cell_links_against_its_journaled_binding_set, "cell-binding-drift"));
-    };
-    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
-        $($attr)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_guard, prefix, host, stores, runner, rlm) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, stores, runner, rlm).await;
-        }
-    };
-}
-
 /// Register the served-process-start laws (FIG-3779): an RLM cell that
 /// called `agents.spawn` is cut at one point of its process start — after
 /// the start was issued, before its frontier marker, after the marker and

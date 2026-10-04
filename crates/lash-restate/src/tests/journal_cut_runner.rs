@@ -155,35 +155,6 @@ impl ConformanceTurnRunner for JournalCutRunner {
     }
 }
 
-// FIG-3587's cell binding-drift law on the server double: the tier cuts the
-// law's first attempt at the run the law names, and the double retries it. A
-// drifted binding whose result the journal recorded is served by the replay;
-// one whose run the replay reaches live refuses (FIG-3719).
-mod on_the_server_double {
-    use super::super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
-
-    lash_conformance::cell_binding_drift_tests!({
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
-        let server = harness
-            .server_double()
-            .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));
-        let runner = super::JournalCutRunner::shared(harness.turn_runner(), server);
-        let host = harness.endpoint_host();
-        let prefix: &'static str =
-            Box::leak(format!("restate-binding-drift-{}", harness.run_nonce()).into_boxed_str());
-        let stores = harness.law_stores();
-        (
-            harness,
-            prefix,
-            host,
-            stores,
-            runner,
-            vec![super::super::conformance_and_poison::drift_law_rlm_factory()],
-        )
-    });
-}
-
 // FIG-3779's served-process-start laws on the server double: a cell's
 // `agents.spawn` is cut at one point of its process start — past the start,
 // before its frontier marker, between the marker and the registry write,

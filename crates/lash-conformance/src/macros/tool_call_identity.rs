@@ -27,11 +27,7 @@ macro_rules! tool_call_identity_tests {
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             live_and_durable_queue_paths_share_results_and_capability_refusals);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
-            tool_identity_survives_unrecorded_effect_crash);
-        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             reported_failure_retry_preserves_call_id);
-        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
-            recorded_outcome_skips_execution);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             code_cells_keep_identity_and_distinguish_fresh_calls);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;

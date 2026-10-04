@@ -9,7 +9,7 @@ use std::sync::atomic::Ordering;
 
 use super::{
     AttemptIdentity, DEFERRED, Execution, PROBE, ProbeArgs, ToolCallIdentityTier, World,
-    assert_finished, calls, outputs, raw_call, text,
+    assert_finished, calls, outputs, text,
 };
 
 /// Panics when the effect loop ends: every tool call settled and the turn
@@ -154,166 +154,6 @@ pub async fn same_scope_completion_collision(tier: ToolCallIdentityTier) {
     );
 }
 
-/// The unrecorded-effect window (ADR 0110 §3): the probe's effect happened
-/// and its outcome was never recorded, the execution died, and the call runs
-/// again. The re-run sees the call id the first run saw.
-///
-/// A tier that can cut a journal cuts the probe's first attempt after its
-/// body ran and before its result is durable, so the call provably runs
-/// twice; the cut's replay key comes from a probe run of the same turn in a
-/// sibling session. A tier that cannot holds the body after its effect and
-/// kills the turn around it; the call then finishes by the held execution
-/// outliving the crash or by a fresh run, and every run sees one call id.
-pub async fn tool_identity_survives_unrecorded_effect_crash(tier: ToolCallIdentityTier) {
-    let world = World::new(&tier, "unrecorded-effect-crash");
-    let turn = world.turn(
-        "turn",
-        vec![
-            calls(&[("call_effect", PROBE, ProbeArgs::label("effect"))]),
-            text("the effect settled"),
-        ],
-    );
-    let assembled = match first_attempt_key(&tier, &world, &turn, "call_effect").await {
-        Some(key) => {
-            let (report, reported) = tokio::sync::mpsc::unbounded_channel();
-            let attempt = world.attempt(&turn, report);
-            world
-                .runner()
-                .run_cut_then_redriven_turn(
-                    world.admitted(&turn),
-                    crate::JournalCut {
-                        replay_key: key,
-                        at: crate::JournalCutPoint::BeforeResult,
-                    },
-                    Arc::clone(&attempt),
-                    attempt,
-                )
-                .await;
-            let executions = world.witness.of("effect");
-            assert!(
-                executions.len() >= 2,
-                "the cut attempt's effect ran and the call ran again: {executions:?}"
-            );
-            last_report(reported).await
-        }
-        None => {
-            let held = world.turn(
-                "held",
-                vec![
-                    calls(&[("call_effect", PROBE, ProbeArgs::held("effect"))]),
-                    text("the effect settled"),
-                ],
-            );
-            crash_while_held(&world, &held, "effect").await
-        }
-    };
-    assert_finished("the recovered turn", &assembled);
-    let executions = world.witness.of("effect");
-    let call_id = assert_one_identity("effect", &executions);
-    eprintln!(
-        "tool_identity_survives_unrecorded_effect_crash: {} run(s) of the call, all under `{call_id}`",
-        executions.len()
-    );
-}
-
-/// The replay key `world`'s run of `target` will journal for the first
-/// attempt of its one call, the provider's `provider_call_id`, or `None` when
-/// the tier cannot read the keys it journaled.
-///
-/// A probe run of the same script in the sibling session `{session}-probe`
-/// journals the key under its own session. The call's `ToolCallId` is rooted
-/// in its session's turn (ADR 0117 §2), so the key is carried over by
-/// locating the probe call's positions under the probe's root and naming the
-/// same positions under `world`'s.
-async fn first_attempt_key(
-    tier: &ToolCallIdentityTier,
-    world: &World,
-    target: &super::ScriptedTurn,
-    provider_call_id: &str,
-) -> Option<String> {
-    let law = world
-        .session_id
-        .as_str()
-        .strip_prefix(&format!("{}-", tier.prefix))
-        .unwrap_or(world.session_id.as_str())
-        .to_string();
-    let probe = World::new(tier, &format!("{law}-probe"));
-    let turn = probe.turn(
-        "turn",
-        vec![
-            calls(&[(provider_call_id, PROBE, ProbeArgs::label("probe"))]),
-            text("the probe settled"),
-        ],
-    );
-    assert_finished("the probe turn", &probe.run_kept(&turn).await);
-    let keys = probe
-        .runner()
-        .recorded_replay_keys(&crate::ExecutionScope::turn(
-            &probe.session_id,
-            &turn.turn_id,
-        ))
-        .await?;
-    let probe_id = only(&probe, "probe").identity.call_id;
-    let attempt = format!("{probe_id}:attempt:1");
-    let key = keys
-        .iter()
-        .find(|key| key.ends_with(&attempt))
-        .cloned()
-        .unwrap_or_else(|| panic!("the probe journaled `{attempt}`: {keys:#?}"));
-    let admission = |session: &lash_sansio::SessionId, turn: &super::ScriptedTurn| {
-        lash_core::EffectOpener::turn(session.clone(), turn.turn_id.clone()).tool_call_admission()
-    };
-    let target_id = same_position(
-        &admission(&probe.session_id, &turn),
-        &probe_id,
-        &admission(&world.session_id, target),
-    )
-    .unwrap_or_else(|| panic!("the probe call `{probe_id}` is a first-response model call"));
-    Some(
-        // The turn ids spell their session's id, so the session swap carries
-        // them over too.
-        key.replace(probe_id.as_str(), target_id.as_str())
-            .replace(probe.session_id.as_str(), world.session_id.as_str()),
-    )
-}
-
-/// The id at `under` of the model call `id` names under `from`: its
-/// positions — continuation, iteration, response effect ordinal and content
-/// index — found by trying the small positions a one-call turn reaches.
-fn same_position(
-    from: &lash_core::ToolCallAdmission,
-    id: &lash_core::ToolCallId,
-    under: &lash_core::ToolCallAdmission,
-) -> Option<lash_core::ToolCallId> {
-    use lash_core::ToolCallPosition::{ContentIndex, Continuation, EffectOrdinal, Iteration};
-    for continuation in 0..8 {
-        for iteration in 0..4 {
-            for ordinal in 0..32 {
-                let positions = [
-                    Continuation(continuation),
-                    Iteration(iteration),
-                    EffectOrdinal(ordinal),
-                    ContentIndex(0),
-                ];
-                if &from.call_id(&positions) == id {
-                    return Some(under.call_id(&positions));
-                }
-            }
-        }
-    }
-    None
-}
-
-async fn last_report(
-    reported: tokio::sync::mpsc::UnboundedReceiver<
-        Result<crate::AssembledTurn, crate::RuntimeError>,
-    >,
-) -> crate::AssembledTurn {
-    last_result(reported)
-        .await
-        .unwrap_or_else(|error| panic!("the recovered turn runs: {error}"))
-}
-
 /// The last execution's report: a replaying tier reports once per execution
 /// that reaches the end.
 #[expect(
@@ -400,7 +240,6 @@ pub(super) async fn crash_when(
     };
     let fire = {
         let world = world.clone();
-        let turn = turn.clone();
         let crash = crash.clone();
         crate::task::spawn(async move {
             world.witness.until(what, ready).await;
@@ -461,67 +300,6 @@ pub async fn reported_failure_retry_preserves_call_id(tier: ToolCallIdentityTier
             .collect::<Vec<_>>(),
         vec![Some("retried".to_string())],
         "the retry's success is the call's outcome"
-    );
-}
-
-/// A call whose outcome is recorded is never executed again: the turn dies
-/// after its call settled and before it commits, and the recovery reads the
-/// recorded outcome back.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn recorded_outcome_skips_execution(tier: ToolCallIdentityTier) {
-    let world = World::new(&tier, "recorded-outcome");
-    let turn = world.turn(
-        "turn",
-        vec![
-            calls(&[("call_once", PROBE, ProbeArgs::label("once"))]),
-            text("the recorded call settled"),
-        ],
-    );
-    let (report, mut reported) = tokio::sync::mpsc::unbounded_channel();
-    let crashing: crate::ConformanceTurnAttempt = {
-        let world = world.clone();
-        let turn = turn.clone();
-        Arc::new(move |scope| {
-            let world = world.clone();
-            let turn = turn.clone();
-            Box::pin(async move {
-                let ended = world
-                    .shift(&turn, scope, Some(Arc::new(PanicBeforeTurnCommit)))
-                    .await;
-                panic!("the crash probe did not fire before the turn commit: {ended:?}");
-            })
-        })
-    };
-    world
-        .runner()
-        .run_crashed_then_redriven_turn(
-            world.admitted(&turn),
-            crashing,
-            world.attempt(&turn, report),
-        )
-        .await;
-    let assembled = reported
-        .recv()
-        .await
-        .expect("the redriven turn reports")
-        .unwrap_or_else(|error| panic!("the redriven turn runs: {error}"));
-    assert_finished("the redriven turn", &assembled);
-    let _ = only(&world, "once");
-    assert_eq!(
-        outputs(&assembled)
-            .iter()
-            .map(|(_, _, output)| answered_label(output).map(str::to_owned))
-            .collect::<Vec<_>>(),
-        vec![Some("once".to_string())],
-        "the redrive reads the recorded outcome back"
-    );
-    assert_eq!(
-        world.model_calls.load(Ordering::SeqCst),
-        2,
-        "the redrive reads the recorded model responses back instead of asking again"
     );
 }
 

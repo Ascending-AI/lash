@@ -384,20 +384,6 @@ pub(crate) fn calls(calls: &[(&str, &str, ProbeArgs)]) -> crate::LlmResponse {
     }
 }
 
-/// A model response calling one tool with arguments that are not a probe's.
-pub(crate) fn raw_call(
-    call_id: &str,
-    tool: &str,
-    input: serde_json::Value,
-) -> crate::LlmOutputPart {
-    crate::LlmOutputPart::ToolCall {
-        call_id: call_id.to_string(),
-        tool_name: tool.to_string(),
-        input_json: input.to_string(),
-        replay: None,
-    }
-}
-
 /// A model response that is one code cell.
 pub(crate) fn cell(source: &str) -> crate::LlmResponse {
     text(&format!("<typescript>\n{source}\n</typescript>"))
