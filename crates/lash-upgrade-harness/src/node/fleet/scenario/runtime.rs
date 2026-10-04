@@ -125,7 +125,11 @@ impl ClusterControl for RuntimeCluster {
         })
     }
     fn converge(&mut self) -> Step<'_, ClusterReceipt> {
-        Box::pin(async move { self.cluster.lock().await.converge().await })
+        Box::pin(async move {
+            let receipt = self.cluster.lock().await.converge().await?;
+            write(&self.directory.join("cluster-convergence.json"), &receipt)?;
+            Ok(receipt)
+        })
     }
     fn finish(&mut self) -> Step<'_, Vec<CleanupReceipt>> {
         Box::pin(async move { self.cluster.lock().await.finish().await })
@@ -449,7 +453,13 @@ impl Control for RuntimeControl {
     }
 }
 
-pub struct RuntimeFixture {
+pub struct NativeRoute {
+    role: &'static str,
+    node: u32,
+    proxy: V7Proxy,
+}
+
+struct RuntimeFixture {
     cluster: SharedCluster,
     proxy: SharedProxy,
     faults: Faults,
@@ -465,6 +475,7 @@ pub struct RuntimeFixture {
     pool: Option<sqlx::PgPool>,
     stores: Option<Arc<dyn lash::StoreSet>>,
     container: Option<String>,
+    routes: Vec<NativeRoute>,
 }
 impl RuntimeFixture {
     async fn postgres(&mut self, lease: &mut CaseLease) -> Result<String> {
@@ -623,6 +634,27 @@ impl FleetFixture for RuntimeFixture {
                 .boot(&self.binary, spec.restate_nodes, lease)
                 .await?;
             write(&self.directory.join("cluster-boot.json"), &boot)?;
+            let mut ingress = boot.nodes[0].ingress_url.clone();
+            let mut admin = boot.nodes[0].admin_url.clone();
+            if matches!(scenario, Scenario::MinorityPartition) {
+                for (role, endpoint) in [("ingress", &mut ingress), ("admin", &mut admin)] {
+                    let upstream: SocketAddr = endpoint.trim_start_matches("http://").parse()?;
+                    let proxy = V7Proxy::start(
+                        TcpListener::bind("127.0.0.1:0")?,
+                        upstream,
+                        self.directory.join(format!("native-{role}-route")),
+                        self.deadline,
+                        Vec::new(),
+                    )
+                    .await?;
+                    *endpoint = proxy.endpoint.clone();
+                    self.routes.push(NativeRoute {
+                        role,
+                        node: boot.nodes[0].node,
+                        proxy,
+                    });
+                }
+            }
             for (name, client) in [
                 ("primary", &mut self.primary),
                 ("follower", &mut self.follower),
@@ -633,8 +665,8 @@ impl FleetFixture for RuntimeFixture {
                     store: url.clone(),
                     directory: self.directory.join(name),
                     barriers: self.barriers.clone(),
-                    ingress: boot.nodes[0].ingress_url.clone(),
-                    admin: boot.nodes[0].admin_url.clone(),
+                    ingress: ingress.clone(),
+                    admin: admin.clone(),
                     authority: lease.authority.clone(),
                     namespace: lease.namespace.clone(),
                     publication_cut: name == "primary"
@@ -695,7 +727,7 @@ impl FleetFixture for RuntimeFixture {
                 let b = self.follower.setup("receiver-bind", a.clone()).await?;
                 ensure!(
                     a == b,
-                    "two fleet hosts admitted different mutation receivers"
+                    "two fleet hosts bound different admitted receiver receipts"
                 );
                 write(&self.directory.join("receiver-start.json"), &a)?;
             }
@@ -863,11 +895,46 @@ impl FleetFixture for RuntimeFixture {
     }
     fn await_leader<'a>(&'a mut self, previous: &'a LeaderReceipt) -> Step<'a, LeaderReceipt> {
         Box::pin(async move {
-            self.cluster
-                .lock()
-                .await
-                .await_leader_change(previous)
-                .await
+            let cluster = self.cluster.lock().await;
+            let successor = cluster.await_leader_change(previous).await?;
+            let nodes = cluster.nodes();
+            let majority = nodes
+                .iter()
+                .find(|node| node.node == successor.node)
+                .context("observed majority leader is not owned")?;
+            for route in &mut self.routes {
+                if route.node == previous.node {
+                    let endpoint = match route.role {
+                        "ingress" => &majority.ingress_url,
+                        "admin" => &majority.admin_url,
+                        _ => anyhow::bail!("unknown native frontend route"),
+                    };
+                    let next: SocketAddr = endpoint.trim_start_matches("http://").parse()?;
+                    let old = route.proxy.replace_upstream(next)?;
+                    // Engines retain ingress pools; close their established
+                    // streams so the next request uses the majority. Worker
+                    // admin observations create and drop their own clients.
+                    let closed = if route.role == "ingress" {
+                        Some(route.proxy.disconnect(self.deadline).await?)
+                    } else {
+                        None
+                    };
+                    write(
+                        &self
+                            .directory
+                            .join(format!("native-{}-majority.json", route.role)),
+                        &serde_json::json!({"previous_node":route.node,"next_node":majority.node,
+                        "old_upstream":old,"next_upstream":next,"closed_streams":closed,
+                        "stable_endpoint":route.proxy.endpoint,"observed_leader":&successor}),
+                    )?;
+                    route.node = majority.node;
+                }
+                ensure!(
+                    route.node != previous.node,
+                    "native frontend still reaches isolated minority"
+                );
+            }
+            Ok(successor)
         })
     }
     fn snapshot<'a>(&'a mut self, work: &'a WorkIdentity) -> Step<'a, FleetSnapshot> {
@@ -980,6 +1047,17 @@ impl FleetFixture for RuntimeFixture {
                         .unwrap_or_else(|| "all owned streams closed".into()),
                 });
             }
+            for route in &mut self.routes {
+                let result = route.proxy.finish().await;
+                cleanup.push(CleanupReceipt {
+                    resource: format!("native-{}-route", route.role),
+                    closed: result.is_ok(),
+                    detail: result
+                        .err()
+                        .map(|error| format!("{error:#}"))
+                        .unwrap_or_else(|| "all owned frontend streams closed".into()),
+                });
+            }
             if let Some(pool) = self.pool.take() {
                 pool.close().await;
             }
@@ -1060,6 +1138,7 @@ pub async fn run_named(scenario: Scenario, name: &str) -> Result<()> {
         pool: None,
         stores: None,
         container: None,
+        routes: Vec::new(),
     };
     let result = execute(
         scenario,
