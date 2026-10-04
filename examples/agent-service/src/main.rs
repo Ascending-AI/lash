@@ -18,6 +18,8 @@ mod chat_discard;
 mod db;
 mod demo_plugin;
 #[cfg(feature = "e2e-tools")]
+mod e2e_receiver;
+#[cfg(feature = "e2e-tools")]
 mod e2e_tools;
 #[cfg(test)]
 mod fork_compensation_tests;
@@ -387,14 +389,23 @@ async fn async_main() -> anyhow_like::Result<()> {
         // Lash's own services come from the backend, and `LashSession` among
         // them executes every chat turn; the service binds only its chat-discard
         // and timer aggregate workflow beside them.
-        let endpoint = restate_backend
+        let endpoint_builder = restate_backend
             .endpoint_builder(process_worker)
             .map_err(|err| format!("build the Restate endpoint: {err}"))?
             .bind(chat_discard.serve())
             .bind(AgentServiceAggregateWorkflowImpl {
                 build_generation: state.core().build_generation().clone(),
+            });
+        #[cfg(feature = "e2e-tools")]
+        let endpoint_builder = if fixture.is_some() {
+            endpoint_builder.bind(e2e_receiver::ReceiverWorkflow {
+                core: state.core().clone(),
+                authority: local_restate.authority.clone(),
             })
-            .build();
+        } else {
+            endpoint_builder
+        };
+        let endpoint = endpoint_builder.build();
         // `serve_at` binds the endpoint and registers the deployment with the
         // server; it serves until the returned handle drops at shutdown.
         let deployment = local_restate
@@ -408,7 +419,12 @@ async fn async_main() -> anyhow_like::Result<()> {
 
         // Keep a state clone for the drain; the router consumes the original.
         let drain_state = state.clone();
-        let app = app_router(state);
+        let app = app_router(state.clone());
+        #[cfg(feature = "e2e-tools")]
+        let app = match &fixture {
+            Some(fixture) => app.merge(e2e_receiver::routes(fixture.receiver_state(state))),
+            None => app,
+        };
 
         println!("agent-service listening on http://{addr}");
         let listener = tokio::net::TcpListener::bind(addr)

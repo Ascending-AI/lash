@@ -2,7 +2,7 @@
 //! AgentService router, send/attach/cancel transport and stores remain the host.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
@@ -34,6 +34,7 @@ fn event_type() -> String {
 
 pub(crate) struct Fixture {
     config: FixtureConfig,
+    receiver: Arc<OnceLock<lash::ProcessId>>,
 }
 
 impl Fixture {
@@ -56,7 +57,21 @@ impl Fixture {
                 && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")),
             "body controls must be a case-owned loopback HTTP endpoint"
         );
-        Ok(Some(Self { config }))
+        let receiver = Arc::new(OnceLock::new());
+        let retained_path = config.delivery_ledger.with_extension("receiver.json");
+        let retained = match &config.intent_process {
+            Some(id) => Some(id.clone()),
+            None if retained_path.exists() => {
+                Some(serde_json::from_slice(&std::fs::read(retained_path)?)?)
+            }
+            None => None,
+        };
+        if let Some(id) = retained {
+            receiver
+                .set(id)
+                .map_err(|_| anyhow!("receiver already bound"))?;
+        }
+        Ok(Some(Self { config, receiver }))
     }
 
     fn labels(&self) -> &'static [&'static str] {
@@ -80,23 +95,20 @@ impl Fixture {
                 "c" => "C",
                 value => value,
             });
-            let result =
-                if *label == "loser" && self.config.deferred_loser {
-                    BodyResult::Deferred
-                } else if matches!(*label, "intent" | "rank_one" | "rank_three") {
-                    BodyResult::EmitEvent {
-                        value,
-                        process_id: self.config.intent_process.clone().ok_or_else(|| {
-                            anyhow!("intent fixture needs its registered process")
-                        })?,
-                        event_type: self.config.intent_event_type.clone(),
-                    }
-                } else {
-                    BodyResult::Inline {
-                        value,
-                        intents: Default::default(),
-                    }
-                };
+            let result = if *label == "loser" && self.config.deferred_loser {
+                BodyResult::Deferred
+            } else if matches!(*label, "intent" | "rank_one" | "rank_three") {
+                BodyResult::EmitToReceiver {
+                    value,
+                    receiver: self.receiver.clone(),
+                    event_type: self.config.intent_event_type.clone(),
+                }
+            } else {
+                BodyResult::Inline {
+                    value,
+                    intents: Default::default(),
+                }
+            };
             plan.insert((*label).to_owned(), result);
         }
         let client = reqwest::Client::new();
@@ -115,6 +127,18 @@ impl Fixture {
             })
         });
         ToolBodies::open(&self.config.delivery_ledger, plan, barrier)?.provider()
+    }
+
+    pub(crate) fn receiver_state(
+        &self,
+        app: crate::state::AppStateData,
+    ) -> crate::e2e_receiver::ReceiverState {
+        crate::e2e_receiver::ReceiverState {
+            app,
+            receiver: self.receiver.clone(),
+            retained_path: self.config.delivery_ledger.with_extension("receiver.json"),
+            event_type: self.config.intent_event_type.clone(),
+        }
     }
 
     pub(crate) fn provider(

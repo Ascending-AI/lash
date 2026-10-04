@@ -6,6 +6,9 @@ pub use bodies::*;
 #[path = "../../../../examples/shared/h2_provider.rs"]
 mod provider;
 pub use provider::{FixtureProtocol, scripted_provider};
+#[path = "../../../../examples/shared/h2_receiver.rs"]
+mod receiver;
+pub use receiver::{ReceiverEvents, receiver_events, register_receiver};
 
 /// Fleet adapters decorate the StoreSet before constructing their engine,
 /// then pass that engine's Backend here. The fixture does not open a store.
