@@ -59,3 +59,4 @@ tempfile = { workspace = true }
 [features]
 default = []
 provider-wire-fixtures = ["dep:lash-sim"]
+e2e-tools = ["lash/testing"]

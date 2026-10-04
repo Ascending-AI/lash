@@ -18,7 +18,7 @@ use lash_upgrade_harness::e2e::{
     },
     evidence::{Evidence, EvidenceReader},
     host::{HostAdapter, HostCommand, HostObservation, HostReady},
-    host_adapters::agent_service::AgentServiceHost,
+    host_adapters::workbench::WorkbenchHost,
 };
 use lash_upgrade_harness::node::tools::deliveries;
 use lash_upgrade_harness::restate_view::RestateView;
@@ -83,7 +83,7 @@ impl Row {
 }
 
 struct Shared {
-    host: Mutex<AgentServiceHost>,
+    host: Mutex<WorkbenchHost>,
     view: RestateView,
     callbacks: Mutex<BodyCallbacks>,
     directory: PathBuf,
@@ -274,7 +274,7 @@ impl HostAdapter for Host {
                 host.boot(artifact, lease).await?
             };
             if previous.is_none() && self.0.row.receiver() {
-                let chat = host.command(HostCommand::Process { action:"create-chat".into(),
+                let chat = host.command(HostCommand::Process { action:"create-session".into(),
                     input:json!({"session":format!("{}-{}",lease.namespace,self.0.row.id().to_lowercase())}) }).await?;
                 let receipt = host
                     .command(HostCommand::Process {
@@ -302,9 +302,9 @@ impl HostAdapter for Host {
                     .0
                     .bind(
                         observation.work,
-                        observation.output["chat_id"]
+                        observation.output["session_id"]
                             .as_str()
-                            .context("Submit has no actual chat id")?,
+                            .context("Submit has no actual session id")?,
                     )
                     .await?;
             } else if !observation.work.run.is_empty() {
@@ -370,7 +370,7 @@ impl Control for Controller {
                 "fault lacks an observed exact barrier"
             );
             let Fault::KillHost { target } = &fault else {
-                bail!("H2 only kills its owned AgentService host")
+                bail!("H2 only kills its owned workbench host")
             };
             let ready = self
                 .shared
@@ -470,8 +470,8 @@ pub async fn run(row: Row) -> Result<()> {
         std::env::var("LASH_RESTATE_SERVER_BIN")?.into(),
     )?;
     let artifact = super::artifact(
-        "agent-service",
-        std::env::var("LASH_AGENT_SERVICE_E2E_BIN")?.into(),
+        "agent-workbench",
+        std::env::var("LASH_WORKBENCH_E2E_BIN")?.into(),
     )?;
     let mut cluster = LocalCluster::new(base, deadline);
     let boot = cluster.boot(&server, 1, &mut lease).await?;
@@ -497,17 +497,25 @@ pub async fn run(row: Row) -> Result<()> {
     } else {
         "standard"
     };
-    let host = AgentServiceHost::new(
+    let fixture_path = lease.directory.join("tool-fixture.json");
+    super::write(&fixture_path, &fixture)?;
+    let host = WorkbenchHost::new(
         boot.nodes[0].ingress_url.clone(),
         boot.nodes[0].admin_url.clone(),
         base + 10,
         base + 11,
-        fixture,
-        callback_dir.clone(),
     )?
     .configure(BTreeMap::from([
-        ("AGENT_SERVICE_PROTOCOL".into(), protocol.into()),
-        ("AGENT_SERVICE_RESTATE_ADVERTISE_URL".into(), advertised_uri),
+        (
+            "AGENT_WORKBENCH_TOOL_FIXTURE".into(),
+            fixture_path.display().to_string(),
+        ),
+        ("OPENROUTER_API_KEY".into(), "case-owned-fixture".into()),
+        ("AGENT_WORKBENCH_PROTOCOL".into(), protocol.into()),
+        (
+            "AGENT_WORKBENCH_RESTATE_ADVERTISE_URL".into(),
+            advertised_uri,
+        ),
     ]))?;
     let shared = Arc::new(Shared {
         host: Mutex::new(host),
@@ -523,7 +531,7 @@ pub async fn run(row: Row) -> Result<()> {
         proxy: Mutex::new(proxy),
         admin: boot.nodes[0].admin_url.clone(),
         namespace: lease.namespace.clone(),
-        store_root: lease.directory.join("agent-service-data/lash-sessions"),
+        store_root: lease.directory.join("workbench-data/lash-sessions"),
         chat: Mutex::new(None),
         artifacts: vec![server.clone(), artifact.clone()],
     });

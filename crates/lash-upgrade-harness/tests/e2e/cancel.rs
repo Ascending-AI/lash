@@ -55,7 +55,7 @@ pub fn spec(id: &str, store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Res
         rules: rules.into_iter().map(str::to_owned).collect(),
         // F01/F02, C03 and B00/B01 are all landed in the candidate baseline.
         requires: Vec::new(),
-        host: HostKind::AgentService,
+        host: HostKind::Workbench,
         store,
         channel,
         provider: ProviderKind::Scripted,

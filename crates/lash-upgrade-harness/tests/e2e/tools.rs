@@ -27,7 +27,7 @@ use lash_upgrade_harness::node::tools::ToolDelivery;
 pub type Snapshot = Arc<dyn Fn(WorkIdentity) -> Step<'static, Evidence> + Send + Sync>;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s01_agent_service_singleton() -> Result<()> {
+async fn s01_workbench_singleton() -> Result<()> {
     super::h2::run(super::h2::Row::Singleton).await
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -66,7 +66,7 @@ pub fn spec(id: &str, store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Res
     Ok(CaseSpec {
         id: id.to_owned(),
         rules: rules.into_iter().map(str::to_owned).collect(),
-        host: HostKind::AgentService,
+        host: HostKind::Workbench,
         store,
         channel: Channel::Standard,
         provider: ProviderKind::Scripted,
@@ -211,11 +211,26 @@ impl Scenario<'_> {
             &observation,
         )?;
         ensure!(
-            observation.output["outcome"] == "requested",
-            "cancel was not accepted for a running Run"
+            observation.output["accepted"] == true,
+            "workbench cancel refused the request"
+        );
+        let receipts = observation.output["cancellations"]
+            .as_array()
+            .ok_or_else(|| anyhow!("cancel has no typed receipts"))?;
+        ensure!(
+            receipts.len() == 1,
+            "case cancel must target its sole running turn"
+        );
+        let receipt = &receipts[0];
+        ensure!(
+            matches!(
+                receipt["status"].as_str(),
+                Some("terminal_attached" | "cancellation_recorded_terminal_pending")
+            ),
+            "cancel was not recorded: {receipt}"
         );
         let outcome: lash::TurnCancelOutcome =
-            serde_json::from_value(observation.output["cancellation"].clone())?;
+            serde_json::from_value(receipt["cancellation"].clone())?;
         let accepted = match outcome {
             lash::TurnCancelOutcome::Requested(accepted)
             | lash::TurnCancelOutcome::AlreadyRequested(accepted)
@@ -236,10 +251,10 @@ impl Scenario<'_> {
         ensure!(
             record.request.address.turn_id.as_str() == self.work()?.run
                 && record.request.address.session_id.as_str()
-                    == observation.output["session_id"]
+                    == receipt["address"]["session_id"]
                         .as_str()
                         .unwrap_or_default()
-                && observation.output["turn_id"].as_str() == Some(self.work()?.run.as_str()),
+                && receipt["address"]["turn_id"].as_str() == Some(self.work()?.run.as_str()),
             "cancel receipt and stored request address another subject"
         );
         ensure!(

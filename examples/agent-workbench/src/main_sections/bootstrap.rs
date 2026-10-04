@@ -76,7 +76,7 @@ struct WorkbenchCorePlugins {
     mcp: Arc<dyn PluginFactory>,
 }
 
-/// The builder behind every workbench Restate core: the RLM protocol factory
+/// The builder behind every workbench Restate core: the selected protocol factory
 /// over `host_backend`, the required budgets, the optional dev-scenario tool
 /// surface and the workbench plugin stack, shutdown marker included. The
 /// caller applies serving-only extras (tracing, model profiles) and builds;
@@ -95,24 +95,33 @@ async fn workbench_core_builder(
         approvals,
         mcp,
     } = plugins;
-    let mut rlm_config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .channel(rlm_channel)
-        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-        .build()
-        .with_lashlang_abilities(workbench_lashlang_abilities());
-    if let Some(warn_tokens) = continue_as_warn_tokens_from_environment(context_window_tokens)? {
-        rlm_config.continue_as_soft_warn_tokens = Some(warn_tokens);
+    let mut builder = match crate::session_protocol::selected()? {
+        crate::session_protocol::SessionProtocol::Standard => {
+            LashCore::standard_builder(host_backend)
+        }
+        crate::session_protocol::SessionProtocol::Rlm => {
+            let mut rlm_config = lash::rlm::RlmProtocolPluginConfig::builder()
+                .channel(rlm_channel)
+                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                .build()
+                .with_lashlang_abilities(workbench_lashlang_abilities());
+            if let Some(warn_tokens) =
+                continue_as_warn_tokens_from_environment(context_window_tokens)?
+            {
+                rlm_config.continue_as_soft_warn_tokens = Some(warn_tokens);
+            }
+            let factory = lash::rlm::RlmProtocolPluginFactory::new(
+                rlm_config,
+                std::sync::Arc::new(lash::rlm::TypescriptDialect),
+                &host_backend,
+            )
+            .with_deferred_tool_resolver(deferred_tools.resolver());
+            LashCore::rlm_builder(host_backend, factory)
+        }
     }
-    let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        rlm_config,
-        std::sync::Arc::new(lash::rlm::TypescriptDialect),
-        &host_backend,
-    )
-    .with_deferred_tool_resolver(deferred_tools.resolver());
-    let mut builder = LashCore::rlm_builder(host_backend, factory)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024));
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024));
     if let Some(tool_provider) = tool_provider {
         builder = builder.tools(tool_provider);
     }
@@ -147,9 +156,15 @@ pub(crate) async fn bound_workbench_engine(
         .context("open the registration engine's scratch store set")?;
     let engine = Arc::new(lash::restate::RestateEngine::new(Arc::new(stores), config));
     let host_backend = lash::Backend::new(engine.clone());
+    let tool_provider = failure_provider::DevProviderScenario::from_environment()?
+        .and_then(failure_provider::DevProviderScenario::tool_provider);
+    #[cfg(feature = "e2e-tools")]
+    let tool_provider = match crate::e2e_tools::Fixture::from_env("AGENT_WORKBENCH_TOOL_FIXTURE")? {
+        Some(fixture) => Some(fixture.tools()?),
+        None => tool_provider,
+    };
     let plugins = WorkbenchCorePlugins {
-        tool_provider: failure_provider::DevProviderScenario::from_environment()?
-            .and_then(failure_provider::DevProviderScenario::tool_provider),
+        tool_provider,
         mail_world: mail::MailWorld::new(),
         subagent_registry: Arc::new(lash::subagents::default_registry(&BTreeMap::new())),
         deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
@@ -221,6 +236,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .set(context_window_tokens)
         .map_err(|_| anyhow!("agent-workbench context window was initialized more than once"))?;
 
+    let protocol = crate::session_protocol::selected()?;
+    #[cfg(feature = "e2e-tools")]
+    let tool_fixture = crate::e2e_tools::Fixture::from_env("AGENT_WORKBENCH_TOOL_FIXTURE")?;
     let dev_provider_scenario = failure_provider::DevProviderScenario::from_environment()?;
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
     let rlm_channel = workbench_rlm_channel()?;
@@ -291,6 +309,19 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 .with_compat(OpenAiCompat::openrouter())
                 .into_components(),
         )?)
+    };
+    #[cfg(feature = "e2e-tools")]
+    let provider = if let Some(fixture) = &tool_fixture {
+        fixture.provider(match protocol {
+            crate::session_protocol::SessionProtocol::Standard => {
+                crate::e2e_tools::provider::FixtureProtocol::Standard
+            }
+            crate::session_protocol::SessionProtocol::Rlm => {
+                crate::e2e_tools::provider::FixtureProtocol::Rlm
+            }
+        })?
+    } else {
+        provider
     };
     let selection = LlmProfileSelection {
         model: model.clone(),
@@ -426,9 +457,15 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             status.health.error().unwrap_or_else(|| "none".into())
         );
     }
+    let tool_provider =
+        dev_provider_scenario.and_then(failure_provider::DevProviderScenario::tool_provider);
+    #[cfg(feature = "e2e-tools")]
+    let tool_provider = match &tool_fixture {
+        Some(fixture) => Some(fixture.tools()?),
+        None => tool_provider,
+    };
     let plugins = WorkbenchCorePlugins {
-        tool_provider: dev_provider_scenario
-            .and_then(failure_provider::DevProviderScenario::tool_provider),
+        tool_provider,
         mail_world: mail_world.clone(),
         subagent_registry,
         deferred_tools,
@@ -665,6 +702,21 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/lashlang-graph/{graph_key}", get(lashlang_graph))
         .with_state(state.clone())
         .merge(crate::mcp_host::router(Arc::clone(&mcp_search)));
+        #[cfg(feature = "e2e-tools")]
+        let app = if let Some(fixture) = &tool_fixture {
+            let (receiver, retained_path, event_type) = fixture.receiver_binding();
+            app.merge(crate::e2e_receiver::routes(
+                crate::e2e_receiver::ReceiverState {
+                    app: state.clone(),
+                    receiver,
+                    retained_path,
+                    event_type,
+                    namespace: workbench_restate_namespace()?,
+                },
+            ))
+        } else {
+            app
+        };
         #[cfg(feature = "provider-wire-fixtures")]
         let app = if dev_provider_scenario
             == Some(failure_provider::DevProviderScenario::ValidEmptyCompletion)

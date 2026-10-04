@@ -58,12 +58,18 @@ fn endpoint(
     backend: Arc<crate::WorkbenchRestateBackend>,
     process_worker: lash::durability::DurableProcessWorker,
 ) -> Result<Endpoint, lash::GenerationUnbound> {
-    Ok(backend
+    let builder = backend
         .endpoint_builder(process_worker)?
         .bind(WorkbenchButtonTriggerWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchMailReceivedWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchSessionDeleteWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchProcessCancelWorkflowImpl::new(state.clone()).serve())
-        .bind(WorkbenchCronJobImpl::new(state).serve())
-        .build())
+        .bind(WorkbenchCronJobImpl::new(state.clone()).serve());
+    #[cfg(feature = "e2e-tools")]
+    let builder = builder.bind(crate::e2e_receiver::ReceiverWorkflow {
+        core: state.core,
+        authority: backend.restate_effect_host().authority_id().clone(),
+        namespace: backend.namespace().clone(),
+    });
+    Ok(builder.build())
 }

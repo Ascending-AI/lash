@@ -1071,6 +1071,7 @@ TEST_RUN_REQUESTS = {
     "//crates/transcript-contract:transcript-contract__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/agent-workbench:agent-workbench__unit_test": {"cpu_count": 3, "memory_kb": 1572864},
     "//examples/agent-workbench:agent-workbench__unit_test__fv_3a66b03d": {"cpu_count": 3, "memory_kb": 1572864},
+    "//examples/agent-workbench:agent-workbench__unit_test__fv_91f8e08c": {"cpu_count": 3, "memory_kb": 1572864},
     "//examples/agent-workbench:agent-workbench__unit_test__fv_dda0367a": {"cpu_count": 3, "memory_kb": 1572864},
     "//examples/e2e-consumer:e2e-consumer__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/integrator-contract:integrator-contract__unit_test": {"cpu_count": 1, "memory_kb": 262144},

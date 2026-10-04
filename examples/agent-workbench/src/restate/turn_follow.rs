@@ -121,14 +121,14 @@ pub(crate) async fn start_user_turn(
         session_id: request.session_id.clone(),
         run: request.turn_id.clone(),
     };
-    let handle = session
-        .send(input)
-        .id(request.turn_id.clone())
-        .require_finish()
-        // Audited: require_finish only validates local send-builder configuration and performs no session-store I/O.
-        .map_err(AppError::internal)?
-        .await
-        .map_err(AppError::runtime)?;
+    let send = session.send(input).id(request.turn_id.clone());
+    let send = match crate::session_protocol::selected().map_err(AppError::internal)? {
+        crate::session_protocol::SessionProtocol::Standard => send,
+        crate::session_protocol::SessionProtocol::Rlm => {
+            send.require_finish().map_err(AppError::internal)?
+        }
+    };
+    let handle = send.await.map_err(AppError::runtime)?;
     state.trace_for_session(
         &request.session_id,
         "turn.accepted",

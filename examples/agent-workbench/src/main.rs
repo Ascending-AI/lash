@@ -1,5 +1,11 @@
+#[cfg(feature = "e2e-tools")]
+mod e2e_receiver;
+#[cfg(feature = "e2e-tools")]
+#[path = "../../shared/h2_fixture.rs"]
+mod e2e_tools;
 #[path = "../../shared/ndjson.rs"]
 mod ndjson;
+mod session_protocol;
 use ndjson::ndjson_response;
 mod approvals;
 #[path = "../../shared/attachment_acceptance.rs"]

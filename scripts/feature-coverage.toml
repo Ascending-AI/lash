@@ -581,12 +581,15 @@ commands = [
 [[lane]]
 name = "host-features"
 features = [
+  "agent-workbench/e2e-tools:on",
+  "agent-workbench/e2e-tools:off",
   "agent-workbench/provider-wire-fixtures:on",
   "agent-workbench/provider-wire-fixtures:off",
 ]
 commands = [
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--features", "provider-wire-fixtures", "--locked"],
+  ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--features", "e2e-tools", "--locked"],
 ]
 
 # Root admission and pre-tool process cuts refuse predecessor journals before decoding.

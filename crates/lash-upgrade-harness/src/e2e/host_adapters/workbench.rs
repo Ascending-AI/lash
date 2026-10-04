@@ -262,6 +262,45 @@ impl WorkbenchHost {
         );
         Ok(serde_json::from_slice(&bytes)?)
     }
+    /// Reads synced callback deliveries, never synthesizing body identities.
+    async fn await_bodies(&self, input: &Value) -> Result<Value> {
+        let labels = input["labels"]
+            .as_array()
+            .context("labels must be an array")?;
+        let run = input["run"].as_str().context("actual run is required")?;
+        loop {
+            let mut bodies = Vec::new();
+            for entry in std::fs::read_dir(
+                self.directory
+                    .as_ref()
+                    .context("workbench directory missing")?
+                    .join("barriers"),
+            )? {
+                let entry = entry?;
+                if !entry.file_name().to_string_lossy().starts_with("body-") {
+                    continue;
+                }
+                let record: Value = serde_json::from_slice(&std::fs::read(entry.path())?)?;
+                if record["delivery"]["logical_run"] == run
+                    && labels.contains(&record["delivery"]["label"])
+                {
+                    bodies.push(record);
+                }
+            }
+            if labels.iter().all(|label| {
+                bodies
+                    .iter()
+                    .any(|body| &body["delivery"]["label"] == label)
+            }) {
+                return Ok(json!({"bodies":bodies}));
+            }
+            ensure!(
+                Instant::now() < self.lease.as_ref().context("lease missing")?.deadline,
+                "body callback labels were not entered"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
     async fn session(&mut self, alias: &str) -> Result<String> {
         if let Some(id) = self.sessions.get(alias) {
             return Ok(id.clone());
@@ -403,6 +442,20 @@ impl HostAdapter for WorkbenchHost {
                         .as_str()
                         .unwrap_or_default()
                         .into();
+                    if work.ingress.is_empty() && !work.run.is_empty() {
+                        let records = self.trace_records()?;
+                        let accepted = records
+                            .iter()
+                            .find(|row| {
+                                row["record"]["name"] == "agent_workbench.turn.accepted"
+                                    && row["record"]["payload"]["turn_id"] == work.run
+                            })
+                            .context("workbench omitted actual accepted input trace")?;
+                        work.ingress = accepted["record"]["payload"]["input_id"]
+                            .as_str()
+                            .context("accepted input trace has no input ID")?
+                            .into();
+                    }
                     if !work.run.is_empty() {
                         self.subjects.insert(work.run.clone(), session.clone());
                     }
@@ -417,7 +470,13 @@ impl HostAdapter for WorkbenchHost {
                         .get(&run)
                         .context("unknown workbench run")?
                         .clone();
-                    work.run = run;
+                    work = self
+                        .transcript
+                        .iter()
+                        .find(|o| o.work.run == run)
+                        .context("unknown accepted run")?
+                        .work
+                        .clone();
                     self.control(
                         reqwest::Method::POST,
                         &format!(
@@ -433,8 +492,37 @@ impl HostAdapter for WorkbenchHost {
                         .subjects
                         .get(&run)
                         .context("unknown workbench subject")?;
-                    work.run = run;
-                    json!({"snapshot":self.snapshot(session).await?})
+                    work = self
+                        .transcript
+                        .iter()
+                        .find(|o| o.work.run == run)
+                        .context("unknown accepted run")?
+                        .work
+                        .clone();
+                    if self
+                        .environment
+                        .contains_key("AGENT_WORKBENCH_TOOL_FIXTURE")
+                    {
+                        json!({"outcome":self.control(reqwest::Method::GET, &format!("/api/e2e/sessions/{session}/inputs/{}",work.ingress),None).await?})
+                    } else {
+                        json!({"snapshot":self.snapshot(session).await?})
+                    }
+                }
+                HostCommand::Transfer { run } => {
+                    let session = self.subjects.get(&run).context("unknown run")?;
+                    work = self
+                        .transcript
+                        .iter()
+                        .find(|o| o.work.run == run)
+                        .context("unknown accepted run")?
+                        .work
+                        .clone();
+                    self.control(
+                        reqwest::Method::POST,
+                        &format!("/api/e2e/sessions/{session}/handover"),
+                        None,
+                    )
+                    .await?
                 }
                 HostCommand::Process { action, input } => match action.as_str() {
                     "kill-host" => {
@@ -451,6 +539,33 @@ impl HostAdapter for WorkbenchHost {
                     "restart" => {
                         ensure!(self.process.is_none(), "workbench still running");
                         serde_json::to_value(self.spawn().await?)?
+                    }
+                    "await-tool-bodies" => self.await_bodies(&input).await?,
+                    "register-receiver" => {
+                        let session = input["session_id"]
+                            .as_str()
+                            .context("actual session required")?;
+                        self.control(
+                            reqwest::Method::POST,
+                            &format!("/api/e2e/receiver/{session}"),
+                            None,
+                        )
+                        .await?
+                    }
+                    "effects" => {
+                        let process = input["process_id"]
+                            .as_str()
+                            .context("actual process required")?;
+                        self.control(
+                            reqwest::Method::GET,
+                            &format!("/api/e2e/receiver/{process}/receipts"),
+                            None,
+                        )
+                        .await?
+                    }
+                    "resolve" => {
+                        self.control(reqwest::Method::POST, "/api/e2e/completions", Some(input))
+                            .await?
                     }
                     "create-session" => {
                         json!({"session_id":self.session(input["session"].as_str().context("session alias required")?).await?})
