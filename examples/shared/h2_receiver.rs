@@ -49,7 +49,8 @@ pub async fn receiver_events(
         .event_page_after(
             process_id,
             0,
-            std::num::NonZeroUsize::new(1024).expect("nonzero fixture page"),
+            std::num::NonZeroUsize::new(1024)
+                .ok_or_else(|| anyhow::anyhow!("receiver page must be nonzero"))?,
             ProcessEventQueryMode::Full,
         )
         .await?;

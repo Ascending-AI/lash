@@ -121,7 +121,7 @@ fn response(
     }
     let parts = match protocol {
         FixtureProtocol::Standard if stage == "initial" => {
-            let source = if config.scenario == "S05" {
+            if config.scenario == "S05" {
                 vec![LlmOutputPart::ToolCall {
                     call_id: "h2-batch".to_owned(), tool_name: "batch".to_owned(),
                     input_json: serde_json::json!({"tool_calls":labels.iter().map(|label| serde_json::json!({"tool":label,"parameters":{}})).collect::<Vec<_>>()} ).to_string(),
@@ -137,8 +137,7 @@ fn response(
                         replay: None,
                     })
                     .collect()
-            };
-            source
+            }
         }
         FixtureProtocol::Standard => {
             let expected: BTreeSet<_> = if config.scenario == "S05" {
@@ -177,7 +176,7 @@ fn response(
                         }
                     }
                     let value = serde_json::from_str::<serde_json::Value>(&text)
-                        .unwrap_or_else(|_| serde_json::Value::String(text));
+                        .unwrap_or(serde_json::Value::String(text));
                     ensure!(
                         results.insert(call_id.as_str(), value).is_none(),
                         "duplicate model-facing tool result"
