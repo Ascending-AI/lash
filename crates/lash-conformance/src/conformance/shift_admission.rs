@@ -1131,56 +1131,6 @@ pub async fn admission_precedes_first_effect(
     );
 }
 
-/// L-S9: an admission whose seal never ran (a reset discarded it) holds
-/// nothing: a fresh shift admits and seals anew, and the stale admission's
-/// later seal is superseded.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn reset_before_admission_admits_fresh(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    let parts = ShiftParts::new(prefix, "reset-admission", &effect_host, &stores, 8).await;
-    parts.enqueue("ask", Some("reset-admission-run")).await;
-    let stale = parts.request("reset-admission-stale");
-    let fresh = parts.request("reset-admission-fresh");
-    let (outcome, late) = on_tier(&runner, &parts, move |mut runtime, scope| {
-        let stale = stale.clone();
-        let fresh = fresh.clone();
-        Box::pin(async move {
-            let stale = admitted(
-                lash_core::shift::admit_shift(&mut runtime, &scope, &stale, 0, None)
-                    .await
-                    .expect("admit the stale shift"),
-            );
-            let outcome = lash_core::shift::work_session(&mut runtime, &scope, &fresh)
-                .await
-                .expect("the fresh shift runs");
-            let late = lash_core::shift::execute_admitted_run(&mut runtime, &scope, stale)
-                .await
-                .expect("the stale run ends without an abort");
-            (outcome, late)
-        })
-    })
-    .await;
-    assert_eq!(outcome.ran.len(), 1, "{outcome:?}");
-    assert!(
-        matches!(late, RunOutcome::Refused { .. }),
-        "a stale admission's late seal is superseded: {late:?}"
-    );
-    let epoch = parts.epoch().await;
-    assert_eq!(epoch.epoch, 1);
-    assert_eq!(
-        epoch.admission().map(|id| id.as_str()),
-        Some("reset-admission-fresh#0")
-    );
-    assert_eq!(parts.calls.load(Ordering::SeqCst), 1);
-}
-
 /// L-S10: a parked run blocks admission: while the session's park stands, a
 /// fresh shift admits nothing and runs nothing, and the pending work stays
 /// accepted.

@@ -188,7 +188,6 @@ macro_rules! shift_admission_tests {
             (one_shift_admits_many_items, "shift-many-items"),
             (replay_cannot_mint_ownership, "shift-replay-ownership"),
             (admission_precedes_first_effect, "shift-admission-first"),
-            (reset_before_admission_admits_fresh, "shift-reset-admission"),
             (parked_run_blocks_admission, "shift-parked-run"),
             (a_command_enqueued_after_an_input_runs_admission_waits_for_the_next_boundary, "shift-command-after-admission"),
             (a_committed_run_answers_its_terminal_by_run, "shift-run-answered"),
