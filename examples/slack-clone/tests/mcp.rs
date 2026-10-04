@@ -530,6 +530,7 @@ async fn bundled_mcp_tools_join_the_catalog_and_feed_the_standard_tool_loop() {
         .open()
         .await
         .expect("open session");
+    publish_catalog(&session).await;
 
     let names = session
         .admin()
@@ -787,6 +788,7 @@ async fn an_exact_native_name_collision_is_rejected_instead_of_shadowing_mcp() {
         .open()
         .await
         .expect("open session");
+    publish_catalog(&session).await;
     let error = session
         .admin()
         .tools()
@@ -848,11 +850,13 @@ async fn http_mcp_server(token: &str) -> (String, tokio::task::JoinHandle<()>) {
               cannot fail on a live core"
 )]
 async fn catalog_names(runtime: &BotRuntime, session_id: &SessionId) -> Vec<String> {
-    created_session(&runtime.core, &runtime.session_spec, session_id)
+    let session = created_session(&runtime.core, &runtime.session_spec, session_id)
         .await
         .open()
         .await
-        .expect("open session")
+        .expect("open session");
+    publish_catalog(&session).await;
+    session
         .admin()
         .tools()
         .active_manifests()
@@ -861,6 +865,25 @@ async fn catalog_names(runtime: &BotRuntime, session_id: &SessionId) -> Vec<Stri
         .into_iter()
         .map(|manifest| manifest.name)
         .collect()
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "the test command Run must publish its catalog"
+)]
+async fn publish_catalog(session: &lash::LashSession) {
+    let commands = session.admin().commands();
+    let receipt = commands
+        .refresh_tool_catalog("MCP catalog inspection", uuid::Uuid::new_v4().to_string())
+        .await
+        .expect("submit catalog publication");
+    assert!(matches!(
+        commands
+            .settle(receipt)
+            .await
+            .expect("settle catalog publication"),
+        lash::SessionCommandSettlement::Durable(_)
+    ));
 }
 
 fn status_of(runtime: &BotRuntime, server_name: &str) -> lash::mcp::McpServerStatus {
