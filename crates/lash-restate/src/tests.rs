@@ -1375,51 +1375,6 @@ impl Fig793LlmGateRedrive for Fig793LlmGateRedriveImpl {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 struct Fig1126PendingToolRedriveInput;
 
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-struct Fig1128WaitRedriveInput;
-
-#[restate_sdk::workflow]
-trait Fig1128WaitRedrive {
-    async fn run(input: Json<Fig1128WaitRedriveInput>) -> HandlerResult<Json<Resolution>>;
-}
-
-struct Fig1128WaitRedriveImpl;
-
-impl Fig1128WaitRedrive for Fig1128WaitRedriveImpl {
-    async fn run(
-        &self,
-        ctx: WorkflowContext<'_>,
-        Json(_input): Json<Fig1128WaitRedriveInput>,
-    ) -> HandlerResult<Json<Resolution>> {
-        let key = test_restate_await_event_key(
-            &ExecutionScope::runtime_operation("fig1128-deadline-redrive"),
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                "fig1128-deadline",
-            )),
-        )
-        .map_err(TerminalError::from_error)?;
-        let controller = RestateRuntimeEffectController::new_for_test(ctx);
-        let outcome = controller
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1128-deadline"),
-                    RuntimeEffectCommand::AwaitEvent { key },
-                ),
-                RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new())
-                    .with_turn_cancel_observation(false),
-            )
-            .await
-            .map_err(TerminalError::from_error)?;
-        let RuntimeEffectOutcome::AwaitEvent { resolution } = outcome else {
-            return Err(TerminalError::new(
-                "FIG-1128 await-event effect returned the wrong outcome",
-            )
-            .into());
-        };
-        Ok(Json(resolution))
-    }
-}
-
 #[restate_sdk::workflow]
 trait Fig1126RevokedAwaitBoundary {
     async fn run(input: Json<Fig1126PendingToolRedriveInput>) -> HandlerResult<Json<Resolution>>;
@@ -1518,16 +1473,6 @@ use process_registry_replay::*;
 use process_workflow::*;
 use recording_context::*;
 
-#[restate_sdk::workflow]
-trait Fig1126PendingToolRedrive {
-    async fn run(input: Json<Fig1126PendingToolRedriveInput>) -> HandlerResult<Json<Resolution>>;
-}
-
-struct Fig1126PendingToolRedriveImpl {
-    tool_launches: Arc<AtomicUsize>,
-    terminal_resumes: Arc<AtomicUsize>,
-}
-
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 struct Fig1142ReplayDivergenceInput;
 
@@ -1606,91 +1551,6 @@ impl Fig1142ReplayDivergence for Fig1142ReplayDivergenceImpl {
                 }
             })?;
         Ok(Json(true))
-    }
-}
-
-impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
-    async fn run(
-        &self,
-        ctx: WorkflowContext<'_>,
-        Json(_input): Json<Fig1126PendingToolRedriveInput>,
-    ) -> HandlerResult<Json<Resolution>> {
-        let controller = RestateRuntimeEffectController::new_for_test(ctx);
-        let scope = durable_turn_scope("fig1126-session", "fig1126-turn");
-        let pending_scope = scope.clone();
-        let pending = controller
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    test_turn_effect_invocation(
-                        "fig1126-session",
-                        "fig1126-turn",
-                        0,
-                        0,
-                        "fig1126-pending-tool",
-                        "fig1126-pending-tool",
-                    ),
-                    RuntimeEffectCommand::ToolAttempt {
-                        call: Box::new(prepared_tool_call_with(
-                            "fig1126-call",
-                            "fig1126_pending_tool",
-                        )),
-                        execution_grant: None,
-                        attempt: 1,
-                        max_attempts: 1,
-                    },
-                ),
-                RuntimeEffectLocalExecutor::testing(|_envelope| async {
-                    self.tool_launches.fetch_add(1, Ordering::SeqCst);
-                    let key = controller
-                        .await_event_key(
-                            &pending_scope,
-                            AwaitEventWaitIdentity::tool_completion(
-                                lash_core::ToolCallId::fixture("fig1126-call"),
-                            ),
-                        )
-                        .await
-                        .map_err(lash_core::RuntimeEffectControllerError::from)?;
-                    Ok(RuntimeEffectOutcome::ToolAttempt {
-                        launch: Box::new(lash_core::ToolAttemptLaunch::Pending {
-                            key: Box::new(key),
-                            pending: lash_core::PendingCompletion::new(),
-                        }),
-                        triggers: Vec::new(),
-                        capture: None,
-                    })
-                }),
-            )
-            .await
-            .map_err(TerminalError::from_error)?;
-        let RuntimeEffectOutcome::ToolAttempt { launch, .. } = pending else {
-            return Err(TerminalError::new("FIG-1126 fixture expected a tool outcome").into());
-        };
-        let lash_core::ToolAttemptLaunch::Pending { key, .. } = *launch else {
-            return Err(TerminalError::new("FIG-1126 fixture expected a pending tool").into());
-        };
-        let waited = controller
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    test_turn_effect_invocation(
-                        "fig1126-session",
-                        "fig1126-turn",
-                        0,
-                        0,
-                        "fig1126-await-pending-tool",
-                        "fig1126-await-pending-tool",
-                    ),
-                    RuntimeEffectCommand::AwaitEvent { key: *key },
-                ),
-                RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new())
-                    .with_turn_cancel_scope(scope),
-            )
-            .await
-            .map_err(TerminalError::from_error)?;
-        let RuntimeEffectOutcome::AwaitEvent { resolution } = waited else {
-            return Err(TerminalError::new("FIG-1126 fixture expected a wait outcome").into());
-        };
-        self.terminal_resumes.fetch_add(1, Ordering::SeqCst);
-        Ok(Json(resolution))
     }
 }
 
