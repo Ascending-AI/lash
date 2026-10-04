@@ -17,6 +17,8 @@ mod board;
 mod chat_discard;
 mod db;
 mod demo_plugin;
+#[cfg(feature = "e2e-tools")]
+mod e2e_tools;
 #[cfg(test)]
 mod fork_compensation_tests;
 #[cfg(test)]
@@ -228,12 +230,16 @@ fn main() -> anyhow_like::Result<()> {
 async fn async_main() -> anyhow_like::Result<()> {
     let _ = dotenvy::dotenv();
 
+    let protocol = std::env::var("AGENT_SERVICE_PROTOCOL")
+        .unwrap_or_else(|_| "rlm".to_string())
+        .parse::<state::SessionProtocol>()?;
+
     // The service takes its configuration from the environment only.
     if let Some(argument) = std::env::args().nth(1) {
         return Err(format!("unknown argument `{argument}`"));
     }
-    let api_key = std::env::var("OPENROUTER_API_KEY")
-        .map_err(|_| "OPENROUTER_API_KEY is required".to_string())?;
+    #[cfg(feature = "e2e-tools")]
+    let fixture = e2e_tools::Fixture::from_env().map_err(|error| error.to_string())?;
     let model = std::env::var("OPENROUTER_MODEL")
         .unwrap_or_else(|_| "anthropic/claude-sonnet-4.6".to_string());
     let model_variant =
@@ -263,11 +269,24 @@ async fn async_main() -> anyhow_like::Result<()> {
         .unwrap_or_else(|_| data_dir.join("trace.jsonl"));
     eprintln!("agent-service trace: {}", trace_path.display());
 
-    let provider = ProviderHandle::new(
-        OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
-            .with_compat(OpenAiCompat::openrouter())
-            .into_components(),
-    );
+    let normal_provider = || {
+        let api_key = std::env::var("OPENROUTER_API_KEY")
+            .map_err(|_| "OPENROUTER_API_KEY is required".to_string())?;
+        Ok::<_, String>(ProviderHandle::new(
+            OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
+                .with_compat(OpenAiCompat::openrouter())
+                .into_components(),
+        ))
+    };
+    #[cfg(feature = "e2e-tools")]
+    let provider = match &fixture {
+        Some(fixture) => fixture
+            .provider(protocol)
+            .map_err(|error| error.to_string())?,
+        None => normal_provider()?,
+    };
+    #[cfg(not(feature = "e2e-tools"))]
+    let provider = normal_provider()?;
     // Retain a clone for the shutdown drain: the core owns the working copy, but
     // the host is what calls `close()` to release transports on the way out.
     let drain_provider = provider.clone();
@@ -306,11 +325,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     let backend = lash::Backend::new(restate_backend.clone());
     let app_db = AppDb::open(&data_dir.join("app.db")).map_err(|err| err.to_string())?;
     let shared_db = Arc::new(Mutex::new(app_db));
-    let factory = crate::rlm_factory(&backend);
-    let mut core_builder = lash::LashCore::rlm_builder(
-        backend,
-        factory,
-    )
+    let mut core_builder = protocol.builder(backend)
     .llm_profiles(Arc::new(OpenRouterLlmProfiles { provider }))
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -328,6 +343,10 @@ async fn async_main() -> anyhow_like::Result<()> {
     // The board plugin is the core's: every chat session and every process
     // worker runs it, over the one app database.
     .plugin(Arc::new(DemoPluginFactory::new(Arc::clone(&shared_db))));
+    #[cfg(feature = "e2e-tools")]
+    if let Some(fixture) = &fixture {
+        core_builder = core_builder.tools(fixture.tools().map_err(|error| error.to_string())?);
+    }
     if let Some(marker) = shutdown_marker::factory_from_env("agent-service")? {
         core_builder = core_builder.plugin(marker);
     }
@@ -358,7 +377,8 @@ async fn async_main() -> anyhow_like::Result<()> {
             model,
             Some(model_variant),
             restate,
-        );
+        )
+        .with_protocol(protocol);
         state
             .recover_pending_chat_forks()
             .await

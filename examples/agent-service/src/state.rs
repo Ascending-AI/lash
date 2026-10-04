@@ -13,6 +13,82 @@ use crate::db::AppDb;
 
 pub(crate) type AppResult<T> = Result<T, AppError>;
 
+/// The host selects a protocol when creating a chat; the session records it.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) enum SessionProtocol {
+    Standard,
+    #[default]
+    Rlm,
+}
+
+impl std::str::FromStr for SessionProtocol {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "standard" => Ok(Self::Standard),
+            "rlm" => Ok(Self::Rlm),
+            _ => Err(format!(
+                "unknown AGENT_SERVICE_PROTOCOL `{value}`: use standard or rlm"
+            )),
+        }
+    }
+}
+
+impl SessionProtocol {
+    pub(crate) fn builder(self, backend: lash::Backend) -> lash::LashCoreBuilder {
+        match self {
+            Self::Standard => lash::LashCore::standard_builder(backend),
+            Self::Rlm => {
+                let factory = crate::rlm_factory(&backend);
+                lash::LashCore::rlm_builder(backend, factory)
+            }
+        }
+    }
+
+    fn configure(
+        self,
+        spec: lash::SessionSpec,
+        context: Vec<String>,
+    ) -> Result<lash::SessionSpec, lash::EmbedError> {
+        Ok(match self {
+            Self::Standard => spec.plugin(
+                lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+                lash::standard::StandardTurnOptions {
+                    prompt: Some(lash::standard::StandardPrompt {
+                        context,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )?,
+            Self::Rlm => spec.plugin(
+                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash::rlm::RlmCreateExtras {
+                    prompt: Some(lash::rlm::RlmPrompt {
+                        context,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )?,
+        })
+    }
+
+    fn context(self, context: Vec<String>) -> lash::config::ConfigTransaction {
+        match self {
+            Self::Standard => {
+                lash::config::ConfigTransaction::of(lash::standard::SetStandardPromptContext {
+                    context,
+                })
+            }
+            Self::Rlm => {
+                lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext { context })
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct AppStateData {
     core: Arc<LashCore>,
@@ -20,6 +96,7 @@ pub(crate) struct AppStateData {
     default_profile: String,
     default_profile_variant: Option<String>,
     restate: lash::restate::RestateConnection,
+    protocol: SessionProtocol,
 }
 
 impl AppStateData {
@@ -38,7 +115,13 @@ impl AppStateData {
             default_profile,
             default_profile_variant,
             restate,
+            protocol: SessionProtocol::default(),
         }
+    }
+
+    pub(crate) fn with_protocol(mut self, protocol: SessionProtocol) -> Self {
+        self.protocol = protocol;
+        self
     }
 
     /// The core, retained for the shutdown drain (trace flush).
@@ -72,9 +155,9 @@ impl AppStateData {
         apply_config_transaction(
             &config,
             &format!("board-context:{}", uuid::Uuid::new_v4()),
-            &lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext {
-                context: vec![crate::board::board_prompt(&board)],
-            }),
+            &self
+                .protocol
+                .context(vec![crate::board::board_prompt(&board)]),
             config.revision().await?,
         )
         .await
@@ -125,24 +208,16 @@ impl AppStateData {
             .create(lash::SessionCreation::root(
                 // The service's default spec, running the chat's model: a
                 // core keeps none, so the host states it at each creation.
-                lash::SessionSpec::new(
-                    model.key.clone(),
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(1024),
-                )
-                .reasoning(model.reasoning.clone())
-                .attachment_acceptance(Arc::new(crate::service_attachment_acceptance()))
-                .plugin(
-                    lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                    lash::rlm::RlmCreateExtras {
-                        prompt: Some(lash::rlm::RlmPrompt {
-                            context: vec![crate::board::board_prompt(&board)],
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    },
-                )
-                .map_err(lash::EmbedError::from)?,
+                self.protocol.configure(
+                    lash::SessionSpec::new(
+                        model.key.clone(),
+                        lash::TurnBudget::Unbounded,
+                        lash::MaxToolCalls::new(1024),
+                    )
+                    .reasoning(model.reasoning.clone())
+                    .attachment_acceptance(Arc::new(crate::service_attachment_acceptance())),
+                    vec![crate::board::board_prompt(&board)],
+                )?,
             ))
             .await
         {

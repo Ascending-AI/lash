@@ -202,6 +202,11 @@ reason = "RGI Unicode suites are too slow for the PR Buck2 partition; they run o
 # --- Library and unit-test compile inputs -----------------------------------
 
 [[rule]]
+packages = ["lash-upgrade-harness"]
+kinds = ["lib", "unit-test"]
+compile_data = ["//examples:shared_rust_sources"]
+
+[[rule]]
 packages = ["slack-clone"]
 kinds = ["lib", "unit-test"]
 compile_data = ["//examples:shared_rust_sources"]

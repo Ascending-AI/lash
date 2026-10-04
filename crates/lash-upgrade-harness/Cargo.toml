@@ -67,8 +67,9 @@ path = "tests/e2e/provider_recovery.rs"
 workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 lash-vm-client = { workspace = true }
-lash = { workspace = true, features = ["restate", "sqlite", "typescript", "rlm"] }
+lash = { workspace = true, features = ["restate", "sqlite", "typescript", "rlm", "testing"] }
 lash-provider-openai = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true }

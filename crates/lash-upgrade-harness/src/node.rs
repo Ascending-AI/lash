@@ -36,6 +36,7 @@ pub mod process;
 pub mod provider;
 pub mod remote;
 pub mod retention;
+pub mod tools;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};

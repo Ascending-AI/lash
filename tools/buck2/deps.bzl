@@ -1214,6 +1214,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "anyhow": "//third-party/rust:p0011",
+            "async_trait": "//third-party/rust:p0015",
             "clap": "//third-party/rust:p0052",
             "lash": "//crates/lash:lash",
             "lash_core": "//crates/lash-core:lash-core",

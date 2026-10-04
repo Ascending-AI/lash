@@ -3128,6 +3128,7 @@ name = "lash-upgrade-harness"
 version = "0.0.0-dev"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
  "lash-internal-core",
  "lash-internal-core-store",

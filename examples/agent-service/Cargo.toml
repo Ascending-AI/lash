@@ -8,6 +8,9 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+e2e-tools = ["lash/testing"]
+
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
