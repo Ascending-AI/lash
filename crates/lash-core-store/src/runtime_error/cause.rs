@@ -26,7 +26,7 @@ pub enum RuntimeErrorCause {
     },
     ToolRunDrift {
         call_id: lash_sansio::ToolCallId,
-        drift: crate::tool_run::SingletonDrift,
+        drift: Box<crate::tool_run::SingletonDrift>,
     },
     ToolRunControl {
         call_id: lash_sansio::ToolCallId,

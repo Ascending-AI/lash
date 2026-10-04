@@ -1,7 +1,7 @@
 //! Aggregates on the product path: `Promise.all`, `allSettled`, `race` and
 //! `any` over tool calls and timers (ADR 0099 §10, §11; FIG-3397).
 //!
-//! One aggregate is one durable effect group. The caller hands over its
+//! One aggregate is one admitted plan in the logical Run. The caller hands over its
 //! **unique** leaves in first-appearance order — a pending operation written
 //! at two positions is one leaf, and the caller expands the outcome back to
 //! positions (§10 L4) — and a consumer mode, which is never journaled; the
@@ -58,15 +58,6 @@ pub enum ToolAggregateLeafReply {
     Tool(Box<ToolInvocationReply>),
     /// A timer elapsed; its fulfilment value is `undefined`.
     Timer,
-}
-
-impl ToolAggregateLeafReply {
-    fn fulfilled(&self) -> bool {
-        match self {
-            Self::Tool(reply) => matches!(reply.output.outcome, crate::ToolCallOutcome::Success(_)),
-            Self::Timer => true,
-        }
-    }
 }
 
 /// The aggregate's answer (ADR 0099 §10 L2), per leaf where it carries
@@ -163,13 +154,31 @@ impl RuntimeExecutionContext<'_> {
                     crate::tool_run::ContinuationRefusal::NotQuiescent,
                 )
             })?
-            .consume(cursor.clone(), consumer, false)
+            .consume(
+                cursor.clone(),
+                consumer,
+                false,
+                consumer != ToolAggregateConsumer::AllSettled,
+            )
             .await
     }
     pub async fn await_tool_run_aggregate(
         &self,
         cursor: &ToolRunAggregateCursor,
         consumer: ToolAggregateConsumer,
+    ) -> Result<ToolRunAggregatePoll, crate::RuntimeEffectControllerError> {
+        self.await_tool_run_aggregate_with_control(
+            cursor,
+            consumer,
+            consumer != ToolAggregateConsumer::AllSettled,
+        )
+        .await
+    }
+    async fn await_tool_run_aggregate_with_control(
+        &self,
+        cursor: &ToolRunAggregateCursor,
+        consumer: ToolAggregateConsumer,
+        host_control: bool,
     ) -> Result<ToolRunAggregatePoll, crate::RuntimeEffectControllerError> {
         let result = self
             .tool_run
@@ -179,7 +188,7 @@ impl RuntimeExecutionContext<'_> {
                     crate::tool_run::ContinuationRefusal::NotQuiescent,
                 )
             })?
-            .consume(cursor.clone(), consumer, true)
+            .consume(cursor.clone(), consumer, true, host_control)
             .await;
         if result
             .as_ref()
@@ -195,28 +204,11 @@ impl RuntimeExecutionContext<'_> {
             Ok(cursor) => cursor,
             Err(error) => return self.aggregate_host_control(error),
         };
-        match self.await_tool_run_aggregate(&cursor, consumer).await {
-            Ok(ToolRunAggregatePoll::Ready { outcome, .. }) => {
-                if let ToolAggregateOutcome::AllResults(results) = &outcome {
-                    for result in results.iter().flatten() {
-                        if let ToolAggregateLeafReply::Tool(reply) = result
-                            && (matches!(
-                                reply.output.outcome,
-                                crate::ToolCallOutcome::Cancelled(_)
-                            ) || matches!(
-                                reply.output.control,
-                                Some(crate::ToolControl::AbortRun { .. })
-                            ))
-                        {
-                            return ToolAggregateOutcome::HostControl(
-                                serde_json::to_string(&reply.output)
-                                    .unwrap_or_else(|error| error.to_string()),
-                            );
-                        }
-                    }
-                }
-                outcome
-            }
+        match self
+            .await_tool_run_aggregate_with_control(&cursor, consumer, true)
+            .await
+        {
+            Ok(ToolRunAggregatePoll::Ready { outcome, .. }) => outcome,
             Ok(ToolRunAggregatePoll::Pending) => {
                 unreachable!("the combined entry waits for its result")
             }

@@ -73,12 +73,12 @@ impl SingletonToolHandlers for Probe {
         &self,
         _: &crate::ToolCallId,
         _: &SingletonCapture,
-    ) -> Vec<AttributedVerdict<AfterCheckVerdict>> {
+    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
         self.checks.fetch_add(1, Ordering::SeqCst);
         if matches!(self.held, Hold::AfterCheck) {
             self.hold().await;
         }
-        Vec::new()
+        Ok(Vec::new())
     }
     async fn realize_declarations(
         &self,

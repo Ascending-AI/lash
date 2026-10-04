@@ -1,5 +1,4 @@
 use crate::ClockWallTime;
-use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -211,14 +210,6 @@ pub(super) struct LocalDirectEffectRunner {
     tracing: crate::trace::TraceRuntime,
     /// The body's live step, bound when the body really runs.
     live: Option<Arc<crate::trace::LiveStep>>,
-}
-
-/// Runs one tool attempt against a live execution context: the recorded body
-/// of a scalar call's attempt.
-struct LocalToolAttemptEffectRunner<'run> {
-    context: crate::RuntimeExecutionContext<'run>,
-    child_trace_hooks: BTreeMap<crate::ToolCallId, crate::ToolChildExecutionTraceHook>,
-    completion_key: Option<crate::AwaitEventKey>,
 }
 
 struct LocalPreparedToolAttemptEffectRunner<'run> {
@@ -910,40 +901,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    pub(crate) fn tool_attempt(
-        context: crate::RuntimeExecutionContext<'run>,
-        child_trace_hooks: BTreeMap<crate::ToolCallId, crate::ToolChildExecutionTraceHook>,
-        completion_key: Option<crate::AwaitEventKey>,
-    ) -> Self {
-        let replay_trace = context.replay_validation_trace();
-        if let Some(context) = context.to_static() {
-            return Self {
-                state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
-                    LocalToolAttemptEffectRunner {
-                        context,
-                        child_trace_hooks,
-                        completion_key,
-                    },
-                ))),
-                replay_trace,
-                served_only: None,
-                issued: crate::trace::StepIssue::default(),
-            };
-        }
-        Self {
-            state: RuntimeEffectLocalExecutorState::Runner(Box::new(
-                LocalToolAttemptEffectRunner {
-                    context,
-                    child_trace_hooks,
-                    completion_key,
-                },
-            )),
-            replay_trace,
-            served_only: None,
-            issued: crate::trace::StepIssue::default(),
-        }
-    }
-
     pub(crate) fn prepared_tool_attempt(
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
         tool_context: crate::ToolContext<'run>,
@@ -1356,57 +1313,6 @@ impl RuntimeEffectLocalRunner for TestingRuntimeEffectLocalRunner<'_> {
         _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         (self.run)(envelope).await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
-    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
-        Some(self.context.plugin_state_session())
-    }
-
-    fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {
-        matches!(command, RuntimeEffectCommand::ToolAttempt { .. })
-    }
-
-    fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
-        self.context.bind_live_step(live);
-    }
-
-    async fn execute(
-        self: Box<Self>,
-        envelope: RuntimeEffectEnvelope,
-        effect_attempt: Option<crate::EffectAttempt>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        match envelope.command {
-            RuntimeEffectCommand::ToolAttempt {
-                call,
-                execution_grant,
-                attempt,
-                max_attempts,
-            } => {
-                let child_execution_trace_hook = self.child_trace_hooks.get(&call.call_id).cloned();
-                let outcome = Box::pin(self.context.execute_prepared_tool_attempt_effect(
-                    *call,
-                    execution_grant,
-                    attempt,
-                    max_attempts,
-                    envelope.invocation.into_runtime_invocation(),
-                    child_execution_trace_hook,
-                    self.completion_key,
-                    effect_attempt,
-                ))
-                .await?;
-                Ok(tool_attempt_outcome(outcome))
-            }
-            command => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                format!(
-                    "local tool executor cannot execute {} command",
-                    command.kind().as_str()
-                ),
-            )),
-        }
     }
 }
 

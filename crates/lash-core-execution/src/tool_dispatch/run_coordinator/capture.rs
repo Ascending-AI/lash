@@ -85,10 +85,10 @@ pub(super) async fn capture_attempt(
                                         encode(&obligation)?,
                                     )?;
                                     materials.push(entry);
-                                    Some(crate::tool_run::PendingStart {
+                                    Some(Box::new(crate::tool_run::PendingStart {
                                         start_key: obligation.start_key().clone(),
                                         obligation: reference,
-                                    })
+                                    }))
                                 }
                                 None => None,
                             };

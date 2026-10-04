@@ -428,7 +428,7 @@ pub trait SingletonToolHandlers: Send + Sync {
         &self,
         call_id: &ToolCallId,
         capture: &SingletonCapture,
-    ) -> Vec<AttributedVerdict<AfterCheckVerdict>>;
+    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String>;
 
     /// Distinct after-check contributions recorded by D beside its verdicts.
     fn decision_contributions(&self, _call_id: &ToolCallId) -> Result<Option<String>, String> {
@@ -687,7 +687,10 @@ impl SingletonRunError {
                 )
             }
             Self::Drift { call_id, drift } => run_refusal(
-                crate::RuntimeErrorCause::ToolRunDrift { call_id, drift },
+                crate::RuntimeErrorCause::ToolRunDrift {
+                    call_id,
+                    drift: Box::new(drift),
+                },
                 format!("recorded admission drifted in {drift:?}"),
             ),
         }

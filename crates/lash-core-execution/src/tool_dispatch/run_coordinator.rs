@@ -571,7 +571,7 @@ async fn decision_entry(
                     .map_err(|error| error.to_string())?;
                 }
                 let after =
-                    CheckRecord::reduce(handlers.after_checks(&call.call_id, &capture).await);
+                    CheckRecord::reduce(handlers.after_checks(&call.call_id, &capture).await?);
                 let decision = match after.winner().map(|reply| &reply.verdict) {
                     None | Some(AfterCheckVerdict::Allow) => CallDecision::Final {
                         source,
@@ -784,6 +784,10 @@ impl<'a> RunCoordinator<'a> {
     pub(crate) fn contains_call(&self, id: &ToolCallId) -> bool {
         self.journal.ledger.has_call(id)
     }
+    pub(crate) fn invocation_failed(&self) -> bool {
+        self.faulted
+    }
+
     pub(crate) fn owner(&self) -> &EffectOpener {
         &self.journal.owner
     }
@@ -916,9 +920,11 @@ impl<'a> RunCoordinator<'a> {
                                 member,
                                 Handlers::Borrowed(handlers),
                                 AttemptOrdinal::FIRST,
-                                source,
-                                &metadata,
-                                start.as_ref(),
+                                PendingAttempt {
+                                    source,
+                                    metadata: &metadata,
+                                    start: start.as_deref(),
+                                },
                             )
                             .await;
                     }
@@ -1307,13 +1313,19 @@ enum AttemptCaptured {
     Pending {
         source: AwaitEventKey,
         metadata: MaterialRef,
-        start: Option<crate::tool_run::PendingStart>,
+        start: Option<Box<crate::tool_run::PendingStart>>,
     },
     Deferred(AwaitEventKey),
     DeferredStart {
         source: AwaitEventKey,
         start: Box<SingletonStart>,
     },
+}
+
+struct PendingAttempt<'a> {
+    source: AwaitEventKey,
+    metadata: &'a MaterialRef,
+    start: Option<&'a crate::tool_run::PendingStart>,
 }
 
 struct AttemptSources<'a> {

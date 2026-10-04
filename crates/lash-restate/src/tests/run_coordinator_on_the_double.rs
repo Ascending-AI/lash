@@ -411,13 +411,13 @@ impl SingletonToolHandlers for Probe {
         &self,
         call_id: &ToolCallId,
         _capture: &SingletonCapture,
-    ) -> Vec<AttributedVerdict<AfterCheckVerdict>> {
+    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
         if !self.parallel_order.is_empty() {
             let index = self.parallel_completed.fetch_add(1, Ordering::SeqCst);
             assert_eq!(self.parallel_order[index], *call_id);
             self.parallel_wake.notify_waiters();
         }
-        if self.cancel_after.as_ref() == Some(call_id) {
+        Ok(if self.cancel_after.as_ref() == Some(call_id) {
             vec![AttributedVerdict {
                 callback: binding().executable,
                 verdict: AfterCheckVerdict::Cancel {
@@ -426,7 +426,7 @@ impl SingletonToolHandlers for Probe {
             }]
         } else {
             Vec::new()
-        }
+        })
     }
 
     fn plugin_session(&self) -> Option<Arc<lash_core::plugin::PluginSession>> {

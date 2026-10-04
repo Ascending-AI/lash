@@ -1334,7 +1334,7 @@ fn l05_unavailable_member_keeps_native_completion_and_source_slots() {
                         lash_sansio::PendingToolCall {
                             call_id: lash_core::ToolCallId::fixture(&format!("source-{index}")),
                             provider_call_id: Some(format!("provider-{index}")),
-                            tool_name: tool.into(),
+                            tool_name: if tool == "tool:echo" { "echo" } else { tool }.into(),
                             args: serde_json::json!({"text": index}),
                             replay: None,
                         },

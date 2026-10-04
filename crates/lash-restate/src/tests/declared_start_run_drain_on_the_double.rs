@@ -328,8 +328,8 @@ impl SingletonToolHandlers for Starter {
         &self,
         _call_id: &ToolCallId,
         _capture: &SingletonCapture,
-    ) -> Vec<AttributedVerdict<AfterCheckVerdict>> {
-        Vec::new()
+    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
+        Ok(Vec::new())
     }
 
     fn run_cancel_requested(&self) -> bool {

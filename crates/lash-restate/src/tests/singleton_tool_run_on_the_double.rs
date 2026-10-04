@@ -860,12 +860,12 @@ impl SingletonToolHandlers for Probe {
         &self,
         _call_id: &ToolCallId,
         _capture: &SingletonCapture,
-    ) -> Vec<AttributedVerdict<AfterCheckVerdict>> {
+    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
         self.after_checks.fetch_add(1, Ordering::SeqCst);
         if self.cancel_at == CancelAt::AfterChecks {
             self.cancel.store(true, Ordering::SeqCst);
         }
-        Vec::new()
+        Ok(Vec::new())
     }
 
     fn run_cancel_requested(&self) -> bool {
@@ -1038,6 +1038,8 @@ fn events(records: &[RunRecord]) -> Vec<Vec<&'static str>> {
                 .map(|event| match event {
                     RunEvent::Admitted { .. } => "admitted",
                     RunEvent::AttemptRecorded { .. } => "attempt",
+                    RunEvent::SourceCaptured { .. } => "source_captured",
+                    RunEvent::CheckContributions { .. } => "check_contributions",
                     RunEvent::RetryScheduled { .. } => "retry",
                     RunEvent::RetryTimerRegistered { .. } => "retry_timer",
                     RunEvent::Decided { .. } => "decided",

@@ -343,6 +343,7 @@ impl<'run> ProductionToolHandlers<'run> {
         cursor: ToolRunAggregateCursor,
         consumer: ToolAggregateConsumer,
         wait: bool,
+        host_control: bool,
     ) -> Result<ToolRunAggregatePoll, SingletonRunError> {
         if &cursor.owner != run.owner() {
             return Err(ContinuationRefusal::ForeignOwner.into());
@@ -363,11 +364,7 @@ impl<'run> ProductionToolHandlers<'run> {
         };
         let outcome = loop {
             let outcome = run
-                .consume_aggregate_with_control(
-                    &key,
-                    mode,
-                    consumer != ToolAggregateConsumer::AllSettled,
-                )
+                .consume_aggregate_with_control(&key, mode, host_control)
                 .await?;
             if !matches!(outcome, RunAggregateOutcome::Pending) {
                 break outcome;
@@ -459,29 +456,25 @@ impl<'run> ProductionToolHandlers<'run> {
                     let recorded_cause = run.withheld_cause(call_id);
                     let output = match recorded_cause
                         .as_ref()
-                        .map(|cause| cause.error_type.as_str())
+                        .map(|cause| (cause.error_type.as_str(), &cause.payload))
                     {
-                        Some("tool_failure") => ToolCallOutput::failure(
-                            serde_json::from_value(recorded_cause.unwrap().payload).map_err(
-                                |error| {
-                                    crate::RuntimeEffectControllerError::new(
-                                        crate::RuntimeErrorCode::RecordEncodingFailed,
-                                        error.to_string(),
-                                    )
-                                },
-                            )?,
+                        Some(("tool_failure", payload)) => ToolCallOutput::failure(
+                            serde_json::from_value(payload.clone()).map_err(|error| {
+                                crate::RuntimeEffectControllerError::new(
+                                    crate::RuntimeErrorCode::RecordEncodingFailed,
+                                    error.to_string(),
+                                )
+                            })?,
                         ),
-                        Some("tool_cancellation") => ToolCallOutput::cancelled(
-                            serde_json::from_value(recorded_cause.unwrap().payload).map_err(
-                                |error| {
-                                    crate::RuntimeEffectControllerError::new(
-                                        crate::RuntimeErrorCode::RecordEncodingFailed,
-                                        error.to_string(),
-                                    )
-                                },
-                            )?,
+                        Some(("tool_cancellation", payload)) => ToolCallOutput::cancelled(
+                            serde_json::from_value(payload.clone()).map_err(|error| {
+                                crate::RuntimeEffectControllerError::new(
+                                    crate::RuntimeErrorCode::RecordEncodingFailed,
+                                    error.to_string(),
+                                )
+                            })?,
                         ),
-                        Some("plugin_abort") => {
+                        Some(("plugin_abort", _)) => {
                             let (callback, cause) =
                                 run.withheld_verdict(call_id).ok_or_else(|| {
                                     crate::RuntimeEffectControllerError::new(

@@ -547,14 +547,6 @@ impl<'a> RunCoordinator<'a> {
         Ok(order.into_iter().map(|(_, index)| index).collect())
     }
 
-    fn select(
-        &self,
-        plan: &AggregatePlan,
-        consumer: AggregateConsumer,
-    ) -> Result<(Selection, Vec<Option<Settlement>>), SingletonRunError> {
-        self.select_with_control(plan, consumer, true)
-    }
-
     fn select_with_control(
         &self,
         plan: &AggregatePlan,

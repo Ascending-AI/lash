@@ -509,10 +509,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             .insert(process_id.clone());
     }
 
-    pub(crate) fn plugin_state_session(&self) -> Arc<crate::PluginSession> {
-        Arc::clone(&self.dispatch.plugins)
-    }
-
     pub(crate) fn session_graph_service(&self) -> &dyn crate::plugin::SessionGraphService {
         self.dispatch.session_graph.as_ref()
     }
@@ -771,12 +767,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             return standing.clone();
         }
         tracing.coordination(&self.dispatch.effect_controller)
-    }
-
-    /// Binds the live step of the recorded body this context is about to run
-    /// in.
-    pub(crate) fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
-        self.live_step = Some(live);
     }
 
     pub fn with_code_block_graph_key(mut self, graph_key: Option<String>) -> Self {

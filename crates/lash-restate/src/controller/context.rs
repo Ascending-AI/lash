@@ -67,6 +67,7 @@ mod source_wait;
 mod event_wait;
 mod contract;
 pub use contract::RestateControllerContext;
+mod run_bridge;
 mod wake;
 pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
 pub use child_cancel::GroupChildCancelArm;
@@ -367,16 +368,17 @@ macro_rules! impl_restate_controller_context {
                       T: Serialize + DeserializeOwned + Send + 'static,
                       Fut: Future<Output = Result<T, String>> + Send + 'run,
                 {
-                    let mut run = Box::pin(self.run_json_or_retry_send(effect_name, future));
-                    let waker = std::task::Waker::noop();
-                    let mut context = std::task::Context::from_waker(waker);
-                    let registered = run.as_mut().poll(&mut context);
-                    async move {
-                        match registered {
-                            std::task::Poll::Ready(result) => result,
-                            std::task::Poll::Pending => run.await,
-                        }
-                    }
+                    let (callback, owner) = run_bridge::bridge();
+                    let closure_relay = Arc::new(ClosureWakeRelay::default());
+                    let relay = Arc::clone(&closure_relay);
+                    let run = restate_sdk::context::ContextSideEffects::run(self, move || async move {
+                        relay_closure_wakes(callback, relay)
+                            .await
+                            .map(Json)
+                            .map_err(|fault| HandlerError::from(std::io::Error::other(fault)))
+                    });
+                    let run = restate_sdk::context::RunFuture::name(run, effect_name).start();
+                    owner.drive(future, guard_restate_run_future(run, closure_relay))
                 }
 
                 fn run_json_or_retry_send<'run, T, Fut>(

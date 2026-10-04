@@ -292,14 +292,12 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 &pending.args,
                 "invalid_tool_args",
             )
-        {
-            if let Some(ToolCallOutput {
+            && let Some(ToolCallOutput {
                 outcome: crate::ToolCallOutcome::Failure(cause),
                 ..
             }) = result.as_done_output()
-            {
-                failure = Some(cause.clone());
-            }
+        {
+            failure = Some(cause.clone());
         }
         let identity =
             PreparedToolCall::identity(input.definition.manifest.id.clone(), pending.clone());
@@ -334,14 +332,12 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 &prepared.args,
                 "invalid_prepared_tool_args",
             )
-        {
-            if let Some(ToolCallOutput {
+            && let Some(ToolCallOutput {
                 outcome: crate::ToolCallOutcome::Failure(cause),
                 ..
             }) = result.as_done_output()
-            {
-                failure = Some(cause.clone());
-            }
+        {
+            failure = Some(cause.clone());
         }
         let original_args = (original_args != prepared.args).then_some(original_args);
         serde_json::to_value(Prepared {
@@ -368,7 +364,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         dispatch.trigger_outcomes = Default::default();
         dispatch.tools = dispatch
             .plugins
-            .resolve_context_tool_bindings(&[prepared.input.binding.executable.clone()])
+            .resolve_context_tool_bindings(std::slice::from_ref(&prepared.input.binding.executable))
             .map_err(|error| {
                 self.context
                     .record_nested_effect_error(error.clone().into());
@@ -655,7 +651,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         &self,
         call_id: &crate::ToolCallId,
         capture: &SingletonCapture,
-    ) -> Vec<AttributedVerdict<AfterCheckVerdict>> {
+    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
         self.check_after(call_id, capture).await
     }
     fn decision_contributions(

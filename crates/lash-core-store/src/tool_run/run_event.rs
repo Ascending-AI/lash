@@ -108,7 +108,7 @@ pub enum AttemptResult {
     Pending {
         source: AwaitEventKey,
         metadata: MaterialRef,
-        start: Option<PendingStart>,
+        start: Option<Box<PendingStart>>,
     },
     /// Parked on a Deferred source; the source's seal supplies the result.
     Deferred { source: AwaitEventKey },

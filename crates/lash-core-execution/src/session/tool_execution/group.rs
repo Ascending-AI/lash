@@ -63,9 +63,6 @@ pub(crate) struct PreparedToolChildLeaf {
 pub(crate) enum PreparedGroupChild {
     /// A tool call, run by the invocation driver.
     Tool(Box<PreparedToolChildLeaf>),
-    /// A timer from an unawaited `sleep(ms)`: a `Sleep` child whose deadline
-    /// was recorded once, at admission (ADR 0099 §11 clause 4).
-    Timer { deadline_ms: u64 },
 }
 
 impl PreparedGroupChild {
@@ -73,7 +70,6 @@ impl PreparedGroupChild {
     pub(crate) fn tool(&self) -> Option<&PreparedToolChildLeaf> {
         match self {
             Self::Tool(leaf) => Some(leaf),
-            Self::Timer { .. } => None,
         }
     }
 }
@@ -121,8 +117,6 @@ impl ToolAggregateConsumer {
 pub(crate) enum GroupChildSettled {
     /// A tool child's completed call.
     Tool(Box<CompletedProtocolToolCall>),
-    /// A timer child that elapsed; its fulfilment value is `undefined`.
-    Timer,
     Deferred(Box<crate::tool_dispatch::DeferredToolCompletion>),
 }
 
@@ -136,7 +130,6 @@ impl GroupChildSettled {
                     crate::ToolCallOutcome::Success(_)
                 )
             }
-            Self::Timer => true,
             Self::Deferred(_) => false,
         }
     }
@@ -157,10 +150,6 @@ pub(crate) struct ToolChildGroupSettled {
     /// Positions in the order the group settled them: durable rank order
     /// (ADR 0099 §5), one per filled slot.
     pub settlement_positions: Vec<usize>,
-    /// The position whose settlement decided the aggregate. When the group
-    /// was not yet exhausted at that settlement it is the opener's: its losers
-    /// keep running and the opener's end closes it.
-    pub decided: Option<usize>,
     /// The await was cancelled with the turn.
     pub cancelled: bool,
 }
@@ -370,28 +359,6 @@ impl RuntimeExecutionContext<'_> {
         for (position, child) in children.iter().enumerate() {
             let leaf = match child {
                 PreparedGroupChild::Tool(leaf) => leaf,
-                PreparedGroupChild::Timer { deadline_ms } => {
-                    // A timer child carries the deadline recorded at
-                    // admission, never a duration: a redrive, a reattachment
-                    // and a duplicate position all wait on the same instant
-                    // (ADR 0099 §11 clause 4).
-                    envelopes.push(crate::RuntimeEffectEnvelope::new(
-                        crate::RuntimeEffectInvocation::new(
-                            crate::EffectAddress::new(
-                                scope.clone(),
-                                group_child_replay_key(&group_key, position),
-                            )?,
-                            self.effect_attribution(),
-                            format!("tool-batch:{batch_id}:child:{position}"),
-                        ),
-                        crate::RuntimeEffectCommand::Sleep {
-                            spec: crate::SleepSpec::Until {
-                                deadline_ms: *deadline_ms,
-                            },
-                        },
-                    ));
-                    continue;
-                }
             };
             let call_id = leaf.call.call.call_id.clone();
             let mut call = leaf.call.call.clone();
@@ -808,7 +775,7 @@ impl RuntimeExecutionContext<'_> {
                             return Ok(ToolChildGroupSettled {
                                 settled,
                                 settlement_positions,
-                                decided: Some(position),
+
                                 cancelled: false,
                             });
                         }
@@ -891,7 +858,7 @@ impl RuntimeExecutionContext<'_> {
                     return Ok(ToolChildGroupSettled {
                         settled,
                         settlement_positions,
-                        decided: None,
+
                         cancelled: true,
                     });
                 }
@@ -940,7 +907,7 @@ impl RuntimeExecutionContext<'_> {
                 return Ok(ToolChildGroupSettled {
                     settled,
                     settlement_positions,
-                    decided: Some(position),
+
                     cancelled: false,
                 });
             }
@@ -972,7 +939,6 @@ impl RuntimeExecutionContext<'_> {
         Ok(ToolChildGroupSettled {
             settled,
             settlement_positions,
-            decided,
             cancelled: false,
         })
     }
@@ -1027,9 +993,7 @@ impl RuntimeExecutionContext<'_> {
                 );
                 Ok(GroupChildSettled::Deferred(completion))
             }
-            (Some(PreparedGroupChild::Timer { .. }), Ok(crate::RuntimeEffectOutcome::Sleep)) => {
-                Ok(GroupChildSettled::Timer)
-            }
+
             (_, Ok(other)) => Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
                 format!(
@@ -1169,11 +1133,7 @@ impl RuntimeExecutionContext<'_> {
                     GroupChildSettled::Tool(Box::new(cancelled_group_leaf(leaf))),
                 ))
             }
-            (PreparedGroupChild::Timer { .. }, Err(error))
-                if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled =>
-            {
-                Ok((position, GroupChildSettled::Timer))
-            }
+
             (_, outcome) => self
                 .present_group_settlement(
                     group_key,

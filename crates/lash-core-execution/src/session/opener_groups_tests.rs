@@ -2,7 +2,6 @@
 //! total, and what a process holds at once.
 
 use super::*;
-use crate::core_internal::RuntimeExecutionContextRuntimeOps as _;
 
 fn env(max_tool_calls: usize) -> crate::ProcessExecutionEnvSpec {
     crate::ProcessExecutionEnvSpec::new(

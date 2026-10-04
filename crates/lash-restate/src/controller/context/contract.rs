@@ -55,7 +55,8 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     /// runs it again (FIG-3683). The fault's text is all the engine keeps of
     /// the attempt, and nothing after the step runs in it: the returned
     /// future never resolves to the fault.
-    /// Register an owned X before waiting; SDK progress owns its closure.
+    /// Register X before waiting. The SDK owns a value callback and the returned
+    /// handle keeps its borrowed body under the logical Run owner.
     fn run_json_eager_or_retry_send<'run, T, Fut>(
         &'run self,
         effect_name: String,

@@ -588,9 +588,11 @@ impl<'a> RunCoordinator<'a> {
                             member.clone(),
                             Handlers::Owned(std::sync::Arc::clone(&handlers)),
                             ordinal,
-                            source.clone(),
-                            metadata,
-                            start.as_ref(),
+                            PendingAttempt {
+                                source: source.clone(),
+                                metadata,
+                                start: start.as_deref(),
+                            },
                         )
                         .await?;
                     decision = Some((call.call_id.clone(), terminal));

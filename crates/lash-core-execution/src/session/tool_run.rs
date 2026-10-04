@@ -37,14 +37,15 @@ impl ToolRunOwner {
 enum Request {
     Admit {
         request: ToolAggregateRequest,
-        parent: Option<crate::RuntimeInvocation>,
-        environment: crate::ProcessExecutionEnvSpec,
+        parent: Option<Box<crate::RuntimeInvocation>>,
+        environment: Box<crate::ProcessExecutionEnvSpec>,
         reply: Reply<Result<ToolRunAggregateCursor, SingletonRunError>>,
     },
     Consume {
         cursor: ToolRunAggregateCursor,
         consumer: ToolAggregateConsumer,
         wait: bool,
+        host_control: bool,
         reply: Reply<Result<ToolRunAggregatePoll, SingletonRunError>>,
     },
     Capture {
@@ -69,8 +70,8 @@ impl ToolRunChannel {
         self.0
             .send(Request::Admit {
                 request,
-                parent,
-                environment,
+                parent: parent.map(Box::new),
+                environment: Box::new(environment),
                 reply,
             })
             .map_err(|_| owner_gone())?;
@@ -85,6 +86,7 @@ impl ToolRunChannel {
         cursor: ToolRunAggregateCursor,
         consumer: ToolAggregateConsumer,
         wait: bool,
+        host_control: bool,
     ) -> Result<ToolRunAggregatePoll, RuntimeEffectControllerError> {
         let (reply, receive) = reply();
         self.0
@@ -92,6 +94,7 @@ impl ToolRunChannel {
                 cursor,
                 consumer,
                 wait,
+                host_control,
                 reply,
             })
             .map_err(|_| owner_gone())?;
@@ -155,133 +158,149 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// Drive a logical owner beside its program. The program explicitly closes
     /// at logical termination or captures at handover. Dropping this frame on
     /// worker loss leaves unfinished journal work to engine recovery.
-    pub async fn drive_tool_run<F, Fut>(
+    pub fn drive_tool_run<F, Fut>(
         &self,
         materials: Option<Arc<dyn crate::store::ToolMaterialStore>>,
         program: F,
-    ) -> Result<Fut::Output, RuntimeEffectControllerError>
+    ) -> impl std::future::Future<Output = Result<Fut::Output, RuntimeEffectControllerError>>
     where
         F: FnOnce(Self) -> Fut,
         Fut: std::future::Future,
     {
-        let materials = materials.or_else(|| self.tool_material_store());
-        let owner = self
-            .logical_run()
-            .map(|address| {
-                crate::EffectOpener::turn(address.session_id.clone(), address.turn_id.clone())
-            })
-            .or_else(|| crate::runtime::effect::opener_for_execution_scope(&self.admitted_scope()))
-            .ok_or_else(|| RuntimeEffectControllerError::from(ContinuationRefusal::ForeignOwner))?;
-        let state = self.opener_state();
-        let segment = self
-            .process_event_context()
-            .and_then(|context| context.execution_write_authority.segment())
-            .or_else(|| {
-                state
-                    .snapshot()
-                    .run
-                    .as_ref()
-                    .map(|transfer| SegmentOrdinal(transfer.from.0 + 1))
-            })
-            .unwrap_or(SegmentOrdinal(0));
-        let scoped = self.dispatch.effect_controller.clone();
-        let available = self.dispatch.plugins.tool_run_revisions();
-        let claim = super::execution_context::execution_claim_of(scoped.execution_scope())
-            .map_err(RuntimeEffectControllerError::from)?;
-        let environment = if let Some(environment) = state
-            .snapshot()
-            .run
-            .as_ref()
-            .and_then(|transfer| transfer.environment.clone())
-        {
-            self.process_env_store
-                .acquire_process_execution_env(&claim, &environment)
-                .await
-                .map_err(crate::PluginError::from)
+        Box::pin(async move {
+            let materials = materials.or_else(|| self.tool_material_store());
+            let owner = self
+                .logical_run()
+                .map(|address| {
+                    crate::EffectOpener::turn(address.session_id.clone(), address.turn_id.clone())
+                })
+                .or_else(|| {
+                    crate::runtime::effect::opener_for_execution_scope(&self.admitted_scope())
+                })
+                .ok_or_else(|| {
+                    RuntimeEffectControllerError::from(ContinuationRefusal::ForeignOwner)
+                })?;
+            let state = self.opener_state();
+            let segment = self
+                .process_event_context()
+                .and_then(|context| context.execution_write_authority.segment())
+                .or_else(|| {
+                    state
+                        .snapshot()
+                        .run
+                        .as_ref()
+                        .map(|transfer| SegmentOrdinal(transfer.from.0 + 1))
+                })
+                .unwrap_or(SegmentOrdinal(0));
+            let scoped = self.dispatch.effect_controller.clone();
+            let available = self.dispatch.plugins.tool_run_revisions();
+            let claim = super::execution_context::execution_claim_of(scoped.execution_scope())
                 .map_err(RuntimeEffectControllerError::from)?;
-            Some(environment)
-        } else {
-            None
-        };
-        let handlers = Arc::new(ProductionToolHandlers::new(
-            self.clone(),
-            materials.clone(),
-            environment,
-        ));
-        let mut run = state
-            .adopt_run(
-                &scoped,
-                owner,
-                segment,
-                available,
-                handlers.clone(),
-                self.dispatch.clock.as_ref(),
-            )
-            .await
-            .map_err(SingletonRunError::into_controller_error)?;
-        let (send, mut receive) = channel();
-        let mut context = self.clone();
-        context.tool_run = Some(ToolRunChannel(send));
-        let future = program(context);
-        tokio::pin!(future);
-        let mut cut = false;
-        let mut closed = false;
-        loop {
-            let event = if cut {
-                select(future.as_mut(), Box::pin(receive.recv())).await
-            } else {
-                run.beside(select(future.as_mut(), Box::pin(receive.recv())))
+            let environment = if let Some(environment) = state
+                .snapshot()
+                .run
+                .as_ref()
+                .and_then(|transfer| transfer.environment.clone())
+            {
+                self.process_env_store
+                    .acquire_process_execution_env(&claim, &environment)
                     .await
-                    .map_err(SingletonRunError::into_controller_error)?
+                    .map_err(crate::PluginError::from)
+                    .map_err(RuntimeEffectControllerError::from)?;
+                Some(environment)
+            } else {
+                None
             };
-            match event {
-                Either::Left((output, _)) => return Ok(output),
-                Either::Right((
-                    Some(Request::Admit {
-                        request,
-                        parent,
-                        environment,
-                        reply,
-                    }),
-                    _,
-                )) => {
-                    let result = handlers
-                        .admit_aggregate(&mut run, request, parent, environment)
-                        .await;
-                    let _ = reply.send(result);
-                }
-                Either::Right((
-                    Some(Request::Consume {
-                        cursor,
-                        consumer,
-                        wait,
-                        reply,
-                    }),
-                    _,
-                )) => {
-                    let result = handlers
-                        .consume_aggregate(&mut run, cursor, consumer, wait)
-                        .await;
-                    let _ = reply.send(result);
-                }
-                Either::Right((Some(Request::Capture { reason, reply }), _)) => {
-                    let result = match materials.as_deref() {
-                        Some(materials) => state.capture_run(&mut run, reason, materials).await,
-                        None => Err(ContinuationRefusal::UnretainedMaterial.into()),
-                    };
-                    cut = result.is_ok();
-                    let _ = reply.send(result);
-                }
-                Either::Right((Some(Request::Close(reply)), _)) => {
-                    let result = if closed { Ok(()) } else { run.close().await };
-                    closed = result.is_ok();
-                    if result.is_ok() {
-                        state.finish_run();
+            let handlers = Arc::new(ProductionToolHandlers::new(
+                self.clone(),
+                materials.clone(),
+                environment,
+            ));
+            let mut run = state
+                .adopt_run(
+                    &scoped,
+                    owner,
+                    segment,
+                    available,
+                    handlers.clone(),
+                    self.dispatch.clock.as_ref(),
+                )
+                .await
+                .map_err(SingletonRunError::into_controller_error)?;
+            let (send, mut receive) = channel();
+            let mut context = self.clone();
+            context.tool_run = Some(ToolRunChannel(send));
+            let future = program(context);
+            tokio::pin!(future);
+            let mut cut = false;
+            let mut closed = false;
+            loop {
+                let event = if cut {
+                    select(future.as_mut(), Box::pin(receive.recv())).await
+                } else {
+                    run.beside(select(future.as_mut(), Box::pin(receive.recv())))
+                        .await
+                        .map_err(SingletonRunError::into_controller_error)?
+                };
+                match event {
+                    Either::Left((output, _)) => return Ok(output),
+                    Either::Right((
+                        Some(Request::Admit {
+                            request,
+                            parent,
+                            environment,
+                            reply,
+                        }),
+                        _,
+                    )) => {
+                        let result = handlers
+                            .admit_aggregate(
+                                &mut run,
+                                request,
+                                parent.map(|parent| *parent),
+                                *environment,
+                            )
+                            .await;
+                        cut |= run.invocation_failed();
+                        let _ = reply.send(result);
                     }
-                    let _ = reply.send(result);
+                    Either::Right((
+                        Some(Request::Consume {
+                            cursor,
+                            consumer,
+                            wait,
+                            host_control,
+                            reply,
+                        }),
+                        _,
+                    )) => {
+                        let result = handlers
+                            .consume_aggregate(&mut run, cursor, consumer, wait, host_control)
+                            .await;
+                        cut |= run.invocation_failed();
+                        let _ = reply.send(result);
+                    }
+                    Either::Right((Some(Request::Capture { reason, reply }), _)) => {
+                        let result = match materials.as_deref() {
+                            Some(materials) => state.capture_run(&mut run, reason, materials).await,
+                            None => Err(ContinuationRefusal::UnretainedMaterial.into()),
+                        };
+                        cut = result.is_ok();
+                        cut |= run.invocation_failed();
+                        let _ = reply.send(result);
+                    }
+                    Either::Right((Some(Request::Close(reply)), _)) => {
+                        let result = if closed { Ok(()) } else { run.close().await };
+                        closed = result.is_ok();
+                        if result.is_ok() {
+                            state.finish_run();
+                        }
+                        cut |= run.invocation_failed();
+                        let _ = reply.send(result);
+                    }
+                    Either::Right((None, _)) => return Err(owner_gone()),
                 }
-                Either::Right((None, _)) => return Err(owner_gone()),
             }
-        }
+        })
     }
 }

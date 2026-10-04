@@ -129,8 +129,8 @@ impl SingletonToolHandlers for Probe {
         &self,
         _: &ToolCallId,
         _: &SingletonCapture,
-    ) -> Vec<AttributedVerdict<AfterCheckVerdict>> {
-        Vec::new()
+    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
+        Ok(Vec::new())
     }
 
     fn run_cancel_requested(&self) -> bool {

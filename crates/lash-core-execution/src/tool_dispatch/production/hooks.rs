@@ -147,20 +147,14 @@ impl ProductionToolHandlers<'_> {
         &self,
         call_id: &crate::ToolCallId,
         capture: &SingletonCapture,
-    ) -> Vec<AttributedVerdict<AfterCheckVerdict>> {
-        let Some(output) = capture.output() else {
-            return Vec::new();
-        };
-        let captured: Captured = match decode(output) {
-            Ok(captured) => captured,
-            Err(_) => return Vec::new(),
-        };
+    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
+        let captured: Captured = decode(capture.output().ok_or("final has no output")?)?;
         let prepared = self
             .prepared
             .lock_recover()
             .get(call_id)
             .cloned()
-            .expect("K3 hydrated the final's admission");
+            .ok_or("the final has no hydrated admission")?;
         let dispatch = self.dispatch(&prepared.input);
         let original = captured.original.unwrap_or_else(|| captured.output.clone());
         let (original, _) = ToolResultCandidate::split(original);
@@ -178,12 +172,12 @@ impl ProductionToolHandlers<'_> {
         let checks = match checked {
             Ok(checks) => checks,
             Err(failure) => {
-                return vec![AttributedVerdict {
+                return Ok(vec![AttributedVerdict {
                     callback: prepared.input.binding.executable,
                     verdict: AfterCheckVerdict::Deny {
                         cause: cause("tool_failure", &failure),
                     },
-                }];
+                }]);
             }
         };
         self.contributions.lock_recover().insert(
@@ -199,7 +193,7 @@ impl ProductionToolHandlers<'_> {
                 .collect(),
         );
         if let Err(error) = crate::plugin::propose_all(&dispatch.plugins, checks.proposals) {
-            return vec![AttributedVerdict {
+            return Ok(vec![AttributedVerdict {
                 callback: prepared.input.binding.executable,
                 verdict: AfterCheckVerdict::Deny {
                     cause: cause(
@@ -211,9 +205,9 @@ impl ProductionToolHandlers<'_> {
                         ),
                     ),
                 },
-            }];
+            }]);
         }
-        checks
+        Ok(checks
             .record
             .replies()
             .iter()
@@ -233,7 +227,7 @@ impl ProductionToolHandlers<'_> {
                     },
                 },
             })
-            .collect()
+            .collect())
     }
 
     pub(super) async fn present_capture(
@@ -253,7 +247,7 @@ impl ProductionToolHandlers<'_> {
             .lock_recover()
             .get(call_id)
             .cloned()
-            .expect("K3 hydrated the final's admission");
+            .ok_or_else(|| fault("the final has no hydrated admission".to_owned()))?;
         let dispatch = self.dispatch(&prepared.input);
         let outcomes = self
             .declarations

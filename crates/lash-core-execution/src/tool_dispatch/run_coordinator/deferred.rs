@@ -8,10 +8,13 @@ impl<'a> RunCoordinator<'a> {
         member: AdmittedCall,
         handlers: Handlers<'a>,
         attempt: AttemptOrdinal,
-        source: AwaitEventKey,
-        metadata: &MaterialRef,
-        start: Option<&crate::tool_run::PendingStart>,
+        pending: PendingAttempt<'_>,
     ) -> Result<DecidedCall, SingletonRunError> {
+        let PendingAttempt {
+            source,
+            metadata,
+            start,
+        } = pending;
         let pending: RecordedPending = self.journal.materials.decode(metadata)?;
         if let Some(start) = start {
             return Ok(self.queue_deferred_start(

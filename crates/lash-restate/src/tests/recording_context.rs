@@ -705,7 +705,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     ) -> impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
     where
         'ctx: 'run,
-        T: serde::Serialize + serde::de::DeserializeOwned + Send + 'run,
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>> + Send + 'run,
     {
         let context = Arc::clone(self);
@@ -1995,7 +1995,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     ) -> impl std::future::Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
     where
         'ctx: 'run,
-        T: serde::Serialize + serde::de::DeserializeOwned + Send + 'run,
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>> + Send + 'run,
     {
         let context = Arc::clone(self);

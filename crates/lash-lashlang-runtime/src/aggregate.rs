@@ -1,4 +1,4 @@
-//! The one mapping from a Lashlang aggregate to the runtime's durable group
+//! The one mapping from a Lashlang aggregate to the logical Run
 //! and back (ADR 0099 §10, §11; FIG-3397), shared by both bridges.
 //!
 //! A bridge resolves each of its leaves in its own way — a language runtime
@@ -19,7 +19,7 @@ use lashlang::{
 pub enum BridgeAggregateLeaf {
     /// Settled by the bridge before the aggregate formed.
     Settled(Result<Value, ExecutionHostError>),
-    /// A tool call to admit as a group child.
+    /// A tool call to admit in the logical Run.
     Tool(lash_core::session::ToolInvocation),
     /// A timer from an unawaited `sleep(ms)`.
     Timer { duration_ms: u64 },
