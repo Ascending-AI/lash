@@ -458,19 +458,32 @@ impl AppState {
     /// moment of creation.
     pub(crate) fn session_creation(&self) -> Result<lash::SessionCreation, serde_json::Error> {
         let selection = self.selected_llm_profile();
-        Ok(lash::SessionCreation::root(
-            self.session_defaults
-                .clone()
-                .model(selection.key())
-                .reasoning(selection.reasoning())
-                .plugin(
-                    lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                    lash::rlm::RlmCreateExtras {
-                        prompt: Some(workbench_rlm_prompt(&self.mail_world)),
+        let spec = self
+            .session_defaults
+            .clone()
+            .model(selection.key())
+            .reasoning(selection.reasoning());
+        let spec = match crate::session_protocol::selected().map_err(serde::de::Error::custom)? {
+            crate::session_protocol::SessionProtocol::Standard => spec.plugin(
+                lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+                lash::standard::StandardTurnOptions {
+                    prompt: Some(lash::standard::StandardPrompt {
+                        intro: Some("You are the Agent Workbench assistant.".to_owned()),
+                        context: workbench_prompt_context(&self.mail_world),
                         ..Default::default()
-                    },
-                )?,
-        ))
+                    }),
+                    ..Default::default()
+                },
+            )?,
+            crate::session_protocol::SessionProtocol::Rlm => spec.plugin(
+                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash::rlm::RlmCreateExtras {
+                    prompt: Some(workbench_rlm_prompt(&self.mail_world)),
+                    ..Default::default()
+                },
+            )?,
+        };
+        Ok(lash::SessionCreation::root(spec))
     }
 }
 
@@ -525,6 +538,16 @@ pub(crate) async fn record_accounts_context_for_session(
     let config = session.admin().config();
     loop {
         let context = workbench_prompt_context(&state.mail_world);
+        let transaction = match crate::session_protocol::selected().map_err(AppError::internal)? {
+            crate::session_protocol::SessionProtocol::Standard => {
+                lash::config::ConfigTransaction::of(lash::standard::SetStandardPromptContext {
+                    context,
+                })
+            }
+            crate::session_protocol::SessionProtocol::Rlm => {
+                lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext { context })
+            }
+        };
         let revision = config.revision().await.map_err(|error| {
             state.session_admission_error(&session.session_id(), "accounts.context", error)
         })?;
@@ -534,7 +557,7 @@ pub(crate) async fn record_accounts_context_for_session(
                     format!("accounts-context:{}", uuid::Uuid::new_v4()),
                     revision,
                 ),
-                lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext { context }),
+                transaction,
             )
             .await
             .map_err(|error| {
