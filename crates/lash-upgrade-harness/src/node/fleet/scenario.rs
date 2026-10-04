@@ -73,6 +73,7 @@ pub trait FleetFixture: Send {
     fn prepare<'a>(&'a mut self, scenario: Scenario, lease: &'a mut CaseLease) -> Step<'a, ()>;
     fn primary(&mut self) -> &mut dyn HostAdapter;
     fn follower(&mut self) -> &mut dyn HostAdapter;
+    fn observed_work(&mut self) -> Step<'_, Option<WorkIdentity>>;
     fn barrier<'a>(
         &'a mut self,
         work: &'a WorkIdentity,
@@ -137,9 +138,9 @@ pub async fn execute(
     // Capture available failed-invocation facts before reaping. Failure to
     // collect is retained as a failure too, never converted into an empty proof.
     let failed_capture = if result.is_err() {
-        match fixture.primary().transcript() {
-            Ok(observations) => match observations.first() {
-                Some(observation) => match fixture.capture(&observation.work, None).await {
+        match fixture.observed_work().await {
+            Ok(observation) => match observation {
+                Some(work) => match fixture.capture(&work, None).await {
                     Ok(evidence) => serde_json::to_vec_pretty(&evidence)
                         .map_err(anyhow::Error::from)
                         .and_then(|bytes| {

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::task::JoinSet;
 
 use crate::e2e::case::Channel;
@@ -17,6 +17,7 @@ use crate::node::tools::{BodyResult, BodyStep, FixtureProtocol, ToolBodies, Tool
 use crate::node::{RestateArgs, ServeReady, StoreArgs};
 use crate::restate_view::RestateView;
 
+mod control;
 mod receiver;
 
 #[derive(Clone, Debug, Args)]
@@ -259,10 +260,7 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
                     let state = state.clone();
                     commands.spawn(async move {
                         let (input, mut output) = socket.into_split();
-                        let mut line = String::new();
-                        BufReader::new(input).read_line(&mut line).await?;
-                        ensure!(line.len() < 1024*1024, "fleet control request exceeds limit");
-                        let command = serde_json::from_str(&line)?;
+                        let Some(command) = control::read_command(BufReader::new(input)).await? else { return Ok(()); };
                         let answer = command_host(&state, command).await.map_err(|error| format!("{error:#}"));
                         let mut bytes = serde_json::to_vec(&answer)?;
                         bytes.push(b'\n');

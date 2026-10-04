@@ -687,6 +687,52 @@ impl FleetFixture for RuntimeFixture {
     fn follower(&mut self) -> &mut dyn HostAdapter {
         &mut self.follower
     }
+    fn observed_work(&mut self) -> Step<'_, Option<WorkIdentity>> {
+        Box::pin(async move {
+            if let Some(observation) = self.primary.observations.first() {
+                return Ok(Some(observation.work.clone()));
+            }
+            let Some(delivery) = self.deliveries()?.into_iter().next() else {
+                return Ok(None);
+            };
+            let run = delivery
+                .logical_run
+                .context("actual delivered body has no logical Run")?;
+            let session = lash::SessionId::parse(format!("{}-fleet", self.namespace))?;
+            let inputs: Vec<String> = sqlx::query_scalar(
+                "SELECT input_id FROM lash_session_run_inputs WHERE session_id=$1 AND run=$2",
+            )
+            .bind(session.as_str())
+            .bind(run.as_str())
+            .fetch_all(self.pool.as_ref().context("observed body has no PG pool")?)
+            .await?;
+            ensure!(
+                inputs.len() == 1,
+                "actual body does not retain one input binding"
+            );
+            let nodes = self.cluster.lock().await.nodes();
+            let node = nodes.first().context("observed body has no cluster")?;
+            let mut reader = RestateEvidenceReader::new(
+                "fleet".into(),
+                RestateView::new(&node.admin_url, &self.namespace)?,
+                7,
+            );
+            Ok(Some(
+                reader
+                    .bind_public_run(
+                        self.stores
+                            .as_ref()
+                            .context("observed body has no PG stores")?
+                            .session_store_factory()
+                            .as_ref(),
+                        &session,
+                        &run,
+                        inputs[0].clone(),
+                    )
+                    .await?,
+            ))
+        })
+    }
     fn barrier<'a>(
         &'a mut self,
         work: &'a WorkIdentity,
@@ -1002,7 +1048,8 @@ pub async fn run_named(scenario: Scenario, name: &str) -> Result<()> {
         &mut fixture,
     )
     .await;
-    let executed = usize::from(!fixture.primary.observations.is_empty());
+    let executed =
+        usize::from(!fixture.primary.observations.is_empty() || !fixture.deliveries()?.is_empty());
     let receipt = crate::e2e::evidence::CaseReceipt {
         evidence: match &result {
             Ok(proof) => {
