@@ -293,7 +293,7 @@ pub struct RunJournalEntry {
 
 /// An independent X receipt. Its place in the Run is chosen by the recorded
 /// selection schedule, rather than by the order its body finishes on replay.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunAttemptEntry {
     pub call_id: ToolCallId,
@@ -521,6 +521,41 @@ impl RunLedger {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Capacity held by admitted calls whose consumer still needs the result.
+    #[must_use]
+    pub fn reserved_calls(&self) -> u32 {
+        self.calls.values().filter(|call| !call.consumed).count() as u32
+    }
+
+    /// Issued local attempts or retry timers not yet accepted by the Run.
+    #[must_use]
+    pub fn unacknowledged_local(&self) -> usize {
+        self.calls
+            .values()
+            .filter(|call| call.outstanding.is_some() || call.retry_timer.is_some())
+            .count()
+    }
+
+    /// Launched starts whose policy and consumer hold have not discharged.
+    #[must_use]
+    pub fn owed_cancels(&self) -> Vec<StartKey> {
+        self.calls
+            .values()
+            .filter_map(|call| match &call.start {
+                Some((key, StartProgress::Launched)) => Some(key.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Fence predecessor publication as soon as the successor is admitted.
+    pub fn admit_successor(&mut self, successor: SegmentOrdinal) {
+        self.latest_segment = Some(
+            self.latest_segment
+                .map_or(successor, |latest| latest.max(successor)),
+        );
     }
 
     /// Apply `record`, appended by `active`, all of it or none of it.

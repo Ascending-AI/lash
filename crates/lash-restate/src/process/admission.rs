@@ -140,6 +140,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// accepts presentation fallback before publishing the attempt stream.
 /// Epoch 20 (FIG-4921) records callback session contributions and publishes
 /// catalog membership and graph appends only after their step acknowledges.
+/// Epoch 21 (FIG-4890) records the admitted environment and adopts complete
+/// Run receipts under the successor segment before any new publication.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -153,14 +155,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 20;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 21;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 21;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 22;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

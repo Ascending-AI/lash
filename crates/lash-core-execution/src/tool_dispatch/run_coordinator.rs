@@ -39,6 +39,7 @@
 use std::collections::BTreeMap;
 
 mod aggregate;
+mod continuation;
 mod deferred;
 mod drain;
 mod parallel;
@@ -386,6 +387,7 @@ async fn prepare_admitted_call(
     };
     let request = SingletonPreparedRequest {
         arguments: call.arguments.clone(),
+        environment: call.environment.clone(),
         prepared: handlers.prepare(call).await?,
         state_snapshot: snapshot
             .as_ref()
@@ -679,6 +681,7 @@ pub struct RunCoordinator<'a> {
     waiting: BTreeMap<ToolCallId, Waiting<'a>>,
     process_sources: BTreeMap<ToolCallId, AwaitEventKey>,
     pending_starts: BTreeMap<ToolCallId, (Waiting<'a>, AwaitEventKey)>,
+    environment: Option<crate::ProcessExecutionEnvRef>,
 }
 
 impl<'a> RunCoordinator<'a> {
@@ -720,6 +723,7 @@ impl<'a> RunCoordinator<'a> {
             waiting: BTreeMap::new(),
             process_sources: BTreeMap::new(),
             pending_starts: BTreeMap::new(),
+            environment: None,
         }
     }
 
@@ -1047,7 +1051,10 @@ impl<'a> RunCoordinator<'a> {
                     member.tool_name == tool_name && request.isolation.is_some()
                 })
             })?;
-        for (call, (member, _)) in calls.iter().zip(&admitted) {
+        for (call, (member, request)) in calls.iter().zip(&admitted) {
+            if self.environment.is_none() {
+                self.environment.clone_from(&request.environment);
+            }
             if member.declaration.may_defer && member.selection() == BeforeSelection::Execute {
                 let key = journal
                     .scoped
@@ -1434,20 +1441,6 @@ pub enum RunCutRefusal {
     AdmissionFrozen { reason: crate::BoundaryReason },
 }
 
-/// The acknowledged records a boundary may hand to continuation publication.
-/// Canonical material and resolved state remain in their original receipts.
-/// Pending Deferred sources remain descriptors in those records; no local
-/// handle, body, socket or borrowed context is exported.
-/// Turn and process owners retain their separate publication transactions.
-#[derive(Clone, Debug)]
-pub struct RunCutSnapshot {
-    pub owner: EffectOpener,
-    pub segment: SegmentOrdinal,
-    pub cut: crate::tool_run::Cut,
-    pub entries: Vec<RunJournalEntry>,
-    pub attempts: Vec<crate::tool_run::RunAttemptEntry>,
-}
-
 impl RunCoordinator<'_> {
     fn begin_frame(&mut self) -> Result<(), SingletonRunError> {
         if self.active_frame || self.faulted {
@@ -1468,72 +1461,5 @@ impl RunCoordinator<'_> {
         {
             self.faulted = true;
         }
-    }
-
-    /// Freeze admission at this boundary, retaining the first requested reason.
-    /// Requesting a physical cut never closes or cancels the logical Run.
-    pub fn request_cut(&mut self, reason: crate::BoundaryReason) -> crate::tool_run::Cut {
-        let cut = *self
-            .cut
-            .get_or_insert_with(|| crate::tool_run::Cut::request(reason));
-        let observed = cut.observe(
-            self.pending
-                .len()
-                .saturating_add(self.pending_starts.len())
-                .saturating_add(usize::from(self.active_frame || self.faulted)),
-        );
-        self.cut = Some(observed);
-        observed
-    }
-
-    /// The current phase, derived from the handles still owed durable acceptance.
-    #[must_use]
-    pub fn cut(&self) -> Option<crate::tool_run::Cut> {
-        self.cut.map(|cut| {
-            cut.observe(
-                self.pending
-                    .len()
-                    .saturating_add(self.pending_starts.len())
-                    .saturating_add(usize::from(self.active_frame || self.faulted)),
-            )
-        })
-    }
-
-    /// Poll issued work through durable acceptance, without draining protected
-    /// declarations or awaiting Deferred sources. Registered retry work belongs
-    /// to the already admitted calls and keeps its recorded schedule.
-    ///
-    /// # Errors
-    /// A missing request or a typed execution refusal. An invocation fault
-    /// exports nothing; its original engine journal owns recovery.
-    pub async fn quiesce(&mut self) -> Result<RunCutSnapshot, SingletonRunError> {
-        if self.cut.is_none() {
-            return Err(RunCutRefusal::NotRequested.into());
-        }
-        while !self.pending.is_empty() {
-            self.progress().await?;
-        }
-        self.capture_cut().map_err(Into::into)
-    }
-
-    /// Capture only durable receipts. This does not publish successor ownership.
-    ///
-    /// # Errors
-    /// A missing request or an issued handle still awaiting durable acceptance.
-    pub fn capture_cut(&self) -> Result<RunCutSnapshot, RunCutRefusal> {
-        if self.faulted || self.active_frame {
-            return Err(RunCutRefusal::InvocationFailed);
-        }
-        let cut = self.cut().ok_or(RunCutRefusal::NotRequested)?;
-        if cut.phase != crate::tool_run::CutPhase::Capturable {
-            return Err(RunCutRefusal::NotQuiescent);
-        }
-        Ok(RunCutSnapshot {
-            owner: self.journal.owner.clone(),
-            segment: self.journal.segment,
-            cut,
-            entries: self.journal.entries.clone(),
-            attempts: self.attempts.clone(),
-        })
     }
 }

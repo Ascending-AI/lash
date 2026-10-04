@@ -19,11 +19,14 @@ use lash_sansio::BoundaryReason;
 use serde::{Deserialize, Serialize};
 
 use super::retention::{MaterialHolder, RetainedBundle};
-use super::run_event::{RunEventOrdinal, RunLifecycle, SegmentOrdinal};
-use super::source_seal::SourceSubscription;
+use super::run_event::{
+    RunAttemptEntry, RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger, RunLifecycle,
+    SegmentOrdinal,
+};
+use super::source_seal::{SourceDescriptor, SourceSubscription};
 use super::state_command::StateFrontier;
 use crate::effect_opener::EffectOpener;
-use crate::process_identity::StartKey;
+use crate::process_identity::{ProcessExecutionEnvRef, StartKey};
 
 /// Where a requested cut stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -88,6 +91,19 @@ pub struct RunTransfer {
     /// Every event below this ordinal transfers; the successor appends at
     /// it.
     pub events: RunEventOrdinal,
+    /// Acknowledged admission, selection, decision, drain and consumption facts.
+    pub entries: Vec<RunJournalEntry>,
+    /// Acknowledged independent X receipts, in recorded selection order.
+    pub attempts: Vec<RunAttemptEntry>,
+    /// Original journal references, resolved through the retained bundles by
+    /// owner, role and digest. Relocation does not change their identity.
+    pub material_aliases: Vec<super::material::MaterialRef>,
+    /// The sources' immutable resolver and cancellation authority.
+    pub sources: Vec<SourceDescriptor>,
+    /// The environment admitted by this logical Run, unchanged by a cut.
+    pub environment: Option<ProcessExecutionEnvRef>,
+    /// Published namespaces and their applied frontiers, including initialization.
+    pub plugin_state: Option<crate::plugin_state::PluginState>,
     /// Every unconsumed payload, in bundles retained under the transferring
     /// segment's lease before publication. The successor acquires its own
     /// lease on each before the predecessor releases.
@@ -110,6 +126,14 @@ pub struct RunTransfer {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ContinuationRefusal {
+    #[error("the captured Run records were refused: {cause}")]
+    Records { cause: RunEventRefusal },
+    #[error("the captured event frontier differs from its acknowledged records")]
+    EventFrontier,
+    #[error("the capture still owes a local attempt acknowledgement")]
+    UnacknowledgedAttempt,
+    #[error("the source descriptors do not belong to this Run")]
+    ForeignSource,
     #[error("the cut is not capturable yet")]
     NotQuiescent,
     #[error("material is journal-local and cannot cross segments")]
@@ -127,6 +151,24 @@ pub enum ContinuationRefusal {
 }
 
 impl RunTransfer {
+    /// Rebuild the fold from acknowledged records, without executing a body.
+    ///
+    /// # Errors
+    /// A malformed event stream or an event frontier that lost records.
+    pub fn ledger(&self) -> Result<RunLedger, ContinuationRefusal> {
+        let mut ledger = RunLedger::new(self.owner.clone());
+        for entry in &self.entries {
+            ledger
+                .append(entry.record.segment, &entry.record)
+                .map_err(|cause| ContinuationRefusal::Records { cause })?;
+        }
+        if ledger.next_ordinal() != self.events {
+            return Err(ContinuationRefusal::EventFrontier);
+        }
+        ledger.admit_successor(self.state.owner_segment);
+        Ok(ledger)
+    }
+
     /// Check a transfer captured under `cut`.
     ///
     /// # Errors
@@ -149,6 +191,26 @@ impl RunTransfer {
             subscription.owner != self.owner || subscription.segment != self.from
         }) {
             return Err(ContinuationRefusal::ForeignSubscription);
+        }
+        if self.sources.iter().any(|source| source.owner != self.owner) {
+            return Err(ContinuationRefusal::ForeignSource);
+        }
+        if self.material_aliases.iter().any(|alias| {
+            !self
+                .material
+                .iter()
+                .flat_map(|bundle| &bundle.references)
+                .any(|reference| {
+                    reference.owner == alias.owner
+                        && reference.role == alias.role
+                        && reference.digest == alias.digest
+                })
+        }) {
+            return Err(ContinuationRefusal::UnretainedMaterial);
+        }
+        let ledger = self.ledger()?;
+        if ledger.unacknowledged_local() != 0 {
+            return Err(ContinuationRefusal::UnacknowledgedAttempt);
         }
         Ok(())
     }

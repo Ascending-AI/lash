@@ -1282,7 +1282,13 @@ fn transfer() -> RunTransfer {
         owner: opener(),
         reason: lash_sansio::BoundaryReason::HandOver,
         from: SegmentOrdinal(0),
-        events: RunEventOrdinal(7),
+        events: RunEventOrdinal(0),
+        entries: Vec::new(),
+        attempts: Vec::new(),
+        material_aliases: Vec::new(),
+        sources: Vec::new(),
+        environment: None,
+        plugin_state: None,
         material: vec![leased_bundle(segment_holder(0))],
         subscriptions: vec![SourceSubscription {
             source: source_key(&call_id),
@@ -1731,4 +1737,142 @@ fn presentation_plans_record_explicit_empty_and_decision_only_callbacks() {
             Err(StateCommandRefusal::DecisionOnly)
         );
     }
+}
+
+/// L09: successor admission fences the predecessor before its first append.
+#[test]
+fn l09_adoption_fences_predecessor_before_the_first_successor_record() {
+    let adopted = transfer()
+        .adopt(&opener(), RunLifecycle::Live, SegmentOrdinal(1))
+        .unwrap();
+    let mut ledger = adopted.ledger().unwrap();
+    let record = RunRecord {
+        trace: None,
+        segment: SegmentOrdinal(0),
+        first: ledger.next_ordinal(),
+        events: vec![RunEvent::Lifecycle {
+            state: RunLifecycle::Closing,
+        }],
+    };
+    assert_eq!(
+        ledger.append(SegmentOrdinal(0), &record),
+        Err(RunEventRefusal::StaleSegment {
+            latest: 1,
+            found: 0
+        })
+    );
+}
+
+/// L09: the codec retains prior consumption, a protected final and an
+/// unranked source, with their receipts, capacity and admitted authority.
+#[test]
+fn l09_capture_rebuilds_the_complete_acknowledged_run() {
+    let prior = call("prior-cell");
+    let committed = call("current-cell-final");
+    let mut pending = call("unranked-source");
+    pending.declaration = ToolDeclaration::deferring();
+    let source = SourceDescriptor {
+        source: source_key(&pending.call_id),
+        call_id: pending.call_id.clone(),
+        owner: opener(),
+        resolver: revision("tools"),
+        authority: SourceAuthority::ExternalCompletion,
+        cancel: ExternalCancelPolicy::CancelExternalWork,
+    };
+    let events = vec![
+        RunEvent::Admitted {
+            round: round(vec![prior.clone(), committed.clone(), pending.clone()]),
+        },
+        done(&prior.call_id, 1),
+        decided(&prior.call_id, 1, final_of(1, false)),
+        RunEvent::Presented {
+            call_id: prior.call_id.clone(),
+            presentation: None,
+        },
+        RunEvent::Consumed {
+            call_id: prior.call_id.clone(),
+        },
+        RunEvent::Incorporated {
+            call_id: prior.call_id.clone(),
+        },
+        done(&committed.call_id, 1),
+        decided(&committed.call_id, 2, final_of(1, true)),
+        RunEvent::AttemptRecorded {
+            call_id: pending.call_id.clone(),
+            attempt: attempt(1),
+            result: AttemptResult::Deferred {
+                source: source.source.clone(),
+            },
+        },
+    ];
+    let mut capture = transfer();
+    capture.entries = vec![RunJournalEntry {
+        record: RunRecord {
+            trace: None,
+            segment: SegmentOrdinal(0),
+            first: RunEventOrdinal(0),
+            events,
+        },
+        materials: Vec::new(),
+        state: Vec::new(),
+    }];
+    capture.events = RunEventOrdinal(capture.entries[0].record.events.len() as u64);
+    capture.attempts = vec![RunAttemptEntry {
+        call_id: pending.call_id.clone(),
+        attempt: attempt(1),
+        result: AttemptResult::Deferred {
+            source: source.source.clone(),
+        },
+        materials: Vec::new(),
+    }];
+    capture.material_aliases = vec![
+        run_material(MaterialRole::PreparedRequest),
+        run_material(MaterialRole::AttemptOutput),
+    ];
+    let artifact = capture.material[0].artifact.clone();
+    capture.material[0]
+        .references
+        .push(capture.material_aliases[0].retained(artifact));
+    capture.sources = vec![source.clone()];
+    capture.environment = Some(crate::process_identity::ProcessExecutionEnvRef::new(
+        "admitted-process-environment",
+    ));
+    capture.reserved_calls = 2;
+    capture.subscriptions = vec![SourceSubscription {
+        source: source.source.clone(),
+        owner: opener(),
+        segment: SegmentOrdinal(0),
+    }];
+    capture
+        .check_capture(&Cut::request(capture.reason).observe(0))
+        .unwrap();
+    let encoded = serde_json::to_vec(&capture).unwrap();
+    let decoded: RunTransfer = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded, capture);
+    let adopted = decoded
+        .adopt(&opener(), RunLifecycle::Live, SegmentOrdinal(1))
+        .unwrap();
+    let ledger = adopted.ledger().unwrap();
+    assert_eq!(ledger.next_ordinal(), capture.events);
+    assert!(ledger.consumed(&prior.call_id));
+    assert!(!ledger.consumed(&committed.call_id));
+    assert!(!ledger.drain_frontier_open(3));
+    assert_eq!(ledger.reserved_calls(), 2);
+    assert_eq!(ledger.unacknowledged_local(), 0);
+    assert_eq!(adopted.sources, vec![source]);
+    assert_eq!(adopted.environment, capture.environment);
+    assert_eq!(adopted.subscriptions[0].segment, SegmentOrdinal(1));
+    let mut unfinished = capture.clone();
+    unfinished.entries[0].record.events.pop();
+    unfinished.events.0 -= 1;
+    assert_eq!(
+        unfinished.check_capture(&Cut::request(unfinished.reason).observe(0)),
+        Err(ContinuationRefusal::UnacknowledgedAttempt)
+    );
+    let mut missing = capture;
+    missing.entries.clear();
+    assert_eq!(
+        missing.ledger().unwrap_err(),
+        ContinuationRefusal::EventFrontier
+    );
 }

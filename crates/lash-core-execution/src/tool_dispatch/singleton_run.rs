@@ -109,6 +109,7 @@ pub struct SingletonToolCall {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SingletonPreparedRequest {
     pub arguments: serde_json::Value,
+    pub environment: Option<ProcessExecutionEnvRef>,
     pub prepared: serde_json::Value,
     /// The plugin namespace at admission, fixed across crash redelivery.
     pub state_snapshot: Option<Arc<crate::plugin::PluginNamespaceState>>,
@@ -474,6 +475,8 @@ pub enum SingletonDrift {
 /// Why a singleton stopped before it ended. None of these runs a body.
 #[derive(Debug, thiserror::Error)]
 pub enum SingletonRunError {
+    #[error(transparent)]
+    Continuation(#[from] crate::tool_run::ContinuationRefusal),
     #[error(transparent)]
     Cut(#[from] super::run_coordinator::RunCutRefusal),
     /// A source seal named material whose retention or authority refused the read.

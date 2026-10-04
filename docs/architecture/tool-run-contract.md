@@ -60,9 +60,14 @@ progress frame. A body proposal is never an acknowledgement. Registered
 retry work retains its existing schedule and a pending Deferred source
 needs no local waiter.
 
-`RunCutSnapshot` exports the original journal and attempt receipts, including
-canonical material, resolved state, unconsumed decisions, pending Deferred
-sources and declared-start obligations. It carries no native handle and
+`RunTransfer` is the shared capture and adoption codec. It carries the
+acknowledged journal and independent attempt receipts, resolved state and
+namespace frontiers, unconsumed decisions, source authority, admitted
+environment, held capacity and declared-start obligations. `retain_cut`
+leases canonical material before publication and removes payload bytes from
+transferred receipts. `RunCoordinator::adopt` acquires the successor lease,
+rebuilds the recorded fold and obligations, and fences predecessor append
+before the successor writes its first record. It carries no native handle and
 performs no Closing, cancellation, reroute or successor publication. Turn
 and process continuation integration belongs to FIG-4739 and FIG-4890;
 source transfer belongs to FIG-4891. This seam does not activate production

@@ -26,9 +26,7 @@ pub use pending_resolver::{
     consumer_hold_owner, discharge_abandoned_call, finish_parked_wait,
     model_visible_intent_outcomes,
 };
-pub use run_coordinator::{
-    DecidedCall, RunAggregateOutcome, RunCoordinator, RunCutRefusal, RunCutSnapshot,
-};
+pub use run_coordinator::{DecidedCall, RunAggregateOutcome, RunCoordinator, RunCutRefusal};
 pub use singleton_run::{
     BeforeCheckReply, IsolatedProcessDescriptor, RecordedIsolatedStart, RunAttemptHandle,
     RunAttemptStep, RunRetryTimer, SingletonAttempt, SingletonBodyOutcome, SingletonCapture,
