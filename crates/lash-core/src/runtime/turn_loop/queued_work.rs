@@ -108,12 +108,10 @@ impl LashRuntime {
         opts: impl Into<QueuedTurnOptions<'a>>,
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
         let opts = opts.into();
-        if self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .is_none()
-        {
+        // The store binding exists before admission publishes plugins and
+        // materializes the session. That pending publication cannot hide
+        // the durable queue from the shift that performs it.
+        if !self.is_store_backed() {
             return Ok(QueuedTurnDrain::Empty(
                 EmptyQueuedDrainReason::NoDurableQueue,
             ));

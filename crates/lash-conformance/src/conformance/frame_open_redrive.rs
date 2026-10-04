@@ -1299,7 +1299,6 @@ impl LawSession {
             .await
             .expect("the tier's runner ran the shift")
             .unwrap_or_else(|error| panic!("the shift runs: {error:?}"))
-            .ran()
             .expect("the shift executes its run")
             .outcome
     }
