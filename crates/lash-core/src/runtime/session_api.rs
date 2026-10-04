@@ -740,16 +740,12 @@ impl LashRuntime {
         handle: crate::runtime::SessionCommandSettlementHandle,
         previous_policy: Option<SessionPolicy>,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .ok_or_else(|| {
-                RuntimeError::new(
-                    RuntimeErrorCode::StoreCommitFailed,
-                    "accepted session command lost its persistent store",
-                )
-            })?;
+        let store = self.services.store.clone().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "accepted session command lost its persistent store",
+            )
+        })?;
         let still_pending = store
             .list_queued_work()
             .await
@@ -931,11 +927,7 @@ impl LashRuntime {
             if let Err(fault) = self.reload_invalidated_resident_session_state().await {
                 return Err(CommandDrainStop::Headless(fault));
             }
-            let Some(store) = self
-                .session
-                .as_ref()
-                .and_then(|session| session.history_store())
-            else {
+            let Some(store) = self.services.store.clone() else {
                 return Ok(None);
             };
             let batches = execute_session_command_run_read(
@@ -1153,11 +1145,7 @@ impl LashRuntime {
             _ => {}
         }
         let effect_controller = effect_controller.controller();
-        let has_durable_store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .is_some();
+        let has_durable_store = self.services.store.is_some();
         if !has_durable_store
             || !super::commit_admission::requires_local_commit_admission(effect_controller)
         {
