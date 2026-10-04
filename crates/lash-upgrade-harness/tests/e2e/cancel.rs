@@ -13,6 +13,31 @@ use lash_upgrade_harness::e2e::evidence::{DecodedRecord, Evidence};
 use lash_upgrade_harness::e2e::host::{HostCommand, HostKind};
 use lash_upgrade_harness::e2e::provider::ProviderKind;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s08_pre_final() -> Result<()> {
+    super::h2::run(super::h2::Row::PreFinal).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s09_before_intent() -> Result<()> {
+    super::h2::run(super::h2::Row::BeforeIntent).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s09_after_intent() -> Result<()> {
+    super::h2::run(super::h2::Row::AfterIntent).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s10_empty_middle_rank() -> Result<()> {
+    super::h2::run(super::h2::Row::Ranks).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s11_inline_loser() -> Result<()> {
+    super::h2::run(super::h2::Row::InlineLoser).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s11_deferred_loser() -> Result<()> {
+    super::h2::run(super::h2::Row::DeferredLoser).await
+}
+
 pub fn spec(id: &str, store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Result<CaseSpec> {
     let (rules, channel) = match id {
         "S08" => (vec!["R1", "R5", "L03"], Channel::Standard),

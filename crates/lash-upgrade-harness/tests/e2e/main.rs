@@ -3,6 +3,7 @@
 mod fleet;
 mod plugin_upgrade;
 mod cancel;
+mod h2;
 mod tools;
 use anyhow::{Context, Result, ensure};
 use lash_upgrade_harness::e2e::control::process::{

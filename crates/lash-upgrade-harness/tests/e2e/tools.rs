@@ -24,6 +24,19 @@ use lash_upgrade_harness::node::tools::ToolDelivery;
 /// its cloned clients; it does not borrow an adapter while an effect is held.
 pub type Snapshot = Arc<dyn Fn(WorkIdentity) -> Step<'static, Evidence> + Send + Sync>;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s01_agent_service_singleton() -> Result<()> {
+    super::h2::run(super::h2::Row::Singleton).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s02_cold_partial() -> Result<()> {
+    super::h2::run(super::h2::Row::Partial).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s05_opposite_batch_order() -> Result<()> {
+    super::h2::run(super::h2::Row::Batch).await
+}
+
 pub struct Scenario<'a> {
     pub host: &'a mut dyn HostAdapter,
     pub control: &'a mut dyn Control,
@@ -254,8 +267,13 @@ impl Scenario<'_> {
                     && outcome.work.run == self.work()?.run,
                 "follow returned another input/Run"
             );
-            let remote: lash_remote_protocol::RemoteSendOutcome =
-                serde_json::from_value(outcome.output.clone())?;
+            let remote: lash_remote_protocol::RemoteSendOutcome = serde_json::from_value(
+                outcome
+                    .output
+                    .get("outcome")
+                    .cloned()
+                    .ok_or_else(|| anyhow!("Attach has no typed outcome"))?,
+            )?;
             let lash_remote_protocol::RemoteSendOutcome::Settled {
                 report, input_id, ..
             } = remote

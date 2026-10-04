@@ -1,0 +1,530 @@
+//! Controller wiring for H2. Public admission supplies input/run identities;
+//! introspection supplies invocation identities and the original journal bytes.
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result, bail, ensure};
+use lash_upgrade_harness::e2e::{
+    Step,
+    case::{ArtifactIdentity, CaseLease, Channel, StoreKind},
+    cluster::{ClusterControl, LocalCluster},
+    control::{
+        Barrier, BarrierKind, BarrierProof, CleanupReceipt, Control, CoreControl, Fault,
+        FaultReceipt, FileBarriers, ToolControl, WorkIdentity, callback::BodyCallbacks,
+    },
+    evidence::{Evidence, EvidenceReader},
+    host::{HostAdapter, HostCommand, HostObservation, HostReady},
+    host_adapters::agent_service::AgentServiceHost,
+};
+use lash_upgrade_harness::node::tools::deliveries;
+use lash_upgrade_harness::restate_view::RestateView;
+use serde_json::{Value, json};
+use tokio::sync::Mutex;
+
+use super::tools::{Scenario, Snapshot};
+
+#[derive(Clone, Copy)]
+pub enum Row {
+    Singleton,
+    Partial,
+    Batch,
+    PreFinal,
+    BeforeIntent,
+    AfterIntent,
+    Ranks,
+    InlineLoser,
+    DeferredLoser,
+}
+impl Row {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Singleton => "S01",
+            Self::Partial => "S02",
+            Self::Batch => "S05",
+            Self::PreFinal => "S08",
+            Self::BeforeIntent | Self::AfterIntent => "S09",
+            Self::Ranks => "S10",
+            Self::InlineLoser | Self::DeferredLoser => "S11",
+        }
+    }
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Singleton => "s01",
+            Self::Partial => "s02",
+            Self::Batch => "s05",
+            Self::PreFinal => "s08",
+            Self::BeforeIntent => "s09-before-intent",
+            Self::AfterIntent => "s09-after-intent",
+            Self::Ranks => "s10",
+            Self::InlineLoser => "s11-inline",
+            Self::DeferredLoser => "s11-deferred",
+        }
+    }
+    fn labels(self) -> &'static [&'static str] {
+        match self {
+            Self::Singleton => &["echo"],
+            Self::Partial => &["a", "b"],
+            Self::Batch => &["a", "b", "c"],
+            Self::PreFinal | Self::BeforeIntent | Self::AfterIntent => &["intent"],
+            Self::Ranks => &["rank_one", "rank_two", "rank_three"],
+            Self::InlineLoser | Self::DeferredLoser => &["winner", "loser"],
+        }
+    }
+    fn receiver(self) -> bool {
+        matches!(
+            self,
+            Self::PreFinal | Self::BeforeIntent | Self::AfterIntent | Self::Ranks
+        )
+    }
+}
+
+struct Shared {
+    host: Mutex<AgentServiceHost>,
+    view: RestateView,
+    callbacks: Mutex<BodyCallbacks>,
+    directory: PathBuf,
+    delivery: PathBuf,
+    deadline: Instant,
+    row: Row,
+    admitted: Mutex<Option<WorkIdentity>>,
+    receiver: Mutex<Option<String>>,
+    ready: Mutex<Option<HostReady>>,
+}
+impl Shared {
+    async fn journals(&self, work: &WorkIdentity) -> Result<Evidence> {
+        #[derive(serde::Deserialize)]
+        struct Invocation {
+            id: String,
+            pinned_service_protocol_version: Option<u32>,
+        }
+        // A case owns one chat and no other turn. Include every actual segment
+        // after handover, retaining each invocation's own journal provenance.
+        let prefix = self.view.service_name("LashTurn").replace('\'', "''");
+        let rows: Vec<Invocation> = self.view.query(&format!(
+            "SELECT id, pinned_service_protocol_version FROM sys_invocation WHERE target_service_name LIKE '{prefix}%' AND target_handler_name = 'run' ORDER BY created_at"
+        )).await?;
+        ensure!(
+            !rows.is_empty(),
+            "actual admitted turn invocation is absent"
+        );
+        let mut evidence = Evidence::empty(self.row.slug().into());
+        for row in rows {
+            ensure!(
+                row.pinned_service_protocol_version == Some(7),
+                "actual segment is not V7"
+            );
+            evidence
+                .journals
+                .extend(self.view.journal(work, &row.id, 7).await?);
+        }
+        for delivery in deliveries(&self.delivery)? {
+            evidence
+                .effects
+                .push(json!({"kind":"h2_body_delivery", "delivery":delivery}));
+        }
+        let host = self.host.lock().await;
+        evidence.effects.extend(host.trace_records()?);
+        if let Some(process) = self.receiver.lock().await.as_ref() {
+            evidence.effects.push(
+                host.control(
+                    reqwest::Method::GET,
+                    &format!("/api/e2e/receiver/{process}/receipts"),
+                    None,
+                )
+                .await?,
+            );
+        }
+        Ok(evidence)
+    }
+    async fn bind(&self, mut work: WorkIdentity) -> Result<WorkIdentity> {
+        #[derive(serde::Deserialize)]
+        struct Invocation {
+            id: String,
+            pinned_service_protocol_version: Option<u32>,
+        }
+        let prefix = self.view.service_name("LashTurn").replace('\'', "''");
+        loop {
+            let rows: Vec<Invocation> = self.view.query(&format!(
+                "SELECT id, pinned_service_protocol_version FROM sys_invocation WHERE target_service_name LIKE '{prefix}%' AND target_handler_name = 'run'"
+            )).await?;
+            if let [row] = rows.as_slice() {
+                ensure!(
+                    row.pinned_service_protocol_version == Some(7),
+                    "admission did not negotiate V7"
+                );
+                work.segment = row.id.clone();
+                break;
+            }
+            ensure!(
+                rows.len() <= 1,
+                "more than one turn existed before admission binding"
+            );
+            ensure!(
+                Instant::now() < self.deadline,
+                "admitted invocation was not observable"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        // Identities below come from the synced body ledger. Holding before
+        // callback binding closes the otherwise unknown-ID admission window.
+        loop {
+            let deliveries = deliveries(&self.delivery)?;
+            if self
+                .row
+                .labels()
+                .iter()
+                .all(|label| deliveries.iter().any(|d| d.label == *label))
+            {
+                let gates = FileBarriers::new(self.directory.clone(), self.deadline)?;
+                for delivery in deliveries {
+                    ensure!(
+                        delivery
+                            .logical_run
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .as_deref()
+                            == Some(work.run.as_str()),
+                        "body belongs to another run"
+                    );
+                    let mut call = work.clone();
+                    call.call = Some(delivery.call_id.to_string());
+                    call.ordinal = Some(delivery.ordinal);
+                    gates.hold(&Barrier {
+                        work: call,
+                        kind: BarrierKind::BodyEntered,
+                    })?;
+                }
+                break;
+            }
+            ensure!(
+                Instant::now() < self.deadline,
+                "actual tool bodies did not enter"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        self.callbacks
+            .lock()
+            .await
+            .bind(work.run.clone(), work.clone())?;
+        *self.admitted.lock().await = Some(work.clone());
+        Ok(work)
+    }
+}
+
+struct Host(Arc<Shared>);
+impl HostAdapter for Host {
+    fn boot<'a>(
+        &'a mut self,
+        artifact: &'a ArtifactIdentity,
+        lease: &'a mut CaseLease,
+    ) -> Step<'a, HostReady> {
+        Box::pin(async move {
+            let mut host = self.0.host.lock().await;
+            let previous = self.0.ready.lock().await.clone();
+            let ready = if previous.is_some() {
+                serde_json::from_value(
+                    host.command(HostCommand::Process {
+                        action: "restart".into(),
+                        input: json!({}),
+                    })
+                    .await?
+                    .output,
+                )?
+            } else {
+                host.boot(artifact, lease).await?
+            };
+            if previous.is_none() && self.0.row.receiver() {
+                let chat = host.command(HostCommand::Process { action:"create-chat".into(),
+                    input:json!({"session":format!("{}-{}",lease.namespace,self.0.row.id().to_lowercase())}) }).await?;
+                let receipt = host
+                    .command(HostCommand::Process {
+                        action: "register-receiver".into(),
+                        input: chat.output,
+                    })
+                    .await?;
+                *self.0.receiver.lock().await = Some(
+                    receipt.output["process_id"]
+                        .as_str()
+                        .context("receiver did not register an actual process")?
+                        .into(),
+                );
+            }
+            *self.0.ready.lock().await = Some(ready.clone());
+            Ok(ready)
+        })
+    }
+    fn command<'a>(&'a mut self, command: HostCommand) -> Step<'a, HostObservation> {
+        Box::pin(async move {
+            let submitting = matches!(command, HostCommand::Submit { .. });
+            let mut observation = self.0.host.lock().await.command(command).await?;
+            if submitting {
+                observation.work = self.0.bind(observation.work).await?;
+            } else if !observation.work.run.is_empty() {
+                let admitted = self.0.admitted.lock().await;
+                let admitted = admitted.as_ref().context("host has no bound admission")?;
+                ensure!(
+                    observation.work.run == admitted.run,
+                    "host observation changed actual logical run"
+                );
+                observation.work.segment = admitted.segment.clone();
+            }
+            Ok(observation)
+        })
+    }
+    fn transcript(&self) -> Result<Vec<HostObservation>> {
+        bail!("use the owned async host transcript in evidence")
+    }
+    fn stop(&mut self) -> Step<'_, Vec<CleanupReceipt>> {
+        Box::pin(async move { self.0.host.lock().await.stop().await })
+    }
+}
+struct Reader(Snapshot);
+impl EvidenceReader for Reader {
+    fn collect<'a>(&'a mut self, work: &'a WorkIdentity) -> Step<'a, Evidence> {
+        (self.0)(work.clone())
+    }
+}
+struct Controller {
+    core: CoreControl,
+    shared: Arc<Shared>,
+    observed: Vec<BarrierProof>,
+}
+impl Control for Controller {
+    fn await_barrier<'a>(&'a mut self, barrier: &'a Barrier) -> Step<'a, BarrierProof> {
+        Box::pin(async move {
+            let proof = self.core.await_barrier(barrier).await?;
+            self.observed.push(proof.clone());
+            Ok(proof)
+        })
+    }
+    fn inject<'a>(&'a mut self, fault: Fault, proof: &'a BarrierProof) -> Step<'a, FaultReceipt> {
+        Box::pin(async move {
+            ensure!(
+                self.observed.iter().any(|p| p.barrier == proof.barrier
+                    && p.artifact == proof.artifact
+                    && p.journal_index == proof.journal_index),
+                "fault lacks an observed exact barrier"
+            );
+            let Fault::KillHost { target } = &fault else {
+                bail!("H2 only kills its owned AgentService host")
+            };
+            let ready = self
+                .shared
+                .ready
+                .lock()
+                .await
+                .clone()
+                .context("no live owned host")?;
+            ensure!(target == &ready.process.role, "kill targeted another host");
+            let killed = self
+                .shared
+                .host
+                .lock()
+                .await
+                .command(HostCommand::Process {
+                    action: "kill-host".into(),
+                    input: json!({}),
+                })
+                .await?;
+            ensure!(
+                killed.output["killed"] == true
+                    && killed.output["reaped"] == true
+                    && killed.output["process"]["pid"] == ready.process.pid,
+                "kill did not reap the actual selected child"
+            );
+            ensure!(
+                killed.output["cleanup"]
+                    .as_array()
+                    .context("kill cleanup missing")?
+                    .iter()
+                    .all(|r| r["closed"] == true),
+                "kill leaked an owned resource"
+            );
+            Ok(FaultReceipt {
+                fault,
+                proof: proof.clone(),
+                target_incarnation: ready.process.incarnation,
+            })
+        })
+    }
+    fn tool<'a>(&'a mut self, command: ToolControl) -> Step<'a, ()> {
+        Box::pin(async move {
+            if let ToolControl::Resolve { work, value } = command {
+                let matches: Vec<_> = deliveries(&self.shared.delivery)?
+                    .into_iter()
+                    .filter(|d| work.call.as_deref() == Some(d.call_id.as_str()))
+                    .collect();
+                ensure!(
+                    matches.len() == 1,
+                    "resolution needs exactly one actual Deferred descriptor"
+                );
+                let key = matches[0]
+                    .completion
+                    .as_ref()
+                    .context("body did not reserve a completion descriptor")?;
+                self.shared
+                    .host
+                    .lock()
+                    .await
+                    .command(HostCommand::Process {
+                        action: "resolve".into(),
+                        input: json!({"key":key,"value":value}),
+                    })
+                    .await?;
+                Ok(())
+            } else {
+                self.core.tool(command).await
+            }
+        })
+    }
+}
+
+pub async fn run(row: Row) -> Result<()> {
+    let root = PathBuf::from(std::env::var("LASH_E2E_ARTIFACT_DIR")?);
+    std::fs::create_dir_all(&root)?;
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let mut lease = CaseLease::new(row.slug(), root.join(row.slug()), deadline)?;
+    let base: u16 = std::env::var("LASH_E2E_PORT_BASE")?.parse()?;
+    ensure!(base <= u16::MAX - 20, "private port range overflow");
+    lease.ports = (base..base + 20).collect();
+    let server = super::artifact(
+        "restate-server",
+        std::env::var("LASH_RESTATE_SERVER_BIN")?.into(),
+    )?;
+    let artifact = super::artifact(
+        "agent-service",
+        std::env::var("LASH_AGENT_SERVICE_E2E_BIN")?.into(),
+    )?;
+    let mut cluster = LocalCluster::new(base, deadline);
+    let boot = cluster.boot(&server, 1, &mut lease).await?;
+    let callback_dir = lease.directory.join("barriers");
+    std::fs::create_dir_all(&callback_dir)?;
+    let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, base + 12))?;
+    let callbacks = BodyCallbacks::start(listener, callback_dir.clone(), deadline).await?;
+    let delivery = lease.directory.join("tool-deliveries.jsonl");
+    let fixture = json!({"scenario":row.id(), "delivery_ledger":delivery,
+        "provider_ledger":lease.directory.join("provider.jsonl"), "body_callback_url":callbacks.endpoint,
+        "deferred_loser":matches!(row,Row::DeferredLoser)});
+    let protocol = if matches!(row, Row::Ranks | Row::InlineLoser | Row::DeferredLoser) {
+        "rlm"
+    } else {
+        "standard"
+    };
+    let host = AgentServiceHost::new(
+        boot.nodes[0].ingress_url.clone(),
+        boot.nodes[0].admin_url.clone(),
+        base + 10,
+        base + 11,
+        fixture,
+        callback_dir.clone(),
+    )?
+    .configure(BTreeMap::from([(
+        "AGENT_SERVICE_PROTOCOL".into(),
+        protocol.into(),
+    )]))?;
+    let shared = Arc::new(Shared {
+        host: Mutex::new(host),
+        view: RestateView::new(&boot.nodes[0].admin_url, &lease.namespace)?,
+        callbacks: Mutex::new(callbacks),
+        directory: callback_dir.clone(),
+        delivery,
+        deadline,
+        row,
+        admitted: Mutex::new(None),
+        receiver: Mutex::new(None),
+        ready: Mutex::new(None),
+    });
+    let source = shared.clone();
+    let snapshot: Snapshot = Arc::new(move |work| {
+        let source = source.clone();
+        Box::pin(async move { source.journals(&work).await })
+    });
+    let mut host = Host(shared.clone());
+    let mut control = Controller {
+        core: CoreControl::new(
+            FileBarriers::new(callback_dir, deadline)?,
+            Box::new(Reader(snapshot.clone())),
+        ),
+        shared: shared.clone(),
+        observed: Vec::new(),
+    };
+    let spec = if matches!(row, Row::Singleton | Row::Partial | Row::Batch) {
+        super::tools::spec(
+            row.id(),
+            StoreKind::SqliteFile,
+            vec![server, artifact.clone()],
+        )?
+    } else {
+        super::cancel::spec(
+            row.id(),
+            StoreKind::SqliteFile,
+            vec![server, artifact.clone()],
+        )?
+    };
+    ensure!(
+        (spec.channel == Channel::Rlm) == (protocol == "rlm"),
+        "host protocol differs from case manifest"
+    );
+    spec.validate()?;
+    let mut scenario = Scenario {
+        host: &mut host,
+        control: &mut control,
+        snapshot,
+        artifact: &artifact,
+        lease: &mut lease,
+        ready: None,
+        work: None,
+        proofs: Vec::new(),
+        faults: Vec::new(),
+    };
+    let result = match row {
+        Row::Singleton => super::tools::singleton(&mut scenario, &spec).await,
+        Row::Partial => super::tools::cold_partial(&mut scenario, &spec).await,
+        Row::Batch => super::tools::opposite_order(&mut scenario, &spec).await,
+        Row::PreFinal => super::cancel::pre_final(&mut scenario, &spec).await,
+        Row::BeforeIntent => {
+            super::cancel::post_final(
+                &mut scenario,
+                &spec,
+                super::cancel::ProtectedCut::BeforeIntent,
+            )
+            .await
+        }
+        Row::AfterIntent => {
+            super::cancel::post_final(
+                &mut scenario,
+                &spec,
+                super::cancel::ProtectedCut::AfterIntent,
+            )
+            .await
+        }
+        Row::Ranks => super::cancel::empty_middle_rank(&mut scenario, &spec).await,
+        Row::InlineLoser => super::cancel::live_loser(&mut scenario, &spec, false).await,
+        Row::DeferredLoser => super::cancel::live_loser(&mut scenario, &spec, true).await,
+    };
+    let host_cleanup = host.stop().await;
+    let callback_cleanup = shared.callbacks.lock().await.finish().await;
+    let cluster_cleanup = cluster.finish().await;
+    super::write(
+        &lease.directory.join("result.json"),
+        &json!({"scenario":row.id(),"variant":row.slug(),"selected":1,
+        "executed":1,"passed":usize::from(result.is_ok()),"failed":usize::from(result.is_err()),"not_run":0,
+        "error":result.as_ref().err().map(|e|format!("{e:#}"))}),
+    )?;
+    let mut evidence = result?;
+    evidence.cleanup.extend(host_cleanup?);
+    callback_cleanup?;
+    evidence.cleanup.extend(cluster_cleanup?);
+    ensure!(
+        evidence.cleanup.iter().all(|r| r.closed),
+        "case leaked owned resources"
+    );
+    super::write(&lease.directory.join("evidence.json"), &evidence)?;
+    println!(
+        "H2 {} selected=1 executed=1 passed=1 failed=0 not_run=0",
+        row.slug()
+    );
+    Ok(())
+}
