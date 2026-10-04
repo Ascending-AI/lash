@@ -15,6 +15,92 @@ fn required(name: &str) -> Result<String> {
         .with_context(|| format!("{name} is required; missing setup is not a passing scenario"))
 }
 
+// Each paid workspace/session is independently selectable and counted.
+macro_rules! paid_row {
+    ($name:ident, $row:literal) => {
+        #[test]
+        #[ignore = "optional capped live provider row; controller preflight records absent credentials as NotRun"]
+        fn $name() -> Result<()> {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all().thread_stack_size(8 * 1024 * 1024).build()?
+                .block_on(live_row($row))
+        }
+    };
+}
+paid_row!(s35_file_edit_bugfix, "S35/file-edit-bugfix");
+paid_row!(s35_missing_helper_file, "S35/missing-helper-file");
+paid_row!(s35_config_contract_edit, "S35/config-contract-edit");
+paid_row!(s36_slack_nonce, "S36/slack-nonce");
+paid_row!(s36_workbench_weather, "S36/workbench-weather");
+
+async fn live_row(row: &str) -> Result<()> {
+    use lash_upgrade_harness::e2e::host_adapters::live::{LiveConfig, missing_credentials};
+    let root = PathBuf::from(required("LASH_E2E_HOST_ARTIFACTS")?);
+    ensure!(
+        missing_credentials(&root)?.is_none(),
+        "live row is NotRun; absent credentials cannot pass"
+    );
+    let gate = required("KILN_GATE_ID")?;
+    let port: u16 = required("LASH_E2E_HOST_PORT")?.parse()?;
+    std::fs::create_dir_all(&root)?;
+    let mut lease = CaseLease {
+        gate_id: gate.clone(),
+        namespace: format!("h6-{gate}-{}", row.replace('/', "-")),
+        authority: format!("h6-{gate}"),
+        directory: root,
+        postgres_url: None,
+        ports: (port..port + 7).collect(),
+        deadline: Instant::now() + Duration::from_secs(600),
+        processes: Vec::new(),
+        cleanup: Vec::new(),
+    };
+    let config = LiveConfig {
+        repo: required("LASH_E2E_REPO")?.into(),
+        ingress: required("RESTATE_INGRESS_URL")?,
+        admin: required("RESTATE_ADMIN_URL")?,
+        port,
+        model: required("OPENROUTER_MODEL")?,
+        budget: required("LASH_E2E_LIVE_BUDGET")?.into(),
+        output_token_cap: required("LASH_E2E_OUTPUT_TOKEN_CAP")?.parse()?,
+        python: required("LASH_E2E_PYTHON")?.into(),
+    };
+    let receipt = match row {
+        "S36/slack-nonce" => {
+            config
+                .slack_nonce(
+                    &artifact("SLACK_PLATFORM", "slack-platform")?,
+                    &artifact("SLACK_LIVE", "slack-live")?,
+                    required("LASH_LIVE_E2E_MAX_SPEND_USD")?.parse()?,
+                    &mut lease,
+                )
+                .await?
+        }
+        "S36/workbench-weather" => {
+            config
+                .weather(&artifact("WORKBENCH", "workbench")?, &mut lease)
+                .await?
+        }
+        _ => {
+            config
+                .rlm_row(
+                    row.strip_prefix("S35/").context("unknown paid row")?,
+                    &artifact("RLM_HOST", "rlm-host")?,
+                    &mut lease,
+                )
+                .await?
+        }
+    };
+    ensure!(
+        receipt.row == row && receipt.selected == 1 && receipt.executed == 1,
+        "live collection did not execute its selected row"
+    );
+    ensure!(
+        lease.cleanup.iter().all(|receipt| receipt.closed),
+        "live host lifetime remains open"
+    );
+    Ok(())
+}
+
 fn artifact(prefix: &str, role: &str) -> Result<ArtifactIdentity> {
     Ok(ArtifactIdentity {
         role: role.into(),

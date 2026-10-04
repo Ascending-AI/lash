@@ -71,6 +71,7 @@ impl AgentServiceHost {
                 key.as_str(),
                 "AGENT_SERVICE_PROTOCOL"
                     | "AGENT_SERVICE_PROVIDER_URL"
+                    | "AGENT_SERVICE_RESTATE_ADVERTISE_URL"
                     | "OPENROUTER_API_KEY"
                     | "OPENROUTER_MODEL"
                     | "OPENROUTER_MODEL_VARIANT"
@@ -265,7 +266,12 @@ impl AgentServiceHost {
             .error_for_status()?
             .json()
             .await?;
-        let uri = format!("http://127.0.0.1:{}", self.endpoint_port);
+        let uri = self
+            .environment
+            .get("AGENT_SERVICE_RESTATE_ADVERTISE_URL")
+            .cloned()
+            .unwrap_or_else(|| format!("http://127.0.0.1:{}", self.endpoint_port));
+        let uri = uri.trim_end_matches('/');
         let deployment = listing["deployments"]
             .as_array()
             .context("no deployments")?
