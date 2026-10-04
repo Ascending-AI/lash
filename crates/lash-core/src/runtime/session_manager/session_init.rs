@@ -418,13 +418,12 @@ async fn materialize_session_init(
     let (plugins, plugin_init) = build_session_plugins(current, plan)?;
     let mut initial_state = plan.initial_runtime_state.clone();
     if let Some(init) = plugin_init {
-        // The captured tool state seeds the child's session state so the
-        // shared open path installs it through `install_persisted_tool_state`:
-        // the lost-member report, its trace evidence, and the `Require`
-        // refusal at creation apply to a forked child exactly as they do to a
-        // reopening session (FIG-3367).
+        // The captured tool state travels to the child's first Run, whose
+        // publication installs it through the shared restoration path.
         initial_state.set_tool_state_snapshot(Some(init.tool_state.clone()));
-        initial_state.set_plugin_state(Some(init.plugin_state.clone()));
+        // The creation request owns the captured seed. It is not a persisted
+        // postimage: the child's first Run records and publishes that view
+        // before constructing its capabilities.
     }
     let store_binding = bind_session_store(current, plan).await?;
     // Session creation routes through the same assembler as live open and
@@ -585,6 +584,18 @@ async fn commit_initialized_session(
         .export_persisted_state()
         .await
         .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+    if matches!(
+        plan.protocol_request.plugin_source,
+        crate::SessionPluginSource::ParentFork(_)
+    ) && materialized.runtime.session.is_none()
+    {
+        // Construction retains a creation seed, not a persisted postimage.
+        // Record the forked registry's namespaces only now, so dropping this
+        // deferred runtime cannot discard the child's spawn-time capture.
+        persisted_state.set_plugin_state(Some(
+            materialized.runtime.services.plugins.committed_state()?,
+        ));
+    }
     let operation = super::super::state::boundary_operation(
         &persisted_state.session_id,
         &plan.session_id,

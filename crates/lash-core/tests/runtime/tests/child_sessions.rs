@@ -1,4 +1,6 @@
 use super::*;
+#[path = "../../runtime_support/session_capabilities.rs"]
+mod session_capabilities;
 use lash_core::AttachmentStore as _;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::plugin::PluginSessionRequest;
@@ -125,12 +127,21 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
         .build_session(PluginSessionRequest::creation("root", Default::default()))
         .expect("plugins");
     let runtime_host = test_host_config(&backend);
-    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
+    let store = double_unbound_store(&double).await;
+    create_runtime_fixture_session(
+        store.as_ref(),
+        &SessionId::from("root"),
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the parent fixture session");
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugin_session,
+        session_view(store, "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
-    let mut runtime = LashRuntime::from_embedded_state(
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         runtime_host,
         runtime_services,
@@ -142,6 +153,7 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
     )
     .await
     .expect("runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     set_runtime_provider(&mut runtime, mock_provider(Vec::new()).into_handle());
     let manager = runtime.session_state_service().expect("session manager");
     let lifecycle = runtime
@@ -149,10 +161,17 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
         .expect("session lifecycle");
 
     // Capture before the parent mutates its tool state.
-    let plugin_init = manager
+    let mut plugin_init = manager
         .session_plugin_init(&SessionId::from("root"))
         .await
         .expect("plugin init");
+    plugin_init
+        .plugin_state
+        .plugins
+        .get_mut("memory_probe")
+        .expect("captured namespace")
+        .values
+        .insert("spawn_time".into(), json!(7));
 
     let mut snapshot = manager
         .tool_state(&SessionId::from("root"))
@@ -179,7 +198,15 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
         .await
         .expect("child session");
 
-    let child = reopen_session_runtime(&runtime, &handle.session_id).await;
+    let mut child = reopen_session_runtime(&runtime, &handle.session_id).await;
+    session_capabilities::activate(&mut child, &double).await;
+    assert_eq!(
+        child.services.plugins.export_state().plugins["memory_probe"]
+            .values
+            .get("spawn_time"),
+        Some(&json!(7)),
+        "the first child Run keeps its captured namespace"
+    );
     let catalog = child
         .session_state_service()
         .expect("child session state")
