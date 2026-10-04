@@ -1191,6 +1191,7 @@ PACKAGE_DEPS = {
             "anyhow": "//third-party/rust:p0011",
             "async_trait": "//third-party/rust:p0015",
             "clap": "//third-party/rust:p0052",
+            "futures_util": "//third-party/rust:p0134",
             "lash": "//crates/lash:lash",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",

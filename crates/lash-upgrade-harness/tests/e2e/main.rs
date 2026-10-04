@@ -507,3 +507,158 @@ async fn core_r1_proxy_disconnect_preserves_new_connections() -> Result<()> {
     tokio::time::timeout_at(deadline.into(), serving).await???;
     proxy.finish().await
 }
+
+/// R1: a held invocation frame must leave unrelated HTTP/2 control streams
+/// usable, retaining the exact held bytes and order within the held stream.
+#[tokio::test]
+async fn core_r1_proxy_hold_leaves_other_http2_streams_usable() -> Result<()> {
+    use lash_restate_test::protocol::{
+        Frame, MessageType,
+        generated::{
+            ProposeRunCompletionMessage, RunCommandMessage, StartMessage,
+            propose_run_completion_message,
+        },
+    };
+    use lash_upgrade_harness::e2e::control::transport::V7Proxy;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    fn http2(stream: u32, ty: u8, flags: u8, payload: &[u8]) -> Vec<u8> {
+        let mut wire = Vec::new();
+        let length = (payload.len() as u32).to_be_bytes();
+        wire.extend_from_slice(&length[1..]);
+        wire.extend_from_slice(&[ty, flags]);
+        wire.extend_from_slice(&stream.to_be_bytes());
+        wire.extend_from_slice(payload);
+        wire
+    }
+    let directory = tempfile::tempdir()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let mut proxy = V7Proxy::start(
+        std::net::TcpListener::bind("127.0.0.1:0")?,
+        upstream.local_addr()?,
+        directory.path().to_owned(),
+        deadline,
+        Vec::new(),
+    )
+    .await?;
+    let work = identity();
+    let proposal = Barrier {
+        work: work.clone(),
+        kind: BarrierKind::PublicationRequest,
+    };
+    let barriers = FileBarriers::new(directory.path().to_owned(), deadline)?;
+    barriers.hold(&proposal)?;
+    proxy.arm_publication(PublicationCut {
+        invocation: "socket-invocation".into(),
+        journal_name: "held-result".into(),
+        proposal: proposal.clone(),
+        before_ack: Barrier {
+            work,
+            kind: BarrierKind::BeforeAck,
+        },
+    })?;
+    let result = async {
+        let mut client =
+            tokio::net::TcpStream::connect(proxy.endpoint.trim_start_matches("http://")).await?;
+        client
+            .write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+            .await?;
+        let start = http2(
+            1,
+            0,
+            0,
+            &Frame::of(
+                MessageType::Start,
+                &StartMessage {
+                    debug_id: "socket-invocation".into(),
+                    ..Default::default()
+                },
+            )
+            .encode(),
+        );
+        client.write_all(&start).await?;
+        let (mut server, _) = upstream.accept().await?;
+        let mut request = vec![0; 24 + start.len()];
+        server.read_exact(&mut request).await?;
+        ensure!(&request[24..] == start, "Start bytes changed");
+        let run = http2(
+            1,
+            0,
+            0,
+            &Frame::of(
+                MessageType::RunCommand,
+                &RunCommandMessage {
+                    result_completion_id: 7,
+                    name: "held-result".into(),
+                },
+            )
+            .encode(),
+        );
+        server.write_all(&run).await?;
+        let mut received = vec![0; run.len()];
+        client.read_exact(&mut received).await?;
+        ensure!(received == run, "Run bytes changed");
+        let mut completion = Frame::of(
+            MessageType::ProposeRunCompletion,
+            &ProposeRunCompletionMessage {
+                result_completion_id: 7,
+                result: Some(propose_run_completion_message::Result::Value(
+                    b"held".to_vec().into(),
+                )),
+            },
+        );
+        completion.requested_ack = true;
+        let held = http2(1, 0, 0, &completion.encode());
+        server.write_all(&held).await?;
+        barriers.await_proof(&proposal).await?;
+        let following = http2(
+            1,
+            0,
+            0,
+            &Frame::of(
+                MessageType::RunCommand,
+                &RunCommandMessage {
+                    result_completion_id: 8,
+                    name: "following-result".into(),
+                },
+            )
+            .encode(),
+        );
+        server.write_all(&following).await?;
+        // A whole header block must remain contiguous even when streams are
+        // forwarded independently. These opaque bytes are forwarded verbatim.
+        let mut control = http2(3, 1, 0, b"header-fragment");
+        control.extend(http2(3, 9, 4, b"header-end"));
+        control.extend(http2(3, 0, 1, b"peer"));
+        server.write_all(&control).await?;
+        let mut received = vec![0; control.len()];
+        let progress =
+            tokio::time::timeout(Duration::from_millis(500), client.read_exact(&mut received))
+                .await;
+        barriers.release(&proposal)?;
+        ensure!(
+            progress.is_ok(),
+            "a held invocation blocked the unrelated HTTP/2 control stream"
+        );
+        progress??;
+        ensure!(
+            received == control,
+            "other-stream bytes or header block order changed"
+        );
+        let mut expected = held;
+        expected.extend(following);
+        let mut resumed = vec![0; expected.len()];
+        tokio::time::timeout_at(deadline.into(), client.read_exact(&mut resumed)).await??;
+        ensure!(
+            resumed == expected,
+            "held stream bytes or order changed after release"
+        );
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    // Both the red and green close every worker and the listener.
+    barriers.release(&proposal)?;
+    let cleanup = proxy.finish().await;
+    cleanup?;
+    result
+}

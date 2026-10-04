@@ -67,6 +67,7 @@ path = "tests/e2e/provider_recovery.rs"
 workspace = true
 
 [dependencies]
+futures-util = { workspace = true }
 async-trait = { workspace = true }
 lash-vm-client = { workspace = true }
 lash = { workspace = true, features = ["restate", "sqlite", "typescript", "rlm", "testing"] }

@@ -52605,6 +52605,7 @@
         "anyhow",
         "async-trait",
         "clap",
+        "futures-util",
         "lash-internal-core",
         "lash-internal-core-store",
         "lash-internal-lashlang",

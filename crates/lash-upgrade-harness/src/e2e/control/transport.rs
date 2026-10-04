@@ -21,6 +21,10 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tokio::task::{JoinHandle, JoinSet};
 
+mod forward;
+
+use forward::{Forwarder, Hold};
+
 pub struct V7Proxy {
     pub endpoint: String,
     stop: watch::Sender<bool>,
@@ -300,7 +304,7 @@ impl Drop for V7Proxy {
 #[allow(clippy::too_many_arguments)]
 async fn relay(
     mut input: tokio::net::tcp::OwnedReadHalf,
-    mut output: tokio::net::tcp::OwnedWriteHalf,
+    output: tokio::net::tcp::OwnedWriteHalf,
     to_host: bool,
     connection: u64,
     directory: &std::path::Path,
@@ -309,30 +313,26 @@ async fn relay(
     connection_state: Arc<Mutex<Connection>>,
     registry: Arc<Mutex<Registry>>,
 ) -> Result<()> {
-    let barriers = FileBarriers::new(directory.to_owned(), deadline)?;
+    let mut forwarder = Forwarder::new(output, FileBarriers::new(directory.to_owned(), deadline)?);
     let mut decoders: BTreeMap<u32, FrameDecoder> = BTreeMap::new();
     let mut observation = 0;
     let mut non_sdk = std::collections::BTreeSet::new();
     loop {
-        let mut header = [0; 9];
-        match input.read_exact(&mut header).await {
-            Ok(_) => {}
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset
-                ) =>
-            {
-                return Ok(());
+        // Retain one read future while reaping finished workers: cancelling a
+        // partially read HTTP/2 header would lose original connection bytes.
+        let read = read_http2(&mut input);
+        tokio::pin!(read);
+        let frame = loop {
+            tokio::select! {
+                frame = &mut read => break frame?,
+                result = forwarder.next_worker(), if forwarder.has_workers() => { result?; }
             }
-            Err(error) => return Err(error.into()),
-        }
-        let length =
-            (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
-        ensure!(length <= 16 * 1024 * 1024, "oversized HTTP/2 frame");
-        let mut payload = vec![0; length];
-        input.read_exact(&mut payload).await?;
+        };
+        let Some((header, payload, wire)) = frame else {
+            return forwarder.finish().await;
+        };
         let stream = u32::from_be_bytes(header[5..9].try_into()?) & 0x7fff_ffff;
+        let mut holds = Vec::new();
         let mut entered_sleeps = Vec::new();
         if header[3] == 0 && !payload.is_empty() && !non_sdk.contains(&stream) {
             let data = if header[4] & 8 != 0 {
@@ -414,9 +414,7 @@ async fn relay(
                             .map_err(|_| anyhow::anyhow!("connection state poisoned"))?
                             .completions
                             .insert((stream, message.result_completion_id), cut.before_ack);
-                        barriers
-                            .enter(&cut.proposal, artifact.display().to_string())
-                            .await?;
+                        holds.push(Hold::Enter(cut.proposal, artifact.display().to_string()));
                     }
                 }
                 let invocation = connection_state
@@ -480,9 +478,10 @@ async fn relay(
                                 .map_err(|_| anyhow::anyhow!("connection state poisoned"))?
                                 .completions
                                 .insert((stream, completion), cut.before_ack.clone());
-                            barriers
-                                .enter(&cut.proposal, artifact.display().to_string())
-                                .await?;
+                            holds.push(Hold::Enter(
+                                cut.proposal.clone(),
+                                artifact.display().to_string(),
+                            ));
                         }
                     }
                     let retries = registry
@@ -521,7 +520,7 @@ async fn relay(
                         .get(&(stream, message.completion_id))
                         .cloned();
                     if let Some(barrier) = barrier {
-                        barriers.await_release(&barrier).await?;
+                        holds.push(Hold::Release(barrier));
                     }
                 }
                 if to_host && frame.ty == MessageType::ProposeRunCompletionAck {
@@ -533,23 +532,84 @@ async fn relay(
                         .get(&(stream, message.completion_id))
                         .cloned();
                     if let Some(barrier) = barrier {
-                        barriers
-                            .enter(&barrier, artifact.display().to_string())
-                            .await?;
+                        holds.push(Hold::Enter(barrier, artifact.display().to_string()));
                     }
                 }
             }
         }
-        output.write_all(&header).await?;
-        output.write_all(&payload).await?;
-        for (barrier, artifact) in entered_sleeps {
-            barriers.publish(&super::BarrierProof {
-                barrier,
-                artifact,
-                journal_index: None,
-            })?;
+        forwarder.push(
+            stream,
+            forward::Frame {
+                wire,
+                holds,
+                publish: entered_sleeps
+                    .into_iter()
+                    .map(|(barrier, artifact)| super::BarrierProof {
+                        barrier,
+                        artifact,
+                        journal_index: None,
+                    })
+                    .collect(),
+                header_block: header[3] == 1,
+                end_stream: matches!(header[3], 0 | 1) && header[4] & 1 != 0 || header[3] == 3,
+            },
+        )?;
+    }
+}
+
+/// Read a whole header block so no independently forwarded DATA frame can
+/// interrupt its CONTINUATION sequence. HPACK bytes are never decoded or changed.
+async fn read_http2(
+    input: &mut tokio::net::tcp::OwnedReadHalf,
+) -> Result<Option<([u8; 9], Vec<u8>, Vec<u8>)>> {
+    let mut header = [0; 9];
+    match input.read_exact(&mut header).await {
+        Ok(_) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset
+            ) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error.into()),
+    }
+    let payload = read_payload(input, &header).await?;
+    let mut wire = header.to_vec();
+    wire.extend_from_slice(&payload);
+    if header[3] == 1 && header[4] & 4 == 0 {
+        loop {
+            let mut next = [0; 9];
+            input.read_exact(&mut next).await?;
+            ensure!(
+                next[3] == 9 && next[5..9] == header[5..9],
+                "HTTP/2 header block has a foreign CONTINUATION"
+            );
+            let continuation = read_payload(input, &next).await?;
+            wire.extend_from_slice(&next);
+            wire.extend(continuation);
+            ensure!(
+                wire.len() <= 16 * 1024 * 1024,
+                "oversized HTTP/2 header block"
+            );
+            if next[4] & 4 != 0 {
+                break;
+            }
         }
     }
+    Ok(Some((header, payload, wire)))
+}
+async fn read_payload(
+    input: &mut tokio::net::tcp::OwnedReadHalf,
+    header: &[u8; 9],
+) -> Result<Vec<u8>> {
+    let length =
+        (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+    ensure!(length <= 16 * 1024 * 1024, "oversized HTTP/2 frame");
+    let mut payload = vec![0; length];
+    input.read_exact(&mut payload).await?;
+    Ok(payload)
 }
 
 fn same_run(observed: &WorkIdentity, wanted: &WorkIdentity) -> bool {
