@@ -20,6 +20,7 @@ BADGE = b"workbench workspace badge v1\x00\x01\x02\x03"
 STDIO = ["mcp__workspace_stdio__" + name for name in
          ("sample_summary", "elicit_confirmation", "elicit_via_url", "list_host_roots")]
 BADGE_TOOL = "mcp__workspace_http__workspace_badge"
+MESSAGE_ROWS = "#timeline .message.user, #timeline .message.assistant"
 
 class Journey:
     def __init__(self, args):
@@ -82,8 +83,8 @@ class Journey:
         assert condition, f"{checkpoint}/{layer}: {rule}"
 
     def dom(self, page):
-        return page.locator("#timeline .message").evaluate_all(
-            "els => els.map(e => ({role: e.classList.contains('assistant') ? 'assistant' : 'user', text: e.innerText}))")
+        return page.locator(MESSAGE_ROWS).evaluate_all(
+            "els => els.map(e => ({role: e.classList.contains('assistant') ? 'assistant' : 'user', text: e.querySelector('.msg-body').innerText}))")
 
     def send(self, marker, wait=True):
         before = len(self.turns())
@@ -99,6 +100,17 @@ class Journey:
     def store(self):
         return {table: self.sql(self.session_db, f"SELECT * FROM {table} WHERE session_id = ?", (self.session,))
                 for table in ("graph_nodes", "runtime_turn_commits", "pending_turn_inputs")}
+
+    def committed_tool_parts(self):
+        return [part for node in self.store()["graph_nodes"]
+                for part in self.walk(json.loads(node["node_json"]))
+                if isinstance(part, dict) and part.get("kind") == "ToolResult"]
+
+    def attributed_pair(self, turn):
+        messages = [message for message in self.state()["messages"]
+                    if message.get("provenance", {}).get("turn_id") == turn]
+        return sorted((message["role"], message["provenance"]["kind"]) for message in messages) == [
+            ("assistant", "turn_output"), ("user", "turn_input")]
 
     def capture(self, checkpoint):
         self.save(checkpoint + "-four-layers.json", {"api": self.state(), "store": self.store(),
@@ -217,9 +229,14 @@ class Journey:
                 store = self.store()
                 self.gate("depth", "api/store", "one accepted input and one attributed answer persist",
                     len(self.state()["messages"]) == 2 and len(store["runtime_turn_commits"]) == 1
-                    and len(store["pending_turn_inputs"]) == 1 and depth["turn_id"] in json.dumps(store))
+                    and len(store["pending_turn_inputs"]) == 1 and depth["turn_id"] in json.dumps(store)
+                    and self.attributed_pair(depth["turn_id"]))
+                committed = {part["tool_name"]: json.loads("".join(block["text"]
+                             for block in part["blocks"] if block.get("type") == "text"))
+                             for part in self.committed_tool_parts() if part.get("tool_name") in STDIO}
                 self.gate("depth", "native", "four typed host-owned MCP results commit",
                     [self.receipt_tool_name(r) for r in receipts] == STDIO and len(outputs) == 4
+                    and committed == dict(zip(STDIO, outputs))
                     and outputs[0] == {"model": "dev/failure-paths", "summary": "Host-generated summary."}
                     and outputs[1] == {"action": "accept", "answer": "yes"}
                     and outputs[2] == {"action": "accept", "completion_notified": True, "elicitation_id": "workbench-demo-url-1"}
@@ -267,15 +284,19 @@ class Journey:
                 results = self.tool_receipts_for_turn(badge["turn_id"], terminal=True)
                 detached = self.detach()
                 servers = self.api("/api/mcp/servers")["servers"]
-                self.send("MCP-DETACHED")
+                detached_turn = self.send("MCP-DETACHED")
                 self.gate("attach", "dom", "attach and post-detach turns render exactly one reply each in both contexts",
                     all(len(self.dom(p)) == before + 4 and "workspace badge came back" in json.dumps(self.dom(p)) for p in self.pages))
                 store = self.store()
                 self.gate("attach", "api/store", "both requests and attributed answers persist once",
                     len(self.state()["messages"]) == before + 4 and len(store["runtime_turn_commits"]) == 4
-                    and len(store["pending_turn_inputs"]) == 4)
+                    and len(store["pending_turn_inputs"]) == 4
+                    and all(self.attributed_pair(turn["turn_id"]) for turn in (badge, detached_turn)))
                 refs = [v["source"] for r in results for v in r["output"].get("view", {}).get("blocks", [])
                         if v.get("type") == "attachment"]
+                committed_refs = [block["source"] for part in self.committed_tool_parts()
+                                  if part.get("tool_name") == BADGE_TOOL for block in part["blocks"]
+                                  if block.get("type") == "attachment"]
                 assert len(refs) == 1, refs
                 reference = refs[0]
                 ref = reference["attachment_ref"]
@@ -284,6 +305,7 @@ class Journey:
                     retrieved, media = response.read(), response.headers["content-type"]
                 self.gate("attach", "native", "connected integration retains one stored binary reference with exact bytes, then detaches",
                     attached["connected"] is True and BADGE_TOOL in attached["tools"] and reference["source"] == "stored"
+                    and committed_refs == refs
                     and ref["byte_len"] == len(BADGE) and ref["media_type"] == "application/octet-stream"
                     and [r["content"] for r in stored] == [BADGE] and retrieved == BADGE and media == "application/octet-stream"
                     and detached == {"detached": "workspace_http"} and sorted(v["name"] for v in servers) == ["parallel", "workspace_stdio"])
@@ -305,7 +327,7 @@ class Journey:
                 for page in self.pages:
                     page.reload()
                     expect(page.locator("#sessionId")).to_have_text(self.session)
-                    expect(page.locator("#timeline .message")).to_have_count(8, timeout=30000)
+                    expect(page.locator(MESSAGE_ROWS)).to_have_count(8, timeout=30000)
                 self.gate("reload", "dom/api/store/trace", "session survives reload after peer restart with no duplicate result delivery",
                     [self.dom(page) for page in self.pages] == before_reload and before_reload[0] == before_reload[1]
                     and len(self.state()["messages"]) == 8 and len(self.turns()) == 4
