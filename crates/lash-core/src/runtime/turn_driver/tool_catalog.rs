@@ -76,7 +76,9 @@ impl RuntimeTurnDriver<'_> {
             model_tool_calls,
         });
         self.mark_phase_end(RuntimeTurnPhase::PromptBuild);
-        Ok(prepared.machine)
+        let mut machine = prepared.machine;
+        machine.adopt_prepared_messages(self.prelude.context.messages.clone(), true);
+        Ok(machine)
     }
 
     /// The step body of an execution-environment sync: builds the prompt and

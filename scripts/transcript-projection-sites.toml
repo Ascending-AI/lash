@@ -1,6 +1,6 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
-reads = 98
+reads = 100
 outputs = 141
 
 [[surfaces]]
@@ -260,3 +260,15 @@ reads = 0
 outputs = 1
 kind = "output-read"
 reason = "H1 compares the typed settled answer with the exact authored HTTP transcript after an observed host kill."
+
+[sites."crates/lash/src/tests/standard_compaction_persistence.rs#attachment_pruning_never_rewrites_the_durable_message"]
+reads = 1
+outputs = 0
+kind = "evidence-read"
+reason = "FIG-4972 proves ephemeral Prompt View edits never change the committed API transcript, including cold replay and reopen."
+
+[sites."crates/lash/src/tests/standard_compaction_persistence.rs#prompt_view_history_law"]
+reads = 2
+outputs = 0
+kind = "evidence-read"
+reason = "FIG-4972 proves ephemeral Prompt View edits never change the committed API transcript, including cold replay and reopen."

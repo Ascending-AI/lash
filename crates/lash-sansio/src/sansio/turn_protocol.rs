@@ -760,6 +760,7 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
 pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub(super) config: &'a TurnMachineConfig<M>,
     pub(super) messages: &'a MessageSequence,
+    pub(super) prompt_messages: &'a MessageSequence,
     pub(super) events: &'a [SessionHistoryRecord<M::Event>],
     pub(super) turn_causes: &'a [TurnCause],
     pub(super) protocol_iteration: usize,
@@ -773,7 +774,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
     pub fn project_llm_request(&self, use_tools: bool) -> Arc<LlmRequest> {
         self.config.projector.project(ProjectorContext {
             config: self.config,
-            messages: self.messages,
+            messages: self.prompt_messages,
             events: self.events,
             turn_causes: self.turn_causes,
             protocol_iteration: self.protocol_iteration,

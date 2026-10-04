@@ -1,12 +1,22 @@
 use super::*;
 
 impl<M: TurnProtocol> TurnMachine<M> {
-    /// Restore the preparation retained by the environment prelude.
+    /// Restore only the Prompt View retained by the environment prelude.
     pub fn adopt_prepared_messages(&mut self, messages: crate::MessageSequence, first_sync: bool) {
         if first_sync {
-            self.next_synthetic_message_id = messages.len() as u64;
+            self.next_synthetic_message_id = self.messages.len() as u64;
         }
+        self.prompt_messages = messages;
+    }
+
+    /// Adopt the real inputs and outputs retained by a recorded sync.
+    pub fn adopt_committed_messages(&mut self, messages: crate::MessageSequence) {
         self.messages = messages;
+    }
+
+    /// The view used only to project model requests.
+    pub fn prompt_message_sequence(&self) -> MessageSequence {
+        self.prompt_messages.clone()
     }
 
     pub fn new(
@@ -46,6 +56,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             side_effect_outbox: VecDeque::new(),
             next_effect_id: 1,
             next_synthetic_message_id,
+            prompt_messages: messages.clone(),
             messages,
             progress_event_cursor: events.len(),
             events,
@@ -191,6 +202,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             next_effect_id: self.next_effect_id,
             next_synthetic_message_id: self.next_synthetic_message_id,
             messages: self.messages.iter().cloned().collect(),
+            prompt_messages: self.prompt_messages.iter().cloned().collect(),
             events: self.events.to_vec(),
             turn_causes: self.turn_causes.clone(),
             progress_event_cursor: self.progress_event_cursor,
@@ -236,6 +248,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             next_effect_id: checkpoint.next_effect_id,
             next_synthetic_message_id: checkpoint.next_synthetic_message_id,
             messages: MessageSequence::from_owned(checkpoint.messages),
+            prompt_messages: MessageSequence::from_owned(checkpoint.prompt_messages),
             events: crate::AppendVec::from(checkpoint.events),
             turn_causes: checkpoint.turn_causes,
             progress_event_cursor: checkpoint.progress_event_cursor,
@@ -275,6 +288,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             DriverContextView {
                 config: &self.config,
                 messages: &self.messages,
+                prompt_messages: &self.prompt_messages,
                 events: self.events.as_slice(),
                 turn_causes: &self.turn_causes,
                 protocol_iteration: self.protocol_iteration,
@@ -438,7 +452,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 .join(", ");
             self.emit(SessionStreamEvent::LlmRequest {
                 protocol_iteration: self.protocol_iteration,
-                message_count: self.messages.len(),
+                message_count: self.prompt_messages.len(),
                 tool_list,
             });
         }
@@ -455,6 +469,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             SessionHistoryRecord::Conversation(record) => {
                 self.events
                     .push(SessionHistoryRecord::Conversation(record.clone()));
+                self.prompt_messages.push(record.to_message());
                 self.messages.push(record.to_message());
             }
             SessionHistoryRecord::Protocol(protocol_event) => {
@@ -635,6 +650,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             });
         }
         if !appended.is_empty() {
+            self.prompt_messages.extend(appended.clone());
             self.messages.extend(appended);
         }
     }
@@ -652,6 +668,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             if !existing_ids.insert(cause.id.clone()) {
                 continue;
             }
+            self.prompt_messages.push(cause.to_event_message());
             self.messages.push(cause.to_event_message());
             self.turn_causes.push(cause);
         }
@@ -668,6 +685,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
             || !delivery.transient_messages.is_empty()
             || !delivery.turn_causes.is_empty()
         {
+            self.prompt_messages
+                .extend(delivery.committed_user_messages.clone());
             self.messages.extend(delivery.committed_user_messages);
             self.append_checkpoint_messages(&delivery.messages, false);
             self.append_checkpoint_messages(&delivery.transient_messages, true);

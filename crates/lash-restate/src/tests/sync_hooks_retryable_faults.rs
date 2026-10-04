@@ -77,6 +77,7 @@ fn test_prelude() -> Box<lash_core::runtime::effect::TurnPrelude> {
         )
         .expect("config record address"),
         pressure: Vec::new(),
+        history: Default::default(),
         context: Default::default(),
         before_turn: None,
     })

@@ -7,14 +7,11 @@
 //! removed a tool the prompt rendered replays the recorded model call from
 //! the journaled prompt with no provider request. Then, the first attempt
 //! asks the model once and crashes after its effect loop, before the turn
-//! commits. The redrive runs under changed host code the model request is
-//! built from (the same registered plugin adds a different note; the
-//! session's config cannot drift a recorded run, FIG-3600 S6):
-//! the recorded model call's envelope hash conflicts, and the conflict parks the
-//! turn — it aborts with the typed replay refusal, a `TurnPark` names the
-//! diverged effect kind, the model is not asked again and nothing terminal is
-//! written. A second redrive under the original code replays the recorded
-//! model call, finishes the turn and clears the park.
+//! commits. A changed live Prompt View transform still replays the recorded
+//! prompt. A layer then changes the actual request-bearing effect envelope
+//! after that recorded preparation: its hash conflicts, the typed refusal
+//! parks the turn, and no model call or terminal commit repeats. Restoring
+//! the request envelope finishes the turn and clears the park.
 
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
@@ -105,8 +102,8 @@ async fn build_runtime(parts: DriftParts, note: Option<&'static str>) -> crate::
 
 /// A fixed plugin and Prompt View transform whose optional note changes the
 /// model request without changing the recorded plugin composition. The
-/// transform runs again on a redrive, unlike a turn callback, whose recorded
-/// decision a replay serves.
+/// transform runs again on a redrive; the environment prelude serves the
+/// recorded Prompt View before the model request is constructed.
 #[derive(Clone)]
 struct DriftNote(Option<&'static str>);
 
@@ -173,6 +170,24 @@ impl lash_core::facade_support::TurnContextTransform for DriftNote {
     }
 }
 
+/// Perturb the request envelope itself, beyond recorded Prompt View preparation.
+struct RequestEnvelopeDrift;
+
+#[async_trait::async_trait]
+impl crate::testing::EffectLayer for RequestEnvelopeDrift {
+    async fn execute_effect(
+        &self,
+        inner: &dyn crate::RuntimeEffectController,
+        mut envelope: crate::RuntimeEffectEnvelope,
+        executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        if let crate::RuntimeEffectCommand::BeforeLlmCall { request } = &mut envelope.command {
+            request.instructions = Some(Arc::from(DRIFT_NOTE));
+        }
+        inner.execute_effect(envelope, executor).await
+    }
+}
+
 fn drift_input(turn_id: &TurnId) -> crate::TurnInput {
     let mut input = crate::TurnInput::text("answer once");
     input.trace_turn_id = Some(turn_id.clone());
@@ -181,10 +196,15 @@ fn drift_input(turn_id: &TurnId) -> crate::TurnInput {
 
 /// Runs one attempt of the law's turn, with the drifting `note` when set, and sends back
 /// what it returned.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the layer preserves the admitted scope"
+)]
 fn attempt(
     parts: &DriftParts,
     turn_id: &TurnId,
     note: Option<&'static str>,
+    envelope_drift: bool,
     crash: bool,
     result_tx: Option<
         tokio::sync::mpsc::UnboundedSender<Result<crate::AssembledTurn, crate::RuntimeError>>,
@@ -197,6 +217,15 @@ fn attempt(
         let turn_id = turn_id.clone();
         let result_tx = result_tx.clone();
         Box::pin(async move {
+            let scope = if envelope_drift {
+                crate::testing::LayeredEffectHost::layer_scoped(
+                    scope,
+                    Arc::new(RequestEnvelopeDrift),
+                )
+                .expect("layer actual request-envelope drift")
+            } else {
+                scope
+            };
             let mut runtime = build_runtime(parts, note).await;
             if crash {
                 runtime.set_turn_phase_probe(Arc::new(PanicBeforeTurnCommit));
@@ -264,7 +293,7 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
     // The journaled prompt is served: the redrive's registry removed the
-    // tool the prompt rendered, and the recorded model call still replays
+    // tool the prompt rendered and added a Prompt View note. The model call replays
     // with no provider request, finishing the turn.
     let served_session = SessionId::fixture(format!("{prefix}-model-served-session"));
     let served_store =
@@ -284,8 +313,15 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     runner
         .run_crashed_then_redriven_turn(
             admit(crate::ExecutionScope::turn(&served_session, &turn_id)),
-            attempt(&served, &turn_id, None, true, None),
-            attempt(&removed, &turn_id, None, false, Some(result_tx.clone())),
+            attempt(&served, &turn_id, None, false, true, None),
+            attempt(
+                &removed,
+                &turn_id,
+                Some(DRIFT_NOTE),
+                false,
+                false,
+                Some(result_tx.clone()),
+            ),
         )
         .await;
     let turn = result_rx
@@ -314,15 +350,16 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
         protocol,
     };
 
-    // The crash, then a redrive under changed host code.
+    // The crash, then a redrive whose request envelope changes after preparation.
     runner
         .run_crashed_then_redriven_turn(
             admit(crate::ExecutionScope::turn(&session_id, &turn_id)),
-            attempt(&parts, &turn_id, None, true, None),
+            attempt(&parts, &turn_id, None, false, true, None),
             attempt(
                 &parts,
                 &turn_id,
                 Some(DRIFT_NOTE),
+                true,
                 false,
                 Some(result_tx.clone()),
             ),
@@ -366,6 +403,7 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
                 &parts,
                 &turn_id,
                 Some(DRIFT_NOTE),
+                true,
                 false,
                 Some(result_tx.clone()),
             ),
@@ -384,7 +422,7 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     runner
         .run_turn(
             admit(crate::ExecutionScope::turn(&session_id, &turn_id)),
-            attempt(&parts, &turn_id, None, false, Some(result_tx)),
+            attempt(&parts, &turn_id, None, false, false, Some(result_tx)),
         )
         .await;
     let turn = result_rx

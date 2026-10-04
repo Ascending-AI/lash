@@ -6,6 +6,7 @@ struct LocalTurnEffectRunner {
     driver: RuntimeTurnDriver<'static>,
     protocol_iteration: usize,
     messages: crate::MessageSequence,
+    prompt_messages: crate::MessageSequence,
     active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
     event_tx: TurnObserver,
 }
@@ -170,7 +171,8 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     }
                 };
                 let mut prelude = runner.driver.prelude.clone();
-                prelude.context.messages = runner.messages.clone();
+                prelude.history = runner.messages.clone();
+                prelude.context.messages = runner.prompt_messages.clone();
                 Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
                     prelude,
                     result: Box::new(result),
@@ -268,6 +270,7 @@ pub(super) fn turn_effect_executor(
             driver: owned_driver,
             protocol_iteration: machine.protocol_iteration(),
             messages: machine.message_sequence(),
+            prompt_messages: machine.prompt_message_sequence(),
             active_events: driver.turn_pipeline.active_events(),
             event_tx,
         }),

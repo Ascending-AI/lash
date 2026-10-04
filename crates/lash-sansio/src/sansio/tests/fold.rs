@@ -247,3 +247,63 @@ fn a_checkpoint_restores_the_step_with_its_expansion() {
     assert_eq!(restored_calls.len(), calls.len());
     assert_eq!(restored_expansion, expansion);
 }
+
+// ADR 0001 / FIG-4972: checkpoint resume retains both the Prompt View and history.
+#[test]
+fn checkpoint_resume_keeps_prompt_view_edits_out_of_progress_and_done() {
+    for remove in [false, true] {
+        let original = user_message("real input");
+        let mut machine = TurnMachine::new(
+            test_config(Arc::new(ProseDriver)),
+            vec![original.clone()],
+            crate::AppendVec::new(),
+            0,
+        );
+        let prompt = if remove {
+            Vec::new()
+        } else {
+            vec![
+                original.clone(),
+                text_message(MessageRole::User, "ephemeral note"),
+            ]
+        };
+        machine.adopt_prepared_messages(MessageSequence::from_owned(prompt), true);
+        // Resume after the sync, before the request has been constructed.
+        let effects = drain_unsynced_effects(&mut machine);
+        let id = find_execution_environment_sync(&effects).expect("sync");
+        machine.handle_response(Response::ExecutionEnvironmentSynced {
+            id,
+            result: Ok(ExecutionEnvironmentSync::default()),
+        });
+        let mut resumed = TurnMachine::restore_from_checkpoint(
+            test_config(Arc::new(ProseDriver)),
+            roundtrip_checkpoint(machine.checkpoint()),
+        )
+        .expect("restore");
+        let effects = drain_effects(&mut resumed);
+        let (_, request) = find_llm_call(&effects).expect("model request");
+        let rendered = serde_json::to_string(&request.messages).expect("request");
+        assert_eq!(rendered.contains("real input"), !remove);
+        assert_eq!(rendered.contains("ephemeral note"), !remove);
+        resumed.apply_actions(vec![DriverAction::AppendEvents(vec![conversation_event(
+            text_message(MessageRole::Assistant, "answer"),
+        )])]);
+        let effects = drain_effects(&mut resumed);
+        let (progress, _) = find_progress(&effects).expect("progress");
+        assert_eq!(
+            progress
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>()[0],
+            original.id
+        );
+        assert_eq!(progress.len(), 2, "only the real input and output commit");
+        resumed.finish_with_outcome(assistant_done("answer"));
+        let effects = drain_effects(&mut resumed);
+        let (done, _) = find_done(&effects).expect("done");
+        assert_eq!(
+            serde_json::to_value(done).unwrap(),
+            serde_json::to_value(progress).unwrap()
+        );
+    }
+}

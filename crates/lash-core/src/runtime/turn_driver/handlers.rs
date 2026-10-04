@@ -374,6 +374,7 @@ impl RuntimeTurnDriver<'_> {
         self.session
             .set_context_overlay(providers)
             .map_err(|error| error.into_turn_failure(RuntimeErrorCode::SessionToolRegistry))?;
+        machine.adopt_committed_messages(prelude.history.clone());
         machine.adopt_prepared_messages(prelude.context.messages.clone(), id.0 == 1);
         self.prelude = prelude;
         // The surface the sync recorded is the one the iteration's tool calls

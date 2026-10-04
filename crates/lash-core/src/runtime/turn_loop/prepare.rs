@@ -363,16 +363,14 @@ impl LashRuntime {
                 Some(turn_phase_id(&trace_turn_id, "prepare-turn")),
             ),
         };
+        let messages = crate::MessageSequence::from_base_and_delta(base_messages, turn_delta)
+            .with_base_render_cache(base_render_cache);
         self.mark_phase_begin(RuntimeTurnPhase::ContextTransform);
         let prepared_context = plugin_session
             .prepare_turn_context(
                 &turn_ctx,
                 crate::session_model::context::PreparedContext {
-                    messages: crate::MessageSequence::from_base_and_delta(
-                        base_messages,
-                        turn_delta,
-                    )
-                    .with_base_render_cache(base_render_cache),
+                    messages: messages.clone(),
                     ..Default::default()
                 },
                 self.turn_phase_probe.clone(),
@@ -398,10 +396,10 @@ impl LashRuntime {
             .map_err(RuntimeEffectControllerError::from)
             .map_err(RuntimeEffectControllerError::into_runtime_error)?,
             pressure: pressure.decisions,
+            history: messages.clone(),
             context: prepared_context.clone(),
             before_turn: None,
         });
-        let messages = prepared_context.messages;
         if let Some(session) = self.session.as_mut() {
             session
                 .set_context_overlay(

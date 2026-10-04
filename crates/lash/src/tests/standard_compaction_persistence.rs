@@ -1188,12 +1188,13 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
             .expect("the backend runs on its held double")
             .stores(),
     );
+    let (provider, requests) = standard_compaction_provider_recorded(vec![
+        response_with_usage("first response", 60_000),
+        response_with_usage("second response", 1),
+    ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(
-            standard_compaction_provider(vec![
-                response_with_usage("first response", 60_000),
-                response_with_usage("second response", 1),
-            ]),
+            provider,
             llm_profile_spec("attachment-prune-model", None, 100_000),
         )
         .plugin(Arc::new(
@@ -1260,6 +1261,28 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         "attachment pruning must not rewrite the durable message"
     );
 
+    let requests = requests.lock_recover().clone();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[0].contains("attachment"),
+        "the first model request sees the attachment"
+    );
+    assert!(
+        !requests[1].contains("attachment_ref"),
+        "the next Prompt View prunes the old attachment"
+    );
+    let api_message = session
+        .read_view()
+        .messages()
+        .iter()
+        .find(|message| message.id == first_input_message_id)
+        .cloned()
+        .expect("API input");
+    assert_eq!(
+        serde_json::to_value(api_message)?,
+        serde_json::to_value(&original_durable_message)?,
+        "the API keeps the attachment pruned from the Prompt View"
+    );
     core.flush_trace_sink()?;
     let trace = std::fs::read_to_string(trace_path).expect("read projection trace");
     let mismatch_record = trace.lines().find_map(|line| {
@@ -1271,9 +1294,9 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
                 .is_some_and(|ids| !ids.is_empty()))
         .then_some(record)
     });
-    assert_eq!(
-        mismatch_record.expect("attachment projection mismatch diagnostic")["payload"]["id_mismatch_message_ids"],
-        serde_json::json!([first_input_message_id])
+    assert!(
+        mismatch_record.is_none(),
+        "a Prompt View never reaches the durable projection"
     );
 
     Ok(())
@@ -1784,4 +1807,162 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
     );
 
     Ok(())
+}
+
+// ADR 0001 / FIG-4972: Prompt Views are never session content.
+struct PromptViewProbe {
+    remove: bool,
+}
+
+#[async_trait]
+impl lash_core::facade_support::TurnContextTransform for PromptViewProbe {
+    fn id(&self) -> &'static str {
+        "prompt-view-probe"
+    }
+
+    async fn transform(
+        &self,
+        _: &lash_core::facade_support::TurnTransformContext<'_>,
+        mut input: lash_core::facade_support::PreparedContext,
+    ) -> std::result::Result<
+        lash_core::facade_support::PreparedContext,
+        lash_core::facade_support::ContextError,
+    > {
+        if self.remove {
+            input
+                .messages
+                .make_mut()
+                .retain(|message| !message_text(message).contains("real input"));
+        } else {
+            input.messages.make_mut().push(lash_core::Message {
+                id: "prompt-only".to_owned(),
+                role: lash_core::MessageRole::User,
+                parts: vec![lash_core::Part::text(
+                    "prompt-only.p0".to_owned(),
+                    "ephemeral note".to_owned(),
+                    None,
+                )]
+                .into(),
+                origin: None,
+                reply_marker: None,
+            });
+        }
+        Ok(input)
+    }
+}
+
+async fn prompt_view_history_law(remove: bool) -> Result<()> {
+    let mut histories = Vec::new();
+    for crash in [false, true] {
+        let backend = double_backend().await;
+        let double = latest_double().expect("held double");
+        let stores = Arc::clone(double.stores());
+        let (provider, requests) =
+            standard_compaction_provider_recorded(vec![response_with_usage("answer", 1)]);
+        let factory = crate::plugins::StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial("prompt-view-law"),
+            lash_core::facade_support::PluginSpec::new()
+                .with_turn_context_transform(0, Arc::new(PromptViewProbe { remove })),
+        );
+        let profile = llm_profile_spec("prompt-view-model", None, 100_000);
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+            .serve_test_llm_profile(provider, profile.clone())
+            .plugin(Arc::new(factory))
+            .build(crate::testing::runtime_lease_owner())?;
+        let session = core
+            .session("prompt-view-law")
+            .created_with(session_spec_for(&profile))
+            .await
+            .open()
+            .await?;
+        if crash {
+            double.server().crash_on(
+                lash_restate_test::CrashRule::new(
+                    lash_restate_test::CrashPoint::BeforeStateWrite {
+                        key: "outcome".to_owned(),
+                        value_contains: Some("\"run\":\"prompt-view-turn\"".to_owned()),
+                    },
+                )
+                .service(lash_restate_test::TURN_DRIVER_SERVICE)
+                .within_attempts(1),
+            );
+        }
+        session
+            .send(TurnInput::text("real input"))
+            .id("prompt-view-turn")
+            .output()
+            .await?;
+        double.server().settle().await;
+        if crash {
+            assert!(
+                double
+                    .server()
+                    .invocations()
+                    .iter()
+                    .any(|run| run.attempts == 2 && run.status == "completed"),
+                "the cold replay must execute"
+            );
+        }
+        let requests = requests.lock_recover().clone();
+        assert_eq!(requests.len(), 1, "replay uses the recorded model result");
+        assert_eq!(requests[0].contains("real input"), !remove);
+        assert_eq!(requests[0].contains("ephemeral note"), !remove);
+        let stored = sqlite_messages(stores.as_ref(), &SessionId::from("prompt-view-law"));
+        let transcript = session
+            .read_view()
+            .messages()
+            .iter()
+            .map(message_text)
+            .collect::<Vec<_>>();
+        let parked = Box::pin(session.park()).await?;
+        let reopened = Box::pin(core.resume(parked)).await?;
+        let reopened = reopened
+            .read_view()
+            .messages()
+            .iter()
+            .map(message_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reopened, transcript,
+            "cold session reload retains the same history"
+        );
+        histories.push((
+            stored.iter().map(message_text).collect::<Vec<_>>(),
+            transcript,
+        ));
+    }
+    assert_eq!(
+        histories[0], histories[1],
+        "live and replay commit the same history"
+    );
+    for (stored, transcript) in histories {
+        assert!(
+            stored.iter().any(|text| text == "real input"),
+            "the store keeps real input removed from the Prompt View"
+        );
+        assert!(
+            !stored.iter().any(|text| text == "ephemeral note"),
+            "the store never commits Prompt View additions"
+        );
+        assert!(
+            transcript.iter().any(|text| text == "real input"),
+            "the API transcript keeps real input"
+        );
+        assert!(
+            !transcript.iter().any(|text| text == "ephemeral note"),
+            "the API transcript contains no Prompt View additions"
+        );
+        assert!(transcript.iter().any(|text| text == "answer"));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn prompt_view_additions_reach_only_the_model_across_cold_replay() -> Result<()> {
+    prompt_view_history_law(false).await
+}
+
+#[tokio::test]
+async fn prompt_view_removals_preserve_history_across_cold_replay() -> Result<()> {
+    prompt_view_history_law(true).await
 }

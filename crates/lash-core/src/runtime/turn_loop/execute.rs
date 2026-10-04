@@ -318,6 +318,7 @@ impl LashRuntime {
         // Keep preparation and plugin-abort handling in separate async frames.
         // Their SessionReadView and abort-only locals are dropped before the
         // normal driver-construction frame clones state for the turn boundary.
+        let history_len = messages.len();
         let mut prepared = self
             .prepare_turn_preamble(TurnPreambleContext {
                 plugins: &plugins,
@@ -333,7 +334,17 @@ impl LashRuntime {
         turn_graph_appends
             .apply_session_contributions(&self.state.session_id, &plugins, &prepared.session)
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?;
-        prelude.context.messages = prepared.messages.clone();
+        // Before-turn contributions are real inputs. Append their recorded
+        // suffix to the Prompt View without adopting any transform edits into
+        // the history used by checkpoints and commits.
+        if prepared.messages.len() > history_len {
+            prelude
+                .context
+                .messages
+                .make_mut()
+                .extend(prepared.messages.iter().skip(history_len).cloned());
+        }
+        prelude.history = prepared.messages.clone();
         if plugins.has_before_turn_hooks() {
             prelude.before_turn = Some(
                 crate::EffectAddress::new(

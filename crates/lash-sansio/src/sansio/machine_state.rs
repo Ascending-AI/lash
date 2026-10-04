@@ -85,6 +85,8 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     #[serde(default)]
     pub(super) next_synthetic_message_id: u64,
     pub(super) messages: Vec<Message>,
+    /// The ephemeral model-call view, retained independently for resume.
+    pub(super) prompt_messages: Vec<Message>,
     pub(super) events: Vec<SessionHistoryRecord<M::Event>>,
     #[serde(default)]
     pub(super) turn_causes: Vec<TurnCause>,
@@ -245,6 +247,7 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) next_effect_id: u64,
     pub(super) next_synthetic_message_id: u64,
     pub(super) messages: MessageSequence,
+    pub(super) prompt_messages: MessageSequence,
     pub(super) events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
     pub(super) turn_causes: Vec<TurnCause>,
     pub(super) progress_event_cursor: usize,
