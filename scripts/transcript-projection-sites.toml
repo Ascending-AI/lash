@@ -1,6 +1,6 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
-reads = 101
+reads = 100
 outputs = 137
 
 [[surfaces]]
