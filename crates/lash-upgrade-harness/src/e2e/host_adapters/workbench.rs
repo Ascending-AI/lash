@@ -500,14 +500,22 @@ impl HostAdapter for WorkbenchHost {
         Box::pin(async move {
             self.cleanup.extend(std::mem::take(&mut self.mcp_cleanup));
             let host = match self.process.as_mut() {
-                Some(process) => process.stop(
-                    Instant::now() + Duration::from_secs(30),
-                    Some("agent-workbench shutdown complete"),
-                ).await,
+                Some(process) => {
+                    process
+                        .stop(
+                            Instant::now() + Duration::from_secs(30),
+                            Some("agent-workbench shutdown complete"),
+                        )
+                        .await
+                }
                 None => Ok(Vec::new()),
             };
             let peer = match self.mcp.as_mut() {
-                Some(process) => process.stop(Instant::now() + Duration::from_secs(10), None).await,
+                Some(process) => {
+                    process
+                        .stop(Instant::now() + Duration::from_secs(10), None)
+                        .await
+                }
                 None => Ok(Vec::new()),
             };
             self.cleanup.extend(host?);

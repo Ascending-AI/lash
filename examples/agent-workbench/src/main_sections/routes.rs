@@ -211,7 +211,14 @@ pub(crate) async fn retrieve_attachment(
     Response::builder()
         .status(StatusCode::OK)
         // MCP can retain arbitrary binary resources beside PNG uploads.
-        .header(header::CONTENT_TYPE, "image/png")
+        .header(
+            header::CONTENT_TYPE,
+            if png_dimensions(&stored.bytes).is_some() {
+                "image/png"
+            } else {
+                "application/octet-stream"
+            },
+        )
         .header("x-content-type-options", "nosniff")
         .header(header::CACHE_CONTROL, "private, no-store")
         .header("x-lash-attachment-id", attachment_id)

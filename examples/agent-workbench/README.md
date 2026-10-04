@@ -89,7 +89,9 @@ with `AGENT_WORKBENCH_MCP_ADDR=127.0.0.1:3032`. The HTTP fixture requires
 the bearer token above. Set `AGENT_WORKBENCH_MCP_FIXTURE_BIN` to the same
 binary to connect the stdio fixture beside search at host startup.
 Its tools exercise provider-backed sampling, form and URL elicitation,
-workspace roots, and a stored binary attachment. `AGENT_WORKBENCH_SEARCH_MCP_URL`
+workspace roots, and a stored binary attachment. Retrieval preserves the retained
+bytes, serving PNG as `image/png` and other binary resources as
+`application/octet-stream`. `AGENT_WORKBENCH_SEARCH_MCP_URL`
 overrides the search peer URL for an isolated fixture run.
 
 S28 is `s28_workbench_mcp_peer_restart` in the upgrade harness. It uses
