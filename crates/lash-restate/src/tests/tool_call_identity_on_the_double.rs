@@ -147,27 +147,6 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
     }
 }
 
-#[async_trait::async_trait]
-impl lash_conformance::ToolCallIdentityRunner for DoubleTurnRunner {
-    async fn run_crashes_then_redriven_turn(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        crashing: Vec<lash_conformance::ConformanceTurnAttempt>,
-        redrive: lash_conformance::ConformanceTurnAttempt,
-    ) {
-        self.backend
-            .run_crashes_then_redriven(
-                admitted,
-                crashing.into_iter().map(into_handler_attempt).collect(),
-                into_handler_attempt(redrive),
-            )
-            .await
-            .unwrap_or_else(|error| {
-                panic!("the double preserves the invocation through each crash: {error}")
-            });
-    }
-}
-
 /// The RLM protocol with its process lifecycle on, over `backend`'s
 /// artifacts, and the process controls a cell's `processes.start` needs.
 fn process_rlm(

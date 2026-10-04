@@ -40,10 +40,6 @@ macro_rules! tool_call_identity_tests {
             frames_keep_identity_and_distinguish_fresh_calls);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             compaction_keeps_identity_and_distinguishes_fresh_calls);
-        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
-            retained_payload_drift_is_refused_before_effects);
-        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
-            retained_call_identity_refuses_name_arguments_and_authority_drift_before_effects);
     };
     (@law [$($attr:tt)*] $fixture:block; fork_inherits_history_without_execution_queues_waits_or_journals) => {
         $($attr)*

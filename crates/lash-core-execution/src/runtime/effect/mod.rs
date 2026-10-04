@@ -4,11 +4,10 @@ mod envelope;
 #[doc(hidden)]
 pub mod executor;
 mod group;
-mod llm_outcome;
-pub(crate) use group::await_cancelled_error;
 mod group_executors;
 #[cfg(any(test, feature = "testing"))]
 mod layered_host;
+mod llm_outcome;
 pub mod scope_status;
 use lash_core_store::effect_identity as identity_types;
 mod live_openers;

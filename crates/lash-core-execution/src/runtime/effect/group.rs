@@ -334,18 +334,6 @@ pub(crate) fn group_shape_error(message: impl Into<String>) -> RuntimeEffectCont
     RuntimeEffectControllerError::new(crate::RuntimeErrorCode::RuntimeEffectGroupShape, message)
 }
 
-/// Refuses an await cancellation without advancing the caller's cursor.
-pub(crate) fn await_cancelled_error(group_key: &str, rank: usize) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(
-        crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
-        format!(
-            "the await of settlement {rank} of durable effect group {group_key} \
-             was cancelled; the group's rank is untouched and a later await resumes \
-             at the same settlement"
-        ),
-    )
-}
-
 /// Refuses an effect that carries group membership on a path that cannot honor
 /// it, for effect-host implementors dispatching on command shape.
 ///

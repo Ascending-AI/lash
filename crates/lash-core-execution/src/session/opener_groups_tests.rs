@@ -140,47 +140,6 @@ async fn a_process_is_refused_past_what_it_holds_and_admitted_after_it_consumes(
         .expect("the consumed calls are no longer held");
 }
 
-#[tokio::test]
-async fn run_boundary_restores_cursor_reservation_and_incorporated_prefix() {
-    let opener = OpenerState::default();
-    let predecessor = process(4).with_opener_state(opener.clone());
-    predecessor
-        .reserve_tool_calls("race", 3)
-        .await
-        .expect("fits");
-    predecessor.retain_outstanding_group(
-        crate::EffectGroupHandle::restored("race", 4, 1).expect("valid cursor"),
-    );
-    let prefix = super::super::SettlementSource::GroupRank {
-        group_key: "race".to_string(),
-        rank: 1,
-        child_replay_key: "timer".to_string(),
-    };
-    opener
-        .ledger
-        .lock_recover()
-        .incorporated
-        .insert(prefix.clone());
-    let recorded = serde_json::to_vec(&opener.snapshot()).expect("serializable Run state");
-    let successor =
-        OpenerState::from_snapshot(serde_json::from_slice(&recorded).expect("stored Run state"))
-            .expect("reattach");
-    assert!(successor.ledger_snapshot().incorporated.contains(&prefix));
-    let context = process(4).with_opener_state(successor);
-    let groups = context.outstanding_groups_snapshot();
-    assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0].consumed(), 1);
-    context
-        .reserve_tool_calls("race", 3)
-        .await
-        .expect("same reservation");
-    context
-        .reserve_tool_calls("new", 1)
-        .await
-        .expect("one call remains");
-    assert!(context.reserve_tool_calls("past-limit", 1).await.is_err());
-}
-
 #[test]
 fn malformed_run_boundary_cursor_refuses_recovery() {
     let snapshot = crate::store::RunOpenerState {

@@ -372,9 +372,9 @@ mod tests {
             BuildGeneration::from_digest([b's', b't', bytes[0], bytes[1], bytes[2], bytes[3]])
         };
         #[cfg(not(feature = "synthetic-next"))]
-        const PREDECESSOR_EPOCH: u32 = 27;
+        const PREDECESSOR_EPOCH: u32 = 29;
         #[cfg(feature = "synthetic-next")]
-        const PREDECESSOR_EPOCH: u32 = 28;
+        const PREDECESSOR_EPOCH: u32 = 30;
         let old = generation(PREDECESSOR_EPOCH);
         let new = generation(crate::JOURNAL_LOGIC_EPOCH);
         let predecessor_lane = crate::services::DEFAULT_NAMESPACE

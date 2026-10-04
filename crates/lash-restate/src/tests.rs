@@ -267,7 +267,6 @@ mod effect_group_drain_transitivity;
 mod effect_group_follow_up_laws;
 mod effect_group_generation_routing;
 mod effect_group_notification_index;
-mod effect_group_notification_ownership;
 mod effect_group_rank_reservation;
 pub(crate) mod effect_group_routing_miss;
 mod effect_group_sdk_preconditions;

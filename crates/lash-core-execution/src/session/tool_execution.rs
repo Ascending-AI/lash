@@ -48,8 +48,6 @@ pub struct ToolInvocation {
     pub issuing_language_node_id: Option<String>,
 }
 
-struct AdmittedCallIdentity(crate::ToolCallId, crate::ToolId);
-
 impl ToolInvocation {
     pub fn new(id: crate::ToolCallId, tool_id: crate::ToolId, args: serde_json::Value) -> Self {
         Self {
@@ -285,31 +283,6 @@ impl ToolInvocationReply {
 pub struct CompletedProtocolToolCall {
     pub completed: crate::sansio::CompletedToolCall,
     pub record: ToolCallRecord,
-}
-
-fn cancelled_completed_tool_call(
-    ids: ToolCallIds,
-    tool_name: String,
-    args: serde_json::Value,
-    replay: Option<crate::llm::types::ProviderReplayMeta>,
-) -> crate::sansio::CompletedToolCall {
-    let output = ToolCallOutput::cancelled(ToolCancellation::runtime("tool call cancelled"));
-    crate::sansio::CompletedToolCall {
-        call_id: ids.call_id,
-        provider_call_id: ids.provider_call_id,
-        tool_name: tool_name.clone(),
-        args,
-        model_return: ModelToolReturn {
-            tool_name,
-            parts: vec![crate::ModelToolReturnPart::text(
-                "[Tool execution cancelled]\ntool call cancelled".to_string(),
-            )],
-            attachment_notices: Vec::new(),
-        },
-        output,
-        intent_outcomes: Vec::new(),
-        replay,
-    }
 }
 
 /// Permanent tag registry for tool-batch identities.
@@ -800,111 +773,6 @@ impl RuntimeExecutionContext<'_> {
         .await;
         self.complete_tool_call(ids, tool_id, replay, outcome, call_key, duration_ms)
             .await
-    }
-
-    /// The completion a language runtime's call answers when a controller
-    /// refused it — its attempt or its presentation: the error is recorded as
-    /// the run's nested effect error, which stops the run at this command (a
-    /// replay divergence parks it), and the call settles a failure that was
-    /// never presented or journaled.
-    pub(crate) async fn refused_completion(
-        &self,
-        ids: ToolCallIds,
-        tool: String,
-        args: serde_json::Value,
-        error: crate::RuntimeEffectControllerError,
-        call_key: &str,
-        duration_ms: u64,
-    ) -> CompletedProtocolToolCall {
-        self.record_nested_effect_error(error.clone());
-        let output = ToolCallOutput::failure(ToolFailure::runtime(
-            ToolFailureClass::Internal,
-            error.code.as_str(),
-            error.message,
-        ));
-        let record = ToolCallRecord {
-            call_id: ids.call_id.clone(),
-            provider_call_id: ids.provider_call_id.clone(),
-            tool: tool.clone(),
-            args: args.clone(),
-            output: output.clone(),
-        };
-        self.emit_tool_call_completed(call_key, &record, &[], duration_ms, &[])
-            .await;
-        CompletedProtocolToolCall {
-            completed: crate::sansio::CompletedToolCall {
-                model_return: ModelToolReturn::from_output(tool.clone(), &output),
-                call_id: ids.call_id,
-                provider_call_id: ids.provider_call_id,
-                tool_name: tool,
-                args,
-                output,
-                intent_outcomes: Vec::new(),
-                replay: None,
-            },
-            record,
-        }
-    }
-
-    /// [`Self::complete_tool_call`] for a language runtime's call, whose
-    /// presentation failure stops the run instead of reaching its caller.
-    /// `call_key` is the material the call's observation lanes key under; see
-    /// [`Self::emit_tool_call_started`].
-    async fn complete_language_tool_call(
-        &self,
-        identity: AdmittedCallIdentity,
-        replay: Option<crate::llm::types::ProviderReplayMeta>,
-        outcome: ToolDispatchOutcome,
-        undispatched: bool,
-        call_key: &str,
-        duration_ms: u64,
-    ) -> CompletedProtocolToolCall {
-        let AdmittedCallIdentity(call_id, tool_id) = identity;
-        // A language runtime's call is lash's own: it carries no provider
-        // correlation.
-        let ids = ToolCallIds {
-            call_id,
-            provider_call_id: None,
-        };
-        let (tool, args) = (outcome.record.tool.clone(), outcome.record.args.clone());
-        // A run that already recorded a nested effect error aborts: this call
-        // was settled from inside it — a sibling's divergence — so it presents
-        // and journals nothing of its own (FIG-3679).
-        if let Some(error) = self.peek_nested_effect_error() {
-            return self
-                .refused_completion(ids, tool, args, error, call_key, duration_ms)
-                .await;
-        }
-        // Boxed: the presentation future would otherwise inflate every
-        // language runtime's call future past clippy's large-future bound.
-        let completed = if undispatched {
-            Box::pin(self.complete_undispatched_tool_call(
-                ids.clone(),
-                tool_id,
-                replay,
-                outcome,
-                call_key,
-                duration_ms,
-            ))
-            .await
-        } else {
-            Box::pin(self.complete_tool_call(
-                ids.clone(),
-                tool_id,
-                replay,
-                outcome,
-                call_key,
-                duration_ms,
-            ))
-            .await
-        };
-        match completed {
-            Ok(completed) => completed,
-            Err(error) => {
-                Box::pin(self.refused_completion(ids, tool, args, error, call_key, duration_ms))
-                    .await
-            }
-        }
     }
 
     /// `call_key` is the material the call's observation lanes key under; see

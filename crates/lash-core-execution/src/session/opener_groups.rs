@@ -220,14 +220,6 @@ pub struct OpenerGroupsClosed {
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
-    /// Hand a group whose consumer stopped before exhaustion to the opener.
-    ///
-    /// The handle carries the consumer's cursor, so the prefix the consumer
-    /// already incorporated is the prefix the end starts after.
-    pub(crate) fn retain_outstanding_group(&self, handle: crate::EffectGroupHandle) {
-        self.opener_groups.lock_recover().outstanding.push(handle);
-    }
-
     /// The cursors of every group the opener holds, for a segment handover
     /// (ADR 0099 §8, §9): a successor segment reattaches them rather than
     /// declining the boundary while losers are unsettled, and closes them at

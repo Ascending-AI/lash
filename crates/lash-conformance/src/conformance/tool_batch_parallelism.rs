@@ -82,11 +82,6 @@ pub use limit::{
 /// nothing useful — the budget's expiry reports the leaves that never started.
 const TURN_BUDGET: Duration = Duration::from_secs(60);
 
-/// The deadlock budget of the negative control. Its turn can never settle, so
-/// the budget only bounds the run; the named-members message is what the
-/// control asserts.
-const SERIAL_BUDGET: Duration = Duration::from_secs(15);
-
 /// The widths every producer is executed at (ADR 0116 §7.1). 64 is the `batch`
 /// ceiling.
 const WIDTHS: [usize; 3] = [2, 8, 64];
@@ -1088,11 +1083,6 @@ impl Schedule {
     const SERIAL_SAFE: Self = Self {
         gated: false,
         budget: TURN_BUDGET,
-        max_tool_calls: None,
-    };
-    const NEGATIVE_CONTROL: Self = Self {
-        gated: true,
-        budget: SERIAL_BUDGET,
         max_tool_calls: None,
     };
 }

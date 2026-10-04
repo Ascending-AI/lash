@@ -1018,33 +1018,6 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
     }
 }
 
-#[async_trait::async_trait]
-impl lash_conformance::ToolCallIdentityRunner for LiveTurnRunner {
-    async fn run_crashes_then_redriven_turn(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        crashing: Vec<lash_conformance::ConformanceTurnAttempt>,
-        redrive: lash_conformance::ConformanceTurnAttempt,
-    ) {
-        let mut attempts = crashing
-            .into_iter()
-            .map(|attempt| QueuedAttempt {
-                attempt,
-                crashing: true,
-                crash: None,
-                repeats_on_retry: false,
-            })
-            .collect::<Vec<_>>();
-        attempts.push(QueuedAttempt {
-            attempt: redrive,
-            crashing: false,
-            crash: None,
-            repeats_on_retry: false,
-        });
-        self.run_attempts(admitted, attempts).await;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

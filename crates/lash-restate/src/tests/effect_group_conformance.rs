@@ -838,7 +838,7 @@ impl LiveConformanceHarness {
 
     pub(super) fn tool_call_identity_runner(
         &self,
-    ) -> Arc<dyn lash_conformance::ToolCallIdentityRunner> {
+    ) -> Arc<dyn lash_conformance::ConformanceTurnRunner> {
         super::live_turn_probe::LiveTurnRunner::shared(
             self.connection.clone(),
             self.admin.clone(),

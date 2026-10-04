@@ -26,24 +26,11 @@ use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{SessionId, TurnId};
 
 mod admission;
-mod drift;
 mod laws;
 mod replay;
 pub use admission::*;
-pub use drift::*;
 pub use laws::*;
 pub use replay::*;
-
-/// Runs repeated crashes in one invocation, preserving its retained call binding.
-#[async_trait::async_trait]
-pub trait ToolCallIdentityRunner: crate::ConformanceTurnRunner {
-    async fn run_crashes_then_redriven_turn(
-        &self,
-        admitted: crate::AdmittedScope,
-        crashing: Vec<crate::ConformanceTurnAttempt>,
-        redrive: crate::ConformanceTurnAttempt,
-    );
-}
 
 /// What a registering tier hands every tool-call identity law.
 #[derive(Clone)]
@@ -54,7 +41,7 @@ pub struct ToolCallIdentityTier {
     pub effect_host: Arc<dyn crate::EffectHost>,
     pub stores: Arc<dyn crate::StoreSet>,
     /// Runs each turn, and crashes and redrives it.
-    pub runner: Arc<dyn ToolCallIdentityRunner>,
+    pub runner: Arc<dyn crate::ConformanceTurnRunner>,
     /// The RLM protocol plugin factories the code-cell laws run under: the
     /// part of the tier this crate cannot construct.
     pub rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
@@ -73,10 +60,6 @@ const PROBE: &str = "identity_probe";
 /// The probe that parks on its completion key and resolves it itself.
 const DEFERRED: &str = "identity_deferred";
 
-/// The probe whose prepare phase seals a fresh payload each time it runs, and
-/// whose body waits on the law's gate before its effect.
-const DRIFTING: &str = "identity_drifting";
-
 /// The tool-facing identity one attempt saw.
 ///
 /// `call_id` is the key a tool author is told to key idempotency on: the
@@ -94,7 +77,6 @@ pub(crate) struct Execution {
     pub(crate) label: String,
     pub(crate) identity: AttemptIdentity,
     /// The payload the call's prepare phase sealed.
-    pub(crate) prepared: serde_json::Value,
     /// The completion key a deferred probe parked on.
     pub(crate) completion_key: Option<crate::AwaitEventKey>,
 }
@@ -130,8 +112,6 @@ pub(crate) struct Witness {
     /// Bodies that started, by label, including those still running.
     started: std::sync::Mutex<Vec<String>>,
     gate: Gate,
-    /// How many times the drifting probe's prepare phase ran.
-    pub(crate) prepares: AtomicUsize,
 }
 
 impl Witness {
@@ -248,7 +228,7 @@ fn probe_definition(name: &str) -> crate::ToolDefinition {
     }
 }
 
-/// The probe tools: [`PROBE`], [`DEFERRED`] and [`DRIFTING`].
+/// The probe tools: [`PROBE`] and [`DEFERRED`].
 struct IdentityProbes {
     witness: Arc<Witness>,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -273,7 +253,6 @@ impl IdentityProbes {
         self.witness.record(Execution {
             label: args.label.clone(),
             identity,
-            prepared: call.context.prepared_payload().clone(),
             completion_key: Some(key.clone()),
         });
         // The call resolves its own key with its own label: a call that reads
@@ -299,29 +278,16 @@ impl IdentityProbes {
 #[async_trait::async_trait]
 impl crate::ToolProvider for IdentityProbes {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        [PROBE, DEFERRED, DRIFTING]
+        [PROBE, DEFERRED]
             .into_iter()
             .map(|name| probe_definition(name).manifest())
             .collect()
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        [PROBE, DEFERRED, DRIFTING]
+        [PROBE, DEFERRED]
             .contains(&name)
             .then(|| Arc::new(probe_definition(name).contract()))
-    }
-
-    async fn prepare_tool_call(
-        &self,
-        call: crate::ToolPrepareCall<'_>,
-    ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
-        let drifting = call.tool_id == *probe_definition(DRIFTING).id();
-        let mut prepared = crate::PreparedToolCall::identity(call.tool_id, call.pending);
-        if drifting {
-            let seal = self.witness.prepares.fetch_add(1, Ordering::SeqCst) + 1;
-            prepared.prepared_payload = serde_json::json!({ "seal": seal });
-        }
-        Ok(prepared)
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -337,17 +303,11 @@ impl crate::ToolProvider for IdentityProbes {
         if call.name() == DEFERRED {
             return self.deferred(&call, args, identity).await;
         }
-        if call.name() == DRIFTING {
-            // Nothing has happened yet: the gate holds the call between its
-            // admission and its effect.
-            self.witness.gate.passed().await;
-        }
         // The recorded execution is the probe's effect; a held probe's gate
         // then holds its outcome back from the journal.
         self.witness.record(Execution {
             label: args.label.clone(),
             identity: identity.clone(),
-            prepared: call.context.prepared_payload().clone(),
             completion_key: None,
         });
         if args.hold {
@@ -581,7 +541,7 @@ impl World {
             .push((opening.to_string(), Arc::new(responses)));
     }
 
-    pub(crate) fn runner(&self) -> &Arc<dyn ToolCallIdentityRunner> {
+    pub(crate) fn runner(&self) -> &Arc<dyn crate::ConformanceTurnRunner> {
         &self.tier.runner
     }
 

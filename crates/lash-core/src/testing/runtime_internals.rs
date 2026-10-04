@@ -49,8 +49,7 @@ pub use crate::tool_dispatch::{
 /// The kernel's single-call entries under the dispatch state a [`crate::testing::ToolCallFixture`]
 /// configures: the entries themselves take crate-private state.
 pub use lash_core_execution::testing::kernel_internals::{
-    bind_retained_tool_requests, coordinate_prepared_tool_call_launch_with_execution_context,
-    execute_once,
+    coordinate_prepared_tool_call_launch_with_execution_context, execute_once,
 };
 /// A read-only view over a runtime's own published plugin state, the one a
 /// plugin receives, and the recorded publication of commands into it the
