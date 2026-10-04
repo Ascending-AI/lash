@@ -573,7 +573,10 @@ pub(super) async fn restate_attach_survives_control_timeout_and_honors_ceiling()
     let (base_url, _captured, server) = spawn_restate_http_capture_delayed(
         vec![MockHttpResponse {
             status: "200 OK",
-            body: r#"{"wire":1,"body":{"type":"success","value":"attached"}}"#,
+            body: Box::leak(
+                crate::wire::reply_json(&legacy_process_success(serde_json::json!("attached")))
+                    .into_boxed_str(),
+            ),
         }],
         response_delay,
     )
