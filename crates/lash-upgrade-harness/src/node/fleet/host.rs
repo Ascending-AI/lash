@@ -95,14 +95,16 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
         lash::RegisteredLlmProfile::new(super::super::model()?, provider),
     )?;
     let callback_args = args.clone();
+    let callback_stores = stores.clone();
     let callback = Arc::new(move |delivery: ToolDelivery| -> BodyStep {
         let args = callback_args.clone();
+        let stores = callback_stores.clone();
         Box::pin(async move {
             let run = delivery
                 .logical_run
                 .as_ref()
                 .context("body has no logical Run")?;
-            let (mut work, _) = observe_work(&args, run, deadline).await?;
+            let (mut work, _) = observe_work(&args, stores.as_ref(), run, deadline).await?;
             work.call = Some(delivery.call_id.to_string());
             work.ordinal = Some(delivery.ordinal);
             let barrier = Barrier {
@@ -221,7 +223,7 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
                 .as_deref()
                 .context("missing held terminal")?
                 .run;
-            let (work, _) = observe_work(&state.args, run, deadline).await?;
+            let (work, _) = observe_work(&state.args, state.stores.as_ref(), run, deadline).await?;
             let path = state.args.directory.join("publication-request.json");
             request.capture(&path)?;
             let barriers = FileBarriers::new(state.args.barrier_directory.clone(), deadline)?;
@@ -460,7 +462,8 @@ async fn command_host(state: &State, command: HostCommand) -> Result<HostObserva
         }
         other => bail!("unsupported fleet public command: {other:?}"),
     };
-    let (work, protocol) = observe_work(&state.args, &run, state.deadline).await?;
+    let (work, protocol) =
+        observe_work(&state.args, state.stores.as_ref(), &run, state.deadline).await?;
     let path = state.args.directory.join("accepted-work.json");
     super::super::write_atomically(
         &path,
@@ -471,6 +474,7 @@ async fn command_host(state: &State, command: HostCommand) -> Result<HostObserva
 
 async fn observe_work(
     args: &FleetServeArgs,
+    stores: &dyn lash::StoreSet,
     run: &lash::TurnId,
     deadline: Instant,
 ) -> Result<(WorkIdentity, u32)> {
@@ -488,14 +492,14 @@ async fn observe_work(
     let pool = sqlx::PgPool::connect(url).await?;
     let view = RestateView::new(&args.restate.admin_url, &args.restate.namespace)?;
     loop {
-        let admission_json: Option<String> = sqlx::query_scalar("SELECT admission_json FROM lash_session_runs WHERE session_id=$1 AND run=$2 AND admission_json IS NOT NULL")
-            .bind(session.as_str()).bind(run.as_str()).fetch_optional(&pool).await?;
-        if let Some(admission_json) = admission_json {
-            let admission: lash_core::store::RunAdmission = serde_json::from_str(&admission_json)?;
-            let lash_core::store::RunExecutor::Run { admission } = admission.executor else {
-                bail!("fleet Run has no real engine executor");
-            };
-            let key = admission.as_str().replace('\'', "''");
+        if let Some(key) = lash::restate::recorded_turn_invocation_key(
+            stores.session_store_factory().as_ref(),
+            &session,
+            run,
+        )
+        .await?
+        {
+            let key = key.replace('\'', "''");
             let prefix = view.service_name("LashTurn").replace('\'', "''");
             let rows: Vec<Invocation> = view.query(&format!("SELECT id, pinned_service_protocol_version FROM sys_invocation WHERE target_service_name LIKE '{prefix}%' AND target_service_key = '{key}' AND target_handler_name = 'run'")).await?;
             if rows.len() == 1 {
