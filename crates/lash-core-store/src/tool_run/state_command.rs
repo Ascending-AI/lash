@@ -453,7 +453,53 @@ pub struct StateFrontier {
     /// The segment that owns publication.
     pub owner_segment: SegmentOrdinal,
     /// Digests of applied resolutions, including origin and resolved content.
+    #[serde(deserialize_with = "deserialize_receipts")]
     pub receipts: BTreeMap<PublicationOrdinal, crate::BlobRef>,
+}
+
+// JSON object keys become strings when an enclosing tagged enum buffers its
+// content. Decode the key at the map boundary, retaining numeric keys for
+// MessagePack and numeric publication ordinals everywhere else.
+fn deserialize_receipts<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<PublicationOrdinal, crate::BlobRef>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(PartialEq, Eq, PartialOrd, Ord)]
+    struct ReceiptKey(PublicationOrdinal);
+
+    impl<'de> Deserialize<'de> for ReceiptKey {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct KeyVisitor;
+            impl serde::de::Visitor<'_> for KeyVisitor {
+                type Value = ReceiptKey;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    formatter.write_str("a publication ordinal")
+                }
+
+                fn visit_u64<E: serde::de::Error>(self, ordinal: u64) -> Result<Self::Value, E> {
+                    Ok(ReceiptKey(PublicationOrdinal(ordinal)))
+                }
+
+                fn visit_str<E: serde::de::Error>(self, ordinal: &str) -> Result<Self::Value, E> {
+                    ordinal
+                        .parse()
+                        .map(|ordinal| ReceiptKey(PublicationOrdinal(ordinal)))
+                        .map_err(E::custom)
+                }
+            }
+            deserializer.deserialize_any(KeyVisitor)
+        }
+    }
+
+    BTreeMap::<ReceiptKey, crate::BlobRef>::deserialize(deserializer).map(|receipts| {
+        receipts
+            .into_iter()
+            .map(|(key, receipt)| (key.0, receipt))
+            .collect()
+    })
 }
 
 impl StateFrontier {

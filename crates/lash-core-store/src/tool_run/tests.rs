@@ -2071,3 +2071,27 @@ fn l09_capture_rebuilds_the_complete_acknowledged_run() {
         ContinuationRefusal::EventFrontier
     );
 }
+
+/// L19: a published state frontier survives the tagged journal envelope.
+#[test]
+fn l19_publication_receipts_round_trip_inside_a_journal_variant() {
+    #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[serde(tag = "outcome")]
+    enum Journal {
+        Published { frontier: StateFrontier },
+    }
+    let frontier = StateFrontier {
+        applied: Some(PublicationOrdinal(1)),
+        owner_segment: SegmentOrdinal(0),
+        receipts: [(
+            PublicationOrdinal(1),
+            crate::BlobRef::for_content(b"recorded resolution"),
+        )]
+        .into(),
+    };
+    let record = Journal::Published { frontier };
+    let bytes = serde_json::to_vec(&record).unwrap();
+    assert_eq!(serde_json::from_slice::<Journal>(&bytes).unwrap(), record);
+    let bytes = rmp_serde::to_vec_named(&record).unwrap();
+    assert_eq!(rmp_serde::from_slice::<Journal>(&bytes).unwrap(), record);
+}
