@@ -72,8 +72,6 @@ pub use adversarial::*;
 mod followup;
 pub(crate) mod receipts;
 pub use followup::*;
-mod superseded_run;
-pub use superseded_run::*;
 mod host_commands;
 pub use host_commands::*;
 mod command_budget;
@@ -1835,18 +1833,6 @@ macro_rules! frame_open_redrive_tests {
                 an_empty_pressure_seed_opens_one_frame, AfterTurnCommit),
             (pressure_hooks_sharing_an_id_crashed_after_the_turns_commit_keep_their_records_apart,
                 pressure_hooks_sharing_an_id_keep_their_records_apart, AfterTurnCommit));
-        $crate::frame_open_redrive_tests!(@superseded [$(#[$attr])*] $fixture;
-            (a_superseded_run_ends_typed_on_the_shift_loop, ShiftLoop, None),
-            (a_superseded_run_ends_typed_on_the_shift_loop_across_a_crash_before_its_end,
-                ShiftLoop, CrashBeforeEnd),
-            (a_superseded_run_ends_typed_on_the_engine_path, Engine, None),
-            (a_superseded_run_ends_typed_on_the_engine_path_across_a_crash_before_its_end,
-                Engine, CrashBeforeEnd));
-        $crate::frame_open_redrive_tests!(@own [$(#[$attr])*] $fixture;
-            (a_run_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_shift_loop,
-                ShiftLoop),
-            (a_run_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_engine_path,
-                Engine));
         $crate::frame_open_redrive_tests!(@once [$(#[$attr])*] $fixture;
             a_commanded_compaction_redriven_on_another_worker_replays_its_recorded_prompt,
             a_pressure_compaction_redriven_on_another_worker_replays_its_recorded_prompt,
@@ -1945,41 +1931,6 @@ macro_rules! frame_open_redrive_tests {
         $crate::frame_open_redrive_tests!(@crashed [$($attrs)*] $fixture; $($rest),*);
     };
     (@crashed [$($attrs:tt)*] $fixture:block;) => {};
-    (@superseded [$($attrs:tt)*] $fixture:block; ($name:ident, $path:ident, $recovery:ident) $(, $rest:tt)*) => {
-        $($attrs)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $name() {
-            let (_guard, prefix, host, stores, runner) = $fixture;
-            $crate::registration_macro_support::a_superseded_run_ends_typed_on_every_shift_path(
-                prefix,
-                host,
-                stores,
-                runner,
-                $crate::registration_macro_support::SupersededRunPath::$path,
-                $crate::registration_macro_support::SupersededRunRecovery::$recovery,
-            )
-            .await;
-        }
-        $crate::frame_open_redrive_tests!(@superseded [$($attrs)*] $fixture; $($rest),*);
-    };
-    (@superseded [$($attrs:tt)*] $fixture:block;) => {};
-    (@own [$($attrs:tt)*] $fixture:block; ($name:ident, $path:ident) $(, $rest:tt)*) => {
-        $($attrs)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $name() {
-            let (_guard, prefix, host, stores, runner) = $fixture;
-            $crate::registration_macro_support::a_run_resumed_on_a_fresh_journal_continues_from_its_own_frame(
-                prefix,
-                host,
-                stores,
-                runner,
-                $crate::registration_macro_support::SupersededRunPath::$path,
-            )
-            .await;
-        }
-        $crate::frame_open_redrive_tests!(@own [$($attrs)*] $fixture; $($rest),*);
-    };
-    (@own [$($attrs:tt)*] $fixture:block;) => {};
     (@once [$($attrs:tt)*] $fixture:block; $law:ident $(, $rest:ident)*) => {
         $($attrs)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

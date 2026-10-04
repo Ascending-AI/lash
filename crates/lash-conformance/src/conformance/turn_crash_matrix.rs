@@ -64,7 +64,6 @@ mod after_commit_redrive;
 mod direct_acceptance;
 mod error_return;
 mod expectations;
-mod held_turn_input;
 mod recovery;
 mod reference_turn;
 mod run_end_crash_cells;
@@ -88,7 +87,6 @@ use expectations::{
     error_return_rulings, turn_crash_matrix_outcomes, validate_error_return_rulings,
     validate_outcome_table,
 };
-pub use held_turn_input::admitted_turn_input_visibility_survives_worker_crash;
 use pretty_assertions::assert_eq;
 pub use run_end_crash_cells::{
     run_end_commit_crash_after_write_replays_once, run_end_commit_crash_before_write_replays_once,

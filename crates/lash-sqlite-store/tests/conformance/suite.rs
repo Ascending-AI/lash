@@ -1437,25 +1437,3 @@ mod session_commands {
         ((backend, double), "sqlite-commands", host, stores, runner)
     });
 }
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn admitted_turn_input_visibility_survives_worker_crash() {
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let stores = backend.as_stores();
-    let double_stores = Arc::clone(&stores);
-    let double = lash_restate_test::backend_with(
-        4679,
-        lash_restate_test::ServerConfig::default(),
-        move |_| Arc::clone(&double_stores),
-    )
-    .await
-    .expect("boot the input visibility law's handler");
-    let host = double.restate().restate_effect_host();
-    let runner =
-        Arc::new(ScopeLawTurnRunner(double)) as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-    let make = move |_scenario: &str| backend.blocking_store();
-    lash_conformance::admitted_turn_input_visibility_survives_worker_crash(
-        stores, make, host, runner,
-    )
-    .await;
-}

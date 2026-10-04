@@ -1,6 +1,6 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
-reads = 102
+reads = 101
 outputs = 137
 
 [[surfaces]]
@@ -143,7 +143,6 @@ row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", 
 "crates/lash-conformance/src/conformance/session_store_factory_failure_evidence.rs#session_store_factory_mid_stream_failure_evidence" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "session_store_factory_mid_stream_failure_evidence inspects recorded state for non-transcript evidence or execution context." }
 "crates/lash-conformance/src/conformance/tool_batch_parallelism.rs#consumer_replies" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "consumer_replies inspects recorded state for non-transcript evidence or execution context." }
 "crates/lash-conformance/src/conformance/turn_crash_matrix/direct_acceptance.rs#direct_turn_acceptance_crash_after_store_commit_admits_one_row" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "direct_turn_acceptance_crash_after_store_commit_admits_one_row inspects recorded state for non-transcript evidence or execution context." }
-"crates/lash-conformance/src/conformance/turn_crash_matrix/held_turn_input.rs#admitted_turn_input_visibility_survives_worker_crash" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "admitted_turn_input_visibility_survives_worker_crash inspects recorded state for non-transcript evidence or execution context." }
 "crates/lash-core/src/runtime/observation/replay/bytes.rs#event_bytes" = { reads = 1, outputs = 0, kind = "projection-core", reason = "event_bytes owns committed context, storage or the canonical read projection." }
 "crates/lash-core/src/runtime/turn_driver/machine.rs#run_machine" = { reads = 1, outputs = 0, kind = "projection-core", reason = "run_machine owns committed context, storage or the canonical read projection." }
 "crates/lash-core/tests/runtime/tests/attachment_continuation.rs#attachment_in_array_tool_value_then_immediate_cancel_loses_nothing" = { reads = 3, outputs = 0, kind = "evidence-read", reason = "attachment_in_array_tool_value_then_immediate_cancel_loses_nothing inspects recorded state for a law assertion." }
