@@ -24,6 +24,9 @@ pub struct WorkbenchHost {
     http: reqwest::Client,
     process: Option<HostProcess>,
     directory: Option<PathBuf>,
+    artifact: Option<ArtifactIdentity>,
+    lease: Option<CaseLease>,
+    cleanup: Vec<CleanupReceipt>,
     sessions: BTreeMap<String, String>,
     subjects: BTreeMap<String, String>,
     transcript: Vec<HostObservation>,
@@ -42,6 +45,9 @@ impl WorkbenchHost {
                 .build()?,
             process: None,
             directory: None,
+            artifact: None,
+            lease: None,
+            cleanup: Vec::new(),
             sessions: BTreeMap::new(),
             subjects: BTreeMap::new(),
             transcript: Vec::new(),
@@ -53,6 +59,9 @@ impl WorkbenchHost {
             environment.keys().all(|key| matches!(
                 key.as_str(),
                 "AGENT_WORKBENCH_PROVIDER_URL"
+                    | "AGENT_WORKBENCH_PROTOCOL"
+                    | "AGENT_WORKBENCH_TOOL_FIXTURE"
+                    | "AGENT_WORKBENCH_RESTATE_ADVERTISE_URL"
                     | "OPENROUTER_API_KEY"
                     | "OPENROUTER_MODEL"
                     | "OPENROUTER_MODEL_VARIANT"
@@ -63,6 +72,142 @@ impl WorkbenchHost {
         self.environment = environment;
         Ok(self)
     }
+    fn advertised_uri(&self) -> String {
+        self.environment
+            .get("AGENT_WORKBENCH_RESTATE_ADVERTISE_URL")
+            .cloned()
+            .unwrap_or_else(|| format!("http://127.0.0.1:{}", self.endpoint_port))
+            .trim_end_matches('/')
+            .to_owned()
+    }
+    async fn spawn(&mut self) -> Result<HostReady> {
+        let artifact = self
+            .artifact
+            .clone()
+            .context("workbench artifact missing")?;
+        let mut lease = copy_lease(self.lease.as_ref().context("workbench lease missing")?);
+        let mut environment = BTreeMap::from([
+            (
+                "AGENT_WORKBENCH_ADDR".into(),
+                format!("127.0.0.1:{}", self.http_port),
+            ),
+            (
+                "AGENT_WORKBENCH_RESTATE_ADDR".into(),
+                format!("127.0.0.1:{}", self.endpoint_port),
+            ),
+            (
+                "AGENT_WORKBENCH_RESTATE_NAMESPACE".into(),
+                lease.namespace.clone(),
+            ),
+            (
+                "AGENT_WORKBENCH_DATA_DIR".into(),
+                self.data_directory()?.display().to_string(),
+            ),
+            ("AGENT_WORKBENCH_OPEN".into(), "0".into()),
+            ("RESTATE_AUTHORITY_ID".into(), lease.authority.clone()),
+            ("RESTATE_INGRESS_URL".into(), self.ingress.clone()),
+            ("RESTATE_ADMIN_URL".into(), self.admin.clone()),
+        ]);
+        environment.extend(self.environment.clone());
+        self.process = Some(
+            HostProcess::spawn(
+                &artifact,
+                &mut lease,
+                "workbench",
+                environment.clone(),
+                vec![self.http_port, self.endpoint_port],
+            )
+            .await?,
+        );
+        let health = format!("{}/healthz", self.base());
+        ready(
+            self.process.as_mut().context("workbench child missing")?,
+            &self.http,
+            &health,
+            "agent-workbench",
+            lease.deadline,
+        )
+        .await?;
+        let mut registration = HostProcess::spawn_with_args(
+            &artifact,
+            &mut lease,
+            "workbench-registration",
+            environment,
+            Vec::new(),
+            &["register-deployment".into(), self.advertised_uri()],
+        )
+        .await?;
+        let result = registration.finish(lease.deadline).await;
+        let cleanup = registration
+            .stop(Instant::now() + Duration::from_secs(10), None)
+            .await;
+        if let Ok(receipts) = &cleanup {
+            lease.cleanup.extend(receipts.clone());
+        }
+        result?;
+        cleanup?;
+        let listing: Value = self
+            .http
+            .get(format!("{}/deployments", self.admin))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let uri = self.advertised_uri();
+        let deployment = listing["deployments"]
+            .as_array()
+            .context("no registered deployments")?
+            .iter()
+            .find(|row| {
+                row["uri"]
+                    .as_str()
+                    .is_some_and(|u| u.trim_end_matches('/') == uri)
+            })
+            .context("workbench endpoint not registered")?;
+        let deployment: Value = self
+            .http
+            .get(format!(
+                "{}/deployments/{}",
+                self.admin,
+                deployment["id"].as_str().context("deployment id missing")?
+            ))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        ensure!(
+            deployment["max_protocol_version"] == 7,
+            "workbench did not negotiate V7"
+        );
+        std::fs::write(
+            lease.directory.join("workbench-deployment.json"),
+            serde_json::to_vec_pretty(&deployment)?,
+        )?;
+        let ready = HostReady {
+            endpoint: self.base(),
+            process: self
+                .process
+                .as_ref()
+                .context("workbench child missing")?
+                .receipt
+                .clone(),
+            protocol: 7,
+        };
+        self.lease = Some(lease);
+        Ok(ready)
+    }
+    pub fn trace_records(&self) -> Result<Vec<Value>> {
+        std::fs::read_to_string(self.trace_path()?)?
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                Ok(json!({"kind":"h2_trace_record", "record":serde_json::from_str::<Value>(line)?}))
+            })
+            .collect()
+    }
+
     fn base(&self) -> String {
         format!("http://127.0.0.1:{}", self.http_port)
     }
@@ -162,6 +307,20 @@ impl WorkbenchHost {
     }
 }
 
+fn copy_lease(lease: &CaseLease) -> CaseLease {
+    CaseLease {
+        gate_id: lease.gate_id.clone(),
+        namespace: lease.namespace.clone(),
+        authority: lease.authority.clone(),
+        directory: lease.directory.clone(),
+        postgres_url: lease.postgres_url.clone(),
+        ports: lease.ports.clone(),
+        deadline: lease.deadline,
+        processes: lease.processes.clone(),
+        cleanup: lease.cleanup.clone(),
+    }
+}
+
 // reqwest uses the URL crate's serializer, preserving opaque cursor bytes.
 #[expect(
     clippy::expect_used,
@@ -188,118 +347,13 @@ impl HostAdapter for WorkbenchHost {
         Box::pin(async move {
             ensure!(self.process.is_none(), "workbench already booted");
             self.directory = Some(lease.directory.clone());
-            let mut environment = BTreeMap::from([
-                (
-                    "AGENT_WORKBENCH_ADDR".into(),
-                    format!("127.0.0.1:{}", self.http_port),
-                ),
-                (
-                    "AGENT_WORKBENCH_RESTATE_ADDR".into(),
-                    format!("127.0.0.1:{}", self.endpoint_port),
-                ),
-                (
-                    "AGENT_WORKBENCH_RESTATE_NAMESPACE".into(),
-                    lease.namespace.clone(),
-                ),
-                (
-                    "AGENT_WORKBENCH_DATA_DIR".into(),
-                    self.data_directory()?.display().to_string(),
-                ),
-                ("AGENT_WORKBENCH_OPEN".into(), "0".into()),
-                ("RESTATE_AUTHORITY_ID".into(), lease.authority.clone()),
-                ("RESTATE_INGRESS_URL".into(), self.ingress.clone()),
-                ("RESTATE_ADMIN_URL".into(), self.admin.clone()),
-            ]);
-            environment.extend(self.environment.clone());
-            self.process = Some(
-                HostProcess::spawn(
-                    artifact,
-                    lease,
-                    "workbench",
-                    environment.clone(),
-                    vec![self.http_port, self.endpoint_port],
-                )
-                .await?,
-            );
-            let health = format!("{}/healthz", self.base());
-            ready(
-                self.process.as_mut().context("workbench child missing")?,
-                &self.http,
-                &health,
-                "agent-workbench",
-                lease.deadline,
-            )
-            .await?;
-            let mut registration = HostProcess::spawn_with_args(
-                artifact,
-                lease,
-                "workbench-registration",
-                environment,
-                Vec::new(),
-                &[
-                    "register-deployment".into(),
-                    format!("http://127.0.0.1:{}", self.endpoint_port),
-                ],
-            )
-            .await?;
-            let result = registration.finish(lease.deadline).await;
-            let cleanup = registration
-                .stop(Instant::now() + Duration::from_secs(10), None)
-                .await;
-            if let Ok(receipts) = &cleanup {
-                lease.cleanup.extend(receipts.clone());
-            }
-            result?;
-            cleanup?;
-            let listing: Value = self
-                .http
-                .get(format!("{}/deployments", self.admin))
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-            let uri = format!("http://127.0.0.1:{}", self.endpoint_port);
-            let deployment = listing["deployments"]
-                .as_array()
-                .context("no registered deployments")?
-                .iter()
-                .find(|row| {
-                    row["uri"]
-                        .as_str()
-                        .is_some_and(|u| u.trim_end_matches('/') == uri)
-                })
-                .context("workbench endpoint not registered")?;
-            let deployment: Value = self
-                .http
-                .get(format!(
-                    "{}/deployments/{}",
-                    self.admin,
-                    deployment["id"].as_str().context("deployment id missing")?
-                ))
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-            ensure!(
-                deployment["max_protocol_version"] == 7,
-                "workbench did not negotiate V7"
-            );
-            std::fs::write(
-                lease.directory.join("workbench-deployment.json"),
-                serde_json::to_vec_pretty(&deployment)?,
-            )?;
-            Ok(HostReady {
-                endpoint: self.base(),
-                process: self
-                    .process
-                    .as_ref()
-                    .context("workbench child missing")?
-                    .receipt
-                    .clone(),
-                protocol: 7,
-            })
+            self.artifact = Some(artifact.clone());
+            self.lease = Some(copy_lease(lease));
+            let ready = self.spawn().await?;
+            let retained = self.lease.as_ref().context("workbench lease missing")?;
+            lease.processes = retained.processes.clone();
+            lease.cleanup = retained.cleanup.clone();
+            Ok(ready)
         })
     }
     fn command<'a>(&'a mut self, command: HostCommand) -> Step<'a, HostObservation> {
@@ -370,6 +424,21 @@ impl HostAdapter for WorkbenchHost {
                     json!({"snapshot":self.snapshot(session).await?})
                 }
                 HostCommand::Process { action, input } => match action.as_str() {
+                    "kill-host" => {
+                        let process = self.process.as_mut().context("no owned workbench")?;
+                        let receipt = process.receipt.clone();
+                        process.kill().await?;
+                        let cleanup = process
+                            .stop(Instant::now() + Duration::from_secs(10), None)
+                            .await?;
+                        self.cleanup.extend(cleanup.clone());
+                        self.process = None;
+                        json!({"killed":true,"reaped":true,"process":receipt,"cleanup":cleanup})
+                    }
+                    "restart" => {
+                        ensure!(self.process.is_none(), "workbench still running");
+                        serde_json::to_value(self.spawn().await?)?
+                    }
                     "create-session" => {
                         json!({"session_id":self.session(input["session"].as_str().context("session alias required")?).await?})
                     }
@@ -416,17 +485,18 @@ impl HostAdapter for WorkbenchHost {
     }
     fn stop(&mut self) -> Step<'_, Vec<CleanupReceipt>> {
         Box::pin(async move {
-            match self.process.as_mut() {
-                Some(process) => {
+            if let Some(process) = self.process.as_mut() {
+                self.cleanup.extend(
                     process
                         .stop(
                             Instant::now() + Duration::from_secs(30),
                             Some("agent-workbench shutdown complete"),
                         )
-                        .await
-                }
-                None => Ok(Vec::new()),
+                        .await?,
+                );
+                self.process = None;
             }
+            Ok(self.cleanup.clone())
         })
     }
 }
