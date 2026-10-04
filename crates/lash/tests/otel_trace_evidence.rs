@@ -63,6 +63,10 @@ fn instrumentation_contract_document_matches_the_registry() {
 
 #[test]
 #[ignore = "writes crates/lash/docs/instrumentation-contract.md"]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the ignored regeneration writer writes the checked-in document into the real checkout"
+)]
 fn instrumentation_contract_document_is_regenerated() {
     let output = match std::env::var_os("BUILD_WORKSPACE_DIRECTORY") {
         Some(root) => PathBuf::from(root).join("crates/lash/docs/instrumentation-contract.md"),
