@@ -687,11 +687,8 @@ async fn submit_while_bound(
         for (command, key) in commands {
             receipts.push(law.submit_command(command, key).await);
         }
-        assert_eq!(
-            law.head().await.head_revision,
-            before,
-            "the head does not move while the bound turn holds its pressure summary"
-        );
+        law.receipts
+            .assert_since(before, law.head().await.head_revision, 0, 0, 0, 1);
         for receipt in &receipts {
             assert!(
                 law.command_outcome(receipt).await.is_none(),
@@ -714,11 +711,7 @@ async fn submit_while_bound(
         .into_inner()
         .expect("the commands were submitted while the pressure summary was held");
     let after = law.head().await.head_revision;
-    assert_eq!(
-        after,
-        before + 2,
-        "the pressure frame and the bound turn each commit once, before the commands"
-    );
+    law.receipts.assert_since(before, after, 1, 1, 0, 1);
     for receipt in &receipts {
         assert!(
             law.command_outcome(receipt).await.is_none(),
@@ -771,11 +764,8 @@ pub async fn host_append_waits_for_the_bound_turn(
         panic!("the append settles appended");
     };
     assert_eq!(node_ids.len(), 1, "the append landed its one node");
-    assert_eq!(
-        head.head_revision,
-        after_bound_turn + 2,
-        "the append and the next run each commit once"
-    );
+    law.receipts
+        .assert_since(after_bound_turn, head.head_revision, 0, 1, 1, 2);
     let path = active_path(&head.graph);
     let note = position_of_once(&path, HOST_APPEND_NOTE);
     assert!(
@@ -886,11 +876,8 @@ pub async fn host_plugin_command_applies_at_the_boundary(
         "a cancel after the task settled finds its settlement (FIG-4453)"
     );
     let head = law.head().await;
-    assert_eq!(
-        head.head_revision,
-        after_bound_turn + 3,
-        "each operation and the next run commit once"
-    );
+    law.receipts
+        .assert_since(after_bound_turn, head.head_revision, 0, 1, 2, 3);
     let path = active_path(&head.graph);
     let answer = position_of_once(&path, "answer 2");
     let next = position_of_once(&path, "third question");
@@ -974,11 +961,8 @@ pub async fn host_frame_open_applies_at_the_boundary(
         }
         other => panic!("the open settles opened: {other:?}"),
     }
-    assert_eq!(
-        head.head_revision,
-        after_bound_turn + 2,
-        "the open and the next run each commit once"
-    );
+    law.receipts
+        .assert_since(after_bound_turn, head.head_revision, 0, 1, 1, 2);
     let path = active_path(&head.graph);
     let frame_at = path
         .iter()

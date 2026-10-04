@@ -696,7 +696,8 @@ pub async fn an_empty_pressure_seed_opens_one_frame(
 
     assert_eq!(model.summary_calls.load(Ordering::SeqCst), 0);
     let head = law.head().await;
-    assert_eq!(head.head_revision, before + 2);
+    law.receipts
+        .assert_since(before, head.head_revision, 1, 1, 0, 1);
     let chain = frame_chain(&head, &law.session_id);
     assert_eq!(chain.len(), 2, "{chain:?}");
     assert_eq!(chain[1].1.as_ref(), Some(&first_frame));

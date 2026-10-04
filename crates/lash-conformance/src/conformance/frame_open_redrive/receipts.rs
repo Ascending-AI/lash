@@ -49,7 +49,7 @@ impl CommitReceipts {
             let kind = match commit.operation.key.as_str() {
                 "frame-commit" => 0,
                 "final" => 1,
-                "session-command" => 2,
+                "session-command" | "append-session-nodes" => 2,
                 key if key.starts_with("plugin-transition:") => 3,
                 other => panic!("unexpected frame-law commit kind {other}: {commit:?}"),
             };
