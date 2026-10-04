@@ -524,6 +524,15 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         ))
     }
 
+    /// Attach the process terminal using the exact source admitted by the Run.
+    async fn attach_run_process_terminal(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let _ = descriptor;
+        Err(crate::tool_run::SourceRefusal::NotArmed.into())
+    }
+
     /// Read the immutable seal selected by short segment subscriptions.
     async fn await_run_sources(
         &self,

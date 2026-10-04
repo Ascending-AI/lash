@@ -332,6 +332,25 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     where
         'ctx: 'run;
 
+    /// Attach the immutable terminal descriptor already armed by a Run.
+    fn attach_run_process_terminal<'run>(
+        &'run self,
+        _namespace: &'run crate::RestateNamespace,
+        _descriptor: lash_core::tool_run::SourceDescriptor,
+    ) -> crate::JournaledFuture<'run, ()>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async {
+            Err(TerminalError::new(
+                lash_core::RuntimeEffectControllerError::from(
+                    lash_core::tool_run::SourceRefusal::NotArmed,
+                )
+                .to_record(),
+            ))
+        })
+    }
+
     fn update_session_waits<'run>(
         &'run self,
         namespace: &'run crate::RestateNamespace,

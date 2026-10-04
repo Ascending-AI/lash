@@ -33,6 +33,10 @@ pub enum EffectControllerTaskRequest {
         descriptor: Box<crate::tool_run::SourceDescriptor>,
         response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
     },
+    AttachRunProcessTerminal {
+        descriptor: Box<crate::tool_run::SourceDescriptor>,
+        response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
+    },
     AwaitRunSources {
         subscriptions: Vec<crate::tool_run::SourceSubscription>,
         cancel: TurnCancelWait,
@@ -164,6 +168,12 @@ impl EffectControllerTaskRequest {
                 response,
             } => Box::pin(async move {
                 let _ = response.send(controller.arm_run_source(*descriptor).await);
+            }),
+            Self::AttachRunProcessTerminal {
+                descriptor,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(controller.attach_run_process_terminal(*descriptor).await);
             }),
             Self::AwaitRunSources {
                 subscriptions,
@@ -601,6 +611,22 @@ impl RuntimeEffectController for EffectTaskController {
         let (response_tx, response_rx) = oneshot::channel();
         self.requests
             .send(EffectControllerTaskRequest::ArmRunSource {
+                descriptor: Box::new(descriptor),
+                response: response_tx,
+            })
+            .map_err(|_| {
+                native_run_task_closed("native Run controller task is no longer running")
+            })?;
+        native_run_response(response_rx).await
+    }
+
+    async fn attach_run_process_terminal(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::AttachRunProcessTerminal {
                 descriptor: Box::new(descriptor),
                 response: response_tx,
             })

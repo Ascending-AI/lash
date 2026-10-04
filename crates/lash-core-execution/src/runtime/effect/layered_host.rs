@@ -728,6 +728,15 @@ impl RuntimeEffectController for LayeredController<'_> {
     ) -> Result<(), RuntimeEffectControllerError> {
         self.inner.as_ref().arm_run_source(descriptor).await
     }
+    async fn attach_run_process_terminal(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.inner
+            .as_ref()
+            .attach_run_process_terminal(descriptor)
+            .await
+    }
     async fn cancel_run_source(
         &self,
         descriptor: crate::tool_run::SourceDescriptor,

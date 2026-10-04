@@ -318,6 +318,12 @@ where
     ) -> Result<(), RuntimeEffectControllerError> {
         self.inner.arm_run_source(descriptor).await
     }
+    async fn attach_run_process_terminal(
+        &self,
+        descriptor: lash_core::tool_run::SourceDescriptor,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.inner.attach_run_process_terminal(descriptor).await
+    }
     async fn cancel_run_source(
         &self,
         descriptor: lash_core::tool_run::SourceDescriptor,

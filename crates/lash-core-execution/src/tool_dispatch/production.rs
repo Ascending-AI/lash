@@ -966,13 +966,19 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         source: &SourceDescriptor,
         process_id: &crate::ProcessId,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
-        self.context
-            .dispatch()
-            .processes
-            .attach_process_terminal(process_id, &source.source, self.context.process_scope(None))
+        if source.authority
+            != (SourceAuthority::ProcessTerminal {
+                process_id: process_id.clone(),
+            })
+        {
+            return Err(SourceRefusal::DescriptorMismatch.into());
+        }
+        let scoped = &self.context.dispatch().effect_controller;
+        scoped.admit_journal_write()?;
+        scoped
+            .controller()
+            .attach_run_process_terminal(source.clone())
             .await
-            .map_err(crate::RuntimeEffectControllerError::from)?;
-        Ok(())
     }
     async fn discharge_start(
         &self,

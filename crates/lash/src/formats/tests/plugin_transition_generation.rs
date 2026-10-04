@@ -285,15 +285,13 @@ async fn atomic_root_admission_refuses_a_predecessor_before_decoding_and_keeps_i
 /// L21 / FIG-4944: native turn activation now precedes Run config resolution.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn native_activation_refuses_predecessor_before_decode_and_retains_drain() {
-    let predecessor_epoch = if cfg!(feature = "synthetic-next") {
-        32
-    } else {
-        31
-    };
     // The malformed transition makes decoding visible: generation refusal
     // must happen first, and restoring the old build must retain its result.
-    predecessor_journal_keeps_its_lane(predecessor_epoch, PredecessorShape::UntaggedTransition)
-        .await;
+    predecessor_journal_keeps_its_lane(
+        crate::restate::JOURNAL_LOGIC_EPOCH - 1,
+        PredecessorShape::UntaggedTransition,
+    )
+    .await;
 }
 
 /// L21: binding a Run's process launch to the live executor changes its
@@ -597,4 +595,14 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
         "the drain lane still reaches the old build"
     );
     assert_eq!(shifts.bodies.load(Ordering::SeqCst), 0);
+}
+
+/// L21 / FIG-4944: Run-owned terminal subscriptions change the handler commands.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn run_terminal_attachment_refuses_predecessor_before_decode_and_retains_drain() {
+    predecessor_journal_keeps_its_lane(
+        crate::restate::JOURNAL_LOGIC_EPOCH - 1,
+        PredecessorShape::UntaggedTransition,
+    )
+    .await;
 }

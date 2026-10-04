@@ -56,6 +56,42 @@ pub(super) async fn cancel<'ctx, C: ContextClient<'ctx>>(
     }
 }
 
+pub(super) async fn attach_process_terminal<'ctx, C: ContextClient<'ctx>>(
+    context: &C,
+    namespace: &crate::RestateNamespace,
+    descriptor: SourceDescriptor,
+) -> Result<(), TerminalError> {
+    let subscription = crate::durable_wait::ProcessTerminalSubscription::for_source(descriptor)
+        .map_err(|error| TerminalError::new(error.to_record()))?;
+    let address = RestateDurableWaitAddress::for_key(&subscription.receiver);
+    let receiver = namespace.durable_wait_registry(context, address.index_key());
+    if !receiver
+        .attach_process_terminal(subscription.clone())
+        .call()
+        .await?
+        .into_body()
+    {
+        return Ok(());
+    }
+    let source = RestateDurableWaitAddress::for_key(&subscription.terminal);
+    let output = namespace
+        .durable_wait_registry(context, source.index_key())
+        .subscribe_process_terminal(subscription.clone())
+        .call()
+        .await?
+        .into_body();
+    if let Some(output) = output {
+        receiver
+            .deliver_process_terminal(crate::durable_wait::ProcessTerminalDelivery {
+                subscription,
+                output,
+            })
+            .call()
+            .await?;
+    }
+    Ok(())
+}
+
 type SourceAwakeable<'run> =
     Box<dyn Fn(usize) -> (String, GateWait<'run, (usize, SourceSeal)>) + Send + Sync + 'run>;
 
@@ -170,6 +206,12 @@ macro_rules! run_source_methods {
                     descriptor: lash_core::tool_run::SourceDescriptor,
                 ) -> crate::JournaledFuture<'run, ()> where $ctx: 'run {
                     Box::pin(source_wait::arm(self, namespace, descriptor))
+                }
+                fn attach_run_process_terminal<'run>(
+                    &'run self, namespace: &'run crate::RestateNamespace,
+                    descriptor: lash_core::tool_run::SourceDescriptor,
+                ) -> crate::JournaledFuture<'run, ()> where $ctx: 'run {
+                    Box::pin(source_wait::attach_process_terminal(self, namespace, descriptor))
                 }
                 fn cancel_run_source<'run>(
                     &'run self, namespace: &'run crate::RestateNamespace,
