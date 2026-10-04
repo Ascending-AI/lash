@@ -46,15 +46,12 @@ impl Controls {
         }
     }
 
-    async fn enter(&self, receipt: BodyReceipt) {
+    async fn enter(&self, receipt: BodyReceipt) -> anyhow::Result<()> {
         let phase = receipt.phase;
         self.entered.lock_recover().push(receipt);
         self.changed.notify_waiters();
-        self.gates[(phase - 1) as usize]
-            .acquire()
-            .await
-            .expect("fixture release gate stays open")
-            .forget();
+        self.gates[(phase - 1) as usize].acquire().await?.forget();
+        Ok(())
     }
 
     async fn wait(&self, phase: u32) -> anyhow::Result<BodyReceipt> {
@@ -115,7 +112,10 @@ impl Scenario {
                                 run: None,
                                 scope: None,
                             })
-                            .await;
+                            .await
+                            .map_err(|error| {
+                                lash::provider::LlmTransportError::new(error.to_string())
+                            })?;
                         Ok(answer("S34 one logical answer"))
                     } else {
                         Ok(LlmResponse {
@@ -291,7 +291,8 @@ impl StaticToolExecute for TelemetryTool {
         if !(1..=2).contains(&ordinal) {
             return ToolOutcome::err_fmt("unexpected S34 tool body ordinal").into();
         }
-        self.0
+        if let Err(error) = self
+            .0
             .enter(BodyReceipt {
                 phase: ordinal,
                 call_id: Some(call.context.call_id().to_string()),
@@ -299,7 +300,10 @@ impl StaticToolExecute for TelemetryTool {
                 run: call.context.logical_run().map(|run| run.to_string()),
                 scope: Some(call.context.execution_scope_id().to_owned()),
             })
-            .await;
+            .await
+        {
+            return ToolOutcome::err_fmt(error).into();
+        }
         let completion = call
             .context
             .direct_completions()

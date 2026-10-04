@@ -1,0 +1,4 @@
+# This example host supplies environment, filesystem and process configuration
+# at its boundary, as the other example hosts do (FIG-2971).
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true

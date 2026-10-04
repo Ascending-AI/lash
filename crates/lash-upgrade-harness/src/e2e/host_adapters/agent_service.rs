@@ -242,15 +242,13 @@ impl AgentServiceHost {
                 .get(format!("http://127.0.0.1:{}/api/settings", self.http_port))
                 .send()
                 .await
+                && response.status().is_success()
+                && response
+                    .json::<Value>()
+                    .await
+                    .is_ok_and(|value| value["default_profile"].is_string())
             {
-                if response.status().is_success()
-                    && response
-                        .json::<Value>()
-                        .await
-                        .is_ok_and(|value| value["default_profile"].is_string())
-                {
-                    break;
-                }
+                break;
             }
             ensure!(
                 Instant::now() < deadline,

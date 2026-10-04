@@ -81,3 +81,9 @@ export_file(
     src = "Cargo.toml",
     visibility = ["PUBLIC"],
 )
+
+export_file(
+    name = "clippy.toml",
+    src = "clippy.toml",
+    visibility = ["PUBLIC"],
+)

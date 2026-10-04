@@ -20,6 +20,7 @@ _CLIPPY_CONFIGS = {
     "crates/lash-upgrade-harness": ("clippy_config_crates_lash_upgrade_harness", "//crates/lash-upgrade-harness:clippy.toml"),
     "examples/agent-service": ("clippy_config_examples_agent_service", "//examples/agent-service:clippy.toml"),
     "examples/agent-workbench": ("clippy_config_examples_agent_workbench", "//examples/agent-workbench:clippy.toml"),
+    "examples/e2e-consumer": ("clippy_config_examples_e2e_consumer", "//examples/e2e-consumer:clippy.toml"),
     "examples/slack-clone": ("clippy_config_examples_slack_clone", "//examples/slack-clone:clippy.toml"),
     "examples/toolbench": ("clippy_config_examples_toolbench", "//examples/toolbench:clippy.toml"),
     "examples/workflow-graph-roundtrip": ("clippy_config_examples_workflow_graph_roundtrip", "//examples/workflow-graph-roundtrip:clippy.toml"),

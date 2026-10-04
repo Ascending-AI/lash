@@ -225,14 +225,12 @@ pub async fn ready(
 ) -> Result<()> {
     loop {
         process.check_alive()?;
-        if let Ok(response) = http.get(url).send().await {
-            if response.status().is_success() {
-                if let Ok(body) = response.json::<serde_json::Value>().await {
-                    if body["service"] == expected_service {
-                        return Ok(());
-                    }
-                }
-            }
+        if let Ok(response) = http.get(url).send().await
+            && response.status().is_success()
+            && let Ok(body) = response.json::<serde_json::Value>().await
+            && body["service"] == expected_service
+        {
+            return Ok(());
         }
         ensure!(
             Instant::now() < deadline,
