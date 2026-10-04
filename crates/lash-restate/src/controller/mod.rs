@@ -51,12 +51,12 @@ use restate_sdk::context::RunRetryPolicy;
 use restate_sdk::errors::TerminalError;
 use restate_sdk::serde::Json;
 
+use crate::durable_wait::restate_durable_wait_request;
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitResolveRequest, RestateTurnCancelRaceOutcome,
     restate_await_event_key_for_authority, restate_await_event_key_is_valid_for_authority,
     restate_unknown_or_revoked,
 };
-use crate::durable_wait::{RestateDurableWaitAwaitRequest, restate_durable_wait_request};
 use crate::effect_group::{
     EffectGroupCloseOutcome, EffectGroupCloseRequest, EffectGroupCloseResponse,
     EffectGroupDispatchRequest, EffectGroupNotice, EffectGroupNotification, EffectGroupOpenRequest,
@@ -956,18 +956,9 @@ where
         }) {
             return Err(restate_unknown_or_revoked().into());
         }
-        let turn_cancel = cancel
-            .observed_scope()
-            .map(|scope| {
-                restate_await_event_key_for_authority(
-                    &self.authority_id,
-                    scope,
-                    AwaitEventWaitIdentity::TurnCancelGate,
-                )
-                .map(|key| RestateDurableWaitAwaitRequest { key })
-            })
-            .transpose()
-            .map_err(RuntimeEffectControllerError::from)?;
+        // A process scope has no session turn gate. Its source wait races
+        // the process workflow's cancel promise, as other Run waits do.
+        let turn_cancel = restate_group_turn_cancel_wait_request(&self.authority_id, &cancel)?;
         let outcome = self
             .context
             .await_run_sources(
