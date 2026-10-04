@@ -1083,28 +1083,34 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
 #[tokio::test]
 /// FIG-4099: a model change is a config patch, and the patched model reaches
 /// every runtime consumer. (It used to be a reopen that stated the model.)
-async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
+async fn a_native_model_patch_reaches_all_runtime_consumers() -> Result<()> {
     use lash_subagents::Capability as _;
 
     let session_id = "reconcile-open";
     let builder_model = llm_profile_spec("builder-model", None, 77_777);
-    let persisted = conflicting_reopen_state(&SessionId::from(session_id));
-    let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
-    let (backend, _) = backend_seeded(persisted).await;
+    let historical_model = llm_profile_spec("historical-model", None, 11_111);
+    let current_frame_model = llm_profile_spec("current-frame-model", None, 22_222);
+    let top_level_model = llm_profile_spec("top-level-model", None, 33_333);
+    let backend = double_backend().await;
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let request_probe = Arc::clone(&requests);
+    let response_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let provider = crate::testing::TestProvider::builder()
         .kind("embed-test")
         .complete(move |request| {
             let request_probe = Arc::clone(&request_probe);
+            let response_counter = Arc::clone(&response_counter);
             async move {
                 request_probe
                     .lock_recover()
                     .push(request.model.wire_model().to_string());
-                let response_index = request_probe
-                    .lock_recover()
-                    .len();
-                if response_index == 1 {
+                let response_index = response_counter
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if response_index == 0 {
+                    Ok(text_response(&typescript_block(
+                        r#"finish("historical");"#,
+                    )))
+                } else if response_index == 1 || response_index == 3 {
                     Ok(text_response(&typescript_block(
                         r#"await control.continue_as({ task: "continue under reconciled policy" });"#,
                     )))
@@ -1127,20 +1133,76 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
             provider,
             [
                 builder_model.clone(),
-                llm_profile_spec("top-level-model", None, 33_333),
-                llm_profile_spec("current-frame-model", None, 22_222),
-                llm_profile_spec("historical-model", None, 11_111),
+                historical_model.clone(),
+                current_frame_model.clone(),
+                top_level_model.clone(),
             ],
         ))
         .plugin(probe_factory)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&llm_profile_spec(
-            "top-level-model",
-            None,
-            33_333,
-        )))
+        .created_with(session_spec_for(&historical_model))
+        .await
+        .open()
+        .await?;
+    assert_eq!(
+        session.policy_snapshot().wire_model(),
+        Some("historical-model"),
+        "creation records the historical model"
+    );
+    let historical = session
+        .send(TurnInput::text("record the historical frame"))
+        .output()
+        .await?;
+    assert!(historical.is_success(), "{historical:?}");
+    let historical_frame_id = session
+        .admin()
+        .state()
+        .persist_current()
+        .await?
+        .current_frame_node_id
+        .expect("the admitted historical turn owns a frame");
+    session
+        .admin()
+        .config()
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetLlmProfile {
+                model: lash_core::LlmProfileKey::new("current-frame-model"),
+            },
+        ))
+        .await?;
+    let current_frame = session
+        .send(TurnInput::text("open the current frame"))
+        .output()
+        .await?;
+    assert!(current_frame.is_success(), "{current_frame:?}");
+    assert_eq!(
+        session
+            .admin()
+            .state()
+            .persist_current()
+            .await?
+            .current_agent_frame()
+            .expect("the continued turn owns its current frame")
+            .assignment
+            .policy
+            .wire_model(),
+        Some("current-frame-model")
+    );
+    session
+        .admin()
+        .config()
+        .configure(crate::config::ConfigTransaction::of(
+            crate::config::SetLlmProfile {
+                model: lash_core::LlmProfileKey::new("top-level-model"),
+            },
+        ))
+        .await?;
+    drop(session);
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&top_level_model))
         .await
         .open()
         .await?;
@@ -1149,6 +1211,9 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
         Some("top-level-model"),
         "the reopen runs the recorded model"
     );
+    requests.lock_recover().clear();
+    transform_observations.lock_recover().clear();
+
     session
         .admin()
         .config()
