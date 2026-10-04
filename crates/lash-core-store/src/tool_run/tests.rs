@@ -656,6 +656,82 @@ fn the_ledger_refuses_gaps_and_appends_from_other_segments() {
 }
 
 #[test]
+fn l05_check_cancellation_cannot_be_recorded_as_run_control() {
+    let mut log = Log::new();
+    let call_id = ToolCallId::fixture("check-cancel");
+    let mut member = call("check-cancel");
+    member.policy.cancel = ExternalCancelPolicy::CancelExternalWork;
+    log.push(RunEvent::Admitted {
+        round: round(vec![member]),
+    })
+    .unwrap();
+    log.push(done(&call_id, 1)).unwrap();
+    let after = Some(CheckRecord::reduce(vec![AttributedVerdict {
+        callback: callback("guard", "tool_result_check:cancel"),
+        verdict: AfterCheckVerdict::Cancel {
+            cause: cause("cancel only this call"),
+        },
+    }]));
+    assert_eq!(
+        log.push(RunEvent::Decided {
+            call_id: call_id.clone(),
+            rank: 1,
+            decision: CallDecision::Cancelled,
+            after: after.clone(),
+        }),
+        Err(RunEventRefusal::DecisionUnsupported {
+            call_id: call_id.clone()
+        }),
+        "L05: recorded check evidence cannot authorize Run cancellation"
+    );
+    assert_eq!(
+        log.push(RunEvent::Decided {
+            call_id: call_id.clone(),
+            rank: 1,
+            decision: CallDecision::CheckCancelled,
+            after: allow_all(),
+        }),
+        Err(RunEventRefusal::DecisionUnsupported {
+            call_id: call_id.clone()
+        }),
+        "L05: check cancellation needs the winning cancellation verdict"
+    );
+    let decided = RunEvent::Decided {
+        call_id: call_id.clone(),
+        rank: 1,
+        decision: CallDecision::CheckCancelled,
+        after,
+    };
+    log.push(decided.clone()).unwrap();
+    assert_eq!(
+        BusinessReceipt::for_event(&decided),
+        vec![BusinessReceipt::Terminal {
+            call_id: call_id.clone(),
+            terminal: LogicalTerminal::Cancelled,
+        }]
+    );
+    assert!(
+        log.ledger.eligible_cancellations().is_empty(),
+        "a check-cancelled completed body owes no external cancellation"
+    );
+    log.push(RunEvent::Lifecycle {
+        state: RunLifecycle::Closing,
+    })
+    .unwrap();
+    log.push(RunEvent::Presented {
+        call_id: call_id.clone(),
+        presentation: None,
+        failure: None,
+    })
+    .unwrap();
+    log.push(RunEvent::Incorporated { call_id }).unwrap();
+    log.push(RunEvent::Lifecycle {
+        state: RunLifecycle::Settled,
+    })
+    .unwrap();
+}
+
+#[test]
 fn final_or_cancel_chooses_once_and_ranks_rise() {
     let mut log = Log::new();
     let (a, b) = (ToolCallId::fixture("a"), ToolCallId::fixture("b"));

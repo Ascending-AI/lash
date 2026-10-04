@@ -235,6 +235,11 @@ reduce by AbortRun > Deny/Cancel > CachedSuccess > Allow, ties broken by
 ascending UTF-8 plugin id and then callback key. A cached success is data
 only and still passes the result transforms and after-checks. After-checks
 return only Allow, Deny, Cancel or AbortRun and never replace a result.
+Check cancellation records `CallDecision::CheckCancelled`, with its typed
+cause in the admission or after-check record. It rejects only that operand:
+race may select the rejection, any keeps waiting for success, and a later
+check cancellation never replaces an earlier winner. `CallDecision::Cancelled`
+is reserved for Run control, which aggregates report as `HostControl`.
 AbortRun fails the call and stops the owning logical Run: the fold refuses
 any later admission and retry. Every reply is recorded with its callback, in
 reduction order; a recorded record is served, never re-reduced. Each reply

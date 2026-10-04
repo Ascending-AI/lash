@@ -147,7 +147,10 @@ pub enum CallDecision {
     },
     /// A check denied the call.
     Denied,
-    /// A check, or the Run's cancellation, cancelled the call.
+    /// A check cancelled only this call. Its attributed cause stays in the
+    /// admission or after-check record; aggregate consumers see a rejection.
+    CheckCancelled,
+    /// The Run's control cancelled the call, independently of check replies.
     Cancelled,
     /// A check returned AbortRun: the call fails and the Run stops.
     Aborted,
@@ -487,6 +490,7 @@ impl RunLedger {
                             _,
                             CallDecision::Final { .. }
                                 | CallDecision::Denied
+                                | CallDecision::CheckCancelled
                                 | CallDecision::Aborted
                         ))
                     )
@@ -1076,10 +1080,10 @@ fn decision_follows(
             Some(AfterCheckVerdict::AbortRun { .. }) => true,
             _ => after.is_none() && call.selection == BeforeSelection::AbortRun,
         },
-        // A check's Cancel, or the Run's own cancellation of an undecided
-        // call.
-        CallDecision::Cancelled => {
-            matches!(after_winner, Some(AfterCheckVerdict::Cancel { .. })) || after.is_none()
-        }
+        CallDecision::CheckCancelled => match after_winner {
+            Some(AfterCheckVerdict::Cancel { .. }) => true,
+            _ => after.is_none() && call.selection == BeforeSelection::Cancel,
+        },
+        CallDecision::Cancelled => after.is_none(),
     }
 }

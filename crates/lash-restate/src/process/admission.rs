@@ -146,12 +146,13 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// material leases and restores it before successor turn work.
 /// Epoch 23 (FIG-4891) uses short event observers, races source waits against
 /// segment handover and holds process results through their logical sources.
-///
 /// Epoch 23 (FIG-4848) records an OS nonce before one atomic root admission,
 /// replacing the separate selection, start, seal and composition records.
 /// Plugin transitions bind and record the executor generation before publication.
 /// Epoch 24 (FIG-4924) always subscribes Deferred waits before racing the
 /// recorded cancellation gate, removing the live cancel command branch.
+/// Epoch 25 (FIG-4925) distinguishes a check's call cancellation from Run
+/// control in recorded decisions and aggregate selection.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -165,14 +166,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 24;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 25;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 25;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 26;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

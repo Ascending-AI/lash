@@ -116,7 +116,14 @@ async fn l05_check_cancel_is_an_operand_rejection_before_and_after() {
         ] {
             let calls = Arc::new(vec![
                 (call("check-allowed", &Kind::IntentFree), Kind::IntentFree),
-                (call("check-cancelled", &Kind::IntentFree), Kind::IntentFree),
+                (
+                    {
+                        let mut call = call("check-cancelled", &Kind::IntentFree);
+                        call.cancel = ExternalCancelPolicy::CancelExternalWork;
+                        call
+                    },
+                    Kind::IntentFree,
+                ),
             ]);
             let mut probe = Probe::new(&calls);
             if before {
@@ -158,7 +165,12 @@ async fn l05_check_cancel_is_an_operand_rejection_before_and_after() {
                         .unwrap();
                         let answer = run.consume_aggregate(&plan.key, consumer).await.unwrap();
                         let rejected = |reply: &Option<SingletonTerminal>| {
-                            matches!(reply, Some(SingletonTerminal::Withheld { .. }))
+                            matches!(
+                                reply,
+                                Some(SingletonTerminal::Withheld {
+                                    decision: CallDecision::CheckCancelled
+                                })
+                            )
                         };
                         match (consumer, &answer) {
                             (
@@ -186,10 +198,35 @@ async fn l05_check_cancel_is_an_operand_rejection_before_and_after() {
                                 && rejected(&replies[1])
                                 && replies[1] == replies[2] => {}
                             _ => panic!(
-                                "L05: a {before:?} before-check cancellation is a call rejection for {consumer:?}: {answer:?}"
+                                "L05: check cancellation with before={before} is a call rejection for {consumer:?}: {answer:?}"
                             ),
                         }
                         while run.progress().await.unwrap().is_some() {}
+                        let decision = run
+                            .records()
+                            .iter()
+                            .flat_map(|record| &record.events)
+                            .find_map(|event| match event {
+                                RunEvent::Decided {
+                                    call_id,
+                                    decision,
+                                    after,
+                                    ..
+                                } if *call_id == round[1].call_id => Some((decision, after)),
+                                _ => None,
+                            })
+                            .unwrap();
+                        assert_eq!(*decision.0, CallDecision::CheckCancelled);
+                        if before {
+                            assert!(run.records().iter().flat_map(|record| &record.events).any(|event| match event {
+                                RunEvent::Admitted { round } => round.members.iter().any(|member| matches!(member.checks.winner().map(|reply| &reply.verdict), Some(lash_core::tool_run::BeforeCheckVerdict::Cancel { cause }) if *cause == check_cancel_cause())),
+                                _ => false,
+                            }));
+                        } else {
+                            assert!(
+                                matches!(decision.1.as_ref().unwrap().winner().map(|reply| &reply.verdict), Some(AfterCheckVerdict::Cancel { cause }) if *cause == check_cancel_cause())
+                            );
+                        }
                         assert_eq!(run.lifecycle(), RunLifecycle::Live);
                         assert!(probe.cancelled_calls.lock().unwrap().is_empty());
                         run.close().await.unwrap();

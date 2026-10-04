@@ -54,7 +54,9 @@ impl BusinessReceipt {
                 terminal: match decision {
                     CallDecision::Final { .. } => LogicalTerminal::Final,
                     CallDecision::Denied => LogicalTerminal::Denied,
-                    CallDecision::Cancelled => LogicalTerminal::Cancelled,
+                    CallDecision::CheckCancelled | CallDecision::Cancelled => {
+                        LogicalTerminal::Cancelled
+                    }
                     CallDecision::Aborted => LogicalTerminal::Aborted,
                 },
             }],

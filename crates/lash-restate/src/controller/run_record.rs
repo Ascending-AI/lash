@@ -178,8 +178,10 @@ mod tests {
             );
         }
     }
-    // FIG-4924 always subscribes before the recorded cancel race. Pin the
-    // predecessor epoch so omitting this command-order lane move fails.
+    // The predecessor subscribes before the recorded cancel race (FIG-4924).
+    // FIG-4925 separates check cancellation from Run control. Its readable
+    // predecessor decision still belongs to that build's drain lane. Pin
+    // main's matching epoch so omitting this generation move fails the witness.
     #[tokio::test]
     async fn l21_a_predecessor_run_journal_parks_before_decode_and_keeps_its_lane() {
         use lash_core::engine::BuildGeneration;
@@ -188,9 +190,9 @@ mod tests {
             BuildGeneration::from_digest([b'r', b'u', bytes[0], bytes[1], bytes[2], bytes[3]])
         };
         #[cfg(not(feature = "synthetic-next"))]
-        const PREDECESSOR_EPOCH: u32 = 23;
-        #[cfg(feature = "synthetic-next")]
         const PREDECESSOR_EPOCH: u32 = 24;
+        #[cfg(feature = "synthetic-next")]
+        const PREDECESSOR_EPOCH: u32 = 25;
         let old = generation(PREDECESSOR_EPOCH);
         let new = generation(crate::JOURNAL_LOGIC_EPOCH);
         let old_lane = crate::services::DEFAULT_NAMESPACE
@@ -202,14 +204,48 @@ mod tests {
             .generation_lane_name()
             .unwrap();
         assert_ne!(old_lane, new_lane);
-        let entry = serde_json::json!({ BUILD_GENERATION_FIELD: old, "record": "a predecessor shape this build cannot decode" });
+        let entry = serde_json::json!({
+            BUILD_GENERATION_FIELD: old,
+            EFFECT_JOURNAL_VERSION_FIELD: EFFECT_JOURNAL_VERSION,
+            "record": lash_core::tool_run::RunRecord {
+                segment: lash_core::tool_run::SegmentOrdinal(0),
+                first: lash_core::tool_run::RunEventOrdinal(0),
+                events: vec![lash_core::tool_run::RunEvent::Decided {
+                    call_id: lash_core::ToolCallId::fixture("predecessor-check-cancel"),
+                    rank: 1,
+                    decision: lash_core::tool_run::CallDecision::Cancelled,
+                    after: Some(lash_core::tool_run::CheckRecord::reduce(vec![
+                        lash_core::tool_run::AttributedVerdict {
+                            callback: lash_core::store::plugin_writers::PluginCallbackIdentity {
+                                owner: lash_core::plugin::PluginRevision::new(
+                                    "guard", lash_core::plugin::BehaviorRevision::ONE,
+                                ),
+                                key: "tool_result_check:cancel".into(),
+                            },
+                            verdict: lash_core::tool_run::AfterCheckVerdict::Cancel {
+                                cause: lash_core::tool_run::HookCause {
+                                    error_type: "check-cancel".into(),
+                                    error_version: std::num::NonZeroU32::MIN,
+                                    payload: serde_json::json!({"only_this_call": true}),
+                                },
+                            },
+                        },
+                    ])),
+                }],
+                trace: None,
+            },
+        });
+        let mut body = entry.clone();
+        body.as_object_mut().unwrap().remove(BUILD_GENERATION_FIELD);
+        decode_run_journal_entry("predecessor", body.clone())
+            .expect("the predecessor decision still decodes as retained data");
         let sentinel = crate::sentinel::FoldedSentinel::new("LashTurn/run", new);
         let decoded = std::sync::atomic::AtomicBool::new(false);
         let refusal = sentinel
             .guard(async {
                 sentinel.check(entry.get(BUILD_GENERATION_FIELD)).await;
                 decoded.store(true, std::sync::atomic::Ordering::SeqCst);
-                decode_run_journal_entry("predecessor", entry.clone())
+                decode_run_journal_entry("predecessor", body)
             })
             .await
             .expect_err("the new handler keeps this journal for its predecessor");

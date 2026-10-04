@@ -525,7 +525,7 @@ async fn decision_entry(
         let (decision, after) = match (selection, checked) {
             _ if aborted && !protected_source => (CallDecision::Cancelled, None),
             (BeforeSelection::Deny, _) => (CallDecision::Denied, None),
-            (BeforeSelection::Cancel, _) => (CallDecision::Cancelled, None),
+            (BeforeSelection::Cancel, _) => (CallDecision::CheckCancelled, None),
             (BeforeSelection::AbortRun, _) => (CallDecision::Aborted, None),
             (_, None) => return Err("a result candidate has no capture".to_owned()),
             (_, Some(_)) if !protected_source && handlers.run_cancel_requested() => {
@@ -574,7 +574,7 @@ async fn decision_entry(
                         declares: capture.declares(),
                     },
                     Some(AfterCheckVerdict::Deny { .. }) => CallDecision::Denied,
-                    Some(AfterCheckVerdict::Cancel { .. }) => CallDecision::Cancelled,
+                    Some(AfterCheckVerdict::Cancel { .. }) => CallDecision::CheckCancelled,
                     Some(AfterCheckVerdict::AbortRun { .. }) => CallDecision::Aborted,
                 };
                 (decision, Some(after))

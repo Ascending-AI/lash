@@ -260,18 +260,18 @@ impl SingletonToolHandlers for Probe {
 
     async fn before_checks(
         &self,
-        _call: &SingletonToolCall,
+        call: &SingletonToolCall,
         _request: &SingletonPreparedRequest,
     ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
         vec![AttributedVerdict {
             callback: binding().executable,
-            verdict: if self.cancel_before.as_ref() == Some(&_call.call_id) {
+            verdict: if self.cancel_before.as_ref() == Some(&call.call_id) {
                 BeforeCheckReply::Cancel {
                     cause: check_cancel_cause(),
                 }
-            } else if matches!(self.kinds[&_call.call_id], Kind::Cached) {
+            } else if matches!(self.kinds[&call.call_id], Kind::Cached) {
                 BeforeCheckReply::Cached {
-                    output: output_of(&_call.call_id),
+                    output: output_of(&call.call_id),
                 }
             } else {
                 BeforeCheckReply::Allow
