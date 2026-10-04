@@ -23,11 +23,22 @@ pub struct JournalFact {
     pub admin_url: String,
     pub protocol: u32,
 }
+/// Actual native receipts retained at acknowledgement, independently of SQL.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NativeRunFact {
+    pub session: lash_core::SessionId,
+    pub run: lash_core::TurnId,
+    pub name: String,
+    pub record: DecodedRecord,
+    pub artifact: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Evidence {
     pub case: String,
     pub artifacts: Vec<ArtifactIdentity>,
     pub journals: Vec<JournalFact>,
+    pub native_records: Vec<NativeRunFact>,
     pub barriers: Vec<BarrierProof>,
     pub faults: Vec<FaultReceipt>,
     pub stores: Vec<serde_json::Value>,
@@ -140,6 +151,7 @@ impl Evidence {
             case,
             artifacts: Vec::new(),
             journals: Vec::new(),
+            native_records: Vec::new(),
             barriers: Vec::new(),
             faults: Vec::new(),
             stores: Vec::new(),

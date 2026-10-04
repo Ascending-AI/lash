@@ -325,7 +325,7 @@ pub async fn s14_leader_loss_retains_accepted_work(
     let converged = cluster.converge().await?;
     assert_live_cluster(&converged, 3)?;
     let after = fixture.capture(work, None).await?;
-    assert_cluster_journals(&converged, &after, work)?;
+    assert_settled_run(&after, work)?;
     assert_partial_recovery(&before, &after, &durable, &held)?;
     ensure!(
         answer.output == serde_json::json!({"status":"Answered", "reply":"A|B"}),
@@ -424,7 +424,7 @@ pub async fn s15_minority_partition_cannot_create_another_winner(
     let healed = cluster.converge().await?;
     assert_live_cluster(&healed, 3)?;
     let after = fixture.capture(work, None).await?;
-    assert_cluster_journals(&healed, &after, work)?;
+    assert_settled_run(&after, work)?;
     ensure!(
         decisions(&settled, work)? == decisions(&after, work)?,
         "healed minority added or changed a final/cancel decision"
@@ -633,64 +633,46 @@ fn assert_new_leader(old: &LeaderReceipt, new: &LeaderReceipt) -> Result<()> {
 fn run_entries<'a>(
     evidence: &'a Evidence,
     work: &WorkIdentity,
-    admin: &str,
 ) -> Result<Vec<&'a RunJournalEntry>> {
-    let mut facts: Vec<_> = evidence
-        .journals
+    let mut entries = BTreeMap::new();
+    for fact in evidence
+        .native_records
         .iter()
-        .filter(|fact| {
-            fact.work.run == work.run
-                && fact.work.ingress == work.ingress
-                && fact.admin_url == admin
-        })
-        .filter_map(|fact| match &fact.decoded {
-            Some(DecodedRecord::Run(entry)) => Some((fact, entry)),
-            _ => None,
-        })
-        .collect();
-    ensure!(!facts.is_empty(), "node {admin} has no decoded Run records");
-    facts.sort_by_key(|(_, entry)| (entry.record.segment, entry.record.first));
-    let mut slots = BTreeSet::new();
-    let owner = facts
+        .filter(|fact| fact.run.as_str() == work.run)
+    {
+        ensure!(
+            std::path::Path::new(&fact.artifact).is_file(),
+            "native receipt artifact disappeared"
+        );
+        if let DecodedRecord::Run(entry) = &fact.record
+            && let Some(previous) = entries.insert(fact.name.clone(), entry)
+        {
+            ensure!(
+                previous == entry,
+                "acknowledged native record changed on replay"
+            );
+        }
+    }
+    let mut entries: Vec<_> = entries.into_values().collect();
+    entries.sort_by_key(|entry| (entry.record.segment, entry.record.first));
+    let owner = entries
         .iter()
-        .flat_map(|(_, entry)| &entry.record.events)
+        .flat_map(|entry| &entry.record.events)
         .find_map(|event| match event {
             RunEvent::Admitted { round } => Some(round.owner.clone()),
             _ => None,
         })
-        .context("Run journal has no original admission owner")?;
+        .context("native Run has no original admission owner")?;
     let mut ledger = RunLedger::new(owner);
-    for (fact, entry) in &facts {
-        ensure!(
-            fact.protocol == 7,
-            "journal was not decoded from negotiated V7"
-        );
-        ensure!(
-            slots.insert((&fact.invocation, fact.index)),
-            "same journal slot was counted twice"
-        );
-        ledger
-            .append(entry.record.segment, &entry.record)
-            .map_err(|error| {
-                anyhow::anyhow!(
-                    "node {admin} has an invalid Run record at {}:{}: {error}",
-                    fact.invocation,
-                    fact.index
-                )
-            })?;
+    for entry in &entries {
+        ledger.append(entry.record.segment, &entry.record)?;
     }
-    Ok(facts.into_iter().map(|(_, entry)| entry).collect())
+    Ok(entries)
 }
 
-fn assert_cluster_journals(
-    cluster: &ClusterReceipt,
-    evidence: &Evidence,
-    work: &WorkIdentity,
-) -> Result<()> {
-    let first = cluster.nodes.first().context("no cluster members")?;
-    let expected = run_entries(evidence, work, &first.admin_url)?;
+fn assert_settled_run(evidence: &Evidence, work: &WorkIdentity) -> Result<()> {
     ensure!(
-        expected
+        run_entries(evidence, work)?
             .iter()
             .flat_map(|entry| &entry.record.events)
             .any(|event| matches!(
@@ -699,15 +681,15 @@ fn assert_cluster_journals(
                     state: lash_core_store::tool_run::RunLifecycle::Settled
                 }
             )),
-        "cluster journal has no settled Run"
+        "native Run has no acknowledged settlement"
     );
-    for node in &cluster.nodes {
-        ensure!(
-            run_entries(evidence, work, &node.admin_url)? == expected,
-            "member {} has another journal/head terminal",
-            node.node
-        );
-    }
+    ensure!(
+        evidence
+            .stores
+            .iter()
+            .any(|fact| fact["kind"] == "authoritative_run_terminal"),
+        "settlement lacks independent Lash terminal"
+    );
     Ok(())
 }
 
@@ -715,15 +697,8 @@ fn decisions(
     evidence: &Evidence,
     work: &WorkIdentity,
 ) -> Result<BTreeMap<lash_core::ToolCallId, CallDecision>> {
-    let admin = evidence
-        .journals
-        .iter()
-        .find(|fact| fact.work.run == work.run)
-        .context("missing Run journal")?
-        .admin_url
-        .as_str();
     let mut decisions = BTreeMap::new();
-    for event in run_entries(evidence, work, admin)?
+    for event in run_entries(evidence, work)?
         .iter()
         .flat_map(|entry| &entry.record.events)
     {
@@ -784,13 +759,7 @@ fn assert_cancel_race(
         .iter()
         .filter(|event| event.event_type == "tool_receipt")
         .collect();
-    let admin = evidence
-        .journals
-        .first()
-        .context("race has no journal")?
-        .admin_url
-        .as_str();
-    let ranks: Vec<_> = run_entries(evidence, work, admin)?
+    let ranks: Vec<_> = run_entries(evidence, work)?
         .iter()
         .flat_map(|entry| &entry.record.events)
         .filter_map(|event| match event {
@@ -883,28 +852,57 @@ fn assert_partial_recovery(
         durable.barrier.work.ordinal == Some(1) && held.barrier.work.ordinal == Some(1),
         "partial-result case unexpectedly retried"
     );
-    // The original A/X fact, including its payload and actual journal slot,
-    // survives; no reconstructed provider log can satisfy this equality.
-    let x = before
-        .journals
-        .iter()
-        .find(|fact| {
-            Some(fact.index) == durable.journal_index
-                && fact.invocation == durable.barrier.work.segment
-                && matches!(&fact.decoded, Some(DecodedRecord::Attempt(attempt))
-                if attempt.call_id.as_str() == a && attempt.attempt.get() == 1)
-        })
-        .context("A has no independent pre-fault typed X receipt")?;
+    // Match the native acknowledgement to its pre-fault SQL completion slot.
+    // After the fault, the retained receipt and Lash head are the authority.
+    let x = before.native_records.iter().find(|fact|
+        matches!(&fact.record, DecodedRecord::Attempt(attempt) if fact.run.as_str() == held.barrier.work.run && attempt.call_id.as_str() == a && attempt.attempt.get() == 1)
+    ).context("A has no captured native acknowledged X receipt before the fault")?;
+    let encoded_x = serde_json::to_value(&x.record)?;
     ensure!(
-        after
+        before
             .journals
             .iter()
-            .any(|fact| fact.invocation == x.invocation
-                && fact.index == x.index
-                && fact.value == x.value
-                && fact.work == x.work),
-        "durable X disappeared or changed during failover"
+            .any(|fact| Some(fact.index) == durable.journal_index
+                && fact.invocation == durable.barrier.work.segment
+                && fact
+                    .decoded
+                    .as_ref()
+                    .is_some_and(
+                        |record| serde_json::to_value(record).ok().as_ref() == Some(&encoded_x)
+                    )),
+        "captured A/X does not match its actual pre-fault V7 completion slot"
     );
+    ensure!(
+        after.native_records.iter().any(|fact| fact.name == x.name
+            && fact.run == x.run
+            && fact.session == x.session
+            && serde_json::to_value(&fact.record).ok().as_ref() == Some(&encoded_x)),
+        "durable native X disappeared or changed during failover"
+    );
+    let state_fact = after
+        .stores
+        .iter()
+        .find(|fact| fact["kind"] == "authoritative_session_state")
+        .context("missing authoritative Lash state")?;
+    let state: lash_core::RuntimeSessionState =
+        serde_json::from_value(state_fact["state"].clone())?;
+    let read = state.read_model();
+    for (call, value) in [(a, "A"), (b, "B")] {
+        let results: Vec<_> = read
+            .messages
+            .as_slice()
+            .iter()
+            .flat_map(|message| message.parts.iter())
+            .filter(|part| {
+                part.kind() == lash_core::PartKind::ToolResult
+                    && part.call_id().is_some_and(|id| id.as_str() == call)
+            })
+            .collect();
+        ensure!(
+            results.len() == 1 && results[0].content() == value,
+            "Lash head did not retain exact original tool result {call}/{value}"
+        );
+    }
     let work = &held.barrier.work;
     assert_decisions_unchanged(before, after, work)?;
     let final_decisions = decisions(after, work)?;
@@ -974,13 +972,6 @@ fn assert_admissions_unchanged(
     after: &Evidence,
     work: &WorkIdentity,
 ) -> Result<()> {
-    let admin = before
-        .journals
-        .iter()
-        .find(|fact| fact.work.run == work.run)
-        .context("missing pre-fault admission journal")?
-        .admin_url
-        .as_str();
     let admissions = |entries: Vec<&RunJournalEntry>| {
         entries
             .into_iter()
@@ -991,13 +982,13 @@ fn assert_admissions_unchanged(
             })
             .collect::<Vec<_>>()
     };
-    let original = admissions(run_entries(before, work, admin)?);
+    let original = admissions(run_entries(before, work)?);
     ensure!(
         !original.is_empty(),
         "pre-fault work has no admitted executable binding"
     );
     ensure!(
-        admissions(run_entries(after, work, admin)?) == original,
+        admissions(run_entries(after, work)?) == original,
         "recovery minted or changed an admitted executable binding"
     );
     Ok(())

@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
 pub mod host;
+mod observation;
+mod receipts;
 pub mod scenario;
 
 type CommitAnswer = std::result::Result<RuntimeCommitReceipt, StoreError>;
@@ -256,17 +258,8 @@ impl FleetSnapshot {
         let lash_core::store::RunTerminalCause::Committed { turn, .. } = &self.terminal else {
             anyhow::bail!("fleet Run did not finish with a committed outcome");
         };
-        // The SQL turn_id column stores the full operation identity, including
-        // its execution scope and reserved final key, rather than a bare TurnId.
-        let terminal_operation =
-            lash_core::store::OperationId::turn(self.session.clone(), turn.clone(), "final")
-                .storage_key()?;
         ensure!(
-            self.commits
-                .iter()
-                .filter(|receipt| receipt.turn == terminal_operation)
-                .count()
-                == 1,
+            receipts::terminal_commit_count(&self.commits, &self.session, turn)? == 1,
             "expected one commit for the Run's terminal physical turn"
         );
         Ok(())
@@ -448,19 +441,28 @@ impl lash_core::plugin::SessionPlugin for FleetFrontier {
                 Ok(Some(serde_json::json!(next)))
             }),
         )?;
-        registrar.turn().after(
-            lash_core::hook_key!("fleet-frontier"),
-            Arc::new(|_| {
-                Box::pin(async {
-                    Ok(lash_core::plugin::AfterTurnContributions {
-                        state: lash_core::plugin::StateCommands::new()
-                            .apply("digits", "append-digit", serde_json::json!(7))
-                            .apply("digits", "append-digit", serde_json::json!(2)),
-                        ..Default::default()
+        // The frontier advances per publication batch, not per reducer.
+        // Keep the two independently receipted proposals the oracle requires.
+        for (key, digit) in [
+            (lash_core::hook_key!("fleet-frontier-first"), 7),
+            (lash_core::hook_key!("fleet-frontier-second"), 2),
+        ] {
+            registrar.turn().after(
+                key,
+                Arc::new(move |_| {
+                    Box::pin(async move {
+                        Ok(lash_core::plugin::AfterTurnContributions {
+                            state: lash_core::plugin::StateCommands::new().apply(
+                                "digits",
+                                "append-digit",
+                                serde_json::json!(digit),
+                            ),
+                            ..Default::default()
+                        })
                     })
-                })
-            }),
-        )?;
+                }),
+            )?;
+        }
         Ok(())
     }
 }
@@ -475,11 +477,10 @@ impl FleetSnapshot {
             frontier.values.get("digits") == Some(&serde_json::json!(72)),
             "fleet reducer was omitted, reordered or published twice"
         );
-        // The callback returns one ordered batch containing both digits.
-        // K10 records a publication per batch, rather than per command.
+        // Each ordered callback contributes one proposal batch.
         ensure!(
-            frontier.publication.receipts.len() == 1
-                && frontier.publication.applied.map(|ordinal| ordinal.0) == Some(1),
+            frontier.publication.receipts.len() == 2
+                && frontier.publication.applied.map(|ordinal| ordinal.0) == Some(2),
             "fleet namespace has another publication frontier"
         );
         Ok(())

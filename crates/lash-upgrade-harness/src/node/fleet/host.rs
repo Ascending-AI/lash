@@ -78,7 +78,12 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
         (stores, None)
     };
     let engine = super::super::engine(stores.clone(), &args.restate)?;
-    let backend = lash::Backend::new(engine.clone());
+    let capture =
+        super::observation::NativeCapture::new(args.directory.join("native-run-records.json"));
+    let backend = lash::Backend::new(super::observation::ObservedEngine::new(
+        engine.clone(),
+        capture,
+    ));
     let labels: &[&str] = if args.scenario == "S15" {
         &["intent"]
     } else {
@@ -419,6 +424,7 @@ async fn command_host(state: &State, command: HostCommand) -> Result<HostObserva
             output,
         });
     }
+    let initial_observation = matches!(&command, HostCommand::Submit { .. });
     let (run, output) = match command {
         HostCommand::Submit {
             session: requested,
@@ -507,8 +513,28 @@ async fn command_host(state: &State, command: HostCommand) -> Result<HostObserva
         }
         other => bail!("unsupported fleet public command: {other:?}"),
     };
-    let (work, protocol) =
-        observe_work(&state.args, state.stores.as_ref(), &run, state.deadline).await?;
+    let (work, protocol) = if initial_observation {
+        observe_work(&state.args, state.stores.as_ref(), &run, state.deadline).await?
+    } else {
+        let work = body_identity::read(
+            &state.args.barrier_directory.join("body-owner.json"),
+            &state.args.session,
+            &run,
+        )?;
+        let stored = state.stores.session_store_factory();
+        ensure!(
+            stored.run_executor(&session_id, &run).await?.is_some(),
+            "captured Run lost its admitted executor"
+        );
+        ensure!(
+            stored
+                .run_of_input(&session_id, &lash::InputId::parse(&work.ingress)?)
+                .await?
+                == Some(run.clone()),
+            "captured input lost its admitted Run"
+        );
+        (work, 7)
+    };
     let path = state.args.directory.join("accepted-work.json");
     super::super::write_atomically(
         &path,

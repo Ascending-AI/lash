@@ -855,9 +855,18 @@ impl FleetFixture for RuntimeFixture {
             let nodes = self.cluster.lock().await.nodes().to_vec();
             let mut evidence = Evidence::empty("fleet".into());
             evidence.artifacts = vec![self.binary.clone(), self.host.clone()];
+            evidence.native_records = crate::node::fleet::observation::read(&[
+                self.directory.join("primary"),
+                self.directory.join("follower"),
+            ])?;
+            let after_fault = !self
+                .faults
+                .lock()
+                .map_err(|_| anyhow::anyhow!("fault receipts poisoned"))?
+                .is_empty();
             for node in nodes
                 .into_iter()
-                .filter(|node| Some(node.node) != excluded_node)
+                .filter(|node| !after_fault && Some(node.node) != excluded_node)
             {
                 let mut reader = RestateEvidenceReader::new(
                     "fleet".into(),
@@ -898,6 +907,41 @@ impl FleetFixture for RuntimeFixture {
             let session = format!("{}-fleet", self.namespace);
             let head:serde_json::Value=sqlx::query_scalar("SELECT json_build_object('shift_epoch',m.shift_epoch,'head_revision',h.head_revision,'head',h.head_json)::jsonb FROM lash_session_meta m JOIN lash_session_head h USING(session_id) WHERE m.session_id=$1").bind(&session).fetch_one(pool).await?;
             evidence.stores.push(head);
+            if after_fault {
+                let store = self
+                    .stores
+                    .as_ref()
+                    .context("fleet stores missing")?
+                    .session_store_factory();
+                let session_id = lash::SessionId::parse(&session)?;
+                let run = lash::TurnId::parse(&work.run)?;
+                ensure!(
+                    store
+                        .run_of_input(&session_id, &lash::InputId::parse(&work.ingress)?)
+                        .await?
+                        == Some(run.clone()),
+                    "fault changed accepted input Run binding"
+                );
+                ensure!(
+                    store.run_executor(&session_id, &run).await?.is_some(),
+                    "fault lost admitted Run executor"
+                );
+                let window = store
+                    .load_session_window(&session_id, lash_core::store::WindowSelector::Current)
+                    .await?
+                    .context("fault lost session head")?;
+                let state = lash_core::store::window_state(window, store.fleet_format())?.state;
+                evidence
+                    .stores
+                    .push(serde_json::json!({"kind":"authoritative_session_state", "state":state}));
+                // Diagnostic captures can precede Attach while the Run is pending.
+                // Settlement assertions require this fact once a terminal exists.
+                if let Some(terminal) = store.run_terminal(&session_id, &run).await? {
+                    evidence.stores.push(
+                        serde_json::json!({"kind":"authoritative_run_terminal", "terminal":terminal}),
+                    );
+                }
+            }
             Ok(evidence)
         })
     }

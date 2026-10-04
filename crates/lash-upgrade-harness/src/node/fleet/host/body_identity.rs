@@ -36,6 +36,12 @@ pub(super) async fn capture(
     Ok(captured.work)
 }
 
+pub(super) fn read(path: &Path, session: &str, run: &lash::TurnId) -> Result<WorkIdentity> {
+    let captured: BodyIdentity = serde_json::from_slice(&std::fs::read(path)?)?;
+    captured.verify(session, run)?;
+    Ok(captured.work)
+}
+
 impl BodyIdentity {
     fn verify(&self, session: &str, run: &lash::TurnId) -> Result<()> {
         ensure!(

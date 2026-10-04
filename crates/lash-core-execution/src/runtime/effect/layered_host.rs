@@ -46,6 +46,34 @@ use crate::{RuntimeError, RuntimeErrorCode, SessionId};
 /// only arbiter of a group.
 #[async_trait::async_trait]
 pub trait EffectLayer: Send + Sync + 'static {
+    /// Observe the acknowledged native record without changing its body.
+    async fn record_run_record(
+        &self,
+        inner: &dyn RuntimeEffectController,
+        name: String,
+        step: crate::RunRecordStep<'_>,
+    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        inner.record_run_record(name, step).await
+    }
+
+    async fn record_run_schedule(
+        &self,
+        inner: &dyn RuntimeEffectController,
+        name: String,
+        step: crate::RunRecordStep<'_>,
+    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        inner.record_run_schedule(name, step).await
+    }
+
+    fn start_run_attempt<'run>(
+        &'run self,
+        inner: &'run dyn RuntimeEffectController,
+        name: String,
+        step: crate::tool_dispatch::RunAttemptStep<'run>,
+    ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
+        inner.start_run_attempt(name, step)
+    }
+
     /// Whether the layered controller owns commit backpressure, as an
     /// engine-backed controller does.
     fn owns_commit_backpressure(&self, inner: &dyn RuntimeEffectController) -> bool {
@@ -702,7 +730,9 @@ impl RuntimeEffectController for LayeredController<'_> {
         name: String,
         step: crate::RunRecordStep<'_>,
     ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
-        self.inner.as_ref().record_run_schedule(name, step).await
+        self.layer
+            .record_run_schedule(self.inner.as_ref(), name, step)
+            .await
     }
 
     fn start_run_attempt<'run>(
@@ -710,7 +740,8 @@ impl RuntimeEffectController for LayeredController<'_> {
         name: String,
         step: crate::tool_dispatch::RunAttemptStep<'run>,
     ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
-        self.inner.as_ref().start_run_attempt(name, step)
+        self.layer
+            .start_run_attempt(self.inner.as_ref(), name, step)
     }
 
     fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
@@ -754,7 +785,9 @@ impl RuntimeEffectController for LayeredController<'_> {
         name: String,
         step: crate::RunRecordStep<'_>,
     ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
-        self.inner.as_ref().record_run_record(name, step).await
+        self.layer
+            .record_run_record(self.inner.as_ref(), name, step)
+            .await
     }
 
     async fn execute_effect(
