@@ -555,7 +555,7 @@ fn mcp_fixture_response(request: &LlmRequest) -> LlmResponse {
 const form = await workspace_stdio.elicit_confirmation({});
 const url = await workspace_stdio.elicit_via_url({});
 const roots = await workspace_stdio.list_host_roots({});
-finish({summary: summary, form: form, url: url, roots: roots});"#
+finish(summary.summary);"#
     } else if prompt.contains("MCP-DETACHED") {
         "finish(\"badge tool is detached\");"
     } else {

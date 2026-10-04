@@ -101,11 +101,6 @@ class Journey:
         return {table: self.sql(self.session_db, f"SELECT * FROM {table} WHERE session_id = ?", (self.session,))
                 for table in ("graph_nodes", "runtime_turn_commits", "pending_turn_inputs")}
 
-    def committed_tool_parts(self):
-        return [part for node in self.store()["graph_nodes"]
-                for part in self.walk(json.loads(node["node_json"]))
-                if isinstance(part, dict) and part.get("kind") == "ToolResult"]
-
     def attributed_pair(self, turn):
         messages = [message for message in self.state()["messages"]
                     if message.get("provenance", {}).get("turn_id") == turn]
@@ -171,6 +166,8 @@ class Journey:
                     raise AssertionError(f"tool presentation belongs to another original owner: {reference}")
                 output = outcomes[0]["output"]
                 presentation = json.loads(material["payload"]["text"])
+                if presentation["presentation"]["model_return"]["tool_name"] != request["payload"]["tool_name"]:
+                    raise AssertionError(f"retained presentation names another tool: {presentation}")
                 receipts.append({"call_id": call_id, "request": request, "completion": completion,
                                  "output": output, "presentation": presentation, "traces": observed})
             else:
@@ -223,6 +220,7 @@ class Journey:
                 depth = self.send("MCP-DEPTH")
                 receipts = self.tool_receipts_for_turn(depth["turn_id"], terminal=True)
                 outputs = [self.payload(r) for r in receipts]
+                self.capture("depth")
                 self.gate("depth", "dom", "one request and deterministic summary render identically in both contexts",
                     all(len(self.dom(p)) == 2 and "Host-generated summary" in self.dom(p)[-1]["text"] for p in self.pages)
                     and self.dom(self.pages[0]) == self.dom(self.pages[1]))
@@ -231,12 +229,14 @@ class Journey:
                     len(self.state()["messages"]) == 2 and len(store["runtime_turn_commits"]) == 1
                     and len(store["pending_turn_inputs"]) == 1 and depth["turn_id"] in json.dumps(store)
                     and self.attributed_pair(depth["turn_id"]))
-                committed = {part["tool_name"]: json.loads("".join(block["text"]
-                             for block in part["blocks"] if block.get("type") == "text"))
-                             for part in self.committed_tool_parts() if part.get("tool_name") in STDIO}
+                # Presentation material is committed under its canonical Run owner;
+                # graph ToolResult copies have been retired.
+                committed = [json.loads("".join(part["text"] for part in
+                             receipt["presentation"]["presentation"]["model_return"]["parts"]
+                             if part["type"] == "text"))["structuredContent"] for receipt in receipts]
                 self.gate("depth", "native", "four typed host-owned MCP results commit",
                     [self.receipt_tool_name(r) for r in receipts] == STDIO and len(outputs) == 4
-                    and committed == dict(zip(STDIO, outputs))
+                    and committed == outputs
                     and outputs[0] == {"model": "dev/failure-paths", "summary": "Host-generated summary."}
                     and outputs[1] == {"action": "accept", "answer": "yes"}
                     and outputs[2] == {"action": "accept", "completion_notified": True, "elicitation_id": "workbench-demo-url-1"}
@@ -247,7 +247,6 @@ class Journey:
                     and [r["call_id"] for r in starts] == [r["call_id"] for r in receipts]
                     and "MCP URL elicitation completed: server=workspace_stdio, elicitation_id=workbench-demo-url-1" in
                         (self.root / "workbench-1.log").read_text())
-                self.capture("depth")
                 attached = self.attach()
                 assert attached["connected"] is True and BADGE_TOOL in attached["tools"], attached
                 interrupted = self.send("MCP-RECONNECT", wait=False)
@@ -294,9 +293,10 @@ class Journey:
                     and all(self.attributed_pair(turn["turn_id"]) for turn in (badge, detached_turn)))
                 refs = [v["source"] for r in results for v in r["output"].get("view", {}).get("blocks", [])
                         if v.get("type") == "attachment"]
-                committed_refs = [block["source"] for part in self.committed_tool_parts()
-                                  if part.get("tool_name") == BADGE_TOOL for block in part["blocks"]
-                                  if block.get("type") == "attachment"]
+                committed_refs = [{key: value for key, value in part.items() if key != "type"}
+                                  for receipt in results for part in
+                                  receipt["presentation"]["presentation"]["model_return"]["parts"]
+                                  if part["type"] == "attachment"]
                 assert len(refs) == 1, refs
                 reference = refs[0]
                 ref = reference["attachment_ref"]
@@ -313,8 +313,8 @@ class Journey:
                 offered = lambda r: json.dumps(r.get("instructions", "")) + json.dumps(r.get("tools", []))
                 # Identify each request by its last actual user input, not earlier transcript markers.
                 def marker(r):
-                    texts = [b.get("text", "") for m in r.get("messages", []) if m.get("role", "").lower() == "user"
-                             for b in m.get("blocks", []) if "MCP-" in b.get("text", "")]
+                    texts = [b["Text"]["text"] for m in r.get("messages", []) if m.get("role", "").lower() == "user"
+                             for b in m.get("blocks", []) if "Text" in b and "MCP-" in b["Text"]["text"]]
                     return texts[-1] if texts else ""
                 during = [r for r in requests if "MCP-ATTACH" in marker(r) and "MCP-DETACHED" not in marker(r)]
                 after = [r for r in requests if "MCP-DETACHED" in marker(r)]

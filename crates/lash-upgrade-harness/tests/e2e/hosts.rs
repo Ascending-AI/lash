@@ -315,14 +315,15 @@ async fn s28_workbench() -> Result<()> {
         ),
     ]);
     let mut host = WorkbenchHost::new(
-        format!("http://127.0.0.1:{}", port + 1),
         format!("http://127.0.0.1:{}", port),
+        format!("http://127.0.0.1:{}", port + 1),
         port + 20,
         port + 21,
     )?
     .configure(environment)?;
     let result = async {
-        cluster.boot(&server, 1, &mut lease).await?;
+        let boot = cluster.boot(&server, 1, &mut lease).await?;
+        std::fs::write(lease.directory.join("cluster-boot.json"), serde_json::to_vec_pretty(&boot)?)?;
         host.boot_mcp(&workbench, &mut lease).await?;
         let ready = host.boot(&workbench, &mut lease).await?;
         let score = host.mcp_oracle(&PathBuf::from(required("LASH_E2E_REPO")?),
