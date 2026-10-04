@@ -133,24 +133,11 @@ impl LocalRestate {
         addr: SocketAddr,
         endpoint: restate_sdk::endpoint::Endpoint,
     ) -> Result<LocalDeployment> {
-        self.serve_at_uri(engine, addr, endpoint, None).await
-    }
-
-    /// Advertise an owned transport proxy while binding the host's own socket.
-    pub(crate) async fn serve_at_uri(
-        &self,
-        engine: &lash::restate::RestateEngine,
-        addr: SocketAddr,
-        endpoint: restate_sdk::endpoint::Endpoint,
-        advertised_uri: Option<&str>,
-    ) -> Result<LocalDeployment> {
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .with_context(|| format!("bind the Restate endpoint at {addr}"))?;
         let local = listener.local_addr()?;
-        let uri = advertised_uri
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("http://{local}"));
+        let uri = format!("http://{local}");
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let serving = tokio::spawn(async move {
             lash::restate::serve_endpoint(
