@@ -112,34 +112,38 @@ impl<T> Owner<T> {
         }
     }
 
-    pub(super) async fn drive<F, R>(self, body: F, result: R) -> R::Output
+    pub(super) fn drive<F, R>(self, body: F, result: R) -> impl Future<Output = R::Output>
     where
         F: Future<Output = Result<T, String>>,
         R: Future,
     {
+        // Allocate before returning the bridge: retaining an inline body until
+        // the first poll grows every enclosing journal and process-start frame.
         let mut body = Some(Box::pin(body));
         let mut result = Box::pin(result);
-        std::future::poll_fn(|cx| {
-            self.started(cx);
-            // Progressing the SDK runs its fresh callback or supplies cached X.
-            if let Poll::Ready(value) = result.as_mut().poll(cx) {
-                return Poll::Ready(value);
-            }
-            if self.started(cx)
-                && let Some(future) = body.as_mut()
-                && let Poll::Ready(value) = future.as_mut().poll(cx)
-            {
-                body = None;
-                self.complete(value);
-                // Submit the completed body before yielding to another owner.
-                // Otherwise a sibling can register its next command before
-                // this run proposes X, leaving an await of an unrecorded X
-                // ahead of that command on replay.
-                return result.as_mut().poll(cx);
-            }
-            Poll::Pending
-        })
-        .await
+        async move {
+            std::future::poll_fn(|cx| {
+                self.started(cx);
+                // Progressing the SDK runs its fresh callback or supplies cached X.
+                if let Poll::Ready(value) = result.as_mut().poll(cx) {
+                    return Poll::Ready(value);
+                }
+                if self.started(cx)
+                    && let Some(future) = body.as_mut()
+                    && let Poll::Ready(value) = future.as_mut().poll(cx)
+                {
+                    body = None;
+                    self.complete(value);
+                    // Submit the completed body before yielding to another owner.
+                    // Otherwise a sibling can register its next command before
+                    // this run proposes X, leaving an await of an unrecorded X
+                    // ahead of that command on replay.
+                    return result.as_mut().poll(cx);
+                }
+                Poll::Pending
+            })
+            .await
+        }
     }
 }
 
