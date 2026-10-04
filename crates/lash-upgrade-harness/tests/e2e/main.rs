@@ -580,7 +580,7 @@ async fn core_r1_proxy_hold_leaves_other_http2_streams_usable() -> Result<()> {
         let (mut server, _) = upstream.accept().await?;
         let mut request = vec![0; 24 + start.len()];
         server.read_exact(&mut request).await?;
-        ensure!(&request[24..] == start, "Start bytes changed");
+        ensure!(request[24..] == start, "Start bytes changed");
         let run = http2(
             1,
             0,

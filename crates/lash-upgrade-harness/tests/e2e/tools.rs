@@ -342,7 +342,7 @@ impl Scenario<'_> {
         };
         report.validate()?;
         ensure!(
-            input_id == self.work()?.ingress && report.turn_id.to_string() == self.work()?.run,
+            input_id == self.work()?.ingress && report.turn_id.as_str() == self.work()?.run,
             "host terminal is bound to another input/Run"
         );
         ensure!(
@@ -635,7 +635,7 @@ pub fn assert_body_identity(
             && delivery
                 .logical_run
                 .as_ref()
-                .is_some_and(|run| run.to_string() == work.work.run)),
+                .is_some_and(|run| run.as_str() == work.work.run)),
         "crash redelivery changed its Run or advanced attempt ordinal"
     );
     if let Some(count) = count {
@@ -783,12 +783,4 @@ pub async fn opposite_order(scenario: &mut Scenario<'_>, spec: &CaseSpec) -> Res
         "replay lost recorded C/A/B selection"
     );
     Ok(evidence)
-}
-
-pub fn fact_for_call<'a>(evidence: &'a Evidence, call: &ToolCallId) -> Result<&'a JournalFact> {
-    evidence
-        .journals
-        .iter()
-        .find(|fact| fact.work.call.as_deref() == Some(call.as_str()))
-        .ok_or_else(|| anyhow!("no journal provenance for {call}"))
 }

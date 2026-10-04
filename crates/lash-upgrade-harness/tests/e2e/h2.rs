@@ -188,27 +188,26 @@ impl Shared {
         }).await??;
         for (turn, raw) in rows {
             let receipt = lash_core::store::decode_runtime_commit_receipt(&session, &turn, &raw)?;
-            if let Some(follow_on) = &receipt.pending_follow_on {
-                if follow_on
+            if let Some(follow_on) = &receipt.pending_follow_on
+                && follow_on
                     .continuation
                     .as_ref()
                     .and_then(|c| c.opener.run.as_deref())
                     .is_some()
-                {
-                    let artifact = self.directory.join(format!(
-                        "native-transfer-{}.json",
-                        lash_core::stable_hash::sha256_hex(turn.as_bytes())
-                    ));
-                    super::write(
-                        &artifact,
-                        &json!({"session_id":session,"turn_id":turn,"receipt":receipt}),
-                    )?;
-                    evidence.retain_follow_on(
-                        work.clone(),
-                        follow_on,
-                        artifact.display().to_string(),
-                    )?;
-                }
+            {
+                let artifact = self.directory.join(format!(
+                    "native-transfer-{}.json",
+                    lash_core::stable_hash::sha256_hex(turn.as_bytes())
+                ));
+                super::write(
+                    &artifact,
+                    &json!({"session_id":session,"turn_id":turn,"receipt":receipt}),
+                )?;
+                evidence.retain_follow_on(
+                    work.clone(),
+                    follow_on,
+                    artifact.display().to_string(),
+                )?;
             }
         }
         Ok(())
@@ -437,19 +436,19 @@ impl Control for Controller {
                     .await?;
                 Ok(())
             } else {
-                if let ToolControl::Hold(barrier) = &command {
-                    if matches!(
+                if let ToolControl::Hold(barrier) = &command
+                    && matches!(
                         barrier.kind,
                         BarrierKind::DeclarationIssued | BarrierKind::VProposed
-                    ) {
-                        self.shared.proxy.lock().await.arm_cut(TransportCut {
-                            proposal: barrier.clone(),
-                            before_ack: Barrier {
-                                work: barrier.work.clone(),
-                                kind: BarrierKind::BeforeAck,
-                            },
-                        })?;
-                    }
+                    )
+                {
+                    self.shared.proxy.lock().await.arm_cut(TransportCut {
+                        proposal: barrier.clone(),
+                        before_ack: Barrier {
+                            work: barrier.work.clone(),
+                            kind: BarrierKind::BeforeAck,
+                        },
+                    })?;
                 }
                 self.core.tool(command).await
             }
