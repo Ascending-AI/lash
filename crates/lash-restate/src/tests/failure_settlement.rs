@@ -113,13 +113,12 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
     // The hook would proceed on a second invocation. The replay must serve
     // the first refusal from the journal without invoking it again.
     context.start_replay();
-    let retry_store = decorated_view(&store, CommitRetryStore::new);
     let mut replay = replay_test_runtime_with_plugins(
         &session_id,
         policy,
         initial_state,
         host,
-        retry_store,
+        store.clone(),
         plugins(),
     )
     .await;
