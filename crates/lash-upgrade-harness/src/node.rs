@@ -27,6 +27,7 @@
 pub mod h3;
 pub mod objects;
 pub mod plugin_state;
+pub mod plugin_upgrade;
 pub mod process;
 pub mod provider;
 pub mod remote;
@@ -90,6 +91,8 @@ pub enum Command {
     PluginState(plugin_state::PluginStateArgs),
     /// Submit, reattach, cancel or inspect H3's engine-owned operation fixture.
     H3(h3::H3Args),
+    /// Live H5 plugin publication and cold-reopen fixture.
+    PluginUpgrade(plugin_upgrade::PluginUpgradeArgs),
 }
 
 /// Which store a command opens.
@@ -315,6 +318,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Retention(args) => retention::run(args).await,
         Command::PluginState(args) => print(&plugin_state::run(args).await?),
         Command::H3(args) => print(&h3::run(args).await?),
+        Command::PluginUpgrade(args) => plugin_upgrade::run(args).await,
     }
 }
 
