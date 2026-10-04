@@ -75,6 +75,7 @@ class Journey:
             if value:
                 return value
             time.sleep(.05)
+        self.capture("watchdog")
         raise AssertionError("S28 predicate watchdog")
 
     def gate(self, checkpoint, layer, rule, condition):
@@ -94,6 +95,14 @@ class Journey:
             self.poll(lambda: len(self.turns()) == before + 1 and not self.state()["active_turns"])
             for page in self.pages:
                 expect(page.locator("#timeline .message.assistant")).to_have_count(before + 1, timeout=30000)
+            # A streamed draft can already satisfy the row count. Wait for the
+            # actual canonical reply, using the API projection rather than a
+            # fixture-authored answer as the browser's completion signal.
+            def rendered():
+                expected = [{"role": m["role"], "text": m["text"]} for m in self.state()["messages"]
+                            if m["role"] in ("user", "assistant")]
+                return len(expected) == 2 * (before + 1) and all(self.dom(page) == expected for page in self.pages)
+            self.poll(rendered)
         self.save(marker + "-receipt.json", receipt)
         return receipt
 
@@ -303,6 +312,10 @@ class Journey:
                 stored = self.sql(self.session_db, "SELECT content FROM attachment_blobs WHERE attachment_id = ?", (ref["id"],))
                 with urllib.request.urlopen(self.args.base_url + "/api/attachments/" + urllib.parse.quote(ref["id"], safe="")) as response:
                     retrieved, media = response.read(), response.headers["content-type"]
+                self.save("attachment-retrieval.json", {"reference": reference, "committed_refs": committed_refs,
+                    "stored_bytes": [row["content"].hex() for row in stored], "retrieved_bytes": retrieved.hex(),
+                    "expected_bytes": BADGE.hex(), "media_type": media, "attach": attached,
+                    "detach": detached, "servers": servers})
                 self.gate("attach", "native", "connected integration retains one stored binary reference with exact bytes, then detaches",
                     attached["connected"] is True and BADGE_TOOL in attached["tools"] and reference["source"] == "stored"
                     and committed_refs == refs

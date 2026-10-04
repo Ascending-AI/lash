@@ -5,6 +5,55 @@ use lash::rlm::RlmSendBuilderExt;
 const ATTACHMENT_USAGE_GATE_PNG_BASE64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
+/// L12: retained MCP binary bytes must be served as binary, beside PNG uploads.
+#[test]
+fn retained_mcp_binary_retrieves_exact_bytes_with_octet_stream() {
+    run_async_test_on_stack_budget("workbench-mcp-binary-retrieval", || async {
+        let double = crate::tests::test_double_backend(0).await;
+        let backend = double.lash_backend();
+        let store = backend.attachment_store();
+        let provider = lash::testing::TestProvider::builder()
+            .kind("workbench-mcp-binary-retrieval")
+            .complete(|_| async { Ok(usage_gate_response()) })
+            .build()
+            .into_handle();
+        let state = attachment_usage_gate_state(
+            attachment_usage_gate_core(
+                GateBackend {
+                    backend: backend.clone(),
+                },
+                provider,
+                None,
+            ),
+            Arc::clone(&store),
+            backend.session_store_factory(),
+            WorkbenchSessions::fresh(),
+        );
+        let attachment = store
+            .put(
+                crate::mcp_fixture::BADGE_BYTES.to_vec(),
+                lash::attachments::AttachmentCreateMeta::new(
+                    lash::attachments::MediaType::parse("application/octet-stream").unwrap(),
+                    None,
+                    Some("workspace-badge.bin".into()),
+                ),
+            )
+            .await
+            .expect("retain the MCP resource bytes");
+        let response = retrieve_attachment(AxumPath(attachment.id.to_string()), State(state))
+            .await
+            .expect("retrieve the retained resource");
+        assert_eq!(response.status(), StatusCode::OK);
+        let media = response.headers()[header::CONTENT_TYPE].clone();
+        assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+        let bytes = axum::body::to_bytes(response.into_body(), MAX_WORKBENCH_ATTACHMENT_BYTES)
+            .await
+            .expect("read retained binary bytes");
+        assert_eq!(bytes.as_ref(), crate::mcp_fixture::BADGE_BYTES);
+        assert_eq!(media, "application/octet-stream");
+    });
+}
+
 #[test]
 fn attachment_usage_gate() {
     run_async_test_on_stack_budget("workbench-attachment-usage-gate", || async {
