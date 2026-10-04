@@ -111,6 +111,13 @@ impl RunCoordinator<'_> {
                     .flat_map(|entry| &entry.state)
                     .map(|state| state.ordinal)
                     .max(),
+                receipts: self
+                    .journal
+                    .entries
+                    .iter()
+                    .flat_map(|entry| &entry.state)
+                    .map(|state| (state.ordinal, state.receipt()))
+                    .collect(),
             },
             reserved_calls: self.journal.ledger.reserved_calls(),
             vm_continuation: false,
