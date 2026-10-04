@@ -475,9 +475,11 @@ impl FleetSnapshot {
             frontier.values.get("digits") == Some(&serde_json::json!(72)),
             "fleet reducer was omitted, reordered or published twice"
         );
+        // The callback returns one ordered batch containing both digits.
+        // K10 records a publication per batch, rather than per command.
         ensure!(
-            frontier.publication.receipts.len() == 2
-                && frontier.publication.applied.map(|ordinal| ordinal.0) == Some(2),
+            frontier.publication.receipts.len() == 1
+                && frontier.publication.applied.map(|ordinal| ordinal.0) == Some(1),
             "fleet namespace has another publication frontier"
         );
         Ok(())
