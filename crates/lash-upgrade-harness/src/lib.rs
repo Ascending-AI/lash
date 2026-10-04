@@ -24,6 +24,13 @@ pub mod identity;
 pub mod node;
 pub mod restate_view;
 
+#[cfg(test)]
+extern crate self as lash_upgrade_harness;
+
+#[cfg(test)]
+#[path = "../tests/e2e/fleet.rs"]
+pub mod e2e_fleet;
+
 // `#[restate_sdk::*]` expansions name `::restate_sdk` absolute paths; the SDK
 // reaches this crate through lash's re-export, so the crate answers to that
 // name and generated code resolves the modules below at the crate root.
