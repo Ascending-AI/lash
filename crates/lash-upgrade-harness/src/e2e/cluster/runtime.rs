@@ -268,11 +268,12 @@ impl LocalCluster {
                     let ident: super::metadata::Ident = super::metadata::unary(&peer,"restate.node_ctl_svc.NodeCtlSvc/GetIdent").await?;
                     ensure!(ident.status==1 && ident.node_id.as_ref().is_some_and(|id| id.id==node.receipt.node),"owned node identity is not ready");
                     ensure!(ident.cluster_name==self.namespace(),"node joined another cluster");
-                    ensure!(ident.advertised_addresses.iter().any(|address| address.address==node.receipt.peer_address),"advertised peer does not use owned link proxy");
+                    ensure!(ident.advertised_addresses.iter().any(|address| reqwest::Url::parse(&address.address).ok()==reqwest::Url::parse(&node.receipt.peer_address).ok()),"advertised peer does not use owned link proxy: {:?}",ident.advertised_addresses);
                     if let Some(version) = node_version { ensure!(version==ident.nodes_config_version,"membership versions disagree"); } else { node_version=Some(ident.nodes_config_version); }
                     let response: super::metadata::ConfigurationResponse = super::metadata::unary(&peer,"restate.cluster_ctrl.ClusterCtrlSvc/GetClusterConfiguration").await?;
                     let config = response.configuration.context("cluster configuration is absent")?;
-                    let replication = if self.nodes.len()==3 { "2" } else { "1" };
+                    std::fs::write(node.config.with_file_name("metadata-observation.json"),serde_json::to_vec_pretty(&json!({"identity":ident,"configuration":config}))?)?;
+                    let replication = if self.nodes.len()==3 { "{node: 2}" } else { "{node: 1}" };
                     ensure!(config.partitions==1 && config.replication.as_ref().is_some_and(|value| value.property==replication),"actual partition replication does not match requested cluster");
                     ensure!(config.bifrost.as_ref().is_some_and(|value| value.provider=="replicated" && value.replication.as_ref().is_some_and(|value| value.property==replication)),"actual log replication does not match requested cluster");
                     let state = self.state(&node.receipt).await?;

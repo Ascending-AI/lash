@@ -499,7 +499,7 @@ impl NodeBinary {
             .with_context(|| format!("spawn {} turn", self.label()))?;
         Ok(PendingTurn {
             path: self.path.clone(),
-            child,
+            child: Some(child),
         })
     }
 
@@ -645,14 +645,45 @@ impl NodeBinary {
 /// A turn a host of one build is waiting on in the background.
 pub struct PendingTurn {
     path: PathBuf,
-    child: Child,
+    child: Option<Child>,
 }
 
 impl PendingTurn {
     /// Wait for the host to report the settled turn.
-    pub fn wait(self) -> Result<TurnReport> {
-        let output = self.child.wait_with_output().context("wait for the turn")?;
+    pub fn wait(mut self) -> Result<TurnReport> {
+        let output = self
+            .child
+            .take()
+            .context("turn was already reaped")?
+            .wait_with_output()
+            .context("wait for the turn")?;
         report(&self.path, "turn", output)
+    }
+    pub fn wait_until(mut self, deadline: Instant) -> Result<TurnReport> {
+        loop {
+            if self
+                .child
+                .as_mut()
+                .context("turn was already reaped")?
+                .try_wait()?
+                .is_some()
+            {
+                return self.wait();
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "turn did not settle before its case deadline"
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+}
+impl Drop for PendingTurn {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
@@ -866,6 +897,34 @@ impl ServingNode {
         Ok(())
     }
 
+    pub fn is_reaped(&self) -> bool {
+        self.child.is_none()
+    }
+    /// Reap a host after its public orderly shutdown/exporter flush completed.
+    /// A nonzero exit is evidence of failure, even if its listener is closed.
+    pub async fn wait_success(&mut self, deadline: Instant) -> Result<()> {
+        loop {
+            if let Some(status) = self
+                .child
+                .as_mut()
+                .context("process was already reaped")?
+                .try_wait()?
+            {
+                self.child = None;
+                anyhow::ensure!(
+                    status.success(),
+                    "owned service exited {status}: {}",
+                    self.log_tail()
+                );
+                return Ok(());
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "owned host did not exit after orderly shutdown"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
     pub fn kill_and_reap(&mut self) -> Result<()> {
         self.assert_running()?;
         let child = self.child.as_mut().context("process has been reaped")?;

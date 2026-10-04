@@ -143,7 +143,8 @@ async fn core_r1_one_node_host_sigkill_reopens_real_journal_and_cleans_up() -> R
             case.release("core-r1")?;
             Ok((case,serving))
         }).await??;
-        let report = tokio::task::spawn_blocking(move || pending.wait()).await??;
+        let deadline=lease.deadline;
+        let report = tokio::task::spawn_blocking(move || pending.wait_until(deadline)).await??;
         ensure!(report.status == "Answered", "cold host did not answer: {report:?}");
         let post = case.view()?.journal(&work,&row.id,protocol).await?;
         ensure!(post.len() >= pre.len(), "retained journal shrank on host restart");

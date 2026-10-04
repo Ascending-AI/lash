@@ -27,6 +27,10 @@ doctest = false
 name = "lash-upgrade-node"
 path = "src/bin/lash-upgrade-node.rs"
 
+[[bin]]
+name = "lash-e2e-proxy"
+path = "src/bin/lash-e2e-proxy.rs"
+
 [[test]]
 name = "phase_a"
 path = "tests/phase_a/main.rs"

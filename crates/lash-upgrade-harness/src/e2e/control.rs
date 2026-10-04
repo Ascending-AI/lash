@@ -14,6 +14,7 @@ pub enum BarrierKind {
     AdmissionDurable,
     RunCancelRecorded,
     RetryBackoffEntered,
+    RetryScheduleDurable,
     PublicationRequest,
     PublicationRefused,
     SuccessorFence,
@@ -200,15 +201,16 @@ impl BarrierKind {
                 | Self::SourceSealed
                 | Self::ParkCommitted
                 | Self::RunCancelRecorded
-                | Self::SuccessorFence
                 | Self::StartAdmitted
                 | Self::StartRegistered
                 | Self::ConsumerHoldDischarged
-                | Self::RetryBackoffEntered
+                | Self::RetryScheduleDurable
         )
     }
 }
 
+pub mod callback;
+pub mod process;
 pub mod transport;
 
 /// Shared controller for real owned child handles, identity-keyed fixture
@@ -219,6 +221,7 @@ pub struct CoreControl {
     pub cluster: Option<super::cluster::LocalCluster>,
     pub host: Option<Box<dyn super::host::HostAdapter + Send>>,
     processes: std::collections::BTreeMap<String, (u32, crate::harness::ServingNode)>,
+    proxies: std::collections::BTreeMap<String, (u32, transport::V7Proxy)>,
     observed: Vec<BarrierProof>,
     pub receipts: Vec<FaultReceipt>,
 }
@@ -233,6 +236,7 @@ impl CoreControl {
             cluster: None,
             host: None,
             processes: Default::default(),
+            proxies: Default::default(),
             observed: Vec::new(),
             receipts: Vec::new(),
         }
@@ -243,12 +247,45 @@ impl CoreControl {
         incarnation: u32,
         process: crate::harness::ServingNode,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            !self.processes.contains_key(&target),
-            "target incarnation is already owned"
-        );
+        if let Some((previous, owned)) = self.processes.get(&target) {
+            anyhow::ensure!(
+                owned.is_reaped() && incarnation == previous + 1,
+                "replacement must follow a reaped predecessor with the next incarnation"
+            );
+        }
         self.processes.insert(target, (incarnation, process));
         Ok(())
+    }
+    pub async fn wait_process_success(
+        &mut self,
+        target: &str,
+        deadline: std::time::Instant,
+    ) -> anyhow::Result<()> {
+        self.processes
+            .get_mut(target)
+            .ok_or_else(|| anyhow::anyhow!("process target is not owned"))?
+            .1
+            .wait_success(deadline)
+            .await
+    }
+    pub fn own_proxy(
+        &mut self,
+        target: String,
+        incarnation: u32,
+        proxy: transport::V7Proxy,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.proxies.contains_key(&target),
+            "transport target is already owned"
+        );
+        self.proxies.insert(target, (incarnation, proxy));
+        Ok(())
+    }
+    pub fn proxy(&self, target: &str) -> anyhow::Result<&transport::V7Proxy> {
+        self.proxies
+            .get(target)
+            .map(|(_, proxy)| proxy)
+            .ok_or_else(|| anyhow::anyhow!("transport target is not owned"))
     }
 }
 impl Control for CoreControl {
@@ -257,7 +294,9 @@ impl Control for CoreControl {
             let proof = if barrier.kind.durable() {
                 loop {
                     for (_, process) in self.processes.values_mut() {
-                        process.assert_running()?;
+                        if !process.is_reaped() {
+                            process.assert_running()?;
+                        }
                     }
                     let evidence = self.reader.collect(&barrier.work).await?;
                     if let Some(fact) = evidence
@@ -306,6 +345,24 @@ impl Control for CoreControl {
                         .get_mut(target)
                         .ok_or_else(|| anyhow::anyhow!("fault targets an unowned process"))?;
                     process.kill_and_reap()?;
+                    *incarnation
+                }
+                Fault::DropConnection { target } => {
+                    let (incarnation, proxy) = self
+                        .proxies
+                        .get(target)
+                        .ok_or_else(|| anyhow::anyhow!("transport target is not owned"))?;
+                    let count = proxy.disconnect(self.barriers.deadline).await?;
+                    let path = self.barriers.directory.join(format!(
+                        "disconnect-{}.json",
+                        lash_core::stable_hash::sha256_hex(target.as_bytes())
+                    ));
+                    crate::node::write_atomically(
+                        &path,
+                        &serde_json::to_vec(
+                            &serde_json::json!({"target":target,"closed_streams":count,"incarnation":incarnation,"barrier":proof}),
+                        )?,
+                    )?;
                     *incarnation
                 }
                 Fault::KillRestate { node } => {
@@ -417,7 +474,7 @@ fn journal_matches(fact: &super::evidence::JournalFact, barrier: &Barrier) -> bo
             }
             RunEvent::RetryScheduled { call_id, .. }
             | RunEvent::RetryTimerRegistered { call_id, .. } => {
-                barrier.kind == BarrierKind::RetryBackoffEntered && call_matches(call_id)
+                barrier.kind == BarrierKind::RetryScheduleDurable && call_matches(call_id)
             }
             _ => false,
         }),
