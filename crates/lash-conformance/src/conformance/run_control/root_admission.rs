@@ -52,7 +52,8 @@ pub async fn a_lost_resume_ack_is_reconciled_before_queued_work_is_admitted(
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let f = Fixture::new_for_execution(prefix, "lost-resume-ack", &host, &stores, &runner).await;
+    let mut f =
+        Fixture::new_for_execution(prefix, "lost-resume-ack", &host, &stores, &runner).await;
     let send = f
         .parts
         .enqueue("queued send", Some("queued-send-run"))
@@ -65,12 +66,38 @@ pub async fn a_lost_resume_ack_is_reconciled_before_queued_work_is_admitted(
         ControlIntentState::Pending
     ));
     assert!(f.owed(intent.id).await);
-    let refused = shift_result(&f, &runner, "before-reconcile").await;
-    assert!(
-        matches!(refused, Err(ShiftAbort::Retry(ref error))
-        if error.code == crate::RuntimeErrorCode::SessionRedriveUnsettled),
-        "{refused:?}"
-    );
+    // The engine retries an uncommitted refusal inside the recorded admission.
+    // Hold its second evaluation so reconciliation happens before its budget ends.
+    let script = Script::new();
+    let held = script
+        .on(crate::store::StoreOp::prepare_shift_admission)
+        .nth(2)
+        .before()
+        .pause();
+    f.parts.store = script.wrap("lost-resume-ack", Arc::clone(&f.parts.store));
+    let mut racing = spawn_shift(&f, &runner, "before-reconcile");
+    script
+        .called(crate::store::StoreOp::prepare_shift_admission, 1)
+        .await;
+    let redecided = tokio::time::timeout(std::time::Duration::from_millis(400), held.reached(1))
+        .await
+        .is_ok();
+    let answered = if racing.is_finished() {
+        Some((&mut racing).await.expect("the racing admission ran"))
+    } else {
+        assert!(
+            redecided,
+            "the unsettled admission retries at its preparation gate"
+        );
+        None
+    };
+    if let Some(ref refused) = answered {
+        assert!(
+            matches!(refused, Err(ShiftAbort::Retry(error))
+            if error.code == crate::RuntimeErrorCode::SessionRedriveUnsettled),
+            "{refused:?}"
+        );
+    }
     assert_eq!(f.parts.calls(), 0);
     assert!(f.parts.applications().await.is_empty());
 
@@ -82,7 +109,15 @@ pub async fn a_lost_resume_ack_is_reconciled_before_queued_work_is_admitted(
         ControlIntentState::Acknowledged { .. }
     ));
     assert!(!f.owed(intent.id).await);
-    let resumed = shift(&f, &runner, "after-reconcile").await;
+    held.open_all();
+    let resumed = match answered {
+        Some(Err(ShiftAbort::Retry(_))) => shift(&f, &runner, "after-reconcile").await,
+        Some(other) => panic!("the unsettled admission refused: {other:?}"),
+        None => racing
+            .await
+            .expect("the held admission resumes")
+            .expect("the reconciled shift runs"),
+    };
     assert_eq!(resumed.stop, ShiftStop::Idle);
     assert_eq!(
         f.parts.applications().await,
