@@ -196,7 +196,7 @@ impl RestateEngine {
 
     /// The endpoint builder a deployment that serves this engine's work
     /// starts from, with every Restate service lash itself serves already
-    /// bound: the durable-wait workflow and index, process attach, the
+    /// bound: the durable-wait workflow and index, the
     /// process workflow over `processes` (a [`DurableProcessWorker`], or a
     /// [`RestateProcessServing`] that also sets the segment policy), and the
     /// effect-group index, payload and dispatcher, and the `SessionShifts`

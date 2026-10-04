@@ -302,13 +302,12 @@ mod turn_crash_on_the_double;
 mod turn_laws_on_the_double;
 mod wait_handoff_generations;
 use endpoint_protocol::{
-    RecordedCommand, admission_journal, admitted_invocation_body, durable_wait_index_call_response,
+    admission_journal, admitted_invocation_body, durable_wait_index_call_response,
     encode_call_replay, encode_captured_run_and_call_replay, encode_captured_run_command_replay,
     encode_completed_gate_sleep_replay, encode_journal_retry, encode_process_segment_send_replay,
     encode_process_terminal_delivery_replay, encode_recorded_commands_replay,
-    encode_recorded_commands_with_invocations_replay, encode_run_replay, encode_signal_value,
-    invoke_endpoint, invoke_endpoint_body, invoke_endpoint_body_open,
-    invoke_endpoint_body_with_json_call_responses,
+    encode_recorded_commands_with_invocations_replay, encode_run_replay, invoke_endpoint,
+    invoke_endpoint_body, invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses,
     invoke_endpoint_body_with_json_call_responses_then_suspend,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
     invoke_process_workflow_body, invoke_process_workflow_endpoint, restate_call_frames,
@@ -587,40 +586,6 @@ impl Future for PanicsWhenPolledAfterReady {
     }
 }
 
-struct CancelOnWake {
-    parent: Waker,
-    cancellation: tokio_util::sync::CancellationToken,
-}
-
-impl std::task::Wake for CancelOnWake {
-    fn wake(self: Arc<Self>) {
-        self.cancellation.cancel();
-        self.parent.wake_by_ref();
-    }
-
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.cancellation.cancel();
-        self.parent.wake_by_ref();
-    }
-}
-
-struct CancelOnWakeFuture<F> {
-    future: Pin<Box<F>>,
-    cancellation: tokio_util::sync::CancellationToken,
-}
-
-impl<F: Future> Future for CancelOnWakeFuture<F> {
-    type Output = F::Output;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let waker = Waker::from(Arc::new(CancelOnWake {
-            parent: cx.waker().clone(),
-            cancellation: self.cancellation.clone(),
-        }));
-        self.future.as_mut().poll(&mut Context::from_waker(&waker))
-    }
-}
-
 #[test]
 fn restate_context_future_repoll_after_ready_stays_pending() {
     let mut future = Box::pin(guard_restate_context_future(PanicsWhenPolledAfterReady {
@@ -775,12 +740,11 @@ fn restate_run_future_cross_thread_closure_wake_does_not_mask_the_terminal_park(
 /// Restate service-protocol message types used by the FIG-779/FIG-790 gates.
 /// `restate_sdk_shared_core::service_protocol::header` keeps these private, so
 /// they are restated here (`SleepCommand = 0x040C`, `Suspension = 0x0001`,
-/// `CallCommand = 0x040D`, `OneWayCallCommand = 0x040E`,
+/// `CallCommand = 0x040D`,
 /// `CompletePromiseCommand = 0x040B`,
 /// `OutputCommand = 0x0401`, `End = 0x0003`).
 const RESTATE_SLEEP_COMMAND_MESSAGE_TYPE: u16 = 0x040C;
 const RESTATE_CALL_COMMAND_MESSAGE_TYPE: u16 = 0x040D;
-const RESTATE_ONE_WAY_CALL_COMMAND_MESSAGE_TYPE: u16 = 0x040E;
 const RESTATE_SUSPENSION_MESSAGE_TYPE: u16 = 0x0001;
 const RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x040B;
 const RESTATE_GET_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x0409;

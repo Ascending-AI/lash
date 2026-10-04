@@ -151,7 +151,7 @@ pub struct RestateTurnCancelClosureParticipantRequest {
 
 /// One watch on a wait: the awakeable the index resolves when the wait `key`
 /// names ends or its index is revoked. A turn-cancel gate entry watches its
-/// session's turn-control wait; a process attach watches the wait it serves.
+/// session's turn-control wait.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateDurableWaitAwakeableRequest {
     pub key: AwaitEventKey,

@@ -34,9 +34,7 @@ pub(super) fn revoke_durable_wait_awakeable(
 ///
 /// An entry is owed its wake by every way its wait can end: a resolve, a
 /// settle, its owning group child's cancel decision and a cancellation of
-/// the scope's waits. A watcher left unwoken outlives the wait it watches;
-/// a process attach would then hold its terminal read for a caller that is
-/// gone.
+/// the scope's waits. A watcher left unwoken outlives the wait it watches.
 pub(super) fn wake_ended_waits(
     namespace: &crate::RestateNamespace,
     ctx: &ObjectContext<'_>,

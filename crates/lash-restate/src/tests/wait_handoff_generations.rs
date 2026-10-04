@@ -1,11 +1,8 @@
-//! Shared durable-wait journals across a build roll (FIG-3795 §5.2: L10,
-//! L3) on the multi-deployment server double.
+//! Durable-wait wire reads and process signal handover across a build roll
+//! on the multi-deployment server double.
 //!
-//! The durable-wait workflow and the process attach are shared services:
-//! bound under their stable names only, their journal shapes frozen, so an
-//! invocation suspended on build N may resume on build N+1. L10 proves it —
-//! the precondition for the drain moving them off a build it retires. L3
-//! executes the drain's `HandOver` arm (FIG-3799): a real process segment
+//! L10W checks a shared journal against a wider reader. L3 executes the
+//! drain's `HandOver` arm (FIG-3799): a real process segment
 //! waiting for a signal on build N is woken for the drain of N's generation,
 //! hands its open wait to a successor segment on N+1, and the successor
 //! waits on the same wait again.
@@ -30,7 +27,6 @@ struct Roll {
     server: RestateTestServer,
     ingress: RestateIngressClient,
     host_next: Arc<RestateEffectHost>,
-    stores: lash_sqlite_store::SqliteStoreSet,
     deployment_n: lash_restate_test::DeploymentId,
     endpoint_next: Option<Endpoint>,
     /// Build N refuses every dispatch once it is retiring, so an invocation
@@ -39,12 +35,7 @@ struct Roll {
 }
 
 impl Roll {
-    async fn start(seed: u64) -> Self {
-        Self::start_reading(seed, crate::RESTATE_WIRE).await
-    }
-
-    /// [`start`](Self::start) with an N+1 that reads the wire versions
-    /// `next_reads`, as the next release does.
+    /// Builds N and an N+1 that reads the wire versions `next_reads`.
     async fn start_reading(seed: u64, next_reads: crate::VersionRange) -> Self {
         // Every await suspends, so each shared invocation below is suspended
         // on N when N+1 arrives, and wakes by a fresh dispatch; a refused
@@ -82,7 +73,6 @@ impl Roll {
             server,
             ingress: RestateIngressClient::new(connection),
             host_next,
-            stores,
             deployment_n,
             endpoint_next: Some(endpoint_next),
             retiring,
@@ -157,12 +147,6 @@ impl Roll {
             );
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-    }
-
-    fn remove_n(&self) {
-        self.server
-            .remove_deployment(&self.deployment_n, false)
-            .expect("nothing open is pinned to N any more");
     }
 
     fn wait_key(&self, label: &str) -> AwaitEventKey {

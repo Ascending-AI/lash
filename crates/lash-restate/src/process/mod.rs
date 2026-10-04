@@ -91,31 +91,6 @@ pub(crate) fn process_segment_workflow_key(process_id: &ProcessId, segment_ordin
     }
 }
 
-/// The handler-side call that awaits `process_id`'s terminal: on the stable
-/// root `LashProcessWorkflow/<pid>`, whose terminal promise outlives every
-/// segment's lane (FIG-3795). A segment running under a generation lane
-/// still completes the terminal there.
-pub(crate) fn await_terminal_on_stable_run<'ctx, C>(
-    ctx: &C,
-    namespace: &crate::RestateNamespace,
-    process_id: ProcessId,
-) -> restate_sdk::context::Request<
-    'ctx,
-    crate::Call<RestateProcessAwaitRequest>,
-    crate::Reply<ProcessAwaitOutput>,
->
-where
-    C: restate_sdk::context::ContextClient<'ctx>,
-{
-    crate::services::routed_workflow(
-        ctx,
-        &namespace.stable(crate::LashService::ProcessWorkflow),
-        process_id.to_string(),
-        "await_terminal",
-        RestateProcessAwaitRequest { process_id },
-    )
-}
-
 mod runner_failure;
 pub(crate) use runner_failure::{handler_error_from_plugin, journal_or_retry};
 use runner_failure::{is_replay_mismatch, is_terminal_runner_error, terminal_process_output};

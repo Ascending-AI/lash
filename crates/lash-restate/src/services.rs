@@ -52,7 +52,7 @@
 //!   `EffectGroupDispatch` binds only its generation name: every opener
 //!   records its build's lane, so no call needs a stable dispatcher binding.
 //! - A **shared** service holds state every build reads and writes: the
-//!   durable-wait workflow and index, process attach, and the effect-group
+//!   durable-wait workflow and index, and the effect-group
 //!   index and payload objects. Its name is never split by generation, so a
 //!   waiter on one build and a resolver on another address the same promise.
 //!
