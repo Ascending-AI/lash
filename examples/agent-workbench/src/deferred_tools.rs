@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 
 const SEARCH_TOOL_NAME: &str = "search_tools";
 const SEARCH_CALL_PATH: &str = "tools.search";
-const DEFERRED_SOURCE_ID: &str = lash::tools::PLUGIN_TOOL_SOURCE_ID;
+const DEFERRED_SOURCE_ID: &str = "agent_workbench";
 const PREVIEW_MODULE_LIMIT: usize = 2;
 const PREVIEW_CALL_NAME_LIMIT: usize = 4;
 const SEARCH_RESULT_LIMIT: usize = 20;
