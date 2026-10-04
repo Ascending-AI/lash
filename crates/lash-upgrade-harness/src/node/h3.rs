@@ -281,3 +281,178 @@ pub async fn double_fixture(
     let core = super::core(double.lash_backend(), &super::ProviderArgs::default())?;
     Ok((core, double))
 }
+
+/// The real durable-wait registry boundary used by S21. Material is retained
+/// through the backing SQLite store before its reference can become a seal.
+pub struct SourceFixture {
+    pub descriptor: lash_core::tool_run::SourceDescriptor,
+    client: lash_restate::RestateIngressClient,
+    service: String,
+    index: String,
+    materials: Arc<dyn lash_core::store::ToolMaterialStore>,
+}
+
+impl SourceFixture {
+    pub async fn new(
+        double: &lash_restate_test::RestateTestBackend<dyn lash::StoreSet>,
+        session: &str,
+        operation: &str,
+    ) -> Result<Self> {
+        use lash_core::AwaitEventResolver as _;
+        let call_id = lash_core::ToolCallId::derive(
+            "",
+            lash_core::ToolCallRoot::host_submission(operation)?,
+            &[],
+        );
+        let source = double
+            .restate()
+            .restate_effect_host()
+            .await_event_key(
+                &lash_core::ExecutionScope::SessionOperation {
+                    session_id: lash_core::SessionId::fixture(session.to_owned()),
+                    operation_id: operation.into(),
+                },
+                lash_core::AwaitEventWaitIdentity::tool_completion(call_id.clone()),
+            )
+            .await?;
+        let index = lash_restate::RestateDurableWaitAddress::for_key(&source).index_key();
+        Ok(Self {
+            descriptor: lash_core::tool_run::SourceDescriptor {
+                source,
+                call_id,
+                owner: lash_core::EffectOpener::session_operation(
+                    lash_core::SessionId::fixture(session.to_owned()),
+                    operation,
+                ),
+                resolver: PluginRevision::new(PLUGIN, BehaviorRevision::ONE),
+                authority: lash_core::tool_run::SourceAuthority::ExternalCompletion,
+                cancel: ExternalCancelPolicy::CancelExternalWork,
+            },
+            client: double.ingress(),
+            service: double.service_name("LashDurableWaitIndex"),
+            index,
+            materials: double.stores().tool_material_store(),
+        })
+    }
+
+    pub async fn arm(&self) -> Result<SourceArmReply> {
+        self.call(
+            "arm_source",
+            serde_json::json!({"descriptor": self.descriptor}),
+        )
+        .await
+    }
+
+    pub async fn retained(&self, value: &str) -> Result<lash_core::tool_run::SourceSeal> {
+        use lash_core::tool_run::{
+            MaterialBundle, MaterialHolder, MaterialOwner, MaterialPayload, MaterialRole,
+            SourceSeal,
+        };
+        let owner = MaterialOwner::Source {
+            source: self.descriptor.source.clone(),
+        };
+        let bundle = MaterialBundle::of([MaterialPayload::new(
+            owner,
+            MaterialRole::AttemptOutput,
+            Some(self.descriptor.resolver.clone()),
+            value.to_owned(),
+        )])?
+        .ok_or_else(|| anyhow!("source result bundle is empty"))?;
+        let retained = self
+            .materials
+            .retain_material(
+                &MaterialHolder::Source {
+                    source: self.descriptor.source.clone(),
+                },
+                &bundle,
+            )
+            .await?;
+        let result = retained
+            .references
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("retained source result has no reference"))?;
+        Ok(SourceSeal::Resolved {
+            result: Box::new(result),
+        })
+    }
+
+    pub async fn seal(
+        &self,
+        writer: lash_core::tool_run::SealWriter,
+        seal: lash_core::tool_run::SourceSeal,
+    ) -> Result<SourceSealReply> {
+        self.call(
+            "seal_source",
+            serde_json::json!({"source": self.descriptor.source, "writer": writer, "seal": seal}),
+        )
+        .await
+    }
+
+    /// S21 subscribes only after a seal exists, so no invented awakeable is
+    /// resolved. The sealed reply must return before registering any observer.
+    pub async fn subscribe_sealed(
+        &self,
+        owner: lash_core::EffectOpener,
+        segment: SegmentOrdinal,
+    ) -> Result<SourceSubscribeReply> {
+        self.call(
+            "subscribe_source",
+            serde_json::json!({"subscription": lash_core::tool_run::SourceSubscription {
+                source: self.descriptor.source.clone(), owner, segment,
+            }, "awakeable_id": ""}),
+        )
+        .await
+    }
+
+    async fn call<T: Serialize, R: serde::de::DeserializeOwned>(
+        &self,
+        handler: &str,
+        body: T,
+    ) -> Result<R> {
+        let reply: lash_restate::Reply<R> = self
+            .client
+            .call_object_json(
+                &self.service,
+                &self.index,
+                handler,
+                &lash_restate::Call::new(body),
+            )
+            .await?;
+        Ok(reply.body)
+    }
+}
+
+/// Typed replies decoded from the real registry wire boundary. These fixture
+/// DTOs are needed because the handler reply types are internal to the adapter.
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceArmReply {
+    Armed {
+        seal: Option<lash_core::tool_run::SourceSeal>,
+    },
+    Refused {
+        refusal: lash_core::tool_run::SourceRefusal,
+    },
+}
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceSealReply {
+    Outcome {
+        outcome: lash_core::tool_run::SealOutcome,
+    },
+    Refused {
+        refusal: lash_core::tool_run::SourceRefusal,
+    },
+}
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(tag = "reply", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceSubscribeReply {
+    Subscribed,
+    Sealed {
+        seal: lash_core::tool_run::SourceSeal,
+    },
+    Refused {
+        refusal: lash_core::tool_run::SourceRefusal,
+    },
+}
