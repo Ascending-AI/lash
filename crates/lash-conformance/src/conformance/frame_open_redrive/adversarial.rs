@@ -280,11 +280,8 @@ async fn assert_standard_frame_opened_once(
         "one model call per run"
     );
     let head = law.head().await;
-    assert_eq!(
-        head.head_revision,
-        before + 2,
-        "the frame's commit and the turn's each land once"
-    );
+    law.receipts
+        .assert_since(before, head.head_revision, 1, 1, 0, 1);
     let chain = frame_chain(&head, &law.session_id);
     assert_eq!(chain.len(), 2, "one frame after the first: {chain:?}");
     assert_eq!(chain[1].0, crate::AgentFrameReason::COMPACTION);

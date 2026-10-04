@@ -150,10 +150,13 @@ pub(super) async fn compaction_crash_case_under(
          requests only an answer the journal never recorded again, and the input \
          after the compaction sees no stale prompt usage"
     );
-    assert_eq!(
+    law.receipts.assert_since(
+        first.head_revision,
         head.head_revision,
-        first.head_revision + 1 + u64::from(input_after),
-        "the compaction commits once, and the input's run once"
+        0,
+        usize::from(input_after),
+        1,
+        1 + usize::from(input_after),
     );
     let path = active_path(&head.graph);
     let seed_at = path
@@ -351,9 +354,13 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
     let while_held = hold.while_held(async {
         let receipt = law.submit_compaction("compact").await;
         let during = law.head().await;
+        law.receipts
+            .assert_since(before.head_revision, during.head_revision, 0, 0, 0, 1);
+        assert_eq!(during.current_frame_node_id, before.current_frame_node_id);
         assert_eq!(
-            during.head_revision, before.head_revision,
-            "the head does not move while the bound turn holds its pressure summary"
+            serde_json::to_value(&during.graph).expect("encode the held graph"),
+            serde_json::to_value(&before.graph).expect("encode the prior graph"),
+            "the command never changes the bound turn's graph",
         );
         assert_eq!(
             law.compaction_outcome(&receipt).await,
@@ -377,10 +384,13 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
     let chain = frame_chain(&after_bound_turn, &law.session_id);
     assert_eq!(chain.len(), 2, "the bound turn's pressure frame: {chain:?}");
     assert_eq!(chain[1].1.as_ref(), Some(&first_frame));
-    assert_eq!(
+    law.receipts.assert_since(
+        before.head_revision,
         after_bound_turn.head_revision,
-        before.head_revision + 2,
-        "the pressure frame and the bound turn each commit once, before the compaction"
+        1,
+        1,
+        0,
+        1,
     );
 
     law.enqueue("third question").await;
@@ -417,10 +427,13 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
             frame_node_id: chain[2].2.clone(),
         })
     );
-    assert_eq!(
+    law.receipts.assert_since(
+        after_bound_turn.head_revision,
         head.head_revision,
-        after_bound_turn.head_revision + 2,
-        "the compaction and the next run each commit once"
+        0,
+        1,
+        1,
+        2,
     );
     assert_eq!(
         model.summary_calls.load(Ordering::SeqCst),

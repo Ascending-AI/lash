@@ -70,6 +70,7 @@ use crate::plugin::PluginFactory;
 mod adversarial;
 pub use adversarial::*;
 mod followup;
+pub(crate) mod receipts;
 pub use followup::*;
 mod superseded_run;
 pub use superseded_run::*;
@@ -1073,6 +1074,7 @@ struct LawHead {
 
 /// A law's session, store and first run.
 struct LawSession {
+    receipts: Arc<receipts::CommitReceipts>,
     parts: LawParts,
     store: Arc<dyn crate::RuntimeStore>,
     session_id: SessionId,
@@ -1119,7 +1121,10 @@ impl LawSession {
         let store =
             crate::conformance::law_session_store_with_config(stores.as_ref(), &session_id, config)
                 .await;
+        let receipts = Arc::new(receipts::CommitReceipts::new(store));
+        let store: Arc<dyn crate::RuntimeStore> = receipts.clone();
         Self {
+            receipts,
             parts: LawParts {
                 session_id: session_id.clone(),
                 host,
@@ -1409,11 +1414,8 @@ pub async fn a_pressure_frame_opens_once_whatever_its_crash(
         "one model call per run"
     );
     let head = law.head().await;
-    assert_eq!(
-        head.head_revision,
-        before + 2,
-        "the pressure frame's commit and the turn's each land once"
-    );
+    law.receipts
+        .assert_since(before, head.head_revision, 1, 1, 0, 1);
     let chain = frame_chain(&head, &law.session_id);
     assert_eq!(chain.len(), 2, "one frame after the first: {chain:?}");
     assert_eq!(chain[1].0, crate::AgentFrameReason::COMPACTION);
@@ -1510,11 +1512,8 @@ pub async fn a_pressure_frame_then_continue_as_commits_both_frames_once(
         "one model call per physical turn"
     );
     let head = law.head().await;
-    assert_eq!(
-        head.head_revision,
-        before + 3,
-        "the pressure frame, the switching turn and the follow-on each commit once"
-    );
+    law.receipts
+        .assert_since(before, head.head_revision, 1, 2, 0, 1);
     let chain = frame_chain(&head, &law.session_id);
     assert_eq!(chain.len(), 3, "two frames after the first: {chain:?}");
     assert_eq!(chain[1].0, crate::AgentFrameReason::COMPACTION);
