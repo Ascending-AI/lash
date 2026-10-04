@@ -1503,8 +1503,6 @@
     "tests::process_await_redrive::durable_wait_workflow_rejects_a_key_for_a_different_workflow_address": 1,
     "tests::process_await_redrive::durable_wait_workflow_rejects_an_inconsistent_key_preimage_before_promise_use": 1,
     "tests::process_await_redrive::effect_host": 281,
-    "tests::process_await_redrive::fig1631_await_event_completion_retires_its_gate_entry": 2,
-    "tests::process_await_redrive::fig1631_await_event_gate_journals_the_event_before_its_gate": 1,
     "tests::process_await_redrive::fig1631_session_revoked_await_event_unwinds_as_a_deleted_session": 2,
     "tests::process_await_redrive::fig1631_session_revoked_before_sleep_registers_never_journals_a_timer": 1,
     "tests::process_await_redrive::fig1631_session_revoked_mid_sleep_unwinds_as_a_deleted_session": 3,

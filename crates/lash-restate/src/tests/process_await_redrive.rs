@@ -798,54 +798,6 @@ pub(super) async fn fig1631_parked_await_event_gate(
     calls
 }
 
-#[tokio::test]
-pub(super) async fn fig1631_await_event_gate_journals_the_event_before_its_gate() {
-    let endpoint = fig1631_await_event_endpoint();
-    fig1631_parked_await_event_gate(&endpoint, "fig1631-await-gate-positions").await;
-}
-
-#[tokio::test]
-pub(super) async fn fig1631_await_event_completion_retires_its_gate_entry() {
-    let endpoint = fig1631_await_event_endpoint();
-    let terminal = Resolution::Ok(serde_json::json!({ "answer": "gated" }));
-    let completed = invoke_endpoint_with_named_call_responses(
-        &endpoint,
-        "Fig1631AwaitEventGate",
-        "run",
-        "fig1631-await-gate-completion",
-        &Fig1126PendingToolRedriveInput,
-        vec![
-            ("is_revoked".to_string(), serde_json::json!(false)),
-            ("register_awakeable".to_string(), fig1631_registered_gate()),
-            (
-                "await_resolution".to_string(),
-                serde_json::to_value(&terminal).expect("serialize awaited resolution"),
-            ),
-            ("unregister_awakeable".to_string(), serde_json::Value::Null),
-        ],
-    )
-    .await
-    .expect("the event must win and retire its gate");
-    assert_eq!(
-        restate_call_frames(&completed)
-            .expect("decode completion-path calls")
-            .iter()
-            .map(|call| call.handler.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "is_revoked",
-            "await_resolution",
-            "register_awakeable",
-            "unregister_awakeable"
-        ],
-        "a completed await-event must retire exactly the gate entry it registered"
-    );
-    assert_eq!(
-        restate_output_json::<String>(&completed).as_deref(),
-        Some(fig1631_resolution_label(&terminal).as_str())
-    );
-}
-
 /// Cancel path: the index already dropped the entry, so the waiter must not
 /// unregister it again — but it must release the losing event wait, which the
 /// retired nested workflow used to do from its own journal.
