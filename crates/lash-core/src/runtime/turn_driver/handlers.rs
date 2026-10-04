@@ -523,7 +523,8 @@ impl RuntimeTurnDriver<'_> {
                     error.to_string(),
                 )
             })?
-            .with_tracing(self.execution_tracing(machine.protocol_iteration()));
+            .with_tracing(self.execution_tracing(machine.protocol_iteration()))
+            .with_turn_hand_over(self.cells_hand_over());
         let poll = context
             .await_tool_run_aggregate(
                 &round.cursor,

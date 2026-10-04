@@ -48,7 +48,8 @@ impl RuntimeTurnDriver<'_> {
                     error.to_string(),
                 )
             })?
-            .with_tracing(self.execution_tracing(machine.protocol_iteration()));
+            .with_tracing(self.execution_tracing(machine.protocol_iteration()))
+            .with_turn_hand_over(self.cells_hand_over());
         let mut leaves = Vec::with_capacity(calls.len());
         for call in calls.iter().cloned() {
             let drift = self.recorded_surface_drift(&context, &call.tool_name)?;
