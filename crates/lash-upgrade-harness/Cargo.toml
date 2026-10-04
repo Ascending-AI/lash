@@ -59,6 +59,10 @@ path = "tests/e2e/telemetry.rs"
 name = "h1_providers"
 path = "tests/e2e/providers.rs"
 
+[[test]]
+name = "h1_recovery"
+path = "tests/e2e/provider_recovery.rs"
+
 [lints]
 workspace = true
 

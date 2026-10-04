@@ -28,7 +28,7 @@ pub struct ToolFixtureArgs {
     /// It is execution evidence only, never an X/D/V durability oracle.
     pub bodies: PathBuf,
     pub backoff_ms: u64,
-    pub controls: Option<super::e2e_body_control::BodyControls>,
+    pub callback_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -129,16 +129,22 @@ impl ToolFixtureArgs {
             .open(&self.bodies)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
-        if let Some(controls) = &self.controls {
-            controls
-                .enter(
-                    label,
-                    &delivery.run,
-                    &delivery.call_id,
-                    delivery.attempt,
-                    self.bodies.display().to_string(),
-                )
-                .await?;
+        if let Some(endpoint) = &self.callback_url {
+            let body = crate::e2e::control::callback::ToolDelivery {
+                label: label.into(),
+                call_id: delivery.call_id.clone(),
+                ordinal: delivery.attempt,
+                logical_run: delivery.run.clone(),
+                completion: serde_json::to_value(&delivery)?,
+            };
+            reqwest::Client::builder()
+                .no_proxy()
+                .build()?
+                .post(endpoint)
+                .json(&body)
+                .send()
+                .await?
+                .error_for_status()?;
         }
         match call.name() {
             "h1_retry" if delivery.attempt == 1 => Ok(ToolOutcome::retryable_failure(

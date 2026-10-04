@@ -1,0 +1,365 @@
+{
+  "name": "s03-tools",
+  "occurrences": [
+    {
+      "identity": "s03-tools",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "e2e/model",
+        "stream": true,
+        "messages": [
+          {
+            "role": "system",
+            "content": [
+              {
+                "type": "text",
+                "text": "H1 transcript."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "s03 input"
+              }
+            ]
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "h1_effect",
+              "description": "H1 deterministic correctness fixture.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "h1_retry",
+              "description": "H1 deterministic correctness fixture.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "h1_state",
+              "description": "H1 deterministic correctness fixture.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            }
+          },
+          {
+            "function": {
+              "description": "Run 1-64 independent tool calls concurrently. Every call starts before any finishes; results return in input order, each with a success flag and result or error. Do not nest batch calls.",
+              "name": "batch",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "tool_calls": {
+                    "description": "1-64 objects { tool, parameters }; each tool must be available and parameters must match its schema.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "parameters": {
+                          "additionalProperties": true,
+                          "properties": {},
+                          "type": "object"
+                        },
+                        "tool": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "tool",
+                        "parameters"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 64,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "tool_calls"
+                ],
+                "type": "object"
+              },
+              "strict": false
+            },
+            "type": "function"
+          }
+        ],
+        "tool_choice": "auto"
+      },
+      "response": {
+        "status": 200,
+        "headers": [
+          [
+            "content-type",
+            "text/event-stream"
+          ]
+        ],
+        "chunks": [
+          {
+            "bytes": "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"label\\\":\\\"A\\\",\\\"value\\\":\\\"value-A\\\"}\",\"name\":\"h1_effect\"},\"id\":\"provider-s03\",\"index\":0,\"type\":\"function\"}]},\"finish_reason\":null,\"index\":0}],\"id\":\"h1-recorded\",\"object\":\"chat.completion.chunk\"}\n\n",
+            "hold_after": null
+          },
+          {
+            "bytes": "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\",\"index\":0}],\"id\":\"h1-recorded\",\"object\":\"chat.completion.chunk\",\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":11,\"total_tokens\":13}}\n\ndata: [DONE]\n\n",
+            "hold_after": null
+          }
+        ],
+        "termination": "complete",
+        "usage": {
+          "input_tokens": 11,
+          "output_tokens": 2
+        },
+        "typed_failure": null
+      }
+    },
+    {
+      "identity": "s03-answer",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "body": {
+        "model": "e2e/model",
+        "stream": true,
+        "messages": [
+          {
+            "role": "system",
+            "content": [
+              {
+                "type": "text",
+                "text": "H1 transcript."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "s03 input"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "provider-s03",
+                "type": "function",
+                "function": {
+                  "name": "h1_effect",
+                  "arguments": "{\"label\":\"A\",\"value\":\"value-A\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "name": "h1_effect",
+            "tool_call_id": "provider-s03",
+            "content": "{\n  \"accepted\": {\n    \"label\": \"A\",\n    \"value\": \"value-A\"\n  }\n}"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "h1_effect",
+              "description": "H1 deterministic correctness fixture.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "h1_retry",
+              "description": "H1 deterministic correctness fixture.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "h1_state",
+              "description": "H1 deterministic correctness fixture.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            }
+          },
+          {
+            "function": {
+              "description": "Run 1-64 independent tool calls concurrently. Every call starts before any finishes; results return in input order, each with a success flag and result or error. Do not nest batch calls.",
+              "name": "batch",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "tool_calls": {
+                    "description": "1-64 objects { tool, parameters }; each tool must be available and parameters must match its schema.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "parameters": {
+                          "additionalProperties": true,
+                          "properties": {},
+                          "type": "object"
+                        },
+                        "tool": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "tool",
+                        "parameters"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 64,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "tool_calls"
+                ],
+                "type": "object"
+              },
+              "strict": false
+            },
+            "type": "function"
+          }
+        ],
+        "tool_choice": "auto"
+      },
+      "response": {
+        "status": 200,
+        "headers": [
+          [
+            "content-type",
+            "text/event-stream"
+          ]
+        ],
+        "chunks": [
+          {
+            "bytes": "data: {\"choices\":[{\"delta\":{\"content\":\"s03 answer\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"id\":\"h1-recorded\",\"object\":\"chat.completion.chunk\"}\n\n",
+            "hold_after": null
+          },
+          {
+            "bytes": "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"index\":0}],\"id\":\"h1-recorded\",\"object\":\"chat.completion.chunk\",\"usage\":{\"completion_tokens\":2,\"prompt_tokens\":11,\"total_tokens\":13}}\n\ndata: [DONE]\n\n",
+            "hold_after": null
+          }
+        ],
+        "termination": "complete",
+        "usage": {
+          "input_tokens": 11,
+          "output_tokens": 2
+        },
+        "typed_failure": null
+      }
+    }
+  ]
+}

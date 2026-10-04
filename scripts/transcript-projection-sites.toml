@@ -275,3 +275,9 @@ reads = 0
 outputs = 1
 kind = "output-read"
 reason = "The native cancellation law checks the typed final value of a fresh logical Run."
+
+[sites."crates/lash-upgrade-harness/tests/e2e/provider_recovery.rs#recovery"]
+reads = 0
+outputs = 1
+kind = "output-read"
+reason = "H1 compares the typed settled answer with the exact authored HTTP transcript after an observed host kill."

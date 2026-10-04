@@ -41,6 +41,7 @@ pub struct ProviderHostConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProviderHostCommand {
+    Shutdown,
     Submit {
         session: String,
         id: String,
@@ -119,26 +120,35 @@ pub async fn serve(args: ProviderHostArgs) -> Result<()> {
             generation: engine.build_generation()?.to_string(),
         })?)?;
         let mut commands = JoinSet::new();
+        let (shutdown, mut shutdown_requested) = tokio::sync::watch::channel(false);
         let signal = super::shutdown_signal();
         tokio::pin!(signal);
         loop {
             tokio::select! {
                 signal = &mut signal => { signal?; break; }
+                _ = shutdown_requested.changed() => break,
                 accepted = control.accept() => {
                     let (mut stream, _) = accepted?;
                     let core = core.clone();
                     let stores = Arc::clone(&stores);
                     let timeout = Duration::from_millis(config.timeout_ms);
                     let restate = args.restate.clone();
-                    let controls = config.tools.controls.clone();
+                    let shutdown = shutdown.clone();
                     commands.spawn(async move {
                         let outcome = tokio::time::timeout(timeout, async {
                             let request = wire::read(&mut stream).await?;
                             ensure!(request.method == "POST" && request.path == "/command", "unknown H1 host transport");
-                            command(&core, stores.as_ref(), &restate, controls.as_ref(), serde_json::from_value(request.body)?).await
+                            let request: ProviderHostCommand = serde_json::from_value(request.body)?;
+                            if matches!(request, ProviderHostCommand::Shutdown) {
+                                wire::json(&mut stream, 200, &serde_json::json!({"shutdown":true})).await?;
+                                shutdown.send_replace(true);
+                                return Ok(None);
+                            }
+                            command(&core, stores.as_ref(), &restate, request).await.map(Some)
                         }).await.unwrap_or_else(|error| Err(error.into()));
                         let (status, value) = match outcome {
-                            Ok(value) => (200, value),
+                            Ok(Some(value)) => (200, value),
+                            Ok(None) => return Ok(()),
                             Err(error) => (500, serde_json::json!({ "fixture_error": format!("{error:#}") })),
                         };
                         wire::json(&mut stream, status, &value).await
@@ -155,6 +165,7 @@ pub async fn serve(args: ProviderHostArgs) -> Result<()> {
     }.await;
     let _ = stop.send(());
     serving.await?;
+    core.shutdown().await?;
     drop(core);
     result
 }
@@ -163,7 +174,6 @@ async fn command(
     core: &lash::LashCore,
     stores: &dyn lash::StoreSet,
     restate: &RestateArgs,
-    controls: Option<&super::e2e_body_control::BodyControls>,
     command: ProviderHostCommand,
 ) -> Result<serde_json::Value> {
     let session_name = match &command {
@@ -172,6 +182,7 @@ async fn command(
         | ProviderHostCommand::Cancel { session, .. }
         | ProviderHostCommand::Snapshot { session }
         | ProviderHostCommand::Address { session, .. } => session,
+        ProviderHostCommand::Shutdown => anyhow::bail!("shutdown bypassed transport dispatcher"),
     };
     let id = lash::SessionId::parse(session_name.clone())?;
     if matches!(command, ProviderHostCommand::Submit { .. }) {
@@ -186,14 +197,21 @@ async fn command(
     }
     let session = core.session(id.clone()).durable().await?;
     match command {
+        ProviderHostCommand::Shutdown => anyhow::bail!("shutdown bypassed transport dispatcher"),
         ProviderHostCommand::Submit { id, text, .. } => {
             let accepted = session
                 .send(lash::TurnInput::text(text))
                 .id(lash::TurnId::parse(id)?)
                 .await?;
-            Ok(
-                serde_json::json!({ "acceptance": accepted.receipt(), "run": accepted.run().await? }),
-            )
+            // Acceptance can precede Run admission. Observe the recorded
+            // binding before returning an addressable host receipt.
+            let run = loop {
+                if let Some(run) = accepted.run().await? {
+                    break run;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            };
+            Ok(serde_json::json!({ "acceptance": accepted.receipt(), "run": run }))
         }
         ProviderHostCommand::Attach { id, .. } => Ok(serde_json::to_value(
             session.attach_id(lash::TurnId::parse(id)?).output().await?,
@@ -243,9 +261,6 @@ async fn command(
                 call: None,
                 ordinal: None,
             };
-            if let Some(controls) = controls {
-                controls.bind(&work)?;
-            }
             Ok(serde_json::json!({ "work": work, "invocation": rows[0].id, "protocol": 7 }))
         }
         ProviderHostCommand::Snapshot { .. } => {

@@ -280,8 +280,24 @@ impl HostAdapter for ProviderNodeHost {
 
     fn stop(&mut self) -> Step<'_, Vec<CleanupReceipt>> {
         Box::pin(async move {
-            if let Some(process) = self.process.take() {
-                process.stop()?;
+            if self.process.is_some() {
+                self.request(&ProviderHostCommand::Shutdown).await?;
+                let mut process = self
+                    .process
+                    .take()
+                    .ok_or_else(|| anyhow!("node disappeared"))?;
+                process
+                    .wait_success(Instant::now() + Duration::from_millis(self.config.timeout_ms))
+                    .await?;
+                let ready = self.ready()?;
+                for endpoint in [&ready.worker, &ready.control] {
+                    ensure!(
+                        tokio::net::TcpStream::connect(endpoint.trim_start_matches("http://"))
+                            .await
+                            .is_err(),
+                        "host listener leaked"
+                    );
+                }
             }
             self.ready = None;
             Ok(vec![CleanupReceipt {
