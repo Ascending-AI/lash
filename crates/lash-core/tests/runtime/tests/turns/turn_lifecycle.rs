@@ -1671,31 +1671,6 @@ pub(super) async fn recording_unbound_store_on(
     Arc::new(RecordingStore::over(backend.session_store_factory()))
 }
 
-#[derive(Clone, Default)]
-pub(super) struct JournalReplayEffectController {
-    outcomes: Arc<Mutex<HashMap<String, lash_core::RuntimeEffectOutcome>>>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::testing::EffectLayer for JournalReplayEffectController {
-    async fn execute_effect(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        let effect_id = envelope.invocation.effect_id().to_string();
-        if let Some(outcome) = self.outcomes.lock_recover().get(&effect_id) {
-            return Ok(outcome.clone());
-        }
-        let outcome = inner.execute_effect(envelope, local_executor).await?;
-        self.outcomes
-            .lock_recover()
-            .insert(effect_id, outcome.clone());
-        Ok(outcome)
-    }
-}
-
 pub(super) fn journal_replay_host(
     backend: &lash_core::Backend,
     controller: Arc<dyn lash_core::testing::EffectLayer>,
@@ -1703,87 +1678,6 @@ pub(super) fn journal_replay_host(
     test_host_config(&super::effect::backend_with_effect_layer(
         backend, controller,
     ))
-}
-
-/// A workflow replay's view of the store: it resumes from the invocation's
-/// pre-commit resident state while the store already contains the first
-/// execution's commit.
-pub(super) struct JournalRedriveStore {
-    pub(super) inner: Arc<RecordingStore>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::store::RuntimeStoreDecorator for JournalRedriveStore {
-    type Inner = RecordingStore;
-
-    fn inner(&self) -> &RecordingStore {
-        self.inner.as_ref()
-    }
-
-    async fn load_session_window(
-        &self,
-        _session_id: &SessionId,
-        _selector: lash_core::store::WindowSelector,
-    ) -> Result<Option<lash_core::store::SessionWindowRead>, lash_core::StoreError> {
-        Ok(None)
-    }
-}
-
-/// Sends the steering fixture's queued input the moment a run admission
-/// returns: for a turn whose model calls never reach the test's provider.
-pub(super) struct SteerAfterRunAdmissionStore {
-    pub(super) inner: Arc<RecordingStore>,
-    pub(super) steer: SteerWhileRunning,
-}
-
-#[async_trait::async_trait]
-impl lash_core::store::RuntimeStoreDecorator for SteerAfterRunAdmissionStore {
-    type Inner = RecordingStore;
-
-    fn inner(&self) -> &RecordingStore {
-        self.inner.as_ref()
-    }
-
-    async fn admit_run(
-        &self,
-        request: &lash_core::store::AdmitRunRequest,
-    ) -> Result<Option<lash_core::store::RunAdmission>, lash_core::StoreError> {
-        let admission = self.inner.admit_run(request).await?;
-        if admission.is_some() {
-            self.steer.send_queued().await;
-        }
-        Ok(admission)
-    }
-}
-
-/// Withdraws the accepted head input just before the shift's run admission,
-/// as a host cancel racing the shift would.
-pub(super) struct WithdrawBeforeShiftStore {
-    pub(super) inner: Arc<RecordingStore>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::store::RuntimeStoreDecorator for WithdrawBeforeShiftStore {
-    type Inner = RecordingStore;
-
-    fn inner(&self) -> &RecordingStore {
-        self.inner.as_ref()
-    }
-
-    async fn admit_run(
-        &self,
-        request: &lash_core::store::AdmitRunRequest,
-    ) -> Result<Option<lash_core::store::RunAdmission>, lash_core::StoreError> {
-        if let lash_core::store::AdmittedHead::Input(input_id) = &request.head {
-            lash_core::store::TurnInputStore::cancel_pending_turn_input(
-                self.inner.as_ref(),
-                request.session_id(),
-                input_id.as_str(),
-            )
-            .await?;
-        }
-        self.inner.admit_run(request).await
-    }
 }
 
 pub(super) async fn append_process_wake_to_queue(
