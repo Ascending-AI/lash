@@ -196,6 +196,14 @@ pub enum RunLifecycle {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunEvent {
+    /// A whole round refused before it admitted any member or ran a body.
+    AdmissionRefused {
+        cause: super::AdmissionRefusal,
+    },
+    /// A declared isolation route cannot honor admission. No start was issued.
+    IsolationRefused {
+        cause: super::IsolatedStartRefusal,
+    },
     /// Source order, aliases and the timers' recorded admission instant.
     AggregateAdmitted {
         plan: AggregatePlan,
@@ -669,6 +677,13 @@ impl RunLedger {
 
     fn apply(&mut self, event: &RunEvent) -> Result<(), RunEventRefusal> {
         match event {
+            RunEvent::AdmissionRefused { .. } | RunEvent::IsolationRefused { .. } => {
+                if self.lifecycle != RunLifecycle::Live || self.aborted {
+                    return Err(RunEventRefusal::AdmissionClosed);
+                }
+                self.aborted = true;
+                Ok(())
+            }
             RunEvent::AggregateAdmitted { plan, .. } => {
                 if self.lifecycle != RunLifecycle::Live || self.aborted {
                     return Err(RunEventRefusal::AdmissionClosed);

@@ -1104,19 +1104,30 @@ impl<'a> RunCoordinator<'a> {
             .keys()
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
-        let mut live_refusal = None;
-        let refusal = &mut live_refusal;
         let admit = Box::pin(async move {
-            let starts = calls
+            let starts = match calls
                 .iter()
                 .enumerate()
                 .map(|(index, call)| admit_live(call, handlers, index))
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| {
-                    let message = error.to_string();
-                    *refusal = Some(error);
-                    message
-                })?;
+            {
+                Ok(starts) => starts,
+                Err(error) => {
+                    let event = match error {
+                        SingletonRunError::Admission(cause) => RunEvent::AdmissionRefused { cause },
+                        SingletonRunError::Isolation(cause) => RunEvent::IsolationRefused { cause },
+                        fault => return Err(fault.to_string()),
+                    };
+                    return Ok(RunJournalEntry {
+                        record: RunRecord {
+                            events: vec![event],
+                            ..first
+                        },
+                        materials: Vec::new(),
+                        state: Vec::new(),
+                    });
+                }
+            };
             let mut projections = BTreeMap::new();
             let mut members = Vec::with_capacity(calls.len());
             let mut materials = Vec::new();
@@ -1197,10 +1208,12 @@ impl<'a> RunCoordinator<'a> {
                 state: Vec::new(),
             })
         });
-        let admitted = match journal.append(name, admit).await {
-            Ok(record) => record,
-            Err(error) => return Err(live_refusal.unwrap_or(error)),
-        };
+        let admitted = journal.append(name, admit).await?;
+        match admitted.events.first() {
+            Some(RunEvent::AdmissionRefused { cause }) => return Err(cause.clone().into()),
+            Some(RunEvent::IsolationRefused { cause }) => return Err(cause.clone().into()),
+            _ => {}
+        }
         let Some(RunEvent::Admitted { round }) = admitted.events.first() else {
             return Err(RunEventRefusal::AggregateShape {
                 key: aggregate.map_or_else(String::new, |(plan, _)| plan.key.clone()),
