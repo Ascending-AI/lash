@@ -6250,13 +6250,23 @@
       let retrySettlement = false;
       try {
         const state = await fetchStateSnapshot();
-        const applied = applyBusySnapshot(state, snapshotSequence);
+        // Once every turn has settled, replace live activity with the canonical
+        // transcript, including its source row IDs and typed turn provenance.
+        const applied = busyAfterStateSnapshot(state)
+          ? applyBusySnapshot(state, snapshotSequence)
+          : applyStateSnapshot(
+              state,
+              true,
+              true,
+              SNAPSHOT_TRANSCRIPT_REPLACE,
+              snapshotSequence
+            );
         retrySettlement = Boolean(settlingTurnId) && (
           !applied || (state.active_turns || []).some(turn => turn.turn_id === settlingTurnId)
         );
         if (!applied) return;
         markShellChannel(shellAvailability, "state", true);
-          renderShellStatus();
+        renderShellStatus();
       } catch (error) {
         if (handleSessionRetirementFailure(error)) return;
         if (handleTerminalStateFailure(error)) {
