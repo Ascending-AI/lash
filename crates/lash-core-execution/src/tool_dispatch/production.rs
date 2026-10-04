@@ -414,17 +414,24 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 prepared.input.definition.manifest.clone(),
             )),
         };
-        let body = retry::execute_leaf_tool_attempt(
-            &dispatch,
-            &authority,
-            &prepared.call,
-            context,
-            attempt.attempt.get(),
-            match prepared.input.definition.manifest.retry_policy {
-                crate::ToolRetryPolicy::Never => 1,
-                crate::ToolRetryPolicy::Safe { max_attempts, .. } => max_attempts,
-            },
-        );
+        let body = self.context.run_turn_step_body(|stop| async {
+            let context = match stop {
+                Some(stop) => context.with_step_stop(stop),
+                None => context,
+            };
+            Box::pin(retry::execute_leaf_tool_attempt(
+                &dispatch,
+                &authority,
+                &prepared.call,
+                context,
+                attempt.attempt.get(),
+                match prepared.input.definition.manifest.retry_policy {
+                    crate::ToolRetryPolicy::Never => 1,
+                    crate::ToolRetryPolicy::Safe { max_attempts, .. } => max_attempts,
+                },
+            ))
+            .await
+        });
         let outcome = match futures_util::future::select(
             Box::pin(body),
             Box::pin(effect_attempt.attempt_faulted()),
