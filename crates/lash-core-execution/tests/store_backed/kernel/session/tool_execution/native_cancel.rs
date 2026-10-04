@@ -8,6 +8,66 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
+// Delay only the live notification: reads and writes retain the real durable
+// authority. An accepted gate must arbitrate A even if its watcher is late.
+struct DelayedWatch(Arc<dyn crate::EffectHost>);
+
+#[async_trait::async_trait]
+impl crate::AwaitEventResolver for DelayedWatch {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.0.await_event_authority_binding_id()
+    }
+    async fn await_event_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+        self.0.await_event_key(scope, wait).await
+    }
+    async fn resolve_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        resolution: crate::Resolution,
+    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+        self.0.resolve_await_event(key, resolution).await
+    }
+    async fn peek_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
+        self.0.peek_await_event(key).await
+    }
+    async fn await_await_event(
+        &self,
+        _: &crate::AwaitEventKey,
+        _: CancellationToken,
+    ) -> Result<crate::Resolution, crate::RuntimeError> {
+        std::future::pending().await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::EffectHost for DelayedWatch {
+    fn turn_control_binding_id(&self) -> String {
+        self.0.turn_control_binding_id()
+    }
+    fn scoped<'run>(
+        &'run self,
+        admitted: crate::AdmittedScope,
+    ) -> Result<crate::ScopedEffectController<'run>, crate::RuntimeError> {
+        self.0.scoped(admitted)
+    }
+    fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
+        self
+    }
+    async fn journal_replay(
+        &self,
+        identity: &crate::runtime::EffectJournalIdentity,
+    ) -> Result<crate::JournalReplay, crate::RuntimeError> {
+        self.0.journal_replay(identity).await
+    }
+}
+
 const PLUGIN: &str = "q5";
 
 struct Tools {
@@ -65,6 +125,10 @@ impl crate::ToolProvider for Tools {
 }
 
 async fn cancelled_sibling(disjoint: bool) {
+    cancelled_sibling_with_delivery(disjoint, true).await;
+}
+
+async fn cancelled_sibling_with_delivery(disjoint: bool, await_delivery: bool) {
     let double =
         crate::support::kernel_double(0x4936, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
@@ -108,6 +172,11 @@ async fn cancelled_sibling(disjoint: bool) {
     );
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(factory));
+    let cancel_host: Arc<dyn crate::EffectHost> = if await_delivery {
+        backend.effect_host()
+    } else {
+        Arc::new(DelayedWatch(backend.effect_host()))
+    };
     let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
         .session_id("q5-session")
         .borrowed_effect_controller(handler.scoped())
@@ -117,7 +186,7 @@ async fn cancelled_sibling(disjoint: bool) {
         .with_recorded_turn_cancel(
             false,
             control.clone(),
-            backend.effect_host(),
+            cancel_host,
             CancellationToken::new(),
         );
     let plugins = context.dispatch().plugins.clone();
@@ -169,9 +238,15 @@ async fn cancelled_sibling(disjoint: bool) {
             .request_local_stop(resolver, crate::TurnCancelMode::Immediate, None)
             .await
             .unwrap();
-        let observed = tokio::time::timeout(Duration::from_secs(1), stop.cancelled())
-            .await
-            .is_ok();
+        let observed = if await_delivery {
+            tokio::time::timeout(Duration::from_secs(1), stop.cancelled())
+                .await
+                .is_ok()
+        } else {
+            // The durable gate acceptance precedes the body ACK; local watch
+            // delivery must not decide whether that result may publish state.
+            true
+        };
         // Release also on the unfixed side, so the red measures leaked state
         // instead of leaving a live body or handler behind.
         release.notify_one();
@@ -422,4 +497,9 @@ async fn l03_accepted_cancel_survives_crash_before_retry_wake_without_second_bod
         crate::tool_run::RunEvent::RetryScheduled { .. }
             | crate::tool_run::RunEvent::DeclarationsIssued { .. }
     )));
+}
+
+#[tokio::test]
+async fn l03_native_cancel_accepted_before_inline_ack_discards_the_unrecorded_sibling() {
+    cancelled_sibling_with_delivery(false, false).await;
 }

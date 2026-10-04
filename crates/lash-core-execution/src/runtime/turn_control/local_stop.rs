@@ -332,6 +332,19 @@ where
 }
 
 impl ActiveTurnControl {
+    /// Execution-side arbitration before an inline attempt publishes its answer.
+    /// The answer is retained in that attempt's X; shift replay never reads here.
+    pub(crate) async fn inline_stop_requested(
+        &self,
+        resolver: &dyn crate::AwaitEventResolver,
+    ) -> Result<bool, RuntimeError> {
+        let Some(base) = Self::peek_base_cancel_evidence(resolver, self.address()).await? else {
+            return Ok(false);
+        };
+        let evidence = super::effective_cancel_evidence(resolver, self.address(), base).await?;
+        Ok(evidence.mode == TurnCancelMode::Immediate)
+    }
+
     /// Execution-side only: run one recorded step body under a cooperative
     /// cancel that fires when the turn's gate pair asks it to stop now.
     ///

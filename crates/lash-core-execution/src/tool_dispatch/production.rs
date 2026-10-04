@@ -473,8 +473,14 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     },
                 ))
                 .await;
-                let stopped = stop.as_ref().is_some_and(|stop| stop.is_cancelled());
-                (outcome, stopped)
+                let stopped = if matches!(&outcome, crate::ToolAttemptOutcome::HostFailed(_)) {
+                    false
+                } else {
+                    self.context
+                        .inline_turn_stop_requested(stop.as_ref())
+                        .await?
+                };
+                Ok::<_, crate::RuntimeEffectControllerError>((outcome, stopped))
             }
         });
         let (outcome, stopped) = match futures_util::future::select(
@@ -483,7 +489,11 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         )
         .await
         {
-            futures_util::future::Either::Left((outcome, _)) => outcome,
+            futures_util::future::Either::Left((Ok(outcome), _)) => outcome,
+            futures_util::future::Either::Left((Err(error), _)) => {
+                self.context.record_nested_effect_error(error.clone());
+                return Err(error.to_string());
+            }
             futures_util::future::Either::Right((error, _)) => {
                 self.context.record_nested_effect_error(error.clone());
                 return Err(error.to_string());

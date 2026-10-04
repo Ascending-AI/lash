@@ -242,3 +242,26 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         self
     }
 }
+
+impl RuntimeExecutionContext<'_> {
+    /// Called only inside X, before state and declarations can escape an inline
+    /// body. The watch is cooperative delivery, not cancellation authority.
+    pub(crate) async fn inline_turn_stop_requested(
+        &self,
+        stop: Option<&CancellationToken>,
+    ) -> Result<bool, crate::RuntimeEffectControllerError> {
+        if stop.is_some_and(CancellationToken::is_cancelled) {
+            return Ok(true);
+        }
+        let (Some(control), Some(host)) = (
+            self.turn_cancel.control.as_ref(),
+            self.turn_cancel.host.as_ref(),
+        ) else {
+            return Ok(false);
+        };
+        control
+            .inline_stop_requested(host.await_event_resolver())
+            .await
+            .map_err(Into::into)
+    }
+}
