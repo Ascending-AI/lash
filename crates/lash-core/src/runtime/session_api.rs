@@ -570,9 +570,9 @@ impl LashRuntime {
         source_key: Option<String>,
     ) -> Result<crate::PendingTurnInput, RuntimeError> {
         let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
+            .services
+            .store
+            .clone()
             .ok_or_else(queued_turn_input_store_required)?;
         super::durable_queue::enqueue_turn_input_to_store(
             self.state.session_id.clone(),

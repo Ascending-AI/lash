@@ -139,12 +139,7 @@ impl TestTurnExecution for LashRuntime {
         input: TurnInput,
         opts: TurnOptions<'_>,
     ) -> Result<AgentFrameRun, RuntimeError> {
-        if self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .is_none()
-        {
+        if self.services.store.is_none() {
             return self.stream_turn_with_agent_frames(input, opts).await;
         }
         let controller = opts.scoped_effect_controller();
