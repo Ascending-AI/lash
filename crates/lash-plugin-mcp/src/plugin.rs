@@ -316,6 +316,34 @@ impl ToolProvider for McpDeferredToolProvider {
     }
 }
 
+/// Admit the same payload a Run's prepare phase records for an MCP call.
+#[cfg(test)]
+pub(crate) async fn prepared_test_call(
+    provider: &McpToolProvider,
+    manifest: &ToolManifest,
+) -> lash_core::testing::ToolCallFixture<'static> {
+    let context = lash_core::ToolPrepareContext::for_testing(
+        lash_core::RuntimeOwner::Session("mcp-admitted-test".into()),
+        Arc::new(lash_core::testing::MockSessionManager::default()),
+        None,
+    );
+    let prepared = provider
+        .prepare_tool_call(lash_core::ToolPrepareCall {
+            tool_id: manifest.id.clone(),
+            pending: lash_core::sansio::PendingToolCall {
+                call_id: context.call_id().clone(),
+                provider_call_id: None,
+                tool_name: manifest.name.clone(),
+                args: serde_json::json!({}),
+                replay: None,
+            },
+            context: &context,
+        })
+        .await
+        .expect("admit the discovered MCP binding");
+    lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared)
+}
+
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod tests {

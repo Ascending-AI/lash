@@ -637,12 +637,10 @@ async fn execute_depth_tool(factory: &McpPluginFactory) -> lash_core::ToolOutcom
     let manifest = provider
         .resolve_manifest(&tool_name)
         .expect("depth tool manifest resolves");
+    let fixture = crate::plugin::prepared_test_call(&provider, &manifest).await;
+    let context = fixture.attempt("client-depth");
     let attempt = provider
-        .execute(lash_core::ToolCall::new(
-            &manifest,
-            &json!({}),
-            &lash_core::testing::mock_attempt_context(),
-        ))
+        .execute(lash_core::ToolCall::new(&manifest, &json!({}), &context))
         .await;
     let lash_core::ToolAttemptOutcome::Done { result, intents } = attempt else {
         panic!("resident MCP calls complete inline")

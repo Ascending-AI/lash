@@ -856,6 +856,16 @@ async fn mcp_law_catalog_miss_is_an_invalid_request() {
         .manifest
         .id
         .clone();
+    let resident = crate::McpToolProvider::new(Arc::clone(&pool));
+    let survivor_manifest = resident
+        .resolve_manifest_by_id(&survivor_id)
+        .expect("survivor");
+    let survivor_fixture = crate::plugin::prepared_test_call(&resident, &survivor_manifest)
+        .await
+        .execution_binding(json!({"kind":"mcp", "server":"directory", "tool_id":survivor_id}));
+    let dropped_fixture = crate::plugin::prepared_test_call(&resident, &dropped_manifest)
+        .await
+        .execution_binding(json!({"kind":"mcp", "server":"directory", "tool_id":dropped_id}));
     std::fs::write(&refresh_marker, "refresh").expect("release tools/list_changed notification");
 
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -870,11 +880,7 @@ async fn mcp_law_catalog_miss_is_an_invalid_request() {
     .expect("tools/list_changed drops the hyphenated tool");
 
     let deferred = crate::McpDeferredToolProvider::new(Arc::clone(&pool));
-    let survivor_context = lash_core::testing::mock_attempt_context_with_execution_binding(json!({
-        "kind": "mcp",
-        "server": "directory",
-        "tool_id": survivor_id.to_string(),
-    }));
+    let survivor_context = survivor_fixture.attempt("catalog-survivor");
     let survivor = execute_by_id(&deferred, &survivor_id, &json!({}), &survivor_context).await;
     assert!(
         survivor.is_success(),
@@ -885,11 +891,7 @@ async fn mcp_law_catalog_miss_is_an_invalid_request() {
         json!({"content":[{"type":"text","text":"underscore"}]})
     );
 
-    let dropped_context = lash_core::testing::mock_attempt_context_with_execution_binding(json!({
-        "kind": "mcp",
-        "server": "directory",
-        "tool_id": dropped_id.to_string(),
-    }));
+    let dropped_context = dropped_fixture.attempt("catalog-dropped");
     let dropped =
         execute_with_manifest(&deferred, &dropped_manifest, &json!({}), &dropped_context).await;
     assert!(!dropped.is_success(), "dropped tool id must be rejected");
