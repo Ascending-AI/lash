@@ -2,7 +2,6 @@ use super::*;
 use crate::runtime::turn_control::ActiveTurnControl;
 
 mod context;
-pub(in crate::runtime) use context::register_live_opener;
 mod effects;
 pub(in crate::runtime) use effects::normalize_plugin_message_attachments;
 mod events;
@@ -83,19 +82,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// Names the reply the protocol driver materialized, for the boundary's
     /// terminal materialization to recognize by identity.
     pub(super) protocol_reply: machine::ProtocolReplyTracker,
-    /// This turn's registration in the host's live-opener registry
-    /// (ADR 0099 §2, §3, FIG-2266).
-    ///
-    /// Registered the first time the turn builds a tool-execution context and
-    /// re-registered on each later one, so a tool child of a group this turn
-    /// opened borrows the turn's *current* live context. Deregistered when the
-    /// guard is released at the end of `run`. A segment boundary registers
-    /// again through its commit decision, and its continuation registers the
-    /// same logical opener. A terminal closes and finalizes every held group
-    /// before committing (ADR 0099 §7): finalization may
-    /// have to run a child no process is running, and that child resolves its
-    /// executor through this registration.
-    pub(super) live_opener: std::sync::Mutex<Option<crate::facade_support::LiveOpenerGuard>>,
     /// The turn's opener state (ADR 0099 §6, §7): the once-only incorporation
     /// ledger and the groups the turn still holds after an aggregate stopped
     /// consuming early. Every phase context the turn builds shares it, so a
@@ -106,11 +92,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// journaled gate peek, and nothing else (FIG-3672 P9). Shift decisions
     /// that depend on the turn's cancellation read this, never a live token.
     pub(super) turn_cancel: Option<crate::TurnCancellationEvidence>,
-    /// The cooperative stop the turn lends to the tool children its
-    /// live-opener registration serves (FIG-2266). The shift fires it when it
-    /// records the turn's cancellation, at a recorded point, so a replay
-    /// fires it at the same point; the children record what they observed in
-    /// their own settlements. No shift code reads it (FIG-3672 P9).
+    /// Cooperative cancellation for recorded tool bodies in this turn.
     pub(super) children_stop: CancellationToken,
     /// The turn-scope observation cursor: every host-facing emission the
     /// driver makes outside an effect body sequences under the turn scope's

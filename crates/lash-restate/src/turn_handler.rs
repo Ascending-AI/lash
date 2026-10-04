@@ -66,30 +66,6 @@ pub(crate) fn retried_attempt_failure(failure: String) -> HandlerError {
     HandlerError::from(RetriedAttempt(failure))
 }
 
-/// Records the park of the turn a group tool child belongs to, when the child
-/// refused where it parks its opener and recorded nothing (FIG-3725): its
-/// tool drifted and it would run live, or its replay diverged. Its opener,
-/// suspended on the child's rank, cannot learn of a refusal that settles
-/// nothing, so the child writes its opener run's typed park through the
-/// session's own store, where the parked-work surface shows it. `None` when
-/// the child's scope names no run (a process opener), or its session has no
-/// store.
-pub(crate) async fn park_refused_group_child(
-    sessions: &dyn lash_core::DeploymentStore,
-    scope: &lash_core::ExecutionScope,
-    refusal: &lash_core::RuntimeEffectControllerError,
-    tracing: &lash_core::facade_support::TraceRuntime,
-) -> Result<Option<lash_core::store::TurnPark>, lash_core::StoreError> {
-    lash_core::park_turn_of_refused_group_child(
-        sessions,
-        scope,
-        &refusal.clone().into_runtime_error(),
-        tracing.clock().timestamp_ms(),
-        tracing.metrics(),
-    )
-    .await
-}
-
 /// The retryable failure [`retried_attempt_failure`] ends a retried attempt
 /// with: the fault's `attempt_failure_text`, verbatim. The endpoint records
 /// a retryable handler error's `Debug` as the attempt's failure, so this

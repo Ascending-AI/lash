@@ -30,7 +30,6 @@ mod host_effect_ledger;
 mod protocol_version_refusal;
 mod retry_effect_controllers;
 mod retry_laws;
-mod retry_turn_cancel_gate;
 
 use retry_effect_controllers::{FailingSleepEffectController, SleepRecordingEffectController};
 
@@ -385,16 +384,6 @@ impl crate::RuntimeEffectController for IntentReplayController {
         _disposition: crate::LoserPolicy,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("IntentReplayController"))
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        _commit: crate::runtime::effect::GroupChildFinalCommit,
-    ) -> Result<
-        crate::runtime::effect::EffectGroupChildCommitOutcome,
-        crate::RuntimeEffectControllerError,
-    > {
-        Ok(crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped)
     }
 }
 

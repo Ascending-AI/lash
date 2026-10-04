@@ -228,16 +228,6 @@ impl RuntimeEffectController for FencedRestateController {
             .await
     }
 
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::EffectGroupChildCommitOutcome,
-        RuntimeEffectControllerError,
-    > {
-        self.controller.commit_group_child_final(commit).await
-    }
-
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,

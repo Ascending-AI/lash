@@ -149,13 +149,7 @@ pub struct EffectGroupCommitChildRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EffectGroupCommittedFinal {
-    /// A tool child's terminal: its sealed drain input — its record, its
-    /// declared intents and the attempt facts its settlement carries. A
-    /// successor drains it and seats that final; the attempt never runs again.
-    Tool { drain_input: String },
-    /// An atomic body's or a wait's outcome, or a tool child's failure before
-    /// its boundary: the committing invocation alone holds it, and publishes
-    /// it at its seat.
+    /// An atomic body or wait outcome held by its committing invocation.
     Held,
     /// The typed refusal of an invocation that could not run the child: its
     /// session's state generation was refused, or its attach expired.

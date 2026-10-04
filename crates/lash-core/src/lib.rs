@@ -26,10 +26,7 @@ pub use lash_core_execution::engine;
 pub use lash_core_execution::process_id_for_test;
 pub use lash_core_execution::process_id_from_handle_json;
 /// Durable tool-effect format versions, re-exported for the format manifest.
-pub use lash_core_execution::runtime::{
-    TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_CHILD_REQUEST_VERSION, TOOL_PRESENTATION_VERSION,
-    TOOL_SETTLEMENT_VERSION,
-};
+pub use lash_core_execution::runtime::{TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_PRESENTATION_VERSION};
 pub use lash_core_ids::operational_metrics;
 pub use lash_core_llm::llm;
 pub(crate) use lash_core_llm::llm_profile;
@@ -122,13 +119,7 @@ pub(crate) use lash_core_execution::trace;
 pub use lash_core_execution::triggers;
 
 pub mod facade_support {
-    pub use crate::runtime::effect::{
-        CommittedGroupChildFinal, ContextSourceInstall, DeploymentToolChildContext,
-        EffectGroupChildCommitOutcome, GroupChildFinalCommit, LiveOpenerContext, LiveOpenerGuard,
-        LiveOpenerRegistry, ToolChildContextSource, ToolChildDriver, ToolChildHost,
-        ToolChildOpenerContext, ToolChildRebuildRefusal, ToolChildRequest, ToolChildSessionFacts,
-        UnrecordedSessionSources, opener_for_execution_scope, scope_status,
-    };
+    pub use crate::runtime::effect::scope_status;
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION};
     /// The shift-tracing seam a durable substrate implements against (the trace runtime,
     /// a step's issue and its standing), public in every feature variant.
@@ -232,7 +223,6 @@ pub mod facade_support {
     pub use crate::plugin::SessionStateChangedContext;
     pub use crate::plugin::ToolCatalogContribution;
     pub use crate::plugin::ToolPresentationArtifacts;
-    pub use crate::plugin::ToolPresentationInput;
     pub use crate::plugin::ToolPresentationPresenter;
     pub use crate::plugin::ToolPresentationStep;
     pub use crate::plugin::ToolResultProjectionContext;
@@ -255,6 +245,7 @@ pub mod facade_support {
     pub use crate::plugin::{
         PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginOperationFailure,
     };
+    pub use crate::plugin::{ToolPresentationFacts, ToolPresentationInput};
     pub use crate::plugin_stack::PluginStack;
     pub use crate::provider::CacheRetention;
     pub use crate::provider::GenerationRetryGuarantee;
@@ -793,8 +784,8 @@ pub use runtime::{
     WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WakeId,
     WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
     WorkerTerminationReceipt, admit_session_state_generation, artifact_store_plugin_error,
-    effect_groups_unsupported, lifetime, mint_process_id, park_turn_of_refused_group_child,
-    park_turn_refused_by_generation, retry_cancel_watch, tool_failure_code,
+    effect_groups_unsupported, lifetime, mint_process_id, park_turn_refused_by_generation,
+    retry_cancel_watch, tool_failure_code,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
@@ -878,8 +869,8 @@ pub mod core_internal {
     pub use crate::runtime::{ProcessRuntimeContext, ProcessRuntimePorts, RuntimeSessionServices};
     pub use lash_core_execution::core_internal::{
         RuntimeEffectLocalRunner, RuntimeExecutionContextRuntimeOps, StartKeyDerivation,
-        ToolChildHostRuntimeOps, attach_process_invocation_correlation,
-        clear_process_invocation_correlation, owned_runner_executor,
+        attach_process_invocation_correlation, clear_process_invocation_correlation,
+        owned_runner_executor,
     };
 }
 

@@ -1110,9 +1110,8 @@ fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
 /// administrative operation has no start context and registers a root, which
 /// may only be `Detached`.
 ///
-/// A process scope whose context does not carry the process's lineage — a
-/// recovered tool child whose context the deployment rebuilt, not lent from
-/// the live body — reads it back from the enclosing process's own row: the
+/// A process scope whose context does not carry the process's lineage reads
+/// it back from the enclosing process's own row: the
 /// lineage is a recorded, immutable fact of that row, never re-derived. A
 /// process with no row is refused rather than recorded as a root.
 ///

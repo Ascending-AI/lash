@@ -1077,9 +1077,6 @@ WIRE_PAYLOAD_CRATES = (
 # and the tree renamed, moved or replaced, and the serialized shapes reachable
 # from the newer surfaces' formats.
 AUDITED_GUARDS = {
-    "crates/lash-core-execution/src/tool_dispatch/context.rs:TOOL_CHILD_REBIND_VERSION": (
-        "RebindSource",
-    ),
     "crates/lashlang/src/artifact.rs:LASHLANG_VM_ABI_VERSION": (
         "AbilityOutcome", "ResourceOperationOutcome", "ResourceOperationBatchOutcome",
     ),
@@ -1092,9 +1089,6 @@ AUDITED_GUARDS = {
     ),
     "crates/lash-core-execution/src/runtime/process/effect_summary.rs:PROCESS_EVENT_VOCABULARY_VERSION": (
         "struct ProcessEffectOccurrence",
-    ),
-    "crates/lash-core-execution/src/runtime/effect/tool_child.rs:TOOL_CHILD_REQUEST_VERSION": (
-        "ToolAttemptLineage", "ToolCallId", "Serialize for ToolCallId",
     ),
     "crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
         "LlmProfileConfig", "RecordedLlmProfile", "LlmProfileKey", "LlmProfileMetadata", "PluginConfig",

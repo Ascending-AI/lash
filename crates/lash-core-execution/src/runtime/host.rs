@@ -159,26 +159,6 @@ pub struct RuntimeControlConfig {
     /// persisted tools (FIG-3353). Carried on the host config so every
     /// construction below the facade sees the same choice.
     pub tool_surface_open_mode: crate::ToolSurfaceOpenMode,
-    /// This deployment's tool-child wiring: the live-opener registry a turn or
-    /// process incarnation registers itself in, and the resolver that routes a
-    /// journaled tool child of an effect group to the handler-level driver
-    /// (ADR 0099 §2, FIG-2266).
-    ///
-    /// Default wiring, not an opt-in: it is installed on the effect host here,
-    /// so native, SQLite and PostgreSQL deployments all route first dispatch
-    /// and recovery through the one resolver without a caller-closure route.
-    ///
-    /// `None` when the host routes no tool children — it implements no durable
-    /// effect groups, or a different resolver is already registered on it,
-    /// which the conformance suites do deliberately. Openers are then not
-    /// registered either, so nothing is half-wired.
-    pub tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
-    /// What this open supplied beyond the deployment's own wiring — plugin
-    /// factories, a provider, a tool-source policy or open mode — as presence
-    /// flags. A group tool child records them (FIG-3712): a context the
-    /// deployment builds for it cannot reproduce them, so such a child waits
-    /// for its live opener. Set by the embedder that opened the session.
-    pub open_sources: crate::runtime::effect::UnrecordedSessionSources,
     /// Where the shift reports a logical run's closed scope, after the
     /// run's terminal evidence is durable (FIG-3607 item 7). Defaults to
     /// [`NoScopeClose`](crate::engine::NoScopeClose); a host composition that
@@ -231,21 +211,6 @@ impl RuntimeHostConfig {
         let process_env_store = backend.process_env_store();
         let clock = backend.clock();
         let artifact_ports = ArtifactReferrerPorts::of_backend(&backend);
-        let tool_children =
-            effect_host.install_tool_child_host(crate::runtime::effect::ToolChildHost::new(
-                &effect_host,
-                Arc::clone(&process_env_store),
-                Arc::clone(&clock),
-            ));
-        if let Some(tool_children) = &tool_children {
-            tool_children.with_clock(Arc::clone(&clock));
-            // The install is get-or-init: a host that already routed tool
-            // children answers with the resolver it built earlier, which may
-            // carry a different env store. The runtime's store is the one
-            // executions publish to, so propagate it the same way
-            // `with_process_env_store` does on a later swap.
-            tool_children.with_process_env_store(Arc::clone(&process_env_store));
-        }
         Self {
             backend: backend.clone(),
             durability: RuntimeDurabilityConfig {
@@ -271,8 +236,6 @@ impl RuntimeHostConfig {
                 process_tool_visibility_filter: None,
                 tool_source_policy: crate::ToolSourcePolicy::default(),
                 tool_surface_open_mode: crate::ToolSurfaceOpenMode::default(),
-                tool_children,
-                open_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
                 scope_close: Arc::new(crate::engine::NoScopeClose),
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
             },
@@ -334,14 +297,7 @@ impl RuntimeHostConfig {
     /// test-driven time inject their own [`Clock`](super::Clock); the default is
     /// [`SystemClock`](super::SystemClock).
     ///
-    /// Also propagates to the installed tool-child host, whose `Sleep`/
-    /// `AwaitEvent` group-child executors wait on it: the host was installed
-    /// get-or-init before this clock existed, so the update happens in place
-    /// rather than by re-install.
     pub fn with_clock(mut self, clock: Arc<dyn super::Clock>) -> Self {
-        if let Some(tool_children) = &self.control.tool_children {
-            tool_children.with_clock(Arc::clone(&clock));
-        }
         self.tracing = self.tracing.with_clock(Arc::clone(&clock));
         self.clock = clock;
         self
@@ -406,43 +362,17 @@ impl RuntimeHostConfig {
         self
     }
 
-    /// Replace the effect host, keeping the tool-child wiring coherent: when
-    /// the new host accepts an install the resolver — and with it the opener
-    /// registry — binds to it; when it answers `None` it is a delegating
-    /// wrapper whose `scoped` forwards to the host already carrying the
-    /// resolver, so the existing wiring is kept. A bare `control.effect_host`
-    /// write strands both cases.
+    /// Replace the effect host.
     pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
-        if let Some(tool_children) =
-            effect_host.install_tool_child_host(crate::runtime::effect::ToolChildHost::new(
-                &effect_host,
-                Arc::clone(&self.durability.process_env_store),
-                Arc::clone(&self.clock),
-            ))
-        {
-            tool_children.with_clock(Arc::clone(&self.clock));
-            // Get-or-init, as in `new`: a host that already routes tool
-            // children keeps its resolver, whose env store must become the
-            // one this runtime's executions publish to.
-            tool_children.with_process_env_store(Arc::clone(&self.durability.process_env_store));
-            self.control.tool_children = Some(tool_children);
-        }
         self.control.effect_host = effect_host;
         self
     }
 
-    /// Swap the process execution-environment store, propagating to the
-    /// installed tool-child host: a child's recorded `execution_env` ref must
-    /// resolve against the same store the runtime's executions publish to, so
-    /// a swap that reaches only `durability` would strand the resolver on the
-    /// store nothing writes.
+    /// Replace the process execution-environment store.
     pub fn with_process_env_store(
         mut self,
         process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     ) -> Self {
-        if let Some(tool_children) = &self.control.tool_children {
-            tool_children.with_process_env_store(Arc::clone(&process_env_store));
-        }
         self.durability.process_env_store = process_env_store;
         self
     }

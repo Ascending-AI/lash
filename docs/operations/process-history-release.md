@@ -106,7 +106,7 @@ admission, pending summaries, effect groups, cancellation state, signal
 promises, child work, trigger linkage, holds and wake content are outside
 release. Counts include released signal rows, so a successor cannot reuse an
 ordinal. Recorded engine steps replay their recorded answers. An old segment
-or tool child retrying an unrecorded append still has its digest fence. Hosts
+or native Run attempt retrying an unrecorded append still has its digest fence. Hosts
 submit work through `send()` and the engine; release executes no turn.
 
 Deleting rows would require proof that every writer stopped replaying its

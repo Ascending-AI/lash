@@ -10,7 +10,7 @@ use lash_core::{
 ///
 /// The endpoint's `EffectGroupDispatch` holds this from construction: it must
 /// not capture a resolver snapshot, because the one registration a
-/// `ToolChildHost` install performs can land after the services were built.
+/// executor registration can land after the services were built.
 pub(super) struct RestateHostGroupExecutors {
     pub(super) controller: Arc<RestateEffectHostController>,
 }

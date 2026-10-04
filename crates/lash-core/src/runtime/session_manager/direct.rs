@@ -24,24 +24,7 @@ impl RuntimeSessionServices {
     }
 }
 
-impl RuntimeSessionServices {
-    /// The concrete half of the trait rebind below: the same refusal and the
-    /// same policy swap, but it returns the rebound services themselves so a
-    /// caller that already holds the concrete type — and a test asserting on
-    /// what was lent — keeps it.
-    fn bound_tool_child_services(
-        &self,
-        owner: &crate::RuntimeOwner,
-        execution_env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Option<Self> {
-        if *owner != self.current.runtime_owner() {
-            return None;
-        }
-        let mut services = self.clone();
-        services.current.policy = execution_env_spec.policy.clone();
-        Some(services)
-    }
-}
+impl RuntimeSessionServices {}
 
 #[async_trait::async_trait]
 impl DirectCompletionService for RuntimeSessionServices {
@@ -91,25 +74,6 @@ impl DirectCompletionService for RuntimeSessionServices {
                 caused_by,
             )
             .await
-    }
-
-    /// Rebinds this service to a tool child's recorded authority.
-    ///
-    /// The transport — the managed session and the provider registry — is
-    /// lent unchanged; what is rebound is everything that
-    /// decides whose call it is. `current.policy` is replaced with the
-    /// child's recorded environment policy so provider and budget resolution
-    /// answer under the facts the child was admitted with, and a service
-    /// asked to rebind to a different session refuses: the transport is
-    /// session-bound, and lending it across sessions would journal the
-    /// child's call under the opener's session authority (ADR 0099 §3).
-    fn bind_tool_child(
-        self: Arc<Self>,
-        owner: &crate::RuntimeOwner,
-        execution_env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Option<Arc<dyn DirectCompletionService>> {
-        self.bound_tool_child_services(owner, execution_env_spec)
-            .map(|services| Arc::new(services) as Arc<dyn DirectCompletionService>)
     }
 }
 
@@ -466,52 +430,5 @@ mod tests {
         );
         let error = crate::PluginError::RuntimeEffectController(fault);
         assert!(error.is_retryable() && !error.is_terminal());
-    }
-
-    /// ADR 0099 §3: a managed-LLM service lent to a tool child is rebound to
-    /// the child's *recorded* environment — provider and policy resolution
-    /// answer under the facts the child was admitted with, not whatever the
-    /// opener is running now — and a bind naming a session the transport is
-    /// not bound to is refused rather than lent across.
-    #[tokio::test]
-    async fn a_rebound_completion_service_resolves_the_childs_recorded_policy() {
-        let (services, opener_policy) = Box::pin(session_services()).await;
-        let mut child_policy = opener_policy.clone();
-        child_policy.model = Some(crate::testing::test_llm_profile_config(
-            "child-recorded-model",
-            crate::LlmProfileMetadata::builder("child-recorded-model")
-                .context_window_tokens(128_000)
-                .build()
-                .expect("valid child model"),
-        ));
-        let child_env = crate::ProcessExecutionEnvSpec::new(
-            crate::AdmittedPluginConfig::default(),
-            child_policy.clone(),
-        );
-
-        let rebound = services
-            .bound_tool_child_services(
-                &crate::RuntimeOwner::Session(crate::SessionId::fixture(SESSION_ID.to_string())),
-                &child_env,
-            )
-            .expect("the transport's own session binds");
-        assert_eq!(
-            rebound.current.policy, child_policy,
-            "provider and budget resolution answer under the recorded environment"
-        );
-        assert_eq!(
-            services.current.policy, opener_policy,
-            "the rebind clones; the opener's services keep resolving their own policy"
-        );
-
-        assert!(
-            services
-                .bound_tool_child_services(
-                    &crate::RuntimeOwner::Session(crate::SessionId::from("a-foreign-session")),
-                    &child_env,
-                )
-                .is_none(),
-            "a session-bound transport is refused across sessions, never lent"
-        );
     }
 }

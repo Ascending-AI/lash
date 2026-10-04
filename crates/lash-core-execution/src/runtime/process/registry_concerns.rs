@@ -916,7 +916,7 @@ pub trait ProcessRetention: Send + Sync {
     /// event keeps its row: sequence, type, replay key and a digest of its
     /// payload. Sequence allocation and signal ordinals therefore do not move,
     /// and a writer that re-presents a released event's replay key — a
-    /// segment or tool child replaying its journal, a host retrying a signal
+    /// segment or Run attempt replaying its journal, a host retrying a signal
     /// — coalesces on the digest exactly as it would on the payload, or is
     /// refused as a conflict. Releasing therefore needs no proof that every
     /// such writer has finished, which storage cannot observe.

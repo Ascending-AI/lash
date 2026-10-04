@@ -376,7 +376,6 @@ impl LashRuntime {
         turn: &TurnId,
         controller: &ScopedEffectController<'run>,
         fence: Option<&ShiftFence>,
-        observer: &TurnObserver,
     ) -> Result<Option<crate::runtime::turn_driver::OpenerForCommit<'run>>, RuntimeError> {
         let Some(continuation) = pipeline
             .state()
@@ -452,16 +451,6 @@ impl LashRuntime {
                 self.state.session_id.clone(),
                 turn.clone(),
             ));
-        let context = match crate::runtime::turn_driver::register_live_opener(
-            &self.host,
-            controller,
-            context.dispatch(),
-            observer,
-            CancellationToken::new(),
-        ) {
-            Some(guard) => context.with_live_opener_guard(Arc::new(guard)),
-            None => context,
-        };
         Ok(Some(crate::runtime::turn_driver::OpenerForCommit {
             context: Some(context),
             messages,
@@ -639,7 +628,6 @@ impl LashRuntime {
                     &trace_turn_id,
                     scoped_effect_controller,
                     shift_fence,
-                    observer,
                 )?,
             };
             if let Some(opener) = opener {

@@ -34,7 +34,7 @@ async fn indexed_wait_keeps_its_key_through_settlement_and_retirement(
     target: HarnessServer,
     tier: HarnessStoreTier,
 ) {
-    let harness = LiveConformanceHarness::start_for_tool_children_over(target, tier).await;
+    let harness = LiveConformanceHarness::start_for_tools_over(target, tier).await;
     let ingress = harness.ingress();
     let identity = uuid::Uuid::new_v4().to_string();
     for transition in ["settle", "resolve", "cancel_all"] {

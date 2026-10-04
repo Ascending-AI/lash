@@ -27,23 +27,12 @@ transaction before reading the marker. Its result carries the session id,
 version, and shift epoch. This admission checks compatibility; it does not
 execute a per-session converter chain or advance the marker.
 
-A tool child of an effect group (ADR 0099) passes the same gate before its
-tool body runs, but there the gate is defence in depth, not the compatibility
-seam. A build's drain generation `G` hashes its `SessionAdmissionWindow` —
-the supported range and every writer pin the recorded `F` could select
-(FIG-4454) — so every build that serves the child's lane admits every marker
-its opener's build admitted. A child or a successor sent on its opener's lane
-therefore never meets a refusal its opener would not have met. A child whose
-final already committed is past the gate: it drains whatever the marker says,
-and a generation refusal of a committed child reports a violated
-precondition, not a compatibility outcome.
-
-The marker has no production writer. It moves only by fleet conversion under
-a shift fence, and a shift fence excludes executes, not group children: a
-committed child whose seat is still owed may drain after the fence is taken.
-A future marker mover must therefore also exclude committed, undrained group
-children on the sessions it moves, replay-safely, before it advances a marker
-(ADR 0099 §5).
+A logical Run admits the session before any fresh tool body. Its drain
+generation includes the session admission window, so a successor serves the
+recorded owner and admission. A committed final remains protected through
+drain. A future marker mover must exclude committed, undrained Run work
+under a replay-safe fence before it advances the marker. The marker has no
+production writer; fleet conversion owns its movement.
 
 ### Record counters remain codec discriminators
 

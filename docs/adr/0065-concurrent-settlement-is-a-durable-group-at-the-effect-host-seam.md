@@ -13,8 +13,9 @@ and an all-settled batch cannot supply an early return.
 
 The effect host owns execution and replay. Restate implements the production
 engine contract; SQLite and PostgreSQL store session and process state.
-[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
-owns tool-child lifetime, protected settlement and incorporation.
+The [Tool-run contract](../architecture/tool-run-contract.md) owns logical
+tool-call lifetime, protected drain and incorporation. The generic transport
+in this ADR remains until FIG-4900; it no longer dispatches tool calls.
 
 ### Restate satisfaction: the group virtual object is the rank authority
 
@@ -56,9 +57,9 @@ starts before issuing their commands.
 
 `open_effect_group(RuntimeEffectGroup)` accepts envelopes, not caller closures.
 The registered `GroupExecutors` resolves an envelope to its executor. Dispatch
-and recovery use the same resolver. A tool child uses `ToolInvocation` carrying
-`ToolChildRequest`; its handler-level driver coordinates retries and waits,
-while `ToolAttempt` names an atomic attempt body.
+and recovery use the same resolver for generic children. Tool calls use
+recorded Run admission and atomic `ToolAttempt` bodies; they have no child
+request or independently replayed child driver.
 
 A first open resolves all children before creating group state. A missing
 runner refuses the whole open with a shape error naming the child and its
@@ -68,28 +69,15 @@ deployment that does not carry a recorded child now leaves it accepted: the
 miss remains visible and retryable, and it neither invents a settlement nor
 denies access to ranks already recorded.
 
-A resolver tells that miss apart from one no retry repairs
-(`GroupExecutors::missing_capability`). A deployment that serves the group's lane and
-lacks a capability the child needs can never run it: a host that serves the
-lane with no resolver registered, or a tool child whose opener lent it no
-context on a deployment that installs no tool-child context source.
+A resolver tells a placement miss apart from a missing deployment
+capability (`GroupExecutors::missing_capability`). This answer uses only the
+recorded generic envelope and registered deployment wiring. Tool calls do
+not use this resolver or lend a live opener context.
 
-That answer is the deployment's, so it is drawn only from facts every worker
-of the deployment shares: what the child's envelope recorded and what the
-deployment registered or wired. Which worker holds a child's live opener is not
-one of them. A tool child's request records whether its opener had a context to
-lend where it formed the group (`ToolChildOpenerContext`), judged there because
-the forming process is the opener's own. A child whose opener lent a context
-runs on the worker that holds it; landing on another worker of the same
-deployment is a miss of placement, and stays a retry whether or not the
-deployment installs a context source.
-
-Losing the lending worker does not make the child permanently unroutable:
-the durable opener can redrive and register its context again. Its durable
-end closes its groups under `Cancel` before committing its terminal, and the
+The durable opener closes its generic groups under `Cancel` before
+committing its terminal, and the
 index seats an uncommitted child as `RuntimeEffectGroupChildCancelled`
-without resolving an executor. This also holds on deployments with no
-context source. Every child routing miss reads the index's durable child
+without resolving an executor. Every child routing miss reads the index's durable child
 notification through ingress before retrying. Cancellation, retirement or
 an already seated settlement releases the invocation through the engine's
 existing admin kill operation, without executing or seating anything. A
@@ -199,32 +187,15 @@ winner cancels no losing promise. A deadline select can declare `Cancel`.
 Normal opener end has ADR 0099's closing protocol; `RunToCompletion` does not
 grant an unfinished opaque tool permission to create new work after that end.
 
-## Tool children have an opener lifetime
+## Tool calls belong to a logical Run
 
-The opener is an admitted execution identity, including the process incarnation
-where applicable. Worker death does not establish opener closure. Durable
-closing records the admission boundary before cancellation.
-
-A child's final record and cancellation compete at the serialized group-index
-decision. A committed final remains protected through drain and projection;
-a winning cancellation refuses a later final. Physical stop follows the
-decision and cannot undo already-admitted obligations or known usage.
-
-Committed siblings drain in durable final-commit order. The barrier waits on
-the last-committed unseated lower sibling. Its own barrier is transitive, so
-that one wake proves every lower committed sibling has seated. Rankability
-depends on discharge of the child's obligations, not on opener closure.
-
-Implicit engine cancellation is not the close protocol. The retained child
-identity, cooperative cancellation decisions and protected-work recovery
-continue to govern cancellation and settlement.
-
-Retained-work admission and controller command budgets apply before dispatch.
-The exact opener owns retained-work capacity; controller command headroom is
-per executing segment. A segment can hand over outstanding children and saved
-consumption. A completed group retires as a whole only when its recovery and
-consumer dependencies are discharged and an identity fence prevents reopening.
-There is no TTL that makes a saved continuation expire.
+The Run records one final-or-cancel decision and protects a committed final
+through declarations, presentation and incorporation. Its drain frontier is
+transitive across empty ranks. Worker death and a segment handover transfer
+that Run; they do not close its owner or cancel a losing call. Independently
+living work is a declared process. See the
+[Tool-run contract](../architecture/tool-run-contract.md) for the native
+records, retention dependencies and replacement laws.
 
 ## Alternatives rejected
 

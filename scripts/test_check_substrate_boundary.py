@@ -54,7 +54,6 @@ FIXTURE_FILES = [
     "crates/lash-core/src/runtime/turn_boundary.rs",
     "crates/lash-core-execution/src/session.rs",
     "crates/lash-core-execution/src/tool_dispatch.rs",
-    "crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs",
     "crates/lash-core-execution/src/runtime/effect/group.rs",
     "crates/lash-restate/src/effect_group.rs",
     "crates/lash-restate/src/durable_wait.rs",

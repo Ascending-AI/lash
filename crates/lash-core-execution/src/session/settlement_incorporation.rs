@@ -1,8 +1,7 @@
-//! The opener-side incorporation of a recorded tool settlement (ADR 0099 §6,
-//! §13; FIG-3411).
+//! Once-only incorporation of logical tool facts and generic group ranks.
 //!
-//! One operation — [`RuntimeExecutionContext::incorporate_tool_settlement`] —
-//! applies every semantic channel a settlement carries exactly once per
+//! One operation — [`RuntimeExecutionContext::incorporate_tool_facts`] —
+//! applies every logical semantic channel exactly once per
 //! [`SettlementSource`]: possession is granted, committed checkpoint messages
 //! are enqueued and trigger receipts are restored as evidence. It never
 //! executes a declaration, never emits a delivery, never re-runs a projector,
@@ -19,7 +18,6 @@ use lash_sansio::sync::MutexExt;
 
 use super::execution_context::RuntimeExecutionContext;
 use crate::ProcessId;
-use crate::runtime::effect::ToolSettlement;
 use crate::runtime::effect::executor::RuntimeEffectControllerError;
 
 pub use lash_core_store::effect_opener::{IncorporationLedger, SettlementSource};
@@ -40,12 +38,13 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// exactly once. Never executes a declaration, never emits a delivery,
     /// never re-runs a projector. A `source` already in the ledger returns an
     /// [`Incorporated`] whose counts are all zero.
-    pub fn incorporate_tool_settlement(
+    pub fn incorporate_tool_facts(
         &self,
         source: SettlementSource,
-        settlement: &ToolSettlement,
+        possession: &[ProcessId],
+        messages: &[crate::PluginMessage],
+        triggers: &[crate::tool_dispatch::ToolTriggerEffectOutcome],
     ) -> Result<Incorporated, RuntimeEffectControllerError> {
-        settlement.validate()?;
         let mut ledger = self.incorporation_ledger().lock_recover();
         if ledger.incorporated.contains(&source) {
             return Ok(Incorporated {
@@ -53,27 +52,22 @@ impl<'run> RuntimeExecutionContext<'run> {
                 ..Incorporated::default()
             });
         }
-        // Possession is granted from the settlement's own realized
-        // `possession` — the identities the child's intent outcomes bound —
-        // never re-derived from intent outcomes here (§6).
-        self.restore_started_process_ids(&settlement.possession);
-        self.dispatch
-            .checkpoint_messages
-            .enqueue(settlement.checkpoint_messages.clone());
-        self.restore_tool_trigger_outcomes(settlement.triggers.clone());
+        // The caller supplies the identities realized by recorded declarations.
+        self.restore_started_process_ids(possession);
+        self.dispatch.checkpoint_messages.enqueue(messages.to_vec());
+        self.restore_tool_trigger_outcomes(triggers.to_vec());
         ledger.incorporated.insert(source.clone());
         Ok(Incorporated {
             source: Some(source),
-            possession: settlement.possession.clone(),
-            messages: settlement.checkpoint_messages.len(),
-            triggers: settlement.triggers.len(),
+            possession: possession.to_vec(),
+            messages: messages.len(),
+            triggers: triggers.len(),
         })
     }
 
     /// ADR 0099 §6/§8: journals the opener's incorporated settlement prefix
     /// of `handle`'s group — ranks `already + 1 ..= handle.consumed()` — and
-    /// applies each settled rank's facts through
-    /// [`incorporate_tool_settlement`](Self::incorporate_tool_settlement).
+    /// records each settled rank in the incorporation ledger.
     ///
     /// The journaled outcome records exactly which ranks were incorporated,
     /// so a replay re-incorporates the recorded prefix and never a rank that
@@ -251,7 +245,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         // in `incorporated` and is never applied.
         let incorporated = outcome.into_incorporate_group_settlements()?;
         for entry in &incorporated {
-            let settlement = prefix.remove(&entry.rank).ok_or_else(|| {
+            let _settlement = prefix.remove(&entry.rank).ok_or_else(|| {
                 RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectGroupShape,
                     format!(
@@ -267,46 +261,16 @@ impl<'run> RuntimeExecutionContext<'run> {
                 rank: entry.rank,
                 child_replay_key: entry.child_replay_key.clone(),
             };
-            match settlement.outcome {
-                Ok(crate::RuntimeEffectOutcome::ToolInvocation { settlement, .. }) => {
-                    self.incorporate_tool_settlement(source, &settlement)?;
-                }
-                Ok(crate::RuntimeEffectOutcome::ToolInvocationDeferred { completion }) => {
-                    let mut ledger = self.incorporation_ledger().lock_recover();
-                    if !ledger.incorporated.contains(&source) {
-                        self.restore_started_process_ids(
-                            &crate::runtime::effect::tool_settlement::settlement_possession(
-                                &completion.armed.intent_outcomes(),
-                            ),
-                        );
-                        self.dispatch.checkpoint_messages.enqueue(
-                            completion
-                                .pending
-                                .captures
-                                .iter()
-                                .flat_map(|capture| capture.messages.iter().cloned())
-                                .collect(),
-                        );
-                        self.restore_tool_trigger_outcomes(completion.pending.triggers.clone());
-                        ledger.incorporated.insert(source);
-                    }
-                }
-                // A non-tool child, or a child whose terminal is a recorded
-                // error, carries no settlement facts; the rank still joins
-                // the incorporated prefix so the next record starts after it.
-                _ => {
-                    self.incorporation_ledger()
-                        .lock_recover()
-                        .incorporated
-                        .insert(source);
-                }
-            }
+            self.incorporation_ledger()
+                .lock_recover()
+                .incorporated
+                .insert(source);
         }
         Ok(incorporated)
     }
 
     /// The once-only ledger this context incorporates against. Behind a
-    /// method so `incorporate_tool_settlement` and the handover carriage both
+    /// method so `incorporate_tool_facts` and the handover carriage both
     /// reach the same `Arc`.
     pub(crate) fn incorporation_ledger(&self) -> &Arc<std::sync::Mutex<IncorporationLedger>> {
         &self.incorporation_ledger

@@ -18,7 +18,6 @@ mod runtime_host_config;
 mod session_deletion;
 pub(crate) mod session_shifts;
 pub use session_deletion::SessionDeleteCompletion;
-mod tool_child_context;
 mod work_drivers;
 
 pub use drain::{DeploymentDrainStatus, GenerationDrainStatus};
@@ -67,13 +66,6 @@ pub struct LashCore {
     /// This core's seat in the recovery leader election (ADR 0109 §1.6),
     /// shared with its `SessionShifts`.
     pub(crate) recovery: Arc<recovery::RecoverySlot>,
-    /// The context a group tool child of this core's sessions runs under when
-    /// its opener is not live where it runs (FIG-3712). The backend's
-    /// tool-child host holds it weakly; the core and every session it opens
-    /// hold it strongly, so a host that keeps its sessions and drops its core
-    /// keeps rebuilding their children.
-    pub(crate) tool_child_context_source:
-        Arc<dyn lash_core::facade_support::ToolChildContextSource>,
 }
 
 pub use lash_core::session_delete::{
@@ -1308,23 +1300,6 @@ impl LashCoreBuilder {
             host_process_engines: host_process_engines.clone(),
         });
         let plugin_factories = Arc::new(plugin_factories);
-        let tool_child_context_source = tool_child_context::CoreToolChildContextSource::install(
-            &env,
-            protocol_factory.clone(),
-            Arc::clone(&plugin_factories),
-            process_lifecycle_available,
-            {
-                let substrate_slot = Arc::clone(&substrate_slot);
-                Arc::new(move || {
-                    let substrate_slot = Arc::clone(&substrate_slot);
-                    Box::pin(async move {
-                        let ports = substrate_slot.ports().await;
-                        (ports.process.clone(), ports.queued_port())
-                    }) as futures_util::future::BoxFuture<'static, _>
-                })
-            },
-            shift_owner.clone(),
-        );
         Ok(LashCore {
             shift_owner,
             env,
@@ -1344,7 +1319,6 @@ impl LashCoreBuilder {
             _session_shifts: installed_shifts,
             recovery: session_shifts.recovery(),
             residents,
-            tool_child_context_source,
         })
     }
 

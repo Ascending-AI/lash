@@ -243,13 +243,12 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "identity, not a stamp: recomputed and compared when a retried request replays, \
              never read back at rest",
         ),
-        DurableFormat::ToolChildRequest
-        | DurableFormat::ToolSettlement
-        | DurableFormat::ToolAttemptCapture
-        | DurableFormat::ToolPresentation => SurfaceRelation::Unwalkable(
-            "no bounded surface: journaled on runtime-effect outcomes, refused when replay \
+        DurableFormat::ToolAttemptCapture | DurableFormat::ToolPresentation => {
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: journaled on runtime-effect outcomes, refused when replay \
              decodes them rather than at rest",
-        ),
+            )
+        }
         DurableFormat::TurnCheckpoint => SurfaceRelation::Unwalkable(
             "no bounded surface: a sans-IO host stores the serialized checkpoint, so the bytes \
              this version gates live outside lash's own store",

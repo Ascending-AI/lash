@@ -48,7 +48,6 @@ pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
         prepared,
         execution_grant,
         retry_policy,
-        None,
         super::ToolAttemptLineage::from_parent(context.parent_invocation.clone()),
         turn_cancel_wait.as_ref(),
         None,

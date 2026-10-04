@@ -148,8 +148,8 @@ Evidence: `crates/lash-sansio/src/handle.rs:46`, `:85`, `:142`,
 `crates/lashlang/src/runtime/vm/pending_tools.rs:176`,
 `crates/lash-restate/src/process/mod.rs:208`, `:241`, and
 `crates/lash-core-execution/src/runtime/effect/executor/process_local.rs:1`.
-[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
-owns group settlement, and
+The [Tool-run contract](../architecture/tool-run-contract.md) owns logical
+tool aggregates, and
 [ADR 0016](0016-process-waits-live-on-the-work-driver-seam.md) owns Durable Wait.
 
 ### The workflow graph sees calls, not a start effect

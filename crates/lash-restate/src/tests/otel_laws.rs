@@ -42,7 +42,7 @@ async fn run_golden_turn(always_replay: bool) -> Observed {
     let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
         unreachable!("in_process names the server double");
     };
-    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::InProcess {
         seed,
         always_replay,
     })

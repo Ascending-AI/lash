@@ -13,7 +13,6 @@ pub(crate) mod effect_journal;
 mod group_child_cancel;
 mod group_commit;
 use group_child_cancel::group_child_cancelled;
-pub(crate) use group_commit::committed_final_is_not_a_tool_terminal;
 mod group_read;
 pub(crate) mod journal_budget;
 mod journal_payload;
@@ -334,26 +333,11 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     namespace: crate::RestateNamespace,
     /// The ranks this controller's run reads served (FIG-4088).
     read_ahead: group_read::GroupReadAhead,
-    /// The ranks this controller's own §4 commits reserved (FIG-4308).
-    commit_receipts: group_commit::GroupCommitReceipts,
     payloads: journal_payload::JournalPayloads,
     _ctx: PhantomData<&'ctx ()>,
 }
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
-    /// The rank this controller's own §4 commit of the child at
-    /// `scope_id`/`replay_key` in `group_key` reserved, if one of its commits
-    /// was answered `Committed` or `AlreadyCommitted` (FIG-4308). It is a
-    /// receipt for that commit, never proof that the child's drain finished.
-    pub(crate) fn group_child_commit_receipt(
-        &self,
-        group_key: &str,
-        scope_id: &str,
-        replay_key: &str,
-    ) -> Option<u64> {
-        self.commit_receipts.rank(group_key, scope_id, replay_key)
-    }
-
     /// A controller over `context`, journaling under `authority_id`, of the
     /// build whose drain generation is `build_generation` — the engine's
     /// [`build_generation`](crate::RestateEngine::build_generation), whose
@@ -387,7 +371,6 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             folded_sentinel: None,
             namespace: crate::RestateNamespace::default(),
             read_ahead: group_read::GroupReadAhead::default(),
-            commit_receipts: group_commit::GroupCommitReceipts::default(),
             payloads: journal_payload::JournalPayloads::default(),
             _ctx: PhantomData,
         }
@@ -806,27 +789,6 @@ where
                 "effect group {group_key} is retired"
             ))),
         }
-    }
-
-    /// The §4 boundary, routed through the durable membership record: the
-    /// child's own scope index answers which group owns its replay key, and
-    /// that group's index takes the commit. The serialized object handler —
-    /// not any state this controller holds — is the linearization point, so
-    /// a cancel decision racing the commit is fenced inside the index. The
-    /// index retains `drain_input` as the child's committed final, and
-    /// `AlreadyCommitted` answers the one the winner sealed (ADR 0099 §5).
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::EffectGroupChildCommitOutcome,
-        RuntimeEffectControllerError,
-    > {
-        let (scope_id, replay_key) = (commit.scope_id.clone(), commit.replay_key.clone());
-        let outcome =
-            group_commit::commit_group_child_final(&self.context, &self.namespace, commit).await?;
-        self.commit_receipts.keep(scope_id, replay_key, &outcome);
-        Ok(outcome)
     }
 
     async fn await_group_child_drain_admission(

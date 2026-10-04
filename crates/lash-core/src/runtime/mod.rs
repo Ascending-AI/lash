@@ -1,5 +1,4 @@
 pub use lash_core_store::turn_input_vocabulary::*;
-use lash_sansio::sync::MutexExt;
 #[cfg(feature = "testing")]
 pub mod assembly;
 #[cfg(not(feature = "testing"))]
@@ -205,8 +204,7 @@ pub use effect::{
     ATTEMPT_STREAM_BYTE_BUDGET, AdmittedHeadVerdict, AttemptStream, AttemptStreamBuilder,
     AttemptStreamChannel, AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation,
     CompactionBase, DecodedStreamEvent, IncorporatedGroupRank, PresentationBinding,
-    ProcessDefinitionLocalExecution, ToolAttemptCapture, ToolChildAdmission,
-    ToolChildCompletionRouting, ToolChildScope, ToolPresentation, ToolSettlement,
+    ProcessDefinitionLocalExecution, ToolAttemptCapture, ToolPresentation,
 };
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
@@ -228,12 +226,12 @@ pub use effect::{
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
     RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnly,
-    ServedOnlyRange, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolChildDriver,
-    ToolCompletionEvent, ToolCompletionWait, ToolDispatchCursor, TriggerLocalExecution,
-    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnPrelude,
-    effect_groups_unsupported, refuse_unhonored_group_membership,
-    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
+    ServedOnlyRange, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolCompletionEvent,
+    ToolCompletionWait, ToolDispatchCursor, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
+    TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
+    TurnControlBindingIdError, TurnPrelude, effect_groups_unsupported,
+    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
+    validate_replayed_effect_envelope,
 };
 pub use environment::{ParkRefused, ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;
@@ -408,8 +406,7 @@ pub use lash_core_execution::runtime::{
     EventSink, NOOP_EVENT_SINK, NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink,
     ProtocolSessionExtension, ProtocolSessionExtensionHandle, TerminationPolicy, TurnActivity,
     TurnActivitySink, TurnEvent, admit_session_state_generation, admit_session_view,
-    live_session_view, park_turn_of_refused_group_child, park_turn_refused_by_generation,
-    session_is_live,
+    live_session_view, park_turn_refused_by_generation, session_is_live,
 };
 
 mod normalized_item {

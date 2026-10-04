@@ -99,63 +99,10 @@ impl ToolAttemptLineage {
             effect_id,
         )
     }
-
-    /// The parent invocation this lineage's attempts descend from.
-    ///
-    /// Public because a tool child of an effect group reconstructs its lineage
-    /// out of its *recorded* request and has no caller to ask (ADR 0099 §3).
-    pub fn parent_invocation(&self) -> Option<&RuntimeInvocation> {
-        self.parent.as_ref()
-    }
 }
 
 pub struct CoordinatedToolInvocation {
     pub launch: ToolCallLaunch,
-}
-
-/// What a tool child of an effect group carries into coordination and a live
-/// caller cannot: the completion routing it was admitted under (ADR 0099 §3)
-/// and the address of its own replay row — the §4 linearization point (ADR
-/// 0099 §4). `None` for every caller that admitted its call live.
-///
-/// A live admission answers `None` for both halves: deferral is read from the
-/// live registry or provider, which is what admitted the call a moment ago,
-/// and there is no group membership to commit against. A **tool child of an
-/// effect group** answers `Some`, because §3 makes the *recorded* admission
-/// authoritative — "a reopen uses the recorded facts, not current session
-/// policy or fresh admission" — and §4 makes the child's own replay row the
-/// commit boundary its final record must reach.
-#[derive(Clone, Debug)]
-pub struct GroupChildCoordination {
-    pub completion_routing: crate::runtime::ToolChildCompletionRouting,
-    /// The child's `ToolInvocation` envelope address: its execution scope and
-    /// replay key.
-    pub child: crate::EffectAddress,
-}
-
-/// Refuses a child whose recorded routing this deployment cannot honour.
-///
-/// The routing mismatch ADR 0099 §3 item 2 names: "The request records
-/// which of `inline` or `durable` the child was admitted under, so a recovered
-/// child never derives a key nothing will resolve." A
-/// child admitted with a durable completion key that lands on a host issuing
-/// none would park on a key no resolver can reach, and a child admitted inline
-/// that suddenly acquires a key would defer where its opener expects a value.
-/// Both are refusals, never a repaired derivation.
-fn completion_routing_mismatch(
-    recorded: crate::runtime::ToolChildCompletionRouting,
-    observed: &str,
-    call: &PreparedToolCall,
-) -> crate::RuntimeEffectControllerError {
-    crate::RuntimeEffectControllerError::new(
-        crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting,
-        format!(
-            "tool child `{}` was admitted under {recorded:?} completion routing and this \
-             deployment answers {observed}; a recovered child is refused rather than run under \
-             a key its opener cannot resolve",
-            call.call_id
-        ),
-    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -164,10 +111,6 @@ pub async fn coordinate_tool_invocation<'run>(
     call: PreparedToolCall,
     execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     retry_policy: ToolRetryPolicy,
-    // `None` for every caller that admitted this call live; `Some` only for a
-    // group child running from its retained request. See
-    // [`GroupChildCoordination`].
-    group_child: Option<GroupChildCoordination>,
     lineage: ToolAttemptLineage,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
     child_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
@@ -178,38 +121,13 @@ pub async fn coordinate_tool_invocation<'run>(
     let mut captures = Vec::new();
     let mut attempts = Vec::new();
 
-    // Whether this attempt may defer is the admitted declaration's answer: the
-    // routing a group child recorded at formation, and otherwise the manifest
-    // the call was admitted under — its grant's, or the dispatch catalog's,
-    // which for a recovered child is the admitted catalog. Never a live
-    // provider. Read once, above the loop, because every attempt of one
-    // invocation is admitted under the same authority.
-    let may_defer = match group_child.as_ref().map(|child| &child.completion_routing) {
-        None => super::atomic_attempt::AttemptAuthority::resolve(
-            context,
-            &call.tool_id,
-            execution_grant.as_deref(),
-        )
-        .is_some_and(|authority| authority.manifest().declaration.may_defer),
-        Some(crate::runtime::ToolChildCompletionRouting::Inline) => false,
-        Some(crate::runtime::ToolChildCompletionRouting::Durable) => true,
-    };
-
+    let may_defer = super::atomic_attempt::AttemptAuthority::resolve(
+        context,
+        &call.tool_id,
+        execution_grant.as_deref(),
+    )
+    .is_some_and(|authority| authority.manifest().declaration.may_defer);
     for attempt in 1..=max_attempts {
-        // A group child reads its cancel fact at each attempt boundary, as a
-        // recorded peek (ADR 0105 §4, FIG-3904): the child's shift never races
-        // it, so a replay reads the answer its first execution read.
-        if group_child.is_some() {
-            match group_child_cancel_boundary(context, &call).await {
-                Ok(()) => {}
-                Err(error) => {
-                    abandon_to_open_buffers(context, triggers, captures);
-                    return CoordinatedToolInvocation {
-                        launch: ToolCallLaunch::ControllerAborted(error),
-                    };
-                }
-            }
-        }
         let prepared_key = context
             .effect_controller
             .controller()
@@ -219,28 +137,6 @@ pub async fn coordinate_tool_invocation<'run>(
                 may_defer,
             )
             .await;
-        if let Some(recorded) = group_child.as_ref().map(|child| &child.completion_routing) {
-            let observed = match &prepared_key {
-                Ok(crate::CompletionKeyPreparation::Issued(_)) => "issued",
-                Ok(crate::CompletionKeyPreparation::NotNeeded) => "not-needed",
-                Ok(crate::CompletionKeyPreparation::Unsupported) => "unsupported",
-                Err(_) => "",
-            };
-            let honoured = match recorded {
-                crate::runtime::ToolChildCompletionRouting::Inline => observed == "not-needed",
-                crate::runtime::ToolChildCompletionRouting::Durable => observed == "issued",
-            };
-            if !observed.is_empty() && !honoured {
-                abandon_to_open_buffers(context, triggers, captures);
-                return CoordinatedToolInvocation {
-                    launch: ToolCallLaunch::ControllerAborted(completion_routing_mismatch(
-                        recorded.clone(),
-                        observed,
-                        &call,
-                    )),
-                };
-            }
-        }
         let completion_key = match prepared_key {
             Ok(crate::CompletionKeyPreparation::Issued(key)) => Some(key),
             Ok(crate::CompletionKeyPreparation::NotNeeded)
@@ -277,18 +173,6 @@ pub async fn coordinate_tool_invocation<'run>(
             // A runner bound to another call or owner is a host refusal,
             // including on replay. It cannot become a tool result.
             Err(err) if err.code == crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch => {
-                abandon_to_open_buffers(context, triggers, captures);
-                return CoordinatedToolInvocation {
-                    launch: ToolCallLaunch::ControllerAborted(err),
-                };
-            }
-            // A group child's attempt its cancel ended, live or recorded, ends
-            // the child's shift as that cancel: the attempt's body was dropped,
-            // and nothing it did is a result.
-            Err(err)
-                if group_child.is_some()
-                    && err.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled =>
-            {
                 abandon_to_open_buffers(context, triggers, captures);
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::ControllerAborted(err),
@@ -390,7 +274,7 @@ pub async fn coordinate_tool_invocation<'run>(
                                 minting_emission: &invocation,
                                 child_trace_hook: child_trace_hook.as_ref(),
                                 recorded_call_id: &recorded_call_id,
-                                group_child,
+
                                 record,
                                 intents,
                                 attempts,
@@ -422,7 +306,7 @@ pub async fn coordinate_tool_invocation<'run>(
                                 minting_emission: &invocation,
                                 child_trace_hook: child_trace_hook.as_ref(),
                                 recorded_call_id: &recorded_call_id,
-                                group_child,
+
                                 record,
                                 intents,
                                 attempts,
@@ -487,36 +371,6 @@ pub async fn coordinate_tool_invocation<'run>(
     }
 }
 
-/// A group child's recorded peek of its cancel fact at an attempt boundary: a
-/// decided cancel is the typed [`RuntimeEffectGroupChildCancelled`] refusal
-/// that ends the child's shift.
-///
-/// [`RuntimeEffectGroupChildCancelled`]: crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
-async fn group_child_cancel_boundary(
-    context: &ToolDispatchContext<'_>,
-    call: &PreparedToolCall,
-) -> Result<(), crate::RuntimeEffectControllerError> {
-    if context
-        .effect_controller
-        .controller()
-        .observe_group_child_cancel()
-        .await?
-    {
-        return Err(group_child_cancelled(&call.call_id));
-    }
-    Ok(())
-}
-
-/// The typed end of a group child whose cancel was decided while it ran.
-pub(crate) fn group_child_cancelled(
-    call_id: &lash_sansio::ToolCallId,
-) -> crate::RuntimeEffectControllerError {
-    crate::RuntimeEffectControllerError::new(
-        crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
-        format!("tool child `{call_id}` was cancelled by its effect group"),
-    )
-}
-
 /// When no outcome exists to carry them — a controller abort refuses the
 /// launch itself — an attempt's journaled facts land in the open context's
 /// buffers, exactly where the pre-applicator restore put them, because the
@@ -537,18 +391,12 @@ fn abandon_to_open_buffers(
     }
 }
 
-/// Settles one terminal tool attempt: commit a group child's final record,
-/// drain the declared intents in final-commit order (ADR 0099 §5), project
-/// their outcomes onto the record, and report them.
-///
-/// Both terminal callers — a first attempt with no retry left to schedule, and
-/// a retry-exhausted attempt — reach the same terminal state and run this one
-/// body.
+/// Facts needed to realize and project a terminal attempt.
 struct TerminalAttemptSettlement<'settlement> {
     minting_emission: &'settlement RuntimeEffectInvocation,
     child_trace_hook: Option<&'settlement crate::ToolChildExecutionTraceHook>,
     recorded_call_id: &'settlement lash_sansio::ToolCallId,
-    group_child: Option<GroupChildCoordination>,
+
     record: Box<ToolCallRecord>,
     intents: crate::ToolIntents,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
@@ -556,13 +404,7 @@ struct TerminalAttemptSettlement<'settlement> {
     triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
-/// A group child's terminal as its §4 commit seals it: everything its drain,
-/// its projection and its settlement need. The point retains it as the
-/// committed final's drain input, so any later invocation of the child — a
-/// redrive that reaches the boundary again, or a successor whose attach
-/// expired — drains exactly what the winner committed, never what it
-/// re-derived, and never re-runs the attempt (W6, W7, W15).
-#[derive(serde::Serialize, serde::Deserialize)]
+/// The local terminal facts passed from coordination to declaration realization.
 struct SealedToolFinal {
     /// The attempt invocation that minted the declared intents, whose
     /// identities derive from it. `None` for a deferred completion's
@@ -579,45 +421,6 @@ struct SealedToolFinal {
     triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(tag = "dispatch", rename_all = "snake_case")]
-enum SealedToolDispatch {
-    Done {
-        final_result: Box<SealedToolFinal>,
-    },
-    Deferred {
-        completion: Box<super::DeferredToolCompletion>,
-    },
-}
-
-pub(crate) enum CommittedToolDispatch {
-    Done(Box<ToolDispatchOutcome>),
-    Deferred(Box<super::DeferredToolCompletion>),
-}
-
-impl SealedToolDispatch {
-    fn drain_input(&self, replay_key: &str) -> Result<String, crate::RuntimeEffectControllerError> {
-        serde_json::to_string(self).map_err(|error| {
-            crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                format!("sealed drain input for {replay_key} does not encode: {error}"),
-            )
-        })
-    }
-
-    fn from_drain_input(
-        drain_input: &str,
-        replay_key: &str,
-    ) -> Result<Self, crate::RuntimeEffectControllerError> {
-        serde_json::from_str(drain_input).map_err(|error| {
-            crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                format!("committed drain input for {replay_key} does not decode: {error}"),
-            )
-        })
-    }
-}
-
 async fn settle_terminal_attempt(
     context: &ToolDispatchContext<'_>,
     settlement: TerminalAttemptSettlement<'_>,
@@ -626,7 +429,7 @@ async fn settle_terminal_attempt(
         minting_emission,
         child_trace_hook,
         recorded_call_id,
-        group_child,
+
         record,
         intents,
         attempts,
@@ -643,24 +446,7 @@ async fn settle_terminal_attempt(
         captures,
         triggers,
     };
-    let (sealed, drain_admission) = commit_group_child_boundary(
-        context,
-        group_child.as_ref(),
-        SealedToolDispatch::Done {
-            final_result: Box::new(sealed),
-        },
-    )
-    .await?;
-    let SealedToolDispatch::Done {
-        final_result: sealed,
-    } = sealed
-    else {
-        return Err(crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-            "an inline final cannot replace a committed deferred dispatch",
-        ));
-    };
-    drain_sealed_final(context, *sealed, drain_admission.as_ref(), child_trace_hook).await
+    drain_sealed_final(context, sealed, child_trace_hook).await
 }
 
 /// Drains a committed final and projects its intent outcomes onto its record.
@@ -675,7 +461,6 @@ async fn settle_terminal_attempt(
 async fn drain_sealed_final(
     context: &ToolDispatchContext<'_>,
     sealed: SealedToolFinal,
-    drain_admission: Option<&GroupChildDrainAdmission>,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
     let SealedToolFinal {
@@ -688,15 +473,6 @@ async fn drain_sealed_final(
         captures,
         triggers,
     } = sealed;
-    if let Some(admission) = drain_admission
-        && !intents.is_empty()
-    {
-        context
-            .effect_controller
-            .controller()
-            .await_group_child_drain_admission(&admission.group_key, admission.rank)
-            .await?;
-    }
     let intent_outcomes = match minting_emission {
         Some(minting_emission) => {
             let mut intent_context = context.clone();
@@ -732,183 +508,6 @@ async fn drain_sealed_final(
         captures,
         triggers,
     })
-}
-
-/// Where a group child's committed final takes its turn at the §5 barrier.
-#[derive(Debug)]
-pub(crate) struct GroupChildDrainAdmission {
-    /// The group the child's final committed in.
-    group_key: String,
-    /// The rank the §4 point reserved for the child.
-    rank: u64,
-}
-
-/// The §4 boundary: a group child's final record commits the moment the child
-/// reaches its terminal, *before* any declared intent runs and before its
-/// result is presented.
-///
-/// Every terminal of a group child crosses this one boundary — an attempt that
-/// finished inline (`settle_terminal_attempt`) and a parked attempt whose
-/// deferred completion resolved (the invocation driver's resume, through
-/// [`commit_deferred_group_child`]). The rank it reserves is the child's place
-/// in the settlement order and the order sibling drains are admitted in (§5),
-/// so a child that deferred its boundary to a later step would take its place
-/// in the settlement order by when that step ran, not by when it settled.
-///
-/// Only a group child carries the address of its own replay row into
-/// settlement; every other caller passes `None` and pays no boundary work at
-/// all. The commit carries the sealed final as its drain input, and
-/// `AlreadyCommitted` answers the one the winner sealed, which replaces this
-/// caller's — the committed settlement is the durable fact, not the replay
-/// (W6/W7). A `CancelDecided` answer is the group's arbitration losing this
-/// child's final: the typed refusal is the whole record, and nothing mints
-/// beneath it.
-async fn commit_group_child_boundary(
-    context: &ToolDispatchContext<'_>,
-    group_child: Option<&GroupChildCoordination>,
-    sealed: SealedToolDispatch,
-) -> Result<
-    (SealedToolDispatch, Option<GroupChildDrainAdmission>),
-    crate::RuntimeEffectControllerError,
-> {
-    let Some(address) = group_child.map(|child| &child.child) else {
-        return Ok((sealed, None));
-    };
-    let scope_id = address
-        .execution_scope
-        .journal_identity()
-        .map_err(crate::RuntimeEffectControllerError::from)?
-        .key()
-        .to_string();
-    let drain_input = sealed.drain_input(&address.replay_key)?;
-    match context
-        .effect_controller
-        .controller()
-        .commit_group_child_final(crate::runtime::effect::GroupChildFinalCommit {
-            scope_id,
-            replay_key: address.replay_key.clone(),
-            drain_input,
-        })
-        .await?
-    {
-        crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped => Ok((sealed, None)),
-        crate::runtime::effect::EffectGroupChildCommitOutcome::Committed { group_key, rank } => {
-            Ok((sealed, Some(GroupChildDrainAdmission { group_key, rank })))
-        }
-        crate::runtime::effect::EffectGroupChildCommitOutcome::AlreadyCommitted {
-            group_key,
-            rank,
-            drain_input,
-        } => Ok((
-            SealedToolDispatch::from_drain_input(&drain_input, &address.replay_key)?,
-            Some(GroupChildDrainAdmission { group_key, rank }),
-        )),
-        crate::runtime::effect::EffectGroupChildCommitOutcome::CancelDecided {
-            group_key, ..
-        } => Err(crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
-            format!(
-                "the final record of `{}` reached durable effect group {group_key} \
-                 after its cancel disposition committed; the refusal is the whole \
-                 record and no declared intent may mint beneath it",
-                address.replay_key
-            ),
-        )),
-    }
-}
-
-/// Seals an armed deferred descriptor at the dispatch's final-commit fence.
-/// Its resolver remains owned by this immutable final until the
-/// Run incorporates it and takes responsibility for the logical result.
-pub(crate) async fn commit_deferred_group_child(
-    context: &ToolDispatchContext<'_>,
-    group_child: &GroupChildCoordination,
-    completion: Box<super::DeferredToolCompletion>,
-) -> Result<Box<super::DeferredToolCompletion>, crate::RuntimeEffectControllerError> {
-    let (sealed, _) = commit_group_child_boundary(
-        context,
-        Some(group_child),
-        SealedToolDispatch::Deferred { completion },
-    )
-    .await?;
-    match sealed {
-        SealedToolDispatch::Deferred { completion } => Ok(completion),
-        SealedToolDispatch::Done { .. } => Err(crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-            "a deferred dispatch cannot replace a committed inline final",
-        )),
-    }
-}
-
-/// A resolver refusal is a completed dispatch and crosses the same final-commit fence.
-pub(crate) async fn commit_unarmed_tool_child(
-    context: &ToolDispatchContext<'_>,
-    group_child: &GroupChildCoordination,
-    outcome: ToolDispatchOutcome,
-) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
-    let ToolDispatchOutcome {
-        record,
-        attempts,
-        intents,
-        intent_outcomes,
-        captures,
-        triggers,
-    } = outcome;
-    let final_result = SealedToolFinal {
-        minting_emission: None,
-        recorded_call_id: record.call_id.clone(),
-        record,
-        intents,
-        intent_outcomes,
-        attempts,
-        captures,
-        triggers,
-    };
-    let (sealed, admission) = commit_group_child_boundary(
-        context,
-        Some(group_child),
-        SealedToolDispatch::Done {
-            final_result: Box::new(final_result),
-        },
-    )
-    .await?;
-    match sealed {
-        SealedToolDispatch::Done { final_result } => {
-            drain_sealed_final(context, *final_result, admission.as_ref(), None).await
-        }
-        SealedToolDispatch::Deferred { .. } => Err(crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-            "a resolver refusal cannot replace a committed deferred dispatch",
-        )),
-    }
-}
-
-/// Finishes a group child whose final an earlier invocation committed at the
-/// §4 point and never seated: its drain runs from the drain input the point
-/// retained, at the §5 barrier of the rank that commit reserved, and the
-/// attempt never runs again (ADR 0099 §5, W7, W15).
-pub(crate) async fn drain_committed_group_child(
-    context: &ToolDispatchContext<'_>,
-    committed: &crate::runtime::effect::CommittedGroupChildFinal,
-) -> Result<CommittedToolDispatch, crate::RuntimeEffectControllerError> {
-    let sealed =
-        SealedToolDispatch::from_drain_input(&committed.drain_input, &committed.group_key)?;
-    match sealed {
-        SealedToolDispatch::Deferred { completion } => {
-            Ok(CommittedToolDispatch::Deferred(completion))
-        }
-        SealedToolDispatch::Done { final_result } => drain_sealed_final(
-            context,
-            *final_result,
-            Some(&GroupChildDrainAdmission {
-                group_key: committed.group_key.clone(),
-                rank: committed.rank,
-            }),
-            None,
-        )
-        .await
-        .map(|outcome| CommittedToolDispatch::Done(Box::new(outcome))),
-    }
 }
 
 /// Whether `outcome` is the attempt's declared process start at

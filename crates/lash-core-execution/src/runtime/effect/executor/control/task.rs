@@ -104,15 +104,6 @@ pub enum EffectControllerTaskRequest {
             >,
         >,
     },
-    CommitGroupChildFinal {
-        commit: crate::runtime::effect::group::GroupChildFinalCommit,
-        response: oneshot::Sender<
-            Result<
-                crate::runtime::effect::group::EffectGroupChildCommitOutcome,
-                RuntimeEffectControllerError,
-            >,
-        >,
-    },
     AwaitGroupChildDrainAdmission {
         group_key: String,
         rank: u64,
@@ -287,9 +278,6 @@ impl EffectControllerTaskRequest {
                 response,
             } => Box::pin(async move {
                 let _ = response.send(controller.read_group_settlement(&group_key, rank).await);
-            }),
-            Self::CommitGroupChildFinal { commit, response } => Box::pin(async move {
-                let _ = response.send(controller.commit_group_child_final(commit).await);
             }),
             Self::AwaitGroupChildDrainAdmission {
                 group_key,
@@ -864,33 +852,6 @@ impl RuntimeEffectController for EffectTaskController {
             RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                 "group-settlement-read controller response was dropped",
-            )
-        })?
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: crate::runtime::effect::group::GroupChildFinalCommit,
-    ) -> Result<
-        crate::runtime::effect::group::EffectGroupChildCommitOutcome,
-        RuntimeEffectControllerError,
-    > {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.requests
-            .send(EffectControllerTaskRequest::CommitGroupChildFinal {
-                commit,
-                response: response_tx,
-            })
-            .map_err(|_| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                    "group-child commit controller task is no longer running",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                "group-child commit controller response was dropped",
             )
         })?
     }

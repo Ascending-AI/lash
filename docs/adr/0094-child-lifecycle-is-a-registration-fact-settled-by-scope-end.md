@@ -95,9 +95,9 @@ Evidence: `crates/lash-restate/src/controller/process_scheduling.rs:145`,
 
 ### 12. An opener close cancels waits, not registered processes
 
-Effect-group close stops new tool work, settles protected obligations, and
-releases Durable Wait children. A process realized by a tool child has its own
-registered lifetime. Closing the group or cancelling `processes.await(job)`
+Logical Run close stops new tool admission and drains protected obligations.
+Generic effect-group close releases its Durable Wait children. A process
+realized by a declared tool start has its own registered lifetime. Closing the Run or cancelling `processes.await(job)`
 does not itself request cancellation of `job`. The process can nevertheless be
 cancelled when its recorded `Until` scope closes. Work that must survive the
 turn needs a lifetime that reaches beyond that turn.
@@ -105,8 +105,8 @@ turn needs a lifetime that reaches beyond that turn.
 A dead worker and segment handover are neither scope closure nor opener close.
 Finalization settles protected obligations and accounting, commits the outcome,
 then records scope closure and completes retirement. Recovery resumes missing
-steps. The group protocol belongs to
-[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
+steps. The logical tool lifetime belongs to the
+[Tool-run contract](../architecture/tool-run-contract.md).
 
 Evidence: `crates/lash-core-execution/src/runtime/process/scope_close.rs:1`,
 `crates/lash-restate/src/process/mod.rs:241`, and

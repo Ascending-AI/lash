@@ -236,20 +236,6 @@ pub trait RuntimeEffectLocalRunner: Send {
         false
     }
 
-    /// The handler-level driver this runner carries, when it is a tool child
-    /// (ADR 0099 §2, FIG-2266).
-    ///
-    /// `execute` runs the runner's whole body to a terminal, which is correct
-    /// only where the runner may build the child's admitted controller itself.
-    /// A tier whose admitted controller is bound to a live handler context
-    /// calls the returned driver with the controller *it* built instead, so
-    /// the driver runs at handler level rather than inside a recorded body.
-    /// `None` is the honest answer for every other kind of runner — leaf
-    /// effects have no handler-level driver to hand out.
-    fn tool_child_driver(&self) -> Option<&dyn super::tool_child_driver::ToolChildDriver> {
-        None
-    }
-
     /// Hands the runner the live step of the body it is about to run: called
     /// once, right before [`execute`](Self::execute), and only for a body the
     /// engine records, never for one that replays by re-execution. A runner
@@ -359,7 +345,7 @@ pub(crate) fn unresolved_execution_env(
     env: &crate::ProcessExecutionEnvRef,
     error: crate::runtime::ProcessExecutionEnvLoadError,
 ) -> RuntimeEffectControllerError {
-    let refusal = crate::RuntimeErrorCode::RuntimeEffectToolChildRequestVersion;
+    let refusal = crate::RuntimeErrorCode::ProcessExecutionEnvRefused;
     let context = format!("{subject} could not resolve its recorded execution environment `{env}`");
     match error {
         crate::runtime::ProcessExecutionEnvLoadError::Store(store) => {
@@ -379,14 +365,14 @@ pub(crate) fn unresolved_execution_env(
 }
 
 /// Everything the presentation boundary needs that is not on the journaled
-/// command: the session's plugin chain, the settlement a step may read, the
+/// command: the session's plugin chain, the facts a step may read, the
 /// store retained artifacts are `put` into, the recorded
 /// attachment-acceptance environment the materialization notices compute
 /// under, and how long the settled call took — an observation the steps may
 /// read, never part of the command's recorded identity.
 pub struct PresentationLocalExecution {
     pub plugins: Arc<crate::plugin::PluginSession>,
-    pub settlement: Arc<super::ToolSettlement>,
+    pub facts: Arc<crate::plugin::ToolPresentationFacts>,
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
     pub duration_ms: u64,
@@ -431,7 +417,7 @@ impl PresentationLocalExecution {
         };
         let presentation = Box::pin(self.plugins.present_tool_result(
             context,
-            self.settlement,
+            self.facts,
             &plan,
             &self.attachment_acceptance,
         ))
@@ -785,7 +771,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// serves the recorded `ToolPresentation`.
     pub(crate) fn presentation(
         plugins: Arc<crate::plugin::PluginSession>,
-        settlement: Arc<super::ToolSettlement>,
+        facts: Arc<crate::plugin::ToolPresentationFacts>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
         duration_ms: u64,
@@ -796,7 +782,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(
                 PresentationLocalExecution {
                     plugins,
-                    settlement,
+                    facts,
                     attachment_store,
                     attachment_acceptance,
                     duration_ms,
@@ -974,24 +960,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
 
     pub fn replay_validation_trace(&self) -> Option<&super::RuntimeEffectReplayTrace> {
         self.replay_trace.as_ref()
-    }
-
-    /// The handler-level driver this executor carries, when it is a tool
-    /// child; `None` for every leaf executor (ADR 0099 §2, FIG-2266).
-    ///
-    /// Same answer the resolver gave: this only *reaches* the runner the
-    /// resolver routed — it does not re-decide routing. A tier that executes
-    /// tool children at handler level resolves once through
-    /// [`GroupExecutors::executor_for`](super::group_executors::GroupExecutors::executor_for)
-    /// and reads this.
-    pub fn tool_child_driver(&self) -> Option<&dyn super::tool_child_driver::ToolChildDriver> {
-        match &self.state {
-            RuntimeEffectLocalExecutorState::Runner(runner) => runner.tool_child_driver(),
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
-                runner.tool_child_driver()
-            }
-            RuntimeEffectLocalExecutorState::Target(_) => None,
-        }
     }
 
     async fn run_body(

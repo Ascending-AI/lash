@@ -69,7 +69,7 @@ pub struct EffectGroupMembership {
 /// that were never recorded together.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroupChildBinding {
-    /// The child's own `ToolInvocation` envelope address: the replay row its
+    /// The child's envelope address: the replay row its
     /// cancel disposition is decided on.
     pub child: crate::EffectAddress,
     /// The retained membership the child's envelope carries.
@@ -84,15 +84,6 @@ pub struct GroupChildBinding {
 /// child the journal could already name — a sleep, a process command, an await
 /// — that is the whole story, and ADR 0065 recorded the reason: what is new is
 /// the *composition above* attempts, not the attempts.
-///
-/// **A tool child is the exception, and it is a named one** (ADR 0099 §2, §3;
-/// FIG-3408). A tool group child is a replayable invocation driver, which
-/// [`ToolAttempt`](super::envelope::RuntimeEffectCommand::ToolAttempt) is not:
-/// that is the atomic body of one attempt, so it cannot carry retry. It is
-/// named by
-/// [`ToolInvocation`](super::envelope::RuntimeEffectCommand::ToolInvocation),
-/// whose payload is the retained request that reconstructs the child from the
-/// journal alone.
 ///
 /// The fields are readable but not publicly writable, because every durability claim in ADR
 /// 0065 reduces to the group key, wake rule, and child positions *agreeing* across the group
@@ -629,80 +620,4 @@ impl LoserPolicy {
             (_, requested) => Ok(requested),
         }
     }
-}
-
-/// What a tool child's terminal — its final attempt's boundary or its resolved
-/// completion — asks its controller to commit.
-///
-/// Identity and drain input only. The lease owner is the substrate's own
-/// fact, so the request does not carry it and no caller can claim another
-/// owner's fence — and the group is *resolved* from the durable record rather
-/// than asserted by the caller, so `group_key` is an output of the decision,
-/// not an input a caller could get wrong.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GroupChildFinalCommit {
-    /// The journal scope the child's replay row lives under.
-    pub scope_id: String,
-    /// The child's replay key — its durable identity.
-    pub replay_key: String,
-    /// The sealed drain input — the child's committed terminal: its record,
-    /// its declared intents and the attempt facts its settlement carries. The
-    /// point retains it with the commit, so any later invocation of the child
-    /// drains exactly this instead of re-running the attempt.
-    pub drain_input: String,
-}
-
-/// A group child's final that an earlier invocation committed at the §4 point
-/// and never seated: what an invocation that cannot run the child — a
-/// successor whose attach expired — drains and seats in its place (ADR 0099
-/// §5, W7). The tool's attempts never run again (W15).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CommittedGroupChildFinal {
-    /// The group the final committed in.
-    pub group_key: String,
-    /// The rank the winning commit reserved.
-    pub rank: u64,
-    /// The drain input the winning commit sealed.
-    pub drain_input: String,
-}
-
-/// The recorded result of committing a group child's final record.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum EffectGroupChildCommitOutcome {
-    /// The replay key names no group child: an ordinary effect, which takes
-    /// the process-local drain path and owes no durable discharge.
-    Ungrouped,
-    /// The final record won the §4 point: `commit_state` is `committed` and
-    /// the point reserved the child's settlement `rank`, its durable place in
-    /// the group's decision order, which its seat publishes once the drain
-    /// and projection are done. A caller with intents to drain may drain once
-    /// every lower-ranked committed sibling has seated.
-    Committed {
-        /// The group the row resolved to.
-        group_key: String,
-        /// The rank the §4 point reserved for the child.
-        rank: u64,
-    },
-    /// The point already holds this child's final record — a crashed or
-    /// retried executor reaching the boundary again. `drain_input` is the
-    /// recorded obligation set the winner committed, so recovery drains the
-    /// recorded intents rather than whatever a re-execution re-declared.
-    AlreadyCommitted {
-        /// The group the row resolved to.
-        group_key: String,
-        /// The rank the winning commit reserved.
-        rank: u64,
-        /// The drain input the winning commit recorded.
-        drain_input: String,
-    },
-    /// Refused: the cancel disposition already committed at the §4 point
-    /// (W6/W7). The late final may journal nothing — no terminal, no
-    /// position, no drain input — and the caller surfaces the typed
-    /// cancel-decided error rather than an outcome.
-    CancelDecided {
-        /// The group the row resolved to.
-        group_key: String,
-        /// The rank the cancel decision seated the child at.
-        rank: u64,
-    },
 }

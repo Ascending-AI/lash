@@ -1740,8 +1740,6 @@ class RestateSuiteSelectionTests(unittest.TestCase):
             "crates/lash-core-execution/src/tool_dispatch.rs",
             "crates/lash-core-execution/src/session/tool_execution.rs",
             "runbooks/restate-postgres-workers/src/bin/worker.rs",
-            # The kernel mirror under tests/ is the same subsystem.
-            "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/tool_child_driver.rs",
             # #2148's turn-driver change.
             "crates/lash-core/src/runtime/turn_driver/tools.rs",
             "crates/lash-core/src/runtime/turn_loop.rs",

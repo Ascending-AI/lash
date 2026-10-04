@@ -417,7 +417,7 @@ pub use aggregate::{
     ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome, ToolAggregateRequest,
     ToolRunAggregateCursor, ToolRunAggregatePoll,
 };
-pub use group::{ToolAggregateConsumer, ToolDispatchResult};
+pub use group::ToolAggregateConsumer;
 
 impl RuntimeExecutionContext<'_> {
     pub fn tool_execution_owner(
@@ -581,13 +581,10 @@ impl RuntimeExecutionContext<'_> {
             let call_id = &ids.call_id;
             let tool_correlation_id = tool_activity_id(call_id);
             let attempts = outcome.attempts.clone();
-            let mut output = outcome.record.output.clone();
-            // The settlement exists before the chain so a step can read its facts;
-            // its `model_return` is overwritten by the presented return below.
-            let mut settlement = crate::runtime::effect::ToolSettlement::from_dispatch(
-                &outcome,
-                ModelToolReturn::from_output(outcome.record.tool.clone(), &output),
-            );
+            let output = outcome.record.output.clone();
+            let facts = crate::plugin::ToolPresentationFacts {
+                intent_outcomes: outcome.intent_outcomes.clone(),
+            };
             // The presentation boundary (ADR 0099 §6, FIG-3420): the ordered
             // presentation steps run once through the journaled `PresentToolResult`
             // effect, keyed by `{call_id}:present`, so a replay serves the recorded
@@ -621,7 +618,7 @@ impl RuntimeExecutionContext<'_> {
                         ),
                         crate::RuntimeEffectLocalExecutor::presentation(
                             std::sync::Arc::clone(&self.dispatch.plugins),
-                            std::sync::Arc::new(settlement.clone()),
+                            std::sync::Arc::new(facts),
                             std::sync::Arc::clone(&self.dispatch.attachment_store),
                             self.attachment_acceptance().clone(),
                             duration_ms,
@@ -633,28 +630,30 @@ impl RuntimeExecutionContext<'_> {
                 Err(error) => Err(error.into()),
             }?;
             let mut model_return = presentation.model_return;
-            // ADR 0099 §6/§13: the applicator owns possession, committed messages,
-            // trigger receipts and usage charging, exactly once per source. A
-            // refusal — an unreadable settlement or a spend with no charge sink —
-            // fails the call closed rather than presenting a result whose
-            // recorded facts were dropped.
-            settlement.model_return = model_return.clone();
-            let settlement_source = crate::session::SettlementSource::Invocation {
-                call_id: call_id.clone(),
-            };
-            if let Err(error) = self.incorporate_tool_settlement(settlement_source, &settlement) {
-                let message = error.message;
-                output = ToolCallOutput::failure(ToolFailure::runtime(
-                    ToolFailureClass::Internal,
-                    "tool_settlement_incorporation_failed",
-                    message.clone(),
-                ));
-                model_return
-                    .parts
-                    .push(crate::ModelToolReturnPart::text(format!(
-                        "settlement incorporation refused: {message}"
-                    )));
-            }
+            let possession = outcome
+                .intent_outcomes
+                .iter()
+                .filter_map(|outcome| match outcome {
+                    crate::ToolIntentExecutionOutcome::Executed {
+                        realized: crate::ToolIntentRealized::StartProcess(handle),
+                        ..
+                    } => Some(handle.process_id.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let messages = outcome
+                .captures
+                .iter()
+                .flat_map(|capture| capture.messages.iter().cloned())
+                .collect::<Vec<_>>();
+            this.incorporate_tool_facts(
+                crate::session::SettlementSource::Invocation {
+                    call_id: call_id.clone(),
+                },
+                &possession,
+                &messages,
+                &outcome.triggers,
+            )?;
             {
                 let mut cursor = this.observation_cursor(&format!("tool:{call_id}:intents"));
                 for intent_outcome in crate::tool_dispatch::model_visible_intent_outcomes(&outcome)

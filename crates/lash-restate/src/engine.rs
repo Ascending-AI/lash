@@ -225,8 +225,7 @@ impl RestateEngine {
     /// deployments stay with the host (FIG-3794).
     ///
     /// Effect-group children route through the resolver registered on this
-    /// backend's effect host — the runtime's tool-child host once a core over
-    /// this engine installs it — and a session-scope child checks its
+    /// backend's effect host, and a session-scope child checks its
     /// session's state generation in this engine's session catalog.
     ///
     /// # Errors

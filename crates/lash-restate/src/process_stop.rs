@@ -2,7 +2,7 @@
 //!
 //! One responsibility: while a process segment's runner is live, fire the stop
 //! the segment lends its step bodies (tool attempts, model calls, the tool
-//! children a live opener lends it) once the segment's durable cancel promise
+//! recorded tool bodies) once the segment's durable cancel promise
 //! resolves. The shift never reads this stop. A step body that observes it
 //! records a cancelled outcome, and that recorded outcome is what reaches the
 //! shift; the shift's own observations of the cancellation are the recorded

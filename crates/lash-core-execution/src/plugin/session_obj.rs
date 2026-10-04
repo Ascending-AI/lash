@@ -1510,15 +1510,8 @@ mod attachment_notice_order_tests {
         let output = crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
             crate::AttachmentSource::stored(reference),
         ));
-        let baseline = crate::ModelToolReturn::from_output("fixture".to_string(), &output);
-        let settlement = Arc::new(crate::runtime::effect::ToolSettlement {
-            version: crate::runtime::effect::TOOL_SETTLEMENT_VERSION,
+        let facts = Arc::new(crate::plugin::ToolPresentationFacts {
             intent_outcomes: Vec::new(),
-            possession: Vec::new(),
-            triggers: Vec::new(),
-            checkpoint_messages: Vec::new(),
-            stream: Default::default(),
-            model_return: baseline,
         });
         let presented = session
             .present_tool_result(
@@ -1533,7 +1526,7 @@ mod attachment_notice_order_tests {
                     duration_ms: 0,
                     artifacts: Arc::new(super::super::NoPresentationArtifacts),
                 },
-                settlement,
+                facts,
                 &session.tool_presentation_plan(),
                 &crate::provider::AttachmentCapabilitySnapshot::default(),
             )
@@ -1610,14 +1603,8 @@ mod presentation_plan_tests {
         plan: &crate::runtime::PresentationBinding,
     ) -> Result<crate::runtime::effect::ToolPresentation, crate::RuntimeEffectControllerError> {
         let output = crate::ToolCallOutput::success("semantic-result");
-        let settlement = Arc::new(crate::runtime::effect::ToolSettlement {
-            version: crate::runtime::effect::TOOL_SETTLEMENT_VERSION,
+        let facts = Arc::new(crate::plugin::ToolPresentationFacts {
             intent_outcomes: Vec::new(),
-            possession: Vec::new(),
-            triggers: Vec::new(),
-            checkpoint_messages: Vec::new(),
-            stream: Default::default(),
-            model_return: crate::ModelToolReturn::from_output("fixture".into(), &output),
         });
         session
             .present_tool_result(
@@ -1632,7 +1619,7 @@ mod presentation_plan_tests {
                     duration_ms: 0,
                     artifacts: Arc::new(NoPresentationArtifacts),
                 },
-                settlement,
+                facts,
                 plan,
                 &crate::provider::AttachmentCapabilitySnapshot::default(),
             )

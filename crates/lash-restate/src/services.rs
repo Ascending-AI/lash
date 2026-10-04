@@ -557,8 +557,6 @@ lash_clients! {
             -> ();
         resolve(crate::durable_wait::RestateDurableWaitResolveRequest)
             -> crate::durable_wait::RestateDurableWaitResolveResponse;
-        fence_cancel_decided(crate::durable_wait::RestateDurableWaitCancelDecidedRequest)
-            -> ();
         cancel_all() -> ();
         revoke_all() -> ();
         begin_effect(crate::durable_wait::RestateDurableWaitEffectRequest) -> bool;

@@ -123,12 +123,12 @@ pub struct ToolPresentation {
 
 impl ToolPresentation {
     /// Refuses a presentation this build cannot read completely, the same
-    /// contract [`ToolSettlement::validate`](super::ToolSettlement::validate)
+    /// contract of a recorded presentation
     /// gives the settlement record.
     pub fn validate(&self) -> Result<(), RuntimeEffectControllerError> {
         if self.version != TOOL_PRESENTATION_VERSION {
             return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectToolSettlementVersion,
+                crate::RuntimeErrorCode::ToolPresentationFormat,
                 format!(
                     "tool presentation records format version {}, and this build reads version \
                      {TOOL_PRESENTATION_VERSION}; a presentation that cannot be read completely is \

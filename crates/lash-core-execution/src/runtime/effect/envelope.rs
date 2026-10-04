@@ -22,7 +22,7 @@ use crate::{
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
 use super::llm_outcome::{AssistantResponsePlan, AssistantStreamHookState, LlmStreamRecord};
-use super::tool_settlement::{ToolAttemptCapture, ToolSettlement};
+use super::tool_attempt_capture::ToolAttemptCapture;
 
 /// Effect-specific header whose address is present by construction.
 ///
@@ -192,9 +192,7 @@ impl<'de> Deserialize<'de> for RuntimeEffectInvocation {
 
 /// Fully serializable envelope emitted at Lash's nondeterministic boundary.
 ///
-/// Decoding validates the command against the address as construction does,
-/// so a retained tool-child request addressed outside its opener's scope is
-/// refused at decode rather than trusted.
+/// Decoding validates the invocation and command as construction does.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "RuntimeEffectEnvelopeWire")]
 pub struct RuntimeEffectEnvelope {
@@ -251,7 +249,7 @@ impl RuntimeEffectEnvelope {
         command: RuntimeEffectCommand,
     ) -> Result<Self, RuntimeEffectControllerError> {
         invocation.validate()?;
-        validate_effect_command(&invocation.address, &command)?;
+        validate_effect_command(&command)?;
         Ok(Self {
             invocation,
             command,
@@ -308,11 +306,6 @@ impl RuntimeEffectCommand {
     /// replay compares.
     pub fn without_trace_provenance(&self) -> Option<Self> {
         match self {
-            Self::ToolInvocation { request } if request.trace_request.is_some() => {
-                let mut request = request.clone();
-                request.trace_request = None;
-                Some(Self::ToolInvocation { request })
-            }
             Self::IngestTriggerOccurrence { request } if !request.trace.is_empty() => {
                 let mut request = request.clone();
                 request.trace = lash_trace::TraceScopeOffer::default();
@@ -373,7 +366,6 @@ impl ProcessCommand {
 }
 
 fn validate_effect_command(
-    address: &EffectAddress,
     command: &RuntimeEffectCommand,
 ) -> Result<(), RuntimeEffectControllerError> {
     if let RuntimeEffectCommand::ToolAttempt {
@@ -390,10 +382,6 @@ fn validate_effect_command(
                 "runtime effect tool attempt must satisfy 1 <= attempt <= max_attempts, got {attempt}/{max_attempts}"
             ),
         ));
-    }
-    if let RuntimeEffectCommand::ToolInvocation { request } = command {
-        request.validate()?;
-        request.validate_address(address)?;
     }
     Ok(())
 }
@@ -484,20 +472,6 @@ pub enum RuntimeEffectCommand {
         execution_grant: Option<Box<crate::ToolExecutionGrant>>,
         attempt: u32,
         max_attempts: u32,
-    },
-    /// One tool child of a durable effect group, at invocation level
-    /// (ADR 0099 §2, §3).
-    ///
-    /// [`ToolAttempt`](Self::ToolAttempt) does not name this: it is the atomic
-    /// body of a single attempt — the thing that runs inside a recorded body —
-    /// so it cannot carry retry, which is a second attempt with a second
-    /// envelope hash. The payload is the request that reconstructs the child
-    /// from the journal alone, which is what makes an accepted group's
-    /// membership recoverable (W1, W2).
-    ///
-    /// Boxed to keep the command inside its measured size budget below.
-    ToolInvocation {
-        request: Box<super::tool_child::ToolChildRequest>,
     },
     /// Durably arm a deferred dispatch's completion key.
     ArmToolCompletion {
@@ -676,8 +650,8 @@ pub enum RuntimeEffectCommand {
     /// call runs under (FIG-3538); every sync carries it, the protocol-start
     /// one included (FIG-3587).
     SyncExecutionEnvironment,
-    /// Validate and hold the environment a tool child's request names
-    /// (ADR 0099 §3, FIG-3683). The recorded outcome carries its digest,
+    /// Validate and hold the recorded process execution environment.
+    /// The recorded outcome carries its digest,
     /// whose immutable bytes the execution referrer keeps available to replay.
     ///
     /// The outcome is that reference, or the refusal of an environment the
@@ -712,20 +686,6 @@ pub enum RuntimeEffectCommand {
 const _: () = assert!(std::mem::size_of::<RuntimeEffectCommand>() <= 256);
 
 impl RuntimeEffectCommand {
-    /// The completion key a group child running this command parks on, when
-    /// it is a deferrable tool child (see
-    /// [`ToolChildRequest::completion_wait`](super::ToolChildRequest::completion_wait)).
-    /// Every other command delivers no completion to a key of its own.
-    #[must_use]
-    pub fn group_child_completion_wait(
-        &self,
-    ) -> Option<(crate::ExecutionScope, crate::AwaitEventWaitIdentity)> {
-        match self {
-            Self::ToolInvocation { request } => request.completion_wait(),
-            _ => None,
-        }
-    }
-
     /// Boxes one process command at the effect boundary for effect-host and process-engine
     /// implementors so the durable envelope remains size-bounded.
     pub fn process(command: ProcessCommand) -> Self {
@@ -756,7 +716,6 @@ impl RuntimeEffectCommand {
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
-            Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
             Self::ArmToolCompletion { .. } => RuntimeEffectKind::ArmToolCompletion,
             Self::AwaitToolCompletions { .. } => RuntimeEffectKind::AwaitToolCompletions,
             Self::IncorporateGroupSettlements { .. } => {
@@ -1359,35 +1318,6 @@ pub enum RuntimeEffectOutcome {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         capture: Option<Box<ToolAttemptCapture>>,
     },
-    /// What one tool child of a durable effect group settled on
-    /// (ADR 0099 §2, §6, §13).
-    ///
-    /// The counterpart of
-    /// [`ToolInvocation`](RuntimeEffectCommand::ToolInvocation), and not a
-    /// [`ToolAttempt`](Self::ToolAttempt): that is one attempt's atomic body,
-    /// so it cannot express a child that retried.
-    ///
-    /// `outcome` is exactly the terminal the per-leaf coordinator produced;
-    /// `settlement` is the child's complete semantic record, including the
-    /// `ModelToolReturn` the singleton plugin projector resolved at the
-    /// child's own presentation boundary. The opener incorporates the
-    /// settlement as recorded evidence; it never re-executes a declaration and
-    /// never re-runs the projector.
-    ///
-    /// An inline dispatch carries its real result. A deferred dispatch uses
-    /// `ToolInvocationDeferred`; its caller owns the completion from that durable final onward.
-    ToolInvocation {
-        outcome: Box<crate::tool_dispatch::ToolDispatchOutcome>,
-        /// The §6/§13 settlement the child accumulated in its own address
-        /// space. Always journaled: a child that reached a terminal always
-        /// produced a settled presentation.
-        settlement: Box<ToolSettlement>,
-    },
-    /// The dispatch is settled. Its original completion key stays open and
-    /// the Run owns the armed resolver and eventual presentation.
-    ToolInvocationDeferred {
-        completion: Box<crate::tool_dispatch::DeferredToolCompletion>,
-    },
     ArmToolCompletion {},
     AwaitToolCompletions {
         event: ToolCompletionEvent,
@@ -1880,9 +1810,6 @@ impl RuntimeEffectOutcome {
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
-            Self::ToolInvocation { .. } | Self::ToolInvocationDeferred { .. } => {
-                RuntimeEffectKind::ToolInvocation
-            }
             Self::ArmToolCompletion { .. } => RuntimeEffectKind::ArmToolCompletion,
             Self::AwaitToolCompletions { .. } => RuntimeEffectKind::AwaitToolCompletions,
             Self::IncorporateGroupSettlements { .. } => {

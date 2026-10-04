@@ -2,6 +2,12 @@
 
 ## Status
 
+The tool-child transport examples and source anchors below are superseded by
+the [Tool-run contract](../architecture/tool-run-contract.md) (FIG-4899).
+Logical calls use Run admission and atomic attempts; deferred results use
+immutable source seals. Presentation reads `ToolPresentationFacts`. The
+child driver, request/settlement transport and live-context lending are retired.
+
 Accepted.
 
 ## Context

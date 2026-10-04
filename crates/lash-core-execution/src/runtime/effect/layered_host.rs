@@ -27,12 +27,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
-    CompletionKeyPreparation, EffectGroupChildCommitOutcome, EffectGroupHandle, EffectHost,
-    EffectJournalRetirement, ExecutionScope, GroupChildBinding, GroupChildFinalCommit,
-    GroupExecutors, GroupSettlement, LoserPolicy, RankedGroupSettlement, Resolution,
-    ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
-    SegmentProgress, ToolChildHost,
+    CompletionKeyPreparation, EffectGroupHandle, EffectHost, EffectJournalRetirement,
+    ExecutionScope, GroupChildBinding, GroupExecutors, GroupSettlement, LoserPolicy,
+    RankedGroupSettlement, Resolution, ResolveOutcome, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController, SegmentProgress,
 };
 use crate::{RuntimeError, RuntimeErrorCode, SessionId};
 
@@ -427,10 +426,6 @@ impl EffectHost for LayeredEffectHost {
             self.inner.route_handler_child_controller(controller)?,
             Arc::clone(&self.layer),
         )
-    }
-
-    fn install_tool_child_host(&self, candidate: Arc<ToolChildHost>) -> Option<Arc<ToolChildHost>> {
-        self.inner.install_tool_child_host(candidate)
     }
 
     /// The layered host itself, so a turn-control binding composed from this
@@ -830,13 +825,6 @@ impl RuntimeEffectController for LayeredController<'_> {
         self.layer
             .close_effect_group(self.inner.as_ref(), handle, disposition)
             .await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: GroupChildFinalCommit,
-    ) -> Result<EffectGroupChildCommitOutcome, RuntimeEffectControllerError> {
-        self.inner.as_ref().commit_group_child_final(commit).await
     }
 
     async fn await_group_child_drain_admission(

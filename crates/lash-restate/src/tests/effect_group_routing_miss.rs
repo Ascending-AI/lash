@@ -435,21 +435,6 @@ pub(crate) fn before_seat(group_key: &str) {
     }
 }
 
-/// Shifts held at their end, by group (FIG-4785): the child's shift has
-/// returned on a live attempt, and nothing of its outcome is journaled yet.
-static SETTLE_HOLDS: LazyLock<Mutex<HashMap<String, SeatCut>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Hold a tool child between its shift and the first journal entry of its
-/// settlement, once.
-pub(crate) async fn before_settled(group_key: &str) {
-    let hold = SETTLE_HOLDS.lock_recover().remove(group_key);
-    if let Some((reached, release)) = hold {
-        reached.notify_one();
-        release.notified().await;
-    }
-}
-
 /// Lose the worker after its settlement became durable and before its invocation ended.
 pub(crate) async fn after_seat(group_key: &str) -> HandlerResult<()> {
     let cut = SEAT_CUTS.lock_recover().remove(group_key);

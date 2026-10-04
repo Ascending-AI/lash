@@ -18,8 +18,6 @@ pub(crate) use execution_context::ToolObservationAttribution;
 mod opener_groups;
 mod process_handles;
 mod settlement_incorporation;
-#[cfg(test)]
-mod settlement_incorporation_tests;
 mod tool_attempt;
 pub(crate) mod tool_execution;
 pub(crate) mod tool_run;
@@ -37,8 +35,8 @@ pub use settlement_incorporation::{Incorporated, IncorporationLedger, Settlement
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{
     CompletedProtocolToolCall, ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply,
-    ToolAggregateOutcome, ToolAggregateRequest, ToolBatchReplies, ToolDispatchResult,
-    ToolInvocation, ToolInvocationReply, ToolRunAggregateCursor, ToolRunAggregatePoll,
+    ToolAggregateOutcome, ToolAggregateRequest, ToolBatchReplies, ToolInvocation,
+    ToolInvocationReply, ToolRunAggregateCursor, ToolRunAggregatePoll,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,10 +73,6 @@ pub enum ToolSurfaceDriftKind {
     Missing,
     /// The live tool with the recorded id links or dispatches differently.
     Changed,
-    /// A group tool child whose recorded surface holds no definition for its
-    /// own tool: nothing recorded to judge the live tool by, so it is served
-    /// only from the journal (FIG-3725).
-    Unrecorded,
 }
 
 impl ToolSurfaceDriftKind {
@@ -86,7 +80,6 @@ impl ToolSurfaceDriftKind {
         match self {
             Self::Missing => "missing from",
             Self::Changed => "changed in",
-            Self::Unrecorded => "unjudgeable against",
         }
     }
 }
@@ -886,7 +879,6 @@ impl Session {
         ))
         .map(|context| {
             context
-                .with_tool_children(self.services.tool_children.clone())
                 .with_fleet_format(
                     self.services
                         .store
@@ -895,10 +887,6 @@ impl Session {
                         .unwrap_or_else(crate::FleetFormat::current),
                 )
                 .with_live_tool_catalog(tool_surface.live_tool_catalog())
-                .with_unrecorded_session_sources(crate::runtime::effect::UnrecordedSessionSources {
-                    context_overlay_tools: !self.context_tools.is_empty(),
-                    ..Default::default()
-                })
         })
     }
 

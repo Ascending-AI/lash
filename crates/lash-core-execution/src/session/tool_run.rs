@@ -177,9 +177,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 .map(|address| {
                     crate::EffectOpener::turn(address.session_id.clone(), address.turn_id.clone())
                 })
-                .or_else(|| {
-                    crate::runtime::effect::opener_for_execution_scope(&self.admitted_scope())
-                })
+                .or_else(|| crate::EffectOpener::for_scope(&self.admitted_scope()).ok())
                 .ok_or_else(|| {
                     RuntimeEffectControllerError::from(ContinuationRefusal::ForeignOwner)
                 })?;

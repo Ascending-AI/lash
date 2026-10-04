@@ -2,7 +2,6 @@ use super::*;
 use crate::PluginError;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
-use lash_core_execution::core_internal::ToolChildHostRuntimeOps as _;
 
 impl<'run> RuntimeTurnDriver<'run> {
     /// The scope whose cancellation gate this turn's waits race: always the
@@ -19,11 +18,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         event_tx: &TurnObserver,
         chronological_projection: Arc<crate::ChronologicalProjection>,
     ) -> Result<crate::RuntimeExecutionContext<'run>, PluginError> {
-        self.execution_context_observing(
-            Arc::new(event_tx.clone()),
-            event_tx,
-            chronological_projection,
-        )
+        self.execution_context_observing(Arc::new(event_tx.clone()), chronological_projection)
     }
 
     /// [`Self::execution_context`] publishing through `observer` instead of
@@ -31,7 +26,6 @@ impl<'run> RuntimeTurnDriver<'run> {
     pub(super) fn execution_context_observing(
         &self,
         observer: Arc<dyn crate::engine::ObservationSink>,
-        event_tx: &TurnObserver,
         chronological_projection: Arc<crate::ChronologicalProjection>,
     ) -> Result<crate::RuntimeExecutionContext<'run>, PluginError> {
         let manager = self.session_services.clone();
@@ -71,7 +65,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 Arc::clone(&self.host.core.attachment_source_policy),
             )
             .map(|context| {
-                self.register_live_opener(context.dispatch(), event_tx);
                 let context = context
                     .with_tool_material_store(self.host.core.backend().tool_material_store());
                 let context = match &self.tool_run_owner {
@@ -97,86 +90,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                     .with_opener_state(self.opener_state.clone())
                     .with_turn_cancel_scope(self.turn_cancel_scope())
                     .with_turn_phase_probe(self.turn_phase_probe.clone())
-                    .with_unrecorded_session_sources(self.host.core.control.open_sources)
             })
     }
-
-    /// Publishes this turn as a live opener, lending its tool-execution context
-    /// to the group children it opens (ADR 0099 §2, §3).
-    ///
-    /// Called from the one place that builds a turn's dispatch context, and
-    /// re-registered on every later one: a turn builds a fresh context per
-    /// phase, and a child must borrow the live half of the *current* one.
-    /// Re-registration supersedes rather than duplicates, and the registry's
-    /// generation guard keeps the superseded guard from evicting its
-    /// replacement.
-    ///
-    /// The lent context's observation sink is replaced before capture: the
-    /// registration owns a sink gated on its `ended` token, which fires on
-    /// supersede and on the release [`run`](super::machine) performs before it
-    /// returns, so a `RunToCompletion` child that outlives its opener stops
-    /// publishing into the turn's observer. The gate replaces the forwarding
-    /// task the channel topology needed (ADR 0105 §1: observation is
-    /// synchronous; there is no channel to pin or forwarder to await).
-    ///
-    /// Three ways this registers nothing, all of them conservative — the child
-    /// stays accepted rather than running under a context that cannot serve it:
-    /// the deployment routes no tool children; the scope is not one an opener
-    /// is derived from (see
-    /// [`opener_for_execution_scope`](crate::facade_support::opener_for_execution_scope));
-    /// or the host hands out no owned controller for the captured context's
-    /// controller slots — the lend a `'static` capture needs, since the
-    /// opener's own live controller (a Restate handler's `ctx`-bound one)
-    /// cannot outlive its frame.
-    fn register_live_opener(
-        &self,
-        dispatch: &std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
-        stream_event_tx: &TurnObserver,
-    ) {
-        if let Some(registration) = register_live_opener(
-            &self.host,
-            &self.scoped_effect_controller,
-            dispatch,
-            stream_event_tx,
-            self.children_stop.clone(),
-        ) {
-            *self.live_opener.lock_recover() = Some(registration);
-        }
-    }
-}
-
-pub(in crate::runtime) fn register_live_opener(
-    host: &RuntimeHost,
-    scoped_effect_controller: &ScopedEffectController<'_>,
-    dispatch: &Arc<crate::tool_dispatch::ToolDispatchContext<'_>>,
-    stream_event_tx: &TurnObserver,
-    children_stop: CancellationToken,
-) -> Option<crate::facade_support::LiveOpenerGuard> {
-    let tool_children = host.core.control.tool_children.as_ref()?;
-    let opener = crate::facade_support::opener_for_execution_scope(
-        scoped_effect_controller.admitted_scope(),
-    )?;
-    let Ok(Some(lent_controller)) = host
-        .core
-        .control
-        .effect_host
-        .scoped_static(scoped_effect_controller.admitted_scope().clone())
-    else {
-        return None;
-    };
-    let ended = CancellationToken::new();
-    let gate = {
-        let ended = ended.clone();
-        move || !ended.is_cancelled()
-    };
-    let context = crate::facade_support::LiveOpenerContext::capture_with_observer(
-        dispatch.as_ref(),
-        lent_controller,
-        crate::engine::GatedObservationSink::new(gate, Arc::new(stream_event_tx.clone())),
-        children_stop,
-    );
-    let registration = tool_children
-        .openers()
-        .register_with_token(opener, context, ended);
-    Some(registration)
 }

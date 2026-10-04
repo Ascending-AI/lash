@@ -13,18 +13,20 @@ pub type PluginSessionTask = PluginFuture<()>;
 /// A before-turn observer: what it contributes to the turn being prepared.
 pub type BeforeTurnHook =
     Arc<dyn Fn(TurnHookContext) -> PluginFuture<TurnContributions> + Send + Sync>;
-/// One composable presentation step (ADR 0099 §6 presentation boundary,
-/// FIG-3420): folds the previous step's `ModelToolReturn` with the recorded
-/// settlement into the next. Pure over its inputs; anything impure it needs
-/// (retaining bytes) goes through
-/// [`ToolResultProjectionContext::artifacts`], which is journaled.
+/// Realized declarations available to presentation callbacks.
+#[derive(Clone, Debug, Default)]
+pub struct ToolPresentationFacts {
+    pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+}
+
+/// One presentation step folds the previous return with recorded declaration facts.
+/// Retaining bytes goes through the journaled artifact port.
 pub struct ToolPresentationInput {
     /// The return the chain has produced so far — `ModelToolReturn::from_output`
     /// before the first step, then each prior step's answer.
     pub previous: crate::ModelToolReturn,
-    /// The settlement the presented result is being recorded into. Read-only
-    /// evidence for the step: its `model_return` is the pre-chain baseline.
-    pub settlement: Arc<crate::runtime::effect::ToolSettlement>,
+    /// Read-only evidence of the declarations realized before presentation.
+    pub facts: Arc<ToolPresentationFacts>,
     pub context: ToolResultProjectionContext,
 }
 

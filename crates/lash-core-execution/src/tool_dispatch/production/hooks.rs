@@ -242,17 +242,8 @@ impl ProductionToolHandlers<'_> {
             .unwrap_or_default();
         let mut output = captured.output.clone();
         super::super::attempt_coordinator::project_recorded_intent_outcomes(&mut output, &outcomes);
-        let settlement = Arc::new(crate::runtime::effect::ToolSettlement {
-            version: crate::runtime::effect::TOOL_SETTLEMENT_VERSION,
+        let facts = Arc::new(crate::plugin::ToolPresentationFacts {
             intent_outcomes: outcomes.clone(),
-            possession: Vec::new(),
-            triggers: Vec::new(),
-            checkpoint_messages: Vec::new(),
-            stream: Default::default(),
-            model_return: crate::ModelToolReturn::from_output(
-                prepared.call.tool_name.clone(),
-                &output,
-            ),
         });
         let projection = crate::plugin::ToolResultProjectionContext {
             owner: dispatch.owner.runtime_owner(),
@@ -271,7 +262,7 @@ impl ProductionToolHandlers<'_> {
             .plugins
             .present_tool_result(
                 projection,
-                settlement,
+                facts,
                 &prepared.input.binding.presentation,
                 &dispatch.execution_env_spec.policy.attachment_acceptance,
             )

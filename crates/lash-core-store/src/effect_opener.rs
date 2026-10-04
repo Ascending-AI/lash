@@ -81,10 +81,8 @@ impl IncorporationLedger {
 
 /// The exact logical opener that durable work binds (ADR 0099 §1).
 ///
-/// Shared vocabulary rather than a per-lane spelling: the retained tool-child
-/// request (FIG-3408) records it, recovery validates it (FIG-3396 §1), and the
-/// Lashlang host bridges mint their identities under it (FIG-3394). One type so
-/// the three cannot disagree about what an opener is.
+/// Run admission records it, recovery validates it, and language host bridges
+/// mint their identities under it. Every path shares the same owner value.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
 )]

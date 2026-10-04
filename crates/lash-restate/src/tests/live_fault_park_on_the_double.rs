@@ -47,8 +47,7 @@ fn fixture(harness: LiveConformanceHarness, tier: &str) -> Fixture {
 
 async fn double_fixture(tier: HarnessStoreTier, name: &str) -> Fixture {
     fixture(
-        LiveConformanceHarness::start_for_tool_children_over(HarnessServer::in_process(), tier)
-            .await,
+        LiveConformanceHarness::start_for_tools_over(HarnessServer::in_process(), tier).await,
         name,
     )
 }
@@ -80,10 +79,7 @@ mod live {
     lash_conformance::live_fault_park_tests!(
         #[ignore = "requires an isolated Restate server; run by the effect-group suite"]
         {
-            fixture(
-                LiveConformanceHarness::start_for_tool_children().await,
-                "live",
-            )
+            fixture(LiveConformanceHarness::start_for_tools().await, "live")
         }
     );
 }

@@ -33,11 +33,8 @@ pub fn default_state() -> RuntimeSessionState {
 /// Admits `admitted` on a runtime host's own effect host.
 ///
 /// A turn-executing test must bind its scope to the host the turn runs on: the
-/// driver publishes the live opener to that host's `ToolChildHost` registry,
-/// the execution context publishes recorded envs to that host's env store,
-/// and group children resolve both through the executors registered on the
-/// admitted controller — a scope minted on a foreign controller leaves every
-/// child unroutable (ADR 0099 §2, §3).
+/// execution context publishes recorded environments to that host's store,
+/// and group executors use the admitted controller's authority.
 /// `scoped_static` returns `None` for hosts that lend no `'static` controller
 /// (a Restate `ctx`-bound one); there the caller's own bound controller is the
 /// scope and this helper does not apply.
@@ -54,7 +51,7 @@ pub fn host_admitted_scope(
 }
 
 /// Admits `admitted` on `backend`'s effect host: the host a runtime built
-/// over `backend` runs on, so its tool-child routing and env store are the
+/// over `backend` runs on, so its process wiring and env store are the
 /// runtime's own.
 pub fn backend_admitted_scope(
     backend: &crate::Backend,

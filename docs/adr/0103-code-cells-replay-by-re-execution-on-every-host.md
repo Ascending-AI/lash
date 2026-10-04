@@ -88,25 +88,16 @@ Evidence: `crates/lash-core/src/runtime/turn_driver/effects.rs:346`,
 `crates/lash-protocol-rlm/src/executor/mod.rs:601`,
 `crates/lash-restate/src/controller/journaled_effect.rs:314`.
 
-### Group tool children judge their own tools
+### Recorded Run admission judges tool bindings
 
-A tool child's request carries its recorded definition. The child judges that
-definition against the registry where it executes, because the engine can retry
-it independently of the opener. A drifted child serves dispatching effects
-only from its journal. The opener offers the recorded membership rather than
-injecting a live drift verdict into the group-open request.
+The Run retains the admitted executable, preparation and presentation
+bindings. Replay serves durable attempts without a fresh body; binding or
+canonical-material drift refuses typed before new work. There is no
+independently replayed tool-child request or live-context reconstruction.
+Tool bodies remain opaque under [ADR 0116](0116-tools-are-opaque.md).
 
-A turn-scoped child's live-frontier refusal writes the turn's park and ends
-its attempt without seating a settlement. Its opener waits. A closed or
-retired group parks no turn. A binding-drift refusal without an attributed
-turn settles as a typed child outcome. Tool bodies are opaque under
-[ADR 0116](0116-tools-are-opaque.md); they do not issue nested controller
-commands as orchestration bodies.
-
-Evidence: `crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs:978`,
-`crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs:1080`,
-`crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs:1363`,
-`crates/lash-restate/src/effect_group/dispatch.rs:99`.
+Evidence: `crates/lash-core-execution/src/tool_dispatch/production.rs` and
+`crates/lash-restate/src/tests/singleton_tool_run_on_the_double.rs`.
 
 ### Executable generation at admission
 
@@ -132,7 +123,7 @@ Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs:82`,
 
 `effect_controller_code_cell_replays_by_reexecution` requires two local cell
 executions across live and replay passes and one nested effect execution.
-The binding, tool-child and model-call drift laws require recorded results to
+The binding, native Run admission and model-call drift laws require recorded results to
 replay, fresh drifted dispatch to park, and restored tools to complete.
 The laws use the controller/backend contracts. The current storage matrix is
 SQLite file, SQLite memory and PostgreSQL; execution hosts are the Restate
@@ -140,7 +131,7 @@ server double, live Restate and lash-sim's in-process effect host.
 
 Evidence: `crates/lash-conformance/src/conformance/effect_host.rs:595`,
 `crates/lash-conformance/src/conformance/cell_binding_drift.rs:306`,
-`crates/lash-conformance/src/conformance/tool_child_drift.rs:319`,
+`crates/lash-restate/src/tests/singleton_tool_run_on_the_double.rs`,
 `crates/lash-conformance/src/conformance/model_call_drift_park.rs:203`.
 
 ## Rejected alternatives

@@ -227,8 +227,9 @@ a stand-in for its own id.
 - **Tool intents** are keyed by `RuntimeOwner`. The identity encoding tags
   the owner, and the durable `tool_intent_submissions` column is `owner` on
   both backends.
-- **A group tool child a process opened** runs, when its opener is not live,
-  under a process runtime built from the child's recorded environment.
+- **A tool call in a process Run** uses that process's recorded admission,
+  environment and owner. It does not reconstruct a child runtime or borrow
+  live opener state.
 - **A subagent spawned inside a process** parents under the session that
   originated the process chain, read by name, and is caused by the process.
   A host-originated chain and a `ParentFork` capability refuse (ADR 0116).

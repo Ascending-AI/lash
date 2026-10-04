@@ -254,7 +254,6 @@ pub(super) fn turn_effect_executor(
         turn_phase_probe: driver.turn_phase_probe.clone(),
         turn_control: Arc::clone(&driver.turn_control),
         protocol_reply: Default::default(),
-        live_opener: std::sync::Mutex::new(None),
         opener_state: driver.opener_state.clone(),
         turn_cancel: driver.turn_cancel.clone(),
         children_stop: driver.children_stop.clone(),

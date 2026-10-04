@@ -470,7 +470,6 @@ impl LashRuntime {
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_control: Arc::clone(&turn_control),
             protocol_reply: Default::default(),
-            live_opener: std::sync::Mutex::new(None),
             opener_state,
             turn_cancel: None,
             children_stop: CancellationToken::new(),
@@ -520,7 +519,7 @@ impl LashRuntime {
                 if let Some(evidence) = honoured {
                     driver.record_turn_cancel(evidence);
                     let cancellation_messages = driver.turn_pipeline.message_sequence();
-                    let opener = driver.take_opener_for_commit(observer)?;
+                    let opener = driver.take_opener_for_commit()?;
                     let mut driver = driver.reclaim();
                     driver
                         .withheld_terminal_work
@@ -558,7 +557,7 @@ impl LashRuntime {
                 return Err(err);
             }
         };
-        let opener = driver.take_opener_for_commit(observer)?;
+        let opener = driver.take_opener_for_commit()?;
         let driver = driver.reclaim();
         self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
         tracing::debug!(

@@ -269,7 +269,6 @@ mod effect_group_rank_reservation;
 pub(crate) mod effect_group_routing_miss;
 mod effect_group_sdk_preconditions;
 mod effect_group_seat_chain;
-mod effect_group_session_gate;
 mod effect_group_settlement_wakes;
 mod effect_group_shape;
 mod effect_host_laws_on_the_double;

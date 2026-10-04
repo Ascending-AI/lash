@@ -400,12 +400,11 @@ mod recorded_termination {
         let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
             unreachable!("in_process names the server double");
         };
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-                seed,
-                always_replay,
-            })
-            .await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::InProcess {
+            seed,
+            always_replay,
+        })
+        .await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let prefix: &'static str = Box::leak(

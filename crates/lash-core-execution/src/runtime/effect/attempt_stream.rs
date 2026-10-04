@@ -4,9 +4,7 @@
 //! and turn activities to the opener as they happen. A body with no live
 //! stream to reach records them instead: a Run attempt records them in its
 //! attempt capture (X), and the Run emits them when it presents the call
-//! (FIG-4880); a tool child (FIG-3712) still carries them on its
-//! [`ToolSettlement`](super::ToolSettlement) until FIG-4899 removes that
-//! transport. They are late, never dropped, unless the budget below cut them.
+//! (FIG-4880). They are late, never dropped, unless the budget below cut them.
 //!
 //! The journal owns this shape, not the stream types. A recorded event holds
 //! its event's serialized form as an opaque payload, tagged only with the
@@ -25,12 +23,6 @@
 //!   `output` appear on its session event and on its activity. A payload
 //!   whose field equals the same call's earlier recorded field keeps a
 //!   reference to that entry instead, and emission restores it.
-//! * **What the child's settlement already holds is not recorded again.** A
-//!   tool child's call events carry the arguments and output its own
-//!   journaled call record holds. Once the child's shift has returned, any
-//!   sizable part of a recorded payload equal to a part of that record is
-//!   replaced by a reference to it, and emission restores it from that
-//!   record.
 //! * **A byte budget caps the whole stream.** Past
 //!   [`ATTEMPT_STREAM_BYTE_BUDGET`], nothing more is recorded, and a typed
 //!   [`AttemptStreamTruncation`] says how much was dropped.
@@ -52,11 +44,6 @@ pub const ATTEMPT_STREAM_BYTE_BUDGET: usize = 256 * 1024;
 /// The fields a call's session event and activity both carry, stored
 /// once per call.
 const SHARED_CALL_FIELDS: [&str; 2] = ["args", "output"];
-
-/// The smallest serialized part of a payload worth replacing by a reference
-/// to the child's own call record: below this, the reference costs about as
-/// much as the value.
-const SETTLED_MIN_BYTES: usize = 64;
 
 /// The recorded stream an attempt capture carries.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,11 +69,6 @@ pub struct AttemptStreamEvent {
     /// same value for the same call: field name to that entry's index.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub shared: BTreeMap<String, u32>,
-    /// Parts of `payload` held by the child's own journaled call record
-    /// instead: a JSON pointer into `payload` (left `null` there) to a JSON
-    /// pointer into that record.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub settled: BTreeMap<String, String>,
 }
 
 /// The stream channel a recorded event arrived on.
@@ -120,35 +102,19 @@ impl AttemptStream {
         self.events.is_empty() && self.truncated.is_none()
     }
 
-    /// The events to emit, in recorded order, with every referenced part
-    /// restored: from `record`, the child's own journaled call record (as
-    /// JSON), and from the earlier entries that hold a shared field. A
-    /// payload this build cannot decode is skipped and counted.
-    pub fn decode(&self, record: &Value) -> (Vec<DecodedStreamEvent>, usize) {
-        let restored: Vec<Value> = self
-            .events
-            .iter()
-            .map(|event| {
-                let mut payload = event.payload.clone();
-                for (at, from) in &event.settled {
-                    if let (Some(slot), Some(value)) =
-                        (payload.pointer_mut(at), record.pointer(from))
-                    {
-                        *slot = value.clone();
-                    }
-                }
-                payload
-            })
-            .collect();
+    /// Decode events in channel order, restoring fields shared with earlier
+    /// entries. A payload this build cannot decode is skipped and counted.
+    pub fn decode(&self) -> (Vec<DecodedStreamEvent>, usize) {
         let mut decoded = Vec::with_capacity(self.events.len());
         let mut undecodable = 0;
-        for (event, payload) in self.events.iter().zip(&restored) {
-            let mut payload = payload.clone();
+        for event in &self.events {
+            let mut payload = event.payload.clone();
             if let Value::Object(fields) = &mut payload {
                 for (field, source) in &event.shared {
-                    if let Some(value) = restored
+                    if let Some(value) = self
+                        .events
                         .get(*source as usize)
-                        .and_then(|source| source.get(field))
+                        .and_then(|source| source.payload.get(field))
                     {
                         fields.insert(field.clone(), value.clone());
                     }
@@ -169,87 +135,6 @@ impl AttemptStream {
         }
         (decoded, undecodable)
     }
-
-    /// Replaces every sizable part of a recorded payload that equals a part
-    /// of `record`, the child's own journaled call record (as JSON), by a
-    /// reference to it. The largest matching part wins; nothing inside it is
-    /// searched further.
-    pub(crate) fn settle_against(&mut self, record: &Value) {
-        let mut index: BTreeMap<String, String> = BTreeMap::new();
-        index_parts(record, String::new(), &mut index);
-        if index.is_empty() {
-            return;
-        }
-        for event in &mut self.events {
-            let mut settled = BTreeMap::new();
-            settle_parts(&mut event.payload, String::new(), &index, &mut settled);
-            event.settled.extend(settled);
-        }
-    }
-}
-
-/// Every part of `value` at least [`SETTLED_MIN_BYTES`] long, by serialized
-/// form, to its JSON pointer: the first, in document order, of equal parts.
-fn index_parts(value: &Value, pointer: String, index: &mut BTreeMap<String, String>) {
-    let serialized = serde_json::to_string(value).unwrap_or_default();
-    if serialized.len() < SETTLED_MIN_BYTES {
-        return;
-    }
-    match value {
-        Value::Object(fields) => {
-            for (key, field) in fields {
-                index_parts(field, format!("{pointer}/{}", escape_pointer(key)), index);
-            }
-        }
-        Value::Array(items) => {
-            for (position, item) in items.iter().enumerate() {
-                index_parts(item, format!("{pointer}/{position}"), index);
-            }
-        }
-        _ => {}
-    }
-    index.entry(serialized).or_insert(pointer);
-}
-
-fn settle_parts(
-    value: &mut Value,
-    pointer: String,
-    index: &BTreeMap<String, String>,
-    settled: &mut BTreeMap<String, String>,
-) {
-    let serialized = serde_json::to_string(value).unwrap_or_default();
-    if serialized.len() < SETTLED_MIN_BYTES {
-        return;
-    }
-    if !pointer.is_empty()
-        && let Some(from) = index.get(&serialized)
-    {
-        settled.insert(pointer, from.clone());
-        *value = Value::Null;
-        return;
-    }
-    match value {
-        Value::Object(fields) => {
-            for (key, field) in fields.iter_mut() {
-                settle_parts(
-                    field,
-                    format!("{pointer}/{}", escape_pointer(key)),
-                    index,
-                    settled,
-                );
-            }
-        }
-        Value::Array(items) => {
-            for (position, item) in items.iter_mut().enumerate() {
-                settle_parts(item, format!("{pointer}/{position}"), index, settled);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn escape_pointer(key: &str) -> String {
-    key.replace('~', "~0").replace('/', "~1")
 }
 
 /// Builds a [`AttemptStream`] as events arrive.
@@ -316,7 +201,6 @@ impl AttemptStreamBuilder {
             channel,
             payload,
             shared,
-            settled: BTreeMap::new(),
         });
     }
 
@@ -465,46 +349,6 @@ mod tests {
             builder.push(channel, Ok(payload));
         }
         builder.finish()
-    }
-
-    /// A real completion round-trips through the settled reference:
-    /// emission restores the output from the child's own record.
-    #[test]
-    fn a_settled_completion_decodes_to_its_output() {
-        let output = crate::ToolCallOutput::success(serde_json::json!({"rows": "q".repeat(128)}));
-        let mut builder = AttemptStreamBuilder::default();
-        builder.push_activity(&crate::TurnActivity::new(
-            crate::TurnActivityId::new("tool:call-1"),
-            crate::TurnEvent::ToolCallCompleted {
-                call_id: crate::ToolCallId::fixture("nested"),
-                provider_call_id: None,
-                name: "leaf".to_string(),
-                args: serde_json::json!({}),
-                output: output.clone(),
-                duration_ms: 1,
-                graph_key: None,
-            },
-        ));
-        let mut stream = builder.finish();
-        let record = serde_json::json!({"tool": "leaf", "args": {}, "output": output.clone()});
-        stream.settle_against(&record);
-        assert!(
-            !stream.events[0].settled.is_empty(),
-            "the output is referenced"
-        );
-        let (decoded, undecodable) = stream.decode(&record);
-        assert_eq!(undecodable, 0);
-        match &decoded[..] {
-            [DecodedStreamEvent::Activity(activity)] => match &activity.event {
-                crate::TurnEvent::ToolCallCompleted {
-                    output: restored, ..
-                } => {
-                    assert_eq!(restored, &output);
-                }
-                other => panic!("unexpected event {other:?}"),
-            },
-            other => panic!("unexpected decode {other:?}"),
-        }
     }
 
     #[test]

@@ -279,8 +279,7 @@ mod recorded_execution_controls_live {
         std::sync::Arc<dyn lash_core::StoreSet>,
         std::sync::Arc<dyn lash_conformance::ConformanceTurnRunner>,
     ) {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -316,9 +315,8 @@ mod recorded_execution_controls_live {
 lash_conformance::turn_runner_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness = Arc::new(
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await,
-        );
+        let harness =
+            Arc::new(effect_group_conformance::LiveConformanceHarness::start_for_tools().await);
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -360,8 +358,7 @@ lash_conformance::turn_runner_tests!(
 lash_conformance::migrated_tools_redrive_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -396,8 +393,7 @@ lash_conformance::migrated_tools_redrive_tests!(
 lash_conformance::frame_open_redrive_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -414,8 +410,7 @@ lash_conformance::frame_open_redrive_tests!(
 lash_conformance::queued_input_runs_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -434,8 +429,7 @@ lash_conformance::queued_input_runs_tests!(
 lash_conformance::bound_trigger_duplicate_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -492,8 +486,7 @@ fn declared_start_tier(
 lash_conformance::declared_start_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         let tier = declared_start_tier(&harness);
         (harness, tier)
     }
@@ -507,8 +500,7 @@ lash_conformance::declared_start_tests!(
 lash_conformance::tool_batch_parallelism_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -544,8 +536,7 @@ lash_conformance::tool_batch_parallelism_tests!(
 lash_conformance::batch_sugar_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -575,8 +566,7 @@ lash_conformance::batch_sugar_tests!(
 lash_conformance::tool_call_identity_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         // Restate state outlives a run, so each run names its own sessions.
         let tier = lash_conformance::ToolCallIdentityTier {
             prefix: format!("restate-tool-call-identity-{}", harness.run_nonce()),
@@ -595,8 +585,7 @@ lash_conformance::tool_call_identity_tests!(
 lash_conformance::vm_broker_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         // Restate state outlives a run: each run names its own sessions.
         let prefix = format!("restate-vm-broker-{}", harness.run_nonce());
         let runner = harness.turn_runner();
@@ -611,8 +600,7 @@ lash_conformance::vm_broker_tests!(
 lash_conformance::segment_redrive_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         // Restate state outlives a run: each run names its own processes.
         let prefix: &'static str =
             Box::leak(format!("restate-segment-redrive-{}", harness.run_nonce()).into_boxed_str());
@@ -629,8 +617,7 @@ lash_conformance::segment_redrive_tests!(
 lash_conformance::admitted_head_redrive_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -812,7 +799,7 @@ async fn live_restate_group_index_answers_its_own_notices() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
 async fn live_restate_a_batch_with_index_owned_notices_answers_every_member() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+    let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
     let label = format!("restate-notice-batch-{}", harness.run_nonce());
     tokio::time::timeout(
         Duration::from_secs(180),
@@ -914,8 +901,7 @@ mod on_the_server_double {
     });
 
     lash_conformance::turn_runner_tests!({
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -949,8 +935,7 @@ mod on_the_server_double {
     // retry under the restored surface replays it and finishes the turn once,
     // and the commit clears the park.
     lash_conformance::model_call_drift_park_tests!({
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
         let host = harness.endpoint_host();
         let runner = harness.turn_runner();
         let prefix: &'static str =
@@ -967,8 +952,7 @@ mod on_the_server_double {
     });
 
     lash_conformance::admitted_head_redrive_tests!({
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -2079,7 +2063,7 @@ pub(super) fn recovery_artifact_store() -> lashlang::LashlangArtifacts {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires isolated native Restate and PostgreSQL services"]
 async fn live_attachment_materialization_turn_witnesses() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+    let harness = effect_group_conformance::LiveConformanceHarness::start_for_tools().await;
     let directory = tempfile::tempdir().expect("file store directory");
     let attachments = tempfile::tempdir().expect("PostgreSQL attachments");
     #[expect(

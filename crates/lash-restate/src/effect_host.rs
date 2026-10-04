@@ -16,8 +16,7 @@ use lash_core::{
     Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
-    ScopedEffectController,
-    facade_support::{RuntimeAwaitEventOptions, ToolChildHost},
+    ScopedEffectController, facade_support::RuntimeAwaitEventOptions,
 };
 
 use crate::durable_wait::{
@@ -53,16 +52,6 @@ pub use journal_verdict::RestateJournalAuthority;
 #[derive(Clone)]
 pub struct RestateEffectHost {
     controller: Arc<RestateEffectHostController>,
-    /// This host's one tool-child wiring (ADR 0099 §2), shared across clones.
-    ///
-    /// Beside the controller's `group_executors` rather than inside it,
-    /// because the two answer different questions: that cell holds whatever
-    /// resolver was registered, and this one holds the live-opener registry a
-    /// turn or process must register its opener in. A get-or-init, so a host
-    /// backing several runtimes hands them all the same registry — two
-    /// registries on one host would mean a turn registering in one while the
-    /// resolver read the other.
-    tool_children: Arc<OnceLock<Arc<ToolChildHost>>>,
     turn_attach: Arc<crate::turn::RestateTurnAttach>,
     turn_control_binding_id: Arc<str>,
     /// What [`EffectHost::journal_replay`] reads, bound once by the engine
@@ -150,7 +139,6 @@ impl RestateEffectHost {
                 group_executors: OnceLock::new(),
                 wait_receipts: OnceLock::new(),
             }),
-            tool_children: Arc::new(OnceLock::new()),
             turn_attach: Arc::new(crate::turn::RestateTurnAttach::in_namespace(
                 connection,
                 turn_attach_authority_id,
@@ -219,8 +207,7 @@ impl RestateEffectHost {
     }
 
     /// This host's resolver as the endpoint sees it: a handle that reads the
-    /// registration cell at call time, so services built before wiring — or a
-    /// tool-child host installed later by `install_tool_child_host` — resolve
+    /// registration cell at call time, so services built before wiring resolve
     /// through the one answer the host holds. `None` from `executor_for`
     /// while nothing is registered is the routing fact "not mine", not a
     /// failure.
@@ -436,18 +423,6 @@ impl EffectHost for RestateEffectHost {
         )?))
     }
 
-    fn install_tool_child_host(&self, candidate: Arc<ToolChildHost>) -> Option<Arc<ToolChildHost>> {
-        let installed = self.tool_children.get_or_init(|| candidate);
-        // A resolver already registered by something else wins, and this host
-        // then routes no tool children: one host has one answer to what runs a
-        // grouped child, and quietly replacing that answer would make it depend
-        // on which runtime was built last.
-        self.register_group_executors(Arc::clone(installed) as Arc<dyn GroupExecutors>)
-            .ok()?;
-        installed.enable_handler_group_pinning();
-        Some(Arc::clone(installed))
-    }
-
     /// Restate owns invocation-journal retention natively, so no Lash-side
     /// replay ledger is deleted here and the count is always 0. The promise
     /// half is real: a scope-exact retirement revokes every durable wait the
@@ -569,8 +544,7 @@ struct RestateEffectHostController {
     registrations: std::sync::Mutex<Option<Arc<dyn lash_core::ProcessRegistrationProbe>>>,
     /// This host's one answer to "what code runs a journaled grouped child".
     ///
-    /// Registered once — by `install_tool_child_host` or by an embedder
-    /// keeping its own resolver — and read by the endpoint's dispatch through
+    /// Registered once by an embedder and read by the endpoint's dispatch through
     /// the lazy handle [`RestateHostGroupExecutors`], so the open, a redriven
     /// child and preflight all consult the same cell.
     group_executors: OnceLock<Arc<dyn GroupExecutors>>,
@@ -1448,105 +1422,6 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "effect group {group_key} is retired"
             ))),
         }
-    }
-
-    /// The §4 boundary over ingress — the same route the ctx-based
-    /// controller takes, with the durable membership record resolving which
-    /// group's index owns this replay key. The serialized index handler is
-    /// the linearization point, and it retains `drain_input` as the child's
-    /// committed final, which `AlreadyCommitted` answers (ADR 0099 §5).
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::EffectGroupChildCommitOutcome,
-        RuntimeEffectControllerError,
-    > {
-        use lash_core::facade_support::EffectGroupChildCommitOutcome as Outcome;
-        let scope = ExecutionScope::from_journal_key(&commit.scope_id).ok_or_else(|| {
-            group_shape_error(format!(
-                "group-child commit scope id `{}` does not decode to an execution scope",
-                commit.scope_id
-            ))
-        })?;
-        let ingress = &self.await_event_ingress.ingress;
-        let index_key = durable_wait_index_key_for_scope(&scope);
-        let membership: Option<String> = ingress
-            .call_lash_object::<_, Option<String>>(
-                &self
-                    .await_event_ingress
-                    .service(LashService::DurableWaitRegistry),
-                &index_key,
-                "group_child_membership",
-                &crate::durable_wait::RestateDurableWaitGroupChildMembershipRequest {
-                    replay_key: commit.replay_key.clone(),
-                },
-            )
-            .await
-            .map_err(|error| {
-                ingress_group_error("LashDurableWaitIndex/group_child_membership", error)
-            })?;
-        let Some(group_key) = membership else {
-            return Ok(Outcome::Ungrouped);
-        };
-        let response = ingress
-            .call_lash_object::<_, crate::effect_group::EffectGroupCommitChildResponse>(
-                &self
-                    .await_event_ingress
-                    .service(LashService::EffectGroupState),
-                &group_key,
-                "commit_child",
-                &crate::effect_group::EffectGroupCommitChildRequest {
-                    replay_key: commit.replay_key.clone(),
-                    committed: crate::effect_group::EffectGroupCommittedFinal::Tool {
-                        drain_input: commit.drain_input,
-                    },
-                },
-            )
-            .await
-            .map_err(|error| ingress_group_error("EffectGroupIndex/commit_child", error))?;
-        Ok(match response {
-            crate::effect_group::EffectGroupCommitChildResponse::Committed { rank } => {
-                Outcome::Committed { group_key, rank }
-            }
-            crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted {
-                rank,
-                committed: crate::effect_group::EffectGroupCommittedFinal::Tool { drain_input },
-            } => Outcome::AlreadyCommitted {
-                group_key,
-                rank,
-                drain_input,
-            },
-            crate::effect_group::EffectGroupCommitChildResponse::AlreadyCommitted {
-                rank,
-                committed,
-            } => {
-                return Err(crate::controller::committed_final_is_not_a_tool_terminal(
-                    &group_key,
-                    &commit.replay_key,
-                    rank,
-                    &committed,
-                ));
-            }
-            crate::effect_group::EffectGroupCommitChildResponse::CancelDecided { rank } => {
-                Outcome::CancelDecided { group_key, rank }
-            }
-            crate::effect_group::EffectGroupCommitChildResponse::UnknownChild => {
-                return Err(group_shape_error(format!(
-                    "effect group {group_key} membership names replay key `{}` but its \
-                     index holds no such child; the two durable records disagree",
-                    commit.replay_key
-                )));
-            }
-            crate::effect_group::EffectGroupCommitChildResponse::UnknownGroup
-            | crate::effect_group::EffectGroupCommitChildResponse::Retired => {
-                return Err(group_shape_error(format!(
-                    "effect group {group_key} carries membership for replay key `{}` but \
-                     its index is gone or retired; the two durable records disagree",
-                    commit.replay_key
-                )));
-            }
-        })
     }
 
     async fn await_group_child_drain_admission(

@@ -7,7 +7,7 @@ use crate::tests::{
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn corrupt_registry_read_is_refused_identically_by_store_and_engine_control() {
-    let harness = LiveConformanceHarness::start_for_tool_children_over(
+    let harness = LiveConformanceHarness::start_for_tools_over(
         HarnessServer::in_process(),
         HarnessStoreTier::SqliteFile,
     )

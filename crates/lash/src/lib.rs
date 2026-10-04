@@ -780,22 +780,22 @@ pub mod plugins {
         AssistantProseProjectorPlugin, AssistantStreamFinishedHook, CompactionSystemPrompt,
         DecidedContextPressure, PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture,
         ResolvedToolSurface, ToolCatalogContributor, ToolPresentationArtifacts,
-        ToolPresentationInput, ToolPresentationStep, TranscriptRowProjectorPlugin,
+        ToolPresentationFacts, ToolPresentationInput, ToolPresentationStep,
+        TranscriptRowProjectorPlugin,
     };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
         AttemptStream, AttemptStreamChannel, AttemptStreamEvent, AttemptStreamTruncation,
-        DecodedStreamEvent, IncorporatedGroupRank, ToolAttemptCapture, ToolSettlement,
+        DecodedStreamEvent, IncorporatedGroupRank, ToolAttemptCapture,
     };
     pub use lash_core::session::{
         CompletedProtocolToolCall, Incorporated, IncorporationLedger, OpenerGroupsClosed,
         SettlementSource, ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply,
-        ToolAggregateOutcome, ToolAggregateRequest, ToolDispatchResult, ToolRunAggregateCursor,
-        ToolRunAggregatePoll,
+        ToolAggregateOutcome, ToolAggregateRequest, ToolRunAggregateCursor, ToolRunAggregatePoll,
     };
     pub use lash_core::tool_dispatch::{
-        ArmedResolver, DeferredToolCompletion, LaunchReceipt, PendingToolDispatchOutcome,
-        ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
+        ArmedResolver, LaunchReceipt, PendingToolDispatchOutcome, ToolCallIds, ToolDispatchOutcome,
+        ToolPreparationOutcome,
     };
     pub use lash_core::{
         ArtifactReferrerPorts, CommandJournalGuard, CommandReplayKey, DeclaredModuleArtifact,
@@ -1361,10 +1361,6 @@ pub mod durability {
     pub use lash_core_store::effect_opener::EffectOpener;
     pub use lash_sansio::{CancelRequest, ToolCallAdmission};
 
-    /// Child execution hosts and atomic group completion inputs.
-    pub use lash_core::facade_support::{
-        EffectGroupChildCommitOutcome, GroupChildFinalCommit, ToolChildHost,
-    };
     /// Effect-host inputs, replay projections, and local execution capabilities.
     pub use lash_core::runtime::{
         BoundaryReason, CanonicalRuntimeEffectEnvelope, EffectJournalIdentity,
@@ -1415,16 +1411,10 @@ pub mod runtime {
         ScopeCloseSink, SealRefusal, SealVerdict, SessionControlEngine, ShiftAbort,
         StalledExecution,
     };
-    pub use lash_core::facade_support::CommittedGroupChildFinal;
-    pub use lash_core::facade_support::{
-        ToolChildDriver, ToolChildOpenerContext, ToolChildRebuildRefusal, ToolChildRequest,
-        ToolChildSessionFacts, UnrecordedSessionSources,
-    };
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
     pub use lash_core::runtime::SessionTurnAdmission;
     pub use lash_core::runtime::{
-        AdmittedHeadVerdict, CompactionBase, PresentationBinding, ToolChildAdmission,
-        ToolChildCompletionRouting, ToolChildScope, ToolPresentation,
+        AdmittedHeadVerdict, CompactionBase, PresentationBinding, ToolPresentation,
     };
     pub use lash_core::shift::relay::RelayPolicy;
     pub use lash_core::tool_dispatch::ToolAttemptLineage;

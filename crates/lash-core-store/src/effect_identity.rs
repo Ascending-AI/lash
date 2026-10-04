@@ -38,10 +38,6 @@ pub enum RuntimeEffectKind {
     AssistantResponseHooks,
     Direct,
     ToolAttempt,
-    /// One tool child of a durable effect group, executed at invocation level
-    /// (ADR 0099 §2). Distinct from [`ToolAttempt`](Self::ToolAttempt), which is
-    /// the atomic body of one attempt.
-    ToolInvocation,
     ArmToolCompletion,
     AwaitToolCompletions,
     /// The opener-journaled record of a group's incorporated settlement prefix
@@ -138,7 +134,6 @@ impl RuntimeEffectKind {
             Self::AssistantResponseHooks => "assistant_response_hooks",
             Self::Direct => "direct",
             Self::ToolAttempt => "tool_attempt",
-            Self::ToolInvocation => "tool_invocation",
             Self::ArmToolCompletion => "arm_tool_completion",
             Self::AwaitToolCompletions => "await_tool_completions",
             Self::IncorporateGroupSettlements => "incorporate_group_settlements",

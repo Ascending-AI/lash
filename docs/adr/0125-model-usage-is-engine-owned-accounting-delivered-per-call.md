@@ -18,7 +18,7 @@ Sam's ruling binds this decision:
 - Run cancellation, refusal, parking, fork or loss never cancel accounting
   delivery. The delivery payload is retained until projection is acknowledged.
   Session deletion drains accounting first.
-- There is one writer for ordinary, direct, compaction, tool-child and process
+- There is one writer for ordinary, direct, compaction, native tool and process
   calls, including failed attempts and corrections. The turn-end drains and
   the duplicate tool-settlement charging go.
 - SQL accounting never advances the head and never needs the shift fence.

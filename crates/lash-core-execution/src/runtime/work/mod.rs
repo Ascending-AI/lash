@@ -57,8 +57,7 @@ pub trait SessionWorkEngine: Send + Sync {
 
     /// Install the core's shift: get-or-init. One engine can back several
     /// cores, and exactly one `SessionShifts` serves it, so a caller hands in a
-    /// candidate and uses whatever comes back (the precedent is
-    /// [`EffectHost::install_tool_child_host`](crate::EffectHost::install_tool_child_host)).
+    /// candidate and uses whatever comes back.
     ///
     /// The caller keeps what comes back for as long as it serves shifts. It
     /// may be an installation wrapping the `SessionShifts`

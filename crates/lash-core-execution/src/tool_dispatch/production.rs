@@ -917,7 +917,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         call_id: &crate::ToolCallId,
         stream: &crate::runtime::effect::AttemptStream,
     ) {
-        let (events, _) = stream.decode(&serde_json::Value::Null);
+        let (events, _) = stream.decode();
         let mut cursor = self
             .context
             .dispatch()

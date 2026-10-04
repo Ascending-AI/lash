@@ -132,7 +132,7 @@ The generated region below is checked against the live filenames and headings.
 | 0096 | [One IR and VM, extensible dialects, TypeScript today](0096-typescript-is-the-sole-rlm-dialect.md) |
 | 0097 | [Commit-identity families mint frozen unframed preimages](0097-commit-identity-families-mint-frozen-unframed-preimages.md) |
 | 0098 | [One owner per SQL table across both stores](0098-one-owner-per-sql-table-across-both-stores.md) |
-| 0099 | [Tool children of effect groups have one lifecycle — live, closing, settled](0099-tool-children-of-effect-groups-are-live-closing-settled.md) |
+| 0099 | [Tool children of effect groups have one lifecycle — live, closing, settled (superseded)](0099-tool-children-of-effect-groups-are-live-closing-settled.md) |
 | 0100 | [The run-observation contract](0100-the-run-observation-contract.md) |
 | 0101 | [One session ingress carries every admitted item](0101-one-session-ingress-carries-every-admitted-item.md) |
 | 0102 | [Every backend binds one journaled engine to one store set](0102-zero-infra-is-a-sqlite-in-memory-backend.md) |

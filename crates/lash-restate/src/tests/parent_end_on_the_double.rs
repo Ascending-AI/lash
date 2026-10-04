@@ -62,8 +62,7 @@ impl World {
         layer: impl FnOnce(lash_core::Backend) -> lash_core::Backend,
         close_in_shift: bool,
     ) -> Self {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
         let nonce = harness.run_nonce();
         let backend = layer(harness.law_backend());
         let registry = backend.process_registry();

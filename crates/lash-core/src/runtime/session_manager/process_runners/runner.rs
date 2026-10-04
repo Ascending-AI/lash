@@ -193,8 +193,7 @@ impl RuntimeSessionServices {
             .with_lent_process_stop(cancellation_for_runtime.clone())
             .without_turn_cancel_observation()
             .with_process_work(services.current.host.work.process_wiring().cloned())
-            .with_opener_state(crate::session::OpenerState::default())
-            .with_unrecorded_session_sources(services.current.host.core.control.open_sources);
+            .with_opener_state(crate::session::OpenerState::default());
             // What runs in the process observes through the runtime's shared
             // handle, under the process's scope.
             let tracing = &services.current.host.core.tracing;

@@ -337,7 +337,7 @@ async fn remote_after_step_waits_for_committed_boundary() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "live Restate cancellation delivery: kiln gate with the remote-cancellation suite"]
 async fn live_remote_after_step_waits_for_committed_boundary() {
-    let harness = LiveConformanceHarness::start_for_tool_children().await;
+    let harness = LiveConformanceHarness::start_for_tools().await;
     let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(harness.law_backend())
         .map_effect_host(|_| harness.endpoint_host())
         .into_backend();

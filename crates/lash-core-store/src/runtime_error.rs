@@ -519,12 +519,8 @@ pub enum RuntimeErrorCode {
     RuntimeEffectTaskJoin,
     RuntimeEffectToolAttemptCaptureVersion,
     RuntimeEffectToolAttemptIndex,
-    RuntimeEffectToolChildCancellationAuthority,
-    RuntimeEffectToolChildCompletionRouting,
-    RuntimeEffectToolChildRequestAdmission,
-    RuntimeEffectToolChildRequestOpener,
-    RuntimeEffectToolChildRequestVersion,
-    RuntimeEffectToolSettlementVersion,
+    ToolPresentationFormat,
+    ProcessExecutionEnvRefused,
     RuntimeEffectWrongOutcome,
     /// Process-local; repaired by restart, not by same-process retry.
     RuntimeEffectControllerTaskClosed,
@@ -804,20 +800,8 @@ impl RuntimeErrorCode {
                 "runtime_effect_tool_attempt_capture_version"
             }
             Self::RuntimeEffectToolAttemptIndex => "runtime_effect_tool_attempt_index",
-            Self::RuntimeEffectToolChildCancellationAuthority => {
-                "runtime_effect_tool_child_cancellation_authority"
-            }
-            Self::RuntimeEffectToolChildCompletionRouting => {
-                "runtime_effect_tool_child_completion_routing"
-            }
-            Self::RuntimeEffectToolChildRequestAdmission => {
-                "runtime_effect_tool_child_request_admission"
-            }
-            Self::RuntimeEffectToolChildRequestOpener => "runtime_effect_tool_child_request_opener",
-            Self::RuntimeEffectToolChildRequestVersion => {
-                "runtime_effect_tool_child_request_version"
-            }
-            Self::RuntimeEffectToolSettlementVersion => "runtime_effect_tool_settlement_version",
+            Self::ToolPresentationFormat => "tool_presentation_format",
+            Self::ProcessExecutionEnvRefused => "process_execution_env_refused",
             Self::RuntimeEffectWrongOutcome => "runtime_effect_wrong_outcome",
             Self::RuntimeEffectControllerTaskClosed => "runtime_effect_controller_task_closed",
             Self::WriterFenced => "writer_fenced",
@@ -1098,20 +1082,8 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectToolAttemptCaptureVersion
             }
             "runtime_effect_tool_attempt_index" => Self::RuntimeEffectToolAttemptIndex,
-            "runtime_effect_tool_child_cancellation_authority" => {
-                Self::RuntimeEffectToolChildCancellationAuthority
-            }
-            "runtime_effect_tool_child_completion_routing" => {
-                Self::RuntimeEffectToolChildCompletionRouting
-            }
-            "runtime_effect_tool_child_request_admission" => {
-                Self::RuntimeEffectToolChildRequestAdmission
-            }
-            "runtime_effect_tool_child_request_opener" => Self::RuntimeEffectToolChildRequestOpener,
-            "runtime_effect_tool_child_request_version" => {
-                Self::RuntimeEffectToolChildRequestVersion
-            }
-            "runtime_effect_tool_settlement_version" => Self::RuntimeEffectToolSettlementVersion,
+            "tool_presentation_format" => Self::ToolPresentationFormat,
+            "process_execution_env_refused" => Self::ProcessExecutionEnvRefused,
             "runtime_effect_wrong_outcome" => Self::RuntimeEffectWrongOutcome,
             "runtime_effect_controller_task_closed" => Self::RuntimeEffectControllerTaskClosed,
             "writer_fenced" => Self::WriterFenced,

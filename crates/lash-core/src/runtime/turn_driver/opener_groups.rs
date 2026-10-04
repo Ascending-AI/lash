@@ -10,7 +10,7 @@
 //! that aborts on a live fault or a park records nothing and is redriven, so
 //! its groups stay live for the redrive exactly as a dead worker's do.
 //!
-//! The end runs while the turn is still registered as a live opener, because
+//! The end runs while the logical Run owner is still live, because
 //! finalization's first step may have to run a child no process is running,
 //! and a child resolves its executor through its opener's live registration.
 
@@ -38,13 +38,11 @@ impl OpenerForCommit<'_> {
 impl<'run> RuntimeTurnDriver<'run> {
     pub(in crate::runtime) fn take_opener_for_commit(
         &self,
-        event_tx: &TurnObserver,
     ) -> Result<OpenerForCommit<'run>, RuntimeError> {
         let context = if self.opener_state.holds_groups() || self.opener_state.holds_tool_run() {
             let context = self
                 .execution_context_observing(
                     crate::engine::NullObservationSink::arc(),
-                    event_tx,
                     Arc::new(crate::ChronologicalProjection::default()),
                 )
                 .map_err(|error| {
@@ -53,10 +51,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                         error.to_string(),
                     )
                 })?;
-            Some(match self.live_opener.lock_recover().take() {
-                Some(guard) => context.with_live_opener_guard(Arc::new(guard)),
-                None => context,
-            })
+            Some(context)
         } else {
             None
         };
@@ -72,11 +67,8 @@ impl<'run> RuntimeTurnDriver<'run> {
     /// is delivered and committed by that checkpoint, before the turn's
     /// outcome (§7 step 2 precedes the outcome commit). Messages it delivers
     /// reopen the turn exactly as any checkpoint message at completion does.
-    pub(super) async fn finish_opener_groups_before_completion(
-        &self,
-        event_tx: &TurnObserver,
-    ) -> Result<(), RuntimeError> {
-        self.close_turn_groups(event_tx).await.map(drop)
+    pub(super) async fn finish_opener_groups_before_completion(&self) -> Result<(), RuntimeError> {
+        self.close_turn_groups().await.map(drop)
     }
 
     /// Close, finalize and incorporate every group this turn's opener holds.
@@ -100,7 +92,6 @@ impl<'run> RuntimeTurnDriver<'run> {
     pub(super) async fn end_opener_groups(
         &self,
         result: Result<(crate::MessageSequence, usize), RuntimeError>,
-        event_tx: &TurnObserver,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
         if result.is_ok() && self.segment.taken.is_some() {
             return result;
@@ -114,7 +105,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         {
             return result;
         }
-        match self.close_turn_groups(event_tx).await {
+        match self.close_turn_groups().await {
             Ok(_) => result,
             Err(error) => match result {
                 Ok(_) => Err(error),
@@ -131,7 +122,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         }
     }
 
-    async fn close_turn_groups(&self, event_tx: &TurnObserver) -> Result<(), RuntimeError> {
+    async fn close_turn_groups(&self) -> Result<(), RuntimeError> {
         if !self.opener_state.holds_groups() && !self.opener_state.holds_tool_run() {
             return Ok(());
         }
@@ -140,7 +131,6 @@ impl<'run> RuntimeTurnDriver<'run> {
         let context = self
             .execution_context_observing(
                 crate::engine::NullObservationSink::arc(),
-                event_tx,
                 Arc::new(crate::ChronologicalProjection::default()),
             )
             .map_err(|error| {

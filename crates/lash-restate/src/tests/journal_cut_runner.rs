@@ -184,8 +184,7 @@ mod served_process_start_on_the_server_double {
     }
 
     lash_conformance::served_process_start_tests!({
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
         let server = harness
             .server_double()
             .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));
@@ -399,8 +398,7 @@ mod served_only_outside_a_run {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_drifted_process_start_or_sleep_at_the_live_frontier_parks_without_acting() {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
         let server = harness
             .server_double()
             .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));
@@ -449,8 +447,7 @@ mod served_only_outside_a_run {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_drifted_process_start_and_sleep_that_were_recorded_are_served() {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
         let server = harness
             .server_double()
             .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));

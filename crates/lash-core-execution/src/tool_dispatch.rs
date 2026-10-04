@@ -19,10 +19,7 @@ pub use crate::runtime::process::{
     IsolatedToolStart, PhysicalProcessWorker, ProcessExecutionBoundary, WorkerTerminationReceipt,
 };
 pub use admission::{ToolRoundRefusal, admission_failure, admit_tool_round};
-pub use context::{
-    REBIND_FIELDS, RebindField, RebindSource, TOOL_CHILD_REBIND_VERSION, ToolDispatchContext,
-    ToolTriggerEffectOutcome,
-};
+pub use context::{ToolDispatchContext, ToolTriggerEffectOutcome};
 pub use pending_resolver::{
     ArmedResolver, LaunchReceipt, ParkSite, ResolverArming, arm_pending_resolver,
     consumer_hold_owner, discharge_abandoned_call, finish_parked_wait,
@@ -38,20 +35,13 @@ pub use singleton_run::{
 };
 
 pub(crate) use atomic_attempt::AtomicToolAttempt;
-pub(crate) use attempt_coordinator::{
-    CommittedToolDispatch, commit_deferred_group_child, commit_unarmed_tool_child,
-    drain_committed_group_child, group_child_cancelled,
-};
-pub use attempt_coordinator::{
-    GroupChildCoordination, ToolAttemptLineage, coordinate_tool_invocation,
-};
+pub use attempt_coordinator::{ToolAttemptLineage, coordinate_tool_invocation};
 #[cfg(feature = "testing")]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 #[cfg(not(feature = "testing"))]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 pub use context::{
-    DeferredToolCompletion, PendingToolDispatchOutcome, ToolCallIds, ToolDispatchOutcome,
-    ToolPreparationOutcome,
+    PendingToolDispatchOutcome, ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
@@ -74,12 +64,3 @@ pub use preparation::{
 pub(crate) use retry::execute_once;
 pub(crate) use retry::settle_completed_pending_tool_call;
 pub(crate) use retry::{mark_retry_exhausted, normalized_outcome, retry_after_ms};
-
-/// The static checks over this module's own source; the dispatch tests that
-/// run tool attempts need an effect host and run over a SQLite memory
-/// store set in `tests/store_backed` (ADR 0102).
-#[cfg(test)]
-mod tests {
-    mod context_source;
-    mod rebind_checklist;
-}

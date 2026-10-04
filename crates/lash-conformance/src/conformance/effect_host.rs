@@ -414,15 +414,6 @@ pub async fn effect_controller_segmentation_vector(
         ) -> Result<(), lash_core::RuntimeEffectControllerError> {
             self.inner.close_effect_group(handle, disposition).await
         }
-        async fn commit_group_child_final(
-            &self,
-            commit: lash_core::facade_support::GroupChildFinalCommit,
-        ) -> Result<
-            lash_core::facade_support::EffectGroupChildCommitOutcome,
-            lash_core::RuntimeEffectControllerError,
-        > {
-            self.inner.commit_group_child_final(commit).await
-        }
 
         async fn await_group_child_drain_admission(
             &self,

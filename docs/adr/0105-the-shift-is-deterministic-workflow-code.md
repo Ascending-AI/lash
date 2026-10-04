@@ -230,15 +230,13 @@ Evidence: `crates/lash-restate/src/controller/context.rs:1`,
 ### 4. Group operations are complete
 
 The controller opens durable groups, serves ranked settlements, reads a rank
-without advancing its cursor, commits child final results under the cancel
-fence, waits for protected drain and closes under the loser policy.
-`EffectGroupHandle` owns the settlement cursor. ADR 0099 defines the child
-attempt, committed and seated boundaries.
+without advancing its cursor, waits for generic protected drain and closes under the loser policy.
+`EffectGroupHandle` owns the generic settlement cursor. Native tool calls
+use the Run final-or-cancel decision and protected drain frontier.
 
 A wait child races its guarded timer or keyed wait against the child's durable
-cancel wait in the journal. A tool child's driver peeks before attempts, and
-the attempt body watches the decided cancel. The attempt's cancelled outcome
-is recorded. A lost watch does not fabricate cancellation. Settlement,
+cancel wait in the journal. A native tool attempt runs under its Run step's
+cancellation token; the Run records the final-or-cancel decision. A lost watch does not fabricate cancellation. Settlement,
 retirement and cancel admission retain their group fences across replay.
 
 Evidence: `crates/lash-core-execution/src/runtime/effect/executor/control.rs:369`,
@@ -399,8 +397,8 @@ envelope before returning a recorded result. An envelope mismatch is
 `EffectReplayDivergence` and parks.
 
 Environment sync records prompt and catalog definitions, and the shift
-installs what it returns. A tool child loads its execution environment through
-its own `LoadExecutionEnv` step. Deterministic refusals remain recorded answers.
+installs what it returns. Recorded Run admission retains the tool execution
+environment and prepared request. Deterministic refusals remain recorded answers.
 A live store or session fault in an uncommitted derivation is retry authority:
 the engine ends the attempt without recording that fault as the step's answer.
 The same rule applies to sync and assistant-response hook derivations.
@@ -408,7 +406,7 @@ Recorded tool definitions and drift handling follow ADR 0103.
 
 Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs:1`,
 `crates/lash-restate/src/controller/journaled_effect.rs:314`,
-`crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs:1`,
+`crates/lash-core-execution/src/tool_dispatch/production.rs`,
 `crates/lash-core-execution/src/runtime/effect/executor.rs:1`.
 
 ### 11. Validation and laws

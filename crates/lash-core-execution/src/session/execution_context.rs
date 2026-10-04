@@ -34,7 +34,7 @@ pub(crate) struct RecordedTurnCancel {
     control: Option<Arc<crate::runtime::turn_control::ActiveTurnControl>>,
     /// The deployment host a recorded step body watches the gate pair over.
     host: Option<Arc<dyn crate::EffectHost>>,
-    /// The stop the turn lends its tool children, fired with the fact.
+    /// Cooperative cancellation for recorded tool bodies, fired with the turn fact.
     lent: Option<CancellationToken>,
 }
 
@@ -57,7 +57,7 @@ pub struct RuntimeExecutionContext<'run> {
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
     tool_material_store: Option<Arc<dyn crate::store::ToolMaterialStore>>,
     pub(super) tool_run: Option<super::tool_run::ToolRunChannel>,
-    pub(super) tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
+
     /// The catalog the live registry resolves to, when the dispatch catalog
     /// is a turn's recorded surface: what a code cell's journaled binding set
     /// is judged against, tool by tool (FIG-3587). `None` means the dispatch
@@ -162,25 +162,6 @@ pub struct RuntimeExecutionContext<'run> {
     /// the language runtime that reports the failed cell or process: its own
     /// error channel carries the refusal's class, code and message only.
     pub(crate) tool_call_limit_refusal: Arc<std::sync::Mutex<Option<crate::ToolCallLimitExceeded>>>,
-    /// The host's durable closing seam (ADR 0099 §7), which the opener's end
-    /// finalizes through. `None` on Restate, whose engine-side group index is
-    /// the twin, and wherever no host wired one.
-    /// Sources of this context that have no recorded form: a group tool child
-    /// it opens records them (FIG-3712).
-    pub(crate) unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources,
-    /// Keeps this context's live-opener registration alive for the context's
-    /// lifetime: a `LiveOpenerGuard` deregisters on drop, and a test context
-    /// that opened a tool-child group while its guard was already dropped
-    /// would route children to a dead opener.
-    #[cfg(any(test, feature = "testing"))]
-    live_opener_guard: Option<Arc<crate::runtime::effect::LiveOpenerGuard>>,
-    /// Keeps the effect host that routed this context's tool children alive:
-    /// `ToolChildHost` holds only a `Weak` back to its host (a strong one
-    /// would make host → controller → resolver a cycle), so a test context
-    /// whose host was dropped after wiring would find "the effect host that
-    /// routed this tool child is gone" on every child.
-    #[cfg(any(test, feature = "testing"))]
-    tool_child_host: Option<Arc<dyn crate::EffectHost>>,
 }
 
 #[derive(Clone)]
@@ -473,7 +454,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             dispatch: Arc::new(self.dispatch.to_static()?),
             tool_material_store: self.tool_material_store.clone(),
             tool_run: self.tool_run.clone(),
-            tool_children: self.tool_children.clone(),
+
             live_tool_catalog: self.live_tool_catalog.clone(),
             process_env_store: Arc::clone(&self.process_env_store),
             fleet_format: self.fleet_format,
@@ -499,7 +480,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             fixture_standing: self.fixture_standing.clone(),
             code_block_graph_key: self.code_block_graph_key.clone(),
             issuing_language_node_id: self.issuing_language_node_id.clone(),
-            unrecorded_sources: self.unrecorded_sources,
+
             process_work: self.process_work.clone(),
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
@@ -508,10 +489,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             tool_requests: Arc::clone(&self.tool_requests),
             cell_tool_calls: Arc::clone(&self.cell_tool_calls),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
-            #[cfg(any(test, feature = "testing"))]
-            live_opener_guard: self.live_opener_guard.clone(),
-            #[cfg(any(test, feature = "testing"))]
-            tool_child_host: self.tool_child_host.clone(),
         })
     }
 
@@ -610,38 +587,6 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn with_parent_invocation(mut self, metadata: crate::RuntimeInvocation) -> Self {
         self.parent_invocation = Some(metadata);
-        self
-    }
-
-    pub fn with_tool_children(
-        mut self,
-        tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
-    ) -> Self {
-        self.tool_children = tool_children;
-        self
-    }
-
-    /// Retains a live-opener registration for this context's lifetime (test
-    /// and conformance contexts only). Hidden from docs: test support, not
-    /// code-executor surface.
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "testing"))]
-    pub fn with_live_opener_guard(
-        mut self,
-        guard: Arc<crate::runtime::effect::LiveOpenerGuard>,
-    ) -> Self {
-        self.live_opener_guard = Some(guard);
-        self
-    }
-
-    /// Retains the effect host this context's tool children route through —
-    /// the `ToolChildHost` resolver holds it weakly (test and conformance
-    /// contexts only). Hidden from docs: test support, not code-executor
-    /// surface.
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "testing"))]
-    pub fn with_tool_child_host(mut self, host: Arc<dyn crate::EffectHost>) -> Self {
-        self.tool_child_host = Some(host);
         self
     }
 

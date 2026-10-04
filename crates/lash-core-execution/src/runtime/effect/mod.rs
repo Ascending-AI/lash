@@ -10,20 +10,6 @@ mod layered_host;
 mod llm_outcome;
 pub mod scope_status;
 use lash_core_store::effect_identity as identity_types;
-mod live_openers;
-pub use live_openers::{LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry};
-mod tool_child;
-pub use tool_child::{
-    TOOL_CHILD_REQUEST_VERSION, ToolChildAdmission, ToolChildCompletionRouting,
-    ToolChildOpenerContext, ToolChildRebuildRefusal, ToolChildRequest, ToolChildScope,
-    ToolChildSessionFacts, UnrecordedSessionSources,
-};
-pub(crate) mod tool_child_driver;
-pub(crate) use tool_child_driver::runtime_ops as tool_child_runtime_ops;
-pub use tool_child_driver::{
-    ContextSourceInstall, DeploymentToolChildContext, ToolChildContextSource, ToolChildDriver,
-    ToolChildHost, opener_for_execution_scope,
-};
 pub(crate) use tool_presentation::record_tool_presentation_plan;
 mod tool_presentation;
 pub use tool_presentation::{
@@ -36,10 +22,8 @@ pub use attempt_stream::{
     ATTEMPT_STREAM_BYTE_BUDGET, AttemptStream, AttemptStreamBuilder, AttemptStreamChannel,
     AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation, DecodedStreamEvent,
 };
-pub(crate) mod tool_settlement;
-pub use tool_settlement::{
-    TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_SETTLEMENT_VERSION, ToolAttemptCapture, ToolSettlement,
-};
+mod tool_attempt_capture;
+pub use tool_attempt_capture::{TOOL_ATTEMPT_CAPTURE_VERSION, ToolAttemptCapture};
 mod outcome;
 mod shift_outcome;
 pub use lash_core_effect::await_event_identity;
@@ -69,7 +53,6 @@ pub use executor::{
     TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
     TurnControlBindingIdError, turn_control_binding_id_for_scope,
 };
-pub use group::{CommittedGroupChildFinal, EffectGroupChildCommitOutcome, GroupChildFinalCommit};
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupChildBinding, GroupReopen, GroupSettlement,
     GroupWakePolicy, IncorporatedGroupRank, LoserPolicy, RankedGroupSettlement, RuntimeEffectGroup,

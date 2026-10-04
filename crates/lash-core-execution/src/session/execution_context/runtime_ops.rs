@@ -43,9 +43,6 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
 
     /// The tool-execution context this run lends its tool calls.
     ///
-    /// Exposed so the turn path can publish it to the live-opener registry
-    /// (ADR 0099 §3): a tool child of a group this turn opens borrows the live
-    /// half of exactly this context.
     fn dispatch(&self) -> &Arc<ToolDispatchContext<'run>>;
 
     /// The logical Run request channel shared by the turn's phase contexts.
@@ -80,15 +77,6 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
         lent: CancellationToken,
     ) -> Self;
 
-    /// Adds sources this context was built from that have no recorded form:
-    /// what the embedder's open supplied and the turn's context overlay. A
-    /// group tool child this context opens records them (FIG-3712).
-    #[must_use]
-    fn with_unrecorded_session_sources(
-        self,
-        sources: crate::runtime::effect::UnrecordedSessionSources,
-    ) -> Self;
-
     /// The opener state this context incorporates against and hands groups to.
     #[must_use]
     fn opener_state(&self) -> OpenerState;
@@ -114,7 +102,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             dispatch,
             tool_material_store: None,
             tool_run: None,
-            tool_children: None,
             process_env_store,
             attachment_store,
             chronological_projection,
@@ -134,7 +121,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             tool_requests: Arc::default(),
             cell_tool_calls: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
-            unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
             parent_invocation: None,
             turn_phase_probe: None,
             cancellation_token: None,
@@ -152,10 +138,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             code_block_graph_key: None,
             issuing_language_node_id: None,
             process_work: None,
-            #[cfg(any(test, feature = "testing"))]
-            live_opener_guard: None,
-            #[cfg(any(test, feature = "testing"))]
-            tool_child_host: None,
         }
     }
     fn dispatch(&self) -> &Arc<ToolDispatchContext<'run>> {
@@ -221,13 +203,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             turn_cancel.note();
         }
         self.turn_cancel = turn_cancel;
-        self
-    }
-    fn with_unrecorded_session_sources(
-        mut self,
-        sources: crate::runtime::effect::UnrecordedSessionSources,
-    ) -> Self {
-        self.unrecorded_sources = self.unrecorded_sources.union(sources);
         self
     }
     fn opener_state(&self) -> OpenerState {

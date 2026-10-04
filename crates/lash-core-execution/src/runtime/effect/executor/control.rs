@@ -125,7 +125,7 @@ pub trait EffectHost: AwaitEventResolver {
     ///
     /// The default refuses rather than lending an unfenced controller, the
     /// same posture as
-    /// [`commit_group_child_final`](RuntimeEffectController::commit_group_child_final):
+    /// the group's durable commit point:
     /// a host without substrate-owned admission has no group-child controller
     /// to lend.
     fn scoped_for_group_child(
@@ -160,30 +160,6 @@ pub trait EffectHost: AwaitEventResolver {
         controller: ScopedEffectController<'run>,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
         Ok(controller)
-    }
-
-    /// Installs — or returns the already-installed — tool-child wiring for this
-    /// host, and registers it as the host's group-executor resolver
-    /// (ADR 0099 §2, FIG-2266).
-    ///
-    /// **Get-or-init, not register.** One effect host can back several
-    /// runtimes, and there is exactly one live-opener registry per host: two
-    /// registries would mean a turn registering its opener in one while the
-    /// resolver consulted the other, and its children would never run. A
-    /// caller therefore hands in a candidate and uses whatever comes back.
-    ///
-    /// `None` means this host routes no tool children — either because it
-    /// implements no durable effect groups at all (the default here), or
-    /// because a different resolver is already registered, which the
-    /// conformance suites do deliberately. Neither is a failure: a host that
-    /// does not route tool children simply has none, and the group's own
-    /// refusal is what an operator sees if one is ever opened.
-    fn install_tool_child_host(
-        &self,
-        candidate: Arc<super::super::tool_child_driver::ToolChildHost>,
-    ) -> Option<Arc<super::super::tool_child_driver::ToolChildHost>> {
-        let _ = candidate;
-        None
     }
 
     /// Projects this host to the resolver that owns its await-event registry.
@@ -432,9 +408,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// cancel fact, read as a recorded peek at one of its step boundaries
     /// (ADR 0105 §4, FIG-3904).
     ///
-    /// A tool child's shift never races its cancel at handler level: it reads
-    /// the fact here before each attempt, and each attempt body watches it
-    /// through [`group_child_cancel_watch`](Self::group_child_cancel_watch).
     /// An engine that records the fact answers the answer it recorded, so a
     /// replay takes the branch the first execution took. A controller that
     /// executes no group child answers `false`. Forwarding wrappers forward.
@@ -751,8 +724,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// consumption order belongs to the handle, but an incorporated prefix is
     /// an opener fact that must not move a cursor to read.
     ///
-    /// The default refuses on the same grounds as
-    /// [`commit_group_child_final`](Self::commit_group_child_final): a
+    /// The default refuses: a
     /// controller that cannot read back a group's recorded ranks cannot carry
     /// the §6 incorporation record either.
     async fn read_group_settlement(
@@ -797,44 +769,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         ))
     }
 
-    /// Commit one group child's final record at the §4 linearization point —
-    /// the durable half of the child's final-attempt boundary.
-    ///
-    /// This is the write ADR 0099 §5's decision order rides on: the CAS that
-    /// moves the child `pending → committed`, the reservation of its durable
-    /// settlement `rank`, and the persistence of `drain_input` — the sealed data a
-    /// recovery needs to finish the drain and projection rather than re-run
-    /// the attempt — as **one decision under the substrate's own
-    /// serialization**. Store backends run it inside a transaction fenced on
-    /// the claiming lease; the Restate substrate runs it inside the serialized
-    /// group index handler. There is deliberately **no read-then-write on this side of
-    /// the boundary**: the substrate's serialization is the fence, so a
-    /// cancel decision can never slip between an advisory read and the commit
-    /// it was supposed to guard.
-    ///
-    /// Returns [`EffectGroupChildCommitOutcome::Committed`] with the reserved
-    /// rank, [`AlreadyCommitted`] with the recorded winner's rank and
-    /// drain input on an idempotent retry, or [`CancelDecided`] when the
-    /// cancel disposition owns the point — in which case the caller writes
-    /// nothing of its own.
-    ///
-    /// [`AlreadyCommitted`]: super::super::group::EffectGroupChildCommitOutcome::AlreadyCommitted
-    /// [`CancelDecided`]: super::super::group::EffectGroupChildCommitOutcome::CancelDecided
-    ///
-    /// The default refuses rather than inventing an arbitration: a controller
-    /// that cannot serialize the decision cannot host grouped tool children,
-    /// and silently succeeding would be a fence that does not exist.
-    async fn commit_group_child_final(
-        &self,
-        commit: super::super::group::GroupChildFinalCommit,
-    ) -> Result<super::super::group::EffectGroupChildCommitOutcome, RuntimeEffectControllerError>
-    {
-        let _ = commit;
-        Err(super::effect_groups_unsupported(
-            "durable group-child commit boundary",
-        ))
-    }
-
     /// Wait at the durable §5 barrier: resolve once every committed sibling
     /// ranked below `rank` in `group_key` has seated, or retirement released
     /// the wait.
@@ -845,8 +779,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// engine's durable wake for each blocking sibling's seat. A retirement
     /// release is not proof of seating: the semantic-admission fence still
     /// refuses any intent under a retired group. Nothing here sleeps
-    /// on a clock. The default refuses on the same grounds as
-    /// [`commit_group_child_final`](Self::commit_group_child_final): a
+    /// on a clock. The default refuses: a
     /// controller that cannot answer the durable barrier cannot order drains
     /// either.
     async fn await_group_child_drain_admission(

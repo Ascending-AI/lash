@@ -98,100 +98,7 @@ impl std::fmt::Debug for EffectGroupDispatchImpl {
     }
 }
 
-impl EffectGroupDispatchImpl {
-    /// Ends a tool child whose shift refused where it parks its opener,
-    /// recording nothing (FIG-3725).
-    ///
-    /// - A group its opener closed or retired no longer needs the child: only
-    ///   the child's own attempt ends, and no turn is parked for it.
-    /// - Otherwise the child writes its turn's park and ends its attempt the
-    ///   way a park ends (FIG-3697): every retry refuses and parks again
-    ///   until the tool is restored or the turn is cancelled. A park the store
-    ///   did not take fails the attempt as a live fault, so the retry writes
-    ///   it again.
-    /// - A child whose scope names no turn has no park to write, so it does
-    ///   not retry unseen: a drift refused at the live frontier settles as the
-    ///   child's typed outcome, which its opener reads (a process segment
-    ///   fails its run). Any other refusal was found mid-replay, where no
-    ///   settlement can be journaled, and ends the attempt as before.
-    async fn end_parked_child<'ctx>(
-        &self,
-        ctx: &SharedWorkflowContext<'ctx>,
-        request: &EffectGroupChildRequest,
-        child: &lash_core::facade_support::ToolChildRequest,
-        refusal: &RuntimeEffectControllerError,
-        outcome: &EffectGroupChildRunOutcome,
-        receipt: Option<u64>,
-    ) -> HandlerResult<()> {
-        let label = format!(
-            "effect group {} child {}",
-            request.group_key, request.position
-        );
-        let failure = refusal.attempt_failure_text();
-        if self.opener_released(&request.group_key).await {
-            return Err(crate::parked_turn_failure(format!(
-                "{label}: its group is closed, so no turn is parked for it: {failure}"
-            )));
-        }
-        let parked = crate::turn_handler::park_refused_group_child(
-            self.sessions.as_ref(),
-            child.scope.claim_scope().scope(),
-            refusal,
-            &self.executors.trace_runtime(),
-        )
-        .await;
-        match parked {
-            Ok(Some(_)) => Err(crate::parked_turn_failure(format!("{label}: {failure}"))),
-            Ok(None) if refusal.code == RuntimeErrorCode::LashlangCellBindingDrift => {
-                tracing::warn!(
-                    group_key = %request.group_key,
-                    position = request.position,
-                    %refusal,
-                    "a drifted tool child whose scope names no turn settles its refusal"
-                );
-                record_child_settlement(
-                    ctx,
-                    self.route.namespace(),
-                    request,
-                    outcome.clone(),
-                    receipt,
-                )
-                .await
-            }
-            Ok(None) => Err(crate::parked_turn_failure(format!("{label}: {failure}"))),
-            Err(error) => Err(std::io::Error::other(format!(
-                "{label} parked on `{}` and its turn's park could not be recorded: {error}",
-                refusal.code
-            ))
-            .into()),
-        }
-    }
-
-    /// Whether the opener of `group_key` no longer needs its children's
-    /// ranks: the group is closed or retired. Read through ingress, outside
-    /// the child's journal, since nothing may be journaled after a refused
-    /// run's orphan; a read that fails answers `false`, so the park is kept.
-    async fn opener_released(&self, group_key: &str) -> bool {
-        matches!(
-            self.ingress
-                .call_lash_object::<_, EffectGroupProbeResponse>(
-                    &self
-                        .route
-                        .namespace()
-                        .stable(crate::LashService::EffectGroupState)
-                        .name(),
-                    group_key,
-                    "probe",
-                    &(),
-                )
-                .await,
-            Ok(EffectGroupProbeResponse::Exists {
-                phase: EffectGroupPhase::Closed | EffectGroupPhase::Retired,
-                ..
-            })
-        )
-    }
-}
+impl EffectGroupDispatchImpl {}
 
 /// The effect-group dispatcher: sends a group's children and runs each one.
 ///
@@ -379,21 +286,14 @@ impl EffectGroupDispatchImpl {
 
         // The child's durable cancel fact (ADR 0105 §4, FIG-3904), which the
         // group index holds (FIG-4344). No child races it at handler level: a
-        // wait child races it as a journaled arm, a tool child reads it at
-        // its step boundaries and watches it inside each attempt, and an
-        // atomic child watches it inside its recorded body.
+        // wait child races it as a journaled arm, and an atomic child watches
+        // it inside its recorded body.
         let child_cancel = GroupChildCancel::new(
             self.ingress.clone(),
             self.route.namespace().clone(),
             request.group_key.clone(),
             request.position,
         );
-
-        if let RuntimeEffectCommand::ToolInvocation { request: child } = &request.envelope.command {
-            return self
-                .run_tool_child(ctx, request, child, child_cancel, ToolChildTerminal::Shift)
-                .await;
-        }
 
         if matches!(
             request.envelope.command,
@@ -596,172 +496,14 @@ impl EffectGroupDispatchImpl {
         Ok(route)
     }
 
-    /// A tool child's handler-level run (ADR 0099 §2): a tool child is a
-    /// handler-level invocation driver, not a recorded body. Its replayable
-    /// work — retries, deferred completion, intent realization, completion-key
-    /// derivation — runs as journaled steps of *this* invocation; only the
-    /// atomic `ToolAttempt` executions it emits enter `ctx.run`. Resolving the
-    /// driver uses the same `GroupExecutors` answer first dispatch and
-    /// recovery both take (ADR 0065): there is no second route and no caller
-    /// closure.
-    ///
-    /// `terminal` says how the child reaches its final: it executes its own
-    /// attempts, or it drains the final an earlier invocation committed. Both
-    /// run on the same controller and settle through the same seat.
-    async fn run_tool_child(
-        &self,
-        ctx: SharedWorkflowContext<'_>,
-        request: &EffectGroupChildRequest,
-        child: &lash_core::facade_support::ToolChildRequest,
-        child_cancel: GroupChildCancel,
-        terminal: ToolChildTerminal,
-    ) -> HandlerResult<()> {
-        let Some(executor) = self.executors.executor_for(&request.envelope) else {
-            return self
-                .end_unrouted_child(&request.group_key, request.position, ctx.invocation_id())
-                .await;
-        };
-        let Some(driver) = executor.tool_child_driver() else {
-            return Err(TerminalError::new(format!(
-                "effect group {} tool child {} resolved to an executor with no handler-level driver",
-                request.group_key, request.position
-            ))
-            .into());
-        };
-        let controller = RestateRuntimeEffectController::new(
-            ctx,
-            self.authority_id.clone(),
-            self.build_generation.clone(),
-        )
-        .in_namespace(self.route.namespace().clone())
-        .with_group_child_cancel(child_cancel);
-        // The child's own admitted controller, bound to its recorded
-        // identity: the recorded pair — claim scope and the incarnation
-        // it was admitted under — never the dispatching scope and never
-        // fresh admission (ADR 0099 §3), and every semantic effect it
-        // serves is admitted through the index under the binding's child
-        // (ADR 0099 §4, FIG-3470). A `ToolInvocation` that reached group
-        // dispatch without retained membership is a shape error — never
-        // run unbound.
-        let Some(membership) = request.envelope.group.as_deref().cloned() else {
-            return Err(TerminalError::new(format!(
-                "effect group {} tool child {} carries no retained membership; \
-                 a child without one has no identity to bind a controller to",
-                request.group_key, request.position
-            ))
-            .into());
-        };
-        let binding = lash_core::GroupChildBinding {
-            child: request.envelope.invocation.address.clone(),
-            membership,
-        };
-        let scoped = controller
-            .scoped_effect_controller_for_group_child(child.scope.claim_scope(), binding)
-            .map_err(TerminalError::from_error)?;
-        // Routed through the host's stack before its first effect. A
-        // failed route is the child's outcome, as any failure of its
-        // shift is, so the opener's rank wait always learns of it.
-        let routed = self.executors.route_handler_child_controller(scoped);
-        let address = request.envelope.invocation.address.clone();
-        // The shift runs to its own end: the child's cancel ends it at a
-        // journaled peek, a journaled wait arm or an attempt's recorded
-        // outcome, each of which a replay takes as the first execution
-        // did, and never by dropping it mid-journal.
-        let (executed, drained_rank) = match (routed, terminal) {
-            (Ok(scoped), ToolChildTerminal::Shift) => {
-                (driver.shift(child, address, scoped).await, None)
-            }
-            (Ok(scoped), ToolChildTerminal::DrainCommitted(committed)) => {
-                let rank = committed.rank;
-                (
-                    driver.drain_committed(child, committed, scoped).await,
-                    Some(rank),
-                )
-            }
-            (Err(error), ToolChildTerminal::Shift) => (
-                Err(lash_core::RuntimeEffectControllerError::from(error)),
-                None,
-            ),
-            (Err(error), ToolChildTerminal::DrainCommitted(committed)) => (
-                Err(lash_core::RuntimeEffectControllerError::from(error)),
-                Some(committed.rank),
-            ),
-        };
-        let outcome = child_run_outcome(executed);
-        // The rank this invocation's §4 answer reserved, if it has one: the
-        // shift's own commit of this child, or the earlier commit whose final
-        // it drained. The seat publishes it without committing again
-        // (FIG-4308).
-        let receipt = drained_rank.or_else(|| {
-            request
-                .envelope
-                .invocation
-                .execution_scope()
-                .journal_identity()
-                .ok()
-                .and_then(|identity| {
-                    controller.group_child_commit_receipt(
-                        &request.group_key,
-                        identity.key(),
-                        request.envelope.invocation.effect_replay_key(),
-                    )
-                })
-        });
-        // A child that parks settles nothing, so its opener's rank wait
-        // cannot learn of it (FIG-3725).
-        if let EffectGroupChildRunOutcome::Completed {
-            outcome: Err(refusal),
-        } = &outcome
-            && refusal.turn_failure_cause() == lash_core::TurnFailureCause::Parked
-        {
-            return self
-                .end_parked_child(
-                    controller.context(),
-                    request,
-                    child,
-                    refusal,
-                    &outcome,
-                    receipt,
-                )
-                .await;
-        }
-        refuse_unrecorded_abort(request, &outcome)?;
-        #[cfg(test)]
-        crate::tests::effect_group_routing_miss::before_settled(&request.group_key).await;
-        // The outcome is journaled once, as the execution that first
-        // reached it built it. Its recorded steps replay the same, but
-        // what the driver builds beside them does not have to: a child
-        // whose opener was live lent its stream to that opener, while one
-        // that ran on a pinned or deployment-built context carries a
-        // recorded stream. A replay finds its context wherever it can, so
-        // it settles the recorded value rather than its own (FIG-3985).
-        let Json(outcome) = controller
-            .context()
-            .run(move || async move { Ok::<_, restate_sdk::errors::HandlerError>(Json(outcome)) })
-            .name(format!(
-                "lash:effect-group:settled:{}:{}",
-                request.group_key, request.position
-            ))
-            .await?;
-        record_child_settlement(
-            controller.context(),
-            self.route.namespace(),
-            request,
-            outcome,
-            receipt,
-        )
-        .await
-    }
-
     /// Settles a child this invocation cannot run: its session's state
     /// generation is refused here, its attach expired (§8), or the deployment
     /// that first took it can never execute it (FIG-4550). The committed
     /// final wins (ADR 0099 §5): the typed refusal is offered to the §4 point
     /// and seats only where no final is committed. Where an earlier
     /// invocation committed one and ended before its seat, this invocation
-    /// seats that final: a tool child's committed final is drained from the
-    /// drain input the point retained, and one it cannot realize is reported
-    /// lost by name, never replaced by the refusal.
+    /// seats that final. A final it cannot realize is reported lost by name,
+    /// never replaced by the refusal.
     async fn settle_unrun_child(
         &self,
         ctx: SharedWorkflowContext<'_>,
@@ -786,54 +528,6 @@ impl EffectGroupDispatchImpl {
                 .await
             }
             PointAnswer::Retired => Ok(()),
-            PointAnswer::Taken {
-                rank,
-                committed: EffectGroupCommittedFinal::Tool { drain_input },
-            } if matches!(unrun, UnrunChild::AttachExpired) => {
-                let RuntimeEffectCommand::ToolInvocation { request: child } =
-                    &request.envelope.command
-                else {
-                    return Err(TerminalError::new(format!(
-                        "effect group {} child {} committed a tool terminal but is not a \
-                         tool child",
-                        request.group_key, request.position
-                    ))
-                    .into());
-                };
-                let child_cancel = GroupChildCancel::new(
-                    self.ingress.clone(),
-                    namespace.clone(),
-                    request.group_key.clone(),
-                    request.position,
-                );
-                self.run_tool_child(
-                    ctx,
-                    request,
-                    child,
-                    child_cancel,
-                    ToolChildTerminal::DrainCommitted(
-                        lash_core::facade_support::CommittedGroupChildFinal {
-                            group_key: request.group_key.clone(),
-                            rank,
-                            drain_input,
-                        },
-                    ),
-                )
-                .await
-            }
-            // An unroutable child commits nothing before its route is
-            // recorded, so a tool final at its point is not this deployment's
-            // to report lost: the attempt ends, and a carrying deployment
-            // drains it.
-            PointAnswer::Taken {
-                committed: EffectGroupCommittedFinal::Tool { .. },
-                ..
-            } if matches!(unrun, UnrunChild::Unroutable(_)) => Err(std::io::Error::other(format!(
-                "effect group {} child {} holds a committed tool final this deployment cannot \
-                 drain ({refusal}); retry on a carrying deployment",
-                request.group_key, request.position
-            ))
-            .into()),
             PointAnswer::Taken { committed, .. } => {
                 seat_committed_final(&ctx, namespace, request, committed, &unrun.why_unrealized())
                     .await
@@ -1046,9 +740,8 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
         call: Call<Vec<RuntimeEffectEnvelope>>,
     ) -> HandlerResult<Reply<Option<usize>>> {
         let (wire, children) = call.open()?;
-        // Routability, not a local executor: this handler may run on any
-        // worker of the deployment, and a tool child whose opener is live on
-        // another worker is still routed — it runs there (FIG-3630).
+        // This handler may run on any worker of the deployment. Preflight
+        // checks registered routes before any generic child is dispatched.
         Ok(Reply::at(
             wire,
             children
@@ -1315,15 +1008,6 @@ fn child_run_outcome(
 /// Records one child's terminal in the index, writing its payload first when
 /// the outcome carries one.
 ///
-/// The context is a parameter because the two callers hold it differently: an
-/// atomic child's `ctx` is still free after its `ctx.run` completes, while a
-/// tool child's `ctx` lives inside the runtime controller the driver was
-/// bound to and comes back through `context()` once the shift is over. The
-/// protocol is identical either way — and a `Cancelled` terminal deliberately
-/// writes no payload: settlement is the index-serialized arbitration point,
-/// so a loser cancelled before its outcome landed leaves nothing for the
-/// group to read.
-///
 /// `receipt` is the rank this invocation's own §4 answer reserved, when it
 /// has one (FIG-4308): the shift's own commit, which already waited at the §5
 /// barrier if the child had intents to drain, or the earlier commit whose
@@ -1440,10 +1124,6 @@ async fn seat_committed_final(
 ) -> HandlerResult<()> {
     let error = match committed {
         EffectGroupCommittedFinal::Refusal { error } => error,
-        EffectGroupCommittedFinal::Tool { .. } => committed_final_lost(
-            request,
-            &format!("{why}, so the intents that final declared are not realized"),
-        ),
         EffectGroupCommittedFinal::Held => committed_final_lost(
             request,
             &format!("{why}, and only the invocation that committed it held its outcome"),
@@ -1483,7 +1163,6 @@ enum PointAnswer {
     /// An earlier invocation's final holds the point at `rank`: it wins over
     /// the one offered, and this invocation seats it.
     Taken {
-        rank: u64,
         committed: EffectGroupCommittedFinal,
     },
     /// The group retired meanwhile, and retirement already settled the child,
@@ -1492,8 +1171,7 @@ enum PointAnswer {
 }
 
 /// The §4 boundary for a final this invocation offers from dispatch — an
-/// atomic or wait child's outcome, a tool child whose shift never reached its
-/// boundary, or the refusal of a child this invocation cannot run: the index
+/// atomic or wait child's outcome, or the refusal of a child this invocation cannot run: the index
 /// decides the child's final before its payload and settlement exist. A final
 /// the cancel disposition beat is refused by name, and its payload and
 /// settlement never write.
@@ -1518,8 +1196,8 @@ async fn commit_child_final(
         .into_body();
     match committed {
         EffectGroupCommitChildResponse::Committed { .. } => Ok(PointAnswer::Won),
-        EffectGroupCommitChildResponse::AlreadyCommitted { rank, committed } => {
-            Ok(PointAnswer::Taken { rank, committed })
+        EffectGroupCommitChildResponse::AlreadyCommitted { committed, .. } => {
+            Ok(PointAnswer::Taken { committed })
         }
         EffectGroupCommitChildResponse::Retired => Ok(PointAnswer::Retired),
         EffectGroupCommitChildResponse::CancelDecided { .. } => {
@@ -1581,15 +1259,6 @@ impl UnrunChild {
             }
         }
     }
-}
-
-/// How a tool child reaches its final in this invocation.
-enum ToolChildTerminal {
-    /// Its driver runs its attempts and commits its own final.
-    Shift,
-    /// It drains the final an earlier invocation committed, from the drain
-    /// input the point retained.
-    DrainCommitted(lash_core::facade_support::CommittedGroupChildFinal),
 }
 
 /// A wait child whose admission the index refused for a reason other than a

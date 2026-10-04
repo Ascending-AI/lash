@@ -441,59 +441,6 @@ async fn a_transient_cancel_watch_fault_does_not_drop_an_atomic_childs_body() {
     );
 }
 
-pub(super) async fn start_atomic_child(
-    ingress: Arc<dyn HttpTransport>,
-) -> (
-    tokio::task::JoinHandle<Vec<u8>>,
-    Arc<tokio::sync::Semaphore>,
-    Arc<AtomicUsize>,
-) {
-    let executors = ChildExecutors::new();
-    let endpoint = endpoint(ingress, Arc::clone(&executors)).await;
-    let request = child_request(RuntimeEffectCommand::LanguageRuntimeValue {
-        operation: "atomic".to_owned(),
-    });
-    let run = tokio::spawn(async move {
-        let output = tokio::time::timeout(
-            Duration::from_secs(120),
-            super::endpoint_protocol::invoke_endpoint_body_with_named_call_responses_unbounded(
-                &endpoint,
-                &dispatch_route().name(),
-                "child",
-                super::endpoint_protocol::encode_invocation_body(GROUP, &request)
-                    .expect("encode the child"),
-                Vec::new(),
-                named_answers(&[
-                    "admit_child",
-                    "record_group_child",
-                    "commit_child",
-                    "put",
-                    "record_settlement",
-                ]),
-            ),
-        )
-        .await
-        .expect("atomic law exceeded its virtual-time budget")
-        .expect("shift the atomic child");
-        assert_eq!(restate_error_message(&output), None);
-        assert!(
-            restate_message_types(&output)
-                .expect("decode frames")
-                .contains(&PROPOSE_RUN_COMPLETION)
-        );
-        assert!(matches!(
-            settled_terminal(&output),
-            Some(EffectGroupSettlementTerminal::StoredPayload)
-        ));
-        output.to_vec()
-    });
-    (
-        run,
-        Arc::clone(&executors.gate),
-        Arc::clone(&executors.runs),
-    )
-}
-
 /// A controller bound to a group child's cancel fact, as group dispatch binds
 /// a wait child's, over a recording context. The fact's watch is never asked:
 /// the laws below end before any wait parks.

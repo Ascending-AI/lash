@@ -34,10 +34,6 @@ pub(crate) struct BoundSession {
     /// The owner core's telemetry adapter: what a send through this
     /// binding captures the caller's trace context from.
     tracing: lash_core::facade_support::TraceRuntime,
-    /// The core's tool-child context source (FIG-3712), held for as long as
-    /// the session is: the backend's host holds it weakly, and a session
-    /// whose core was dropped still has children to rebuild.
-    tool_child_context_source: Option<Arc<dyn lash_core::facade_support::ToolChildContextSource>>,
 }
 
 impl BoundSession {
@@ -67,17 +63,7 @@ impl BoundSession {
             clock: Arc::clone(&env.core.clock),
             models: Arc::clone(&env.core.providers.models),
             tracing: env.core.tracing.clone(),
-            tool_child_context_source: None,
         }
-    }
-
-    /// Keeps `source` alive for as long as this binding is.
-    pub(crate) fn holding_tool_child_context_source(
-        mut self,
-        source: Arc<dyn lash_core::facade_support::ToolChildContextSource>,
-    ) -> Self {
-        self.tool_child_context_source = Some(source);
-        self
     }
 
     pub(crate) fn store(&self) -> lash_core::store::SessionStore {

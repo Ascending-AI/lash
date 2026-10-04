@@ -646,17 +646,6 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                     suspended: false,
                 })),
             }),
-            // Delegated, exactly like every other command this double records
-            // and runs locally. The handler-level driver (FIG-2266) arrives as
-            // the local executor the host's registered resolver handed out, so
-            // this double no longer has to refuse a tool child for want of one —
-            // and it still synthesizes nothing, which is what made the earlier
-            // refusal right.
-            command @ RuntimeEffectCommand::ToolInvocation { .. } => {
-                local_executor
-                    .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
-                    .await
-            }
             command @ (RuntimeEffectCommand::ArmToolCompletion { .. }
             | RuntimeEffectCommand::AwaitToolCompletions { .. }) => {
                 inner

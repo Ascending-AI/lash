@@ -12,7 +12,7 @@ use super::session_manager::{ProcessServicesPorts, RuntimeSessionServices};
 
 /// The host's ports a process runtime is built from.
 pub struct ProcessRuntimePorts {
-    /// Clock, stores, effect host, tool children and engines. Its attachment
+    /// Clock, stores, effect host and engines. Its attachment
     /// store is rebound to the process as holder when the runtime is built.
     pub host: crate::RuntimeHostConfig,
     pub plugin_host: Arc<crate::PluginHost>,
@@ -69,29 +69,6 @@ impl ProcessRuntimeContext {
             plugin_host: ports.plugin_host,
             lease_owner: ports.lease_owner,
             turn_phase_probe: ports.turn_phase_probe,
-            reconstruct_tool_child: false,
-        })
-    }
-
-    /// The runtime a group tool child a process opened runs under when the
-    /// process's body is not live where the child runs: the environment the
-    /// child was admitted under, and this environment's wiring.
-    pub fn for_tool_child(
-        runtime_env: &super::RuntimeEnvironment,
-        plugin_host: Arc<crate::PluginHost>,
-        process_id: crate::ProcessId,
-        environment: crate::ProcessExecutionEnvSpec,
-        lease_owner: crate::LeaseOwnerIdentity,
-    ) -> Result<Self, crate::PluginError> {
-        Self::build(ProcessRuntimeBuild {
-            process_id,
-            environment,
-            host: runtime_env.core.clone(),
-            work: runtime_env.work.clone(),
-            plugin_host,
-            lease_owner,
-            turn_phase_probe: None,
-            reconstruct_tool_child: true,
         })
     }
 
@@ -104,7 +81,6 @@ impl ProcessRuntimeContext {
             plugin_host,
             lease_owner,
             turn_phase_probe,
-            reconstruct_tool_child,
         } = build;
         let plugins = plugin_host.isolated_registry().defer_session(
             crate::plugin::PluginSessionRequest::process_creation(
@@ -115,10 +91,6 @@ impl ProcessRuntimeContext {
                 },
             ),
         )?;
-        // Standalone tool-child reconstruction is removed by FIG-4864.
-        if reconstruct_tool_child {
-            plugins.materialize()?;
-        }
         // The process's attachments are held by its own record: a put it
         // makes names `ProcessRecord(id)` as its referrer, and the cleanup its
         // terminal publication plans ends that edge (ADR 0124).
@@ -156,16 +128,6 @@ impl ProcessRuntimeContext {
     pub fn adopt_plugin_admission(&self, admission: crate::store::plugin_writers::PluginAdmission) {
         self.services.adopt_plugin_admission(admission);
     }
-
-    /// The dispatch context of a group tool child this process opened, its
-    /// controller slots filled by `lent_controller` until the driver rebinds
-    /// them to the child's own.
-    pub fn tool_child_dispatch(
-        &self,
-        lent_controller: crate::ScopedEffectController<'static>,
-    ) -> Result<crate::tool_dispatch::ToolDispatchContext<'static>, crate::PluginError> {
-        self.services.tool_child_dispatch(lent_controller)
-    }
 }
 
 /// Everything one process runtime is built from.
@@ -177,7 +139,6 @@ struct ProcessRuntimeBuild {
     plugin_host: Arc<crate::PluginHost>,
     lease_owner: crate::LeaseOwnerIdentity,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    reconstruct_tool_child: bool,
 }
 
 #[async_trait::async_trait]

@@ -152,8 +152,7 @@ fn endpoint(
 ```
 
 Effect-group children route through the resolver registered on the backend's
-effect host — the runtime's `ToolChildHost` once a core over the backend
-installs it — so there is one resolver and one authority by construction. A
+effect host, so there is one resolver and one authority by construction. A
 process that only submits work to Restate and serves no handlers does not call
 `endpoint_builder`.
 

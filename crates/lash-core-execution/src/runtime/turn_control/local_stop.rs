@@ -210,7 +210,7 @@ async fn deliver_within(
 }
 
 /// Keeps one execution-side stop delivery running — a forwarded
-/// [`LocalTurnStop`], or a stop lent to tool children — for as long as it
+/// [`LocalTurnStop`], or a stop lent to recorded tool bodies — for as long as it
 /// lives; dropping it ends the delivery.
 pub struct StopDeliveryGuard {
     done: CancellationToken,

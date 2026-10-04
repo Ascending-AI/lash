@@ -196,9 +196,8 @@ pub struct ServedOnlyRange {
 }
 
 impl ServedOnlyRange {
-    /// Every key the guarded controller issues: a group tool child whose own
-    /// tool drifted serves each dispatching effect it issues only from its
-    /// journal, whatever its key (FIG-3725).
+    /// Every key the guarded controller issues: a refused recorded lease
+    /// permits served replay without admitting any fresh effect.
     pub fn every_key(refusal: RuntimeEffectControllerError) -> Self {
         Self {
             lower: String::new(),

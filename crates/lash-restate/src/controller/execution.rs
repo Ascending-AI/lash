@@ -147,19 +147,11 @@ pub(crate) fn restate_effect_execution(
         // completion-key derivation and resolver arming are coordination,
         // and §2 forbids coordination inside a recorded body ("A recorded body
         // must not emit commands into an ordinal-addressed journal"). The
-        // `EffectGroupDispatch::child` handler resolves the `ToolChildDriver`
+        // `EffectGroupDispatch::child` handler resolves the group executor
         // and executes it at handler level with a ctx-bound admitted controller;
         // the driver's own atomic effects arrive here individually. This arm
         // remains the guard for any path that tries to execute the command
         // itself as one recorded step.
-        RuntimeEffectCommand::ToolInvocation { .. } => {
-            return Err(RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "a tool invocation is a handler-level driver, not an atomic effect; the \
-                 effect-group child handler shifts it, so reaching this controller arm means \
-                 coordination was routed into a recorded body, which ADR 0099 section 2 forbids",
-            ));
-        }
         RuntimeEffectCommand::Sleep { spec } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate timer")?;
             RestateEffectExecution::Timer { invocation, spec }

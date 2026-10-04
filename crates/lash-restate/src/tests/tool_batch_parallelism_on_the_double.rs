@@ -15,8 +15,7 @@ pub(super) fn standard_factories()
 }
 
 lash_conformance::tool_batch_parallelism_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let host = harness.endpoint_host();
     let runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -47,8 +46,7 @@ pub(super) fn withheld_factories()
 
 // The `batch` sugar laws (ADR 0116 §7.2) on the same tier.
 lash_conformance::batch_sugar_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let host = harness.endpoint_host();
     let runner = harness.turn_runner();
     let stores = harness.law_stores();

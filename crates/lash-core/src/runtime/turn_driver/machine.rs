@@ -99,13 +99,12 @@ impl RuntimeTurnDriver<'_> {
                     let effect_loop: EffectLoop<'_> =
                         Box::pin(self.run_effect_loop(messages, event_tx.clone(), run_offset));
                     let result = effect_loop.await;
-                    Box::pin(self.end_opener_groups(result, &event_tx)).await
+                    Box::pin(self.end_opener_groups(result)).await
                 }
             })
             .await
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
         self.tool_run_owner = None;
-        self.live_opener.lock_recover().take();
         result
     }
 

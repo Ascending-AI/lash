@@ -121,8 +121,8 @@ impl PluginSession {
     /// The catalog a session's calls resolve against when `tools` is its
     /// live provider: the registry's manifests and contracts through this
     /// session's catalog contributions, `tool_access` and `subagent`. It is
-    /// what a recorded tool is judged against, by a turn's recorded surface
-    /// and by a group tool child's recorded admission alike (FIG-3725).
+    /// what a recorded tool is judged against by a turn's recorded surface
+    /// and the logical Run's recorded admission.
     pub fn resolve_live_tool_catalog(
         &self,
         tools: Arc<dyn crate::ToolProvider>,
@@ -295,7 +295,7 @@ impl PluginSession {
     pub(crate) async fn present_tool_result(
         &self,
         ctx: ToolResultProjectionContext,
-        settlement: Arc<crate::runtime::effect::ToolSettlement>,
+        facts: Arc<crate::plugin::ToolPresentationFacts>,
         plan: &crate::runtime::PresentationBinding,
         attachment_acceptance: &crate::provider::AttachmentCapabilitySnapshot,
     ) -> Result<
@@ -314,7 +314,7 @@ impl PluginSession {
         if let Some(presenter) = callbacks.presenter {
             model_return = (presenter.hook)(ToolPresentationInput {
                 previous: model_return,
-                settlement: Arc::clone(&settlement),
+                facts: Arc::clone(&facts),
                 context: ctx.clone(),
             })
             .await?;
@@ -322,7 +322,7 @@ impl PluginSession {
         for registered in callbacks.steps {
             let input = ToolPresentationInput {
                 previous: model_return,
-                settlement: Arc::clone(&settlement),
+                facts: Arc::clone(&facts),
                 context: ctx.clone(),
             };
             model_return = match (registered.hook)(input).await {

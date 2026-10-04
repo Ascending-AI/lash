@@ -21,8 +21,7 @@ impl ProductionToolHandlers<'_> {
             .transpose()
             .map_err(fault)?;
         let presented: Option<Presented> = presentation.map(decode).transpose().map_err(fault)?;
-        let prepared = self
-            .prepared
+        self.prepared
             .lock_recover()
             .get(call_id)
             .cloned()
@@ -42,43 +41,37 @@ impl ProductionToolHandlers<'_> {
             .as_ref()
             .map(|presented| presented.intent_outcomes.clone())
             .unwrap_or_default();
-        let mut output = captured
+        let possession = outcomes
+            .iter()
+            .filter_map(|outcome| match outcome {
+                crate::ToolIntentExecutionOutcome::Executed {
+                    realized: crate::ToolIntentRealized::StartProcess(handle),
+                    ..
+                } => Some(handle.process_id.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let messages = captured
             .as_ref()
-            .map(|captured| captured.output.clone())
-            .unwrap_or_else(|| {
-                ToolCallOutput::cancelled(crate::ToolCancellation::runtime("the call is withheld"))
-            });
-        super::super::attempt_coordinator::project_recorded_intent_outcomes(&mut output, &outcomes);
-        let settlement = crate::runtime::effect::ToolSettlement {
-            version: crate::runtime::effect::TOOL_SETTLEMENT_VERSION,
-            possession: crate::runtime::effect::tool_settlement::settlement_possession(&outcomes),
-            intent_outcomes: outcomes,
-            checkpoint_messages: captured
-                .as_ref()
-                .into_iter()
-                .flat_map(|captured| captured.messages.clone())
-                .chain(
-                    contributions
-                        .iter()
-                        .flat_map(|contribution| contribution.messages.clone()),
-                )
-                .collect(),
-            triggers: captured
-                .as_ref()
-                .map(|captured| captured.triggers.clone())
-                .unwrap_or_default(),
-            stream: Default::default(),
-            model_return: presented
-                .map(|presented| presented.presentation.model_return)
-                .unwrap_or_else(|| {
-                    crate::ModelToolReturn::from_output(prepared.call.tool_name, &output)
-                }),
-        };
-        self.context.incorporate_tool_settlement(
+            .into_iter()
+            .flat_map(|captured| captured.messages.clone())
+            .chain(
+                contributions
+                    .iter()
+                    .flat_map(|contribution| contribution.messages.clone()),
+            )
+            .collect::<Vec<_>>();
+        let triggers = captured
+            .as_ref()
+            .map(|capture| capture.triggers.clone())
+            .unwrap_or_default();
+        self.context.incorporate_tool_facts(
             crate::session::SettlementSource::Invocation {
                 call_id: call_id.clone(),
             },
-            &settlement,
+            &possession,
+            &messages,
+            &triggers,
         )?;
         if observe {
             let mut cursor = self

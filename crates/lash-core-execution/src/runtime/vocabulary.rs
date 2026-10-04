@@ -613,43 +613,6 @@ pub async fn admit_session_state_generation(
     }
 }
 
-/// Records the park of the turn a group tool child belongs to, when the child
-/// refused where it parks its opener and recorded nothing (FIG-3725) — its
-/// tool drifted and it would run live, or its replay diverged — and returns
-/// it. The child runs in its own invocation on an engine whose opener cannot
-/// learn of a refusal that settles nothing, so the child writes the park its
-/// opener would have: keyed by the opener's logical run (D2 §1.3), a turn
-/// scope's run, in the run's own session. A
-/// refusal that parks nothing, a scope with no run, and a session the
-/// catalog does not hold live answer `None`.
-pub async fn park_turn_of_refused_group_child(
-    store: &dyn crate::store::RuntimeStore,
-    scope: &crate::ExecutionScope,
-    refusal: &crate::RuntimeError,
-    at_ms: u64,
-    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
-) -> Result<Option<crate::store::TurnPark>, crate::StoreError> {
-    let Some(reason) = crate::store::ParkReason::of_error(refusal) else {
-        return Ok(None);
-    };
-    let (session_id, ran_execution) = match (scope, scope.logical_run()) {
-        (crate::ExecutionScope::Turn { session_id, .. }, Some(ran_execution)) => {
-            (session_id, ran_execution)
-        }
-        _ => return Ok(None),
-    };
-    if !session_is_live(store, session_id).await? {
-        return Ok(None);
-    }
-    let park = super::record_run_park(
-        store,
-        &crate::store::TurnParkWrite::refusal(session_id.clone(), ran_execution, reason, at_ms),
-        metrics,
-    )
-    .await?;
-    Ok(Some(park))
-}
-
 /// Records the park of the turn a durable engine redelivered to a build whose
 /// generation gate refused its session (FIG-3735), and returns it. `store` is
 /// the deployment's store, read without admission.

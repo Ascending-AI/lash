@@ -418,15 +418,6 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         self.inner.close_effect_group(handle, disposition).await
     }
-    async fn commit_group_child_final(
-        &self,
-        commit: crate::runtime::effect::GroupChildFinalCommit,
-    ) -> Result<
-        crate::runtime::effect::EffectGroupChildCommitOutcome,
-        crate::RuntimeEffectControllerError,
-    > {
-        self.inner.commit_group_child_final(commit).await
-    }
 
     async fn await_group_child_drain_admission(
         &self,

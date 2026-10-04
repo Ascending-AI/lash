@@ -9,8 +9,7 @@
 use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 
 lash_conformance::session_close_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let host = harness.endpoint_host();
     let stores = harness.law_stores();
     let runner = harness.turn_runner();
@@ -23,8 +22,7 @@ lash_conformance::session_close_tests!({
 // are recorded steps on the engine's journal, so a redelivered handler
 // replays them instead of re-deciding from the store.
 lash_conformance::shift_admission_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -36,8 +34,7 @@ lash_conformance::shift_admission_tests!({
 // FIG-3607 contract 4 (FIG-4489): every logical turn a shift runs, a
 // recovered follow-on's included, is owned by `Turn(logical run)`.
 lash_conformance::driver_turn_ownership_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -57,12 +54,11 @@ mod driver_turn_ownership_under_replay {
         let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
             unreachable!("in_process names the server double");
         };
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-                seed,
-                always_replay: true,
-            })
-            .await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::InProcess {
+            seed,
+            always_replay: true,
+        })
+        .await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -76,8 +72,7 @@ mod driver_turn_ownership_under_replay {
 // The session config a run executes under is a recorded step (FIG-3600 S6):
 // a redelivered handler replays the run under the config it recorded.
 lash_conformance::turn_config_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -105,12 +100,11 @@ mod recorded_execution_controls_under_replay {
         let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
             unreachable!("in_process names the server double");
         };
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-                seed,
-                always_replay: true,
-            })
-            .await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::InProcess {
+            seed,
+            always_replay: true,
+        })
+        .await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -159,8 +153,7 @@ mod recorded_termination {
         Arc<dyn lash_core::StoreSet>,
         Arc<dyn lash_conformance::ConformanceTurnRunner>,
     ) {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(server(always_replay)).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(server(always_replay)).await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -190,8 +183,7 @@ mod recorded_termination {
                 .await
                 .expect("open the SQLite file store set"),
         );
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(server(always_replay)).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(server(always_replay)).await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let prefix: &'static str = Box::leak(
@@ -303,8 +295,7 @@ mod recorded_run_view_and_bound {
 // of the probe runner is a fresh invocation, so its second run of the
 // same admission is the fresh execution.
 lash_conformance::run_start_marker_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -317,8 +308,7 @@ lash_conformance::run_start_marker_tests!({
 // commit and redelivered replays its recorded admission and switched
 // turn from the journal and runs only the follow-on frame.
 lash_conformance::frame_switch_redrive_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -332,8 +322,7 @@ lash_conformance::frame_switch_redrive_tests!({
 // crash point and redelivered opens once, chained in order, with one
 // summarizer call.
 lash_conformance::frame_open_redrive_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -345,8 +334,7 @@ lash_conformance::frame_open_redrive_tests!({
 // FIG-3552, FIG-3927: a row admitted to one run is answered only by that
 // run, whatever path the shifts after its worker's death take.
 lash_conformance::run_answers_its_rows_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -358,8 +346,7 @@ lash_conformance::run_answers_its_rows_tests!({
 // FIG-3748: a queued shift crashed after its first commit replays that
 // run from its journal, and the input queued behind it runs once.
 lash_conformance::queued_after_commit_redrive_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -372,8 +359,7 @@ lash_conformance::queued_after_commit_redrive_tests!({
 // is down, get their own runs under the default drain, and a cancel of one
 // leaves the other untouched.
 lash_conformance::queued_input_runs_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -395,12 +381,11 @@ mod frame_open_under_replay {
         let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
             unreachable!("in_process names the server double");
         };
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-                seed,
-                always_replay: true,
-            })
-            .await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::InProcess {
+            seed,
+            always_replay: true,
+        })
+        .await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -417,8 +402,7 @@ mod frame_open_under_replay {
 // Every emission runs in a probe handler and the delivery's process in the
 // endpoint's `LashProcessWorkflow`.
 lash_conformance::bound_trigger_duplicate_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
@@ -437,12 +421,11 @@ mod bound_trigger_duplicate_under_replay {
         let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
             unreachable!("in_process names the server double");
         };
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
-                seed,
-                always_replay: true,
-            })
-            .await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::InProcess {
+            seed,
+            always_replay: true,
+        })
+        .await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();

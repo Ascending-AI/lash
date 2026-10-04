@@ -316,15 +316,6 @@ const PINS: &[Pin] = &[
         ),
     },
     Pin {
-        file: "crates/lash/src/core/tool_child_context.rs",
-        text: "let enclosing = registry.get_process(process_id).await?.ok_or_else(|| {",
-        count: 1,
-        class: PinClass::Exempt(
-            "the lineage of the live enclosing process: immutable, and the process \
-             cannot be pruned while it runs",
-        ),
-    },
-    Pin {
         file: "crates/lash-restate/src/process/workflow.rs",
         text: ".get_process(&process_id)",
         count: 1,

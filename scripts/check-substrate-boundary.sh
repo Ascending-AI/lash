@@ -340,7 +340,7 @@ fi
 #   crates/lash-core/src/runtime/shift{.rs,/**}
 #                                        -- the session shift and its admission
 #   crates/lash-core-execution/src/session{,.rs}, tool_dispatch{,.rs},
-#   runtime/effect/{tool_child_driver.rs,group*.rs}
+#   runtime/effect/group*.rs
 #                                        -- execution-side session and group
 #                                           child shift code
 #   crates/lash-protocol-rlm/src/{executor,projection}/**
@@ -402,7 +402,6 @@ shift_paths=(
   crates/lash-core-execution/src/session
   crates/lash-core-execution/src/tool_dispatch.rs
   crates/lash-core-execution/src/tool_dispatch
-  crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs
   crates/lash-core-execution/src/runtime/effect/group*.rs
   crates/lash-protocol-rlm/src/executor
   crates/lash-protocol-rlm/src/projection

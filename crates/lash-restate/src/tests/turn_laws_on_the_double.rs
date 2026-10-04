@@ -50,8 +50,7 @@ async fn law_session_store(
 lash_conformance::direct_turn_acceptance_tests!(
     #[ignore = "parked: the laws execute their turns on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); FIG-3600 S5a-q3 or S8"]
     {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
         let backend = harness.backend_factory()().await;
         let store = law_session_store(backend.session_store_factory(), "root").await;
         let prefix: &'static str =
@@ -66,8 +65,7 @@ lash_conformance::direct_turn_acceptance_tests!(
 lash_conformance::tool_batch_parallelism_tests!(
     #[ignore = "parked: every width-8 leaf starts through the endpoint's dispatch but the probe turn never settles inside the law's budget; FIG-3600 S5a-q3 or S8"]
     {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
         let host = harness.endpoint_host();
         let runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -89,8 +87,7 @@ lash_conformance::tool_batch_parallelism_tests!(
 // The session read-view law is storage-shaped: the endpoint's session-store
 // factory answers it over the shared catalog.
 lash_conformance::session_read_view_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let factory = harness.session_catalog_factory()();
     (harness, factory)
 });
@@ -117,8 +114,7 @@ lash_conformance::session_failure_evidence_tests!(
 // Fresh-session admission is storage-shaped: a fresh handle on the endpoint's
 // session catalog admits its session as created.
 lash_conformance::fresh_session_admission_tests!({
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let make = harness.law_persistence();
     (
         harness,

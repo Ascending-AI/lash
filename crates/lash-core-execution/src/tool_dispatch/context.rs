@@ -189,194 +189,6 @@ impl ToolDispatchContext<'_> {
     }
 }
 
-/// Version of the tool-child rebind checklist below (ADR 0099 section 3).
-///
-/// Bump this when [`REBIND_FIELDS`] or the [`RebindField`]/[`RebindSource`]
-/// vocabulary changes: the list is the contract every tool-child driver rebinds
-/// a lent opener context against, so an edit that slips by unnoticed is a field
-/// a child can inherit under the wrong opener's authority.
-///
-/// version_guard(
-///     roots(ToolDispatchContext, RebindField, RebindSource),
-///     items(REBIND_FIELDS),
-/// )
-/// version_surface = "drain"
-/// format_outside_manifest = "versions a reviewed in-process checklist (REBIND_FIELDS), not stored bytes: nothing durable carries it"
-pub const TOOL_CHILD_REBIND_VERSION: u16 = 7;
-
-/// Where a tool child's value for one [`ToolDispatchContext`] field comes from
-/// (ADR 0099 section 3).
-///
-/// The checklist is deliberately closed: a field is one of these three, and the
-/// meta-test in `tool_dispatch/tests/rebind_checklist.rs` refuses a field that
-/// arrives unclassified.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RebindSource {
-    /// Rebound to the child — taken from its recorded request or rebuilt under
-    /// the child's own admitted authority. The lent value is unreachable in the
-    /// child's context.
-    Rebound,
-    /// Lent from the live opener: deployment wiring and live channels a request
-    /// deliberately does not record.
-    Lent,
-    /// A fresh child-local instance: neither lent nor recorded, so nothing the
-    /// opener accumulated can leak into the child's settlement.
-    Fresh,
-}
-
-/// One field of [`ToolDispatchContext`], as the rebind checklist names it.
-///
-/// The enum exists so a fixture — or a mutant — can name one field of the
-/// context rather than a line of one driver's rebind. [`REBIND_FIELDS`] carries
-/// every variant exactly once; adding a field to `ToolDispatchContext` without
-/// adding its ruling here fails the completeness meta-test.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum RebindField {
-    Plugins,
-    Tools,
-    ToolRegistry,
-    ToolCatalog,
-    Sessions,
-    SessionLifecycle,
-    SessionGraph,
-    Processes,
-    TriggerRouter,
-    ProcessEngines,
-    EffectController,
-    DirectCompletions,
-    ParentInvocation,
-    ObservationCallKey,
-    ExecutionEnvSpec,
-    Owner,
-    Observer,
-    CheckpointMessages,
-    TriggerOutcomes,
-    AttachmentStore,
-    AttachmentSourcePolicy,
-    TurnContext,
-    Clock,
-    ProcessLineage,
-    ProcessOriginator,
-}
-
-impl RebindField {
-    /// The [`ToolDispatchContext`] field this ruling covers.
-    #[must_use]
-    pub const fn context_field(self) -> &'static str {
-        match self {
-            Self::Plugins => "plugins",
-            Self::Tools => "tools",
-            Self::ToolRegistry => "tool_registry",
-            Self::ToolCatalog => "tool_catalog",
-            Self::Sessions => "sessions",
-            Self::SessionLifecycle => "session_lifecycle",
-            Self::SessionGraph => "session_graph",
-            Self::Processes => "processes",
-            Self::TriggerRouter => "trigger_router",
-            Self::ProcessEngines => "process_engines",
-            Self::EffectController => "effect_controller",
-            Self::DirectCompletions => "direct_completions",
-            Self::ParentInvocation => "parent_invocation",
-            Self::ObservationCallKey => "observation_call_key",
-            Self::ExecutionEnvSpec => "execution_env_spec",
-            Self::Owner => "owner",
-            Self::Observer => "observer",
-            Self::CheckpointMessages => "checkpoint_messages",
-            Self::TriggerOutcomes => "trigger_outcomes",
-            Self::AttachmentStore => "attachment_store",
-            Self::AttachmentSourcePolicy => "attachment_source_policy",
-            Self::TurnContext => "turn_context",
-            Self::Clock => "clock",
-            Self::ProcessLineage => "process_lineage",
-            Self::ProcessOriginator => "process_originator",
-        }
-    }
-
-    /// The disposition a child's context assigns this field.
-    #[must_use]
-    pub const fn disposition(self) -> RebindSource {
-        match self {
-            // The recorded request is authoritative for what the child was
-            // admitted under: its catalog manifest, its lineage, its session
-            // and frame attribution, its environment and its own admitted
-            // controller. The completion client's transport is lent, but the
-            // ledger it reports into is the child's, so the value as a whole
-            // is rebound rather than lent.
-            Self::ToolCatalog
-            | Self::EffectController
-            | Self::DirectCompletions
-            | Self::ParentInvocation
-            | Self::ExecutionEnvSpec
-            | Self::Owner => RebindSource::Rebound,
-            // Facts that ride the child's own outcome: a buffer the opener
-            // filled would smuggle the opener's pending facts into the child's
-            // settlement. The observation call key is likewise call-scoped —
-            // inherited, it would key the child's lanes under a call that is
-            // not theirs.
-            Self::CheckpointMessages | Self::TriggerOutcomes | Self::ObservationCallKey => {
-                RebindSource::Fresh
-            }
-            // Everything else is deployment wiring and live channels, which
-            // section 3 puts on the lent side of the split.
-            Self::Plugins
-            | Self::Tools
-            | Self::ToolRegistry
-            | Self::Sessions
-            | Self::SessionLifecycle
-            | Self::SessionGraph
-            | Self::Processes
-            | Self::TriggerRouter
-            | Self::ProcessEngines
-            | Self::Observer
-            | Self::AttachmentStore
-            | Self::AttachmentSourcePolicy
-            | Self::TurnContext
-            | Self::Clock => RebindSource::Lent,
-            // The lineage of the process the opener's body runs inside is
-            // lent with the opener: request validation makes the opener and
-            // the enclosing process one fact, so a live opener's lineage is
-            // the child's. A context the deployment built carries none, and a
-            // start the child makes reads the enclosing process's recorded
-            // lineage back from its row (FIG-3607 R2).
-            Self::ProcessLineage | Self::ProcessOriginator => RebindSource::Lent,
-        }
-    }
-}
-
-/// Every [`ToolDispatchContext`] field's rebind ruling, in declaration order.
-///
-/// This is the single list a tool-child driver answers to: for each entry the
-/// child's context either carries the recorded value, borrows the live one, or
-/// holds a fresh instance — and the two-opener oracle generates its fixtures
-/// from it, so a field added here is a field the differential cannot forget.
-pub const REBIND_FIELDS: &[RebindField] = &[
-    RebindField::Plugins,
-    RebindField::Tools,
-    RebindField::ToolRegistry,
-    RebindField::ToolCatalog,
-    RebindField::Sessions,
-    RebindField::SessionLifecycle,
-    RebindField::SessionGraph,
-    RebindField::Processes,
-    RebindField::TriggerRouter,
-    RebindField::ProcessEngines,
-    RebindField::EffectController,
-    RebindField::DirectCompletions,
-    RebindField::ParentInvocation,
-    RebindField::ObservationCallKey,
-    RebindField::ExecutionEnvSpec,
-    RebindField::Owner,
-    RebindField::Observer,
-    RebindField::CheckpointMessages,
-    RebindField::TriggerOutcomes,
-    RebindField::AttachmentStore,
-    RebindField::AttachmentSourcePolicy,
-    RebindField::TurnContext,
-    RebindField::Clock,
-    RebindField::ProcessLineage,
-    RebindField::ProcessOriginator,
-];
-
 impl<'run> ToolDispatchContext<'run> {
     pub fn process_scope(&self) -> crate::ProcessOpScope<'_> {
         crate::ProcessOpScope::new(self.effect_controller.clone())
@@ -415,55 +227,6 @@ impl<'run> ToolDispatchContext<'run> {
             process_originator: self.process_originator.clone(),
         })
     }
-
-    /// This context taken to `'static` with its controller slots lent
-    /// `controller` — the conversion an opener registration performs when the
-    /// dispatch's own controller cannot be taken static.
-    ///
-    /// What is lent is the deployment host's owned controller for the opener's
-    /// admitted scope ([`EffectHost::scoped_static`]), never the opener's live
-    /// handler-bound controller: a Restate handler cannot lend its `ctx`-bound
-    /// controller past its handler, and the group-child driver replaces the
-    /// lent slot at its rebind anyway (`rebind_child_dispatch` overwrites
-    /// `effect_controller` and rebinds `direct_completions` through
-    /// [`DirectCompletionClient::bind_tool_child`]), so no child ever executes
-    /// under it.
-    ///
-    /// [`EffectHost::scoped_static`]: crate::EffectHost::scoped_static
-    /// [`DirectCompletionClient::bind_tool_child`]: crate::DirectCompletionClient::bind_tool_child
-    pub(crate) fn lend_static(
-        &self,
-        controller: crate::ScopedEffectController<'static>,
-    ) -> ToolDispatchContext<'static> {
-        ToolDispatchContext {
-            tool_receipts: self.tool_receipts.clone(),
-            plugins: Arc::clone(&self.plugins),
-            tools: Arc::clone(&self.tools),
-            tool_registry: self.tool_registry.clone(),
-            tool_catalog: Arc::clone(&self.tool_catalog),
-            sessions: Arc::clone(&self.sessions),
-            session_lifecycle: Arc::clone(&self.session_lifecycle),
-            session_graph: Arc::clone(&self.session_graph),
-            processes: Arc::clone(&self.processes),
-            trigger_router: self.trigger_router.clone(),
-            process_engines: self.process_engines.clone(),
-            effect_controller: controller.clone(),
-            direct_completions: self.direct_completions.lend_static(controller),
-            parent_invocation: self.parent_invocation.clone(),
-            observation_call_key: self.observation_call_key.clone(),
-            execution_env_spec: self.execution_env_spec.clone(),
-            owner: self.owner.clone(),
-            observer: Arc::clone(&self.observer),
-            checkpoint_messages: self.checkpoint_messages.clone(),
-            trigger_outcomes: self.trigger_outcomes.clone(),
-            attachment_store: Arc::clone(&self.attachment_store),
-            attachment_source_policy: Arc::clone(&self.attachment_source_policy),
-            turn_context: self.turn_context.clone(),
-            clock: Arc::clone(&self.clock),
-            process_lineage: self.process_lineage.clone(),
-            process_originator: self.process_originator.clone(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -475,11 +238,9 @@ pub struct ToolDispatchOutcome {
     pub intents: crate::ToolIntents,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
-    /// The per-attempt captures in attempt order — committed
-    /// `EnqueueMessages` facts and per-provider-attempt usage deltas — which
-    /// the opener's settlement incorporation applies exactly once (ADR 0099
-    /// §6/§13, FIG-3411). Guarded by `TOOL_SETTLEMENT_VERSION` because this
-    /// rides the journaled `ToolInvocation` outcome.
+    /// Committed message facts in attempt order, applied exactly once at
+    /// the opener's incorporation boundary. Each capture validates its own
+    /// `TOOL_ATTEMPT_CAPTURE_VERSION`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub captures: Vec<crate::runtime::ToolAttemptCapture>,
     /// Trigger receipts the attempts emitted, carried to the same
@@ -513,17 +274,6 @@ pub struct PendingToolDispatchOutcome {
     /// Trigger receipts emitted before this call parked, carried likewise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
-}
-
-/// A settled dispatch whose completion belongs to its Run. The recorded
-/// request retains its presentation environment and the original call keys.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DeferredToolCompletion {
-    pub request: Box<crate::runtime::ToolChildRequest>,
-    pub pending: Box<PendingToolDispatchOutcome>,
-    pub armed: super::ArmedResolver,
-    pub stream: crate::runtime::effect::AttemptStream,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

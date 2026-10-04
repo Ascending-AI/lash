@@ -26,31 +26,6 @@ pub trait DirectCompletionService: Send + Sync {
         caused_by: Option<crate::CausalRef>,
         effect_attempt: Option<&crate::EffectAttempt>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError>;
-
-    /// Rebinds this service to a tool child's recorded authority, when the
-    /// implementation carries authority of its own.
-    ///
-    /// A `DirectCompletionService` is the live completion *transport* a group
-    /// child borrows from its opener. The transport is lent; everything that
-    /// decides whose call it is — the session the provider call resolves its
-    /// policy under, the environment it was admitted with — must answer from
-    /// the child's *recorded* facts, and the default answers `None` because a
-    /// service that cannot prove it executes under those facts is refused
-    /// rather than lent the opener's (ADR 0099 §3).
-    ///
-    /// `owner` is who the child's work runs for and `execution_env_spec` is
-    /// the environment resolved from the child's recorded
-    /// `ProcessExecutionEnvRef` — an implementation bound to a different
-    /// owner returns `None`, and a returned service must resolve policy under
-    /// `execution_env_spec`, not whatever the opener is running.
-    fn bind_tool_child(
-        self: Arc<Self>,
-        owner: &crate::RuntimeOwner,
-        execution_env_spec: &crate::ProcessExecutionEnvSpec,
-    ) -> Option<Arc<dyn DirectCompletionService>> {
-        let _ = (owner, execution_env_spec);
-        None
-    }
 }
 
 /// Runtime-backed direct completion source.
@@ -135,78 +110,6 @@ impl<'run> DirectCompletionClient<'run> {
         self
     }
 
-    /// Rebinds this client to a tool child's recorded authority (ADR 0099 §3).
-    ///
-    /// What is lent is the live completion transport; what is rebound is
-    /// everything that decides whose call it is:
-    ///
-    /// * `owner` — who the child's work runs for: the session and frame it
-    ///   recorded, or its process;
-    /// * `execution_env_spec` — the environment resolved from the child's
-    ///   recorded `ProcessExecutionEnvRef`, which a runtime-backed service
-    ///   must rebind its policy resolution to or be refused;
-    /// * `effect_controller` — the child's own admitted controller, so the
-    ///   direct effect is journaled under the child's claim scope;
-    /// * `turn_id` and `parent_invocation` — the recorded lineage, so the
-    ///   effect's causal parent is the child's, not the opener's current one.
-    ///
-    /// The child's recorded body installs its own attempt fault latch.
-    ///
-    /// A service that cannot prove it executes under the recorded owner and
-    /// environment makes this a typed refusal rather than a silent authority
-    /// leak.
-    pub(crate) fn bind_tool_child<'child>(
-        &self,
-        owner: &crate::RuntimeOwner,
-        execution_env_spec: &crate::ProcessExecutionEnvSpec,
-        effect_controller: crate::runtime::ScopedEffectController<'child>,
-        turn_id: Option<crate::TurnId>,
-        parent_invocation: Option<crate::RuntimeInvocation>,
-    ) -> Result<DirectCompletionClient<'child>, crate::runtime::RuntimeEffectControllerError> {
-        let source = match &self.source {
-            DirectCompletionSource::Runtime(source) => {
-                let service = source
-                    .service
-                    .clone()
-                    .bind_tool_child(owner, execution_env_spec)
-                    .ok_or_else(|| {
-                        crate::runtime::RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
-                            format!(
-                                "the opener's direct-completion service cannot prove it executes \
-                                 for `{owner}` and the child's recorded \
-                                 environment; a managed-LLM call is refused rather than journaled \
-                                 under the opener's authority"
-                            ),
-                        )
-                    })?;
-                DirectCompletionSource::Runtime(RuntimeDirectSource {
-                    service,
-                    effect_controller,
-                    turn_id,
-                })
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::Unavailable(message) => {
-                DirectCompletionSource::Unavailable(message.clone())
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestFn(invoke) => {
-                DirectCompletionSource::TestFn(Arc::clone(invoke))
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestLlmFn(invoke) => {
-                DirectCompletionSource::TestLlmFn(Arc::clone(invoke))
-            }
-        };
-        Ok(DirectCompletionClient {
-            source,
-            parent_invocation: parent_invocation.map(Box::new),
-            inside_tool_attempt: self.inside_tool_attempt,
-            effect_attempt: None,
-        })
-    }
-
     pub(crate) fn to_static(&self) -> Option<DirectCompletionClient<'static>> {
         let source = match &self.source {
             DirectCompletionSource::Runtime(source) => {
@@ -235,48 +138,6 @@ impl<'run> DirectCompletionClient<'run> {
             inside_tool_attempt: self.inside_tool_attempt,
             effect_attempt: self.effect_attempt.clone(),
         })
-    }
-
-    /// This client taken to `'static` with its controller slot lent
-    /// `effect_controller` — the same conversion as [`Self::to_static`], but
-    /// for an opener whose own controller cannot be taken static (a Restate
-    /// handler's context-bound one) and so lends the deployment host's owned
-    /// controller for its admitted scope instead.
-    ///
-    /// The lent controller never executes the child: the group-child driver
-    /// rebinds `direct_completions` through [`Self::bind_tool_child`] with the
-    /// child's own recorded authority before any call can ride it.
-    pub(crate) fn lend_static(
-        &self,
-        effect_controller: crate::runtime::ScopedEffectController<'static>,
-    ) -> DirectCompletionClient<'static> {
-        let source = match &self.source {
-            DirectCompletionSource::Runtime(source) => {
-                DirectCompletionSource::Runtime(RuntimeDirectSource {
-                    service: Arc::clone(&source.service),
-                    effect_controller: effect_controller.clone(),
-                    turn_id: source.turn_id.clone(),
-                })
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::Unavailable(message) => {
-                DirectCompletionSource::Unavailable(message.clone())
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestFn(invoke) => {
-                DirectCompletionSource::TestFn(Arc::clone(invoke))
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestLlmFn(invoke) => {
-                DirectCompletionSource::TestLlmFn(Arc::clone(invoke))
-            }
-        };
-        DirectCompletionClient {
-            source,
-            parent_invocation: self.parent_invocation.clone(),
-            inside_tool_attempt: self.inside_tool_attempt,
-            effect_attempt: self.effect_attempt.clone(),
-        }
     }
 
     /// Classifies where a direct call sits relative to the journal.

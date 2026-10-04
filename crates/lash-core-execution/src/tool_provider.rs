@@ -911,10 +911,7 @@ impl<'run> ToolContext<'run> {
         &self.call_id
     }
 
-    /// Lends the call the stop of the recorded step body it runs in (ADR 0105
-    /// §4): the body's watch fires it when the call's effect-group child is
-    /// cancelled. `stop` is a child of the context's own token, so either
-    /// stop reaches the call.
+    /// Lends the call the cancellation token of its recorded Run step body.
     pub(crate) fn with_step_stop(mut self, stop: tokio_util::sync::CancellationToken) -> Self {
         self.cancellation_token = Some(stop);
         self
@@ -1004,8 +1001,7 @@ impl<'run> ToolContext<'run> {
 /// and any argument rewrites and provider-owned context projections are
 /// frozen before the call crosses a runtime effect or process boundary.
 // `PartialEq` but not `Eq`: `args` and `prepared_payload` are `serde_json::Value`.
-// Comparison exists so a retained tool-child request can prove it round-tripped
-// its input unchanged (ADR 0099 §3).
+// Comparison verifies retained logical call admission and replay.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PreparedToolCall {
     pub call_id: lash_sansio::ToolCallId,
@@ -1097,9 +1093,8 @@ impl PreparedToolBatch {
 /// execution binding that providers can inspect from the prepare and execute
 /// contexts.
 // `PartialEq` but not `Eq`: `execution_binding` is a `serde_json::Value`, whose
-// float arm has no total equality. Comparison exists so a retained tool-child
-// request can prove it round-tripped its admitted authority unchanged
-// (ADR 0099 §3).
+// float arm has no total equality. Comparison verifies that retained
+// admission preserves the granted authority.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolExecutionGrant {
     /// The plugin whose declared code executes this grant.

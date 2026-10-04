@@ -127,12 +127,7 @@ pub mod triggers;
 
 pub mod facade_support {
     pub use crate::Response;
-    pub use crate::runtime::effect::{
-        ContextSourceInstall, DeploymentToolChildContext, LiveOpenerContext, LiveOpenerGuard,
-        LiveOpenerRegistry, ToolChildContextSource, ToolChildDriver, ToolChildHost,
-        ToolChildOpenerContext, ToolChildRebuildRefusal, ToolChildRequest, ToolChildSessionFacts,
-        UnrecordedSessionSources, opener_for_execution_scope, scope_status,
-    };
+    pub use crate::runtime::effect::scope_status;
     pub use lash_core_ids::operational_metrics::StoreObserver;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
@@ -856,7 +851,7 @@ pub use runtime::{
     admit_session_state_generation, admit_session_view, apply_parent_end_plan,
     artifact_referrer_ended, effect_groups_unsupported, end_parent_scope, end_session_runs,
     lifetime, live_session_view, mint_process_id, parent_end_delivery_key, parent_end_requester,
-    park_turn_of_refused_group_child, park_turn_refused_by_generation, session_is_live,
+    park_turn_refused_by_generation, session_is_live,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
@@ -945,9 +940,7 @@ pub mod core_internal {
     pub use crate::plugin::EffectPublication;
     pub use crate::runtime::effect::executor::{RuntimeEffectLocalRunner, owned_runner_executor};
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
-    pub use crate::runtime::effect::tool_child_runtime_ops::ToolChildHostRuntimeOps;
     pub use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps;
-    pub use crate::session::tool_execution::ToolDispatchResult;
     pub use crate::session::tool_run::ToolRunOwner;
     pub use lash_core_store::process_identity::StartKeyDerivation;
     pub fn attach_process_invocation_correlation(

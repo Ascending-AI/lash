@@ -1,5 +1,4 @@
 use super::*;
-use lash_core_execution::core_internal::ToolChildHostRuntimeOps as _;
 
 #[cfg(test)]
 mod context_tests;
@@ -9,12 +8,6 @@ mod session;
 
 pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContext<'run> {
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
-    /// The process incarnation's live-opener registration (ADR 0099 §3), when
-    /// this host routes tool children and the scope names an opener. Held here
-    /// so `shutdown` releases it with the dispatch: the lent context's
-    /// observation sink is the process's own, so nothing the registration
-    /// held could outlive them.
-    live_opener: Option<crate::LiveOpenerGuard>,
 }
 
 impl<'run> ProcessRunContext<'run> {
@@ -39,11 +32,7 @@ impl<'run> ProcessRunContext<'run> {
     }
 
     pub(in crate::runtime::session_manager::process_runners) async fn shutdown(self) {
-        let Self {
-            dispatch,
-            live_opener,
-        } = self;
-        drop(live_opener);
+        let Self { dispatch } = self;
         drop(dispatch);
     }
 }
@@ -101,8 +90,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         self
     }
 
-    /// The cooperative signal the lent opener context carries: a tool child's
-    /// waits cancel with the process that opened it (FIG-2266).
+    /// Cooperative cancellation shared by this process's recorded tool bodies.
     pub(in crate::runtime::session_manager::process_runners) fn cancellation(
         mut self,
         cancellation: tokio_util::sync::CancellationToken,
@@ -123,15 +111,6 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
                 "process run context requires a scoped effect controller".to_string(),
             )
         })?;
-        // Derive the opener before the controller moves into the handle. The
-        // derivation is the one owner derivation (`EffectOpener::for_scope`,
-        // FIG-3417): the admitted scope plus its pinned incarnation, never a
-        // registry lookup — a process scope without one names no opener and
-        // registers nothing, leaving its children accepted rather than run
-        // under a context that cannot claim them.
-        let opener = crate::facade_support::opener_for_execution_scope(
-            scoped_effect_controller.admitted_scope(),
-        );
         let effect_controller = scoped_effect_controller;
         let direct_completions = services.direct_completion_client(
             effect_controller.clone(),
@@ -175,46 +154,6 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             process_lineage: self.process_lineage,
             process_originator: self.process_originator,
         });
-        // Publish the process incarnation as a live opener, lending this
-        // dispatch context to the group children it opens (ADR 0099 §3). The
-        // lent context keeps the dispatch's own observation sink — nowhere —
-        // so nothing a child emits outlives the registration. Nothing
-        // registers when the deployment routes no tool children, the scope
-        // names no opener, or the host hands out no owned controller to lend
-        // the captured context's controller slots — the lend a `'static`
-        // capture needs, since the runner's own live controller cannot
-        // outlive its frame.
-        let live_opener = opener
-            .zip(
-                self.services
-                    .current
-                    .host
-                    .core
-                    .control
-                    .tool_children
-                    .as_ref(),
-            )
-            .and_then(|(opener, tool_children)| {
-                let lent_controller = self
-                    .services
-                    .current
-                    .host
-                    .core
-                    .control
-                    .effect_host
-                    .scoped_static(dispatch.effect_controller.admitted_scope().clone())
-                    .ok()??;
-                let context = crate::facade_support::LiveOpenerContext::capture(
-                    dispatch.as_ref(),
-                    lent_controller,
-                    self.cancellation.clone(),
-                );
-                let (guard, _ended) = tool_children.openers().register(opener, context);
-                Some(guard)
-            });
-        Ok(ProcessRunContext {
-            dispatch,
-            live_opener,
-        })
+        Ok(ProcessRunContext { dispatch })
     }
 }

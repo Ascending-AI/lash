@@ -288,7 +288,7 @@ async fn a_dispatch_killed_before_it_registers_redrives_to_one_registration() {
     let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
         unreachable!("in_process names the server double");
     };
-    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::InProcess {
         seed,
         always_replay: false,
     })

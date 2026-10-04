@@ -48,10 +48,10 @@ use lash_http_transport::HttpRequest;
 /// `ConformanceExecutors` plays for group children — so the runner settles
 /// every submitted process successfully and lets the workflow write the
 /// terminal into the law's registry.
-struct ToolChildProcessRunner;
+struct ToolProcessRunner;
 
 #[async_trait::async_trait]
-impl RestateProcessRunner for ToolChildProcessRunner {
+impl RestateProcessRunner for ToolProcessRunner {
     fn executable_generation(
         &self,
         _registration: &lash_core::ProcessRegistration,
@@ -84,7 +84,7 @@ impl RestateProcessRunner for ToolChildProcessRunner {
 /// real process segments (a `spawn_agent` child session) installs its own
 /// [`DurableProcessWorker`](lash_core_worker::DurableProcessWorker) here,
 /// which is what a deployment's `RestateCoreProcessRunner` serves; until one
-/// is installed the endpoint answers as [`ToolChildProcessRunner`] does.
+/// is installed the endpoint answers as [`ToolProcessRunner`] does.
 #[derive(Default)]
 pub(super) struct LawProcessRunner {
     installed: Mutex<Option<crate::RestateCoreProcessRunner>>,
@@ -154,7 +154,7 @@ impl RestateProcessRunner for LawProcessRunner {
                 .await
             }
             None => {
-                ToolChildProcessRunner
+                ToolProcessRunner
                     .run_process_segment(
                         started,
                         process_id,
@@ -450,8 +450,7 @@ impl LiveConformanceHarness {
         Self::start_on(HarnessServer::Live).await
     }
 
-    /// The shared-laws endpoint: the suite's staged resolver is registered on
-    /// the host, so `install_tool_child_host` wins nothing here.
+    /// The shared-laws endpoint with the suite's staged resolver.
     pub(super) async fn start_on(target: HarnessServer) -> Self {
         let executors = Arc::new(ConformanceExecutors::default());
         let registered = Arc::clone(&executors);
@@ -462,18 +461,13 @@ impl LiveConformanceHarness {
         .await
     }
 
-    /// The tool-child laws' endpoint on a live server.
-    pub(super) async fn start_for_tool_children() -> Self {
-        Self::start_for_tool_children_on(HarnessServer::Live).await
+    /// The tool Run laws' endpoint on a live server.
+    pub(super) async fn start_for_tools() -> Self {
+        Self::start_for_tools_on(HarnessServer::Live).await
     }
 
-    /// The tool-child laws' endpoint: nothing is registered, so the runtime's
-    /// `install_tool_child_host` installs its `ToolChildHost` on this host and
-    /// the endpoint routes `ToolInvocation` children through it — the one
-    /// resolver a deployment has. A child's declared start submits
-    /// `LashProcessWorkflow/run` through the handler's context, which the
-    /// endpoint serves with the law's installed process worker.
-    pub(super) async fn start_for_tool_children_on(target: HarnessServer) -> Self {
+    /// A tool Run endpoint serving declared process work.
+    pub(super) async fn start_for_tools_on(target: HarnessServer) -> Self {
         Self::start_with(target, Arc::new(ConformanceExecutors::default()), |_| {}).await
     }
 
@@ -496,7 +490,7 @@ impl LiveConformanceHarness {
     /// The tool-child laws' endpoint over the store tier `tier`: the
     /// endpoint's session catalog, process registry and a law's runtime all
     /// run over it.
-    pub(super) async fn start_for_tool_children_over(
+    pub(super) async fn start_for_tools_over(
         target: HarnessServer,
         tier: super::effect_group_committed_recovery::HarnessStoreTier,
     ) -> Self {
@@ -685,9 +679,7 @@ impl LiveConformanceHarness {
         )
     }
 
-    /// The endpoint's own host, for a law that builds a runtime on it: the
-    /// runtime installs its `ToolChildHost` here, which is the resolver the
-    /// endpoint's dispatch invocations route tool children through.
+    /// The endpoint's host for a law that builds a runtime on it.
     pub(super) fn endpoint_host(&self) -> Arc<dyn lash_core::EffectHost> {
         Arc::clone(&self.host) as Arc<dyn lash_core::EffectHost>
     }

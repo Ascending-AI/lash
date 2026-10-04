@@ -17,8 +17,6 @@
 //! independently.
 //! Other entry points can be called from backend-specific `#[tokio::test]` functions.
 
-pub use lash_core::testing::coordinate_tool_provider_with_services;
-
 mod attachment_adoption;
 pub use attachment_adoption::{
     AttachmentBytesFactory, abandoned_attachment_write_recovery_after_cold_reopen,

@@ -1429,7 +1429,7 @@ async fn an_attempt_capture_bounds_its_stream_and_its_presentation_emits_it() {
             panic!("cut {cut:?}: the call is final");
         };
         let stream = capture.stream().expect("the body ran").clone();
-        let (decoded, undecodable) = stream.decode(&serde_json::Value::Null);
+        let (decoded, undecodable) = stream.decode();
         assert_eq!(undecodable, 0);
         assert!(
             matches!(

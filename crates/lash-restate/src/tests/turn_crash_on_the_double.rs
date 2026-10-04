@@ -22,8 +22,7 @@ async fn turn_crash_runner_fixture() -> (
     Arc<dyn EffectHost>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
 ) {
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let harness = LiveConformanceHarness::start_for_tools_on(HarnessServer::in_process()).await;
     let host = harness.endpoint_host();
     let runner = harness.turn_runner();
     let stores = harness.law_stores();

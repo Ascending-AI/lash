@@ -95,17 +95,17 @@ pub fn turn_phase_effect_invocation(
     )
 }
 
-/// The replay-key segment of a turn's tool-child group invocation.
+/// The replay-key segment of a turn's tool batch invocation.
 ///
 /// A group invocation is never an envelope, so it has no
 /// [`RuntimeEffectKind`]; it is key material only. The segment keeps the bytes
 /// the turn's tool calls have been keyed under since before they formed groups:
-/// the group key, every child's `ToolChildRequest` attempt identity and every
+/// the group key, every logical call identity and every
 /// attempt envelope hash derive from this key, so renaming the segment would
 /// move each of those hashes for no change in meaning (ADR 0099 §3).
 const TURN_TOOL_GROUP_KEY_SEGMENT: &str = "tool_batch";
 
-/// Invocation a standard-protocol turn opens its tool-child effect group under
+/// Invocation a standard-protocol turn opens its tool batch under
 /// (ADR 0099 §3).
 ///
 /// The replay key carries the physical turn and protocol iteration, so a

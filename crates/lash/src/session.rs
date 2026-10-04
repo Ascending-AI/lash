@@ -455,14 +455,6 @@ impl SessionBuilder {
         let policy = state.effective_policy().clone();
         let session_id = state.session_id.clone();
         let mut env = self.core.env.clone();
-        // What this open adds to the core's wiring has no recorded form, so a
-        // group tool child of this session cannot be rebuilt without it and
-        // waits for its live opener instead (FIG-3712).
-        env.core.control.open_sources = lash_core::facade_support::UnrecordedSessionSources {
-            open_tool_policy: self.tool_source_policy.is_some()
-                || self.tool_surface_open_mode.is_some(),
-            ..Default::default()
-        };
         if let Some(policy) = self.tool_source_policy {
             // Per-open override of the deployment default. It rides the env's
             // host config so every construction this open performs below the
@@ -485,18 +477,15 @@ impl SessionBuilder {
         env.plugin_host = Some(Arc::new(plugin_host));
         let ports = self.core.substrate_slot.ports().await;
         env = env.with_work_ports(ports.process.clone(), ports.queued_port());
-        let binding = Arc::new(
-            BoundSession::new(
-                session_id,
-                resolved.store.clone(),
-                &env,
-                ports.process.clone(),
-                Arc::clone(&ports.queued),
-                Arc::clone(&self.core.residents),
-                resolved.catalog,
-            )
-            .holding_tool_child_context_source(Arc::clone(&self.core.tool_child_context_source)),
-        );
+        let binding = Arc::new(BoundSession::new(
+            session_id,
+            resolved.store.clone(),
+            &env,
+            ports.process.clone(),
+            Arc::clone(&ports.queued),
+            Arc::clone(&self.core.residents),
+            resolved.catalog,
+        ));
         env = binding.apply_owner(env);
         let recorded_parent_session_id =
             crate::session::recorded_parent_session_id(&binding.store()).await?;

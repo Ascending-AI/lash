@@ -202,9 +202,6 @@ impl RuntimeErrorCause {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum GroupChildCapability {
-    /// The deployment's builder of a tool child's dispatch context when the
-    /// child's opener is not live where it runs.
-    ToolChildContextSource,
     /// The resolver that maps a recorded group child to the code that runs
     /// it: the host serves the lane with none registered.
     GroupExecutors,
@@ -214,7 +211,6 @@ impl GroupChildCapability {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::ToolChildContextSource => "tool_child_context_source",
             Self::GroupExecutors => "group_executors",
         }
     }

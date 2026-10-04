@@ -58,15 +58,17 @@ is a local-executor observation, not part of the command identity.
 The outcome is `ToolPresentation { version, model_return, artifacts,
 retention }`. Its reader validates `TOOL_PRESENTATION_VERSION` and refuses
 unknown fields. A recorded presentation replays without running its presenter
-or optional steps. The settlement uses its recorded model return; realized
-intent outcomes supply the call's model addenda.
+or optional steps. The logical call uses its recorded model return; realized intent outcomes
+supply the call's model addenda through `ToolPresentationFacts`.
+`ToolPresentationInput::facts` contains this declaration evidence, and
+`previous` carries the preceding presentation step's return.
 
 A journal or envelope failure is not fallback model text. It fails the scalar
-completion or refuses the group child. Presentation-step fallback applies to
+completion or refuses the logical Run. Presentation-step fallback applies to
 optional plugin failures, not to failure of the effect that records them.
 
 Sources: `crates/lash-core-execution/src/session/tool_execution.rs:653`,
-`crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs:1643`, and
+`crates/lash-core-execution/src/tool_dispatch/production/settlement.rs`, and
 `crates/lash-core-execution/src/runtime/effect/tool_presentation.rs:38`.
 
 ### C. Retention uses content-addressed attachments
@@ -115,10 +117,11 @@ governs the 1.0 upgrade contract.
 
 ## Links
 
-- [ADR 0099 §6](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
-  defines the group-child presentation boundary.
-- `crates/lash-core-execution/src/runtime/effect/tool_settlement.rs` defines
-  the settlement presentation and incorporation share.
+- The [Tool-run contract](../architecture/tool-run-contract.md) defines
+  protected declaration, presentation and incorporation order.
+- `crates/lash-core-execution/src/plugin/hooks.rs` defines presentation facts;
+  `crates/lash-core-execution/src/runtime/effect/tool_attempt_capture.rs`
+  defines committed attempt facts for incorporation.
 - `crates/lash-restate-test/tests/crash_windows.rs` exercises the crash between
   the retained put and the journaled presentation on the server double and
   live Restate.

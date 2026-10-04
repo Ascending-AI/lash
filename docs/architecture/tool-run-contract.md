@@ -13,7 +13,11 @@ it into production, and no production route reads it before that ticket
 lands. The normative specification behind them is the FIG-4864 arc
 specification (`tool-final-spec.md`), including the binding Q2-Q5 rulings,
 the hook policy and the adopted hook-composition ruling. FIG-529's
-effect-host simulator targets these seams, not `ToolChildHost`.
+effect-host simulator targets these seams. FIG-4899 removes the tool-child
+driver, request/settlement transport and live-context lending. Atomic
+`ToolAttempt` capture and logical public `ToolInvocation` keep their own jobs;
+presentation callbacks receive realized declarations through
+`ToolPresentationFacts`. Generic group transport remains until FIG-4900.
 
 ## Seams
 

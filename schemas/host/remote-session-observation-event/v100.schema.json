@@ -2458,7 +2458,7 @@
       "type": "object"
     },
     "EffectOpener": {
-      "description": "The exact logical opener that durable work binds (ADR 0099 \u00a71).\n\nShared vocabulary rather than a per-lane spelling: the retained tool-child\nrequest (FIG-3408) records it, recovery validates it (FIG-3396 \u00a71), and the\nLashlang host bridges mint their identities under it (FIG-3394). One type so\nthe three cannot disagree about what an opener is.",
+      "description": "The exact logical opener that durable work binds (ADR 0099 \u00a71).\n\nRun admission records it, recovery validates it, and language host bridges\nmint their identities under it. Every path shares the same owner value.",
       "oneOf": [
         {
           "description": "A turn of a session.",
@@ -2806,11 +2806,6 @@
     "GroupChildCapability": {
       "description": "A capability a deployment needs to execute an effect-group child, and\nwhose absence is a fact of the deployment's wiring rather than of one\nattempt (FIG-4550).",
       "oneOf": [
-        {
-          "const": "tool_child_context_source",
-          "description": "The deployment's builder of a tool child's dispatch context when the\nchild's opener is not live where it runs.",
-          "type": "string"
-        },
         {
           "const": "group_executors",
           "description": "The resolver that maps a recorded group child to the code that runs\nit: the host serves the lane with none registered.",

@@ -386,16 +386,6 @@ impl RuntimeErrorCode {
             Self::AggregateAwaitUnsettled => Terminal,
             // the recorded tool-call limit refuses the same call again.
             Self::MaxToolCallsExceeded => Terminal,
-            // the child request names the wrong cancellation authority.
-            Self::RuntimeEffectToolChildCancellationAuthority => Terminal,
-            // the child request routes its completion inconsistently.
-            Self::RuntimeEffectToolChildCompletionRouting => Terminal,
-            // the child request is refused admission.
-            Self::RuntimeEffectToolChildRequestAdmission => Terminal,
-            // the child request names an inconsistent opener.
-            Self::RuntimeEffectToolChildRequestOpener => Terminal,
-            // the child request version is unsupported.
-            Self::RuntimeEffectToolChildRequestVersion => Terminal,
             // the invocation names an inconsistent subject.
             Self::RuntimeEffectInvocationSubject => Terminal,
             // the effect names another scope; wiring, not the attempt.
@@ -420,8 +410,8 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectToolAttemptCaptureVersion => Terminal,
             // the attempt index is inconsistent.
             Self::RuntimeEffectToolAttemptIndex => Terminal,
-            // the tool settlement version is unsupported.
-            Self::RuntimeEffectToolSettlementVersion => Terminal,
+            // the recorded presentation or execution environment cannot be reconstructed.
+            Self::ToolPresentationFormat | Self::ProcessExecutionEnvRefused => Terminal,
             // the effect produced an outcome of the wrong kind for its command.
             Self::RuntimeEffectWrongOutcome => Terminal,
             // the process-local controller task closed; a restart repairs it.

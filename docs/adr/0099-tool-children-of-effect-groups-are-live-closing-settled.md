@@ -2,7 +2,14 @@
 
 ## Status
 
-Accepted and implemented. Restate is the only effect engine
+Superseded for tool execution by the [Tool-run contract](../architecture/tool-run-contract.md)
+(FIG-4899). The child driver, requests, settlements and live-context lending
+below are historical design evidence. The logical Run now owns admission,
+retry, final-or-cancel, protected drain, presentation and incorporation.
+Atomic attempts and declared process starts retain those semantic jobs.
+Generic group transport remains until FIG-4900.
+
+At the time of this decision, Restate was the only effect engine
 ([ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)):
 the group authority this ADR names is the Restate `EffectGroupIndex` object,
 which also answers the group's own notifications (§2), and the SQL stores hold

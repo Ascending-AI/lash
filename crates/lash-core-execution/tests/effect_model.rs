@@ -9,6 +9,5 @@ mod runtime {
     mod effect {
         mod envelope;
         mod group;
-        mod tool_child;
     }
 }

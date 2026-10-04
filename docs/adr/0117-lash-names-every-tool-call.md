@@ -145,15 +145,14 @@ Sources: `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs:42
 
 ### 7. Retained payload drift is refused before any effect
 
-A tool-child group's formation journals one `{group}:requests` record. Each
-tool entry contains its call id, a digest of canonical tool identity, name,
-arguments and authority, and its prepared payload. A replay compares the id
-and digest before execution. A mismatch is `LashlangCellBindingDrift`; the id
-is not reminted. The prepared payload is retained and served, rather than
-compared with fresh preparation. Every later attempt executes the retained
-payload. One record keeps formation replay bounded independently of width.
+Whole-round Run admission records call ids, canonical bindings, argument
+and authority material, prepared requests and operand aliases before any
+body starts. Replay validates retained admission and serves its prepared
+payload. A changed identity or missing material refuses typed before a
+fresh body; it never remints a call id.
 
-Source: `crates/lash-core-execution/src/session/tool_execution/group.rs:416`.
+Source: `crates/lash-core-execution/src/session/tool_run.rs` and
+`crates/lash-core-execution/src/tool_dispatch/production.rs`.
 
 ### 8. The provider boundary
 

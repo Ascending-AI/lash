@@ -91,19 +91,6 @@ async fn controller_owned_non_tool_trigger_reemission_answers_its_bound_process_
                 .await
         }
 
-        async fn commit_group_child_final(
-            &self,
-            commit: lash_core::facade_support::GroupChildFinalCommit,
-        ) -> Result<
-            lash_core::facade_support::EffectGroupChildCommitOutcome,
-            lash_core::RuntimeEffectControllerError,
-        > {
-            self.native
-                .controller()
-                .commit_group_child_final(commit)
-                .await
-        }
-
         async fn await_group_child_drain_admission(
             &self,
             group_key: &str,
