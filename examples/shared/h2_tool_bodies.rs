@@ -25,6 +25,7 @@ pub struct ToolDelivery {
     pub label: String,
     pub call_id: lash::ToolCallId,
     pub ordinal: u32,
+    pub owner: lash::tools::ExecutionOwner,
     pub logical_run: Option<lash::TurnId>,
     pub completion: Option<AwaitEventKey>,
 }
@@ -131,6 +132,7 @@ impl ToolBodies {
             label: call.name().to_owned(),
             call_id: call.context.call_id().clone(),
             ordinal: call.context.attempt_number(),
+            owner: call.context.owner().clone(),
             logical_run: call.context.logical_run(),
             completion,
         };

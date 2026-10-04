@@ -2,6 +2,8 @@
 //! real process and peer loss, retained data, observed leaders and cleanup.
 mod fleet;
 mod plugin_upgrade;
+mod cancel;
+mod tools;
 use anyhow::{Context, Result, ensure};
 use lash_upgrade_harness::e2e::control::process::{
     ProxyCommand, ProxyConfig, command as proxy_command,
