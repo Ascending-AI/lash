@@ -183,6 +183,25 @@ impl LashRuntime {
                 crate::RuntimeEffectControllerError::from(error).into_runtime_error()
             })?;
         let mut state = loaded.state;
+        // Transition publication changes checkpoint state, not immutable graph
+        // nodes. Preserve the warm projection when the validated window is
+        // exactly the resident window, so retained readers keep sharing it.
+        if state.session_graph.anchor == self.state.session_graph.anchor
+            && state.session_graph.leaf_node_id == self.state.session_graph.leaf_node_id
+            && state
+                .session_graph
+                .nodes
+                .iter()
+                .map(|node| &node.node_id)
+                .eq(self
+                    .state
+                    .session_graph
+                    .nodes
+                    .iter()
+                    .map(|node| &node.node_id))
+        {
+            state.session_graph = self.state.session_graph.clone();
+        }
         state.authority.plugin_config =
             (*self.services.plugins.admitted_plugin_config().config).clone();
         if self.session.is_some() {

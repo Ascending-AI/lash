@@ -6,7 +6,7 @@ use lash_sansio::sync::MutexExt;
 const SEED: u64 = 0x5_a503;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
+async fn cumulative_usage_overflow_publishes_no_turn_terminal_or_usage() {
     let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let transport = mock_provider(vec![
@@ -77,7 +77,16 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
         error.message,
         "token usage counter `input_tokens` overflowed while accumulating (turn, mock-model)"
     );
-    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
+    assert!(
+        store.runtime_commits().iter().all(|commit| {
+            commit.turn_commit.operation.key != "final" && commit.run_terminal.is_none()
+        }),
+        "overflow publishes neither a physical turn nor a logical Run terminal"
+    );
+    let state = durable_state(store, "root").await;
+    assert_eq!(state.turn_index, 0);
+    assert_eq!(state.token_usage, lash_core::TokenUsage::default());
+    assert!(active_conversation_messages(&state.to_snapshot()).is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]

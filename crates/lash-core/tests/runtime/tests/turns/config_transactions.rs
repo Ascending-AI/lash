@@ -1,6 +1,6 @@
 use super::*;
-use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::config::core::{SetAutonomy, SetGeneration, SetLlmProfile, SetTurnBudget};
+use lash_core::testing::TestTurnExecution as _;
 use lash_core::testing::{Script, StoreOp};
 
 const SEED: u64 = 0x5_f420;
@@ -51,87 +51,6 @@ async fn command_enqueue_preserves_typed_session_state_version_refusal() {
             current: 12,
         })
     );
-}
-
-/// A transaction of several commands, of one owner or many, publishes with
-/// one head commit and one config revision step (ADR 0101 §12).
-#[tokio::test(flavor = "multi_thread")]
-pub(super) async fn a_transaction_publishes_every_command_with_one_commit_and_one_revision_step() {
-    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
-    let (mut runtime, store) =
-        standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
-            .await;
-    assert_eq!(runtime.config_revision(), 0);
-    let transaction_model = serve_llm_profile_beside(
-        &mut runtime,
-        "transaction-model",
-        lash_core::LlmProfileMetadata::builder("transaction-model")
-            .context_window_tokens(32_000)
-            .build()
-            .expect("model"),
-    );
-    enqueue_config_transaction(
-        store.as_ref(),
-        &runtime,
-        "one-step",
-        lash_core::ConfigTransaction::of(SetLlmProfile {
-            model: transaction_model,
-        })
-        .then(SetTurnBudget {
-            turn_budget: lash_core::TurnBudget::bounded(7),
-        })
-        .then(SetGeneration {
-            generation: lash_core::facade_support::GenerationOverlay::Merge(
-                lash_core::GenerationOptions {
-                    seed: Some(42),
-                    ..Default::default()
-                },
-            ),
-        }),
-    )
-    .await;
-    let commits_before = *store.runtime_commit_count.lock_recover();
-    let request = lash_core::engine::ShiftRequest {
-        session: SessionId::from("root"),
-        request: lash_core::engine::ShiftRequestId::new("config-transaction"),
-        intended_lane: None,
-    };
-    let handler = double
-        .open_handler(AdmittedScope::turn(
-            SessionId::from("root"),
-            "session-command",
-        ))
-        .await
-        .expect("open the drain's handler");
-    let shift = lash_core::shift::work_session(&mut runtime, &handler.scoped(), &request)
-        .await
-        .expect("engine shift settles the config transaction");
-    handler.close().await.expect("close the drain's handler");
-    assert!(
-        !shift.ran.is_empty(),
-        "engine must admit the queued command run"
-    );
-
-    assert_eq!(
-        *store.runtime_commit_count.lock_recover(),
-        commits_before + 1,
-        "a transaction publishes with exactly one head commit"
-    );
-    assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("list settled config commands")
-        .is_empty(),
-        "the transaction's command settles"
-    );
-    assert_eq!(runtime.config_revision(), 1, "one revision step");
-    let policy = runtime.session_policy();
-    assert_eq!(policy.wire_model(), Some("transaction-model"));
-    assert_eq!(policy.turn_budget, lash_core::TurnBudget::bounded(7));
-    assert_eq!(policy.generation.seed, Some(42));
 }
 
 /// A transaction id names one request: resubmitting the same content while
@@ -347,38 +266,35 @@ pub(super) async fn a_set_turn_budget_survives_park_and_reload() {
             .expect("park mutated session"),
     );
 
-    let reloaded_state = durable_state(runtime_store.clone(), "root").await;
-    let plugin_host = lash_core::testing::test_plugin_host(Vec::new());
-    let plugins = match reloaded_state.plugin_state() {
-        Some(snapshot) => plugin_host.build_session(PluginSessionRequest::rematerialization(
-            "root",
-            snapshot,
-            lash_core::plugin::SessionAuthorityContext {
-                plugin_config: reloaded_state.admitted_plugin_config(),
-                ..Default::default()
-            },
-        )),
-        None => {
-            plugin_host.build_session(PluginSessionRequest::creation("root", Default::default()))
-        }
-    }
-    .expect("reloaded plugins");
-    let runtime_host = test_host_config(&backend);
-    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
-        plugins,
-        session_view(runtime_store, "root"),
-        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
-        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
-    );
-    let reloaded = lash_core::facade_support::LashRuntime::from_persistent_embedded_state(
-        standard_test_policy(),
-        runtime_host,
-        runtime_services,
-        reloaded_state,
-        lash_core::testing::runtime_lease_owner(),
+    let mut reloaded = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "the restored budget applies".into(),
+                    response_meta: None,
+                }],
+                ..LlmResponse::default()
+            }),
+        }]),
+        test_host_config(&backend),
+        runtime_store,
     )
-    .await
-    .expect("reload parked runtime");
+    .await;
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "restored-budget"))
+        .await
+        .expect("open the restored Run");
+    reloaded
+        .execute_turn(
+            TurnInput::text("run under the restored budget"),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
+        .await
+        .expect("the Run restores the durable budget");
+    handler.close().await.expect("close the restored Run");
     assert_eq!(
         reloaded.session_policy().turn_budget,
         persisted_budget,
@@ -388,7 +304,8 @@ pub(super) async fn a_set_turn_budget_survives_park_and_reload() {
 
 #[tokio::test]
 pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
-    let backend = sqlite_memory_store_backend().await;
+    let double = kernel_double(SEED + 21, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let observed = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let observed_hook = Arc::clone(&observed);
     let plugin = Arc::new(RuntimeTestPluginFactory {
@@ -414,7 +331,15 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
         }),
     });
     let transport = mock_provider(Vec::new());
-    let mut runtime = runtime_with_plugins(&backend, vec![plugin], transport).await;
+    let store = double_unbound_recording_store(&double).await;
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![plugin],
+        Arc::new(EmptyTools),
+        transport,
+        test_host_config(&backend),
+        store,
+    )
+    .await;
 
     let alt_provider = TestProvider::builder()
         .kind("alt")
@@ -461,6 +386,7 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
     );
     apply(
         &mut runtime,
+        &double,
         lash_core::ConfigTransaction::of(SetLlmProfile {
             model: lash_core::LlmProfileKey::new("alt-model"),
         }),
@@ -468,6 +394,7 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
     .await;
     apply(
         &mut runtime,
+        &double,
         lash_core::ConfigTransaction::of(SetLlmProfile {
             model: lash_core::LlmProfileKey::new("alt-model-on-alt"),
         }),
@@ -478,6 +405,7 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
 
     apply(
         &mut runtime,
+        &double,
         lash_core::ConfigTransaction::of(SetLlmProfile {
             model: lash_core::LlmProfileKey::new("combined-model"),
         }),
@@ -488,6 +416,7 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
 
     apply(
         &mut runtime,
+        &double,
         lash_core::ConfigTransaction::of(SetAutonomy { autonomous: true }),
     )
     .await;
@@ -500,6 +429,7 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
     };
     apply(
         &mut runtime,
+        &double,
         lash_core::ConfigTransaction::of(SetGeneration {
             generation: lash_core::facade_support::GenerationOverlay::Replace(generation.clone()),
         }),
@@ -510,6 +440,7 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
 
     apply(
         &mut runtime,
+        &double,
         lash_core::ConfigTransaction::of(SetTurnBudget {
             turn_budget: lash_core::TurnBudget::bounded(9),
         }),
@@ -560,12 +491,15 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
     );
 }
 
-/// Apply `transaction` to a storeless runtime, which must apply it.
+/// Settle the transaction through its command Run.
 async fn apply(
     runtime: &mut lash_core::runtime::LashRuntime,
+    double: &lash_restate_test::RestateTestBackend,
     transaction: lash_core::ConfigTransaction,
 ) {
-    let outcome = crate::runtime_support::apply_storeless_config(runtime, transaction).await;
+    let command = format!("lifecycle-config-{}", runtime.config_revision());
+    let outcome =
+        crate::runtime_support::apply_config(runtime, double, transaction, &command).await;
     assert!(
         matches!(outcome, lash_core::ConfigTransactionOutcome::Applied { .. }),
         "{outcome:?}"

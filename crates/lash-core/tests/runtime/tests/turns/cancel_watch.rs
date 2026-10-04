@@ -94,28 +94,29 @@ where
     let layer: Arc<dyn lash_core::testing::EffectLayer> = Arc::new(recorder);
     let config = super::effect::runtime_host_config_with_effect_layer(&backend, layer)
         .with_clock(host_clock);
-    let runtime = runtime_with_plugins_and_tools_and_host(
-        Vec::new(),
-        Arc::new(CountingEchoTool {
-            executions: Arc::new(AtomicUsize::new(0)),
-        }),
-        transport,
-        EmbeddedRuntimeHost::new(config),
-    )
-    .await;
-    let session_id = runtime.session_id().to_string();
-    let runtime = Arc::new(tokio::sync::Mutex::new(runtime));
+    let host = EmbeddedRuntimeHost::new(config);
+    let store = double_unbound_recording_store(&double).await;
+    let session_id = "root";
     let outcome: Arc<std::sync::Mutex<Option<Result<TurnOutcome, String>>>> = Arc::default();
     let attempt: lash_restate_test::HandlerAttempt = {
-        let runtime = Arc::clone(&runtime);
         let outcome = Arc::clone(&outcome);
         Arc::new(move |scoped| {
-            let runtime = Arc::clone(&runtime);
+            let host = host.clone();
+            let store = store.clone();
+            let transport = transport.clone();
             let outcome = Arc::clone(&outcome);
             Box::pin(async move {
+                // Each invocation attempt gets a cold runtime. Its recorded
+                // Run publishes the plugin view, including on redrive.
+                let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+                    Vec::new(),
+                    Arc::new(EmptyTools),
+                    transport,
+                    host,
+                    store,
+                )
+                .await;
                 let turn = runtime
-                    .lock()
-                    .await
                     .execute_turn(
                         TurnInput::text("run a model call over a failing cancellation watch"),
                         TurnOptions::new(CancellationToken::new(), scoped),
@@ -131,7 +132,7 @@ where
         std::time::Duration::from_secs(60),
         double.run_in_handler(
             AdmittedScope::turn(
-                lash_core::SessionId::fixture(session_id.clone()),
+                lash_core::SessionId::fixture(session_id),
                 TurnId::fixture(turn_id),
             ),
             attempt,

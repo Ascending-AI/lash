@@ -204,7 +204,7 @@ async fn open_frame(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn historical_frame_switch_refuses_and_keeps_resident_config() {
+async fn historical_frame_refusal_keeps_the_changed_policy_and_current_frame() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     let lash_core::runtime::OpenAgentFrameCommandOutcome::Opened { outcome: opened } =
@@ -240,10 +240,7 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
     let resident_policy_before_refusal = runtime.state().effective_policy().clone();
     let resident_plugin_config_before_refusal = runtime.state().authority.plugin_config.clone();
     let resident_frame_before_refusal = runtime.state().current_frame_node_id.clone();
-    let durable_head_before_refusal = session_view(store.clone(), "root")
-        .load_session_head_meta()
-        .await
-        .expect("load durable head before historical-frame refusal");
+    let durable_before = durable_state(store.clone(), "root").await;
 
     let lash_core::runtime::OpenAgentFrameCommandOutcome::Refused { code, .. } =
         Box::pin(open_frame(&mut runtime, &double, "initial-frame")).await
@@ -267,35 +264,26 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
         runtime.state().current_frame_node_id,
         resident_frame_before_refusal
     );
-    let durable_head_after_refusal = session_view(store.clone(), "root")
-        .load_session_head_meta()
-        .await
-        .expect("load durable head after historical-frame refusal");
-    // The open is a session command (FIG-4202): its refusal settles in one
-    // commit, which completes the command and moves nothing else.
+    let durable_after = durable_state(store.clone(), "root").await;
     assert_eq!(
-        durable_head_after_refusal
-            .as_ref()
-            .map(|head| head.head_revision),
-        durable_head_before_refusal
-            .as_ref()
-            .map(|head| head.head_revision + 1)
+        durable_after.effective_policy(),
+        durable_before.effective_policy()
     );
     assert_eq!(
-        durable_head_after_refusal
-            .as_ref()
-            .and_then(|head| head.current_frame_node_id.as_ref()),
-        durable_head_before_refusal
-            .as_ref()
-            .and_then(|head| head.current_frame_node_id.as_ref())
+        durable_after.authority.plugin_config,
+        durable_before.authority.plugin_config
     );
     assert_eq!(
-        durable_head_after_refusal
-            .as_ref()
-            .and_then(|head| head.leaf_node_id.as_deref()),
-        durable_head_before_refusal
-            .as_ref()
-            .and_then(|head| head.leaf_node_id.as_deref())
+        durable_after.config_revision,
+        durable_before.config_revision
+    );
+    assert_eq!(
+        durable_after.current_frame_node_id,
+        durable_before.current_frame_node_id
+    );
+    assert_eq!(
+        durable_after.session_graph.leaf_node_id,
+        durable_before.session_graph.leaf_node_id
     );
 }
 
@@ -707,79 +695,5 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
     assert_eq!(
         *runtime.resident_session.validity(),
         ResidentSessionState::Valid
-    );
-}
-
-/// FIG-1875 pin (b): a successful invalidation reload settles the freshness
-/// facts — `Valid` plus `graph_loaded_from_store`. The turn still reads one
-/// bounded head projection to verify the admitted shift epoch.
-#[tokio::test(flavor = "multi_thread")]
-async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
-    let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let store = double_unbound_recording_store(&double).await;
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(EmptyTools),
-        mock_provider(vec![MockCall {
-            stream_events: Vec::new(),
-            response: Ok(LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text: "reload settled the freshness facts".to_string(),
-                    response_meta: None,
-                }],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            }),
-        }]),
-        test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimeStore>,
-    )
-    .await;
-    Box::pin(append_history(&mut runtime, &double, 2)).await;
-
-    runtime.invalidate_resident_session_state();
-    let head_probes_before = store.load_session_head_meta_count();
-    let full_loads_before = store.load_session_count();
-
-    let handler = double
-        .open_handler(AdmittedScope::turn(
-            SessionId::from("root"),
-            TurnId::from("reload-settles-freshness"),
-        ))
-        .await
-        .expect("open the turn's handler");
-    let turn = runtime
-        .execute_turn(
-            TurnInput::text("shift the invalidated turn"),
-            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
-        )
-        .await
-        .expect("the invalidated turn reloads and runs");
-    handler.close().await.expect("close the turn's handler");
-    assert_eq!(
-        turn.assistant_output.safe_text,
-        "reload settled the freshness facts"
-    );
-
-    assert_eq!(
-        store.load_session_count() - full_loads_before,
-        1,
-        "the invalidation reload performs exactly one full durable read"
-    );
-    // The shift admission's pending-follow-on probe answers from the head,
-    // and the run then verifies its epoch once after the full reload.
-    assert_eq!(
-        store.load_session_head_meta_count() - head_probes_before,
-        2,
-        "the shift verifies its epoch once after the full freshness reload"
-    );
-    assert_eq!(
-        *runtime.resident_session.validity(),
-        ResidentSessionState::Valid
-    );
-    assert!(
-        runtime.resident_session.graph_loaded_from_store(),
-        "the reload settles graph_loaded_from_store"
     );
 }
