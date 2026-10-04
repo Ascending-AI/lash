@@ -178,18 +178,15 @@ async fn public_append_node_budget_failure_is_typed_terminal_and_actionable() ->
         .open()
         .await?;
 
-    let error =
-        Box::pin(
-            session
-                .admin()
-                .state()
-                .append_messages(vec![lash_core::PluginMessage::text(
-                    lash_core::MessageRole::User,
-                    "one appended message plus the initial frame exceeds one node",
-                )]),
-        )
-        .await
-        .expect_err("the public append must reject its over-limit commit");
+    let error = Box::pin(session.admin().state().append_messages(vec![
+        lash_core::PluginMessage::text(lash_core::MessageRole::User, "first appended node"),
+        lash_core::PluginMessage::text(
+            lash_core::MessageRole::User,
+            "second appended node exceeds the one-node budget",
+        ),
+    ]))
+    .await
+    .expect_err("the public append must reject its over-limit commit");
 
     assert_budget_command_error(
         &factory,

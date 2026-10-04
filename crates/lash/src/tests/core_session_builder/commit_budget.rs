@@ -38,12 +38,17 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         .open()
         .await?;
     let error = session
-        .send(TurnInput::text("adopt one attachment").with_attachment(
-            lash_core::AttachmentSource::inline(
-                lash_core::MediaType::parse("image/png").expect("image media type"),
-                vec![1, 2, 3],
-            ),
-        ))
+        .send(
+            TurnInput::text("adopt two attachments")
+                .with_attachment(lash_core::AttachmentSource::inline(
+                    lash_core::MediaType::parse("image/png").expect("image media type"),
+                    vec![1, 2, 3],
+                ))
+                .with_attachment(lash_core::AttachmentSource::inline(
+                    lash_core::MediaType::parse("image/png").expect("image media type"),
+                    vec![4, 5, 6],
+                )),
+        )
         .id("commit-adoption-row-budget-turn")
         .output()
         .await
