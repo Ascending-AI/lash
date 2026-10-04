@@ -104,6 +104,215 @@ async fn l06_race_returns_before_inline_loser_and_keeps_it_unconsumed() {
     );
 }
 
+#[tokio::test]
+async fn l05_check_cancel_is_an_operand_rejection_before_and_after() {
+    for before in [true, false] {
+        for consumer in [
+            AggregateConsumer::Race,
+            AggregateConsumer::Any,
+            AggregateConsumer::All,
+            AggregateConsumer::AllSettled,
+            AggregateConsumer::ListBatch,
+        ] {
+            let calls = Arc::new(vec![
+                (call("check-allowed", &Kind::IntentFree), Kind::IntentFree),
+                (call("check-cancelled", &Kind::IntentFree), Kind::IntentFree),
+            ]);
+            let mut probe = Probe::new(&calls);
+            if before {
+                probe.cancel_before = Some(calls[1].0.call_id.clone());
+            } else {
+                probe.cancel_after = Some(calls[1].0.call_id.clone());
+                probe.parallel = Some(Arc::new(tokio::sync::Barrier::new(2)));
+                probe.parallel_order = vec![calls[1].0.call_id.clone(), calls[0].0.call_id.clone()];
+            }
+            let probe = Arc::new(probe);
+            let backend = lash_restate_test::backend(4925, ServerConfig::default())
+                .await
+                .unwrap();
+            let finished = Arc::new(AtomicBool::new(false));
+            let attempt: lash_restate_test::HandlerAttempt = {
+                let probe = Arc::clone(&probe);
+                let finished = Arc::clone(&finished);
+                Arc::new(move |scoped| {
+                    let calls = Arc::clone(&calls);
+                    let probe = Arc::clone(&probe);
+                    let finished = Arc::clone(&finished);
+                    Box::pin(async move {
+                        let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+                        let plan = aggregate_plan("check-cancel", &round, vec![0, 1, 1]);
+                        let mut run = RunCoordinator::open(
+                            &scoped,
+                            owner(),
+                            SegmentOrdinal(0),
+                            vec![revision()],
+                        );
+                        run.start_aggregate(
+                            &plan,
+                            &round,
+                            Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                            Default::default(),
+                            &SystemClock,
+                        )
+                        .await
+                        .unwrap();
+                        let answer = run.consume_aggregate(&plan.key, consumer).await.unwrap();
+                        let rejected = |reply: &Option<SingletonTerminal>| {
+                            matches!(reply, Some(SingletonTerminal::Withheld { .. }))
+                        };
+                        match (consumer, &answer) {
+                            (
+                                AggregateConsumer::Any,
+                                RunAggregateOutcome::Selected {
+                                    operand: 0,
+                                    fulfilled: true,
+                                    reply: Some(SingletonTerminal::Final { .. }),
+                                },
+                            ) => {}
+                            (
+                                AggregateConsumer::Race
+                                | AggregateConsumer::All
+                                | AggregateConsumer::ListBatch,
+                                RunAggregateOutcome::Selected {
+                                    operand: 1,
+                                    fulfilled: false,
+                                    reply,
+                                },
+                            ) if rejected(reply) => {}
+                            (
+                                AggregateConsumer::AllSettled,
+                                RunAggregateOutcome::AllResults(replies),
+                            ) if replies.len() == 3
+                                && rejected(&replies[1])
+                                && replies[1] == replies[2] => {}
+                            _ => panic!(
+                                "L05: a {before:?} before-check cancellation is a call rejection for {consumer:?}: {answer:?}"
+                            ),
+                        }
+                        while run.progress().await.unwrap().is_some() {}
+                        assert_eq!(run.lifecycle(), RunLifecycle::Live);
+                        assert!(probe.cancelled_calls.lock().unwrap().is_empty());
+                        run.close().await.unwrap();
+                        finished.store(true, Ordering::SeqCst);
+                    })
+                })
+            };
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(finished.load(Ordering::SeqCst));
+            assert!(probe.cancelled_calls.lock().unwrap().is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn l05_check_cancel_never_replaces_an_earlier_winner() {
+    for before in [true, false] {
+        for consumer in [AggregateConsumer::Race, AggregateConsumer::Any] {
+            let winner = if before {
+                Kind::Cached
+            } else {
+                Kind::IntentFree
+            };
+            let calls = Arc::new(vec![
+                (call("earlier-winner", &winner), winner),
+                (
+                    call("later-check-cancel", &Kind::IntentFree),
+                    Kind::IntentFree,
+                ),
+            ]);
+            let mut probe = Probe::new(&calls);
+            if before {
+                probe.cancel_before = Some(calls[1].0.call_id.clone());
+            } else {
+                probe.cancel_after = Some(calls[1].0.call_id.clone());
+                probe.body_barrier = Some(Arc::new(tokio::sync::Barrier::new(2)));
+                probe.gate = Some((calls[1].0.call_id.clone(), calls[0].0.call_id.clone()));
+            }
+            let probe = Arc::new(probe);
+            let backend = lash_restate_test::backend(0x492505, ServerConfig::default())
+                .await
+                .unwrap();
+            let finished = Arc::new(AtomicBool::new(false));
+            let attempt: lash_restate_test::HandlerAttempt = {
+                let probe = Arc::clone(&probe);
+                let finished = Arc::clone(&finished);
+                Arc::new(move |scoped| {
+                    let calls = Arc::clone(&calls);
+                    let probe = Arc::clone(&probe);
+                    let finished = Arc::clone(&finished);
+                    Box::pin(async move {
+                        let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+                        let plan = aggregate_plan("earlier-winner", &round, vec![0, 1]);
+                        let mut run = RunCoordinator::open(
+                            &scoped,
+                            owner(),
+                            SegmentOrdinal(0),
+                            vec![revision()],
+                        );
+                        run.start_aggregate(
+                            &plan,
+                            &round,
+                            Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                            Default::default(),
+                            &SystemClock,
+                        )
+                        .await
+                        .unwrap();
+                        let first = run.consume_aggregate(&plan.key, consumer).await.unwrap();
+                        assert!(
+                            matches!(
+                                first,
+                                RunAggregateOutcome::Selected {
+                                    operand: 0,
+                                    fulfilled: true,
+                                    ..
+                                }
+                            ),
+                            "L05: the earlier winner survives the check cancellation: {first:?}"
+                        );
+                        probe.gate_open.store(true, Ordering::SeqCst);
+                        probe.gate_wake.notify_waiters();
+                        while run.progress().await.unwrap().is_some() {}
+                        run.drain_protected().await.unwrap();
+                        let again = run.consume_aggregate(&plan.key, consumer).await.unwrap();
+                        assert_eq!(
+                            again, first,
+                            "L05: a later check-cancel never discards a selected winner"
+                        );
+                        let consumed: Vec<_> = run
+                            .records()
+                            .iter()
+                            .flat_map(|record| &record.events)
+                            .filter_map(|event| match event {
+                                RunEvent::Consumed { call_id } => Some(call_id.clone()),
+                                _ => None,
+                            })
+                            .collect();
+                        assert_eq!(consumed, vec![round[0].call_id.clone()]);
+                        assert_eq!(run.lifecycle(), RunLifecycle::Live);
+                        run.close().await.unwrap();
+                        finished.store(true, Ordering::SeqCst);
+                    })
+                })
+            };
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(finished.load(Ordering::SeqCst));
+        }
+    }
+}
+
 fn aggregate_plan(key: &str, calls: &[SingletonToolCall], operands: Vec<u32>) -> AggregatePlan {
     AggregatePlan {
         key: key.to_owned(),

@@ -111,6 +111,14 @@ fn call(label: &str, kind: &Kind) -> SingletonToolCall {
     }
 }
 
+fn check_cancel_cause() -> lash_core::tool_run::HookCause {
+    lash_core::tool_run::HookCause {
+        error_type: "check-cancel".to_owned(),
+        error_version: std::num::NonZeroU32::MIN,
+        payload: serde_json::json!({ "reason": "only this call" }),
+    }
+}
+
 fn output_of(call_id: &ToolCallId) -> String {
     format!("fig4880 done {call_id}")
 }
@@ -132,6 +140,8 @@ struct Probe {
     /// Stream events each body observes into its attempt's stream.
     streams: BTreeMap<ToolCallId, Vec<SessionStreamEvent>>,
     cancel: AtomicBool,
+    cancel_before: Option<ToolCallId>,
+    cancel_after: Option<ToolCallId>,
     cancelled_calls: Mutex<Vec<ToolCallId>>,
     parallel: Option<Arc<tokio::sync::Barrier>>,
     body_barrier: Option<Arc<tokio::sync::Barrier>>,
@@ -181,6 +191,8 @@ impl Probe {
             complete_sources: false,
             streams: BTreeMap::new(),
             cancel: AtomicBool::new(false),
+            cancel_before: None,
+            cancel_after: None,
             cancelled_calls: Mutex::new(Vec::new()),
             parallel: None,
             body_barrier: None,
@@ -253,7 +265,11 @@ impl SingletonToolHandlers for Probe {
     ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
         vec![AttributedVerdict {
             callback: binding().executable,
-            verdict: if matches!(self.kinds[&_call.call_id], Kind::Cached) {
+            verdict: if self.cancel_before.as_ref() == Some(&_call.call_id) {
+                BeforeCheckReply::Cancel {
+                    cause: check_cancel_cause(),
+                }
+            } else if matches!(self.kinds[&_call.call_id], Kind::Cached) {
                 BeforeCheckReply::Cached {
                     output: output_of(&_call.call_id),
                 }
@@ -401,7 +417,16 @@ impl SingletonToolHandlers for Probe {
             assert_eq!(self.parallel_order[index], *call_id);
             self.parallel_wake.notify_waiters();
         }
-        Vec::new()
+        if self.cancel_after.as_ref() == Some(call_id) {
+            vec![AttributedVerdict {
+                callback: binding().executable,
+                verdict: AfterCheckVerdict::Cancel {
+                    cause: check_cancel_cause(),
+                },
+            }]
+        } else {
+            Vec::new()
+        }
     }
 
     fn plugin_session(&self) -> Option<Arc<lash_core::plugin::PluginSession>> {
