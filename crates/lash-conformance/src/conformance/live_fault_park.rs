@@ -114,6 +114,10 @@ struct World {
 }
 
 impl World {
+    #[expect(
+        clippy::expect_used,
+        reason = "the live-fault fixture resolves its creator configuration"
+    )]
     async fn new(
         name: &str,
         effect_host: &Arc<dyn crate::EffectHost>,
@@ -147,8 +151,27 @@ impl World {
         let session_id = SessionId::fixture(format!("{name}-session"));
         let admission_faults = Arc::new(AtomicUsize::new(0));
         let admissions = Arc::new(AtomicUsize::new(0));
+        let contributor_faulting = Arc::new(AtomicBool::new(false));
+        let plugins = crate::facade_support::PluginHost::new(Self::factories(Arc::clone(
+            &contributor_faulting,
+        )));
+        let mut config = crate::PersistedSessionConfig::from(crate::testing::mock_session_policy());
+        config.plugin_config = plugins
+            .resolve_creation_plugin_config(
+                plugins.protocol_plugin_id(),
+                &crate::PluginOptions::default(),
+                None,
+                true,
+                &crate::store::plugin_writers::PluginAdmission::default(),
+            )
+            .expect("the live-fault session records its creator configuration");
         let store: Arc<dyn crate::RuntimeStore> = Arc::new(FaultingAdmission {
-            inner: crate::conformance::law_session_store(stores.as_ref(), &session_id).await,
+            inner: crate::conformance::law_session_store_with_config(
+                stores.as_ref(),
+                &session_id,
+                config,
+            )
+            .await,
             faults: Arc::clone(&admission_faults),
             admissions: Arc::clone(&admissions),
         });
@@ -158,11 +181,32 @@ impl World {
             host,
             store,
             contributor_armed: Arc::new(AtomicBool::new(false)),
-            contributor_faulting: Arc::new(AtomicBool::new(false)),
+            contributor_faulting,
             admission_faults,
             admissions,
             model_calls,
         }
+    }
+
+    fn factories(faulting: Arc<AtomicBool>) -> Vec<Arc<dyn crate::facade_support::PluginFactory>> {
+        let contributor: crate::plugin::ToolCatalogContributor = Arc::new(move |_| {
+            if faulting.load(Ordering::SeqCst) {
+                return Err(crate::PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::StoreCommitFailed,
+                    CONTRIBUTOR_FAULT,
+                )));
+            }
+            Ok(crate::plugin::ToolCatalogContribution::default())
+        });
+        crate::testing::test_standard_protocol_factories()
+            .into_iter()
+            .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("conformance-live-fault-park"),
+                crate::facade_support::PluginSpec::new()
+                    .with_tool_catalog_contributor(crate::hook_key!("live-fault"), contributor),
+            ))
+                as Arc<dyn crate::facade_support::PluginFactory>])
+            .collect()
     }
 
     fn admitted(&self) -> crate::AdmittedScope {
@@ -175,38 +219,11 @@ impl World {
     )]
     async fn runtime(&self) -> crate::LashRuntime {
         let policy = crate::testing::mock_session_policy();
-        let state = crate::RuntimeSessionState {
-            session_id: self.session_id.clone(),
-            policy: policy.clone(),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            ))
-        };
-        let faulting = Arc::clone(&self.contributor_faulting);
-        let contributor: crate::plugin::ToolCatalogContributor = Arc::new(move |_| {
-            if faulting.load(Ordering::SeqCst) {
-                return Err(crate::PluginError::Runtime(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::StoreCommitFailed,
-                    CONTRIBUTOR_FAULT,
-                )));
-            }
-            Ok(crate::plugin::ToolCatalogContribution::default())
-        });
-        let factories = crate::testing::test_standard_protocol_factories()
-            .into_iter()
-            .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
-                lash_core::plugin::PluginDeclaration::initial("conformance-live-fault-park"),
-                crate::facade_support::PluginSpec::new()
-                    .with_tool_catalog_contributor(crate::hook_key!("live-fault"), contributor),
-            ))
-                as Arc<dyn crate::facade_support::PluginFactory>])
-            .collect();
+        let factories = Self::factories(Arc::clone(&self.contributor_faulting));
         Box::pin(
             crate::LashRuntime::builder(self.host.clone(), crate::testing::runtime_lease_owner())
                 .with_session_id(&self.session_id)
                 .with_policy(policy)
-                .with_initial_state(state)
                 .with_plugin_factories(factories)
                 .with_store(crate::conformance::helpers::session_view(
                     &self.store,
