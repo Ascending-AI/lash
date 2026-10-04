@@ -384,3 +384,62 @@ async fn core_r3_three_real_nodes_directed_partition_leader_loss_and_cleanup() -
     let cleanup = cluster.finish().await;
     finish_case(&lease.directory, "H0-R3", result, cleanup)
 }
+
+/// R1: a physical host outage cannot remove the controller endpoint needed
+/// for the same admitted invocation's cold reconnect (H1 S06 regression).
+#[tokio::test]
+async fn core_r1_proxy_reconnects_after_owned_upstream_downtime() -> Result<()> {
+    use lash_upgrade_harness::e2e::control::transport::V7Proxy;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let directory = tempfile::tempdir()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let upstream = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let address = upstream.local_addr()?;
+    drop(upstream);
+    let mut proxy = V7Proxy::start(
+        std::net::TcpListener::bind("127.0.0.1:0")?,
+        address,
+        directory.path().to_owned(),
+        deadline,
+        Vec::new(),
+    )
+    .await?;
+    let endpoint = proxy.endpoint.trim_start_matches("http://");
+    let mut refused = tokio::net::TcpStream::connect(endpoint).await?;
+    let mut bytes = Vec::new();
+    tokio::time::timeout_at(deadline.into(), refused.read_to_end(&mut bytes)).await??;
+    ensure!(
+        bytes.is_empty(),
+        "unavailable upstream returned fabricated bytes"
+    );
+    let upstream = tokio::net::TcpListener::bind(address).await?;
+    let serving = tokio::spawn(async move {
+        let (mut stream, _) = upstream.accept().await?;
+        let mut request = Vec::new();
+        stream.read_to_end(&mut request).await?;
+        ensure!(
+            request == b"GET /discover HTTP/1.1\r\nHost: fixture\r\n\r\n",
+            "reconnect changed discovery bytes"
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .await?;
+        stream.shutdown().await?;
+        Ok::<_, anyhow::Error>(())
+    });
+    let mut reconnected = tokio::net::TcpStream::connect(endpoint)
+        .await
+        .context("upstream outage killed the reconnect listener")?;
+    reconnected
+        .write_all(b"GET /discover HTTP/1.1\r\nHost: fixture\r\n\r\n")
+        .await?;
+    reconnected.shutdown().await?;
+    let mut response = Vec::new();
+    tokio::time::timeout_at(deadline.into(), reconnected.read_to_end(&mut response)).await??;
+    ensure!(
+        response.ends_with(b"\r\n\r\nok"),
+        "cold reconnect did not forward the actual host reply"
+    );
+    tokio::time::timeout_at(deadline.into(), serving).await???;
+    proxy.finish().await
+}

@@ -101,7 +101,13 @@ impl V7Proxy {
                     accepted = listener.accept() => {
                         let (client, _) = accepted?;
                         let address=*target.lock().map_err(|_|anyhow::anyhow!("upstream registry poisoned"))?;
-                        let server = TcpStream::connect(address).await?;
+                        let server = match TcpStream::connect(address).await {
+                            Ok(server) => server,
+                            // A host is intentionally unavailable between incarnations.
+                            // Close this accepted connection, retain the reconnect listener.
+                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => continue,
+                            Err(error) => return Err(error.into()),
+                        };
                         connection += 1;
                         let directory = directory.clone();
                         let cuts = cuts.clone();
