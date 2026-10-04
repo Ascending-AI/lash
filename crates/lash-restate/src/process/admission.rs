@@ -167,7 +167,7 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// Epoch 32 (FIG-4944) publishes native turn plugins before resolving the
 /// Run configuration that records their protocol driver and renderer.
 ///
-/// Epoch 32 (FIG-4946) closes a Run after a completed cell response handoff
+/// Epoch 33 (FIG-4946) closes a Run after a completed cell response handoff
 /// abort when the turn has already recorded cancellation.
 ///
 /// version_guard(
@@ -182,14 +182,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 32;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 33;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 33;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 34;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

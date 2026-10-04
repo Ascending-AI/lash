@@ -7,7 +7,6 @@
 
 pub(crate) use crate::runtime::tests::*;
 
-pub(crate) mod commit_pins;
 pub(crate) mod effect_controller_doubles;
 pub(crate) mod effect_recording_authority;
 
