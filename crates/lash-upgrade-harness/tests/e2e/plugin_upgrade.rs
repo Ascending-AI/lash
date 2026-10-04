@@ -23,7 +23,7 @@ fn services() -> Result<Services> {
     })
 }
 
-fn setup(id: &str, terminal: &str) -> Result<(Case, CaseLease, CaseSpec)> {
+fn setup(id: &str, terminal: &str, builds: &NodeBuilds) -> Result<(Case, CaseLease, CaseSpec)> {
     let root = std::path::PathBuf::from(
         std::env::var_os("LASH_PHASE_A_ARTIFACT_DIR").context("persistent scenario artifacts")?,
     )
@@ -35,6 +35,14 @@ fn setup(id: &str, terminal: &str) -> Result<(Case, CaseLease, CaseSpec)> {
         std::time::Instant::now() + std::time::Duration::from_secs(120),
     )?;
     let case = Case::leased_sqlite(id, &services()?, &lease)?;
+    // Expand the successor's additive store shape before either serving host
+    // holds it open. SQLite migration requires exclusive ownership; admission
+    // and plugin publication remain at the predecessor's rollback floor.
+    record(
+        &case,
+        "store-expand.json",
+        &serde_json::to_value(builds.next.probe(&case, None)?)?,
+    )?;
     let mut artifacts = Vec::new();
     for (role, variable) in [
         ("candidate", lash_upgrade_harness::harness::NODE_N_ENV),
@@ -337,7 +345,7 @@ fn one_turn(node: &NodeBinary, case: &Case, session: &str) -> Result<Value> {
 #[ignore = "needs exact candidate/synthetic-next binaries and private live Restate"]
 fn s24_plugin_revision_rolls_back_without_reentering_completed_work() -> Result<()> {
     let builds = NodeBuilds::from_env()?;
-    let (case, mut lease, mut spec) = setup("s24", "Answered")?;
+    let (case, mut lease, mut spec) = setup("s24", "Answered", &builds)?;
     let session = case.session_id("plugin");
     let n = builds.n.serve_plugin_upgrade(&case, None)?;
     note_process(&mut lease, &n, "candidate", 1)?;
@@ -611,7 +619,7 @@ fn s25_cold_reopen(
     record(
         case,
         "s25-composition.json",
-        &json!({"leg":"D-durable/SIGKILL/cancel/cold-reopen", "store_refusal":"separate H4 disconnect/fence witness", "refusal_laws":["a_stale_fence_writes_nothing", "a_checkpoint_refuses_a_stale_fence_whatever_its_caps"], "note":"Per ruling 13678, SIGKILL cannot deliver a stale store request. It proves retained B and no second terminal; the separately labelled disconnect subcase proves actual StaleShiftFence."}),
+        &json!({"leg":"D-durable/SIGKILL/cancel/cold-reopen", "held_terminal":"separate H4 invariant helper: pending drain, one terminal on release, SIGKILL redrive on the same seal without a fence raise or second segment", "refusal_laws":["a_stale_fence_writes_nothing", "a_checkpoint_refuses_a_stale_fence_whatever_its_caps"], "note":"Per ruling 14379, this composes recovery, held-terminal invariants and the store-tier refusal oracle instead of the plan's single-run wording. SIGKILL cannot deliver a stale store request, and a held terminal is not a quiet point admitting a higher fence. No live stale-refusal claim."}),
     )?;
     finish(case, lease, spec)?;
     Ok(())
@@ -619,7 +627,7 @@ fn s25_cold_reopen(
 
 fn cold_reopen(variant: &str) -> Result<()> {
     let builds = NodeBuilds::from_env()?;
-    let (case, mut lease, mut spec) = setup(&format!("s25-{variant}"), "Cancelled")?;
+    let (case, mut lease, mut spec) = setup(&format!("s25-{variant}"), "Cancelled", &builds)?;
     s25_cold_reopen(&case, &builds, variant, &mut lease, &mut spec)
 }
 
