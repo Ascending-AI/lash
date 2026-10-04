@@ -691,16 +691,30 @@ pub(super) async fn replay_test_runtime_with_plugins(
 pub(super) async fn replay_test_runtime_with_plugins_and_registry(
     session_id: &SessionId,
     policy: lash_core::SessionPolicy,
-    initial_state: lash_core::RuntimeSessionState,
+    mut initial_state: lash_core::RuntimeSessionState,
     host: lash_core::facade_support::RuntimeHostConfig,
     store: lash_core::store::SessionStore,
     plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     process_registry: Option<Arc<dyn ProcessRegistry>>,
 ) -> lash_core::facade_support::LashRuntime {
-    lash_core::testing::runtime_helpers::create_runtime_fixture_session(
+    let plugin_host = lash_core::facade_support::PluginHost::new(plugin_factories);
+    initial_state.authority.plugin_config = plugin_host
+        .resolve_creation_plugin_config(
+            plugin_host.protocol_plugin_id(),
+            &lash_core::PluginOptions {
+                plugins: initial_state.authority.plugin_config.namespaces().clone(),
+            },
+            None,
+            true,
+            &lash_core::store::plugin_writers::PluginAdmission::default(),
+        )
+        .expect("the replay fixture's creation configuration resolves");
+    let mut config = lash_core::PersistedSessionConfig::from(&policy);
+    config.plugin_config = initial_state.authority.plugin_config.clone();
+    lash_core::testing::runtime_helpers::create_runtime_fixture_session_with_config(
         store.store().as_ref(),
         session_id,
-        &policy,
+        config,
     )
     .await
     .expect("create the replay fixture session before runtime assembly");
@@ -714,7 +728,7 @@ pub(super) async fn replay_test_runtime_with_plugins_and_registry(
     .with_session_id(session_id)
     .with_policy(policy)
     .with_initial_state(initial_state)
-    .with_plugin_factories(plugin_factories)
+    .with_plugin_host(plugin_host)
     .with_store(store);
     if let Some(process_registry) = process_registry {
         let watched = lash_core::facade_support::watch_process_registry(process_registry);

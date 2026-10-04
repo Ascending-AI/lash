@@ -610,8 +610,29 @@ impl World {
     }
 
     /// The session's store on the tier.
+    #[expect(
+        clippy::expect_used,
+        reason = "the identity fixture installs its protocol"
+    )]
     pub(crate) async fn store(&self) -> Arc<dyn crate::RuntimeStore> {
-        crate::conformance::law_session_store(self.tier.stores.as_ref(), &self.session_id).await
+        let (_, factories) = self.host_and_factories();
+        let host = crate::facade_support::PluginHost::new(factories);
+        let mut config = crate::PersistedSessionConfig::from(crate::testing::mock_session_policy());
+        config.plugin_config = host
+            .resolve_creation_plugin_config(
+                host.protocol_plugin_id(),
+                &crate::PluginOptions::default(),
+                None,
+                true,
+                &crate::store::plugin_writers::PluginAdmission::default(),
+            )
+            .expect("the identity law's creation configuration resolves");
+        crate::conformance::law_session_store_with_config(
+            self.tier.stores.as_ref(),
+            &self.session_id,
+            config,
+        )
+        .await
     }
 
     /// A fresh runtime over the tier's host and stores, loading the session
