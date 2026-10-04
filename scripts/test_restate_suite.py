@@ -113,10 +113,10 @@ class MatrixTests(unittest.TestCase):
 
     def test_ci_runs_the_registered_remote_suite_entrypoint(self) -> None:
         with mock.patch.object(restate_matrix.subprocess, "call", return_value=19) as call:
-            self.assertEqual(19, restate_matrix.run("json-decode", "replay"))
+            self.assertEqual(19, restate_matrix.run("effect-group", "replay"))
         command = call.call_args.args[0]
         self.assertEqual([sys.executable, str(ROOT / "scripts/ci/restate_suite.py"),
-                          "suite", "json-decode", "--leg", "replay", "--keep-test-logs"], command)
+                          "suite", "effect-group", "--leg", "replay", "--keep-test-logs"], command)
 
     def test_the_registered_workbench_driver_retains_its_cleanup(self) -> None:
         with mock.patch.object(restate_matrix.subprocess, "call", return_value=0) as call:

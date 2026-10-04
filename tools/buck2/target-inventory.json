@@ -54194,10 +54194,6 @@
       "live": "//crates/lash-restate-test:restate_host_send_wait_live",
       "replay": "//crates/lash-restate-test:restate_host_send_wait_replay"
     },
-    "json-decode": {
-      "live": "//crates/lash-restate:restate_json_decode_live",
-      "replay": "//crates/lash-restate:restate_json_decode_replay"
-    },
     "live-replay-bounds": {
       "live": "//crates/lash:restate_live_replay_bounds_live",
       "replay": "//crates/lash:restate_live_replay_bounds_replay"
@@ -54309,8 +54305,6 @@
       "//crates/lash-restate:restate_attachment_attach_replay",
       "//crates/lash-restate:restate_effect_group_live",
       "//crates/lash-restate:restate_effect_group_replay",
-      "//crates/lash-restate:restate_json_decode_live",
-      "//crates/lash-restate:restate_json_decode_replay",
       "//crates/lash-restate:restate_process_await_live",
       "//crates/lash-restate:restate_process_await_replay",
       "//crates/lash-restate:restate_refused_successor_drain_live",

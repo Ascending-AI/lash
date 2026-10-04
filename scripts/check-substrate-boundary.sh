@@ -303,8 +303,8 @@ if [[ ${#engine_format_runs[@]} -gt 0 ]]; then
   fi
 fi
 
-# A pinned lash service (FIG-3795: the process workflow, the effect-group
-# dispatcher, the session object's shift and turn) is addressed only through a
+# A pinned lash service (FIG-3795: the process workflow and the session
+# object's shift and turn) is addressed only through a
 # `ServiceRoute`: the name a call targets is always a route — stable, or the
 # generation lane a recorded route names — never the name a generated typed
 # client bakes into the request target. Shared services keep their typed

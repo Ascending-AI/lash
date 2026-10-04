@@ -499,26 +499,6 @@ lash_restate_suite(
 )
 
 lash_restate_suite(
-    name = "restate_json_decode_live",
-    test = ":lash-restate__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "json-decode",
-    leg = "live",
-    shard_count = 1,
-)
-
-lash_restate_suite(
-    name = "restate_json_decode_replay",
-    test = ":lash-restate__unit_test__rust_test",
-    env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    timeout_seconds = 900,
-    suite = "json-decode",
-    leg = "replay",
-    shard_count = 1,
-)
-
-lash_restate_suite(
     name = "restate_process_await_live",
     test = ":lash-restate__unit_test__rust_test",
     env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},

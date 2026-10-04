@@ -1335,10 +1335,16 @@ def check_binary_unit_test_compile_inputs() -> None:
     package = next(p for p in metadata["packages"] if p["name"] == "agent-workbench")
     target = next(t for t in package["targets"] if t["kind"] == ["bin"])
     inherited = generator.target_policy(package["name"], "bin", target["name"]).compile_data
-    test_only = generator.target_policy(
-        package["name"], "bin-unit-test", target["name"]
-    ).compile_data
-    assert test_only, "the regression needs a test-only compile input"
+
+    # No package policy grants a binary unit test its own compile input
+    # today; grant one for this check so an omitted merge still fails closed.
+    test_only = ["//:sentinel_compile_input"]
+    rule = {
+        "packages": [package["name"]],
+        "kinds": ["bin-unit-test"],
+        "compile_data": list(test_only),
+    }
+    generator.PACKAGE_POLICY["rule"].append(rule)
 
     def compile_inputs(text: str, name: str) -> list[str]:
         calls = [
@@ -1355,23 +1361,26 @@ def check_binary_unit_test_compile_inputs() -> None:
         return next(ast.literal_eval(keyword.value) for keyword in call.keywords
                     if keyword.arg == "extra_compile_data")
 
-    ordinary, _ = generator.render_package(package, ["default"])
     expected = inherited + test_only
-    assert compile_inputs(ordinary, "agent-workbench__unit_test") == expected, (
-        "ordinary binary unit test discarded its own compile inputs"
-    )
-    graph = generator.FeatureLaneGraph(metadata, {}, {})
-    resolved = generator.feature_variants.resolve_request(
-        graph.workspace, package["name"], default_features=False, requested=[], with_dev=True
-    )
-    graph.record_activations(resolved)
-    resolution = resolved.features
-    label = graph.emit_target(package["name"], resolution, target, "bin-unit-test", True, [])
-    variant = next(text for name, text in graph.chunks[package["name"]]
-                   if name == label.split(":")[1])
-    assert compile_inputs(variant, label.split(":")[1]) == expected, (
-        "feature binary unit test discarded its own compile inputs"
-    )
+    try:
+        ordinary, _ = generator.render_package(package, ["default"])
+        assert compile_inputs(ordinary, "agent-workbench__unit_test") == expected, (
+            "ordinary binary unit test discarded its own compile inputs"
+        )
+        graph = generator.FeatureLaneGraph(metadata, {}, {})
+        resolved = generator.feature_variants.resolve_request(
+            graph.workspace, package["name"], default_features=False, requested=[], with_dev=True
+        )
+        graph.record_activations(resolved)
+        resolution = resolved.features
+        label = graph.emit_target(package["name"], resolution, target, "bin-unit-test", True, [])
+        variant = next(text for name, text in graph.chunks[package["name"]]
+                       if name == label.split(":")[1])
+        assert compile_inputs(variant, label.split(":")[1]) == expected, (
+            "feature binary unit test discarded its own compile inputs"
+        )
+    finally:
+        generator.PACKAGE_POLICY["rule"].remove(rule)
 
 
 def check_feature_lane_executable_selection() -> None:

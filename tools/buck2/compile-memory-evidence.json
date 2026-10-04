@@ -408,12 +408,6 @@
       "p99_anon_peak_bytes": 122089472,
       "samples": 23
     },
-    "lash-internal-provider-anthropic/property": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 57528320,
-      "samples": 5
-    },
     "lash-internal-provider-auth/lash_provider_auth": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -437,12 +431,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 167419904,
       "samples": 20
-    },
-    "lash-internal-provider-google/property": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 61124608,
-      "samples": 7
     },
     "lash-internal-provider-openai/codex_websocket_runtime": {
       "legacy_peak_bytes": 0,
@@ -1574,12 +1562,6 @@
       "p99_anon_peak_bytes": 401059840,
       "samples": 119
     },
-    "lash-internal-provider-anthropic/property": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 323698688,
-      "samples": 6
-    },
     "lash-internal-provider-auth/lash_provider_auth": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1603,12 +1585,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 789393408,
       "samples": 114
-    },
-    "lash-internal-provider-google/property": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 318631936,
-      "samples": 14
     },
     "lash-internal-provider-openai/codex_websocket_runtime": {
       "legacy_peak_bytes": 0,

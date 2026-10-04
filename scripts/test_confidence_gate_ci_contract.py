@@ -364,7 +364,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         consumers = {"confidence-harnesses", "confidence-generated", "confidence-minimizer",
                      "confidence-backends", "confidence-coverage",
                      "confidence-mutation-core", "confidence-mutation-sim",
-                     "confidence-mutation-authority", "confidence-mutation-packages-rotating",
+                     "confidence-mutation-packages-rotating",
                      "sim-search"}
         self.assertEqual(consumers | {"confidence", "confidence-build", "confidence-conclusion", "append-vec-miri"}, set(jobs))
         self.assertNotIn("needs", jobs["append-vec-miri"])
@@ -422,7 +422,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual(0, upload["compression-level"])
 
         consumers = [job for job in jobs.values() if job.get("needs") == "confidence-build"]
-        self.assertEqual(10, len(consumers))
+        self.assertEqual(9, len(consumers))
         for job in consumers:
             restores = [step["run"] for step in job["steps"] if step.get("name") == "Restore shared build"]
             self.assertEqual([f'{helper} restore "${{RUNNER_TEMP}}/confidence-build/{archive}"'], restores)
@@ -485,7 +485,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "coverage": ["run_coverage_blind_spots"],
             "mutation-core": ["run_lash_core_direct_model_mutation_evidence"],
             "mutation-sim": ["run_lash_sim_runtime_completion_mutation_evidence"],
-            "mutation-authority": ["run_authority_rebind_mutation_evidence"],
             "mutation-packages-rotating": ["run_mutation_smoke", "run_mutation_full", "finalize_mutation_gate"],
         }
         all_functions = {f for fs in functions.values() for f in fs}
@@ -1110,7 +1109,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         expected_consumed_paths.update(
             f"target/confidence/stages/{stage}/**"
             for stage in ("harnesses", "generated-${{ matrix.shard }}", "minimizer", "backends",
-                           "coverage", "mutation-core", "mutation-sim", "mutation-authority",
+                           "coverage", "mutation-core", "mutation-sim",
                            "mutation-packages-rotating-${{ matrix.package }}-${{ matrix.shard }}")
         )
         self.assertCountEqual(consumed_paths, expected_consumed_paths)
@@ -2157,7 +2156,7 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
             for command in shell_logical_commands(gate)
             if "cargo mutants" in command and "--re " in command
         ]
-        self.assertGreaterEqual(len(sweeps), 7)
+        self.assertGreaterEqual(len(sweeps), 5)
         for command in sweeps:
             name = re.search(r'run_mutants_recorded "([^"]+)"', command).group(1)
             with self.subTest(sweep=name):
@@ -3660,6 +3659,7 @@ derive_mutation_jobs() {{
                 "upgrade-harness-synthetic-next",
                 "lashctl-synthetic-next",
                 "loadtest-worker-synthetic-next",
+                "turn-admission-synthetic-next",
                 "regress-stable-features",
                 "host-features",
             },
