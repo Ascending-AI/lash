@@ -357,6 +357,16 @@ async fn sessions_that_record_no_plugin_config_do_not_get_inactive_fallback_tool
         .await
         .expect("session");
 
+    let commands = session.admin().commands();
+    let receipt = commands
+        .refresh_tool_catalog("inspect the native tool surface", "native-tool-surface")
+        .await
+        .expect("submit native capability command");
+    commands
+        .settle(receipt)
+        .await
+        .expect("native capability command settles");
+
     let definitions = session
         .admin()
         .tools()

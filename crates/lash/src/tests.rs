@@ -988,6 +988,25 @@ pub(crate) fn standard_core_over(backend: lash_core::Backend) -> LashCore {
         .expect("standard core")
 }
 
+/// Establish the native session capabilities through the engine's command
+/// Run before a fixture inspects or mutates its live tool registry.
+pub(crate) async fn materialize_session(session: &crate::LashSession) -> Result<()> {
+    let commands = session.admin().commands();
+    let receipt = commands
+        .refresh_tool_catalog("fixture native capabilities", "fixture-native-capabilities")
+        .await?;
+    let settlement = commands.settle(receipt).await?;
+    assert!(
+        matches!(
+            settlement,
+            lash_core::runtime::SessionCommandSettlement::Applied { .. }
+                | lash_core::runtime::SessionCommandSettlement::Durable(_)
+        ),
+        "native capability command must complete: {settlement:?}"
+    );
+    Ok(())
+}
+
 /// Default RLM protocol factory for tests, over `backend`, the substrate its
 /// Lashlang artifacts live in.
 #[cfg(feature = "rlm")]

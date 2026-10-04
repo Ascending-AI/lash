@@ -523,6 +523,8 @@ async fn projected_bindings_reach_a_served_prompt_once() -> Result<()> {
         .open()
         .await?;
 
+    materialize_session(&session).await?;
+
     session
         .admin()
         .protocol()
@@ -651,8 +653,8 @@ async fn the_typed_read_reports_what_the_session_recorded_and_only_the_render_ch
 }
 
 /// A render change publishes its durable revision. The session's creation
-/// head already carries its RLM config, so the open publishes nothing and the
-/// command's commit is the only publication (FIG-4099).
+/// head carries its RLM config. After the native command Run constructs
+/// capabilities, the render commit is the only new publication (FIG-4099).
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn a_render_change_emits_its_committed_revision() -> Result<()> {
@@ -665,7 +667,14 @@ async fn a_render_change_emits_its_committed_revision() -> Result<()> {
         .await
         .open()
         .await?;
+    materialize_session(&session).await?;
     let before = session.observe().current_observation();
+    let observed_revision = before
+        .cursor
+        .parse_for_session(&session.session_id())
+        .expect("the observation cursor names its session")
+        .revision
+        .as_u64();
     let revision = session.admin().config().revision().await?;
 
     let outcome = set_render(&session, "rlm-render-publication", revision, 700).await?;
@@ -687,7 +696,7 @@ async fn a_render_change_emits_its_committed_revision() -> Result<()> {
             .iter()
             .map(|event| event.revision())
             .collect::<Vec<_>>(),
-        vec![lash_core::SessionRevision::new(1)],
+        vec![lash_core::SessionRevision::new(observed_revision + 1)],
         "the command's commit publishes once and the open publishes nothing"
     );
     assert!(events.iter().all(|event| matches!(
@@ -720,6 +729,7 @@ async fn a_render_change_written_against_a_stale_revision_settles_stale() -> Res
         .await
         .open()
         .await?;
+    materialize_session(&stale).await?;
     let concurrent = concurrent_core
         .session("rlm-stale-render")
         .created()

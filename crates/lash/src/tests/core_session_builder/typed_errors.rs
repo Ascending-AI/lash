@@ -49,6 +49,7 @@ async fn tool_law() -> Result<()> {
     let backend = double_backend_explicit_reconcile().await;
     let core = core(backend);
     let session = core.session("typed-tools").created().await.open().await?;
+    materialize_session(&session).await?;
     let tools = session.admin().tools();
     let source = tools.add_provider(Arc::new(EmptyTools)).await?;
     tools.remove_source(&source).await?;
@@ -173,60 +174,40 @@ fn assert_state_error(error: &PluginError, mode: usize) {
     assert!(error.is_terminal());
 }
 
-async fn state_law() -> Result<()> {
+#[tokio::test]
+async fn a_native_cold_open_preserves_state_codec_refusals() -> Result<()> {
     let backend = double_backend_explicit_reconcile().await;
     for mode in 1..=2 {
-        for rematerialize in [false, true] {
-            let id = format!("typed-state-{mode}-{rematerialize}");
-            let mode_control = Arc::new(AtomicUsize::new(if rematerialize { 0 } else { mode }));
-            let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-                .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-                .plugin(Arc::new(StateHook {
-                    mode: Arc::clone(&mode_control),
-                    handle: Arc::default(),
-                }))
-                .build(crate::testing::runtime_lease_owner())?;
-            let created = core
-                .session(lash_core::SessionId::fixture(id.as_str()))
-                .create(crate::SessionCreation::root(mock_session_spec()))
-                .await;
-            let error = if rematerialize {
-                created?;
-                let session = core.session(SessionId::fixture(id.clone())).open().await?;
-                session.park().await?;
-                mode_control.store(mode, Ordering::SeqCst);
-                core.session(SessionId::fixture(id.clone()))
-                    .open()
-                    .await
-                    .err()
-                    .expect("ready refuses on reopen")
-            } else {
-                match created {
-                    Err(error) => error,
-                    Ok(_) => core
-                        .session(SessionId::fixture(id.as_str()))
-                        .open()
-                        .await
-                        .err()
-                        .expect("ready refuses on create"),
-                }
-            };
-            let plugin = match &error {
-                EmbedError::Plugin(plugin) | EmbedError::Session(SessionError::Plugin(plugin)) => {
-                    plugin
-                }
-                other => panic!("facade retains plugin source: {other:?}"),
-            };
-            assert_state_error(plugin, mode);
-            assert!(!error.is_retryable());
-            assert!(error.is_terminal());
-        }
+        let id = SessionId::fixture(format!("native-state-codec-{mode}"));
+        let mode_control = Arc::new(AtomicUsize::new(0));
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(Arc::new(StateHook {
+                mode: Arc::clone(&mode_control),
+                handle: Arc::default(),
+            }))
+            .build(crate::testing::runtime_lease_owner())?;
+        let session = core.session(id.clone()).created().await.open().await?;
+        materialize_session(&session).await?;
+        session.park().await?;
+        mode_control.store(mode, Ordering::SeqCst);
+        let error = core
+            .session(id)
+            .open()
+            .await
+            .err()
+            .expect("native readiness refuses");
+        let plugin = match &error {
+            EmbedError::Plugin(plugin) | EmbedError::Session(SessionError::Plugin(plugin)) => {
+                plugin
+            }
+            other => panic!("facade retains plugin source: {other:?}"),
+        };
+        assert_state_error(plugin, mode);
+        assert!(!error.is_retryable());
+        assert!(error.is_terminal());
     }
     Ok(())
-}
-#[tokio::test]
-async fn plugin_state_hook_errors_keep_their_structured_cause() -> Result<()> {
-    state_law().await
 }
 struct CleanupLayer {
     step: usize,

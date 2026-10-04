@@ -927,6 +927,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
         .await
         .open()
         .await?;
+    materialize_session(&session).await?;
     let turn_session = session.clone();
     let turn =
         tokio::spawn(async move { turn_session.send(TurnInput::text("blocked")).output().await });

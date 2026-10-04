@@ -859,26 +859,29 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
     ]
     .concat();
     let session_id = "rlm-v5-cold-open";
-    let policy = lash_core::SessionPolicy {
-        model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-        ..lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        )
-    };
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from(session_id),
-        policy,
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        ))
-    };
-    state.set_execution_state_snapshot(Some(old_version_snapshot.into()));
-    let (backend, _) = backend_seeded(state).await;
+    let backend = double_backend().await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).created().await.open().await?;
+    materialize_session(&session).await?;
+    let mut state = session.admin().state().persist_current().await?;
+    state.set_execution_state_snapshot(Some(old_version_snapshot.into()));
+    let store = lash_core::runtime::live_session_view(
+        &backend.session_store_factory(),
+        &SessionId::from(session_id),
+    )
+    .await?
+    .expect("the admitted session");
+    store
+        .commit_runtime_state(
+            lash_core::RuntimeCommit::persisted_state_with_operation_for_testing(
+                &state,
+                seed_operation("old-execution-snapshot"),
+            ),
+        )
+        .await?;
+    drop(session);
 
     let error = match core.session(session_id).created().await.open().await {
         Ok(_) => panic!("cold open must reject the persisted v5 execution snapshot"),
@@ -1087,41 +1090,20 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
 
 #[tokio::test]
 async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<()> {
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("manual-state"),
-        policy: lash_core::SessionPolicy {
-            model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-            ..lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-                lash_core::MaxToolCalls::new(1024),
-            )
-        },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        ))
-    };
-    state.append_active_conversation_messages(&[text_message(
-        lash_core::MessageRole::User,
-        "manual input",
-    )]);
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
-
+    let session = core.session("manual-state").created().await.open().await?;
+    materialize_session(&session).await?;
+    let mut state = session.admin().state().persist_current().await?;
+    state.append_active_conversation_messages(&[text_message(
+        lash_core::MessageRole::User,
+        "manual input",
+    )]);
+    drop(session);
     let created = core.session("manual-state").created().await;
-    // A complete state carries the plugin configuration its session recorded
-    // (FIG-4398): a rebuilt session that recorded none is refused.
-    state.authority.plugin_config = lash_core::SessionCommitStore::load_session_head_meta(
-        core.store_factory.as_ref(),
-        &SessionId::from("manual-state"),
-    )
-    .await?
-    .expect("the created session's head")
-    .config
-    .plugin_config;
     let opened = created.open_with_state(state).await?;
     assert_eq!(
         message_text(&opened.read_view().messages().to_vec()[0]),
