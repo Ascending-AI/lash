@@ -1373,7 +1373,9 @@ pub mod durability {
     pub use lash_core::runtime::{
         JournalReplay, ProcessDriveStep, RecordedJournal, RecordedKeyRange, RunRecordStep,
     };
-    pub use lash_core::tool_dispatch::{RunAttemptHandle, RunAttemptStep, RunRetryTimer};
+    pub use lash_core::tool_dispatch::{
+        RunAttemptHandle, RunAttemptStep, RunRetryTimer, RunRetryWake,
+    };
     pub use lash_core::{
         EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,
         facade_support::LeaseTimingsError, facade_support::RuntimeEnvironment,

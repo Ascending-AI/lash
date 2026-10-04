@@ -28,9 +28,9 @@ pub use pending_resolver::{
 pub use run_coordinator::{DecidedCall, RunAggregateOutcome, RunCoordinator, RunCutRefusal};
 pub use singleton_run::{
     BeforeCheckReply, IsolatedProcessDescriptor, RecordedIsolatedStart, RunAttemptHandle,
-    RunAttemptStep, RunRetryTimer, SingletonAttempt, SingletonBodyOutcome, SingletonCapture,
-    SingletonDrift, SingletonPreparedRequest, SingletonPresentationError, SingletonRunError,
-    SingletonRunOutcome, SingletonStart, SingletonTerminal, SingletonToolCall,
+    RunAttemptStep, RunRetryTimer, RunRetryWake, SingletonAttempt, SingletonBodyOutcome,
+    SingletonCapture, SingletonDrift, SingletonPreparedRequest, SingletonPresentationError,
+    SingletonRunError, SingletonRunOutcome, SingletonStart, SingletonTerminal, SingletonToolCall,
     SingletonToolHandlers, run_singleton_tool,
 };
 

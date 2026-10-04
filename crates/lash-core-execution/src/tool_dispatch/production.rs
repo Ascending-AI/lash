@@ -78,6 +78,32 @@ struct Presented {
     intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
 }
 
+/// How long a stopped inline body may keep running to observe its token and
+/// return its own outcome, settling the nested work it owns, before X drops
+/// it. Only a body that ignores its stop meets this bound.
+const INLINE_STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn stopped_before_completion() -> crate::ToolAttemptOutcome {
+    crate::ToolOutcome::cancelled("the inline attempt stopped before its body completed").into()
+}
+
+/// Run an inline body to its own end; once `stop` fires it has
+/// [`INLINE_STOP_GRACE`] to return before it is dropped.
+async fn until_stopped(
+    execute: impl std::future::Future<Output = crate::ToolAttemptOutcome>,
+    stop: &tokio_util::sync::CancellationToken,
+) -> crate::ToolAttemptOutcome {
+    tokio::pin!(execute);
+    tokio::select! {
+        biased;
+        outcome = &mut execute => return outcome,
+        () = stop.cancelled() => {}
+    }
+    tokio::time::timeout(INLINE_STOP_GRACE, execute)
+        .await
+        .unwrap_or_else(|_| stopped_before_completion())
+}
+
 fn encode<T: Serialize>(value: &T) -> Result<String, String> {
     serde_json::to_string(value).map_err(|error| error.to_string())
 }
@@ -137,6 +163,30 @@ impl<'run> ProductionToolHandlers<'run> {
             token.cancel();
         }
         stop.token = token;
+    }
+    /// The true cause of a stop an inline body met, read inside X before its
+    /// state or declarations can escape: the turn's accepted immediate stop,
+    /// else the Run's own Closing cancel, else the execution's stop standing
+    /// for its turn where there is no gate.
+    async fn inline_stop_origin(
+        &self,
+        call_id: &crate::ToolCallId,
+        stop: Option<&tokio_util::sync::CancellationToken>,
+    ) -> Result<Option<crate::CancelOrigin>, crate::RuntimeEffectControllerError> {
+        if self.context.inline_turn_stop_requested().await? {
+            return Ok(Some(crate::CancelOrigin::TurnStopped));
+        }
+        if self
+            .inline_stops
+            .lock_recover()
+            .get(call_id)
+            .is_some_and(|stop| stop.cancelled)
+        {
+            return Ok(Some(crate::CancelOrigin::RunClosing));
+        }
+        Ok(stop
+            .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
+            .then_some(crate::CancelOrigin::TurnStopped))
     }
     async fn dispatch(&self, input: &CallInput) -> Result<ToolDispatchContext<'run>, String> {
         let mut dispatch = self.context.dispatch().as_ref().clone();
@@ -512,41 +562,21 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         crate::ToolRetryPolicy::Safe { max_attempts, .. } => max_attempts,
                     },
                 ));
-                let cancelled = async {
-                    match &stop {
-                        Some(stop) => stop.cancelled().await,
-                        None => std::future::pending().await,
-                    }
+                let outcome = match &stop {
+                    Some(stop) if stop.is_cancelled() => stopped_before_completion(),
+                    Some(stop) => until_stopped(execute, stop).await,
+                    None => execute.await,
                 };
-                let cancelled_outcome = || {
-                    crate::ToolOutcome::cancelled(
-                        "the inline attempt stopped before its body completed",
-                    )
-                    .into()
-                };
-                let outcome = if stop
-                    .as_ref()
-                    .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
-                {
-                    cancelled_outcome()
+                let origin = if matches!(&outcome, crate::ToolAttemptOutcome::HostFailed(_)) {
+                    None
                 } else {
-                    tokio::select! {
-                        biased;
-                        outcome = execute => outcome,
-                        () = cancelled => cancelled_outcome(),
-                    }
-                };
-                let stopped = if matches!(&outcome, crate::ToolAttemptOutcome::HostFailed(_)) {
-                    false
-                } else {
-                    self.context
-                        .inline_turn_stop_requested(stop.as_ref())
+                    self.inline_stop_origin(attempt.call_id, stop.as_ref())
                         .await?
                 };
-                Ok::<_, crate::RuntimeEffectControllerError>((outcome, stopped))
+                Ok::<_, crate::RuntimeEffectControllerError>((outcome, origin))
             }
         });
-        let (outcome, stopped) = match futures_util::future::select(
+        let (outcome, origin) = match futures_util::future::select(
             Box::pin(body),
             Box::pin(effect_attempt.attempt_faulted()),
         )
@@ -567,15 +597,32 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             return Err(error.to_string());
         }
 
-        if stopped && !matches!(&outcome, crate::ToolAttemptOutcome::HostFailed(_)) {
+        if let Some(origin) = origin {
             // A noncooperative body may return success after its durable stop.
             // Neither its state commands nor its intents can escape that stop.
+            // A body that observed it keeps its own cancellation, under the
+            // stop's true cause.
+            let own = match outcome {
+                crate::ToolAttemptOutcome::Done { result, .. } => {
+                    match result.into_parts().0.outcome {
+                        crate::ToolCallOutcome::Cancelled(cancellation) => Some(cancellation),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            let mut cancellation = own.unwrap_or_else(|| {
+                crate::ToolCancellation::runtime(match origin {
+                    crate::CancelOrigin::RunClosing => {
+                        "the owning Run closed during the tool attempt"
+                    }
+                    _ => "the turn stopped during the tool attempt",
+                })
+            });
+            cancellation.source = crate::ToolFailureSource::Cancellation;
             let capture = Captured {
                 original: None,
-                output: ToolCallOutput::cancelled(
-                    crate::ToolCancellation::runtime("the turn stopped during the tool attempt")
-                        .with_origin(crate::CancelOrigin::TurnStopped),
-                ),
+                output: ToolCallOutput::cancelled(cancellation.with_origin(origin)),
                 messages: Vec::new(),
                 triggers: Vec::new(),
                 occurrence: crate::plugin::ToolHookOccurrence::Attempt {
@@ -894,16 +941,22 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     }
     async fn wait_run_retry(
         &self,
+        call_id: &crate::ToolCallId,
         timer: crate::tool_dispatch::RunRetryTimer<'_>,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
+    ) -> Result<RunRetryWake, crate::RuntimeEffectControllerError> {
         self.context
-            .run_turn_step_body(|stop| async move {
-                match stop {
-                    Some(stop) => tokio::select! {
-                        result = timer => result,
-                        () = stop.cancelled() => Ok(()),
-                    },
-                    None => timer.await,
+            .run_turn_step_body(|stop| {
+                // Closing cuts the backoff through the call's indexed stop.
+                self.remember_inline_stop(call_id, stop.clone());
+                async move {
+                    match stop {
+                        Some(stop) => tokio::select! {
+                            biased;
+                            result = timer => result.map(|()| RunRetryWake::Elapsed),
+                            () = stop.cancelled() => Ok(RunRetryWake::Stopped),
+                        },
+                        None => timer.await.map(|()| RunRetryWake::Elapsed),
+                    }
                 }
             })
             .await

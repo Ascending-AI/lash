@@ -45,13 +45,14 @@
       "type": "string"
     },
     "CancelOrigin": {
-      "description": "The runtime or actor decision that requested cancellation of a process.",
+      "description": "The runtime or actor decision that requested cancellation of a process\nor of a tool call's attempt. `RunClosing` is a call's owning tool Run\ndischarging its cancellation at Closing while the turn itself runs on.",
       "enum": [
         "turn_stopped",
         "parent_ended",
         "operator_requested",
         "model_requested",
-        "start_failed"
+        "start_failed",
+        "run_closing"
       ],
       "type": "string"
     },

@@ -8,7 +8,10 @@ pub(super) type Handle<'a> = Shared<BoxFuture<'a, Result<Ready, RuntimeEffectCon
 #[derive(Clone)]
 pub(super) enum Ready {
     Attempt(std::sync::Arc<RunAttemptEntry>),
+    /// The durable timer fired.
     Timer,
+    /// A stop cut a retry backoff before its timer fired: never an elapse.
+    TimerStopped,
     Presentation(std::sync::Arc<RunJournalEntry>),
 }
 
@@ -513,11 +516,16 @@ impl<'a> RunCoordinator<'a> {
                         }
                     }
                     Ready::Presentation(_) => Err("an X returned a presentation".to_owned()),
-                    Ready::Timer => {
+                    Ready::Timer | Ready::TimerStopped => {
                         if !timer {
                             return Err("an X handle returned a timer wake".to_owned());
                         }
-                        let event = if aborted || handlers.run_cancel_requested().await? {
+                        // A cut backoff decides the call: its next attempt
+                        // would run under the stop that cut it.
+                        let event = if matches!(ready, Ready::TimerStopped)
+                            || aborted
+                            || handlers.run_cancel_requested().await?
+                        {
                             RunEvent::Decided {
                                 call_id,
                                 rank,
@@ -612,9 +620,18 @@ impl<'a> RunCoordinator<'a> {
             let work = pending_entry.work;
             let (call, member, request) = (&work.call, &work.member, &work.request);
             let handlers = std::sync::Arc::clone(&work.handlers);
-            let ready = pending_entry.handle.await?;
-            let capture = match (event, &ready) {
-                (RunEvent::AttemptRecorded { result, .. }, Ready::Attempt(entry)) => {
+            let capture = match event {
+                // A served timer selection drops its handle: replay never
+                // awaits an SDK sleep a stop cut, nor before later commands.
+                RunEvent::RetryScheduled { .. } | RunEvent::Decided { .. }
+                    if pending_entry.timer =>
+                {
+                    pending_entry.capture
+                }
+                RunEvent::AttemptRecorded { result, .. } if !pending_entry.timer => {
+                    let Ready::Attempt(entry) = pending_entry.handle.await? else {
+                        return Err(boundary(&call.call_id));
+                    };
                     if entry.call_id != call.call_id
                         || entry.attempt != ordinal
                         || entry.result != *result
@@ -622,7 +639,7 @@ impl<'a> RunCoordinator<'a> {
                         return Err(boundary(&call.call_id));
                     }
                     let capture = captured(
-                        entry,
+                        &entry,
                         &self.journal.materials.owner,
                         &self.journal.materials.available,
                     )?;
@@ -639,9 +656,6 @@ impl<'a> RunCoordinator<'a> {
                     self.journal.materials.admit(entry.materials.clone())?;
                     self.attempts.push(entry.as_ref().clone());
                     capture
-                }
-                (RunEvent::RetryScheduled { .. } | RunEvent::Decided { .. }, Ready::Timer) => {
-                    pending_entry.capture
                 }
                 _ => return Err(boundary(&call.call_id)),
             };
@@ -737,9 +751,14 @@ impl<'a> RunCoordinator<'a> {
                     self.journal.scoped.admit_journal_write()?;
                     let timer = controller.start_run_retry(delay);
                     let waiting_handlers = std::sync::Arc::clone(&handlers);
+                    let call_id = call.call_id.clone();
                     let handle = async move {
-                        waiting_handlers.wait_run_retry(timer).await?;
-                        Ok(Ready::Timer)
+                        Ok(
+                            match waiting_handlers.wait_run_retry(&call_id, timer).await? {
+                                crate::tool_dispatch::RunRetryWake::Elapsed => Ready::Timer,
+                                crate::tool_dispatch::RunRetryWake::Stopped => Ready::TimerStopped,
+                            },
+                        )
                     }
                     .boxed()
                     .shared();

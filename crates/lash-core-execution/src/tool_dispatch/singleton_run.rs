@@ -496,12 +496,14 @@ pub trait SingletonToolHandlers: Send + Sync {
     /// of its recorded decision (D), never from an unrecorded live flag.
     async fn run_cancel_requested(&self) -> Result<bool, String>;
 
-    /// Wake a registered retry when its timer finishes or its owner stops.
-    /// This is readiness only: the subsequent recorded D chooses cancellation.
+    /// Wake `call_id`'s registered retry when its timer finishes or a stop
+    /// cuts it, saying which. A cut is never an elapse: the subsequent
+    /// recorded D decides the call instead of scheduling its next attempt.
     async fn wait_run_retry(
         &self,
+        call_id: &ToolCallId,
         timer: crate::tool_dispatch::RunRetryTimer<'_>,
-    ) -> Result<(), RuntimeEffectControllerError>;
+    ) -> Result<RunRetryWake, RuntimeEffectControllerError>;
 
     /// Discharge eligible external cancellation at logical Closing. The
     /// call id is the dedup key; recovery can repeat an unacknowledged call.
@@ -691,6 +693,15 @@ pub type RunAttemptHandle<'run> = std::pin::Pin<
 pub type RunRetryTimer<'run> = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<(), RuntimeEffectControllerError>> + Send + 'run>,
 >;
+
+/// How a registered retry backoff ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunRetryWake {
+    /// The durable timer fired: the call may schedule its next attempt.
+    Elapsed,
+    /// A stop cut the backoff before its timer fired.
+    Stopped,
+}
 
 impl SingletonRunError {
     pub(crate) fn into_controller_error(self) -> RuntimeEffectControllerError {

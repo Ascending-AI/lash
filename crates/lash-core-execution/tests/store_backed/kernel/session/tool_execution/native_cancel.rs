@@ -698,3 +698,427 @@ async fn l03_native_cancel_replays_before_the_inline_loser_ack() {
         if *call_id == crate::ToolCallId::fixture("A")
     )));
 }
+
+/// The recorded X completions of `symbol`, with their canonical material.
+fn attempt_material(server: &lash_restate_test::RestateTestServer, symbol: &str) -> String {
+    server
+        .invocations()
+        .iter()
+        .flat_map(|view| server.journal(&view.id).unwrap_or_default())
+        .filter_map(|entry| entry.run_completion().and_then(Result::ok))
+        .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .filter(|value| value.get("call_id") == Some(&json!(crate::ToolCallId::fixture(symbol))))
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn run_events(server: &lash_restate_test::RestateTestServer) -> Vec<crate::tool_run::RunEvent> {
+    server
+        .invocations()
+        .into_iter()
+        .flat_map(|invocation| server.journal(&invocation.id).unwrap_or_default())
+        .filter_map(|entry| entry.run_completion().and_then(Result::ok))
+        .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .filter_map(|value| value.get("record").cloned())
+        .filter_map(|record| serde_json::from_value::<crate::tool_run::RunRecord>(record).ok())
+        .flat_map(|record| record.events)
+        .collect()
+}
+
+/// A race loser A that either watches its stop and finishes its own work
+/// after it, or never answers; winner B answers once A's body is live.
+struct LoserTools {
+    cooperative: bool,
+    entered: Arc<tokio::sync::Notify>,
+    settled: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for LoserTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![definition().manifest()]
+    }
+
+    fn resolve_contract(&self, _: &str) -> Option<Arc<crate::ToolContract>> {
+        Some(Arc::new(definition().contract()))
+    }
+
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        if call.args["symbol"] == "B" {
+            self.entered.notified().await;
+            return crate::ToolOutcome::ok(json!("B")).into();
+        }
+        let stop = call.context.cancellation_token().cloned().unwrap();
+        self.entered.notify_one();
+        if !self.cooperative {
+            std::future::pending::<()>().await;
+        }
+        stop.cancelled().await;
+        // Work the body still owes after its stop, as a nested owned run's
+        // settlement does: dropping the body here loses it.
+        tokio::task::yield_now().await;
+        self.settled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::ToolOutcome::cancelled("A observed its stop").into()
+    }
+}
+
+async fn closing_race(cooperative: bool) -> (lash_restate_test::RestateTestBackend, bool) {
+    use crate::session::{
+        ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateOutcome, ToolAggregateRequest,
+    };
+    let double =
+        crate::support::kernel_double(0x4979, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let scope = crate::AdmittedScope::turn("closing-session", "closing-turn");
+    let handler = double.open_handler(scope).await.unwrap();
+    let host = backend.effect_host();
+    let control = Arc::new(
+        crate::runtime::turn_control::ActiveTurnControl::new(
+            host.await_event_resolver(),
+            crate::TurnAddress::new("closing-session", "closing-turn"),
+        )
+        .await
+        .unwrap(),
+    );
+    let settled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let factory = crate::plugin::StaticPluginFactory::new(
+        crate::plugin::PluginDeclaration::initial(PLUGIN),
+        crate::PluginSpec::new().with_tool_provider(Arc::new(LoserTools {
+            cooperative,
+            entered: Arc::new(tokio::sync::Notify::new()),
+            settled: settled.clone(),
+        })),
+    );
+    let mut factories = crate::testing::test_standard_protocol_factories();
+    factories.push(Arc::new(factory));
+    // The turn has a live gate that never stops: only Closing stops A.
+    let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+        .session_id("closing-session")
+        .borrowed_effect_controller(handler.scoped())
+        .plugin_factories(factories)
+        .build()
+        .into_runtime()
+        .with_recorded_turn_cancel(false, control, host, CancellationToken::new());
+    let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new(PLUGIN, crate::plugin::BehaviorRevision::ONE),
+        definition(),
+    );
+    let leaves = ["A", "B"]
+        .into_iter()
+        .map(|symbol| {
+            ToolAggregateLeaf::Tool(
+                crate::session::ToolInvocation::new(
+                    crate::ToolCallId::fixture(symbol),
+                    crate::ToolId::new("q5:append"),
+                    json!({"symbol":symbol,"key":"value"}),
+                )
+                .with_execution_grant(grant.clone()),
+            )
+        })
+        .collect();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        context.drive_tool_run(None, |context| async move {
+            let outcome = context
+                .call_tool_aggregate(ToolAggregateRequest {
+                    leaves,
+                    consumer: ToolAggregateConsumer::Race,
+                    settled_value_after: None,
+                    command: crate::CommandReplayKey::new("closing-race"),
+                })
+                .await;
+            assert!(matches!(
+                outcome,
+                ToolAggregateOutcome::Selected { leaf: 1, .. }
+            ));
+            context.close_opener_groups().await.unwrap();
+        }),
+    )
+    .await
+    .expect("Closing settles the race loser")
+    .unwrap();
+    assert!(!context.has_nested_effect_error());
+    drop(context);
+    handler.close().await.unwrap();
+    let events = run_events(double.server());
+    assert!(events.iter().any(|event| matches!(event,
+        crate::tool_run::RunEvent::Decided { call_id, decision: crate::tool_run::CallDecision::Cancelled, .. }
+        if *call_id == crate::ToolCallId::fixture("A")
+    )));
+    (double, settled.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+/// L06: Closing stops a loser cooperatively. Its body observes the stop,
+/// finishes the work it owes and records its own cancellation, attributed
+/// to the Run's Closing rather than to a turn that never stopped.
+#[tokio::test]
+async fn l06_closing_lets_a_cooperative_loser_record_its_own_cancellation() {
+    let (double, settled) = closing_race(true).await;
+    assert!(settled, "Closing dropped the loser's body after its stop");
+    let recorded = attempt_material(double.server(), "A");
+    assert!(
+        recorded.contains("A observed its stop"),
+        "X records the body's own cancellation: {recorded}"
+    );
+    assert!(recorded.contains("run_closing"), "{recorded}");
+    assert!(!recorded.contains("turn_stopped"), "{recorded}");
+}
+
+/// L06: a loser that never answers its stop is dropped only after the
+/// bounded grace, and its runtime cancellation names Closing as its cause.
+#[tokio::test]
+async fn l06_closing_records_its_own_cause_for_a_loser_it_drops() {
+    let (double, settled) = closing_race(false).await;
+    assert!(!settled);
+    let recorded = attempt_material(double.server(), "A");
+    assert!(
+        recorded.contains("the inline attempt stopped before its body completed"),
+        "{recorded}"
+    );
+    assert!(recorded.contains("run_closing"), "{recorded}");
+    assert!(!recorded.contains("turn_stopped"), "{recorded}");
+}
+
+/// A fails retryably on its first attempt; B answers once A's backoff is a
+/// durable SDK sleep.
+struct BackoffTools {
+    bodies: Arc<Mutex<Vec<(String, u32)>>>,
+    server: lash_restate_test::RestateTestServer,
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for BackoffTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![retry_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, _: &str) -> Option<Arc<crate::ToolContract>> {
+        Some(Arc::new(retry_definition().contract()))
+    }
+
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        let symbol = call.args["symbol"].as_str().unwrap().to_owned();
+        self.bodies
+            .lock_recover()
+            .push((symbol.clone(), call.context.attempt_number()));
+        if symbol == "B" {
+            while !self
+                .server
+                .timers()
+                .iter()
+                .any(|timer| timer.kind == "sleep")
+            {
+                tokio::task::yield_now().await;
+            }
+            return crate::ToolOutcome::ok(json!("B")).into();
+        }
+        crate::ToolOutcome::retryable_failure(
+            crate::ToolFailureClass::External,
+            "retry-first",
+            "reported first-attempt failure",
+            Some(30_000),
+        )
+        .into()
+    }
+}
+
+/// L17: Closing cuts a losing call's retry backoff at once and decides it
+/// cancelled; it never waits out the sleep or starts the next attempt.
+#[tokio::test]
+async fn l17_closing_cuts_a_loser_in_retry_backoff_promptly() {
+    use crate::session::{
+        ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateOutcome, ToolAggregateRequest,
+    };
+    let double =
+        crate::support::kernel_double(0x497903, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let scope = crate::AdmittedScope::turn("backoff-session", "backoff-turn");
+    let handler = double.open_handler(scope).await.unwrap();
+    let bodies = Arc::new(Mutex::new(Vec::new()));
+    let factory = crate::plugin::StaticPluginFactory::new(
+        crate::plugin::PluginDeclaration::initial(PLUGIN),
+        crate::PluginSpec::new().with_tool_provider(Arc::new(BackoffTools {
+            bodies: bodies.clone(),
+            server: double.server().clone(),
+        })),
+    );
+    let mut factories = crate::testing::test_standard_protocol_factories();
+    factories.push(Arc::new(factory));
+    let parent_stop = CancellationToken::new();
+    let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+        .session_id("backoff-session")
+        .borrowed_effect_controller(handler.scoped())
+        .plugin_factories(factories)
+        .build()
+        .into_runtime()
+        .with_cancellation_token(parent_stop.clone());
+    let grant = crate::ToolExecutionGrant::from_definition(
+        crate::plugin::PluginRevision::new(PLUGIN, crate::plugin::BehaviorRevision::ONE),
+        retry_definition(),
+    );
+    let leaves = ["A", "B"]
+        .into_iter()
+        .map(|symbol| {
+            ToolAggregateLeaf::Tool(
+                crate::session::ToolInvocation::new(
+                    crate::ToolCallId::fixture(symbol),
+                    crate::ToolId::new("q5:append"),
+                    json!({"symbol":symbol}),
+                )
+                .with_execution_grant(grant.clone()),
+            )
+        })
+        .collect();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        context.drive_tool_run(None, |context| async move {
+            let outcome = context
+                .call_tool_aggregate(ToolAggregateRequest {
+                    leaves,
+                    consumer: ToolAggregateConsumer::Race,
+                    settled_value_after: None,
+                    command: crate::CommandReplayKey::new("backoff-race"),
+                })
+                .await;
+            assert!(matches!(
+                outcome,
+                ToolAggregateOutcome::Selected { leaf: 1, .. }
+            ));
+            context.close_opener_groups().await.unwrap();
+        }),
+    )
+    .await
+    .expect("Closing does not wait out the loser's 30-second backoff")
+    .unwrap();
+    assert!(!parent_stop.is_cancelled());
+    assert!(!context.has_nested_effect_error());
+    drop(context);
+    handler.close().await.unwrap();
+    let mut actual = bodies.lock_recover().clone();
+    actual.sort();
+    assert_eq!(actual, [("A".into(), 1), ("B".into(), 1)]);
+    let events = run_events(double.server());
+    assert!(events.iter().any(|event| matches!(event,
+        crate::tool_run::RunEvent::Decided { call_id, decision: crate::tool_run::CallDecision::Cancelled, .. }
+        if *call_id == crate::ToolCallId::fixture("A")
+    )));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, crate::tool_run::RunEvent::RetryScheduled { .. }))
+    );
+}
+
+/// L17/K9: a lent stop that cuts a backoff is a decision, not an elapse:
+/// the schedule records the call cancelled, never a retry. A cold replay
+/// serves that selection without awaiting the SDK sleep that never fired.
+#[tokio::test]
+async fn l17_a_stop_cut_backoff_is_decided_and_replay_never_awaits_its_sleep() {
+    use lash_restate_test::{CrashCount, CrashPoint, CrashRule};
+
+    let double =
+        crate::support::kernel_double(0x497904, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    double
+        .server()
+        .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
+            name: Some("lash:run:lifecycle:Closing".to_owned()),
+        }));
+    let crashes = CrashCount::new();
+    assert!(double.server().on_crash(crashes.listener()));
+    let bodies = Arc::new(Mutex::new(Vec::new()));
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let server = double.server().clone();
+        let crashes = crashes.clone();
+        let backend = backend.clone();
+        let bodies = bodies.clone();
+        Arc::new(move |scoped| {
+            let backend = backend.clone();
+            let server = server.clone();
+            let crashes = crashes.clone();
+            let bodies = bodies.clone();
+            Box::pin(async move {
+                let factory = crate::plugin::StaticPluginFactory::new(
+                    crate::plugin::PluginDeclaration::initial(PLUGIN),
+                    crate::PluginSpec::new().with_tool_provider(Arc::new(RetryingTools(bodies))),
+                );
+                let mut factories = crate::testing::test_standard_protocol_factories();
+                factories.push(Arc::new(factory));
+                // A cold worker's lent stop has not fired.
+                let lent = CancellationToken::new();
+                let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+                    .session_id("stop-cut-session")
+                    .borrowed_effect_controller(scoped)
+                    .plugin_factories(factories)
+                    .build()
+                    .into_runtime()
+                    .with_lent_process_stop(lent.clone());
+                let grant = crate::ToolExecutionGrant::from_definition(
+                    crate::plugin::PluginRevision::new(
+                        PLUGIN,
+                        crate::plugin::BehaviorRevision::ONE,
+                    ),
+                    retry_definition(),
+                );
+                let calls = vec![
+                    crate::session::ToolInvocation::new(
+                        crate::ToolCallId::fixture("A"),
+                        crate::ToolId::new("q5:append"),
+                        json!({"symbol":"A"}),
+                    )
+                    .with_execution_grant(grant),
+                ];
+                let drive = context.drive_tool_run(None, |context| async move {
+                    let replies = context.call_tool_batch(calls).await;
+                    context.close_opener_groups().await.unwrap();
+                    replies
+                });
+                let first = crashes.get() == 0;
+                let stop = async {
+                    if first {
+                        while !server.timers().iter().any(|timer| timer.kind == "sleep") {
+                            tokio::task::yield_now().await;
+                        }
+                        lent.cancel();
+                    }
+                };
+                let (replies, ()) = tokio::join!(drive, stop);
+                let replies = replies.unwrap();
+                assert!(matches!(
+                    replies.replies[0].output.outcome,
+                    crate::ToolCallOutcome::Cancelled(_)
+                ));
+                assert!(!context.has_nested_effect_error());
+            })
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        double.run_in_handler(
+            crate::AdmittedScope::turn("stop-cut-session", "stop-cut-turn"),
+            attempt,
+        ),
+    )
+    .await
+    .expect("replay does not await the stop-cut sleep")
+    .unwrap();
+    assert_eq!(
+        crashes.get(),
+        1,
+        "the owner crashes after the cut is decided"
+    );
+    assert_eq!(bodies.lock_recover().as_slice(), [("A".into(), 1)]);
+    let events = run_events(double.server());
+    assert!(events.iter().any(|event| matches!(event,
+        crate::tool_run::RunEvent::Decided { call_id, decision: crate::tool_run::CallDecision::Cancelled, .. }
+        if *call_id == crate::ToolCallId::fixture("A")
+    )));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, crate::tool_run::RunEvent::RetryScheduled { .. })),
+        "a stop-cut backoff never records an elapse"
+    );
+}

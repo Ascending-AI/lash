@@ -1259,7 +1259,7 @@ impl ProcessEventAppendRequest {
 const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 3;
 
 /// Permanent cancellation origin tags: TurnStopped=0, ParentEnded=1,
-/// OperatorRequested=2, ModelRequested=3, StartFailed=4. Clock readings are
+/// OperatorRequested=2, ModelRequested=3, StartFailed=4, RunClosing=5. Clock readings are
 /// excluded: origin and requester identify the request on this process.
 fn cancellation_replay_preimage(process_id: &ProcessId, request: &CancelRequest) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
@@ -1273,6 +1273,7 @@ fn cancellation_replay_preimage(process_id: &ProcessId, request: &CancelRequest)
         CancelOrigin::OperatorRequested => 2,
         CancelOrigin::ModelRequested => 3,
         CancelOrigin::StartFailed => 4,
+        CancelOrigin::RunClosing => 5,
     });
     identity.string(&request.requester);
     identity.finish()

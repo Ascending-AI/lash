@@ -731,7 +731,9 @@ pub enum ToolRetryStatus {
     },
 }
 
-/// The runtime or actor decision that requested cancellation of a process.
+/// The runtime or actor decision that requested cancellation of a process
+/// or of a tool call's attempt. `RunClosing` is a call's owning tool Run
+/// discharging its cancellation at Closing while the turn itself runs on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CancelOrigin {
@@ -740,6 +742,7 @@ pub enum CancelOrigin {
     OperatorRequested,
     ModelRequested,
     StartFailed,
+    RunClosing,
 }
 
 /// A process cancellation fact. Its first timestamp survives retries.

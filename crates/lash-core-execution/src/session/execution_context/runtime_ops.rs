@@ -250,14 +250,11 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
 
 impl RuntimeExecutionContext<'_> {
     /// Called only inside X, before state and declarations can escape an inline
-    /// body. The watch is cooperative delivery, not cancellation authority.
+    /// body: whether the turn's gate accepted an immediate stop. A fired body
+    /// token is cooperative delivery, not this authority: Closing fires it too.
     pub(crate) async fn inline_turn_stop_requested(
         &self,
-        stop: Option<&CancellationToken>,
     ) -> Result<bool, crate::RuntimeEffectControllerError> {
-        if stop.is_some_and(CancellationToken::is_cancelled) {
-            return Ok(true);
-        }
         let (Some(control), Some(host)) = (
             self.turn_cancel.control.as_ref(),
             self.turn_cancel.host.as_ref(),
