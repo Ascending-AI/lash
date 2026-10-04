@@ -871,12 +871,8 @@ fn granted_leaf_name(scenario: &str, position: usize) -> String {
 /// catalogue listing the leaf.
 pub fn tool_batch_granted_leaf(path: &str) -> Option<(crate::ToolDefinition, &'static str)> {
     let name = path.strip_prefix("tools.")?;
-    (name.starts_with("rv_") && name.ends_with("_granted")).then(|| {
-        (
-            leaf_definition(name),
-            crate::facade_support::PLUGIN_TOOL_SOURCE_ID,
-        )
-    })
+    (name.starts_with("rv_") && name.ends_with("_granted"))
+        .then(|| (leaf_definition(name), "conformance-tool-batch-parallelism"))
 }
 
 #[expect(

@@ -310,8 +310,6 @@ mod restate_double {
                 as Arc<dyn lash_conformance::ConformanceTurnRunner>,
         )
     });
-
-
 }
 
 /// The `max_tool_calls` laws on the Restate server double over PostgreSQL
