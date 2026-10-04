@@ -225,11 +225,23 @@ impl WorkbenchMcpServer {
             match std::fs::OpenOptions::new()
                 .create_new(true)
                 .write(true)
-                .open(root.join("badge-entered"))
+                .open(root.join("badge-claimed"))
             {
-                Ok(mut file) => {
+                Ok(claim) => {
+                    claim.sync_all().map_err(internal)?;
+                    // Publish a complete PID barrier; an empty file is not body-entry proof.
+                    let mut file = std::fs::OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .open(root.join("badge-entered.tmp"))
+                        .map_err(internal)?;
                     writeln!(file, "{}", std::process::id()).map_err(internal)?;
                     file.sync_all().map_err(internal)?;
+                    std::fs::rename(root.join("badge-entered.tmp"), root.join("badge-entered"))
+                        .map_err(internal)?;
+                    std::fs::File::open(&root)
+                        .and_then(|directory| directory.sync_all())
+                        .map_err(internal)?;
                     std::future::pending::<()>().await;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
