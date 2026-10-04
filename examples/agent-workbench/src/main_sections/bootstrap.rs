@@ -70,14 +70,139 @@ pub(crate) async fn build_search_mcp(url: &str) -> AnyhowResult<Arc<lash::mcp::M
     ))
 }
 
+/// The `LASH_RLM_CHANNEL` value the workbench's RLM protocol factory is built
+/// with, read the same way for the serving engine and for the registration
+/// engine so both compose the same factories — and bind the same generation.
+fn workbench_rlm_channel() -> AnyhowResult<lash::rlm::RlmChannel> {
+    match std::env::var("LASH_RLM_CHANNEL") {
+        Ok(value) => value.parse().map_err(anyhow::Error::msg),
+        Err(std::env::VarError::NotPresent) => Ok(lash::rlm::RlmChannel::Cell),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Everything the workbench plugin stack is configured with, shared by the
+/// serving engine and the `register-deployment` engine so both compute the
+/// same plugin composition — and the same bound build generation.
+struct WorkbenchCorePlugins {
+    tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
+    mail_world: mail::MailWorld,
+    subagent_registry: Arc<lash::subagents::CapabilityRegistry>,
+    deferred_tools: deferred_tools::WorkbenchDeferredTools,
+    approvals: approvals::WorkbenchApprovals,
+    mcp: Arc<dyn PluginFactory>,
+}
+
+/// The builder behind every workbench Restate core: the RLM protocol factory
+/// over `host_backend`, the required budgets, the optional dev-scenario tool
+/// surface and the workbench plugin stack, shutdown marker included. The
+/// caller applies serving-only extras (tracing, model profiles) and builds;
+/// `build` binds the backend's generation to this composition.
+async fn workbench_core_builder(
+    host_backend: lash::Backend,
+    rlm_channel: lash::rlm::RlmChannel,
+    context_window_tokens: usize,
+    plugins: WorkbenchCorePlugins,
+) -> AnyhowResult<lash::LashCoreBuilder> {
+    let WorkbenchCorePlugins {
+        tool_provider,
+        mail_world,
+        subagent_registry,
+        deferred_tools,
+        approvals,
+        mcp,
+    } = plugins;
+    let mut rlm_config = lash::rlm::RlmProtocolPluginConfig::builder()
+        .channel(rlm_channel)
+        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+        .build()
+        .with_lashlang_abilities(workbench_lashlang_abilities());
+    if let Some(warn_tokens) = continue_as_warn_tokens_from_environment(context_window_tokens)? {
+        rlm_config.continue_as_soft_warn_tokens = Some(warn_tokens);
+    }
+    let factory = lash::rlm::RlmProtocolPluginFactory::new(
+        rlm_config,
+        std::sync::Arc::new(lash::rlm::TypescriptDialect),
+        &host_backend,
+    )
+    .with_deferred_tool_resolver(deferred_tools.resolver());
+    let mut builder = LashCore::rlm_builder(host_backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024));
+    if let Some(tool_provider) = tool_provider {
+        builder = builder.tools(tool_provider);
+    }
+    let shutdown_marker =
+        shutdown_marker::factory_from_env("agent-workbench").map_err(anyhow::Error::msg)?;
+    Ok(builder.configure_plugins(move |plugins| {
+        configure_workbench_plugins(
+            plugins,
+            mail_world,
+            subagent_registry,
+            deferred_tools,
+            approvals,
+            mcp,
+        );
+        if let Some(marker) = shutdown_marker {
+            plugins.push(marker);
+        }
+    }))
+}
+
+/// A workbench `RestateEngine` whose generation a core has bound, over a
+/// scratch in-memory store set: registration reads only the engine's
+/// authority, namespace, admin connection and bound generation, never the
+/// stores. The core is built through [`workbench_core_builder`], the serving
+/// engine's own construction, so the registered deployment advertises the
+/// build the host will actually serve (FIG-4969).
+pub(crate) async fn bound_workbench_engine(
+    config: lash::restate::RestateConfig,
+) -> AnyhowResult<Arc<WorkbenchRestateBackend>> {
+    let stores = lash::sqlite::SqliteStoreSet::memory()
+        .await
+        .context("open the registration engine's scratch store set")?;
+    let engine = Arc::new(lash::restate::RestateEngine::new(Arc::new(stores), config));
+    let host_backend = lash::Backend::new(engine.clone());
+    let plugins = WorkbenchCorePlugins {
+        tool_provider: failure_provider::DevProviderScenario::from_environment()?
+            .and_then(failure_provider::DevProviderScenario::tool_provider),
+        mail_world: mail::MailWorld::new(),
+        subagent_registry: Arc::new(lash::subagents::default_registry(&BTreeMap::new())),
+        deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
+            .context("open the registration core's scratch deferred-tool grants")?,
+        approvals: approvals::WorkbenchApprovals::in_memory()
+            .context("open the registration core's scratch approval ledger")?,
+        mcp: build_search_mcp(WORKBENCH_SEARCH_MCP_URL).await?,
+    };
+    let _core = workbench_core_builder(
+        host_backend,
+        workbench_rlm_channel()?,
+        context_window_tokens_from_environment()?,
+        plugins,
+    )
+    .await?
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "agent-workbench",
+        process_incarnation_id(),
+    ))
+    .context("build Lash core")?;
+    Ok(engine)
+}
+
 /// The `register-deployment <endpoint-url>` subcommand: the dev launcher's
 /// registration step, run as an invocation of this binary so
 /// `scripts/agent-workbench-dev.sh` keeps owning when registration happens —
 /// a fresh `up` registers, a restart does not — while the registration
 /// itself goes through [`RestateEngine::register_deployment`] and its
 /// namespace collision guard (FIG-3898) exactly as the serving engine would
-/// do it. The store set is a scratch in-memory one: registration reads only
-/// the engine's authority, namespace and admin connection, never the stores.
+/// do it.
+///
+/// `register_deployment` refuses an engine whose generation was never bound
+/// (FIG-4969), and only a core built over the engine's backend binds it, so
+/// the subcommand first builds the workbench's core — the serving engine's
+/// own construction, over a scratch in-memory store set the registration
+/// never touches — then registers through that bound engine.
 ///
 /// A `NameTaken` refusal is permanent, so it exits 2 for the launcher to
 /// stop retrying; every other failure is an ordinary nonzero exit.
@@ -89,14 +214,11 @@ pub(crate) async fn register_deployment_command(endpoint_url: &str) -> AnyhowRes
         std::env::var("RESTATE_AUTHORITY_ID").context("RESTATE_AUTHORITY_ID is required")?,
     )
     .map_err(|error| anyhow!("RESTATE_AUTHORITY_ID: {error}"))?;
-    let stores = lash::sqlite::SqliteStoreSet::memory()
-        .await
-        .context("open the registration engine's scratch store set")?;
-    let engine = lash::restate::RestateEngine::new(
-        Arc::new(stores),
+    let engine = bound_workbench_engine(
         lash::restate::RestateConfig::new(ingress_url, admin_url, authority)
             .with_namespace(workbench_restate_namespace()?),
-    );
+    )
+    .await?;
     match engine.register_deployment(endpoint_url).await {
         Ok(()) => Ok(()),
         Err(error @ lash::restate::RestateRegistrationError::NameTaken { .. }) => {
@@ -117,11 +239,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
 
     let dev_provider_scenario = failure_provider::DevProviderScenario::from_environment()?;
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
-    let rlm_channel = match std::env::var("LASH_RLM_CHANNEL") {
-        Ok(value) => value.parse().map_err(anyhow::Error::msg)?,
-        Err(std::env::VarError::NotPresent) => lash::rlm::RlmChannel::Cell,
-        Err(error) => return Err(error.into()),
-    };
+    let rlm_channel = workbench_rlm_channel()?;
     validate_provider_credentials(dev_provider_scenario, &api_key)?;
 
     let addr: SocketAddr = std::env::var("AGENT_WORKBENCH_ADDR")
@@ -276,24 +394,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     ));
     let attachment_store = stores.stores.attachment_store();
 
-    let mut rlm_config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .channel(rlm_channel)
-        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-        .build()
-        .with_lashlang_abilities(workbench_lashlang_abilities());
-    if let Some(warn_tokens) = continue_as_warn_tokens_from_environment(context_window_tokens)? {
-        rlm_config.continue_as_soft_warn_tokens = Some(warn_tokens);
-    }
     let host_backend = lash::Backend::new(backend.clone());
     let tracing = lash::runtime::TraceRuntime::new(host_backend.clock())
         .with_product_observer(Arc::clone(&lashlang_execution_sink));
-    let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        rlm_config,
-        std::sync::Arc::new(lash::rlm::TypescriptDialect),
-        &host_backend,
-    )
-    .with_deferred_tool_resolver(deferred_tools.resolver());
     // FIG-1407: the workbench used to run `TurnBudget::Unbounded` with no
     // second bound, so a turn whose cells never committed re-called the
     // provider until someone noticed — one measured send bought 1,223 calls.
@@ -321,21 +424,29 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         ..Default::default()
     })
     .attachment_acceptance(Arc::new(workbench_attachment_acceptance()));
-    let builder = LashCore::rlm_builder(host_backend, factory)
-        .trace_runtime(tracing)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .trace_sink(Arc::clone(&trace_sink))
-        .trace_level(TraceLevel::Extended)
-        .llm_profiles(Arc::new(WorkbenchLlmProfiles {
-            provider: provider.clone(),
-        }));
-    let builder = if let Some(tool_provider) =
-        dev_provider_scenario.and_then(failure_provider::DevProviderScenario::tool_provider)
-    {
-        builder.tools(tool_provider)
-    } else {
-        builder
+    // Web search/fetch ride the free Parallel Search MCP server, attached with
+    // no API key and no auth headers. Construction never fails on an
+    // unreachable server: the pool keeps reconnecting in the background and
+    // the model-facing tools appear once it is up, so an offline boot degrades
+    // to "no web tools" rather than refusing to start.
+    let mcp_search = build_search_mcp(WORKBENCH_SEARCH_MCP_URL).await?;
+    for status in mcp_search.server_statuses() {
+        eprintln!(
+            "agent-workbench MCP server {}: connected={}, tools={}, last_error={}",
+            status.server_name,
+            status.health.is_connected(),
+            status.tool_count,
+            status.health.error().unwrap_or_else(|| "none".into())
+        );
+    }
+    let plugins = WorkbenchCorePlugins {
+        tool_provider: dev_provider_scenario
+            .and_then(failure_provider::DevProviderScenario::tool_provider),
+        mail_world: mail_world.clone(),
+        subagent_registry,
+        deferred_tools,
+        approvals: approvals.clone(),
+        mcp: mcp_search,
     };
     // Deployment policy example. Choose these limits for the host's workload
     // before build(); session settings instead use recorded config commands.
@@ -361,40 +472,14 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //     )))
     //     .trace_context(TraceContext::default());
     // host_trigger_route_restorer is the host's Arc<dyn lash::triggers::TriggerRouteRestorer>.
-    let shutdown_marker =
-        shutdown_marker::factory_from_env("agent-workbench").map_err(anyhow::Error::msg)?;
-    // Web search/fetch ride the free Parallel Search MCP server, attached with
-    // no API key and no auth headers. Construction never fails on an
-    // unreachable server: the pool keeps reconnecting in the background and
-    // the model-facing tools appear once it is up, so an offline boot degrades
-    // to "no web tools" rather than refusing to start.
-    let mcp_search = build_search_mcp(WORKBENCH_SEARCH_MCP_URL).await?;
-    for status in mcp_search.server_statuses() {
-        eprintln!(
-            "agent-workbench MCP server {}: connected={}, tools={}, last_error={}",
-            status.server_name,
-            status.health.is_connected(),
-            status.tool_count,
-            status.health.error().unwrap_or_else(|| "none".into())
-        );
-    }
-    let plugin_mcp: Arc<dyn PluginFactory> = Arc::clone(&mcp_search) as Arc<dyn PluginFactory>;
-    let plugin_mail_world = mail_world.clone();
-    let plugin_approvals = approvals.clone();
-    let core = builder
-        .configure_plugins(move |plugins| {
-            configure_workbench_plugins(
-                plugins,
-                plugin_mail_world,
-                subagent_registry,
-                deferred_tools.clone(),
-                plugin_approvals,
-                plugin_mcp,
-            );
-            if let Some(marker) = shutdown_marker {
-                plugins.push(marker);
-            }
-        })
+    let core = workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins)
+        .await?
+        .trace_runtime(tracing)
+        .trace_sink(Arc::clone(&trace_sink))
+        .trace_level(TraceLevel::Extended)
+        .llm_profiles(Arc::new(WorkbenchLlmProfiles {
+            provider: provider.clone(),
+        }))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "agent-workbench",
             process_incarnation_id(),

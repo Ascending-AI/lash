@@ -499,6 +499,74 @@ async fn fixture_deployment_id(admin_url: &str, endpoint_url: &str) -> String {
         .clone()
 }
 
+/// FIG-4969: `register-deployment` used to build a bare engine over a scratch
+/// store, and `register_deployment` refused it `GenerationUnbound` — every
+/// WorkbenchHost boot died there. The subcommand now binds the engine's
+/// generation the way the serving engine binds it — by building the
+/// workbench's core over it through `workbench_core_builder` — then runs the
+/// registration guard: the collision scan over the admin service and
+/// deployment listings, then `POST /deployments`.
+#[test]
+fn register_deployment_registers_through_the_bound_workbench_engine() {
+    run_async_test_on_stack_budget_multi_thread("workbench-register-deployment", 2, || async {
+        let registrations = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let recorded = Arc::clone(&registrations);
+        let app = Router::new()
+            .route(
+                "/deployments",
+                get(|| async { Json(json!({ "deployments": [] })) }).post(
+                    move |Json(body): Json<Value>| {
+                        let recorded = Arc::clone(&recorded);
+                        async move {
+                            recorded.lock_recover().push(body);
+                            StatusCode::OK
+                        }
+                    },
+                ),
+            )
+            .fallback(|| async { StatusCode::NOT_FOUND });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind stub Restate admin listener");
+        let admin_url = format!(
+            "http://{}",
+            listener.local_addr().expect("stub Restate admin address")
+        );
+        let admin_task = tokio::spawn(async move { axum::serve(listener, app).await });
+        let engine = bound_workbench_engine(
+            lash::restate::RestateConfig::new(
+                "http://127.0.0.1:1".to_owned(),
+                admin_url,
+                lash::restate::RestateAuthorityId::new("fig-4969").expect("literal authority id"),
+            )
+            .with_namespace(lash::restate::RestateNamespace::default()),
+        )
+        .await
+        .expect("bind the registration engine's generation");
+        engine
+            .register_deployment("http://127.0.0.1:2/endpoint")
+            .await
+            .expect("register the endpoint deployment");
+        admin_task.abort();
+        let registrations = registrations.lock_recover();
+        assert_eq!(
+            registrations.len(),
+            1,
+            "one deployment registration was posted"
+        );
+        assert_eq!(
+            registrations[0]["uri"].as_str(),
+            Some("http://127.0.0.1:2/endpoint"),
+            "the registration names the endpoint URL"
+        );
+        assert_eq!(
+            registrations[0]["force"],
+            json!(false),
+            "no deployment already held the endpoint URI"
+        );
+    });
+}
+
 pub(crate) async fn restate_invocation_status_with_deployment(
     admin_url: &str,
     invocation_id: &lash::restate::RestateInvocationId,
