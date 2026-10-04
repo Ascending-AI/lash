@@ -441,16 +441,18 @@ impl SeamStore {
 
     /// Admit the run, then steer every input addressed to it. Each steer
     /// carries a source key, so a redrive's admission writes nothing new.
-    async fn admit_run_and_steer(
+    async fn commit_shift_admission_and_steer(
         &self,
-        request: &crate::store::AdmitRunRequest,
-    ) -> Result<Option<crate::store::RunAdmission>, StoreError> {
-        let admission = self.inner.admit_run(request).await?;
-        if admission.is_some() {
+        write: &crate::store::ShiftAdmissionWrite,
+        trace: &crate::TraceAnchor,
+    ) -> Result<crate::store::ShiftAdmissionReceipt, StoreError> {
+        let admission = self.inner.commit_shift_admission(write, trace).await?;
+        if admission.run_admission.is_some() {
             for draft in &self.steer {
                 if matches!(
                     &draft.ingress,
-                    crate::TurnInputIngress::ActiveTurn { turn_id, .. } if *turn_id == request.run
+                    crate::TurnInputIngress::ActiveTurn { turn_id, .. }
+                    if *turn_id == admission.selection.run
                 ) {
                     self.inner.enqueue_pending_turn_input(draft.clone()).await?;
                 }
@@ -474,16 +476,12 @@ impl crate::store::RuntimeStoreDecorator for SeamStore {
             .await
     }
 
-    async fn admit_run(
+    async fn commit_shift_admission(
         &self,
-        request: &crate::store::AdmitRunRequest,
-    ) -> Result<Option<crate::store::RunAdmission>, StoreError> {
-        self.control
-            .around(
-                TurnSeamOperation::Store(StoreOperation::AdmitRun),
-                self.admit_run_and_steer(request),
-            )
-            .await
+        write: &crate::store::ShiftAdmissionWrite,
+        trace: &crate::TraceAnchor,
+    ) -> Result<crate::store::ShiftAdmissionReceipt, StoreError> {
+        self.commit_shift_admission_and_steer(write, trace).await
     }
     type Inner = dyn RuntimeStore;
 
