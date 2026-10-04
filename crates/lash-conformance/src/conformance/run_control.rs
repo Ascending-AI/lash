@@ -17,10 +17,13 @@ mod intent_ledger_fault;
 mod interleavings;
 mod lost_run;
 mod ownership;
+mod physical_turn;
 pub use intent_ledger_fault::*;
 pub use interleavings::*;
 pub use lost_run::*;
 pub use ownership::*;
+pub use physical_turn::a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit;
+pub(super) use physical_turn::run_final_commit;
 
 struct Control {
     fail: AtomicBool,
@@ -517,37 +520,6 @@ impl Fixture {
     async fn owed(&self, id: ControlIntentId) -> bool {
         self.intent(id).await.engine_half_owed()
     }
-}
-
-/// A commit of `run`'s physical turn `turn` over `state` that ends the run,
-/// as the runtime writes it: the run's terminal evidence in the head
-/// transaction.
-pub(super) fn run_final_commit(
-    state: &crate::RuntimeSessionState,
-    run: &TurnId,
-    turn: &TurnId,
-    ordinal: u32,
-) -> crate::RuntimeCommit {
-    let operation = crate::OperationId::turn(state.session_id.clone(), turn.clone(), "final");
-    let mut graph = state.pending_graph_commit();
-    graph
-        .derive_node_ids(&state.session_id, &operation)
-        .expect("nodes");
-    let mut commit = crate::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        state, graph, operation,
-    )
-    .expect("commit");
-    commit.run_terminal = Some(Box::new(RunTerminalWrite {
-        run: run.clone(),
-        commit: TurnCommitId::new(run.clone(), ordinal),
-        turn: turn.clone(),
-        outcome: crate::store::RunCommittedOutcome::Finished(
-            lash_core::facade_support::TurnFinish::AssistantMessage {
-                text: String::new(),
-            },
-        ),
-    }));
-    commit
 }
 
 async fn shift(
@@ -1596,45 +1568,6 @@ pub async fn a_diverged_run_parks_once_holds_its_admitted_rows_blocks_admission_
             .expect("park")
             .is_none()
     );
-}
-
-/// B1: a run that parks on a later physical turn — a frame switch's
-/// follow-on turn — is still one run. The commit that ends it clears its
-/// park whichever physical turn committed, so the run is never parked and
-/// terminal at once: the verbs answer `NotParked` and nothing is left for a
-/// drain to count.
-pub async fn a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit(
-    prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    _: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    let f = Fixture::new(prefix, "later-physical-park", &host, &stores).await;
-    let redrive = f.verb(RunVerb::Redrive).await.expect("redrive");
-    let (work, close) = f.control(false, false);
-    f.apply(&work, &close, &redrive).await;
-    let turn = PhysicalTurn::derive_turn_id(&f.run, 1);
-    f.parts
-        .store
-        .commit_runtime_state(run_final_commit(&f.parts.initial_state(), &f.run, &turn, 1))
-        .await
-        .expect("the run's final commit on its second physical turn");
-    assert!(
-        f.factory
-            .run_terminal(&f.parts.session_id, &f.run)
-            .await
-            .expect("terminal")
-            .is_some()
-    );
-    assert_eq!(
-        f.park().await,
-        None,
-        "the run's commit clears its park whichever physical turn committed"
-    );
-    assert!(matches!(
-        f.verb(RunVerb::Cancel).await,
-        Err(RunIntentRefused::NotParked)
-    ));
 }
 
 /// H2: a redrive whose resume reached the engine but whose acknowledgement
