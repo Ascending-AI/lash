@@ -21,7 +21,7 @@ jobs:
       release_journal_replay: ${{ steps.classify.outputs.release_journal_replay }}
       trusted: ${{ github.event_name == 'push' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
       - name: Select main and registered surfaces
@@ -52,7 +52,7 @@ jobs:
       # Current-tree journals during the freeze; the release tag supplies the immutable corpus.
       LASH_REPLAY_CORPUS_ROOT: crates/lash-restate/testdata/replay-corpus
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Configure shared build cache
         if: needs.plan.outputs.trusted == 'true'
         uses: ./.github/actions/buck2-shared-cache
