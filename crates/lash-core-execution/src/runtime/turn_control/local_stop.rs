@@ -111,9 +111,10 @@ impl LocalTurnStop {
         &self,
         control: Arc<ActiveTurnControl>,
         host: Arc<dyn EffectHost>,
+        store: Option<crate::SessionStore>,
     ) -> StopDeliveryGuard {
         if let Some(mode) = self.requested() {
-            deliver_bounded(&control, host.as_ref(), mode, self.origin()).await;
+            deliver_bounded(&control, host.as_ref(), store.as_ref(), mode, self.origin()).await;
         }
         let stop = self.clone();
         let done = CancellationToken::new();
@@ -122,7 +123,7 @@ impl LocalTurnStop {
             tokio::select! {
                 biased;
                 () = finished.cancelled() => {}
-                () = stop.forward(&control, host.as_ref()) => {}
+                () = stop.forward(&control, host.as_ref(), store.as_ref()) => {}
             }
         });
         StopDeliveryGuard {
@@ -131,16 +132,28 @@ impl LocalTurnStop {
         }
     }
 
-    async fn forward(&self, control: &ActiveTurnControl, host: &dyn EffectHost) {
+    async fn forward(
+        &self,
+        control: &ActiveTurnControl,
+        host: &dyn EffectHost,
+        store: Option<&crate::SessionStore>,
+    ) {
         tokio::select! {
             biased;
             () = self.immediate.cancelled() => {}
             () = self.after_step.cancelled() => {
-                deliver(control, host, TurnCancelMode::AfterStep, self.origin()).await;
+                deliver(control, host, store, TurnCancelMode::AfterStep, self.origin()).await;
                 self.immediate.cancelled().await;
             }
         }
-        deliver(control, host, TurnCancelMode::Immediate, self.origin()).await;
+        deliver(
+            control,
+            host,
+            store,
+            TurnCancelMode::Immediate,
+            self.origin(),
+        )
+        .await;
     }
 }
 
@@ -157,10 +170,11 @@ const GATE_RETRY_MAX: Duration = Duration::from_secs(1);
 async fn deliver(
     control: &ActiveTurnControl,
     host: &dyn EffectHost,
+    store: Option<&crate::SessionStore>,
     mode: TurnCancelMode,
     origin: Option<String>,
 ) {
-    deliver_within(control, host, mode, origin, None).await;
+    deliver_within(control, host, store, mode, origin, None).await;
 }
 
 /// [`deliver`] on the retry ladder alone, for the inline delivery before a
@@ -168,15 +182,25 @@ async fn deliver(
 async fn deliver_bounded(
     control: &ActiveTurnControl,
     host: &dyn EffectHost,
+    store: Option<&crate::SessionStore>,
     mode: TurnCancelMode,
     origin: Option<String>,
 ) {
-    deliver_within(control, host, mode, origin, Some(GATE_RETRY_ATTEMPTS)).await;
+    deliver_within(
+        control,
+        host,
+        store,
+        mode,
+        origin,
+        Some(GATE_RETRY_ATTEMPTS),
+    )
+    .await;
 }
 
 async fn deliver_within(
     control: &ActiveTurnControl,
     host: &dyn EffectHost,
+    store: Option<&crate::SessionStore>,
     mode: TurnCancelMode,
     origin: Option<String>,
     attempts: Option<usize>,
@@ -184,10 +208,31 @@ async fn deliver_within(
     let mut backoff = GATE_RETRY_INITIAL;
     let mut attempt: usize = 1;
     loop {
-        let Err(error) = control
-            .request_local_stop(host.await_event_resolver(), mode, origin.clone())
-            .await
-        else {
+        let delivery = async {
+            // Persistent turns select cancellation from durable intent in
+            // their final transaction. Record it before waking the gate so
+            // even a stop at the terminal checkpoint reaches that selection.
+            if let Some(store) = store {
+                let evidence = control.internal_evidence(origin.clone());
+                store
+                    .record_turn_cancel_request(super::TurnCancelRequest {
+                        address: control.address().clone(),
+                        request_id: evidence.request_id,
+                        origin: evidence.origin,
+                        reason: evidence.reason,
+                        undelivered: evidence.undelivered,
+                        mode,
+                    })
+                    .await
+                    .map_err(|error| {
+                        RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, error.to_string())
+                    })?;
+            }
+            control
+                .request_local_stop(host.await_event_resolver(), mode, origin.clone())
+                .await
+        };
+        let Err(error) = delivery.await else {
             return;
         };
         if attempt.is_power_of_two() {
@@ -197,7 +242,7 @@ async fn deliver_within(
                 ?mode,
                 session_id = %control.address().session_id,
                 turn_id = %control.address().turn_id,
-                "forwarding a local turn stop to its durable gate failed; retrying"
+                "forwarding a local turn stop failed; retrying"
             );
         }
         if attempts.is_some_and(|attempts| attempt >= attempts) {

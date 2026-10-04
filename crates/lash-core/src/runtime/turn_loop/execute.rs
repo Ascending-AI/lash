@@ -291,7 +291,11 @@ impl LashRuntime {
         // turn sees it only where it sees any request — its journaled peeks
         // and its steps' recorded outcomes.
         let _local_stop_forwarding = local_stop
-            .forward_to(Arc::clone(&turn_control), Arc::clone(&turn_control_host))
+            .forward_to(
+                Arc::clone(&turn_control),
+                Arc::clone(&turn_control_host),
+                self.services.store.clone(),
+            )
             .await;
         let turn_policy = self.state.effective_policy().clone();
         // The run's recorded view: its protocol turn options are a view of
