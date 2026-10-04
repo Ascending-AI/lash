@@ -286,9 +286,15 @@ impl SessionPlugin for Probe {
         let probe = self.clone();
         registrar.turn().after(
             lash_core::hook_key!("completed"),
-            Arc::new(move |_| {
+            Arc::new(move |context| {
                 let probe = probe.clone();
                 Box::pin(async move {
+                    // S24's completed-turn hook is a successful-turn edit.
+                    // A cancelled S25 turn must not add a separate frontier
+                    // receipt after B's retained publication.
+                    if !matches!(context.turn.outcome, lash::TurnOutcome::Finished(_)) {
+                        return Ok(lash_core::plugin::AfterTurnContributions::default());
+                    }
                     probe
                         .record("hook", Value::Null)
                         .map_err(|error| PluginError::Session(error.to_string()))?;
@@ -345,7 +351,23 @@ impl lash_core::ToolProvider for Probe {
             let detail = json!({"symbol":symbol, "key":key, "call_id":call.context.call_id(), "attempt":call.context.attempt_number(), "run":call.context.logical_run().context("tool has no logical Run")?});
             self.record("body", detail.clone())?;
             if call.args["hold"].as_bool() == Some(true) {
-                self.hold(symbol, &detail).await?;
+                let held = self.hold(symbol, &detail);
+                tokio::pin!(held);
+                if let Some(stop) = call.context.cancellation_token() {
+                    tokio::select! {
+                        result = &mut held => result?,
+                        () = stop.cancelled() => {
+                            super::write_atomically(
+                                &self.controls.join(format!("{symbol}.cancelled")),
+                                &serde_json::to_vec(&detail)?,
+                            )?;
+                        }
+                    }
+                } else {
+                    held.await?;
+                }
+                // Deliberately still return success and commands after the
+                // stop: native X must withhold them, as the Q5 law requires.
             }
             Ok::<_, anyhow::Error>(lash_core::ToolOutcomeDone::ok(json!(symbol)).with_state(
                 lash_core::plugin::StateCommands::new().apply(key, "append", json!(symbol)),

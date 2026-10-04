@@ -532,6 +532,20 @@ fn s25_cold_reopen(
     control(&builds.next, case, "cancel", &session, &["--input", input])?;
     let predecessor = builds.n.serve_plugin_upgrade(case, Some(&bind))?;
     note_process(lease, &predecessor, "candidate", 2)?;
+    // Public cancel has written its intent. Observe A's actual recorded-step
+    // stop before release, so a ready body cannot win before the stop watch.
+    let cancelled = wait_for("A's durable cancellation stop", || {
+        match std::fs::read(case.gate_dir().join("A.cancelled")) {
+            Ok(bytes) => Ok(Some(serde_json::from_slice::<Value>(&bytes)?)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    })?;
+    ensure!(
+        cancelled["call_id"] == a_body["call_id"] && cancelled["run"] == a_body["run"],
+        "another body observed the cancellation stop: {cancelled}"
+    );
+    record(case, "s25-cancel-stop.json", &cancelled)?;
     barriers(case)?.release(&a_barrier)?;
     let terminal = control(&builds.next, case, "follow", &session, &["--input", input])?;
     ensure!(
