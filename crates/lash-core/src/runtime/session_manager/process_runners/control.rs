@@ -51,6 +51,82 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
+    /// StartLaunched records this body. Only its local registry and relay
+    /// work belongs here; nested SDK commands cannot replay an unfinished body.
+    async fn start_in_run(
+        &self,
+        registration: crate::ProcessStartRegistration,
+        observers: Vec<SessionId>,
+        execution_context: crate::ProcessExecutionContext,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.scoped_effect_controller.admit_journal_write()?;
+        let execution = self
+            .local_executor(self.scoped_effect_controller.owned_controller())
+            .into_process()?;
+        match execution
+            .execute(
+                self.scoped_effect_controller.execution_scope(),
+                crate::ProcessCommand::Start {
+                    registration,
+                    observers,
+                    execution_context: Box::new(execution_context),
+                },
+            )
+            .await?
+        {
+            crate::ProcessEffectOutcome::Start { record, .. } => Ok(*record),
+            _ => Err(wrong_process_outcome("start")),
+        }
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the process service requires its host's process-work wiring"
+    )]
+    fn local_executor(
+        &self,
+        owned_controller: Option<Arc<dyn crate::RuntimeEffectController>>,
+    ) -> crate::RuntimeEffectLocalExecutor<'static> {
+        let mut local_executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&self.registry),
+            self.current
+                .host
+                .process_work()
+                .cloned()
+                .expect("process service requires process-work wiring"),
+            self.current.host.core.process_engines.clone(),
+            crate::runtime::HostStartAdmission::default(),
+        )
+        .with_process_starts(
+            self.current
+                .host
+                .core
+                .backend()
+                .obligation_ledger(crate::store::ObligationKind::ProcessStart),
+            Arc::clone(&self.current.host.core.clock),
+            self.current.host.core.control.relay_policy(),
+            self.current.host.core.tracing.metrics().clone(),
+        )
+        .with_process_env_store(Arc::clone(
+            &self.current.host.core.durability.process_env_store,
+        ))
+        .with_process_attachments(Arc::clone(
+            self.current
+                .host
+                .core
+                .durability
+                .attachment_store
+                .referrers(),
+        ));
+        if let Some(owned_controller) = owned_controller {
+            local_executor = local_executor.with_process_effect_controller(owned_controller);
+        }
+        if let Some(turn_cancellation) = self.turn_cancellation.clone() {
+            local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
+        }
+        local_executor
+    }
+
     async fn await_process_ref(
         &self,
         process_id: crate::ProcessId,
@@ -241,41 +317,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
                 Some(requests),
             )
         };
-        let mut local_executor = crate::RuntimeEffectLocalExecutor::processes(
-            Arc::clone(&self.registry),
-            self.current
-                .host
-                .process_work()
-                .cloned()
-                .expect("process service requires process-work wiring"),
-            self.current.host.core.process_engines.clone(),
-            crate::runtime::HostStartAdmission::default(),
-        )
-        .with_process_starts(
-            self.current
-                .host
-                .core
-                .backend()
-                .obligation_ledger(crate::store::ObligationKind::ProcessStart),
-            Arc::clone(&self.current.host.core.clock),
-            self.current.host.core.control.relay_policy(),
-            self.current.host.core.tracing.metrics().clone(),
-        )
-        .with_process_env_store(Arc::clone(
-            &self.current.host.core.durability.process_env_store,
-        ))
-        .with_process_attachments(Arc::clone(
-            self.current
-                .host
-                .core
-                .durability
-                .attachment_store
-                .referrers(),
-        ))
-        .with_process_effect_controller(owned_controller);
-        if let Some(turn_cancellation) = self.turn_cancellation.clone() {
-            local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
-        }
+        let local_executor = self.local_executor(Some(owned_controller));
         let outcome = if let Some(task_requests) = task_requests {
             // The effect task hands the command to the raw controller, not
             // through the scoped one: the command's guard marks it here, so a
@@ -416,7 +458,7 @@ impl ProcessCapability {
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
         self.command_runner(current, &scope)?
-            .start(
+            .start_in_run(
                 registration,
                 options.initial_observers.into_iter().collect(),
                 execution_context,
