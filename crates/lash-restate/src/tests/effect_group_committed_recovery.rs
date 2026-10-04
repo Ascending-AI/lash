@@ -1,28 +1,10 @@
-//! FIG-4454's committed-final recovery on the Restate tier: the operators the
-//! shared laws take, and the store tiers the harness runs them over.
-//!
-//! - [`LiveConformanceHarness::child_invocation_expiry`] kills a group
-//!   child's open invocation before its seat and purges it, as its
-//!   retention's expiry does. It dispatches nothing: the opener's reopen is
-//!   what re-sends the child.
-//! - [`LiveConformanceHarness::deployment_change`] registers another build,
-//!   of another drain generation, as the newest deployment of every lash
-//!   service. Its session catalog holds the law's session at a marker below
-//!   its admission window: the profile of a build whose session window
-//!   excludes the marker the opener's build admits. A child that landed on it
-//!   would be refused at the session gate and report its committed final
-//!   lost.
+//! Store tiers and drain probes shared by the Restate test harness.
 
 // Test harness code: ambient env access is sanctioned here.
 #![allow(clippy::disallowed_methods)]
 
 use std::sync::Arc;
 use std::time::Duration;
-
-use lash_core::store::SessionCatalogStore as _;
-use lash_core::store::StoreTestSupport as _;
-
-use super::effect_group_conformance::{HarnessAdmin, LiveConformanceHarness};
 
 /// The store tier a harness's endpoint and a law's runtime run over.
 #[derive(Clone, Copy, Debug)]
@@ -36,7 +18,6 @@ pub(super) enum HarnessStoreTier {
 /// What keeps a file or PostgreSQL tier's substrate alive for the
 /// harness's lifetime.
 pub(super) struct HarnessTierResources {
-    pub(super) source_materials: Option<Arc<dyn lash_core::store::ToolMaterialStore>>,
     _directory: tempfile::TempDir,
     _database: Option<lash_postgres_store::testing::IsolatedDatabase>,
 }
@@ -68,7 +49,6 @@ impl HarnessStoreTier {
                     Some(HarnessTierResources {
                         _directory: directory,
                         _database: None,
-                        source_materials: None,
                     }),
                 )
             }
@@ -92,7 +72,6 @@ impl HarnessStoreTier {
                     Some(HarnessTierResources {
                         _directory: directory,
                         _database: Some(database),
-                        source_materials: Some(Arc::new(storage.tool_material_store())),
                     }),
                 )
             }
@@ -102,8 +81,6 @@ impl HarnessStoreTier {
 
 /// The generation of the build a deployment change registers.
 const NEWER_BUILD: &str = "effect-group-conformance-newer";
-
-impl LiveConformanceHarness {}
 
 /// The newer build's generation.
 pub(super) fn newer_build() -> lash_core::engine::BuildGeneration {

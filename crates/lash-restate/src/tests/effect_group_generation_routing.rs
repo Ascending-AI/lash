@@ -108,19 +108,6 @@ pub(super) async fn build_endpoint_reading(
     (host, builder.build())
 }
 
-pub(super) async fn build_endpoint_with_host_controller(
-    connection: &RestateConnection,
-    stores: &dyn lash_core::StoreSet,
-    log: &RunLog,
-) -> (Arc<RestateEffectHost>, Endpoint) {
-    let (host, builder) =
-        build_endpoint_builder(connection, stores, "N", log, crate::RESTATE_WIRE).await;
-    (
-        host,
-        builder.bind(HostBuiltControllerProbeImpl.serve()).build(),
-    )
-}
-
 async fn build_endpoint_builder(
     connection: &RestateConnection,
     stores: &dyn lash_core::StoreSet,
@@ -168,56 +155,6 @@ async fn build_endpoint_builder(
         reads,
     );
     (host, endpoint)
-}
-
-#[restate_sdk::workflow]
-pub(super) trait HostBuiltControllerProbe {
-    async fn run(input: Json<String>) -> HandlerResult<Json<Vec<usize>>>;
-}
-
-struct HostBuiltControllerProbeImpl;
-
-impl HostBuiltControllerProbe for HostBuiltControllerProbeImpl {
-    async fn run(
-        &self,
-        ctx: WorkflowContext<'_>,
-        Json(key): Json<String>,
-    ) -> HandlerResult<Json<Vec<usize>>> {
-        let controller = crate::RestateRuntimeEffectController::new(
-            ctx,
-            test_restate_authority_id(),
-            generation("N"),
-        );
-        let scoped = controller
-            .scoped_effect_controller(lash_core::AdmittedScope::runtime_operation(&key))
-            .map_err(TerminalError::from_error)?;
-        let mut handle = scoped
-            .controller()
-            .open_effect_group(group(&key, 3))
-            .await
-            .map_err(TerminalError::from_error)?;
-        let mut positions = Vec::new();
-        for _ in 0..3 {
-            let settled = scoped
-                .controller()
-                .await_next_settlement(
-                    &mut handle,
-                    lash_core::TurnCancelWait::unobserved(
-                        tokio_util::sync::CancellationToken::new(),
-                    ),
-                )
-                .await
-                .map_err(TerminalError::from_error)?;
-            settled.outcome.map_err(TerminalError::from_error)?;
-            positions.push(settled.position);
-        }
-        scoped
-            .controller()
-            .close_effect_group(handle, LoserPolicy::RunToCompletion)
-            .await
-            .map_err(TerminalError::from_error)?;
-        Ok(Json(positions))
-    }
 }
 
 pub(super) fn recording(

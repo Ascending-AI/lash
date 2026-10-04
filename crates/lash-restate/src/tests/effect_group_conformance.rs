@@ -685,57 +685,11 @@ impl LiveConformanceHarness {
         )
     }
 
-    /// A maker of another build's endpoint over this harness's stores and
-    /// process runner (FIG-4454's deployment change): every lash service,
-    /// bound under the newer build's lanes, whose session-scope children read
-    /// their session's generation from the catalog the maker is given.
-    pub(super) fn another_build_maker(
-        &self,
-    ) -> Arc<dyn Fn(Arc<dyn lash_core::DeploymentStore>) -> Endpoint + Send + Sync> {
-        let connection = self.connection.clone();
-        let admin = self.admin_client();
-        let stores = Arc::clone(&self.stores);
-        let process_runner = Arc::clone(&self.process_runner);
-        Arc::new(move |sessions| {
-            let host = RestateEffectHost::new_for_test(connection.clone());
-            crate::services::bind_lash_services(
-                Endpoint::builder(),
-                crate::services::LashServiceParts {
-                    effect_host: &host,
-                    ingress: RestateIngressClient::new(connection.clone()),
-                    admin: admin.clone(),
-                    sessions,
-                    materials: stores.tool_material_store(),
-                    attachments: stores.attachment_referrers(),
-                    process_workflow: LashProcessWorkflowImpl::new_for_test(
-                        Arc::clone(&process_runner),
-                        stores.process_registry(),
-                        stores.process_continuations(),
-                    ),
-                    session_shifts: crate::RestateSessionShiftsSlot::new(),
-                    build_generation: super::effect_group_committed_recovery::newer_build(),
-                    namespace: crate::RestateNamespace::default(),
-                    fleet: crate::object_state::FleetView::default(),
-                },
-            )
-            .build()
-        })
-    }
-
     /// The endpoint's own host, for a law that builds a runtime on it: the
     /// runtime installs its `ToolChildHost` here, which is the resolver the
     /// endpoint's dispatch invocations route tool children through.
     pub(super) fn endpoint_host(&self) -> Arc<dyn lash_core::EffectHost> {
         Arc::clone(&self.host) as Arc<dyn lash_core::EffectHost>
-    }
-
-    pub(super) fn release_group_context(&self, group_key: &str) {
-        self.host.group_executors().release_group(group_key);
-    }
-
-    /// Makes `executors` the endpoint's current group-child resolver.
-    pub(super) fn install_executors(&self, executors: Arc<dyn GroupExecutors>) {
-        self.executors.install(executors);
     }
 
     pub(super) fn install_current_executors(&self, executors: Arc<dyn GroupExecutors>) {

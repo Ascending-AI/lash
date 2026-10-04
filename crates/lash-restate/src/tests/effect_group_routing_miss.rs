@@ -466,7 +466,6 @@ pub(crate) async fn after_seat(group_key: &str) -> HandlerResult<()> {
 
 /// How long the deferred law's committed child is held before it settles:
 /// long enough for a law that does not wait for the seat to release its opener.
-const SEAT_HOLD: Duration = Duration::from_secs(1);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn wait_children_with_a_durable_end_stop_on_a_routing_miss() {

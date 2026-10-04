@@ -831,9 +831,6 @@ async fn live_restate_a_batch_with_index_owned_notices_answers_every_member() {
     harness.finish().await;
 }
 
-/// The rounds each tier runs of the §5 barrier's transitivity law.
-const DRAIN_TRANSITIVITY_ROUNDS: usize = 12;
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
 async fn live_restate_close_releases_an_unstarted_wait_child() {
