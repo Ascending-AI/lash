@@ -39,6 +39,7 @@ enum Request {
         request: ToolAggregateRequest,
         parent: Option<Box<crate::RuntimeInvocation>>,
         environment: Box<crate::ProcessExecutionEnvSpec>,
+        attribution: Box<super::execution_context::ToolObservationAttribution>,
         reply: Reply<Result<ToolRunAggregateCursor, SingletonRunError>>,
     },
     Consume {
@@ -65,6 +66,7 @@ impl ToolRunChannel {
         request: ToolAggregateRequest,
         parent: Option<crate::RuntimeInvocation>,
         environment: crate::ProcessExecutionEnvSpec,
+        attribution: super::execution_context::ToolObservationAttribution,
     ) -> Result<ToolRunAggregateCursor, RuntimeEffectControllerError> {
         let (reply, receive) = reply();
         self.0
@@ -72,6 +74,7 @@ impl ToolRunChannel {
                 request,
                 parent: parent.map(Box::new),
                 environment: Box::new(environment),
+                attribution: Box::new(attribution),
                 reply,
             })
             .map_err(|_| owner_gone())?;
@@ -249,6 +252,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                             request,
                             parent,
                             environment,
+                            attribution,
                             reply,
                         }),
                         _,
@@ -259,6 +263,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                                 request,
                                 parent.map(|parent| *parent),
                                 *environment,
+                                *attribution,
                             )
                             .await;
                         cut |= run.invocation_failed();

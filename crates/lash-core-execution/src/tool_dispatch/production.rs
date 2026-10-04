@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 mod aggregate;
 mod hooks;
+mod observations;
 mod settlement;
 
 pub(crate) struct ProductionToolHandlers<'run> {
@@ -29,6 +30,7 @@ pub(crate) struct ProductionToolHandlers<'run> {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct CallInput {
+    attribution: crate::session::ToolObservationAttribution,
     definition: crate::ToolDefinition,
     pending: Option<Box<crate::sansio::PendingToolCall>>,
     grant: Option<Box<crate::ToolExecutionGrant>>,
@@ -156,6 +158,24 @@ impl<'run> ProductionToolHandlers<'run> {
 
 #[async_trait::async_trait]
 impl SingletonToolHandlers for ProductionToolHandlers<'_> {
+    fn admission_observation(
+        &self,
+        request: &SingletonPreparedRequest,
+    ) -> Result<Option<serde_json::Value>, String> {
+        self.started_observation(request)
+    }
+
+    fn terminal_observation(
+        &self,
+        call_id: &crate::ToolCallId,
+        decision: &CallDecision,
+        cause: Option<&AttributedVerdict<HookCause>>,
+        capture: Option<&SingletonCapture>,
+        presentation: Option<&str>,
+    ) -> Result<Option<serde_json::Value>, String> {
+        self.completed_observation(call_id, decision, cause, capture, presentation)
+    }
+
     fn restore_request(
         &self,
         call_id: &crate::ToolCallId,
@@ -702,6 +722,41 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .insert(call_id.clone(), contributions);
         Ok(())
     }
+    fn observe_terminal(
+        &self,
+        call_id: &crate::ToolCallId,
+        decision: &CallDecision,
+        cause: Option<&AttributedVerdict<HookCause>>,
+        capture: Option<&SingletonCapture>,
+        presentation: Option<&str>,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        let record = self
+            .observed_record(call_id, decision, cause, capture, presentation)
+            .map_err(|message| {
+                crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RecordEncodingFailed,
+                    message,
+                )
+            })?;
+        self.context
+            .with_tool_observation_attribution(
+                &self
+                    .prepared
+                    .lock_recover()
+                    .get(call_id)
+                    .ok_or_else(|| {
+                        crate::RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::RecordEncodingFailed,
+                            "the observed call has no admitted preparation",
+                        )
+                    })?
+                    .input
+                    .attribution,
+            )
+            .emit_tool_call_completed_activity(call_id.as_str(), &record, 0);
+        Ok(())
+    }
+
     fn incorporate(
         &self,
         call_id: &crate::ToolCallId,

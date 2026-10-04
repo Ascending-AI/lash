@@ -140,6 +140,12 @@ impl RunRecordObserver {
                 at_ms,
                 owner,
                 admissions,
+                projections: entry
+                    .record
+                    .trace
+                    .take()
+                    .map(|trace| trace.projections)
+                    .unwrap_or_default(),
             });
             runtime.body(bound.parent, &live).observe(|| {
                 (
@@ -181,6 +187,14 @@ pub(crate) fn tool_owner(opener: &EffectOpener) -> TraceToolOwner {
 
 struct RunObservations {
     runtime: super::TraceRuntime,
+}
+
+struct ReceiptTransition<'a> {
+    terminal: Option<TraceToolTerminal>,
+    at_ms: u64,
+    transition: TraceTransitionKind,
+    permit: Option<&'a lash_trace::EmissionPermit>,
+    projection: Option<&'a serde_json::Value>,
 }
 
 fn request_key(
@@ -235,11 +249,14 @@ impl RunObservations {
                     self.emit(
                         &receipt.record,
                         &member.call_id,
-                        None,
-                        receipt.record.requested_at_ms,
-                        TraceTransitionKind::Started,
-                        receipt.permit().as_ref(),
-                    );
+                        ReceiptTransition {
+                            terminal: None,
+                            at_ms: receipt.record.requested_at_ms,
+                            transition: TraceTransitionKind::Started,
+                            permit: receipt.permit().as_ref(),
+                            projection: trace.projections.get(&member.call_id),
+                        },
+                    )?;
                 }
             }
             for fact in ObservationPermit::for_recorded(ordinal, event) {
@@ -299,11 +316,14 @@ impl RunObservations {
         self.emit(
             &request,
             call_id,
-            Some(terminal),
-            receipt.record.completed_at_ms,
-            TraceTransitionKind::Terminal,
-            receipt.permit().as_ref(),
-        );
+            ReceiptTransition {
+                terminal: Some(terminal),
+                at_ms: receipt.record.completed_at_ms,
+                transition: TraceTransitionKind::Terminal,
+                permit: receipt.permit().as_ref(),
+                projection: trace.projections.get(call_id),
+            },
+        )?;
         Ok(())
     }
 
@@ -311,13 +331,17 @@ impl RunObservations {
         &self,
         request: &ToolRequestReceipt,
         call_id: &ToolCallId,
-        terminal: Option<TraceToolTerminal>,
-        at_ms: u64,
-        transition: TraceTransitionKind,
-        permit: Option<&lash_trace::EmissionPermit>,
-    ) {
+        observation: ReceiptTransition<'_>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let ReceiptTransition {
+            terminal,
+            at_ms,
+            transition,
+            permit,
+            projection,
+        } = observation;
         let Some(scope) = &request.scope else {
-            return;
+            return Ok(());
         };
         self.runtime.unreplayed(Some(scope.clone())).transition(
             permit,
@@ -342,6 +366,21 @@ impl RunObservations {
                 )
             },
         );
+        if let Some(projection) = projection {
+            let (context, mut event): (TraceContext, TraceEvent) =
+                serde_json::from_value(projection.clone()).map_err(encoding_error)?;
+            if let TraceEvent::ToolCallCompleted { duration_ms, .. } = &mut event {
+                *duration_ms = at_ms.saturating_sub(request.requested_at_ms);
+            }
+            self.runtime.unreplayed(Some(scope.clone())).transition(
+                permit,
+                at_ms,
+                transition,
+                1,
+                || (context, event),
+            );
+        }
+        Ok(())
     }
 }
 

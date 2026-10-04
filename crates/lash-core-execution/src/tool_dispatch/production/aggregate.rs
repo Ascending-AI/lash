@@ -70,6 +70,7 @@ impl<'run> ProductionToolHandlers<'run> {
         request: ToolAggregateRequest,
         parent: Option<crate::RuntimeInvocation>,
         environment_spec: crate::ProcessExecutionEnvSpec,
+        attribution: crate::session::ToolObservationAttribution,
     ) -> Result<ToolRunAggregateCursor, SingletonRunError>
     where
         'run: 'owner,
@@ -300,6 +301,14 @@ impl<'run> ProductionToolHandlers<'run> {
                         },
                     };
                     let input = CallInput {
+                        attribution: {
+                            let mut attribution = attribution.clone();
+                            if invocation.issuing_language_node_id.is_some() {
+                                attribution.issuing_node_id =
+                                    invocation.issuing_language_node_id.clone();
+                            }
+                            attribution
+                        },
                         definition: definition.clone(),
                         pending: invocation.pending.clone(),
                         grant: invocation.execution_grant.clone(),
@@ -371,6 +380,42 @@ impl<'run> ProductionToolHandlers<'run> {
             self.context.dispatch().clock.as_ref(),
         )
         .await?;
+        for call in &calls {
+            let prepared = self
+                .prepared
+                .lock_recover()
+                .get(&call.call_id)
+                .cloned()
+                .ok_or_else(|| {
+                    crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::EffectReplayDivergence,
+                        "the observed call has no accepted preparation",
+                    )
+                })?;
+            self.context
+                .with_tool_observation_attribution(&prepared.input.attribution)
+                .emit_tool_call_started(
+                    call.call_id.as_str(),
+                    &ToolCallIds::of(&prepared.call),
+                    &prepared.call.tool_name,
+                    prepared.call.args.clone(),
+                    crate::TurnActivityId::new(format!("tool:{}", call.call_id)),
+                )
+                .await;
+        }
+        for leaf in &plan.leaves {
+            if let AggregateLeaf::Refused { input } = leaf {
+                let ToolAggregateLeafReply::Tool(reply) = refused_reply(input)? else {
+                    unreachable!("a refused tool is a tool reply")
+                };
+                if let Some(completed) = &reply.completed {
+                    self.context
+                        .with_tool_observation_attribution(&attribution)
+                        .report_undispatched_tool_call(completed, completed.call_id.as_str())
+                        .await;
+                }
+            }
+        }
         Ok(ToolRunAggregateCursor {
             owner: run.owner().clone(),
             key,

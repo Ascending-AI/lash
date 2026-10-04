@@ -349,7 +349,7 @@ async fn prepare_admitted_call(
         std::sync::Arc<crate::plugin::PluginNamespaceState>,
     )>,
     retry: crate::tool_run::RecordedRetryPolicy,
-) -> Result<(AdmittedCall, Vec<MaterialEntry>), String> {
+) -> Result<(AdmittedCall, Vec<MaterialEntry>, Option<serde_json::Value>), String> {
     let mut minted = Vec::new();
     let isolation = match live_start {
         None => None,
@@ -407,6 +407,7 @@ async fn prepare_admitted_call(
     for reply in handlers.before_checks(call, &request).await? {
         checks.push(before_verdict(owner, reply, handlers, &mut minted)?);
     }
+    let observation = handlers.admission_observation(&request)?;
     Ok((
         AdmittedCall {
             call_id: call.call_id.clone(),
@@ -421,6 +422,7 @@ async fn prepare_admitted_call(
             checks: CheckRecord::reduce(checks),
         },
         minted,
+        observation,
     ))
 }
 
@@ -525,6 +527,7 @@ async fn decision_entry(
     );
     let plugins = handlers.plugin_session();
     let selection = member.selection();
+    let observed_capture = checked.as_ref().map(|(_, capture)| capture.clone());
     let decide = async {
         let (decision, after) = match (selection, checked) {
             _ if aborted && !protected_source => (CallDecision::Cancelled, None),
@@ -598,6 +601,47 @@ async fn decision_entry(
                 call_id: call.call_id.clone(),
                 material,
             });
+        }
+        if !matches!(decision, CallDecision::Final { .. }) {
+            let cause = after
+                .as_ref()
+                .and_then(|checks| checks.winner())
+                .and_then(|reply| match &reply.verdict {
+                    AfterCheckVerdict::Deny { cause }
+                    | AfterCheckVerdict::Cancel { cause }
+                    | AfterCheckVerdict::AbortRun { cause } => Some(AttributedVerdict {
+                        callback: reply.callback.clone(),
+                        verdict: cause.clone(),
+                    }),
+                    AfterCheckVerdict::Allow => None,
+                })
+                .or_else(|| {
+                    member
+                        .checks
+                        .winner()
+                        .and_then(|reply| match &reply.verdict {
+                            BeforeCheckVerdict::Deny { cause }
+                            | BeforeCheckVerdict::Cancel { cause }
+                            | BeforeCheckVerdict::AbortRun { cause } => Some(AttributedVerdict {
+                                callback: reply.callback.clone(),
+                                verdict: cause.clone(),
+                            }),
+                            _ => None,
+                        })
+                });
+            if let Some(observation) = handlers.terminal_observation(
+                &call.call_id,
+                &decision,
+                cause.as_ref(),
+                observed_capture.as_ref(),
+                None,
+            )? {
+                record = observation_record(
+                    record,
+                    &call.owner,
+                    BTreeMap::from([(call.call_id.clone(), observation)]),
+                );
+            }
         }
         record.events.push(RunEvent::Decided {
             call_id: call.call_id.clone(),
@@ -1063,6 +1107,7 @@ impl<'a> RunCoordinator<'a> {
                     *refusal = Some(error);
                     message
                 })?;
+            let mut projections = BTreeMap::new();
             let mut members = Vec::with_capacity(calls.len());
             let mut materials = Vec::new();
             let state = handlers
@@ -1102,9 +1147,12 @@ impl<'a> RunCoordinator<'a> {
                 } else {
                     None
                 };
-                let (member, minted) =
+                let (member, minted, observation) =
                     prepare_admitted_call(&owner, call, handlers, start, snapshot, retry.clone())
                         .await?;
+                if let Some(observation) = observation {
+                    projections.insert(call.call_id.clone(), observation);
+                }
                 members.push(member);
                 materials.extend(minted);
             }
@@ -1118,7 +1166,7 @@ impl<'a> RunCoordinator<'a> {
                 .map_err(|error| error.to_string())?;
             let mut events = vec![RunEvent::Admitted {
                 round: RoundAdmission {
-                    owner: journal_owner,
+                    owner: journal_owner.clone(),
                     members,
                     operands,
                 },
@@ -1130,7 +1178,11 @@ impl<'a> RunCoordinator<'a> {
                 });
             }
             Ok(RunJournalEntry {
-                record: RunRecord { events, ..first },
+                record: observation_record(
+                    RunRecord { events, ..first },
+                    &journal_owner,
+                    projections,
+                ),
                 materials,
                 state: Vec::new(),
             })
@@ -1447,4 +1499,22 @@ impl RunCoordinator<'_> {
             self.faulted = true;
         }
     }
+}
+
+/// Producer facts join the same record as their admission or terminal. The
+/// engine fills the original instant and scope; it never re-runs a projector.
+fn observation_record(
+    mut record: RunRecord,
+    owner: &EffectOpener,
+    projections: BTreeMap<ToolCallId, serde_json::Value>,
+) -> RunRecord {
+    if !projections.is_empty() {
+        record.trace = Some(crate::tool_run::RunTraceFacts {
+            at_ms: 0,
+            owner: crate::trace::run_receipts::tool_owner(owner),
+            admissions: BTreeMap::new(),
+            projections,
+        });
+    }
+    record
 }

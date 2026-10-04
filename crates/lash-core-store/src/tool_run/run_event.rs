@@ -324,6 +324,10 @@ pub struct RunTraceFacts {
     pub at_ms: u64,
     pub owner: lash_trace::TraceToolOwner,
     pub admissions: BTreeMap<ToolCallId, lash_trace::DurableTraceScope>,
+    /// Detailed producer observations, replayed as data and emitted only with
+    /// the owning call's first-writer receipt permit.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub projections: BTreeMap<ToolCallId, serde_json::Value>,
 }
 
 /// One Run record as its journal entry holds it (FIG-4877): the record and

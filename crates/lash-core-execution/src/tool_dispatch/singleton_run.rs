@@ -334,6 +334,26 @@ pub enum SingletonPresentationError {
 /// An `Err` is a fault: the record stays unjournaled and its step runs again.
 #[async_trait::async_trait]
 pub trait SingletonToolHandlers: Send + Sync {
+    /// Passive original-call facts retained beside the accepted admission.
+    fn admission_observation(
+        &self,
+        _request: &SingletonPreparedRequest,
+    ) -> Result<Option<serde_json::Value>, String> {
+        Ok(None)
+    }
+
+    /// Passive terminal facts; a final is observed after protected presentation.
+    fn terminal_observation(
+        &self,
+        _call_id: &ToolCallId,
+        _decision: &CallDecision,
+        _cause: Option<&AttributedVerdict<HookCause>>,
+        _capture: Option<&SingletonCapture>,
+        _presentation: Option<&str>,
+    ) -> Result<Option<serde_json::Value>, String> {
+        Ok(None)
+    }
+
     /// The session whose read-only snapshots and declared commands this Run uses.
     fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
         None
@@ -440,6 +460,19 @@ pub trait SingletonToolHandlers: Send + Sync {
         &self,
         _call_id: &ToolCallId,
         _text: &str,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Ok(())
+    }
+
+    /// Project a call's activity at its own acknowledged V, including while
+    /// the aggregate is still pending. Replay observes through the same cursor.
+    fn observe_terminal(
+        &self,
+        _call_id: &ToolCallId,
+        _decision: &CallDecision,
+        _cause: Option<&AttributedVerdict<HookCause>>,
+        _capture: Option<&SingletonCapture>,
+        _presentation: Option<&str>,
     ) -> Result<(), RuntimeEffectControllerError> {
         Ok(())
     }

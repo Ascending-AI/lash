@@ -90,7 +90,8 @@ impl RuntimeTurnDriver<'_> {
                     RuntimeErrorCode::ToolCatalogResolutionFailed,
                     error.to_string(),
                 )
-            })?;
+            })?
+            .with_tracing(self.execution_tracing(0));
         let result = context
             .drive_tool_run(None, |owned| {
                 self.tool_run_owner = owned.tool_run_owner();

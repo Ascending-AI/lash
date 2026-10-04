@@ -728,6 +728,15 @@ impl RuntimeExecutionContext<'_> {
         {
             self.record_nested_effect_error(error);
         }
+        self.emit_tool_call_completed_activity(call_key, record, duration_ms);
+    }
+
+    pub(crate) fn emit_tool_call_completed_activity(
+        &self,
+        call_key: &str,
+        record: &ToolCallRecord,
+        duration_ms: u64,
+    ) {
         let context = self.with_call_observation_key(self.call_observation_key(call_key));
         let mut cursor = context.observation_cursor(&format!("tool:{}:complete", record.call_id));
         cursor.observe(

@@ -649,41 +649,7 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
     .await;
 }
 
-/// A layer over the backend's host: the turn driver's `ToolInvocation` group
-/// children open, defer, and settle against the backend registry the test
-/// resolves out of band.
-struct PendingToolResolutionController;
-
-#[async_trait::async_trait]
-impl lash_core::testing::EffectLayer for PendingToolResolutionController {
-    async fn execute_effect(
-        &self,
-        inner: &dyn RuntimeEffectController,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        // The turn's cancel watch issues peek effects the local executor does
-        // not cover; the backend's registry answers them.
-        if let lash_core::RuntimeEffectCommand::PeekAwaitEvent { key } = &envelope.command {
-            return Ok(lash_core::RuntimeEffectOutcome::PeekAwaitEvent {
-                resolution: inner.peek_await_event(key).await?,
-            });
-        }
-        // The deferred call's await parks on the backend's own journal, which
-        // the out-of-band resolve lands in; a local executor cannot run an
-        // await by itself.
-        if matches!(
-            envelope.command,
-            lash_core::RuntimeEffectCommand::AwaitEvent { .. }
-        ) {
-            return inner.execute_effect(envelope, local_executor).await;
-        }
-        local_executor.execute(envelope).await
-    }
-}
-
-/// An `echo_tool` that parks on its issued completion key and lets the test
-/// resolve it out of band — the group-path shape of "pending then resolved".
+/// An `echo_tool` whose Run-owned Deferred source is resolved out of band.
 struct PendingEchoTool {
     resolver: Arc<dyn lash_core::EffectHost>,
 }
@@ -702,7 +668,7 @@ impl lash_core::ToolProvider for PendingEchoTool {
         let key = call
             .context
             .completion_key()
-            .expect("the group child carries an issued completion key");
+            .expect("the owning Run supplies the call's completion key");
         let resolver = Arc::clone(&self.resolver);
         let value = call
             .args
@@ -772,18 +738,6 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(PendingEchoTool {
         resolver: backend.effect_host(),
     });
-    let mut config =
-        crate::runtime_support::effect_recording_authority::runtime_host_config_with_effect_layer(
-            &backend,
-            Arc::new(PendingToolResolutionController),
-        );
-    config.tracing =
-        config
-            .tracing
-            .clone()
-            .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(
-                trace_path.clone(),
-            )));
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
@@ -791,16 +745,11 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
         ))
         .await
         .expect("open the turn's handler");
-    let scope = lash_core::testing::LayeredEffectHost::layer_scoped(
-        handler.scoped(),
-        Arc::new(PendingToolResolutionController),
-    )
-    .expect("layer the lent controller with the resolution layer");
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         tools,
         transport,
-        EmbeddedRuntimeHost::new(config),
+        test_host_config_with_trace_path(&backend, trace_path.clone()),
     )
     .await;
     let turn_events = RecordingTurnEvents::default();
@@ -808,7 +757,8 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
     let turn = runtime
         .execute_turn(
             TurnInput::text("call the pending tool"),
-            TurnOptions::new(CancellationToken::new(), scope).with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("turn");

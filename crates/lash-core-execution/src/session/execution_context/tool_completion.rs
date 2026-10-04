@@ -8,7 +8,13 @@ impl RuntimeExecutionContext<'_> {
         requested_at_ms: u64,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         Box::pin(async {
-            let Some(store) = self.dispatch.tool_receipts.clone() else {
+            let Some(store) = self
+                .dispatch
+                .effect_controller
+                .frontier()
+                .runtime()
+                .and_then(|runtime| runtime.tool_receipts())
+            else {
                 return Ok(());
             };
             let owner =
@@ -147,7 +153,13 @@ impl RuntimeExecutionContext<'_> {
         intent_outcomes: &[crate::ToolIntentExecutionOutcome],
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         Box::pin(async {
-            let Some(store) = self.dispatch.tool_receipts.clone() else {
+            let Some(store) = self
+                .dispatch
+                .effect_controller
+                .frontier()
+                .runtime()
+                .and_then(|runtime| runtime.tool_receipts())
+            else {
                 return Ok(());
             };
             let request = self

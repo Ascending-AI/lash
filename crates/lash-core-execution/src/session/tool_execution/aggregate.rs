@@ -139,6 +139,7 @@ impl RuntimeExecutionContext<'_> {
                 request,
                 self.parent_invocation.clone(),
                 self.tool_run_env_spec(),
+                self.tool_observation_attribution(),
             )
             .await
     }

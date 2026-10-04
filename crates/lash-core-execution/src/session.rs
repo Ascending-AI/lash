@@ -14,6 +14,7 @@ use crate::tool_dispatch::ToolDispatchContext;
 use crate::{RuntimeServices, ToolProvider};
 
 mod execution_context;
+pub(crate) use execution_context::ToolObservationAttribution;
 mod opener_groups;
 mod process_handles;
 mod settlement_incorporation;

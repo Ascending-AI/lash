@@ -65,6 +65,9 @@ impl<'a> RunCoordinator<'a> {
         } = owed;
         let handlers = handlers.get();
         restore_contributions(&self.journal, &call_id, handlers)?;
+        let observed_cause = self
+            .withheld_verdict(&call_id)
+            .map(|(callback, verdict)| AttributedVerdict { callback, verdict });
         let journal = &mut self.journal;
         let (CallDecision::Final { declares, source }, Some(capture)) =
             (&decision, capture.clone())
@@ -97,6 +100,13 @@ impl<'a> RunCoordinator<'a> {
                 capture.as_ref(),
                 None,
                 fresh.load(Ordering::Relaxed),
+            )?;
+            handlers.observe_terminal(
+                &call_id,
+                &decision,
+                observed_cause.as_ref(),
+                capture.as_ref(),
+                None,
             )?;
             self.presented.insert(
                 call_id,
@@ -180,6 +190,7 @@ impl<'a> RunCoordinator<'a> {
             }
             _ => None,
         };
+        let observation_decision = decision.clone();
         let fresh = AtomicBool::new(false);
         let executed = &fresh;
         let present = Box::pin(async move {
@@ -200,6 +211,13 @@ impl<'a> RunCoordinator<'a> {
                     Err(SingletonPresentationError::Fault { message }) => return Err(message),
                 },
             };
+            let projection = handlers.terminal_observation(
+                &step_call,
+                &observation_decision,
+                None,
+                Some(&final_capture),
+                Some(&text),
+            )?;
             let mut owned = Vec::new();
             let presentation = if final_capture.output() == Some(text.as_str()) {
                 None
@@ -211,12 +229,23 @@ impl<'a> RunCoordinator<'a> {
             let mut events = settle;
             events.extend(presented(&step_call, presentation, consume, failure));
             executed.store(true, Ordering::Relaxed);
+            let projections = projection
+                .into_iter()
+                .map(|value| (step_call.clone(), value))
+                .collect();
             Ok(RunJournalEntry {
                 state: Vec::new(),
-                record: RunRecord {
-                    events,
-                    ..present_record
-                },
+                record: observation_record(
+                    RunRecord {
+                        events,
+                        ..present_record
+                    },
+                    &match &owner {
+                        MaterialOwner::Run { opener } => opener.clone(),
+                        _ => unreachable!("a Run owns its presentation"),
+                    },
+                    projections,
+                ),
                 materials: owned,
             })
         });
@@ -256,6 +285,13 @@ impl<'a> RunCoordinator<'a> {
             Some(&capture),
             Some(&presentation),
             fresh.load(Ordering::Relaxed),
+        )?;
+        handlers.observe_terminal(
+            &call_id,
+            &decision,
+            None,
+            Some(&capture),
+            Some(&presentation),
         )?;
         Ok(SingletonTerminal::Final {
             source: source.clone(),
