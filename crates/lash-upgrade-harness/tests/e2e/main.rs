@@ -443,3 +443,62 @@ async fn core_r1_proxy_reconnects_after_owned_upstream_downtime() -> Result<()> 
     tokio::time::timeout_at(deadline.into(), serving).await???;
     proxy.finish().await
 }
+
+/// R1: a targeted physical disconnect applies to existing streams, while a
+/// later incarnation can reconnect (second H1 S06 regression).
+#[tokio::test]
+async fn core_r1_proxy_disconnect_preserves_new_connections() -> Result<()> {
+    use lash_upgrade_harness::e2e::control::transport::V7Proxy;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    const REQUEST: &[u8] = b"GET /discover HTTP/1.1\r\nHost: fixture\r\n\r\n";
+    let directory = tempfile::tempdir()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let mut proxy = V7Proxy::start(
+        std::net::TcpListener::bind("127.0.0.1:0")?,
+        upstream.local_addr()?,
+        directory.path().to_owned(),
+        deadline,
+        Vec::new(),
+    )
+    .await?;
+    let endpoint = proxy.endpoint.trim_start_matches("http://");
+    let mut original = tokio::net::TcpStream::connect(endpoint).await?;
+    original.write_all(REQUEST).await?;
+    let (mut accepted, _) = tokio::time::timeout_at(deadline.into(), upstream.accept()).await??;
+    let mut received = vec![0; REQUEST.len()];
+    tokio::time::timeout_at(deadline.into(), accepted.read_exact(&mut received)).await??;
+    ensure!(
+        received == REQUEST,
+        "original stream was not established at the actual host"
+    );
+    ensure!(
+        proxy.disconnect(deadline).await? == 1,
+        "disconnect missed the established stream"
+    );
+    let serving = tokio::spawn(async move {
+        let (mut stream, _) = upstream.accept().await?;
+        let mut request = Vec::new();
+        stream.read_to_end(&mut request).await?;
+        ensure!(
+            request == REQUEST,
+            "new discovery stream did not survive the prior disconnect"
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .await?;
+        stream.shutdown().await?;
+        Ok::<_, anyhow::Error>(())
+    });
+    let mut reconnected = tokio::net::TcpStream::connect(endpoint).await?;
+    reconnected.write_all(REQUEST).await?;
+    reconnected.shutdown().await?;
+    let mut response = Vec::new();
+    tokio::time::timeout_at(deadline.into(), reconnected.read_to_end(&mut response)).await??;
+    ensure!(
+        response.ends_with(b"\r\n\r\nok"),
+        "prior disconnect cancelled the fresh reconnect"
+    );
+    tokio::time::timeout_at(deadline.into(), serving).await???;
+    proxy.finish().await
+}

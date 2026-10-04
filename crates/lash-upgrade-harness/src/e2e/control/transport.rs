@@ -86,11 +86,12 @@ impl V7Proxy {
         let listener = TcpListener::from_std(listener)?;
         let endpoint = format!("http://{}", listener.local_addr()?);
         let (stop, mut stopped) = watch::channel(false);
-        let (disconnect, disconnected) = watch::channel(0_u64);
+        let (disconnect, _) = watch::channel(0_u64);
         let registry = Arc::new(Mutex::new(Registry::default()));
         let registered = registry.clone();
         let upstream = Arc::new(Mutex::new(upstream));
         let target = upstream.clone();
+        let stream_disconnect = disconnect.clone();
         let task = tokio::spawn(async move {
             let mut children = JoinSet::new();
             let mut connection = 0;
@@ -112,7 +113,8 @@ impl V7Proxy {
                         let directory = directory.clone();
                         let cuts = cuts.clone();
                         let mut stopped = stopped.clone();
-                        let mut disconnected=disconnected.clone();
+                        // Only future cuts apply to this newly accepted connection.
+                        let mut disconnected=stream_disconnect.subscribe();
                         let registry=registered.clone();
                         registry.lock().map_err(|_|anyhow::anyhow!("transport registry poisoned"))?.active+=1;
                         children.spawn(async move {
