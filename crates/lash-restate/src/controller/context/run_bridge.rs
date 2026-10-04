@@ -9,6 +9,42 @@ use std::task::{Context, Poll, Waker};
 
 use lash_sansio::sync::MutexExt;
 
+/// Register every callback with the SDK, including journaled work nested in V.
+/// Borrowing Run::poll can discard a not-yet-executable nested closure; start
+/// retains it until engine progress selects it.
+pub(super) fn register<'run, 'ctx, C, T, F>(
+    context: &C,
+    name: String,
+    retry_policy: Option<restate_sdk::context::RunRetryPolicy>,
+    body: F,
+) -> impl Future<Output = Result<restate_sdk::serde::Json<T>, restate_sdk::errors::TerminalError>>
++ Send
++ 'run
+where
+    C: restate_sdk::context::ContextSideEffects<'ctx>,
+    T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+    F: Future<Output = Result<T, String>> + Send + 'run,
+{
+    let (callback, owner) = bridge();
+    let relay = Arc::new(super::wake::ClosureWakeRelay::default());
+    let closure_relay = relay.clone();
+    let run = restate_sdk::context::ContextSideEffects::run(context, move || async move {
+        super::wake::relay_closure_wakes(callback, closure_relay)
+            .await
+            .map(restate_sdk::serde::Json)
+            .map_err(|fault| restate_sdk::errors::HandlerError::from(std::io::Error::other(fault)))
+    });
+    let run = restate_sdk::context::RunFuture::name(run, name);
+    let run = match retry_policy {
+        Some(policy) => restate_sdk::context::RunFuture::retry_policy(run, policy),
+        None => run,
+    };
+    owner.drive(
+        body,
+        super::wake::guard_restate_run_future(run.start(), relay),
+    )
+}
+
 struct State<T> {
     started: bool,
     owner_alive: bool,

@@ -431,12 +431,17 @@ impl<'run> ProductionToolHandlers<'run> {
                             message,
                         )
                     })?;
+                    let mut output = captured.output;
+                    super::super::attempt_coordinator::project_recorded_intent_outcomes(
+                        &mut output,
+                        &presented.intent_outcomes,
+                    );
                     let record = ToolCallRecord {
                         call_id: call_id.clone(),
                         provider_call_id: prepared.call.provider_call_id.clone(),
                         tool: prepared.call.tool_name.clone(),
                         args: prepared.call.args.clone(),
-                        output: captured.output,
+                        output,
                     };
                     let mut reply = ToolInvocationReply::from_output(record.output.clone())
                         .with_record(record.clone());

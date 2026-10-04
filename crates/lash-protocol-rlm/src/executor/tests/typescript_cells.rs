@@ -1444,8 +1444,8 @@ fn l06_race_loser_stays_owned_across_cells_until_logical_closing() {
         );
         context.drive_tool_run(None, |context| async move {
             let mut state = RlmExecutionState::for_engine("typescript");
-            for (code, expected) in [(r#"const slow = echo.say({text: "slow"}); const fast = echo.say({text: "fast"}); print(await Promise.race([slow, fast]));"#, None), (r#"finish(await echo.say({text: "next"}));"#, Some(serde_json::json!("next")))] {
-                let response = execute_code_with_test_render(&mut state, context.clone(), ExecRequest { code: code.into() }, crate::testing::sqlite_memory_artifact_store().await, LashlangSurface::default(), None, RlmProjectedBindings::default(), None, lashlang::ExecutionBounds::unbounded(), crate::plugin::RlmChannel::Cell).await;
+            for (cell, (code, expected)) in [(r#"const slow = echo.say({text: "slow"}); const fast = echo.say({text: "fast"}); print(await Promise.race([slow, fast]));"#, None), (r#"finish(await echo.say({text: "next"}));"#, Some(serde_json::json!("next")))].into_iter().enumerate() {
+                let response = execute_code_with_test_render(&mut state, context.clone().with_parent_invocation(lash_core::testing::exec_code_invocation("test-session", "test-turn", 0, cell, format!("exec_code:{cell}"), format!("race-owner-cell:{cell}"))), ExecRequest { code: code.into() }, crate::testing::sqlite_memory_artifact_store().await, LashlangSurface::default(), None, RlmProjectedBindings::default(), None, lashlang::ExecutionBounds::unbounded(), crate::plugin::RlmChannel::Cell).await;
                 assert_eq!(response.error, None, "{response:?}");
                 assert_eq!(response.terminal_finish, expected);
             }

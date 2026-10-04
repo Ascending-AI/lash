@@ -77,6 +77,7 @@ use gate_race::{TurnGateRace, race_turn_cancel_gate, race_turn_gate};
 pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome, TurnSleepOutcome, TurnWaitOutcome};
 #[cfg(test)]
 pub(crate) use wake::guard_restate_context_future;
+#[cfg(test)]
 pub(crate) use wake::{ClosureWakeRelay, guard_restate_run_future, relay_closure_wakes};
 
 /// Whether `error` is the engine's cancellation of this invocation. The SDK
@@ -330,33 +331,7 @@ macro_rules! impl_restate_controller_context {
                     T: Serialize + DeserializeOwned + Send + 'static,
                     Fut: Future<Output = T> + Send + 'run,
                 {
-                    Box::pin(async move {
-                        // Wakes from the closure's own future are relayed straight
-                        // to the guard's parent waker, so they never reach the
-                        // guard's tracker and only the SDK's terminal park can
-                        // fuse the run - on a live attempt and on a replay that
-                        // never invokes the closure at all.
-                        let closure_relay = Arc::new(ClosureWakeRelay::default());
-                        let relay = Arc::clone(&closure_relay);
-                        let run = restate_sdk::context::ContextSideEffects::run(self, move || async move {
-                            let value = relay_closure_wakes(future, relay).await;
-                            Ok::<Json<T>, HandlerError>(Json(value))
-                        });
-                        let run = restate_sdk::context::RunFuture::name(run, effect_name);
-                        let run = match retry_policy {
-                            Some(policy) => restate_sdk::context::RunFuture::retry_policy(run, policy),
-                            None => run,
-                        };
-                        // An SDK-level run failure is terminal for this attempt:
-                        // the SDK records the handler state, wakes
-                        // synchronously and returns `Pending` so its outer
-                        // `HandlerStateAwareFuture` can consume that state. The
-                        // already-resolved run future must never be re-entered,
-                        // and pollers above this seam (the turn observation publisher, the
-                        // effect races) can poll their enclosing future again,
-                        // so fuse it here rather than trusting every caller.
-                        guard_restate_run_future(run, closure_relay).await
-                    })
+                    Box::pin(run_bridge::register(self, effect_name, retry_policy, async move { Ok(future.await) }))
                 }
 
                 fn run_json_eager_or_retry_send<'run, T, Fut>(
@@ -368,17 +343,7 @@ macro_rules! impl_restate_controller_context {
                       T: Serialize + DeserializeOwned + Send + 'static,
                       Fut: Future<Output = Result<T, String>> + Send + 'run,
                 {
-                    let (callback, owner) = run_bridge::bridge();
-                    let closure_relay = Arc::new(ClosureWakeRelay::default());
-                    let relay = Arc::clone(&closure_relay);
-                    let run = restate_sdk::context::ContextSideEffects::run(self, move || async move {
-                        relay_closure_wakes(callback, relay)
-                            .await
-                            .map(Json)
-                            .map_err(|fault| HandlerError::from(std::io::Error::other(fault)))
-                    });
-                    let run = restate_sdk::context::RunFuture::name(run, effect_name).start();
-                    owner.drive(future, guard_restate_run_future(run, closure_relay))
+                    run_bridge::register(self, effect_name, None, future)
                 }
 
                 fn run_json_or_retry_send<'run, T, Fut>(
@@ -391,23 +356,7 @@ macro_rules! impl_restate_controller_context {
                     T: Serialize + DeserializeOwned + Send + 'static,
                     Fut: Future<Output = Result<T, String>> + Send + 'run,
                 {
-                    let future = Box::pin(future);
-                    async move {
-                        let closure_relay = Arc::new(ClosureWakeRelay::default());
-                        let relay = Arc::clone(&closure_relay);
-                        let run = restate_sdk::context::ContextSideEffects::run(self, move || async move {
-                            // A retryable closure failure under the SDK's
-                            // default (infinite) policy fails the attempt
-                            // without journaling a completion; the invocation
-                            // retry runs the step again.
-                            relay_closure_wakes(future, relay)
-                                .await
-                                .map(Json)
-                                .map_err(|fault| HandlerError::from(std::io::Error::other(fault)))
-                        });
-                        let run = restate_sdk::context::RunFuture::name(run, effect_name);
-                        guard_restate_run_future(run, closure_relay).await
-                    }
+                    run_bridge::register(self, effect_name, None, future)
                 }
 
                 fn start_process_workflow<'run>(

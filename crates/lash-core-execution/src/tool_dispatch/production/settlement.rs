@@ -42,12 +42,13 @@ impl ProductionToolHandlers<'_> {
             .as_ref()
             .map(|presented| presented.intent_outcomes.clone())
             .unwrap_or_default();
-        let output = captured
+        let mut output = captured
             .as_ref()
             .map(|captured| captured.output.clone())
             .unwrap_or_else(|| {
                 ToolCallOutput::cancelled(crate::ToolCancellation::runtime("the call is withheld"))
             });
+        super::super::attempt_coordinator::project_recorded_intent_outcomes(&mut output, &outcomes);
         let settlement = crate::runtime::effect::ToolSettlement {
             version: crate::runtime::effect::TOOL_SETTLEMENT_VERSION,
             possession: crate::runtime::effect::tool_settlement::settlement_possession(&outcomes),

@@ -936,7 +936,7 @@ fn declares_at(
     outcome_kind == kind && index == intent_index
 }
 
-fn project_recorded_intent_outcomes(
+pub(super) fn project_recorded_intent_outcomes(
     output: &mut crate::ToolCallOutput,
     outcomes: &[crate::ToolIntentExecutionOutcome],
 ) {

@@ -254,7 +254,8 @@ impl ProductionToolHandlers<'_> {
             .lock_recover()
             .remove(call_id)
             .unwrap_or_default();
-        let output = captured.output.clone();
+        let mut output = captured.output.clone();
+        super::super::attempt_coordinator::project_recorded_intent_outcomes(&mut output, &outcomes);
         let settlement = Arc::new(crate::runtime::effect::ToolSettlement {
             version: crate::runtime::effect::TOOL_SETTLEMENT_VERSION,
             intent_outcomes: outcomes.clone(),
