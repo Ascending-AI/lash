@@ -992,7 +992,7 @@ impl LashlangProcessHost<'_> {
         receiver: lashlang::Value,
         args: Vec<lashlang::Value>,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
-    ) -> Result<lashlang::Value, ExecutionHostError> {
+    ) -> Result<lashlang::AbilityOutcome, ExecutionHostError> {
         let commands = self.commands();
         let command = commands.issue()?;
         if let Some(checked) = crate::language_runtime_operation(&receiver, &operation, &args) {
@@ -1009,7 +1009,7 @@ impl LashlangProcessHost<'_> {
                 .language_runtime_value(&in_flight, runtime_operation, call_site.as_ref(), key)
                 .await;
             commands.finish(&in_flight)?;
-            return result;
+            return result.map(lashlang::AbilityOutcome::Value);
         }
         let call_id = self.identities.call_id(command.ordinal);
         let prepared = match self.prepare_resource_invocation(
@@ -1047,7 +1047,7 @@ impl LashlangProcessHost<'_> {
                     )
                     .await;
                 commands.finish(&in_flight)?;
-                result
+                result.map(lashlang::AbilityOutcome::Value)
             }
             PreparedResourceInvocation::Tool { invocation, call } => {
                 // The call's journal rows live under its command key; that is
@@ -1062,9 +1062,14 @@ impl LashlangProcessHost<'_> {
                         .call_command_tool(&in_flight.command.key, invocation),
                 )
                 .await;
+                if in_flight.ctx.take_wait_handed_over() {
+                    commands.hand_over(&in_flight)?;
+                    return Ok(lashlang::AbilityOutcome::HandedOver);
+                }
                 commands.finish(&in_flight)?;
                 self.record_tool_reply(&call.call_site, &call.host_operation, &replay_key, &reply);
                 protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
+                    .map(lashlang::AbilityOutcome::Value)
             }
         }
     }
@@ -1353,13 +1358,10 @@ impl LashlangProcessHost<'_> {
                     operation.call_site,
                 ))
                 .await
-                .map(lashlang::AbilityOutcome::Value)
             }),
-            lashlang::AbilityOp::ResourceOperationBatch(batch) => Box::pin(async move {
-                Box::pin(self.resource_operation_batch(batch))
-                    .await
-                    .map(lashlang::AbilityOutcome::ResourceOperationBatch)
-            }),
+            lashlang::AbilityOp::ResourceOperationBatch(batch) => {
+                Box::pin(async move { Box::pin(self.resource_operation_batch(batch)).await })
+            }
             lashlang::AbilityOp::Await(handle) => Box::pin(async move {
                 self.await_handle(handle)
                     .await

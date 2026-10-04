@@ -100,7 +100,7 @@ async fn execute_owned_code(
     // its issue ordinal under the cell's own replay key, and the cell seals
     // its run as its last nested effect once it has an answer.
     let cell = Arc::new(match &resumed {
-        Some(resumed) => cell_run::CellRun::open_at(&ctx, resumed.ordinals.clone()),
+        Some(resumed) => Ok(cell_run::CellRun::resume(resumed)),
         None => cell_run::CellRun::open(&ctx),
     });
     // Boxed: the seal runs under the same context after the cell, and an
@@ -1173,6 +1173,13 @@ async fn suspend_cell(
         code: cell_segment::CellSegmentState::code_digest(code),
         vm,
         ordinals: cell.ordinals(),
+        cell_opener: cell.identities().opener().clone(),
+        cell_execution: cell
+            .identities()
+            .code()
+            .execution()
+            .ok_or_else(|| "a suspended cell has no execution identity".to_owned())?
+            .to_owned(),
         projection_namespace: host.hand_over_gate().projection_namespace(),
         projected_bindings: projected_bindings.map_err(|error| error.to_string())?,
         host_environment,

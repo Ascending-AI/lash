@@ -3,6 +3,26 @@
 use super::*;
 
 impl RunCoordinator<'_> {
+    pub(crate) fn with_generation_cuts(mut self, enabled: bool) -> Self {
+        self.observe_generation_cuts = enabled;
+        self
+    }
+
+    // Only a served frame result owns cut truth; a replay never reads the mark.
+    pub(super) fn accept_cut_request(
+        &mut self,
+        record: &RunRecord,
+    ) -> Result<(), SingletonRunError> {
+        if let Some(reason) = record.events.iter().find_map(|event| match event {
+            RunEvent::CutChecked { reason } => Some(*reason),
+            _ => None,
+        }) {
+            let cut = self.request_cut(reason);
+            return Err(RunCutRefusal::AdmissionFrozen { reason: cut.reason }.into());
+        }
+        Ok(())
+    }
+
     fn owed_starts(&self) -> Vec<crate::StartKey> {
         let mut keys: std::collections::BTreeSet<_> =
             self.journal.ledger.owed_starts().into_iter().collect();
@@ -133,24 +153,85 @@ impl RunCoordinator<'_> {
 
 impl<'a> RunCoordinator<'a> {
     /// Retain canonical payloads before publishing a continuation. The
-    /// predecessor keeps its lease until successor ownership commits.
+    /// predecessor keeps its lease until successor ownership commits. The old
+    /// invocation replays the receipt and its own journaled payloads, never a
+    /// retention under the now-ended predecessor holder.
     ///
     /// # Errors
     /// A store refusal leaves the continuation unpublished.
     pub async fn retain_cut(
-        &self,
+        &mut self,
         transfer: &mut crate::tool_run::RunTransfer,
         store: &dyn crate::store::ToolMaterialStore,
     ) -> Result<(), SingletonRunError> {
-        let payloads = self
-            .journal
-            .materials
-            .entries
-            .values()
-            .filter_map(Clone::clone);
-        if let Some(bundle) = crate::tool_run::MaterialBundle::of(payloads)? {
-            transfer.material = vec![store.retain_material(&transfer.holder(), &bundle).await?];
+        // The extra command belongs only to a real, quiescent physical cut.
+        let capture = self.capture_cut()?;
+        if transfer.owner != capture.owner || transfer.from != capture.from {
+            return Err(crate::tool_run::ContinuationRefusal::ForeignOwner.into());
         }
+        let retained = self
+            .journal
+            .records
+            .iter()
+            .filter(|record| record.segment == self.journal.segment)
+            .flat_map(|record| &record.events)
+            .find_map(|event| match event {
+                RunEvent::CutRetained { material } => Some(material.clone()),
+                _ => None,
+            });
+        transfer.material = match retained {
+            Some(material) => material,
+            None => {
+                let payloads: Vec<_> = self
+                    .journal
+                    .materials
+                    .entries
+                    .values()
+                    .filter_map(Clone::clone)
+                    .collect();
+                let holder = transfer.holder();
+                let record = self.journal.record(Vec::new());
+                let name = format!(
+                    "lash:run:cut:retain:{}:{}",
+                    record.segment.0, record.first.0
+                );
+                let recorded = self
+                    .journal
+                    .append(
+                        name,
+                        Box::pin(async move {
+                            let material = match crate::tool_run::MaterialBundle::of(payloads)
+                                .map_err(|error| error.to_string())?
+                            {
+                                Some(bundle) => vec![
+                                    store
+                                        .retain_material(&holder, &bundle)
+                                        .await
+                                        .map_err(|error| error.to_string())?,
+                                ],
+                                None => Vec::new(),
+                            };
+                            Ok(RunJournalEntry {
+                                record: RunRecord {
+                                    events: vec![RunEvent::CutRetained { material }],
+                                    ..record
+                                },
+                                materials: Vec::new(),
+                                state: Vec::new(),
+                            })
+                        }),
+                    )
+                    .await?;
+                match recorded.events.into_iter().next() {
+                    Some(RunEvent::CutRetained { material }) => material,
+                    _ => {
+                        return Err(crate::tool_run::ContinuationRefusal::UnretainedMaterial.into());
+                    }
+                }
+            }
+        };
+        transfer.events = self.journal.ledger.next_ordinal();
+        transfer.entries.clone_from(&self.journal.entries);
         for entry in &mut transfer.entries {
             entry
                 .materials
@@ -501,4 +582,28 @@ impl<'a> RunCoordinator<'a> {
         }
         Ok(run)
     }
+}
+
+// Admission and consumption borrow their existing SDK record. Only a fresh
+// callback reads authority, and only an accepted mark replaces the frame result.
+pub(super) async fn generation_cut_entry(
+    controller: &dyn crate::RuntimeEffectController,
+    enabled: bool,
+    mut record: RunRecord,
+) -> Result<Option<RunJournalEntry>, String> {
+    if enabled
+        && let Some(reason) = controller
+            .peek_run_cut()
+            .await
+            .map_err(|error| error.to_string())?
+    {
+        record.events = vec![RunEvent::CutChecked { reason }];
+        record.trace = None;
+        return Ok(Some(RunJournalEntry {
+            record,
+            materials: Vec::new(),
+            state: Vec::new(),
+        }));
+    }
+    Ok(None)
 }

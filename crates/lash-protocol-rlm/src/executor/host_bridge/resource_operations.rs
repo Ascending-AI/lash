@@ -142,7 +142,7 @@ impl HostBridge<'_> {
         receiver: FlowValue,
         args: Vec<FlowValue>,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
-    ) -> Result<FlowValue, ExecutionHostError> {
+    ) -> Result<AbilityOutcome, ExecutionHostError> {
         let commands = self.commands()?;
         let command = commands.issue()?;
         let prepared = match self
@@ -175,7 +175,7 @@ impl HostBridge<'_> {
                 .await;
                 commands.finish(&in_flight)?;
                 match result {
-                    Ok(value) => value,
+                    Ok(value) => value.map(AbilityOutcome::Value),
                     Err(error) => Err(commands.journal_error(&in_flight, error, |error| {
                         ExecutionHostError::new(error.to_string())
                     })),
@@ -198,6 +198,7 @@ impl HostBridge<'_> {
                 .await;
                 commands.finish(&in_flight)?;
                 self.consume_resource_trigger(call, result)
+                    .map(AbilityOutcome::Value)
             }
             PreparedOperation::Tool {
                 call,
@@ -213,8 +214,13 @@ impl HostBridge<'_> {
                         .call_command_tool(&in_flight.command.key, *invocation),
                 )
                 .await;
+                if in_flight.ctx.take_wait_handed_over() {
+                    commands.hand_over(&in_flight)?;
+                    return Ok(AbilityOutcome::HandedOver);
+                }
                 commands.finish(&in_flight)?;
                 self.consume_resource_reply(&call, reply, in_flight.command.key.as_str())
+                    .map(AbilityOutcome::Value)
             }
         }
     }
@@ -222,7 +228,7 @@ impl HostBridge<'_> {
     pub(super) async fn resource_operation_batch(
         &self,
         batch: lashlang::ResourceOperationBatch,
-    ) -> Result<lashlang::ResourceOperationBatchOutcome, ExecutionHostError> {
+    ) -> Result<AbilityOutcome, ExecutionHostError> {
         let lashlang::ResourceOperationBatch {
             leaves,
             consumer,
@@ -336,6 +342,10 @@ impl HostBridge<'_> {
             },
         )
         .await;
+        if in_flight.ctx.take_wait_handed_over() {
+            commands.hand_over(&in_flight)?;
+            return Ok(AbilityOutcome::HandedOver);
+        }
         commands.finish(&in_flight)?;
         if !self.is_cancelled()
             && dispatched.len() > 1
@@ -348,6 +358,6 @@ impl HostBridge<'_> {
                 );
             }
         }
-        reply
+        reply.map(AbilityOutcome::ResourceOperationBatch)
     }
 }

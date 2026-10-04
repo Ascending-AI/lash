@@ -220,6 +220,7 @@ pub trait LashProcessWorkflow {
 pub(crate) struct LashProcessWorkflowImpl<R> {
     runner: Arc<R>,
     registry: Arc<dyn ProcessRegistry>,
+    drain_marks: Option<Arc<dyn lash_core::store::generation_drain::GenerationDrainStore>>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     segment_effect_budget: super::SegmentEffectBudget,
     retry_max_attempts: u64,
@@ -293,6 +294,7 @@ impl<R> Clone for LashProcessWorkflowImpl<R> {
         Self {
             runner: Arc::clone(&self.runner),
             registry: Arc::clone(&self.registry),
+            drain_marks: self.drain_marks.clone(),
             continuations: Arc::clone(&self.continuations),
             segment_effect_budget: Arc::clone(&self.segment_effect_budget),
             retry_max_attempts: self.retry_max_attempts,
@@ -379,6 +381,7 @@ impl<R> LashProcessWorkflowImpl<R> {
         Self {
             runner,
             registry,
+            drain_marks: None,
             continuations,
             segment_effect_budget: Arc::new(|_| 10_000),
             retry_max_attempts: super::PROCESS_HANDLER_MAX_ATTEMPTS,
@@ -390,6 +393,14 @@ impl<R> LashProcessWorkflowImpl<R> {
             route: namespace.stable(LashService::ProcessWorkflow),
             tracing: None,
         }
+    }
+
+    pub(crate) fn with_generation_drain(
+        mut self,
+        marks: Arc<dyn lash_core::store::generation_drain::GenerationDrainStore>,
+    ) -> Self {
+        self.drain_marks = Some(marks);
+        self
     }
 
     /// This workflow bound under `route`: the binder serves one instance per
@@ -1223,6 +1234,7 @@ where
             scope_journal::ProcessJournalPin::register(&ctx, self.route.namespace(), &process_id)
                 .await?;
         let options = RestateEffectControllerOptions::default()
+            .with_generation_drain(self.drain_marks.clone())
             .segment_effect_budget(policy.effect_budget)
             .process_segment_drive()
             .segment_generation(self.build_generation.clone());

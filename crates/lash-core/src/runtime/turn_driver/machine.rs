@@ -88,7 +88,8 @@ impl RuntimeTurnDriver<'_> {
             .map_err(|error| {
                 error.into_turn_failure(RuntimeErrorCode::ToolCatalogResolutionFailed)
             })?
-            .with_tracing(self.execution_tracing(0));
+            .with_tracing(self.execution_tracing(0))
+            .with_turn_hand_over(self.cells_hand_over());
         let result = context
             .drive_tool_run(None, |owned| {
                 self.tool_run_owner = owned.tool_run_owner();

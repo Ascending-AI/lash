@@ -144,6 +144,7 @@ impl StartedRunTrace {
 /// Configuration for [`RestateRuntimeEffectController`].
 #[derive(Clone)]
 pub struct RestateEffectControllerOptions {
+    drain_marks: Option<Arc<dyn lash_core::store::generation_drain::GenerationDrainStore>>,
     run_retry_policy: Option<RunRetryPolicy>,
     segment_effect_budget: u64,
     journaled_effect_byte_budget: Option<u64>,
@@ -161,6 +162,7 @@ pub struct RestateEffectControllerOptions {
 impl Default for RestateEffectControllerOptions {
     fn default() -> Self {
         Self {
+            drain_marks: None,
             run_retry_policy: None,
             segment_effect_budget: 10_000,
             journaled_effect_byte_budget: None,
@@ -173,6 +175,14 @@ impl Default for RestateEffectControllerOptions {
 impl RestateEffectControllerOptions {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn with_generation_drain(
+        mut self,
+        marks: Option<Arc<dyn lash_core::store::generation_drain::GenerationDrainStore>>,
+    ) -> Self {
+        self.drain_marks = marks;
+        self
     }
 
     /// Set a Restate retry policy for recorded `ctx.run` effects.
@@ -249,6 +259,7 @@ impl RestateEffectControllerOptions {
 impl fmt::Debug for RestateEffectControllerOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RestateEffectControllerOptions")
+            .field("drain_marks", &self.drain_marks.is_some())
             .field("run_retry_policy", &self.run_retry_policy)
             .field("segment_effect_budget", &self.segment_effect_budget)
             .field(
@@ -683,6 +694,20 @@ where
             .map_err(|error| {
                 crate::wire::lash_terminal(&error, RuntimeErrorCode::EngineEffectController)
             })
+    }
+
+    async fn peek_run_cut(
+        &self,
+    ) -> Result<Option<lash_core::BoundaryReason>, RuntimeEffectControllerError> {
+        let Some(marks) = &self.options.drain_marks else {
+            return Ok(None);
+        };
+        let draining = marks
+            .draining_generations()
+            .await?
+            .iter()
+            .any(|mark| mark.generation == self.build_generation);
+        Ok(draining.then_some(lash_core::BoundaryReason::HandOver))
     }
 
     async fn await_run_sources(

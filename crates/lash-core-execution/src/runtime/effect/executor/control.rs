@@ -429,6 +429,12 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         Err(crate::tool_run::SourceRefusal::NotArmed.into())
     }
 
+    /// Read physical-cut authority without emitting or awaiting SDK commands.
+    /// Called only inside a recorded native frame decision.
+    async fn peek_run_cut(&self) -> Result<Option<BoundaryReason>, RuntimeEffectControllerError> {
+        Ok(None)
+    }
+
     /// Read the immutable seal selected by short segment subscriptions.
     async fn await_run_sources(
         &self,

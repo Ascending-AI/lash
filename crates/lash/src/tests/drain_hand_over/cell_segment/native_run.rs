@@ -762,3 +762,328 @@ async fn cancel_cell(storage: Storage, sleep: bool) -> Result<()> {
     }
     Ok(())
 }
+
+struct NativeCutBodies {
+    entered: tokio::sync::mpsc::UnboundedSender<String>,
+    release: [Arc<tokio::sync::Notify>; 2],
+}
+
+fn native_cut_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:native_cut", "native_cut", "held native body",
+        serde_json::json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}),
+        serde_json::json!({"type":"string"}),
+    ).unwrap().with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["cut"], "body"))
+}
+
+#[async_trait]
+impl ToolProvider for NativeCutBodies {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![native_cut_definition().manifest()]
+    }
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "native_cut").then(|| Arc::new(native_cut_definition().contract()))
+    }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let id = call.args["id"].as_str().unwrap();
+        self.entered.send(id.into()).unwrap();
+        self.release[usize::from(id == "b")].notified().await;
+        lash_core::ToolOutcome::ok(serde_json::json!(id)).into()
+    }
+}
+
+/// K6/L09/L16: an accepted drain cuts native X without a pending turn wait,
+/// including acceptance immediately before the last X returns. Native X is
+/// acknowledged before the retained Run and VM continuation move together.
+#[tokio::test]
+async fn l09_generation_drain_cuts_native_aggregate_without_a_turn_wait() {
+    for (last_only, crash) in [
+        (false, None),
+        (true, None),
+        (false, Some(false)),
+        (false, Some(true)),
+    ] {
+        native_cut_without_wait(last_only, false, crash).await;
+    }
+}
+
+#[tokio::test]
+async fn l09_generation_drain_cuts_native_process_aggregate_without_a_source_wait() {
+    for (last_only, crash) in [
+        (false, None),
+        (true, None),
+        (false, Some(false)),
+        (false, Some(true)),
+    ] {
+        native_cut_without_wait(last_only, true, crash).await;
+    }
+}
+
+async fn native_cut_without_wait(
+    last_only: bool,
+    process: bool,
+    crash_after_cut_ack: Option<bool>,
+) {
+    let world = double_world(Storage::SqliteMemory).await;
+    let Engine::Double(double) = &world.engine else {
+        unreachable!()
+    };
+    let crashes = CrashCount::new();
+    assert!(double.server().on_crash(crashes.listener()));
+    let (entered, mut bodies) = tokio::sync::mpsc::unbounded_channel();
+    let release = [
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+    ];
+    let requests = Arc::default();
+    let code = typescript_block(if process {
+        r#"const worker = async () => { let local = 40; const results = await Promise.all([cut.body({id:"a"}), cut.body({id:"b"})]); return {results, local:local + 2}; }; const job = await processes.start({definition:worker}); finish(await job);"#
+    } else {
+        r#"let local = 40; const results = await Promise.all([cut.body({id:"a"}), cut.body({id:"b"})]); finish({results, local:local + 2});"#
+    });
+    let tools = Arc::new(NativeCutBodies {
+        entered,
+        release: release.clone(),
+    });
+    let provider = cell_provider(code.clone(), &requests);
+    let deployed = |backend: lash_core::Backend, work: Arc<dyn lash_core::SessionWorkEngine>| {
+        let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
+            .with_session_work(work)
+            .into_backend();
+        rlm_core_builder_over(backend)
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(
+                crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
+            )
+            .serve_test_llm_profile(provider.clone(), mock_llm_profile_spec())
+            .tools(tools.clone())
+            .plugin(Arc::new(
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                    lash_core::lifetime::session_or_starter,
+                ),
+            ))
+            .plugin(lash_core::testing::process_engine_plugin_fixture())
+            .build(crate::testing::runtime_lease_owner())
+            .unwrap()
+    };
+    let core = deployed(world.engine.old_backend(), world.engine.old_work());
+    double.install_process_worker(
+        lash_core_worker::DurableProcessWorker::new(core.durable_process_worker_config().unwrap())
+            .unwrap(),
+    );
+    let session = lash_core::SessionId::fixture(format!("native-cut-{process}-{last_only}"));
+    let handle = core
+        .session(session.clone())
+        .created()
+        .await
+        .open()
+        .await
+        .unwrap()
+        .send(TurnInput::text("cut active native work"))
+        .id(RUN)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        tokio::time::timeout(WEDGE, bodies.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    if last_only {
+        release[0].notify_one();
+        // Pin the last-body window to a durable first-X receipt. The second
+        // body remains held when the operator accepts the drain.
+        tokio::time::timeout(WEDGE, async {
+            loop {
+                let acknowledged = double
+                    .server()
+                    .invocations()
+                    .into_iter()
+                    .filter(|view| {
+                        view.target.contains(if process {
+                            "LashProcessWorkflow"
+                        } else {
+                            "LashTurn"
+                        }) && view.target.ends_with("/run")
+                    })
+                    .flat_map(|view| double.server().journal(&view.id).unwrap_or_default())
+                    .filter_map(|entry| entry.run_completion().and_then(std::result::Result::ok))
+                    .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                    .any(|value| {
+                        value.get("call_id").is_some()
+                            && value.get("attempt").is_some()
+                            && value.get("result").is_some()
+                    });
+                if acknowledged {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the first native X is acknowledged before the last-body drain");
+    }
+    let old = core.build_generation().clone();
+    let next = BuildGeneration::for_test("native-cut-next");
+    let successor = double
+        .add_separate_build(next.clone(), "native-cut-next", Default::default())
+        .await
+        .unwrap();
+    let admin = deployed(
+        successor.lash_backend(),
+        successor.explicit_reconcile_session_work(),
+    );
+    assert_eq!(admin.build_generation(), &next);
+    successor.processes().install(
+        lash_core_worker::DurableProcessWorker::new(admin.durable_process_worker_config().unwrap())
+            .unwrap(),
+    );
+    assert!(admin.drain_generation(&old).await.unwrap());
+    let turn_views = || {
+        double
+            .server()
+            .invocations()
+            .into_iter()
+            .filter(|view| {
+                view.target.contains(if process {
+                    "LashProcessWorkflow"
+                } else {
+                    "LashTurn"
+                }) && view.target.ends_with("/run")
+                    // A refused admission probe owns no native Run. Count
+                    // the physical owners whose journals contain K6 work.
+                    && double.server().journal(&view.id).unwrap_or_default().iter()
+                        .any(|entry| entry.name.as_deref().is_some_and(|name| name.starts_with("lash:run:")))
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(turn_views().len(), 1, "no successor before native ACK");
+    if let Some(after_ack) = crash_after_cut_ack {
+        let owner = turn_views().pop().unwrap();
+        let (service, rest) = owner.target.split_once('/').unwrap();
+        let point = if after_ack && process {
+            CrashPoint::BeforeRunResult {
+                name: Some("lash.segment.handover".into()),
+            }
+        } else if after_ack {
+            // Publication follows durable acceptance of the cut frame.
+            CrashPoint::BeforeStateWrite {
+                key: "outcome".into(),
+                value_contains: None,
+            }
+        } else {
+            CrashPoint::BeforeRunResultStarting {
+                prefix: "lash:run:aggregate:".into(),
+            }
+        };
+        double.server().crash_on(
+            CrashRule::new(point)
+                .service(service)
+                .handler("run")
+                .key(rest.strip_suffix("/run").unwrap()),
+        );
+    }
+    if !last_only {
+        release[0].notify_one();
+    }
+    release[1].notify_one();
+    let result = tokio::time::timeout(WEDGE, handle.output()).await;
+    let output = match result {
+        Ok(output) => output,
+        Err(_) => {
+            let journals = double
+                .server()
+                .invocations()
+                .into_iter()
+                .filter(|view| view.target.ends_with("/run"))
+                .map(|view| {
+                    let (service, key) = view.target.split_once('/').unwrap();
+                    let outcome = double.server().object_state(service, key.strip_suffix("/run").unwrap())
+                        .get("outcome").and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok()).map(|value| value["body"]["outcome"].clone());
+                    let tail = double.server().journal(&view.id).unwrap_or_default().into_iter()
+                        .rev().take(12).map(|entry| (entry.ty, entry.name.clone(), entry.run_completion().and_then(std::result::Result::err)))
+                        .collect::<Vec<_>>();
+                    let commands = double.server().journal(&view.id).unwrap_or_default().into_iter()
+                        .filter(|entry| format!("{:?}", entry.ty).ends_with("Command"))
+                        .enumerate().map(|(index, entry)| (index, entry.ty, entry.name.clone(), entry.call_command())).collect::<Vec<_>>();
+                    (view, outcome, commands, tail)
+                })
+                .collect::<Vec<_>>();
+            let store = lash_core::runtime::live_session_view(&core.store_factory, &session).await.unwrap().unwrap();
+            let pending = store.load_pending_follow_on().await.unwrap().and_then(|pending| pending.continuation)
+                .map(|continuation| (continuation.reason, continuation.cell.is_some(), continuation.opener.run.map(|run| run.vm_continuation)));
+            panic!(
+                "native cut did not resume: process={process}, last_only={last_only}, crash_after_cut_ack={crash_after_cut_ack:?}; pending={pending:?}; model_calls={}; {journals:#?}", requests.lock_recover().len()
+            )
+        }
+    }.unwrap();
+    assert_eq!(
+        output.final_value(),
+        Some(&serde_json::json!({"results":["a","b"],"local":42}))
+    );
+    assert_eq!(
+        requests.lock_recover().len(),
+        1,
+        "VM resumes without another model call"
+    );
+    assert!(
+        bodies.try_recv().is_err(),
+        "ACKed native bodies never run again"
+    );
+    assert_eq!(
+        crashes.get(),
+        u64::from(crash_after_cut_ack.is_some()),
+        "the cut crash witness executed once: process={process}, last_only={last_only}, crash_after_cut_ack={crash_after_cut_ack:?}"
+    );
+    let views = turn_views();
+    assert_eq!(
+        views.len(),
+        2,
+        "accepted drain published no physical Run transfer"
+    );
+    assert_ne!(views[0].pinned_deployment_id, views[1].pinned_deployment_id);
+    let retained = views
+        .iter()
+        .flat_map(|view| double.server().journal(&view.id).unwrap_or_default())
+        .filter_map(|entry| entry.run_completion().and_then(std::result::Result::ok))
+        .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .any(|value| retained_native_cut(&value));
+    assert!(
+        retained,
+        "the Capturable K6 Run and VM continuation were not retained together"
+    );
+}
+
+// Process VM state is opaque bytes inside its journaled handover. Decode that
+// envelope before checking the same typed K6 transfer a foreground cell owns.
+fn retained_native_cut(value: &serde_json::Value) -> bool {
+    if value.get("vm_continuation").is_some() {
+        let transfer: lash_core::tool_run::RunTransfer =
+            serde_json::from_value(value.clone()).unwrap();
+        return transfer.vm_continuation
+            && transfer.reason == lash_core::BoundaryReason::HandOver
+            && transfer.ledger().is_ok()
+            && transfer
+                .entries
+                .iter()
+                .flat_map(|entry| &entry.record.events)
+                .any(|event| {
+                    matches!(
+                        event,
+                        lash_core::tool_run::RunEvent::CutChecked {
+                            reason: lash_core::BoundaryReason::HandOver
+                        }
+                    )
+                });
+    }
+    if let Some(state) = value.get("engine_state") {
+        let bytes: Vec<u8> = serde_json::from_value(state.clone()).unwrap();
+        let state = serde_json::from_slice(&bytes).unwrap();
+        return retained_native_cut(&state);
+    }
+    match value {
+        serde_json::Value::Object(fields) => fields.values().any(retained_native_cut),
+        serde_json::Value::Array(values) => values.iter().any(retained_native_cut),
+        _ => false,
+    }
+}

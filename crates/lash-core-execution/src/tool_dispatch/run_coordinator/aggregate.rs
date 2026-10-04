@@ -54,7 +54,7 @@ impl<'a> RunCoordinator<'a> {
         clock: &dyn crate::Clock,
     ) -> Result<(), SingletonRunError> {
         plan.validate()?;
-        if let Some(cut) = self.cut {
+        if let Some(cut) = self.cut() {
             return Err(super::RunCutRefusal::AdmissionFrozen { reason: cut.reason }.into());
         }
         if plan.leaves.iter().any(|leaf| {
@@ -63,20 +63,32 @@ impl<'a> RunCoordinator<'a> {
             return Err(RunEventRefusal::AggregateShape { key: plan.key.clone() }.into());
         }
         self.begin_frame()?;
-        let record = self.journal.record(vec![RunEvent::AggregateAdmitted {
-            plan: plan.clone(),
-            admitted_at_ms: clock.timestamp_ms(),
-        }]);
         let result = self
             .bodies
             .clone()
             .beside(async {
+                let record = self.journal.record(vec![RunEvent::AggregateAdmitted {
+                    plan: plan.clone(),
+                    admitted_at_ms: clock.timestamp_ms(),
+                }]);
                 let mut ledger = self.journal.ledger.clone();
                 ledger.append(self.journal.segment, &record)?;
-                self.journal
+                let controller = self.journal.scoped.controller();
+                let observe = self.observe_generation_cuts;
+                let admitted = self
+                    .journal
                     .append(
                         format!("lash:run:aggregate:{}:admit", plan.key),
                         Box::pin(async move {
+                            if let Some(entry) = continuation::generation_cut_entry(
+                                controller,
+                                observe,
+                                record.clone(),
+                            )
+                            .await?
+                            {
+                                return Ok(entry);
+                            }
                             Ok(RunJournalEntry {
                                 record,
                                 materials: Vec::new(),
@@ -85,6 +97,7 @@ impl<'a> RunCoordinator<'a> {
                         }),
                     )
                     .await?;
+                self.accept_cut_request(&admitted)?;
                 if self.aggregate_plan(&plan.key)? != *plan {
                     return Err(RunEventRefusal::AggregateShape {
                         key: plan.key.clone(),
@@ -116,6 +129,9 @@ impl<'a> RunCoordinator<'a> {
         clock: &dyn crate::Clock,
     ) -> Result<(), SingletonRunError> {
         plan.validate()?;
+        if let Some(cut) = self.cut() {
+            return Err(super::RunCutRefusal::AdmissionFrozen { reason: cut.reason }.into());
+        }
         let supplied: BTreeSet<_> = calls.iter().map(|call| &call.call_id).collect();
         let new: BTreeSet<_> = plan
             .leaves
@@ -137,9 +153,21 @@ impl<'a> RunCoordinator<'a> {
         let result = self
             .bodies
             .clone()
-            .beside(self.start_round_inner(calls, capacity, handlers, retry, Some((plan, clock))))
-            .await
-            .map(|_| ());
+            .beside(async {
+                if let Ok(recorded) = self.aggregate_plan(&plan.key) {
+                    if recorded != *plan || !calls.is_empty() {
+                        return Err(RunEventRefusal::AggregateShape {
+                            key: plan.key.clone(),
+                        }
+                        .into());
+                    }
+                    return Ok(());
+                }
+                self.start_round_inner(calls, capacity, handlers, retry, Some((plan, clock)))
+                    .await
+                    .map(|_| ())
+            })
+            .await;
         self.active_frame = false;
         self.note_fault(&result);
         result?;
@@ -239,7 +267,7 @@ impl<'a> RunCoordinator<'a> {
             .max();
         if let Some(through) = through {
             loop {
-                self.begin_aggregate_drain(through, &consumed, &mut presentation)
+                self.begin_aggregate_drain(through, &BTreeSet::new(), &mut presentation)
                     .await?;
                 if presentation.is_none() {
                     break;
@@ -252,6 +280,8 @@ impl<'a> RunCoordinator<'a> {
         while presentation.is_some() {
             self.progress_with_presentation(&mut presentation).await?;
         }
+        // Presentation is protected through acceptance; consumption belongs
+        // to the VM outcome and must stay unrecorded when this frame cuts.
         // A background drain may have presented a result before this consumer
         // asked for it. Taking its value is a separate recorded fact then.
         let events: Vec<_> = consumed
@@ -263,10 +293,19 @@ impl<'a> RunCoordinator<'a> {
             .collect();
         if !events.is_empty() {
             let record = self.journal.record(events);
-            self.journal
+            let controller = self.journal.scoped.controller();
+            let observe = self.observe_generation_cuts;
+            let consumed = self
+                .journal
                 .append(
                     format!("lash:run:aggregate:{key}:consume:{}", record.first.0),
                     Box::pin(async move {
+                        if let Some(entry) =
+                            continuation::generation_cut_entry(controller, observe, record.clone())
+                                .await?
+                        {
+                            return Ok(entry);
+                        }
                         Ok(RunJournalEntry {
                             record,
                             materials: Vec::new(),
@@ -275,6 +314,7 @@ impl<'a> RunCoordinator<'a> {
                     }),
                 )
                 .await?;
+            self.accept_cut_request(&consumed)?;
         }
         let reply = |operand: usize| match &plan.leaves[plan.operands[operand] as usize] {
             AggregateLeaf::Call { call_id } => self.terminal(call_id).map(Some),

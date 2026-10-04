@@ -130,6 +130,27 @@ impl ToolRunChannel {
     }
 }
 
+fn cut_reply<T>(result: Result<T, SingletonRunError>) -> Result<T, SingletonRunError> {
+    // Only a safe frame boundary may return a cut to the VM. An accepted
+    // consumer result is delivered whole; real faults keep their typed cause.
+    if matches!(
+        result,
+        Err(SingletonRunError::Cut(
+            crate::tool_run::RunCutRefusal::AdmissionFrozen {
+                reason: crate::BoundaryReason::HandOver,
+            }
+        ))
+    ) {
+        let mut error = RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::TurnWaitHandedOver,
+            "the active native Run accepted its generation drain",
+        );
+        error.journaled = true;
+        return Err(error.into());
+    }
+    result
+}
+
 impl<'run> RuntimeExecutionContext<'run> {
     /// Whether an enclosing invocation already owns this context's Run.
     pub fn has_tool_run_owner(&self) -> bool {
@@ -229,7 +250,11 @@ impl<'run> RuntimeExecutionContext<'run> {
                 )
                 .await
                 .map_err(SingletonRunError::into_controller_error)?
-                .with_admitted_environment(environment);
+                .with_admitted_environment(environment)
+                .with_generation_cuts(
+                    scoped.controller().hands_over_turns()
+                        && (self.turn_hands_over() || self.process_id().is_some()),
+                );
             let bodies = run.bodies();
             let (send, mut receive) = channel();
             let mut context = self.clone();
@@ -266,7 +291,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                                         *attribution,
                                     )
                                     .await;
-                                let _ = reply.send(result);
+                                let _ = reply.send(cut_reply(result));
                             }
                             Either::Right((
                                 Some(Request::Consume {
@@ -287,7 +312,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                                         host_control,
                                     )
                                     .await;
-                                let _ = reply.send(result);
+                                let _ = reply.send(cut_reply(result));
                             }
                             Either::Right((Some(Request::Capture { reason, reply }), _)) => {
                                 let result = match materials.as_deref() {
@@ -296,7 +321,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                                     }
                                     None => Err(ContinuationRefusal::UnretainedMaterial.into()),
                                 };
-                                let _ = reply.send(result);
+                                let _ = reply.send(cut_reply(result));
                             }
                             Either::Right((Some(Request::Close(reply)), _)) => {
                                 let result = if closed { Ok(()) } else { run.close().await };
@@ -304,7 +329,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                                 if result.is_ok() {
                                     state.finish_run();
                                 }
-                                let _ = reply.send(result);
+                                let _ = reply.send(cut_reply(result));
                             }
                             Either::Right((None, _)) => break Err(owner_gone()),
                         }

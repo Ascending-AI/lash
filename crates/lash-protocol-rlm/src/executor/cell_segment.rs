@@ -79,6 +79,9 @@ pub(super) struct CellSegmentState {
     /// The run's issue-ordinal state. The command the cell stopped on has
     /// returned its ordinal, so the resumed cell issues it under the same key.
     pub ordinals: lash_lashlang_runtime::LashlangRunOrdinals,
+    /// Native call identities keep the admitting cell across physical turns.
+    pub cell_opener: lash_core::EffectOpener,
+    pub cell_execution: String,
     /// The namespace the run's projection tokens name.
     pub projection_namespace: Option<String>,
     /// The session's projected bindings as the cell recorded them.

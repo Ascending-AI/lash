@@ -684,3 +684,135 @@ async fn authorize_publication(
     commit.shift_fence = Some(Box::new(fence));
     commit.park_run = Some(turn);
 }
+
+/// L13/K6: publication ends the predecessor holder, and successor retirement
+/// may reclaim the bundle before the old physical invocation replays its tail.
+/// Its own SDK journal serves capture; neither replay nor its receipt reopens X.
+#[tokio::test]
+async fn l13_k6_old_cut_replays_after_successor_material_retirement() {
+    use lash_core::tool_run::{MaterialHolder, MaterialRetentionError};
+
+    let backend = lash_restate_test::backend(0x4976, ServerConfig::default())
+        .await
+        .unwrap();
+    let call = call("cut-retained", &Kind::IntentFree);
+    let mut probe = Probe::new(&[(call.clone(), Kind::IntentFree)]);
+    probe.materials = Some(backend.stores().process_env_store());
+    let probe = Arc::new(probe);
+    let captures = Arc::new(Mutex::new(Vec::new()));
+    let retired = Arc::new(AtomicBool::new(false));
+    backend
+        .server()
+        .crash_on(CrashRule::new(CrashPoint::BeforeRun {
+            name: UNRELATED.to_owned(),
+        }));
+    let crashes = lash_restate_test::CrashCount::new();
+    assert!(backend.server().on_crash(crashes.listener()));
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let probe = Arc::clone(&probe);
+        let captures = Arc::clone(&captures);
+        let retired = Arc::clone(&retired);
+        let call = call.clone();
+        Arc::new(move |scoped| {
+            let probe = Arc::clone(&probe);
+            let captures = Arc::clone(&captures);
+            let retired = Arc::clone(&retired);
+            let call = call.clone();
+            Box::pin(async move {
+                probe.handler_attempts.fetch_add(1, Ordering::SeqCst);
+                let store = probe.materials.as_ref().unwrap();
+                let mut run =
+                    RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                run.decide_round(
+                    std::slice::from_ref(&call),
+                    probe.clone(),
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+                run.request_cut(lash_core::BoundaryReason::HandOver);
+                let mut transfer = run.quiesce().await.unwrap();
+                run.retain_cut(&mut transfer, store.as_ref()).await.unwrap();
+                assert!(!transfer.material.is_empty());
+                captures.lock().unwrap().push(transfer.clone());
+                let successor = MaterialHolder::Segment {
+                    opener: owner(),
+                    segment: SegmentOrdinal(1),
+                };
+                if !retired.swap(true, Ordering::SeqCst) {
+                    // The successor alone owns the transferred material before
+                    // its retirement, exactly as the publication commit orders it.
+                    for bundle in &transfer.material {
+                        store.acquire_material(&successor, bundle).await.unwrap();
+                    }
+                    store.release_material(&transfer.holder()).await.unwrap();
+                    store.release_material(&successor).await.unwrap();
+                }
+                let reference = &transfer.material[0].references[0];
+                for holder in [transfer.holder(), successor] {
+                    assert!(
+                        store
+                            .read_material(&holder, reference, &reference.owner, &[revision()])
+                            .await
+                            .is_err()
+                    );
+                    assert!(matches!(
+                        store.acquire_material(&holder, &transfer.material[0]).await,
+                        Err(MaterialRetentionError::HolderEnded { .. })
+                    ));
+                }
+                assert!(matches!(
+                    run.decide_round(
+                        std::slice::from_ref(&call),
+                        probe.clone(),
+                        Default::default()
+                    )
+                    .await,
+                    Err(SingletonRunError::Cut(
+                        lash_core::tool_dispatch::RunCutRefusal::AdmissionFrozen { .. }
+                    ))
+                ));
+                // Crash only after both holders ended; replay serves all earlier
+                // Run entries and the retention receipt before reaching this slot.
+                scoped
+                    .controller()
+                    .record_run_record(UNRELATED.to_owned(), unrelated_record(probe))
+                    .await
+                    .unwrap();
+            })
+        })
+    };
+    backend
+        .run_in_handler(AdmittedScope::turn("session", "turn"), attempt)
+        .await
+        .unwrap();
+    assert_eq!(crashes.get(), 1);
+    assert_eq!(probe.handler_attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(probe.executions_of(&call.call_id), 1);
+    let captures = captures.lock().unwrap();
+    assert_eq!(captures.len(), 2);
+    assert_eq!(captures[0], captures[1]);
+    let old = backend
+        .server()
+        .invocations()
+        .into_iter()
+        .find(|view| view.target.starts_with("LashTestHandlerHost/"))
+        .unwrap();
+    assert_eq!(
+        backend
+            .server()
+            .journal(&old.id)
+            .unwrap()
+            .iter()
+            .filter(|entry| entry
+                .name
+                .as_deref()
+                .is_some_and(|name| name.starts_with("lash:run:cut:retain:")))
+            .count(),
+        1
+    );
+    // Once the physical invocation retires, its SDK journal releases the only
+    // canonical payloads old replay needed; no old material lease survives.
+    assert_eq!(backend.server().purge(&old.id), Some(true));
+    assert!(backend.server().journal(&old.id).is_none());
+}

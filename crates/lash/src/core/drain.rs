@@ -100,6 +100,53 @@ impl serde::Serialize for DeploymentDrainStatus {
 /// and the operator binary share one definition (FIG-3884).
 pub use lash_core::store::generation_drain::GenerationDrainStatus;
 
+impl crate::LashCore {
+    // Deliver the accepted mark to current owners immediately. The durable
+    // mark remains recovery's retry authority if any delivery is interrupted.
+    pub(super) async fn request_generation_cuts(
+        &self,
+        generation: &lash_core::engine::BuildGeneration,
+    ) -> crate::Result<()> {
+        let marks = self.backend.generation_drain();
+        let page = std::num::NonZeroUsize::MIN.saturating_add(255);
+        let control = self.backend.session_work().control();
+        let mut after = None;
+        loop {
+            let sessions = marks
+                .sessions_in_flight(generation, after.as_ref(), page)
+                .await?;
+            if sessions.is_empty() {
+                break;
+            }
+            for session in sessions {
+                control
+                    .hand_over_turns(&session, generation)
+                    .await
+                    .map_err(|error| lash_core::RuntimeError::new(error.code, error.message))?;
+                after = Some(session);
+            }
+        }
+        let process_work = self.backend.process_work();
+        let mut after = None;
+        loop {
+            let processes = marks
+                .live_processes(generation, after.as_ref(), page)
+                .await?;
+            if processes.is_empty() {
+                break;
+            }
+            for process in processes {
+                process_work
+                    .port()
+                    .deliver_hand_over(&process, generation)
+                    .await?;
+                after = Some(process);
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;

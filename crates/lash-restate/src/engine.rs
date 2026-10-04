@@ -165,7 +165,9 @@ impl RestateEngine {
         effect_host.bind_wait_receipts(stores.session_store_factory(), stores.clock());
         let session_work = Arc::new(RestateSessionWork::new(
             RestateIngressClient::new(connection.clone()),
-            crate::RestateSessionShiftsSlot::new().with_run_effect_budget(run_effect_budget),
+            crate::RestateSessionShiftsSlot::new()
+                .with_run_effect_budget(run_effect_budget)
+                .with_generation_drain(stores.generation_drain()),
             generation.clone(),
             namespace.clone(),
             Arc::new(crate::session_control::RestateSessionControl {
@@ -254,11 +256,14 @@ impl RestateEngine {
 
                 materials: self.stores.tool_material_store(),
                 attachments: self.stores.attachment_referrers(),
-                process_workflow: self.process.workflow(
-                    processes.into(),
-                    build_generation.clone(),
-                    self.stores.attachment_referrers(),
-                ),
+                process_workflow: self
+                    .process
+                    .workflow(
+                        processes.into(),
+                        build_generation.clone(),
+                        self.stores.attachment_referrers(),
+                    )
+                    .with_generation_drain(self.stores.generation_drain()),
                 session_shifts: self.session_work.shifts_slot().clone(),
                 build_generation,
                 namespace: self.namespace.clone(),

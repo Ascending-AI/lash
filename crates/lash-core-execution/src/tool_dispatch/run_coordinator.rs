@@ -744,6 +744,7 @@ pub struct RunCoordinator<'a> {
     presented: BTreeMap<ToolCallId, PresentedCall>,
     timers: Vec<parallel::AggregateTimer<'a>>,
     cut: Option<crate::tool_run::Cut>,
+    observe_generation_cuts: bool,
     faulted: bool,
     active_frame: bool,
     sources: BTreeMap<ToolCallId, crate::tool_run::SourceDescriptor>,
@@ -896,6 +897,7 @@ impl<'a> RunCoordinator<'a> {
             presented: BTreeMap::new(),
             timers: Vec::new(),
             cut: None,
+            observe_generation_cuts: false,
             faulted: false,
             active_frame: false,
             sources: BTreeMap::new(),
@@ -1093,7 +1095,7 @@ impl<'a> RunCoordinator<'a> {
         if self.faulted {
             return Err(RunCutRefusal::InvocationFailed.into());
         }
-        if let Some(cut) = self.cut {
+        if let Some(cut) = self.cut() {
             return Err(RunCutRefusal::AdmissionFrozen { reason: cut.reason }.into());
         }
         if self.journal.ledger.lifecycle() != crate::tool_run::RunLifecycle::Live
@@ -1131,7 +1133,9 @@ impl<'a> RunCoordinator<'a> {
             || record_name(&calls[0].call_id, "admit"),
             |(plan, _)| format!("lash:run:aggregate:{}:admit", plan.key),
         );
+        let observe = self.observe_generation_cuts;
         let journal = &mut self.journal;
+        let controller = journal.scoped.controller();
         let first = journal.record(Vec::new());
         let owner = journal.materials.owner.clone();
         let journal_owner = journal.owner.clone();
@@ -1142,6 +1146,11 @@ impl<'a> RunCoordinator<'a> {
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
         let admit = Box::pin(async move {
+            if let Some(entry) =
+                continuation::generation_cut_entry(controller, observe, first.clone()).await?
+            {
+                return Ok(entry);
+            }
             let starts = match calls
                 .iter()
                 .enumerate()
@@ -1247,6 +1256,10 @@ impl<'a> RunCoordinator<'a> {
             })
         });
         let admitted = journal.append(name, admit).await?;
+        if let Some(RunEvent::CutChecked { reason }) = admitted.events.first() {
+            let cut = self.request_cut(*reason);
+            return Err(RunCutRefusal::AdmissionFrozen { reason: cut.reason }.into());
+        }
         match admitted.events.first() {
             Some(RunEvent::AdmissionRefused { cause }) => return Err(cause.clone().into()),
             Some(RunEvent::IsolationRefused { cause }) => return Err(cause.clone().into()),

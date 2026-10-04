@@ -272,3 +272,9 @@ reads = 2
 outputs = 0
 kind = "evidence-read"
 reason = "FIG-4972 proves ephemeral Prompt View edits never change the committed API transcript, including cold replay and reopen."
+
+[sites."crates/lash/src/tests/drain_hand_over/cell_segment/native_run.rs#native_cut_without_wait"]
+reads = 0
+outputs = 1
+kind = "output-read"
+reason = "K6/L09 checks the exact native Run result and VM locals after a generation drain transfers ownership."

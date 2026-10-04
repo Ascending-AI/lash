@@ -64,9 +64,7 @@ impl CellRun {
         Self::open_at(ctx, LashlangRunOrdinals::start())
     }
 
-    /// [`Self::open`] for a cell resumed from a segment boundary inside it
-    /// (FIG-4739): the run continues from the ordinals its predecessor
-    /// segment handed over, under this segment's own opener.
+    /// Open a cell under its admitted physical invocation.
     pub(super) fn open_at(
         ctx: &RuntimeExecutionContext<'_>,
         ordinals: LashlangRunOrdinals,
@@ -91,6 +89,18 @@ impl CellRun {
             run,
             module_ref: std::sync::Mutex::new(None),
         })
+    }
+
+    /// A retained cell owns its original namespace, even on a new physical turn.
+    pub(super) fn resume(state: &super::cell_segment::CellSegmentState) -> Self {
+        let identities =
+            LashlangHostIdentities::cell(state.cell_opener.clone(), state.cell_execution.clone());
+        let run = LashlangReplayRun::new(identities.namespace(), state.ordinals.clone());
+        Self {
+            identities,
+            run,
+            module_ref: std::sync::Mutex::new(None),
+        }
     }
 
     pub(super) fn identities(&self) -> &LashlangHostIdentities {

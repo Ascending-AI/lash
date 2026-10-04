@@ -297,6 +297,12 @@ where
     ) -> Result<lash_core::tool_run::SourceSeal, RuntimeEffectControllerError> {
         self.inner.cancel_run_source(descriptor).await
     }
+    async fn peek_run_cut(
+        &self,
+    ) -> Result<Option<lash_core::BoundaryReason>, RuntimeEffectControllerError> {
+        self.inner.peek_run_cut().await
+    }
+
     async fn await_run_sources(
         &self,
         subscriptions: Vec<lash_core::tool_run::SourceSubscription>,

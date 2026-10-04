@@ -1361,6 +1361,8 @@ fn events(records: &[RunRecord]) -> Vec<Vec<&'static str>> {
                 .events
                 .iter()
                 .map(|event| match event {
+                    RunEvent::CutChecked { .. } => "cut_checked",
+                    RunEvent::CutRetained { .. } => "cut_retained",
                     RunEvent::AdmissionRefused { .. } => "admission_refused",
                     RunEvent::IsolationRefused { .. } => "isolation_refused",
                     RunEvent::Admitted { .. } => "admitted",

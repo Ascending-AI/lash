@@ -267,7 +267,7 @@ impl LashlangProcessHost<'_> {
     pub(super) async fn resource_operation_batch(
         &self,
         batch: lashlang::ResourceOperationBatch,
-    ) -> Result<lashlang::ResourceOperationBatchOutcome, ExecutionHostError> {
+    ) -> Result<lashlang::AbilityOutcome, ExecutionHostError> {
         let lashlang::ResourceOperationBatch {
             leaves,
             consumer,
@@ -390,6 +390,10 @@ impl LashlangProcessHost<'_> {
             },
         )
         .await;
+        if in_flight.ctx.take_wait_handed_over() {
+            commands.hand_over(&in_flight)?;
+            return Ok(lashlang::AbilityOutcome::HandedOver);
+        }
         commands.finish(&in_flight)?;
         for (leaf, tool_reply) in &read {
             if let Some(call) = dispatched.get(leaf) {
@@ -407,6 +411,6 @@ impl LashlangProcessHost<'_> {
                     .emit_resumed(&call.call_site, TraceNodeWaitResolution::Resumed);
             }
         }
-        reply
+        reply.map(lashlang::AbilityOutcome::ResourceOperationBatch)
     }
 }

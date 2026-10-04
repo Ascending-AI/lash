@@ -716,6 +716,10 @@ impl RuntimeEffectController for LayeredController<'_> {
     ) -> Result<crate::tool_run::SourceSeal, RuntimeEffectControllerError> {
         self.inner.as_ref().cancel_run_source(descriptor).await
     }
+    async fn peek_run_cut(&self) -> Result<Option<BoundaryReason>, RuntimeEffectControllerError> {
+        self.inner.as_ref().peek_run_cut().await
+    }
+
     async fn await_run_sources(
         &self,
         subscriptions: Vec<crate::tool_run::SourceSubscription>,

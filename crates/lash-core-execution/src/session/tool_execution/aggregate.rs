@@ -226,6 +226,9 @@ impl RuntimeExecutionContext<'_> {
         &self,
         error: crate::RuntimeEffectControllerError,
     ) -> ToolAggregateOutcome {
+        if error.code == crate::RuntimeErrorCode::TurnWaitHandedOver {
+            self.record_wait_handed_over();
+        }
         if let Some(exceeded) = error.tool_call_limit_exceeded() {
             return ToolAggregateOutcome::ToolCallLimitExceeded(exceeded);
         }

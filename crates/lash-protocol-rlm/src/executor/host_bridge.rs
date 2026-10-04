@@ -713,15 +713,11 @@ impl HostBridge<'_> {
                     args,
                     call_site,
                 } = *operation;
-                Box::pin(self.resource_operation(operation, receiver, args, call_site))
-                    .await
-                    .map(AbilityOutcome::Value)
+                Box::pin(self.resource_operation(operation, receiver, args, call_site)).await
             }),
-            AbilityOp::ResourceOperationBatch(batch) => Box::pin(async move {
-                Box::pin(self.resource_operation_batch(batch))
-                    .await
-                    .map(AbilityOutcome::ResourceOperationBatch)
-            }),
+            AbilityOp::ResourceOperationBatch(batch) => {
+                Box::pin(async move { Box::pin(self.resource_operation_batch(batch)).await })
+            }
             AbilityOp::Await(handle) => Box::pin(async move { self.await_handle(handle).await }),
             AbilityOp::Print(value) => Box::pin(async move {
                 self.print(value).await?;

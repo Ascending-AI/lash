@@ -252,10 +252,10 @@ impl LashCore {
         })
     }
 
-    /// Mark `generation` draining (FIG-3799): from the next recovery tick the
-    /// deployment that leads recovery wakes every live process whose current
-    /// segment `generation` admitted, and each hands its open wait to a
-    /// successor on the newest build, where it waits again. Poll
+    /// Mark `generation` draining and request every active turn and process
+    /// Run's physical cut. Issued native work reaches durable acknowledgement
+    /// before its retained continuation moves to the newest build. Recovery
+    /// retries any delivery an interrupted drain left owed. Poll
     /// [`generation_drain_status`](Self::generation_drain_status) until it
     /// reports drained, then retire the generation's deployment.
     ///
@@ -275,11 +275,13 @@ impl LashCore {
             });
         }
         let now_ms = self.env.core.clock.timestamp_ms();
-        Ok(self
+        let changed = self
             .backend
             .generation_drain()
             .mark_draining(generation, now_ms)
-            .await?)
+            .await?;
+        self.request_generation_cuts(generation).await?;
+        Ok(changed)
     }
 
     /// Stop draining `generation`: the recovery leader wakes none of its
