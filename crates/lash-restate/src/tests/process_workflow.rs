@@ -134,6 +134,7 @@ impl ProcessJournalWorld {
                         )
                         .serve(),
                     )
+                    .bind(crate::durable_wait::LashDurableWaitWorkflowImpl::default().serve())
                     .build(),
             )
             .await
