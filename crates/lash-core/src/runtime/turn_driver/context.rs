@@ -66,7 +66,8 @@ impl<'run> RuntimeTurnDriver<'run> {
             )
             .map(|context| {
                 let context = context
-                    .with_tool_material_store(self.host.core.backend().tool_material_store());
+                    .with_tool_material_store(self.host.core.backend().tool_material_store())
+                    .with_process_work(self.host.work.process_wiring().cloned());
                 let context = match &self.tool_run_owner {
                     Some(owner) => context.with_tool_run_owner(owner),
                     None => context,
