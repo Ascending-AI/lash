@@ -160,6 +160,7 @@ mod session_plugin_init_tests {
             crate::PluginNamespaceState {
                 format_version: lash_core_ids::FormatVersion::ONE,
                 generation: 0,
+                publication: Default::default(),
                 values,
             },
         );

@@ -233,6 +233,12 @@ impl crate::runtime::effect::ProcessRunner for ProcessRuntimeContext {
         )
         .await?;
         plugins.adopt_plugin_transition(&record)?;
+        let state_segment = u32::try_from(execution_context.segment_ordinal).map_err(|_| {
+            crate::PluginError::attempt_fault(
+                "process segment exceeds the plugin-state segment range",
+            )
+        })?;
+        plugins.adopt_state_segment(crate::tool_run::SegmentOrdinal(state_segment));
         plugins.materialize()?;
         self.services
             .run_admitted_process(

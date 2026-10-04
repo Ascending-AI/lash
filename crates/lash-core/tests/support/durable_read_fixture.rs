@@ -1308,6 +1308,7 @@ fn fixture_plugin_state() -> PluginState {
             PluginNamespaceState {
                 format_version: lash_core::FormatVersion::ONE,
                 generation: 887,
+                publication: Default::default(),
                 values: std::collections::BTreeMap::from([(
                     "state".into(),
                     serde_json::json!({"fixture": "plugin-state", "value": 887}),

@@ -256,6 +256,15 @@ impl LashRuntime {
             }
         };
         let turn_index = self.physical_turn_index(admitted_turn_index);
+        let state_segment = u32::try_from(turn_index).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::Plugin,
+                "physical turn index exceeds the plugin-state segment range",
+            )
+        })?;
+        self.services
+            .plugins
+            .adopt_state_segment(crate::tool_run::SegmentOrdinal(state_segment));
         let trace_turn_id = input
             .trace_turn_id
             .clone()

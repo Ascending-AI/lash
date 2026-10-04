@@ -631,6 +631,7 @@ mod tests {
             crate::plugin_state::PluginNamespaceState {
                 format_version: version(2),
                 generation: 1,
+                publication: Default::default(),
                 values: BTreeMap::new(),
             },
         );

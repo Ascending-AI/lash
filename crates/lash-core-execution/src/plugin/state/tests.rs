@@ -208,7 +208,7 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(calls.clone()))]);
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
-        "format-probe": {"generation": 7, "format_version": 4294967295_u32, "values": {"old": 17}}
+        "format-probe": {"generation": 7, "format_version": 4294967295_u32, "publication": {"applied": null, "owner_segment": 0, "receipts": {}}, "values": {"old": 17}}
     }))
     .unwrap();
     let bytes = rmp_serde::to_vec_named(&snapshot).unwrap();
@@ -390,15 +390,14 @@ impl crate::SessionPlugin for NoMigrateProbe {
 #[test]
 fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     let calls = || Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let inactive =
-        serde_json::json!({"generation": 7, "format_version": 99, "values": {"opaque": 5}});
+    let inactive = serde_json::json!({"generation": 7, "format_version": 99, "publication": {"applied": null, "owner_segment": 0, "receipts": {}}, "values": {"opaque": 5}});
 
     // A missing or zero format stamp never produces a `PluginState`: the
     // component codec refuses the body as corrupt durable data, before any
     // host exists to run callbacks.
     for body in [
         serde_json::json!({"format-probe": {"generation": 7, "values": {"native": 17}}}),
-        serde_json::json!({"format-probe": {"generation": 7, "format_version": 0, "values": {"native": 17}}}),
+        serde_json::json!({"format-probe": {"generation": 7, "format_version": 0, "publication": {"applied": null, "owner_segment": 0, "receipts": {}}, "values": {"native": 17}}}),
     ] {
         let mut checkpoint = crate::HydratedSessionCheckpoint::default();
         checkpoint.components.insert(
@@ -430,7 +429,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
             serde_json::json!({"wide": "x".repeat(lash_core_store::plugin_state::PLUGIN_STATE_VALUE_LIMIT + 1)}),
         ] {
             let snapshot: PluginState = serde_json::from_value(serde_json::json!({
-                "format-probe": {"generation": 7, "format_version": stamp, "values": malformed},
+                "format-probe": {"generation": 7, "format_version": stamp, "publication": {"applied": null, "owner_segment": 0, "receipts": {}}, "values": malformed},
                 "inactive": inactive,
             }))
             .unwrap();
@@ -461,7 +460,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     let calls_no_migrate = calls();
     let host = crate::PluginHost::new(vec![Arc::new(NoMigrateProbe(calls_no_migrate.clone()))]);
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
-        "no-migrate": {"generation": 7, "format_version": 1, "values": {"old": 17}},
+        "no-migrate": {"generation": 7, "format_version": 1, "publication": {"applied": null, "owner_segment": 0, "receipts": {}}, "values": {"old": 17}},
         "inactive": inactive,
     }))
     .unwrap();
@@ -518,7 +517,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
         calls: calls_owner.clone(),
     })]);
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
-        "registered": {"generation": 7, "format_version": 1, "values": {"value": 1}},
+        "registered": {"generation": 7, "format_version": 1, "publication": {"applied": null, "owner_segment": 0, "receipts": {}}, "values": {"value": 1}},
         "inactive": inactive,
     }))
     .unwrap();
@@ -550,7 +549,7 @@ fn plugin_formats_convert_only_in_recorded_transition() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(calls))]);
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
-        "format-probe": {"generation": 7, "format_version": 1, "values": {"old": 17}}
+        "format-probe": {"generation": 7, "format_version": 1, "publication": {"applied": null, "owner_segment": 0, "receipts": {}}, "values": {"old": 17}}
     }))
     .unwrap();
     let before = rmp_serde::to_vec_named(&snapshot).unwrap();
@@ -614,8 +613,8 @@ fn plugin_formats_stamp_every_state_write() {
         std::sync::atomic::AtomicUsize::new(0),
     )))]);
     let native: PluginState = serde_json::from_value(serde_json::json!({
-        "format-probe": {"generation": 8, "format_version": 2, "values": {"native": 18}},
-        "inactive": {"generation": 7, "format_version": 99, "values": {"opaque": 5}}
+        "format-probe": {"generation": 8, "format_version": 2, "publication": {"applied": null, "owner_segment": 0, "receipts": {}}, "values": {"native": 18}},
+        "inactive": {"generation": 7, "format_version": 99, "publication": {"applied": null, "owner_segment": 0, "receipts": {}}, "values": {"opaque": 5}}
     }))
     .unwrap();
     let mut config = crate::PluginConfig::default();
@@ -710,6 +709,7 @@ fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
             PluginNamespaceState {
                 format_version: lash_core_ids::FormatVersion::ONE,
                 generation: 17,
+                publication: Default::default(),
                 values: BTreeMap::from([("value".into(), serde_json::json!("at-spawn"))]),
             },
         )]),
@@ -769,6 +769,7 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
             PluginNamespaceState {
                 format_version: lash_core_ids::FormatVersion::ONE,
                 generation: 17,
+                publication: Default::default(),
                 values,
             },
         )]),
@@ -875,7 +876,7 @@ async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_final
     )))]);
     let fleet = FleetRecord::permitting(1, 1);
     let stored: PluginState = serde_json::from_value(serde_json::json!({
-        "format-probe": {"generation": 7, "format_version": 1, "values": {"old": 17}}
+        "format-probe": {"generation": 7, "format_version": 1, "publication": {"applied": null, "owner_segment": 0, "receipts": {}}, "values": {"old": 17}}
     }))
     .unwrap();
     let session = host

@@ -96,7 +96,10 @@ pub struct PluginState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginNamespaceState {
     pub format_version: FormatVersion,
+    /// Freshness of the values, including format conversions.
     pub generation: u64,
+    /// Publication ownership and durable dedup evidence, carried with the values.
+    pub publication: crate::tool_run::StateFrontier,
     pub values: BTreeMap<String, Value>,
 }
 
@@ -105,6 +108,7 @@ impl Default for PluginNamespaceState {
         Self {
             format_version: FormatVersion::ONE,
             generation: 0,
+            publication: Default::default(),
             values: BTreeMap::new(),
         }
     }

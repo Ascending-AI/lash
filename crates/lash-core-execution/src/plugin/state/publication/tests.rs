@@ -806,6 +806,8 @@ async fn a_predecessor_segment_never_publishes_after_transfer() {
 
     let successor = session(&host, Some(&checkpoint));
     successor.adopt_state_segment(lash_core_store::tool_run::SegmentOrdinal(1));
+    let transferred = successor.export_state();
+    let successor = session(&host, Some(&transferred));
     publish(&successor, "applied", journaled(&applied)).unwrap();
     let refusal = publish(&successor, "stale", journaled(&stale)).unwrap_err();
     assert_eq!(
@@ -820,5 +822,140 @@ async fn a_predecessor_segment_never_publishes_after_transfer() {
             }),
         })
     );
-    assert_eq!(successor.export_state(), checkpoint);
+    assert_eq!(successor.export_state(), transferred);
+}
+
+/// L19 / FIG-4923: two recorded outcomes reduced from the same checkpoint
+/// cannot share a publication ordinal and silently discard one outcome.
+#[tokio::test]
+async fn a_checkpoint_refuses_a_different_receipt_at_an_applied_ordinal() {
+    let reducer_calls = Arc::new(AtomicUsize::new(0));
+    let host = host(&reducer_calls);
+    let predecessor = session(&host, None);
+    let checkpoint = predecessor.export_state();
+    let child = record(
+        &predecessor,
+        "child",
+        vec![tool_commands(
+            LEDGER,
+            "child",
+            StateCommands::new().set("k", serde_json::json!("a")),
+        )],
+    )
+    .await;
+    let successor = session(&host, Some(&checkpoint));
+    let hook = record(
+        &successor,
+        "successor",
+        vec![tool_commands(
+            LEDGER,
+            "successor",
+            StateCommands::new().set("j", serde_json::json!("b")),
+        )],
+    )
+    .await;
+    assert_eq!(
+        resolutions(&child)[0].ordinal,
+        resolutions(&hook)[0].ordinal
+    );
+    publish(&successor, "successor", journaled(&hook)).unwrap();
+    let accepted = successor.export_state();
+    // Cross the checkpoint codec and reconstruct the publication coordinator.
+    let restored: PluginState =
+        rmp_serde::from_slice(&rmp_serde::to_vec_named(&accepted).unwrap()).unwrap();
+    let cold = session(&host, Some(&restored));
+    publish(&cold, "successor", journaled(&hook)).unwrap();
+    let original = resolutions(&hook)[0].clone();
+    let mut changed = vec![resolutions(&child)[0].clone()];
+    let mut attempt = original.clone();
+    attempt.origin = StateCommandOrigin::ToolAttempt {
+        call_id: crate::ToolCallId::fixture("successor"),
+        attempt: lash_core_store::tool_run::AttemptOrdinal::new(2).unwrap(),
+    };
+    changed.push(attempt);
+    let mut phase = original.clone();
+    phase.origin = StateCommandOrigin::DeferredFinalization {
+        call_id: crate::ToolCallId::fixture("successor"),
+        attempt: lash_core_store::tool_run::AttemptOrdinal::FIRST,
+    };
+    changed.push(phase);
+    let mut run = original.clone();
+    run.publisher.execution_scope = crate::ExecutionScope::turn("state-owner", "another-run");
+    changed.push(run);
+    let mut content = original.clone();
+    content.outcome = StateResolutionOutcome::Applied { changes: vec![] };
+    changed.push(content);
+    let mut predecessor = original.clone();
+    predecessor.predecessor = Some(PublicationOrdinal(9));
+    changed.push(predecessor);
+    for resolution in changed {
+        let error = cold
+            .publish_run_resolutions(&resolution.publisher.clone(), vec![resolution])
+            .unwrap_err();
+        assert_eq!(
+            error.cause,
+            Some(crate::RuntimeErrorCause::PluginStateFrontier {
+                refusal: Box::new(NamespaceFrontierRefusal {
+                    plugin: LEDGER.into(),
+                    refusal: FrontierRefusal::ReceiptMismatch { found: 1 },
+                }),
+            })
+        );
+        assert_eq!(cold.export_state(), accepted);
+    }
+    assert_eq!(cold.export_state(), accepted);
+    assert_eq!(value(&cold, LEDGER, "j"), Some(serde_json::json!("b")));
+    assert_eq!(value(&cold, LEDGER, "k"), None);
+    assert_eq!(reducer_calls.load(Ordering::SeqCst), 0);
+}
+
+/// L19: a callback retains its starting segment across an await. Its recorded
+/// outcome cannot publish after a successor takes ownership.
+#[tokio::test]
+async fn a_callback_keeps_its_publisher_segment_across_handover() {
+    let host = host(&Arc::default());
+    let live = session(&host, None);
+    let body_session = Arc::clone(&live);
+    let (began, reached) = tokio::sync::oneshot::channel();
+    let (finish, finished) = tokio::sync::oneshot::channel();
+    let body = record_effect(
+        Arc::clone(&live),
+        RuntimeEffectKind::LanguageRuntimeValue,
+        address("held"),
+        async move {
+            began.send(()).unwrap();
+            finished.await.unwrap();
+            propose(
+                &body_session,
+                tool_commands(
+                    LEDGER,
+                    "held",
+                    StateCommands::new().set("k", serde_json::json!("a")),
+                ),
+            )?;
+            Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
+        },
+    );
+    tokio::pin!(body);
+    tokio::select! {
+        result = &mut body => panic!("held callback finished: {result:?}"),
+        _ = reached => {}
+    }
+    live.adopt_state_segment(SegmentOrdinal(1));
+    let checkpoint = live.export_state();
+    finish.send(()).unwrap();
+    let outcome = journaled(&body.await.unwrap());
+    assert_eq!(resolutions(&outcome)[0].segment, SegmentOrdinal(0));
+    assert_eq!(live.export_state(), checkpoint, "reduction remains private");
+    let error = publish(&live, "held", outcome).unwrap_err();
+    assert_eq!(
+        error.cause,
+        Some(crate::RuntimeErrorCause::PluginStateFrontier {
+            refusal: Box::new(NamespaceFrontierRefusal {
+                plugin: LEDGER.into(),
+                refusal: FrontierRefusal::StalePublisher { owner: 1, found: 0 },
+            }),
+        })
+    );
+    assert_eq!(live.export_state(), checkpoint);
 }

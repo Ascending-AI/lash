@@ -194,6 +194,7 @@ async fn matrix(file: bool, stale: bool, refuse: bool) {
                 crate::PluginNamespaceState {
                     format_version: crate::FormatVersion::ONE,
                     generation: 7,
+                    publication: Default::default(),
                     values: BTreeMap::from([("old".into(), serde_json::json!(17))]),
                 },
             )]),

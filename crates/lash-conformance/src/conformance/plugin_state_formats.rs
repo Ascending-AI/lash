@@ -151,6 +151,7 @@ pub(super) async fn plugin_format_boundary(
         lash_core::PluginNamespaceState {
             format_version: lash_core::FormatVersion::new(version).unwrap(),
             generation: 7,
+            publication: Default::default(),
             values: std::collections::BTreeMap::from([("count".into(), serde_json::json!(17))]),
         },
     );

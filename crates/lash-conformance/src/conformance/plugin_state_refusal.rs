@@ -36,6 +36,7 @@ pub(super) async fn plugin_state_corrupt_boundary(store: Arc<dyn RuntimeStore>, 
         lash_core::PluginNamespaceState {
             format_version: lash_core::FormatVersion::new(2).unwrap(),
             generation: 3,
+            publication: Default::default(),
             values: std::collections::BTreeMap::from([("bad key".into(), serde_json::json!(17))]),
         },
     );

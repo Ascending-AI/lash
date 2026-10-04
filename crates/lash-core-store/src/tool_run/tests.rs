@@ -1601,6 +1601,11 @@ fn only_sequential_turn_and_tool_result_check_callbacks_publish_state() {
 #[test]
 fn the_state_frontier_applies_each_publication_once_in_order() {
     let resolution = |ordinal: u64, predecessor: Option<u64>, segment: u32| StateResolution {
+        publisher: crate::EffectAddress::new(
+            ExecutionScope::turn("session-1", "turn-1"),
+            "attempt:a",
+        )
+        .unwrap(),
         plugin: revision("state"),
         origin: StateCommandOrigin::ToolAttempt {
             call_id: ToolCallId::fixture("a"),
@@ -1622,10 +1627,14 @@ fn the_state_frontier_applies_each_publication_once_in_order() {
         empty.step(&resolution(2, Some(1), 0)),
         Err(FrontierRefusal::OutOfOrder { found: 2 })
     );
-    let applied = StateFrontier {
+    let mut applied = StateFrontier {
         applied: Some(PublicationOrdinal(3)),
         owner_segment: SegmentOrdinal(1),
+        receipts: Default::default(),
     };
+    applied
+        .receipts
+        .insert(PublicationOrdinal(2), resolution(2, Some(1), 1).receipt());
     assert_eq!(
         applied.step(&resolution(2, Some(1), 1)),
         Ok(FrontierStep::AlreadyApplied),

@@ -33,6 +33,7 @@ pub(super) fn plugin_state(value: u8) -> PluginState {
             PluginNamespaceState {
                 format_version: crate::FormatVersion::ONE,
                 generation: u64::from(value),
+                publication: Default::default(),
                 values: std::collections::BTreeMap::from([(
                     "state".into(),
                     serde_json::json!({"value": value}),

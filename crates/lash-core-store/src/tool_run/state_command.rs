@@ -10,10 +10,10 @@
 //! refusal rejects the whole batch.
 //!
 //! Publication is sequenced per namespace: a resolution's ordinal is the
-//! generation its namespace reaches when it applies, and its predecessor is
-//! the generation it was reduced against. A namespace checkpoint therefore
-//! carries its own applied frontier, and a resolution delivered again after
-//! a newer one applies nothing.
+//! position in the namespace's publication sequence, and its predecessor is
+//! the publication it was reduced against. Checkpoints carry the applied
+//! frontier and receipt digests. Only an identical recorded resolution can
+//! be delivered again without applying anything.
 //!
 //! Only the sequential before-turn, after-turn, checkpoint and after-tool
 //! (result-check) callbacks may return commands ([`CallbackSlot`]), beside a
@@ -386,7 +386,7 @@ fn canonical(mut value: serde_json::Value) -> serde_json::Value {
 }
 
 /// The ordinal of one durable publication in its namespace's sequence, from
-/// 1: the namespace generation it publishes.
+/// 1, independent of namespace format conversions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PublicationOrdinal(pub u64);
@@ -432,6 +432,8 @@ pub enum StateResolutionOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StateResolution {
+    /// The recorded effect address binds the logical Run and callback phase.
+    pub publisher: crate::EffectAddress,
     pub plugin: PluginRevision,
     pub origin: StateCommandOrigin,
     /// The segment that published it.
@@ -443,31 +445,45 @@ pub struct StateResolution {
 }
 
 /// The applied frontier a checkpoint or handover carries with a namespace.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StateFrontier {
     /// The last publication applied.
     pub applied: Option<PublicationOrdinal>,
     /// The segment that owns publication.
     pub owner_segment: SegmentOrdinal,
+    /// Digests of applied resolutions, including origin and resolved content.
+    pub receipts: BTreeMap<PublicationOrdinal, crate::BlobRef>,
 }
 
 impl StateFrontier {
-    /// The frontier of a namespace at `generation`, owned by `owner_segment`.
-    #[must_use]
-    pub fn at_generation(generation: u64, owner_segment: SegmentOrdinal) -> Self {
-        Self {
-            applied: (generation > 0).then_some(PublicationOrdinal(generation)),
-            owner_segment,
-        }
-    }
-
     /// The publication the next resolution reduced now takes.
     #[must_use]
     pub fn next(&self) -> PublicationOrdinal {
         PublicationOrdinal(
             self.applied
                 .map_or(1, |applied| applied.0.saturating_add(1)),
+        )
+    }
+
+    /// Advance after the resolved changes have been accepted and installed.
+    pub fn record(&mut self, resolution: &StateResolution) {
+        self.receipts
+            .insert(resolution.ordinal, resolution.receipt());
+        self.applied = Some(resolution.ordinal);
+    }
+}
+
+impl StateResolution {
+    /// Identity evidence for this exact recorded resolution, with no payload copy.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "a state resolution contains only infallibly serializable data"
+    )]
+    pub fn receipt(&self) -> crate::BlobRef {
+        crate::BlobRef::for_content(
+            &rmp_serde::to_vec_named(self).expect("state resolution encodes"),
         )
     }
 }
@@ -499,11 +515,13 @@ pub enum FrontierRefusal {
     StalePublisher { owner: u32, found: u32 },
     #[error("publication {found} does not follow the applied frontier")]
     OutOfOrder { found: u64 },
+    #[error("publication {found} differs from its applied or pending receipt")]
+    ReceiptMismatch { found: u64 },
 }
 
 impl StateFrontier {
     /// Decide what to do with `resolution`. A delivery of an applied
-    /// publication applies nothing, whoever delivers it.
+    /// publication applies nothing only if its entire receipt matches.
     ///
     /// # Errors
     ///
@@ -514,7 +532,13 @@ impl StateFrontier {
             .applied
             .is_some_and(|applied| resolution.ordinal <= applied)
         {
-            return Ok(FrontierStep::AlreadyApplied);
+            return if self.receipts.get(&resolution.ordinal) == Some(&resolution.receipt()) {
+                Ok(FrontierStep::AlreadyApplied)
+            } else {
+                Err(FrontierRefusal::ReceiptMismatch {
+                    found: resolution.ordinal.0,
+                })
+            };
         }
         if resolution.segment < self.owner_segment {
             return Err(FrontierRefusal::StalePublisher {

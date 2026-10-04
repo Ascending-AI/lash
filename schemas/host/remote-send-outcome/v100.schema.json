@@ -2335,6 +2335,25 @@
             "found"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "found": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "receipt_mismatch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "found"
+          ],
+          "type": "object"
         }
       ]
     },

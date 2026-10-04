@@ -474,6 +474,7 @@ impl ProcessStartOptions {
     /// coordinating durable process execution.
     pub fn execution_context(&self, scope: &ProcessOpScope<'_>) -> ProcessExecutionContext {
         ProcessExecutionContext {
+            segment_ordinal: 0,
             causal_invocation: scope.parent_invocation.clone(),
             execution_write_authority: None,
             plugin_admission: None,

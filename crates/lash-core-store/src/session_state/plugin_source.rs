@@ -17,15 +17,6 @@ pub trait SessionPluginStateSource {
     /// Snapshot of the tool registry at the current generation.
     fn export_tool_state(&self) -> crate::ToolState;
 
-    /// Per-plugin state generations, keyed by plugin id.
-    fn plugin_state_generations(&self) -> std::collections::BTreeMap<String, u64>;
-
-    /// The format each of the source's plugins writes its state namespace
-    /// in: the one its admission recorded, or its native one.
-    fn plugin_state_formats(
-        &self,
-    ) -> std::collections::BTreeMap<String, crate::plugin_state::FormatVersion>;
-
     /// Namespace-filtered export, as a plugin-facing handle sees it, in the
     /// formats the source's admission recorded.
     fn export_plugin_state(&self) -> Result<crate::PluginState, crate::RuntimeError>;
@@ -59,16 +50,6 @@ where
 
     fn export_tool_state(&self) -> crate::ToolState {
         T::export_tool_state(self)
-    }
-
-    fn plugin_state_generations(&self) -> std::collections::BTreeMap<String, u64> {
-        T::plugin_state_generations(self)
-    }
-
-    fn plugin_state_formats(
-        &self,
-    ) -> std::collections::BTreeMap<String, crate::plugin_state::FormatVersion> {
-        T::plugin_state_formats(self)
     }
 
     fn export_plugin_state(&self) -> Result<crate::PluginState, crate::RuntimeError> {

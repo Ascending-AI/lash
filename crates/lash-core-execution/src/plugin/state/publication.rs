@@ -17,7 +17,7 @@ use super::*;
 use crate::{RuntimeEffectControllerError, RuntimeEffectKind, RuntimeEffectOutcome};
 use lash_core_store::store::plugin_writers::PluginCallbackIdentity;
 use lash_core_store::tool_run::{
-    FrontierStep, ReducerRefusal, StateCommandBatch, StateCommandLimits, StateFrontier,
+    FrontierStep, ReducerRefusal, StateCommandBatch, StateCommandLimits,
 };
 use std::future::Future;
 
@@ -167,11 +167,12 @@ pub(crate) async fn record_effect<F>(
 where
     F: Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>,
 {
+    let segment = plugins.state_segment();
     let (result, proposals) = collect_proposals(&plugins, body).await;
     if proposals.is_empty() || result.is_err() {
         return result;
     }
-    let resolutions = Box::pin(plugins.reduce_proposals(&address, proposals))
+    let resolutions = Box::pin(plugins.reduce_proposals(&address, segment, proposals))
         .await
         .map_err(fenced_fault)?;
     Ok(RuntimeEffectOutcome::PluginState {
@@ -283,6 +284,7 @@ impl crate::PluginSession {
     pub(crate) async fn reduce_proposals(
         &self,
         address: &crate::EffectAddress,
+        segment: SegmentOrdinal,
         proposals: Vec<Proposal>,
     ) -> Result<Vec<StateResolution>, PluginStateError> {
         let namespaces: BTreeSet<String> = proposals
@@ -315,7 +317,7 @@ impl crate::PluginSession {
                     for namespace in &namespaces {
                         registry.reserved.insert(namespace.clone(), address.clone());
                     }
-                    return Ok(self.resolve(&registry, proposals));
+                    return Ok(self.resolve(&registry, address, segment, proposals));
                 }
             }
             notified.await;
@@ -327,6 +329,8 @@ impl crate::PluginSession {
     fn resolve(
         &self,
         registry: &PluginStateRegistry,
+        address: &crate::EffectAddress,
+        segment: SegmentOrdinal,
         proposals: Vec<Proposal>,
     ) -> Vec<StateResolution> {
         let mut candidates: BTreeMap<String, PluginNamespaceState> = BTreeMap::new();
@@ -342,7 +346,7 @@ impl crate::PluginSession {
                         .cloned()
                         .unwrap_or_default()
                 });
-                let frontier = StateFrontier::at_generation(namespace.generation, registry.segment);
+                namespace.publication.owner_segment = registry.segment;
                 let outcome = match self.admit_batch(&batch, proposer.as_ref(), namespace) {
                     Err(refusal) => StateResolutionOutcome::Refused { refusal },
                     Ok(()) => batch.reduce(&namespace.values, &mut |key, name, current, input| {
@@ -363,14 +367,16 @@ impl crate::PluginSession {
                     }
                 }
                 let resolution = StateResolution {
+                    publisher: address.clone(),
                     plugin: batch.plugin,
                     origin: batch.origin,
-                    segment: registry.segment,
-                    ordinal: frontier.next(),
-                    predecessor: frontier.applied,
+                    segment,
+                    ordinal: namespace.publication.next(),
+                    predecessor: namespace.publication.applied,
                     outcome,
                 };
-                namespace.generation = resolution.ordinal.0;
+                namespace.generation = namespace.generation.saturating_add(1);
+                namespace.publication.record(&resolution);
                 resolution
             })
             .collect()
@@ -483,15 +489,26 @@ impl crate::PluginSession {
                 match publish_one(namespace, segment, resolution)? {
                     Published::Applied | Published::AlreadyApplied => Ok(()),
                     Published::Ahead => {
-                        owed.entry(resolution.plugin.plugin.clone())
-                            .or_default()
-                            .insert(resolution.ordinal.0, resolution.clone());
+                        let queue = owed.entry(resolution.plugin.plugin.clone()).or_default();
+                        if queue
+                            .get(&resolution.ordinal.0)
+                            .is_some_and(|pending| pending != resolution)
+                        {
+                            return Err(PluginStateError::Frontier {
+                                plugin: resolution.plugin.plugin.clone(),
+                                refusal: FrontierRefusal::ReceiptMismatch {
+                                    found: resolution.ordinal.0,
+                                },
+                            });
+                        }
+                        queue.insert(resolution.ordinal.0, resolution.clone());
                         Ok(())
                     }
                 }
             })
             .and_then(|()| settle_owed(&mut candidate, &mut owed, segment));
         if let Err(error) = published {
+            tracing::warn!(event = "plugin_state.frontier_refused", ?address, owner_segment = segment.0, %error, "recorded plugin-state publication refused");
             drop(registry);
             self.abandon_publication(address);
             return Err(error.into());
@@ -544,6 +561,11 @@ impl crate::PluginSession {
     pub fn adopt_state_segment(&self, segment: SegmentOrdinal) {
         let mut registry = self.state.lock_recover();
         registry.segment = registry.segment.max(segment);
+        let segment = registry.segment;
+        for namespace in registry.data.plugins.values_mut() {
+            namespace.publication.owner_segment = segment;
+        }
+        registry.source = None;
     }
 }
 
@@ -561,8 +583,8 @@ fn publish_one(
     segment: SegmentOrdinal,
     resolution: &StateResolution,
 ) -> Result<Published, PluginStateError> {
-    let frontier = StateFrontier::at_generation(namespace.generation, segment);
-    match frontier.step(resolution) {
+    namespace.publication.owner_segment = namespace.publication.owner_segment.max(segment);
+    match namespace.publication.step(resolution) {
         Ok(FrontierStep::AlreadyApplied) => Ok(Published::AlreadyApplied),
         Ok(FrontierStep::Apply) => {
             match &resolution.outcome {
@@ -581,11 +603,12 @@ fn publish_one(
                     );
                 }
             }
-            namespace.generation = resolution.ordinal.0;
+            namespace.generation = namespace.generation.saturating_add(1);
+            namespace.publication.record(resolution);
             Ok(Published::Applied)
         }
         Err(lash_core_store::tool_run::FrontierRefusal::OutOfOrder { .. })
-            if resolution.ordinal > frontier.next() =>
+            if resolution.ordinal > namespace.publication.next() =>
         {
             Ok(Published::Ahead)
         }

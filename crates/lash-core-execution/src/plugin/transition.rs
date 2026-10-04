@@ -98,6 +98,7 @@ impl PluginHost {
                                 Ok(PluginNamespaceState {
                                     format_version: factory.declaration().format_version,
                                     generation: 0,
+                                    publication: Default::default(),
                                     values,
                                 })
                             })

@@ -373,7 +373,11 @@ impl PluginHost {
         };
         self.composition()?;
         Ok(Arc::new(PluginSession {
-            state: Arc::new(StdMutex::new(PluginStateRegistry::from_snapshot(snapshot))),
+            state: Arc::new(StdMutex::new(if forked {
+                PluginStateRegistry::from_fork(snapshot)
+            } else {
+                PluginStateRegistry::from_snapshot(snapshot)
+            })),
             native_view: Arc::new(StdMutex::new(None)),
             host: self.clone(),
             owner,

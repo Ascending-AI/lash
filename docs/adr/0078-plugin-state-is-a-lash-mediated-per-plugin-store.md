@@ -64,9 +64,10 @@ commands, never wait.
 
 A resolution names its plugin revision, origin (tool attempt or callback
 occurrence), owner segment, ordinal and predecessor. The ordinal is the
-namespace's generation after it publishes; the predecessor is the generation it
-was reduced against. A namespace's generation therefore counts its
-publications, and a checkpoint's generation is its applied frontier.
+namespace's publication position; the predecessor is the last publication it
+was reduced against. Its publisher's effect address identifies the logical Run
+and recorded phase. Namespace generation tracks value freshness, including
+format conversion, separately from the publication frontier.
 
 ### 4. Publication and replay
 
@@ -78,9 +79,16 @@ body's recorded result.
 
 Replay installs recorded resolutions without running the body, the hook, the
 reducer or a format converter. A delivery ahead of its predecessor waits for
-it; one at or below the namespace's frontier applies nothing. After ownership
+it; one at or below the namespace's frontier applies nothing only when its
+complete receipt digest matches the checkpoint's evidence. A different receipt
+at an applied ordinal is refused as `FrontierRefusal::ReceiptMismatch`. After ownership
 moves to a later segment, an earlier segment's unapplied resolution is refused
 with a typed `FrontierRefusal`.
+
+Physical-turn preparation adopts the admitted session turn index as publication
+ownership before any hook runs. A process adopts its engine-admitted segment
+ordinal before capability construction. A callback retains the segment it
+started under across awaits, so a handover cannot relabel a stale callback.
 
 Before-turn and after-turn callbacks run inside one recorded `PluginCallbacks`
 step per turn boundary; replay serves its decisions without calling them.
@@ -109,10 +117,12 @@ namespaces.
 ### 6. The checkpoint component
 
 The `plugin_state` keyed component contains ordered plugin namespaces, each
-with format version, generation and ordered values. Content addressing gives the body its
+with format version, generation, publication frontier, receipt digests and
+ordered values. Content addressing gives the body its
 `BlobRef`; the generation is part of that body, rather than a manifest column.
 The runtime recaptures when namespaces exist and the component is absent or
-its captured generations differ. Otherwise it retains the reference.
+its complete captured namespace differs, including an ownership change without
+a new value generation. Otherwise it retains the reference.
 
 The `plugin_admission` opaque checkpoint component carries the transition
 request and current native namespace/config view. It uses the existing
@@ -129,7 +139,9 @@ and their frontiers.
 
 Fork initialization uses a deep copy of captured parent namespaces and their
 generations. It preserves non-resident namespaces as well as resident ones.
-Parent and child publications are independent; there is no merge. Content-addressed
+Parent and child publications are independent; there is no merge.
+Fork creation resets publication ownership to the child's initial segment and
+retains the inherited applied receipts. Content-addressed
 storage can deduplicate unchanged bodies. Retention policy governs how long
 the session's checkpoint contents remain available.
 

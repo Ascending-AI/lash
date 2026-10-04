@@ -745,6 +745,7 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
             PluginNamespaceState {
                 format_version: lash_core::FormatVersion::ONE,
                 generation: 11,
+                publication: Default::default(),
                 values: std::collections::BTreeMap::from([(
                     "state".into(),
                     serde_json::json!({"mode": "durable"}),

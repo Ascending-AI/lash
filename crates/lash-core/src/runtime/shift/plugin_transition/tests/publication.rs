@@ -108,6 +108,7 @@ async fn scenario(
                     crate::PluginNamespaceState {
                         format_version: crate::FormatVersion::ONE,
                         generation: 7,
+                        publication: Default::default(),
                         values: BTreeMap::from([("old".into(), serde_json::json!(17))]),
                     },
                 ),
@@ -116,6 +117,7 @@ async fn scenario(
                     crate::PluginNamespaceState {
                         format_version: crate::FormatVersion::ONE,
                         generation: 9,
+                        publication: Default::default(),
                         values: BTreeMap::from([("retained".into(), serde_json::json!(23))]),
                     },
                 ),

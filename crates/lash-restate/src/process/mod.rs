@@ -542,7 +542,9 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
         let execution_write_authority = started.write_authority().clone();
         // The segment writes plugin namespaces in the formats its start
         // recorded (FIG-4747), on this execution and on every retry.
-        let execution_context = execution_context.with_plugin_admission(started.plugins().cloned());
+        let mut execution_context =
+            execution_context.with_plugin_admission(started.plugins().cloned());
+        execution_context.segment_ordinal = started.segment_ordinal();
         Box::pin(worker.run_process_segment_with_scoped_effect_controller(
             process_id,
             registration,

@@ -1444,25 +1444,6 @@ impl lash_core_store::session_state::SessionPluginStateSource for PluginSession 
         self.tool_registry().export_state()
     }
 
-    fn plugin_state_generations(&self) -> BTreeMap<String, u64> {
-        self.state_generations()
-    }
-
-    fn plugin_state_formats(&self) -> BTreeMap<String, FormatVersion> {
-        let recorded = self.plugin_admission();
-        self.host
-            .factories()
-            .iter()
-            .map(|factory| {
-                let format = recorded
-                    .as_ref()
-                    .and_then(|admission| admission.writer(factory.id()))
-                    .unwrap_or_else(|| factory.declaration().format_version);
-                (factory.id().to_owned(), format)
-            })
-            .collect()
-    }
-
     fn export_plugin_state(&self) -> Result<PluginState, crate::RuntimeError> {
         self.in_recorded_formats(self.export_state())
             .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())

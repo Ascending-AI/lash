@@ -549,6 +549,7 @@ async fn decision_entry(
     let Some(plugins) = plugins else {
         return decide.await;
     };
+    let segment = plugins.state_segment();
     let (entry, proposals) = crate::plugin::collect_proposals(&plugins, decide).await;
     let mut entry = entry?;
     if success
@@ -563,7 +564,7 @@ async fn decision_entry(
         })
     {
         entry.state = plugins
-            .reduce_proposals(&address, proposals)
+            .reduce_proposals(&address, segment, proposals)
             .await
             .map_err(|error| error.to_string())?;
     }

@@ -268,6 +268,9 @@ impl ProcessStartOutcome {
 /// process record.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ProcessExecutionContext {
+    /// Replay-stable segment ordinal supplied by the engine's admitted start.
+    #[serde(skip)]
+    pub segment_ordinal: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub causal_invocation: Option<crate::RuntimeInvocation>,
     /// Execution-local correctness fence. Substrate handlers reconstruct it

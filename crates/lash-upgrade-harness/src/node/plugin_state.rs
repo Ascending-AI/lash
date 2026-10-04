@@ -521,6 +521,7 @@ pub async fn run(args: PluginStateArgs) -> Result<PluginStateReport> {
             .or_insert_with(|| PluginNamespaceState {
                 format_version: registered.native,
                 generation: 0,
+                publication: Default::default(),
                 values: BTreeMap::new(),
             });
     namespace.values.insert(

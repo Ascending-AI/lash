@@ -13,6 +13,7 @@
 use super::*;
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{RestateTestServer, ServerConfig};
+use restate_sdk::endpoint::{HandlerOptions, ServiceOptions};
 use restate_sdk::service::Service;
 use restate_sdk::service::macro_support::ServiceBoxFuture;
 
@@ -111,11 +112,11 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
     let server = RestateTestServer::new(ServerConfig::default().with_seed(0x3795_d007))
         .expect("start the server double");
     let connection = RestateConnection::with_transport(server.ingress_url(), server.transport());
-    let ingress = RestateIngressClient::new(connection);
+    let ingress = RestateIngressClient::new(connection.clone());
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
     let runner = Arc::new(HeldRunner::default());
-    let build = |generation: &'static str| {
+    let build = |generation: lash_core::engine::BuildGeneration| {
         Arc::new(
             LashProcessWorkflowImpl::new(
                 Arc::clone(&runner),
@@ -124,19 +125,43 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
                 ingress.clone(),
                 Arc::new(lash_core::attachments::NoopAttachmentReferrers),
                 test_restate_authority_id(),
-                lash_core::engine::BuildGeneration::for_test(generation),
+                generation,
                 &crate::services::DEFAULT_NAMESPACE,
             )
             .with_retry_max_attempts(MAX_ATTEMPTS)
             .serve(),
         )
     };
-    let (recorded, swapped) = (build("G_a"), build("G_b"));
+    let generation = |epoch: u32| {
+        let [a, b, c, d] = epoch.to_le_bytes();
+        lash_core::engine::BuildGeneration::from_digest([a, b, c, d, 0, 0])
+    };
+    let predecessor = generation(crate::JOURNAL_LOGIC_EPOCH - 1);
+    let successor = generation(crate::JOURNAL_LOGIC_EPOCH);
+    let (recorded, swapped) = (build(predecessor.clone()), build(successor));
     let current = Arc::new(Mutex::new(Arc::clone(&recorded)));
     let deployment = server
         .register(
             Endpoint::builder()
-                .bind(swappable(Arc::clone(&current)))
+                .bind(
+                    swappable(Arc::clone(&current)).options(
+                        ServiceOptions::new().handler(
+                            "run",
+                            HandlerOptions::new()
+                                .retry_policy_max_attempts(MAX_ATTEMPTS)
+                                .retry_policy_pause_on_max_attempts(),
+                        ),
+                    ),
+                )
+                .bind(
+                    crate::durable_wait::LashDurableWaitRegistryImpl::new(
+                        Default::default(),
+                        Default::default(),
+                        crate::RestateAdminClient::new(connection),
+                    )
+                    .serve(),
+                )
+                .bind(crate::durable_wait::LashDurableWaitWorkflowImpl::default().serve())
                 .build(),
         )
         .await
@@ -157,7 +182,7 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
                 registration: executed_registration(),
                 execution_context: ProcessExecutionContext::default(),
                 segment_ordinal: 0,
-                sender_generation: crate::tests::test_build_generation(),
+                sender_generation: predecessor.clone(),
             }),
         )
         .await
@@ -233,8 +258,18 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
     );
     assert_eq!(
         park.build_generation,
-        Some(lash_core::engine::BuildGeneration::for_test("G_a")),
+        Some(predecessor.clone()),
         "the park names the generation that recorded the journal"
+    );
+    let predecessor_lanes =
+        crate::services::lash_service_routes(&crate::services::DEFAULT_NAMESPACE, &predecessor);
+    assert!(
+        predecessor_lanes.iter().any(|route| {
+            route.generation_lane_name().is_some_and(|name| {
+                crate::services::generation_lane_of(&name) == Some(predecessor.clone())
+            })
+        }),
+        "the predecessor still binds its own drain lane"
     );
 
     // Back on a build of the recorded generation, the kept journal replays

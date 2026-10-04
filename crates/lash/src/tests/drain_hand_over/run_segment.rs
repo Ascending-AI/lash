@@ -1087,6 +1087,24 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(storage: Stor
         store.load_pending_follow_on().await?.is_none(),
         "the last continuation's commit left nothing owed"
     );
+    let head = lash_core::store::load_session_window_state(
+        &store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .expect("the completed run has a head");
+    let state = head
+        .state
+        .plugin_state()
+        .expect("the head carries plugin namespaces");
+    assert!(!state.plugins.is_empty());
+    for namespace in state.plugins.values() {
+        assert_eq!(
+            u64::from(namespace.publication.owner_segment.0),
+            head.state.turn_index as u64,
+            "every production continuation adopts publication ownership before its hooks"
+        );
+    }
     drop(core);
     engine.finish().await;
     Ok(())

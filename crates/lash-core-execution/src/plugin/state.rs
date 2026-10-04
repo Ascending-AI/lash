@@ -12,9 +12,9 @@
 mod publication;
 pub use lash_core_store::plugin_state::{KeyRejection, PluginNamespaceState, PluginState};
 pub use lash_core_store::tool_run::{
-    FrontierRefusal, HookCause, HookOccurrence, NamespaceFrontierRefusal, PublicationOrdinal,
-    ResolvedStateChange, StateCommand, StateCommandOrigin, StateCommandRefusal, StateResolution,
-    StateResolutionOutcome,
+    FrontierRefusal, FrontierStep, HookCause, HookOccurrence, NamespaceFrontierRefusal,
+    PublicationOrdinal, ResolvedStateChange, StateCommand, StateCommandOrigin, StateCommandRefusal,
+    StateFrontier, StateResolution, StateResolutionOutcome,
 };
 pub use publication::{EffectPublication, PluginStateEffect, StateReducer, StateReduction};
 pub(crate) use publication::{Proposal, collect_proposals, propose, propose_all, record_effect};
@@ -351,10 +351,27 @@ impl PluginStateRegistry {
     // Hydrate before admission so register calls validate durable membership and
     // size.
     pub(super) fn from_snapshot(snapshot: Option<&PluginState>) -> Self {
+        let data = snapshot.cloned().unwrap_or_default();
+        let segment = data
+            .plugins
+            .values()
+            .map(|namespace| namespace.publication.owner_segment)
+            .max()
+            .unwrap_or_default();
         Self {
-            data: snapshot.cloned().unwrap_or_default(),
+            data,
+            segment,
             ..Self::default()
         }
+    }
+
+    pub(super) fn from_fork(snapshot: Option<&PluginState>) -> Self {
+        let mut registry = Self::from_snapshot(snapshot);
+        registry.segment = SegmentOrdinal::default();
+        for namespace in registry.data.plugins.values_mut() {
+            namespace.publication.owner_segment = registry.segment;
+        }
+        registry
     }
 
     pub(super) fn matches_ref(&self, reference: &crate::BlobRef) -> bool {
@@ -374,6 +391,13 @@ impl PluginStateRegistry {
             return;
         }
         self.data = snapshot.clone();
+        self.segment = self
+            .data
+            .plugins
+            .values()
+            .map(|namespace| namespace.publication.owner_segment)
+            .max()
+            .unwrap_or_default();
         self.reserved.clear();
         self.fenced.clear();
         self.owed.clear();

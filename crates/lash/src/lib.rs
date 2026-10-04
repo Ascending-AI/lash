@@ -887,11 +887,11 @@ pub mod plugins {
     /// checkpoint or after-tool callback. Their recorded resolution is
     /// published once durable and persisted at boundary commits.
     pub use lash_core::plugin::{
-        FormatNamespace, FormatRefusal, FrontierRefusal, HookCause, HookOccurrence, KeyRejection,
-        NamespaceFrontierRefusal, PluginConfigNamespace, PluginStateError, PluginStateView,
-        PublicationOrdinal, ResolvedStateChange, SessionReadyContext, StateCommand,
-        StateCommandOrigin, StateCommandRefusal, StateCommands, StateReducer, StateReduction,
-        StateResolution, StateResolutionOutcome,
+        FormatNamespace, FormatRefusal, FrontierRefusal, FrontierStep, HookCause, HookOccurrence,
+        KeyRejection, NamespaceFrontierRefusal, PluginConfigNamespace, PluginStateError,
+        PluginStateView, PublicationOrdinal, ResolvedStateChange, SessionReadyContext,
+        StateCommand, StateCommandOrigin, StateCommandRefusal, StateCommands, StateFrontier,
+        StateReducer, StateReduction, StateResolution, StateResolutionOutcome,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus

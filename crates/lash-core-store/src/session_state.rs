@@ -1163,27 +1163,14 @@ impl RuntimeSessionState {
             }
         }
 
-        let generations = plugins.plugin_state_generations();
-        let captured = self.checkpoint_components.plugin_generations();
-        // A capture still resident was taken under the formats of its time:
-        // one the source no longer writes (it adopted an admission since) is
-        // captured again, in the recorded formats (FIG-4747).
-        let formats = plugins.plugin_state_formats();
-        let outdated = self
-            .checkpoint_components
-            .plugin_state()
-            .is_some_and(|resident| {
-                formats.iter().any(|(plugin, format)| {
-                    resident
-                        .plugins
-                        .get(plugin)
-                        .is_some_and(|namespace| namespace.format_version != *format)
-                })
-            });
-        if !generations.is_empty()
-            && (self.plugin_state_ref().is_none() || captured != Some(&generations) || outdated)
+        // Ownership and receipt evidence can change without a values-generation
+        // change. Compare the complete recorded namespace checkpoint.
+        let snapshot = capture(plugins)?;
+        if !snapshot.plugins.is_empty()
+            && (self.plugin_state_ref().is_none()
+                || self.checkpoint_components.plugin_state() != Some(&snapshot))
         {
-            self.set_plugin_state(Some(capture(plugins)?));
+            self.set_plugin_state(Some(snapshot));
         }
         // The config a commit writes is the recorded one too (FIG-4747): the
         // sticky config under a run view and the view the state runs under
