@@ -173,6 +173,19 @@ impl RuntimeTurnDriver<'_> {
                 {
                     RuntimeEffectControllerError::from(error)
                 }
+                err @ crate::PluginError::Invoke(_) => {
+                    // The paid completion is already recorded. An invocation
+                    // failure leaves only this response derivation to redrive.
+                    let mut failure = crate::PluginOperationFailure::from(err);
+                    failure.class = crate::PluginFailureClass::Retryable;
+                    let message = failure.message.clone();
+                    let mut error =
+                        RuntimeEffectControllerError::retryable_response_derivation(message);
+                    error.cause = Some(crate::RuntimeErrorCause::PluginOperation {
+                        failure: Box::new(failure),
+                    });
+                    error
+                }
                 err => RuntimeEffectControllerError::from(crate::PluginError::Operation(Box::new(
                     err.into(),
                 )))
