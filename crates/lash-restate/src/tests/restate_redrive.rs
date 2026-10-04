@@ -1,7 +1,7 @@
 use super::*;
 
 mod shift_fixtures;
-use shift_fixtures::{execute_shift, registered};
+use shift_fixtures::registered;
 
 /// A terminal process run's suspension tail: the terminal pair, then the
 /// `lash.process.parent-end` pair applied right after terminal completion
@@ -2352,46 +2352,6 @@ pub(super) async fn segment_handover_records_the_successor_external_reference() 
         external.id,
         format!("LashProcessWorkflow/{process_id}#1"),
         "the recorded reference must address the successor's workflow key"
-    );
-}
-
-/// The inputs an execution under `live_generation` would compose: the
-/// enqueue instant stands in for everything a live read could observe.
-/// FIG-3532: the initial shift set of an accepted turn input is a journaled
-/// Restate run. A replay under a later shift epoch returns the admission the
-/// first execution journaled and never runs the live admission again.
-#[tokio::test]
-async fn accepted_turn_input_shift_replays_the_journaled_admission() {
-    let context = Arc::new(ReplayableRecordingContext::default());
-    let local_runs = Arc::new(AtomicUsize::new(0));
-    let first = execute_shift(&context, 3, &local_runs).await;
-    assert_eq!(local_runs.load(Ordering::SeqCst), 1);
-
-    context.start_replay();
-    let replayed = execute_shift(&context, 4, &local_runs).await;
-    assert_eq!(
-        local_runs.load(Ordering::SeqCst),
-        1,
-        "replay returns the journaled shift without admitting live rows"
-    );
-    // The admission's base head and turn index are the first execution's,
-    // never re-read from the replaying execution's live head (FIG-3682).
-    assert_eq!(replayed.base, first.base);
-    assert_eq!(replayed.base.revision, 3);
-    assert_eq!((first.turn_index, replayed.turn_index), (4, 4));
-    assert_eq!(replayed.generation, first.generation);
-    assert_eq!(
-        replayed.generation,
-        Some(lash_core::ExecutableGeneration::new("blake3:live-3"))
-    );
-    let (Some(first), Some(replayed)) = (first.inputs, replayed.inputs) else {
-        panic!("both executions admit their input");
-    };
-    assert_eq!(replayed.inputs[0].enqueued_at_ms, 3);
-    assert_eq!(replayed.inputs[0].input_id, first.inputs[0].input_id);
-    assert_eq!(
-        replayed.inputs[0].enqueued_at_ms,
-        first.inputs[0].enqueued_at_ms
     );
 }
 

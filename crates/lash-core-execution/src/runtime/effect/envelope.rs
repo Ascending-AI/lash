@@ -573,15 +573,6 @@ pub enum RuntimeEffectCommand {
     AcceptTurnInput {
         draft: Box<crate::PendingTurnInputDraft>,
     },
-    /// Admit the turn-lane run a run is headed by (FIG-3927). The outcome
-    /// journals the admitted rows with their content, and the base the run
-    /// was admitted on, so a replaying run executes the same rows from the
-    /// same head and never reads open rows.
-    /// The envelope names only the head: the shift fence is captured by the
-    /// local executor, so the envelope hashes the same under every epoch.
-    AdmitRun {
-        head: crate::store::AdmittedHead,
-    },
     /// Read, at a quiet point of a turn, whether `generation` — the build
     /// the turn's invocation runs on — is draining (FIG-4739). The body
     /// reads the store's drain marks once; replay uses its recorded answer.
@@ -609,17 +600,11 @@ pub enum RuntimeEffectCommand {
     AdmitShift {
         request: Box<crate::engine::AdmitRequest>,
     },
-    /// Draw the start marker of this execution of an admitted run (ADR 0105
-    /// §2, L-S8): the run's first recorded step, in its own journal, before
-    /// its seal. A retry of the execution replays the marker; an execution
-    /// that cannot read the journal draws a new one, which the seal refuses.
+    /// Draw an OS-random start marker before the root's atomic admission
+    /// (ADR 0105 §2, L-S8). A retry replays this marker; a purged invocation
+    /// draws a new one, which the retained admission refuses.
     DrawRunStart {
-        run: crate::TurnId,
-    },
-    /// Seal an admission: the shift-epoch compare-and-set keyed by its nonce.
-    /// The fence rides the outcome, never this envelope (L-S12).
-    SealShiftAdmission {
-        admitted: Box<crate::engine::Admitted>,
+        admission: crate::engine::AdmissionId,
     },
     /// Resolve the shape `run` runs under (FIG-3600 S6, FIG-3838): once per
     /// run, keyed by it, so every redrive replays the recorded shape.
@@ -784,14 +769,12 @@ impl RuntimeEffectCommand {
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
-            Self::AdmitRun { .. } => RuntimeEffectKind::AdmitRun,
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
             Self::DrawRunStart { .. } => RuntimeEffectKind::DrawRunStart,
-            Self::SealShiftAdmission { .. } => RuntimeEffectKind::SealShiftAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
             Self::RenderCompactionPrompt { .. } => RuntimeEffectKind::RenderCompactionPrompt,
@@ -1450,11 +1433,6 @@ pub enum RuntimeEffectOutcome {
     AcceptTurnInput {
         accepted: Box<crate::PendingTurnInput>,
     },
-    /// The run's recorded admission, journaled so replay executes and settles
-    /// the same rows (FIG-3927).
-    AdmitRun {
-        answer: crate::store::RunAdmissionAnswer,
-    },
     /// Whether the build was draining when the turn read its mark.
     ObserveDrainMark {
         draining: bool,
@@ -1476,10 +1454,6 @@ pub enum RuntimeEffectOutcome {
     /// The start marker this execution of a run drew.
     DrawRunStart {
         run_start: crate::engine::RunStartNonce,
-    },
-    /// The seal's recorded verdict, with the fence when `Sealed`.
-    SealShiftAdmission {
-        verdict: Box<crate::engine::SealVerdict>,
     },
     /// The run's recorded shape: its spec resolved against its snapshot
     /// of the durable head's config (FIG-3838).
@@ -1923,14 +1897,12 @@ impl RuntimeEffectOutcome {
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
-            Self::AdmitRun { .. } => RuntimeEffectKind::AdmitRun,
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::PluginCallbacks { .. } => RuntimeEffectKind::PluginCallbacks,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
             Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
             Self::DrawRunStart { .. } => RuntimeEffectKind::DrawRunStart,
-            Self::SealShiftAdmission { .. } => RuntimeEffectKind::SealShiftAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
             Self::RenderCompactionPrompt { .. } => RuntimeEffectKind::RenderCompactionPrompt,

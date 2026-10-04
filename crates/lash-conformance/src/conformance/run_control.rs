@@ -275,6 +275,7 @@ impl AdmittedRun {
         let admission = parts
             .store
             .admit_run(&lash_core::store::AdmitRunRequest {
+                unsealed_epoch: None,
                 fence: lease.clone(),
                 run: run.clone(),
                 head: lash_core::store::AdmittedHead::Input(input.clone()),
@@ -287,7 +288,6 @@ impl AdmittedRun {
                     checkpoint: state.checkpoint_ref.clone(),
                 },
                 turn_index: state.turn_index as u64 + 1,
-                generation: None,
                 admitted_generation: lash_core::engine::BuildGeneration::for_test("run-control"),
                 executor: lash_core::store::RunExecutor::run(&lash_core::store::AdmissionId::new(
                     "fixture#0",
@@ -764,6 +764,7 @@ pub async fn a_refused_run_ends_once_and_its_next_input_admits_a_new_run(
         checkpoint: state.checkpoint_ref.clone(),
     };
     let admit = |run: &TurnId, head: &crate::InputId| lash_core::store::AdmitRunRequest {
+        unsealed_epoch: None,
         fence: fence.clone(),
         run: run.clone(),
         head: lash_core::store::AdmittedHead::Input(head.clone()),
@@ -771,7 +772,6 @@ pub async fn a_refused_run_ends_once_and_its_next_input_admits_a_new_run(
         policy: lash_core::testing::queued_work_admission_policy(1),
         base: base.clone(),
         turn_index: state.turn_index as u64 + 1,
-        generation: None,
         admitted_generation: lash_core::engine::BuildGeneration::for_test("refused-end"),
         executor: lash_core::store::RunExecutor::run(&lash_core::store::AdmissionId::new(
             "fixture#0",

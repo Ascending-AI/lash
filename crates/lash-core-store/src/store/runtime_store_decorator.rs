@@ -141,6 +141,9 @@ macro_rules! runtime_store_operations {
                 [session] fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError>;
             }
             RunStore {
+                [session] fn prepare_shift_admission(&self, session_id: &SessionId, admission: &AdmissionId, executor: &RunExecutor) -> Result<ShiftAdmissionPreparation, StoreError>;
+                [session] fn read_shift_admission(&self, session_id: &SessionId, admission: &AdmissionId) -> Result<Option<ShiftAdmissionReceipt>, StoreError>;
+                [carried request] fn commit_shift_admission(&self, request: &ShiftAdmissionWrite, anchor: &lash_trace::TraceAnchor) -> Result<ShiftAdmissionReceipt, StoreError>;
                 [session] fn run_executor(&self, session_id: &SessionId, run: &crate::TurnId) -> Result<Option<RunExecutor>, StoreError>;
                 [session] fn unfinished_run(&self, session_id: &SessionId) -> Result<Option<UnfinishedRun>, StoreError>;
                 [carried request] fn prepare_run_admission(&self, request: &AdmitRunRequest) -> Result<Option<PreparedRunAdmission>, StoreError>;

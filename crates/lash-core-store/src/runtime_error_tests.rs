@@ -676,8 +676,6 @@ fn assert_terminal_derivation(fault: &crate::runtime_error::RuntimeEffectControl
         Kind::PresentToolResult,
         Kind::LanguageRuntimeValue,
         Kind::AdmitShift,
-        Kind::SealShiftAdmission,
-        Kind::AdmitRun,
         Kind::ObserveDrainMark,
         Kind::RecoverFollowOn,
         Kind::ResolveTurnConfig,

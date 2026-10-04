@@ -449,6 +449,27 @@ pub trait RunStore: Send + Sync {
         session_id: &SessionId,
     ) -> Result<Option<UnfinishedRun>, StoreError>;
 
+    /// Read a root selection and prospective fence without retaining any rows.
+    async fn prepare_shift_admission(
+        &self,
+        session_id: &SessionId,
+        admission: &super::AdmissionId,
+        executor: &RunExecutor,
+    ) -> Result<super::ShiftAdmissionPreparation, StoreError>;
+    /// Read the retained decision for one immutable root admission identity.
+    async fn read_shift_admission(
+        &self,
+        session_id: &SessionId,
+        admission: &super::AdmissionId,
+    ) -> Result<Option<super::ShiftAdmissionReceipt>, StoreError>;
+    /// Revalidate the proposal and retain selection, seal, composition and
+    /// cancellation authority with its nonce in one write transaction.
+    async fn commit_shift_admission(
+        &self,
+        request: &super::ShiftAdmissionWrite,
+        anchor: &lash_trace::TraceAnchor,
+    ) -> Result<super::ShiftAdmissionReceipt, StoreError>;
+
     /// Admit the turn-lane run headed by `request.head` to `request.run`, in
     /// one transaction fenced by `request.fence` (FIG-3840, FIG-3927).
     ///
@@ -632,7 +653,7 @@ pub struct UnfinishedRun {
 
 /// What a run's admission took ([`RunStore::admit_run`]): the rows it
 /// executes and the head it was admitted on. The store records it on the run
-/// and the run's `AdmitRun` step journals it, so every execution of the
+/// and the root admission journals it, so every execution of the
 /// run executes exactly this composition from exactly this base.
 ///
 /// A composition is one family: an input head admits turn inputs, a batch
@@ -648,9 +669,6 @@ pub struct RunAdmission {
     /// The session head the run was admitted on (FIG-3682).
     pub base: SessionHeadRef,
     pub turn_index: u64,
-    /// The executable generation the run executes under (FIG-3571): a redrive
-    /// under another one is refused before any effect.
-    pub generation: Option<crate::executable_generation::ExecutableGeneration>,
     /// The execution that executes the run (FIG-4403): recovery judges the
     /// run by it, never by the run's name.
     pub executor: RunExecutor,
@@ -667,7 +685,7 @@ pub struct RunAdmission {
     pub trace: Option<lash_trace::DurableTraceScope>,
     /// Cancellation intent read in the admission transaction. Final commits
     /// validate this recorded authority before publishing. The nonce admission
-    /// producer populates it; an absent field keeps the existing closure path.
+    /// producer populates it; a final turn requires this authority.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
     /// Whether this call recorded the admission. It is the call's receipt,
@@ -948,20 +966,21 @@ pub struct TurnCancellationBinding {
 /// A run's admission request ([`RunStore::admit_run`]). `base` is the
 /// resident head the run is admitted on; the store replaces its
 /// `generation` with the durable state generation it reads inside the
-/// admission transaction. `turn_index` and `generation` are recorded as
-/// given, and so are `executor` and `plugins`.
+/// admission transaction. `turn_index`, `executor` and `plugins` are recorded
+/// as given. The plugin transition records the executable generation.
 #[derive(Clone)]
 pub struct AdmitRunRequest {
     /// The fence of the shift admission the run executes under: the one
     /// authority the admission's write checks.
     pub fence: ShiftFence,
+    /// A read-only proposal before the root has sealed its next epoch.
+    pub unsealed_epoch: Option<u64>,
     pub run: TurnId,
     pub head: AdmittedHead,
     pub max_inputs: usize,
     pub policy: crate::TurnLaneAdmissionPolicy,
     pub base: SessionHeadRef,
     pub turn_index: u64,
-    pub generation: Option<crate::executable_generation::ExecutableGeneration>,
     pub admitted_generation: crate::build_generation::BuildGeneration,
     /// The execution that executes the run, recorded as given.
     pub executor: RunExecutor,

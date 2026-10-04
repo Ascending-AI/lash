@@ -144,13 +144,6 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             "journaled_run",
         ),
         (
-            // FIG-3532: the initial shift set is journaled like acceptance.
-            RuntimeEffectCommand::AdmitRun {
-                head: lash_core::store::AdmittedHead::Input(lash_core::InputId::from("in_7")),
-            },
-            "journaled_run",
-        ),
-        (
             RuntimeEffectCommand::Trigger {
                 command: Box::new(lash_core::TriggerCommand::List {
                     owner_scope: lash_core::TriggerOwnerScope::session("session"),

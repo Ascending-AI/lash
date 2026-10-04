@@ -11,12 +11,12 @@ use crate::engine::RunStartNonce;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::{
     RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectOutcome, RuntimeErrorCode, TurnId,
+    RuntimeEffectOutcome, RuntimeErrorCode,
 };
 
 /// The first execution of one `DrawRunStart` step.
 pub(in crate::runtime) struct DrawRunStartRunner {
-    pub(in crate::runtime) run: TurnId,
+    pub(in crate::runtime) admission: crate::engine::AdmissionId,
 }
 
 #[async_trait::async_trait]
@@ -26,7 +26,7 @@ impl RuntimeEffectLocalRunner for DrawRunStartRunner {
         envelope: RuntimeEffectEnvelope,
         _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let RuntimeEffectCommand::DrawRunStart { run } = &envelope.command else {
+        let RuntimeEffectCommand::DrawRunStart { admission } = &envelope.command else {
             return Err(RuntimeEffectControllerError::new(
                 RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
@@ -35,7 +35,7 @@ impl RuntimeEffectLocalRunner for DrawRunStartRunner {
                 ),
             ));
         };
-        if *run != self.run {
+        if *admission != self.admission {
             return Err(RuntimeEffectControllerError::new(
                 RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 "run start executor was bound to another run",

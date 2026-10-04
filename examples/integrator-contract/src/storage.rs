@@ -538,6 +538,29 @@ impl RunStore for Integrator {
     ) -> Result<Option<RunExecutor>, StoreError> {
         unreachable!("external signature witness")
     }
+    async fn prepare_shift_admission(
+        &self,
+        session_id: &SessionId,
+        admission: &lash::persistence::AdmissionId,
+        executor: &lash::persistence::RunExecutor,
+    ) -> Result<lash::persistence::ShiftAdmissionPreparation, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn read_shift_admission(
+        &self,
+        session_id: &SessionId,
+        admission: &lash::persistence::AdmissionId,
+    ) -> Result<Option<lash::persistence::ShiftAdmissionReceipt>, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn commit_shift_admission(
+        &self,
+        request: &lash::persistence::ShiftAdmissionWrite,
+        anchor: &lash::tracing::TraceAnchor,
+    ) -> Result<lash::persistence::ShiftAdmissionReceipt, StoreError> {
+        unreachable!("external signature witness")
+    }
+
     async fn prepare_run_admission(
         &self,
         request: &AdmitRunRequest,

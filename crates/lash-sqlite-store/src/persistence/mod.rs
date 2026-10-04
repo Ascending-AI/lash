@@ -173,6 +173,7 @@ pub(crate) fn nearest_frame_node_id_conn(
 }
 
 mod admission;
+pub(crate) mod shift_admission;
 pub(crate) use admission::{
     admit_at_checkpoint_sqlite, admit_run_sqlite, open_session_command_run_sqlite,
 };

@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashTurn",
   "service": "LashTurn",
-  "generation": "f9a51172660c",
+  "generation": "53eef6ec33bb",
   "handlers": {
     "close": [
       [
@@ -13,11 +13,9 @@
     "run": [
       [
         "InputCommand",
+        "RunCommand lash:shift-run-start:ingress:ti:#:1#0",
         "RunCommand lash:shift-admission:ingress:ti:#:1#0",
         "SetStateCommand admission",
-        "RunCommand lash:shift-run-start:ingress:ti:#:1#0",
-        "RunCommand lash:shift-seal:ingress:ti:#:1#0",
-        "RunCommand lash:shift-admit:replay-corpus-turn",
         "RunCommand lash:plugin-transition:replay-corpus-turn",
         "RunCommand lash:turn-config:replay-corpus-turn",
         "RunCommand lash:trace:turn:replay-corpus-turn:started",
@@ -50,7 +48,7 @@
         "CallCommand LashDurableWaitIndex/peek_turn_gate",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:checkpoint:7",
         "CallCommand LashDurableWaitIndex/resolve",
-        "CallCommand LashDurableWaitIndex/peek_turn_gate",
+        "CallCommand LashDurableWaitIndex/resolve",
         "OneWayCallCommand LashDurableWaitIndex/resolve",
         "OneWayCallCommand LashTurn/close",
         "SetStateCommand outcome",

@@ -541,14 +541,11 @@ impl SqliteStore {
                     if let Some(superseded) = superseded {
                         return Err(superseded);
                     }
+                    let root = commit.shift_fence.as_ref().map(|fence| super::shift_admission::read_conn(tx, &commit.session_id, fence.admission())).transpose()?.flatten();
                     let admission = if commit.turn_commit.operation.key == "final" {
-                        commit.settled_park_run().map(|run|
-                            crate::session_runs::run_admission_conn(tx, &commit.session_id, run)
-                        ).transpose()?.flatten()
+                        commit.settled_park_run().map(|run| crate::session_runs::run_admission_conn(tx, &commit.session_id, run)).transpose()?.flatten()
                     } else { None };
-                    let intent_authoritative = commit.validate_admitted_cancel_intent(
-                        admission.as_ref().and_then(|admission| admission.cancel_intent.as_ref())
-                    )?;
+                    let intent_authoritative = commit.validate_admitted_cancel_intent(root.as_ref().map(|root| &root.cancel_intent).or_else(|| admission.as_ref().and_then(|admission| admission.cancel_intent.as_ref())))?;
                     if let Some(interrupted) = commit.interrupted_turn.as_ref() {
                         let closure = interrupted.settlement.authorization();
                         if intent_authoritative && !super::turn_input::check_turn_cancellation_conn(
@@ -582,24 +579,7 @@ impl SqliteStore {
                                 session_id: closure.session_id().clone(), turn_id: closure.turn_id().clone(),
                             });
                         }
-                        let stored = tx
-                            .query_row(
-                                crate::turn_ingress::turn_ingress_sql()
-                                    .closures_sqlite
-                                    .select_by_turn
-                                    .sql(),
-                                params![closure.session_id().as_str(), closure.turn_id().as_str()],
-                                |row| row.get::<_, String>(0),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?;
-                        let expected = encode_json(closure)?;
-                        if !intent_authoritative && stored.as_deref() != Some(expected.as_str()) {
-                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                                session_id: closure.session_id().clone(),
-                                turn_id: closure.turn_id().clone(),
-                            });
-                        }
+
                     }
                     if let Some(interrupted) = commit.interrupted_turn.as_ref()
                         && load_turn_cancel_intent_snapshot_conn(

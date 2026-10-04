@@ -123,7 +123,7 @@ impl RuntimeEffectControllerError {
     /// execution-environment load, presentation
     /// whose recorded renderer is unavailable, and a presentation or language
     /// value whose output retention faulted (FIG-1643) — and a
-    /// shift's admission and seal, a run's resolution (its spec read and its
+    /// shift's admission, a run's resolution (its spec read and its
     /// definition lookup, FIG-3838), a config transaction's resolution under
     /// reducers other than it was admitted with (FIG-4379), a run's scope
     /// close and a session's close,
@@ -157,8 +157,6 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::PresentToolResult
                 | RuntimeEffectKind::LanguageRuntimeValue
                 | RuntimeEffectKind::AdmitShift
-                | RuntimeEffectKind::SealShiftAdmission
-                | RuntimeEffectKind::AdmitRun
                 | RuntimeEffectKind::TransitionPlugins
                 | RuntimeEffectKind::ObserveDrainMark
                 | RuntimeEffectKind::RecoverFollowOn

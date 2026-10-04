@@ -372,6 +372,7 @@ pub async fn inconsistent_divergence_still_parks(
     parts
         .store
         .admit_run(&lash_core::store::AdmitRunRequest {
+            unsealed_epoch: None,
             fence,
             run: run.clone(),
             head: lash_core::store::AdmittedHead::Input(input.clone()),
@@ -379,7 +380,6 @@ pub async fn inconsistent_divergence_still_parks(
             policy: lash_core::testing::queued_work_admission_policy(1),
             base,
             turn_index: state.turn_index as u64 + 1,
-            generation: None,
             admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance-law"),
             executor: lash_core::store::RunExecutor::run(&lash_core::store::AdmissionId::new(
                 "fixture#0",

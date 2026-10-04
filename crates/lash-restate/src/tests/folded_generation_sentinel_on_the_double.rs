@@ -67,6 +67,7 @@ impl HeldShifts {
             RuntimeEffectInvocation::new(address, RuntimeAttribution::default(), "first-step"),
             RuntimeEffectCommand::AdmitShift {
                 request: Box::new(lash_core::engine::AdmitRequest {
+                    run_start: lash_core::engine::RunStartNonce::new("fixture"),
                     session: SessionId::from("held"),
                     request: ShiftRequestId::new("held"),
                     build_generation: lash_core::engine::BuildGeneration::for_test("G_a"),

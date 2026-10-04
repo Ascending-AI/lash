@@ -30,6 +30,13 @@ CREATE TABLE IF NOT EXISTS session_ingress_sequence (
 /// records an operator's verb or a session's close; a `close_session` row
 /// outlives its session as the deletion tombstone.
 pub(crate) const SESSION_RUNS_TABLES: &str = "
+CREATE TABLE IF NOT EXISTS session_shift_admissions (
+    session_id TEXT NOT NULL,
+    admission TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, admission)
+);
+
 CREATE TABLE IF NOT EXISTS session_runs (
     session_id              TEXT NOT NULL,
     run                    TEXT NOT NULL,

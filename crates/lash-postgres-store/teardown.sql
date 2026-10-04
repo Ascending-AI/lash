@@ -76,6 +76,8 @@ DROP TABLE IF EXISTS lash_session_run_specs CASCADE;
 
 DROP TABLE IF EXISTS lash_session_ingress_sequence CASCADE;
 
+DROP TABLE IF EXISTS lash_session_shift_admissions CASCADE;
+
 DROP TABLE IF EXISTS lash_session_runs CASCADE;
 
 DROP TABLE IF EXISTS lash_session_run_inputs CASCADE;

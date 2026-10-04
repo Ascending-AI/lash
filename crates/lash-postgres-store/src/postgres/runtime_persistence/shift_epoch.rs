@@ -169,6 +169,74 @@ impl PostgresStore {
     }
 }
 
+pub(crate) async fn seal_shift_epoch_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    admission: &AdmissionId,
+    observed_epoch: u64,
+    run_start: &RunStartNonce,
+    hold: Option<&RunHold>,
+) -> Result<ShiftEpochSeal, StoreError> {
+    // A seal that names its run reads who holds it: the row lock
+    // orders the read against another seal and against a run admission,
+    // whose fence check takes the same lock (FIG-4814).
+    let stored = match hold {
+        Some(_) => shift_epoch_locked_tx(tx, session_id).await?,
+        None => shift_epoch_tx(tx, session_id).await?,
+    };
+    let refused = match hold {
+        Some(hold) => decide_run_hold(
+            hold,
+            stored.epoch,
+            crate::session_runs::held_run_conn(tx, session_id, &hold.run)
+                .await?
+                .as_ref(),
+            crate::session_runs::unfinished_run_conn(tx, session_id)
+                .await?
+                .as_ref(),
+            super::turn_cancel::pending_follow_on_tx(tx, session_id, false)
+                .await?
+                .as_ref(),
+        ),
+        None => None,
+    };
+    let decision =
+        decide_shift_epoch_seal(session_id, &stored, admission, observed_epoch, run_start);
+    let seal = match (decision, refused) {
+        (ShiftEpochSealDecision::Answer(seal), _) => seal,
+        // The recorded executor of the run keeps its fence.
+        (ShiftEpochSealDecision::Raise { .. }, Some(refused)) => refused,
+        (ShiftEpochSealDecision::Raise { next }, None) => {
+            let changed = sqlx::query(session_sql().meta.seal_shift_epoch.sql())
+                .bind(session_id.as_str())
+                .bind(sql_counter_value("shift_epoch", observed_epoch)?)
+                .bind(sql_counter_value("shift_epoch", next)?)
+                .bind(admission.as_str())
+                .bind(run_start.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?
+                .rows_affected();
+            if changed == 1 {
+                if let Some(hold) = hold {
+                    crate::session_runs::record_run_hold_tx(tx, session_id, hold).await?;
+                }
+                ShiftEpochSeal::Sealed(sealed_shift_fence(
+                    session_id.clone(),
+                    next,
+                    admission.clone(),
+                ))
+            } else {
+                ShiftEpochSeal::Superseded {
+                    epoch: shift_epoch_tx(tx, session_id).await?.epoch,
+                }
+            }
+        }
+    };
+
+    Ok(seal)
+}
+
 #[async_trait::async_trait]
 impl ShiftEpochStore for PostgresStore {
     async fn seal_shift_epoch(
@@ -181,62 +249,15 @@ impl ShiftEpochStore for PostgresStore {
     ) -> Result<ShiftEpochSeal, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = self.begin_seal_tx(&mut connection, session_id).await?;
-        // A seal that names its run reads who holds it: the row lock
-        // orders the read against another seal and against a run admission,
-        // whose fence check takes the same lock (FIG-4814).
-        let stored = match hold {
-            Some(_) => shift_epoch_locked_tx(&mut tx, session_id).await?,
-            None => shift_epoch_tx(&mut tx, session_id).await?,
-        };
-        let refused = match hold {
-            Some(hold) => decide_run_hold(
-                hold,
-                stored.epoch,
-                crate::session_runs::held_run_conn(&mut tx, session_id, &hold.run)
-                    .await?
-                    .as_ref(),
-                crate::session_runs::unfinished_run_conn(&mut tx, session_id)
-                    .await?
-                    .as_ref(),
-                super::turn_cancel::pending_follow_on_tx(&mut tx, session_id, false)
-                    .await?
-                    .as_ref(),
-            ),
-            None => None,
-        };
-        let decision =
-            decide_shift_epoch_seal(session_id, &stored, admission, observed_epoch, run_start);
-        let seal = match (decision, refused) {
-            (ShiftEpochSealDecision::Answer(seal), _) => seal,
-            // The recorded executor of the run keeps its fence.
-            (ShiftEpochSealDecision::Raise { .. }, Some(refused)) => refused,
-            (ShiftEpochSealDecision::Raise { next }, None) => {
-                let changed = sqlx::query(session_sql().meta.seal_shift_epoch.sql())
-                    .bind(session_id.as_str())
-                    .bind(sql_counter_value("shift_epoch", observed_epoch)?)
-                    .bind(sql_counter_value("shift_epoch", next)?)
-                    .bind(admission.as_str())
-                    .bind(run_start.as_str())
-                    .execute(&mut **tx)
-                    .await
-                    .map_err(store_sqlx_error)?
-                    .rows_affected();
-                if changed == 1 {
-                    if let Some(hold) = hold {
-                        crate::session_runs::record_run_hold_tx(&mut tx, session_id, hold).await?;
-                    }
-                    ShiftEpochSeal::Sealed(sealed_shift_fence(
-                        session_id.clone(),
-                        next,
-                        admission.clone(),
-                    ))
-                } else {
-                    ShiftEpochSeal::Superseded {
-                        epoch: shift_epoch_tx(&mut tx, session_id).await?.epoch,
-                    }
-                }
-            }
-        };
+        let seal = seal_shift_epoch_tx(
+            &mut tx,
+            session_id,
+            admission,
+            observed_epoch,
+            run_start,
+            hold,
+        )
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(seal)
     }

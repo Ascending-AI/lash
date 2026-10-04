@@ -128,45 +128,47 @@ impl CoreSessionShifts {
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<RuntimeHandle, OpenFailure> {
-        // The engine executes only a session that exists: a missing one is
-        // terminal, never a silent create (FIG-4112). Resolution writes no
-        // catalog row.
-        let store =
-            crate::session::resolve_existing_session(&self.config.store_factory, session_id)
-                .await
-                .map_err(|error| OpenFailure::of_open_read(session_id, error))?;
-        // A row with no head recorded no config: the shift is refused with
-        // the typed code, never run on defaults (FIG-4553).
-        let state = crate::session::load_state_from_store(session_id, &store)
-            .await
-            .map_err(|error| OpenFailure::of_open_read(session_id, error))?;
-        let plugin_host = build_plugin_host(
-            self.config.protocol_factory.as_ref(),
-            self.config.plugin_factories.as_ref(),
-            &self.config.env.core.tracing,
-        )
+        open_admission_runtime(&self.config, session_id).await
+    }
+}
+
+async fn open_admission_runtime(
+    config: &CoreSessionShiftsConfig,
+    session_id: &SessionId,
+) -> std::result::Result<RuntimeHandle, OpenFailure> {
+    // The engine executes only a session that exists: a missing one is
+    // terminal, never a silent create (FIG-4112). Resolution writes no
+    // catalog row.
+    let store = crate::session::resolve_existing_session(&config.store_factory, session_id)
+        .await
+        .map_err(|error| OpenFailure::of_open_read(session_id, error))?;
+    // A row with no head recorded no config: the shift is refused with
+    // the typed code, never run on defaults (FIG-4553).
+    let state = crate::session::load_state_from_store(session_id, &store)
+        .await
+        .map_err(|error| OpenFailure::of_open_read(session_id, error))?;
+    let plugin_host = build_plugin_host(
+        config.protocol_factory.as_ref(),
+        config.plugin_factories.as_ref(),
+        &config.env.core.tracing,
+    )
+    .map_err(|error| OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string())))?;
+    let mut env = config.env.clone();
+    env.core = plugin_host
+        .install_process_engine_contributions(env.core.clone(), config.process_lifecycle_available)
         .map_err(|error| {
             OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
         })?;
-        let mut env = self.config.env.clone();
-        env.core = plugin_host
-            .install_process_engine_contributions(
-                env.core.clone(),
-                self.config.process_lifecycle_available,
-            )
-            .map_err(|error| {
-                OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
-            })?;
-        env.plugin_host = Some(Arc::new(plugin_host));
-        // The shift runs the policy the session recorded; this core states
-        // none of its own (FIG-4594).
-        let policy = state.effective_policy().clone();
-        let runtime = LashRuntime::from_environment(
+    env.plugin_host = Some(Arc::new(plugin_host));
+    // The shift runs the policy the session recorded; this core states
+    // none of its own (FIG-4594).
+    let policy = state.effective_policy().clone();
+    let runtime = LashRuntime::from_environment(
             &env,
             policy,
             state,
             Some(store),
-            self.config.shift_owner.clone(),
+            config.shift_owner.clone(),
         )
         .await
         // Assembly binds the loaded state to its store with one more catalog
@@ -179,13 +181,53 @@ impl CoreSessionShifts {
             }
             error => OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string())),
         })?;
-        // The session runs with the config it recorded at creation, its
-        // plugin configuration included, unchanged (FIG-4099, FIG-4112,
-        // FIG-4379).
-        Ok(RuntimeHandle::with_live_replay_store(
-            runtime,
-            Arc::clone(&self.config.live_replay_store),
-        ))
+    // The session runs with the config it recorded at creation, its
+    // plugin configuration included, unchanged (FIG-4099, FIG-4112,
+    // FIG-4379).
+    Ok(RuntimeHandle::with_live_replay_store(
+        runtime,
+        Arc::clone(&config.live_replay_store),
+    ))
+}
+
+struct FreshAdmissionMaterializer {
+    config: Arc<CoreSessionShiftsConfig>,
+}
+#[async_trait::async_trait]
+impl lash_core::shift::ShiftAdmissionMaterializer for FreshAdmissionMaterializer {
+    async fn request(
+        &self,
+        store: &lash_core::SessionStore,
+        admitted: &lash_core::engine::Admitted,
+        preparation: &lash_core::store::ShiftAdmissionPreparation,
+        executor: lash_core::store::RunExecutor,
+        scope: &lash_core::AdmittedScope,
+    ) -> std::result::Result<
+        lash_core::store::AdmitRunRequest,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        let handle = open_admission_runtime(&self.config, admitted.session())
+            .await
+            .map_err(|failure| {
+                lash_core::RuntimeEffectControllerError::from(failure.into_abort().error().clone())
+                    .retryable_uncommitted_derivation()
+            })?;
+        let template = {
+            let writer = handle.writer();
+            let runtime = writer.lock().await;
+            runtime
+                .shift_admission_template()
+                .map_err(lash_core::RuntimeEffectControllerError::from)?
+        };
+        lash_core::shift::ShiftAdmissionMaterializer::request(
+            &template,
+            store,
+            admitted,
+            preparation,
+            executor,
+            scope,
+        )
+        .await
     }
 }
 
@@ -444,7 +486,12 @@ impl lash_core::SessionShifts for CoreSessionShifts {
         };
         lash_core::shift::admit_shift_on_store(
             &self.config.env.core,
-            store,
+            (
+                store,
+                Arc::new(FreshAdmissionMaterializer {
+                    config: Arc::clone(&self.config),
+                }),
+            ),
             &controller,
             request,
             admitting_generation,
@@ -461,12 +508,8 @@ impl lash_core::SessionShifts for CoreSessionShifts {
     ) -> lash_core::engine::RunEnd {
         let runtime = match self.shift_runtime(admitted.session()).await {
             Ok(runtime) => runtime,
-            // A run whose session is already deleted — or closed past
-            // admission — still owes the journal its start marker and seal:
-            // an attempt that stopped short of them would diverge from what
-            // an earlier attempt of the run journaled, and the seal's
-            // recorded body answers the same retirement every redrive
-            // replays (ADR 0104 O1, FIG-3881).
+            // A session retired after admission still executes the retained
+            // root answer and its journaled effects headless (ADR 0104 O1).
             Err(OpenFailure::SessionRetired(_)) => {
                 return lash_core::engine::RunEnd::owing_nothing(
                     lash_core::shift::execute_admitted_run_retired(&controller, admitted).await,

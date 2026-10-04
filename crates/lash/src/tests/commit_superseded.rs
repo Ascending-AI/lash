@@ -21,6 +21,531 @@ const TURN: &str = "superseded-turn";
 const FIRST_TURN: &str = "first-turn";
 const NEXT_TURN: &str = "next-turn";
 
+struct GenerationFactory;
+
+impl lash_core::plugin::PluginFactory for GenerationFactory {
+    fn id(&self) -> &'static str {
+        "admission_generation"
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::plugin::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
+    {
+        Ok(Arc::new(GenerationExecutor))
+    }
+}
+
+struct GenerationExecutor;
+
+impl lash_core::plugin::SessionPlugin for GenerationExecutor {
+    fn id(&self) -> &'static str {
+        "admission_generation"
+    }
+
+    fn register(
+        &self,
+        reg: &mut lash_core::plugin::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        reg.execution().code_executor(Arc::new(GenerationExecutor))
+    }
+}
+
+#[async_trait]
+impl lash_core::plugin::CodeExecutorPlugin for GenerationExecutor {
+    async fn frame_switch_carries(
+        &self,
+        _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
+        _frame: &lash_core::FrameNodeId,
+        _nodes: &[lash_core::SessionAppendNode],
+    ) -> std::result::Result<Vec<lash_core::ArtifactName>, SessionError> {
+        Ok(Vec::new())
+    }
+
+    async fn execute_code(
+        &self,
+        _ctx: lash_core::RuntimeExecutionContext<'_>,
+        _request: lash_core::ExecRequest,
+    ) -> std::result::Result<lash_core::ExecResponse, SessionError> {
+        Err(SessionError::Protocol("this law executes no cells".into()))
+    }
+
+    fn executable_generation(&self) -> Option<lash_core::ExecutableGeneration> {
+        Some(lash_core::ExecutableGeneration::new(
+            "bound-executor-generation",
+        ))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_first_admission_redrives_under_its_bound_executor_generation() -> Result<()> {
+    let backend =
+        double_backend_over(lash_restate_test::ServerConfig::default(), |stores| stores).await;
+    let double = latest_double().expect("generation law double");
+    let provider = crate::testing::TestProvider::builder()
+        .kind("generation-law")
+        .complete(|_| async { Ok(text_response("answered")) })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .plugin(Arc::new(GenerationFactory))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    double.server().crash_on(
+        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRunResultStarting {
+            prefix: "lash:generation-redrive:generation-run:1:0:checkpoint:".into(),
+        })
+        .service(lash_restate_test::TURN_DRIVER_SERVICE)
+        .handler("run"),
+    );
+    let session = core
+        .session("generation-redrive")
+        .created()
+        .await
+        .open()
+        .await?;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        session
+            .send(TurnInput::text("first turn"))
+            .id("generation-run")
+            .output(),
+    )
+    .await;
+    result.expect("the redrive completes")?;
+    let root = nonce_root(&double, "generation-redrive");
+    let generation = double
+        .server()
+        .journal(&root.id)
+        .expect("root journal")
+        .iter()
+        .filter_map(|entry| entry.run_completion())
+        .filter_map(|answer| answer.ok())
+        .map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).expect("recorded JSON"))
+        .find_map(|record| {
+            record["outcome"]["Ok"]["record"]["generation"]
+                .as_str()
+                .map(str::to_owned)
+        });
+    assert_eq!(
+        generation.as_deref(),
+        Some("bound-executor-generation"),
+        "the recorded transition retains the bound executor generation on redrive"
+    );
+    double.server().settle().await;
+    assert_eq!(
+        nonce_root(&double, "generation-redrive").attempts,
+        2,
+        "the same recorded admission survives a redrive after executor binding"
+    );
+    Ok(())
+}
+
+struct PredecessorGenerationFactory(Arc<AtomicUsize>);
+
+impl lash_core::plugin::PluginFactory for PredecessorGenerationFactory {
+    fn id(&self) -> &'static str {
+        "admission_generation"
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        let mut declaration = lash_core::plugin::PluginDeclaration::initial(self.id());
+        declaration.format_version = lash_core::FormatVersion::new(2).expect("native format");
+        declaration.writable_formats =
+            vec![lash_core::FormatVersion::ONE, declaration.format_version];
+        declaration
+    }
+
+    fn migrate_format(
+        &self,
+        from: lash_core::FormatVersion,
+        namespace: lash_core::FormatNamespace,
+        mut value: serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, lash_core::FormatRefusal> {
+        assert_eq!(from, lash_core::FormatVersion::ONE);
+        assert_eq!(namespace, lash_core::FormatNamespace::State);
+        self.0.fetch_add(1, Ordering::SeqCst);
+        let object = value.as_object_mut().expect("state namespace");
+        let old = object.remove("old").expect("predecessor value");
+        object.insert("native".into(), old);
+        Ok(value)
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::plugin::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
+    {
+        Ok(Arc::new(GenerationExecutor))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_readable_predecessor_root_converts_in_its_transition_before_running() -> Result<()> {
+    let backend =
+        double_backend_over(lash_restate_test::ServerConfig::default(), |stores| stores).await;
+    let conversions = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("predecessor-generation")
+        .complete(|_| async { Ok(text_response("converted")) })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .plugin(Arc::new(PredecessorGenerationFactory(conversions.clone())))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let created = core.session("predecessor-generation").created().await;
+    let raw: Arc<dyn lash_core::RuntimeStore> = core.store_factory.clone();
+    let store = lash_core::store::SessionStore::new(
+        raw,
+        lash_core::SessionId::from("predecessor-generation"),
+    )?;
+    let mut state = lash_core::store::load_session_window_state(
+        &store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .expect("created state")
+    .state;
+    let old = lash_core::PluginState {
+        plugins: std::collections::BTreeMap::from([(
+            "admission_generation".into(),
+            lash_core::PluginNamespaceState {
+                format_version: lash_core::FormatVersion::ONE,
+                generation: 0,
+                publication: Default::default(),
+                values: std::collections::BTreeMap::from([("old".into(), serde_json::json!(17))]),
+            },
+        )]),
+    };
+    if let Some(bytes) = state.plugin_admission_snapshot() {
+        let mut view = lash_core::plugin::PluginNativeView::decode(&bytes)?;
+        view.state = old.clone();
+        state.set_plugin_admission_snapshot(view.encode()?);
+    }
+    state.set_plugin_state(Some(old));
+    store
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(&state))
+        .await?;
+    let session = created.open().await?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        session
+            .send(TurnInput::text("readable predecessor"))
+            .id("predecessor-run")
+            .output(),
+    )
+    .await
+    .expect("a readable predecessor runs")?;
+    assert_eq!(
+        conversions.load(Ordering::SeqCst),
+        1,
+        "only the recorded transition converts the predecessor"
+    );
+    let state = lash_core::store::load_session_window_state(
+        &store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .expect("published state")
+    .state;
+    let view = lash_core::plugin::PluginNativeView::decode(
+        &state
+            .plugin_admission_snapshot()
+            .expect("published native view"),
+    )?;
+    assert_eq!(
+        view.state.plugins["admission_generation"]
+            .format_version
+            .get(),
+        2
+    );
+    assert_eq!(
+        view.state.plugins["admission_generation"].values["native"],
+        serde_json::json!(17)
+    );
+    Ok(())
+}
+
+/// FIG-4848, L-S8: the root records its nonce, then one atomic admission.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_root_records_only_its_nonce_and_atomic_admission_before_preparation() -> Result<()> {
+    let backend =
+        double_backend_over(lash_restate_test::ServerConfig::default(), |stores| stores).await;
+    let double = latest_double().expect("the backend's server double");
+    let provider = crate::testing::TestProvider::builder()
+        .kind("atomic-admission")
+        .complete(|_| async { Ok(text_response("answered")) })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("atomic-admission")
+        .created()
+        .await
+        .open()
+        .await?;
+    session
+        .send(TurnInput::text("ask once"))
+        .id("atomic-run")
+        .output()
+        .await?;
+    double.server().settle().await;
+    let root = double
+        .server()
+        .invocations()
+        .into_iter()
+        .find(|invocation| {
+            invocation
+                .target
+                .starts_with("LashTurn/16:atomic-admission")
+                && invocation.target.ends_with("/run")
+        })
+        .expect("the sent turn's root invocation");
+    let names = double
+        .server()
+        .journal(&root.id)
+        .expect("retained root journal")
+        .into_iter()
+        .filter(|entry| entry.ty == lash_restate_test::protocol::MessageType::RunCommand)
+        .filter_map(|entry| entry.name)
+        .collect::<Vec<_>>();
+    let admission = names
+        .iter()
+        .filter(|name| {
+            name.contains("shift-admission")
+                || name.contains("shift-run-start")
+                || name.contains("shift-seal")
+                || name.contains("shift-admit")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        admission.len(),
+        2,
+        "the OS nonce and atomic admission are the only admission records: {names:#?}"
+    );
+    assert!(admission[0].contains("shift-run-start"));
+    assert!(admission[1].contains("shift-admission"));
+    Ok(())
+}
+
+async fn nonce_core() -> (
+    LashCore,
+    lash_restate_test::RestateTestBackend,
+    Arc<AtomicUsize>,
+) {
+    let backend =
+        double_backend_over(lash_restate_test::ServerConfig::default(), |stores| stores).await;
+    let double = latest_double().expect("the nonce law's double");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("nonce-laws")
+        .complete(move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            async { Ok(text_response("answered")) }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("nonce-law core");
+    (core, double, calls)
+}
+
+fn nonce_root(
+    double: &lash_restate_test::RestateTestBackend,
+    session: &str,
+) -> lash_restate_test::InvocationView {
+    let prefix = format!("LashTurn/{}:{session}", session.len());
+    double
+        .server()
+        .invocations()
+        .into_iter()
+        .find(|invocation| {
+            invocation.target.starts_with(&prefix) && invocation.target.ends_with("/run")
+        })
+        .expect("the root invocation")
+}
+
+/// L-S3/L-S8: the transaction committed, but the server lost its result.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_lost_atomic_admission_result_reuses_its_nonce_and_bound_rows() -> Result<()> {
+    let (core, double, calls) = nonce_core().await;
+    double.server().crash_on(
+        lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRunResultStarting {
+            prefix: "lash:shift-admission:".into(),
+        })
+        .service(lash_restate_test::TURN_DRIVER_SERVICE)
+        .handler("run"),
+    );
+    let session = core
+        .session("lost-root-result")
+        .created()
+        .await
+        .open()
+        .await?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        session
+            .send(TurnInput::text("one admitted input"))
+            .id("lost-root-run")
+            .output(),
+    )
+    .await
+    .expect("the result-loss retry completes")?;
+    double.server().settle().await;
+    let root = nonce_root(&double, "lost-root-result");
+    assert_eq!(root.attempts, 2, "the loss cut the first attempt");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "adoption executes the retained input once"
+    );
+    let journal = double.server().journal(&root.id).expect("root journal");
+    let start = journal
+        .iter()
+        .filter_map(|entry| entry.run_completion())
+        .filter_map(|answer| answer.ok())
+        .map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).expect("recorded JSON"))
+        .find_map(|record| {
+            record["outcome"]["Ok"]["run_start"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .expect("the recorded OS nonce");
+    let session_id = lash_core::SessionId::from("lost-root-result");
+    let run = lash_core::TurnId::from("lost-root-run");
+    let lash_core::store::RunExecutor::Run { admission } = core
+        .store_factory
+        .run_executor(&session_id, &run)
+        .await?
+        .expect("recorded root executor")
+    else {
+        panic!("root executor");
+    };
+    let receipt = core
+        .store_factory
+        .read_shift_admission(&session_id, &admission)
+        .await?
+        .expect("the transaction's retained receipt");
+    assert_eq!(receipt.run_start.as_str(), start);
+    let Some(lash_core::store::RunAdmissionAnswer::Admitted { admission, .. }) =
+        receipt.run_admission
+    else {
+        panic!("retained composition");
+    };
+    assert_eq!(
+        admission
+            .inputs
+            .as_ref()
+            .expect("input admission")
+            .inputs
+            .len(),
+        1
+    );
+    assert_eq!(
+        admission.cancel_intent,
+        Some(lash_core::TurnCancelIntentSnapshot::Absent)
+    );
+    Ok(())
+}
+
+/// L-S8: purging the invocation destroys the only replayable nonce.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_purged_root_refuses_execution_lost_without_selecting_again() -> Result<()> {
+    let (core, double, calls) = nonce_core().await;
+    let session = core.session("purged-root").created().await.open().await?;
+    session
+        .send(TurnInput::text("execute once"))
+        .id("purged-root-run")
+        .output()
+        .await?;
+    double.server().settle().await;
+    let root = nonce_root(&double, "purged-root");
+    let journal = double
+        .server()
+        .journal(&root.id)
+        .expect("the original journal");
+    let input: serde_json::Value = serde_json::from_slice(
+        &journal
+            .iter()
+            .find_map(|entry| entry.input())
+            .expect("original input"),
+    )
+    .expect("root request");
+    let session_id = lash_core::SessionId::from("purged-root");
+    let run = lash_core::TurnId::from("purged-root-run");
+    let lash_core::store::RunExecutor::Run { admission } = core
+        .store_factory
+        .run_executor(&session_id, &run)
+        .await?
+        .expect("original executor")
+    else {
+        panic!("root executor");
+    };
+    let original = core
+        .store_factory
+        .read_shift_admission(&session_id, &admission)
+        .await?
+        .expect("original root receipt");
+    let epoch = core.store_factory.shift_epoch(&session_id).await?;
+    assert_eq!(double.server().purge(&root.id), Some(true));
+    let key = root
+        .target
+        .strip_prefix("LashTurn/")
+        .and_then(|target| target.strip_suffix("/run"))
+        .expect("root key");
+    let connection = lash_restate::RestateConnection::with_transport(
+        double.server().ingress_url(),
+        double.server().transport(),
+    );
+    let ingress = lash_restate::RestateIngressClient::new(connection);
+    #[derive(serde::Deserialize)]
+    struct RootAnswer {
+        outcome: lash_core::engine::RunOutcome,
+    }
+    let reply: lash_restate::Reply<RootAnswer> = ingress
+        .call_workflow_json("LashTurn", key, "run", &input)
+        .await
+        .expect("purged invocation reply");
+    assert!(matches!(
+        reply.body.outcome,
+        lash_core::engine::RunOutcome::Refused {
+            refusal: lash_core::engine::SealRefusal::ExecutionLost,
+            ..
+        }
+    ));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "a purge executes no model work"
+    );
+    assert_eq!(
+        core.store_factory.shift_epoch(&session_id).await?,
+        epoch,
+        "the fresh nonce raises no epoch"
+    );
+    let retained = core
+        .store_factory
+        .read_shift_admission(&session_id, &admission)
+        .await?
+        .expect("retained original receipt");
+    assert_eq!(
+        retained.run_start, original.run_start,
+        "the fresh invocation cannot replace the retained nonce"
+    );
+    Ok(())
+}
+
 /// A core over the double's engine, and the double it runs on.
 struct Fixture {
     core: LashCore,

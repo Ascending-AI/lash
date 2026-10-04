@@ -1,6 +1,6 @@
 {
   "scenario": "sleep-envelope",
-  "generation": "f9a51172660c",
+  "generation": "53eef6ec33bb",
   "journal": [
     {
       "name": "lash:sleep:test",

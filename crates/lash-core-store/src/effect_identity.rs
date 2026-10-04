@@ -73,11 +73,6 @@ pub enum RuntimeEffectKind {
     ExecCode,
     /// Durable admission of a turn input (ADR 0069 section 6).
     AcceptTurnInput,
-    /// A run's recorded admission (FIG-3927): the turn-lane rows it executes,
-    /// with the base and turn index it was admitted on. Replay returns it and
-    /// never re-reads pending rows.
-    AdmitRun,
-    /// The recorded decision about an admitted run's head.
     /// A turn's recorded read, at a quiet point, of whether the build its
     /// invocation runs on is draining (FIG-4739): the fact its segment
     /// boundary is decided from, so a replay ends the turn where its first
@@ -90,12 +85,9 @@ pub enum RuntimeEffectKind {
     /// A session shift's recorded admission (ADR 0105 §2, FIG-3600): the run
     /// it admitted, with its base and turn index, or why it admitted none.
     AdmitShift,
-    /// The start marker an execution of an admitted run drew in its own
-    /// journal before its seal (ADR 0105 L-S8).
+    /// The OS-random nonce recorded before a root's atomic admission
+    /// (ADR 0105 L-S8).
     DrawRunStart,
-    /// The recorded seal of a shift admission: the shift-epoch
-    /// compare-and-set whose fence the admitted run's commits present.
-    SealShiftAdmission,
     /// The session config a logical turn runs under, recorded once per run
     /// after the boundary's command drain (FIG-3600 S6, D3 §2): every replay
     /// of the run executes under the recorded config, never the live head's.
@@ -158,14 +150,12 @@ impl RuntimeEffectKind {
             Self::Process => "process",
             Self::ExecCode => "exec_code",
             Self::AcceptTurnInput => "accept_turn_input",
-            Self::AdmitRun => "admit_run",
             Self::ObserveDrainMark => "observe_drain_mark",
             Self::PluginCallbacks => "plugin_callbacks",
             Self::RecoverFollowOn => "recover_follow_on",
             Self::AdmitShift => "admit_shift",
             Self::TraceBoundary => "trace_boundary",
             Self::DrawRunStart => "draw_run_start",
-            Self::SealShiftAdmission => "seal_shift_admission",
             Self::ResolveTurnConfig => "resolve_turn_config",
             Self::RecordCompactionBase => "record_compaction_base",
             Self::RenderCompactionPrompt => "render_compaction_prompt",

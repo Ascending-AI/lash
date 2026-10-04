@@ -8,6 +8,10 @@ pub const TABLE: &str = "session_runs";
 crate::statements! {
     /// `session_runs` statements both backends issue verbatim.
     pub struct SessionRunStatements @ "session_run" {
+        read_shift_admission = "SELECT receipt_json FROM session_shift_admissions WHERE session_id = ?1 AND admission = ?2";
+        write_shift_admission = "INSERT INTO session_shift_admissions (session_id, admission, receipt_json) VALUES (?1, ?2, ?3)";
+        delete_shift_admissions = "DELETE FROM session_shift_admissions WHERE session_id = ?1";
+
         /// Open run `?2` of session `?1` if it has no row yet.
         insert_open = "INSERT INTO session_runs (session_id, run) VALUES (?1, ?2)
              ON CONFLICT (session_id, run) DO NOTHING";

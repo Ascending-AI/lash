@@ -134,7 +134,7 @@ impl SessionHeadRef {
 }
 
 /// What the store's seal answered.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShiftEpochSeal {
     /// The epoch was raised to the fence's epoch under this admission, now or
     /// by an earlier invocation of the same seal.
@@ -383,7 +383,7 @@ pub fn decide_shift_epoch_seal(
 }
 
 /// What a backend does for one seal.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShiftEpochSealDecision {
     /// Compare-and-set the epoch from the observed value to `next`, recording
     /// the admission.

@@ -555,7 +555,3 @@ mod tests {
         );
     }
 }
-
-#[cfg(test)]
-#[path = "turn_loop/recovery_tests.rs"]
-mod recovery_tests;

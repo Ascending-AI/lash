@@ -98,6 +98,7 @@ async fn runtime_open_defers_capabilities_until_recorded_publication() {
     let record = old_host.transition_plugins(request, &Default::default(), &Default::default());
     let (native_state, native_config) = record.candidate().unwrap();
     let view = crate::plugin::PluginNativeView {
+        generation: None,
         request: record.request,
         source: record.source,
         state: native_state.clone(),

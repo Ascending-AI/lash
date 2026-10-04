@@ -44,17 +44,43 @@ pub(crate) async fn admit_run_postgres(
     prepared: Option<&lash_core_execution::store::PreparedRunAdmission>,
     anchor: &lash_core_execution::TraceAnchor,
 ) -> Result<Option<RunAdmission>, StoreError> {
-    let session_id = request.session_id();
     let mut connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
     let mut tx = begin_guarded(&mut *connection, &store.fence).await?;
     #[cfg(any(test, feature = "testing"))]
     store
         .set_transaction_lease_clock_for_testing(&mut tx)
         .await?;
-    require_shift_fence_tx(&mut tx, &request.fence).await?;
+    let result = admit_run_tx(store, &mut tx, request, prepared, anchor).await?;
+    if prepared.is_some() {
+        tx.commit().await.map_err(store_sqlx_error)?;
+    } else {
+        tx.rollback().await.map_err(store_sqlx_error)?;
+    }
+    Ok(result)
+}
+
+pub(crate) async fn admit_run_tx(
+    store: &crate::PostgresStore,
+    tx: &mut PgTx<'_>,
+    request: &lash_core_execution::store::AdmitRunRequest,
+    prepared: Option<&lash_core_execution::store::PreparedRunAdmission>,
+    anchor: &lash_core_execution::TraceAnchor,
+) -> Result<Option<RunAdmission>, StoreError> {
+    let session_id = request.session_id();
+    if let Some(epoch) = request.unsealed_epoch {
+        let stored = super::shift_epoch::shift_epoch_tx(tx, session_id).await?;
+        if stored.epoch != epoch || stored.closing.is_some() || stored.control_pending {
+            return Err(StoreError::PreparedRunAdmissionStale {
+                session_id: session_id.clone(),
+                run: request.run.clone(),
+            });
+        }
+    } else {
+        require_shift_fence_tx(tx, &request.fence).await?;
+    }
     if let Some(binding) = &request.turn_cancellation {
         super::turn_input::check_turn_cancellation_tx(
-            &mut tx,
+            tx,
             session_id,
             &binding.binding_id,
             &binding.admitted_scope,
@@ -83,18 +109,16 @@ pub(crate) async fn admit_run_postgres(
             && let Some(binding) = &request.turn_cancellation
         {
             super::turn_input::bind_turn_cancellation_tx(
-                &mut tx,
+                tx,
                 session_id,
                 &binding.binding_id,
                 &binding.admitted_scope,
             )
             .await?;
         }
-        tx.commit().await.map_err(store_sqlx_error)?;
         return Ok(Some(admission));
     }
-    if follow_on_blocks_admission_tx(&mut tx, session_id, FollowOnAdmission::Idle).await? {
-        tx.rollback().await.map_err(store_sqlx_error)?;
+    if follow_on_blocks_admission_tx(tx, session_id, FollowOnAdmission::Idle).await? {
         if prepared.is_some() {
             return Err(StoreError::PreparedRunAdmissionStale {
                 session_id: session_id.clone(),
@@ -103,17 +127,17 @@ pub(crate) async fn admit_run_postgres(
         }
         return Ok(None);
     }
-    if let Some(unfinished) = crate::session_runs::unfinished_run_conn(&mut tx, session_id).await? {
+    if let Some(unfinished) = crate::session_runs::unfinished_run_conn(tx, session_id).await? {
         return Err(StoreError::UnfinishedRunConflict {
             session_id: session_id.clone(),
             run: unfinished.run,
         });
     }
-    let now = postgres_transaction_epoch_ms(&mut tx).await?;
+    let now = postgres_transaction_epoch_ms(tx).await?;
     let (inputs, queued) = match &request.head {
         AdmittedHead::Input(head) => {
             let inputs = compose_next_turn_inputs_tx(
-                &mut tx,
+                tx,
                 now,
                 session_id,
                 request.max_inputs,
@@ -124,7 +148,6 @@ pub(crate) async fn admit_run_postgres(
             let Some(inputs) =
                 inputs.filter(|inputs| inputs.inputs.iter().any(|input| input.input_id == *head))
             else {
-                tx.rollback().await.map_err(store_sqlx_error)?;
                 if prepared.is_some() {
                     return Err(StoreError::PreparedRunAdmissionStale {
                         session_id: session_id.clone(),
@@ -137,7 +160,7 @@ pub(crate) async fn admit_run_postgres(
         }
         AdmittedHead::Batch(head) => {
             let batches = compose_turn_lane_batches_tx(
-                &mut tx,
+                tx,
                 now,
                 session_id,
                 AdmissionBoundary::Idle,
@@ -146,7 +169,6 @@ pub(crate) async fn admit_run_postgres(
             )
             .await?;
             if !batches.iter().any(|batch| batch.batch_id == *head) {
-                tx.rollback().await.map_err(store_sqlx_error)?;
                 if prepared.is_some() {
                     return Err(StoreError::PreparedRunAdmissionStale {
                         session_id: session_id.clone(),
@@ -166,7 +188,7 @@ pub(crate) async fn admit_run_postgres(
     };
     let mut base = request.base.clone();
     base.generation =
-        read_session_state_version_tx(&mut tx, session_id, true, store.fence.fleet()).await?;
+        read_session_state_version_tx(tx, session_id, true, store.fence.fleet()).await?;
     let trace = RunAdmission::trace_scope_of(
         session_id,
         &request.run,
@@ -181,15 +203,16 @@ pub(crate) async fn admit_run_postgres(
         queued,
         base,
         turn_index: request.turn_index,
-        generation: request.generation.clone(),
         executor: request.executor.clone(),
         plugins: request.plugins.clone(),
         trace: Some(trace),
-        cancel_intent: None,
+        cancel_intent: Some(
+            super::turn_cancel::load_turn_cancel_intent_snapshot_tx(tx, session_id, &request.run)
+                .await?,
+        ),
         recorded_by_this_call: prepared.is_some(),
     };
     let Some(prepared) = prepared else {
-        tx.rollback().await.map_err(store_sqlx_error)?;
         return Ok(Some(admission));
     };
     if !prepared.matches(
@@ -206,7 +229,7 @@ pub(crate) async fn admit_run_postgres(
     // cancellation authority or admitted rows.
     if let Some(binding) = &request.turn_cancellation {
         super::turn_input::bind_turn_cancellation_tx(
-            &mut tx,
+            tx,
             session_id,
             &binding.binding_id,
             &binding.admitted_scope,
@@ -214,11 +237,11 @@ pub(crate) async fn admit_run_postgres(
         .await?;
     }
     if let Some(inputs) = admission.inputs.as_deref() {
-        bind_turn_inputs_tx(&mut tx, now, &request.run, RUN_ADMISSION_STEP, inputs).await?;
+        bind_turn_inputs_tx(tx, now, &request.run, RUN_ADMISSION_STEP, inputs).await?;
     }
     if let Some(queued) = admission.queued.as_deref() {
         bind_batches_tx(
-            &mut tx,
+            tx,
             now,
             session_id,
             &request.run,
@@ -239,13 +262,8 @@ pub(crate) async fn admit_run_postgres(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    crate::session_runs::bind_run_inputs_conn(
-        &mut tx,
-        session_id,
-        &request.run,
-        &admission.input_ids(),
-    )
-    .await?;
+    crate::session_runs::bind_run_inputs_conn(tx, session_id, &request.run, &admission.input_ids())
+        .await?;
     let json = serde_json::to_string(&admission)
         .map_err(|error| StoreError::Backend(error.to_string()))?;
     let changed = sqlx::query(runs.runs.write_admission.sql())
@@ -262,7 +280,6 @@ pub(crate) async fn admit_run_postgres(
             "run admission was already recorded".into(),
         ));
     }
-    tx.commit().await.map_err(store_sqlx_error)?;
     Ok(Some(admission))
 }
 

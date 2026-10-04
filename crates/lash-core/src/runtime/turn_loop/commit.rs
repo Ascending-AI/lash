@@ -33,37 +33,6 @@ fn trace_commit_cas_rejected(
     );
 }
 
-/// Select the exact closure operation a recovered turn must finish.
-///
-/// A successor shift may settle and consume this persisted operation, but may
-/// not replace it with an authorization carrying its new shift epoch. The
-/// binding and admitted physical scope remain part of the authorization being
-/// adopted, so recovery cannot broaden the original authority.
-pub(super) fn recovered_turn_cancel_closure(
-    pending: Vec<crate::TurnCancelClosureAuthorization>,
-    address: &crate::TurnAddress,
-    binding_id: &str,
-    admitted_scope: &crate::ExecutionScope,
-) -> Result<Option<crate::TurnCancelClosureAuthorization>, RuntimeError> {
-    let Some(authorization) = pending
-        .into_iter()
-        .find(|authorization| authorization.address() == *address)
-    else {
-        return Ok(None);
-    };
-    authorization.validate()?;
-    if authorization.binding_id() != binding_id || authorization.admitted_scope() != admitted_scope
-    {
-        return Err(RuntimeError::new(
-            RuntimeErrorCode::InvalidTurnCancelRequest,
-            format!(
-                "pending turn cancellation closure for `{address:?}` does not match the admitted binding and scope"
-            ),
-        ));
-    }
-    Ok(Some(authorization))
-}
-
 pub(super) struct TurnFinishInput {
     pub(super) turn_pipeline: TurnBoundary,
     pub(super) recorded_assembly: RecordedTurnAssembly,
@@ -498,7 +467,7 @@ impl LashRuntime {
             Some(TurnOutcome::Stopped(TurnStop::Cancelled { evidence })) => Some(evidence.clone()),
             _ => None,
         };
-        let mut interrupted_turn_cancel_intent =
+        let interrupted_turn_cancel_intent =
             match self.session.as_ref().and_then(Session::history_store) {
                 Some(store) => Some(
                     store
@@ -520,69 +489,33 @@ impl LashRuntime {
             shift_fence,
             interrupted_turn_cancel_intent.clone(),
         ) {
-            (Some(store), Some(fence), Some(observed)) => {
+            (Some(_store), Some(fence), Some(observed)) => {
                 let address = crate::TurnAddress::new(&self.state.session_id, &trace_turn_id);
                 let admitted_scope = crate::runtime::effect::executor::admitted_turn_cancel_scope(
                     &address,
                     scoped_effect_controller.execution_scope(),
                     &turn_control_binding_id,
                 );
-                if admitted_cancel_intent.is_some() {
-                    let durable = observed
-                        .request()
-                        .map(crate::TurnCancelRequest::evidence)
-                        .or_else(|| assembled_cancellation.clone());
-                    Some(turn_control.closure_authorization(
-                        &turn_control_binding_id,
-                        admitted_scope,
-                        fence,
-                        observed,
-                        honoured_cancel.as_ref(),
-                        durable,
-                    )?)
-                } else if let Some(authorization) = recovered_turn_cancel_closure(
-                    store
-                        // The exact persisted operation is matched to this
-                        // address, binding, and scope below; activation's fence
-                        // check is separate.
-                        .pending_turn_cancel_closure_pins()
-                        .await
-                        .map_err(runtime_error_from_store_commit)?,
-                    &address,
-                    &turn_control_binding_id,
-                    &admitted_scope,
-                )? {
-                    Some(authorization)
-                } else {
-                    let mut observed = observed;
-                    loop {
-                        let authorization = turn_control.closure_authorization(
-                            &turn_control_binding_id,
-                            admitted_scope.clone(),
-                            fence,
-                            observed.clone(),
-                            honoured_cancel.as_ref(),
-                            assembled_cancellation.clone(),
-                        )?;
-                        match store
-                            .authorize_turn_cancel_closure(fence, &authorization)
-                            .await
-                        {
-                            Ok(_) => {
-                                interrupted_turn_cancel_intent =
-                                    Some(authorization.observed_intent().clone());
-                                break Some(authorization);
-                            }
-                            Err(crate::StoreError::TurnCancelIntentChanged { .. }) => {
-                                observed = store
-                                    .turn_cancel_request_intent(&address)
-                                    .await
-                                    .map_err(runtime_error_from_store_commit)?;
-                            }
-                            Err(error) => return Err(runtime_error_from_store_commit(error)),
-                        }
-                    }
+                if admitted_cancel_intent.is_none() {
+                    return Err(runtime_error_from_store_commit(
+                        crate::StoreError::TurnCancelClosureAuthorizationMismatch {
+                            session_id: address.session_id.clone(),
+                            turn_id: address.turn_id.clone(),
+                        },
+                    ));
                 }
+                let durable = observed
+                    .request()
+                    .map(crate::TurnCancelRequest::evidence)
+                    .or_else(|| assembled_cancellation.clone());
+                Some(turn_control.closure_authorization(
+                    &turn_control_binding_id,
+                    admitted_scope,
+                    fence,
+                    observed,
+                    honoured_cancel.as_ref(),
+                    durable,
+                )?)
             }
             _ => None,
         };
@@ -592,18 +525,8 @@ impl LashRuntime {
         ) {
             (Some(authorization), Some(observed_intent)) => {
                 Some(crate::store::InterruptedTurnClosure {
-                    settlement: if admitted_cancel_intent.is_some() {
-                        turn_control
-                            .settle_admitted_intent(authorization.clone(), honoured_cancel.as_ref())
-                    } else {
-                        turn_control
-                            .settle_authorized(
-                                turn_control_resolver,
-                                authorization,
-                                honoured_cancel.as_ref(),
-                            )
-                            .await?
-                    },
+                    settlement: turn_control
+                        .settle_admitted_intent(authorization.clone(), honoured_cancel.as_ref()),
                     observed_intent,
                     admitted_intent: admitted_cancel_intent.clone(),
                 })

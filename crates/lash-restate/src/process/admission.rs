@@ -147,6 +147,10 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// Epoch 23 (FIG-4891) uses short event observers, races source waits against
 /// segment handover and holds process results through their logical sources.
 ///
+/// Epoch 23 (FIG-4848) records an OS nonce before one atomic root admission,
+/// replacing the separate selection, start, seal and composition records.
+/// Plugin transitions bind and record the executor generation before publication.
+///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
 ///     items(ADMIT_STEP, START_STEP),

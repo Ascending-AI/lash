@@ -413,6 +413,7 @@ async fn read_session_state_version_tx(
 }
 
 mod admission;
+pub(crate) mod shift_admission;
 pub(crate) use admission::{
     admit_at_checkpoint_postgres, admit_run_postgres, open_session_command_run_postgres,
 };

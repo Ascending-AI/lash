@@ -46,6 +46,8 @@ pub struct PluginTransitionRecord {
     pub source: crate::BlobRef,
     pub namespaces: BTreeMap<String, Result<PluginNamespaceState, PluginError>>,
     pub config: Result<PluginConfig, FormatRefusal>,
+    /// The executor bound from the converted candidate by the recorded transition.
+    pub generation: Option<crate::ExecutableGeneration>,
     pub publication: Option<Box<crate::store::RuntimeCommit>>,
 }
 
@@ -112,12 +114,60 @@ impl PluginHost {
             source: super::state::state_ref(state),
             namespaces,
             config: native_config,
+            generation: None,
             publication: None,
         }
     }
 }
 
 impl PluginSession {
+    /// Bind the recorded native candidate privately, preserving this session's
+    /// factory context. Publication installs the candidate on the resident session.
+    pub fn materialize_transition_candidate(
+        self: &std::sync::Arc<Self>,
+        record: &PluginTransitionRecord,
+    ) -> Result<std::sync::Arc<Self>, PluginError> {
+        let (state, config) = record.candidate()?;
+        if self.is_materialized() {
+            return Ok(std::sync::Arc::clone(self));
+        }
+        let authority = self.live_authority();
+        let mut plugin_config = authority.plugin_config;
+        plugin_config.config = std::sync::Arc::new(config);
+        let config = SessionAuthorityContext {
+            tool_access: authority.tool_access,
+            subagent: authority.subagent,
+            plugin_config,
+        };
+        let materialization = match self.materialization {
+            PluginSessionMaterialization::Creation => {
+                PluginSessionMaterializationRequest::Creation {
+                    config,
+                    seed_snapshot: Some(&state),
+                }
+            }
+            PluginSessionMaterialization::Rematerialization => {
+                PluginSessionMaterializationRequest::Rematerialization {
+                    snapshot: &state,
+                    config,
+                }
+            }
+        };
+        let candidate = self
+            .host
+            .isolated_registry()
+            .defer_session(PluginSessionRequest {
+                owner: self.owner.clone(),
+                parent_session_id: self.parent_session_id.clone(),
+                materialization,
+                tool_catalog_overlay: self.tool_catalog_overlay.clone(),
+                tool_snapshot: self.tool_snapshot.clone(),
+            })?;
+        candidate.adopt_plugin_transition(record)?;
+        candidate.materialize()?;
+        Ok(candidate)
+    }
+
     /// Install a journaled complete result without calling a converter.
     pub fn adopt_plugin_transition(
         &self,
@@ -130,6 +180,7 @@ impl PluginSession {
         *self.native_view.lock_recover() = Some(PluginNativeView {
             request: record.request.clone(),
             source: record.source.clone(),
+            generation: record.generation.clone(),
             state: candidate.clone(),
             config: config.clone(),
         });
@@ -149,6 +200,7 @@ impl PluginSession {
 pub struct PluginNativeView {
     pub request: PluginTransitionRequest,
     pub source: crate::BlobRef,
+    pub generation: Option<crate::ExecutableGeneration>,
     pub state: PluginState,
     pub config: PluginConfig,
 }

@@ -61,7 +61,6 @@ use crate::{PendingTurnInputDraft, RuntimeStore, SessionHeadMeta, ShiftFence, St
 
 mod admission_crash_cells;
 mod after_commit_redrive;
-mod cancel_closure;
 mod direct_acceptance;
 mod error_return;
 mod expectations;
@@ -80,7 +79,6 @@ pub use admission_crash_cells::{
     a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles_nothing_twice,
 };
 pub use after_commit_redrive::turn_crash_after_commit_redrive_replays_the_committed_receipt;
-pub use cancel_closure::turn_cancel_closure_recovers_from_a_crash_at_every_cut;
 pub use direct_acceptance::direct_turn_acceptance_crash_after_store_commit_admits_one_row;
 use error_return::{ErrorReturnPlacement, ErrorReturnRuling, ErrorReturnRulingEntry};
 pub use error_return::{
@@ -1043,22 +1041,6 @@ async fn seed_reference_ingress_as(
         ))
         .await
         .expect("seed queued work");
-}
-
-/// Drain the reference turn through the session shift on the controller a
-/// tier's runner lent it.
-async fn execute_run_on(
-    mut runtime: crate::LashRuntime,
-    scoped: crate::ScopedEffectController<'_>,
-) -> Result<Option<crate::AssembledTurn>, crate::RuntimeError> {
-    Box::pin(
-        runtime.execute_one_admitted_queued_run(crate::TurnOptions::new(
-            tokio_util::sync::CancellationToken::new(),
-            scoped,
-        )),
-    )
-    .await
-    .map(crate::facade_support::QueuedTurnDrain::ran)
 }
 
 /// Park the turn at `control`'s armed point and fire `crash` there: the crash

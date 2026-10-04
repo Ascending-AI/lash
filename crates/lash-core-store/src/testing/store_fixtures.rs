@@ -307,6 +307,7 @@ pub fn admit_run_request_for_test(
     head: crate::store::AdmittedHead,
 ) -> crate::store::AdmitRunRequest {
     crate::store::AdmitRunRequest {
+        unsealed_epoch: None,
         fence: fence.clone(),
         run: run.clone(),
         head,
@@ -319,7 +320,6 @@ pub fn admit_run_request_for_test(
             checkpoint: None,
         },
         turn_index: 1,
-        generation: None,
         admitted_generation: crate::build_generation::BuildGeneration::for_test("conformance"),
         executor: crate::store::RunExecutor::run(&crate::store::AdmissionId::new("fixture#0")),
         plugins: Default::default(),

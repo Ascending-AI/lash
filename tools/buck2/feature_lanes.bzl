@@ -1155,7 +1155,7 @@ FEATURE_LANE_TEST_ARGS = {
         "synthetic_next_and_plain_workers_refuse_each_other_at_the_handshake"
     ],
     "//crates/lash:lash__unit_test__fv_f554e6b8": [
-        "formats::tests::plugin_transition_generation::the_merged_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane",
+        "formats::tests::plugin_transition_generation::atomic_root_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane",
         "--exact"
     ]
 }

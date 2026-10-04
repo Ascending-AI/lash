@@ -1,44 +1,12 @@
-//! The session shift: every turn runs through one shift body whose admission
-//! is a recorded step (FIG-3600, ADR 0104 O1/O2/O6, ADR 0105 §2).
-//!
-//! A shift of one session loops: a recorded `AdmitShift` step decides what
-//! runs next (an unfinished run it resumes, a follow-on the head owes, or
-//! the queue prefix it takes, minting the run), a recorded `SealShiftAdmission` step raises the
-//! session's shift epoch for that admission, and the run's turns run to
-//! their terminal commit. It stops when admission answers anything but an
-//! admitted run. What the shift decides is recorded: a redrive replays the
-//! admission and the seal, and the run replays its recorded admission and the
-//! head that admission ran on (FIG-3682).
-//!
-//! The run's admission body repairs orphaned inputs before it binds the admitted
-//! head and records whether that head is ready, advanced, overtaken, or
-//! divergent in the admission outcome. A redrive reads that outcome from its journal
-//! and issues no second repair. The inspection's body is the shift's one live
-//! head check, and it runs only when the admission is the attempt's live
-//! frontier; a redrive honours the recorded verdict at every position
-//! (FIG-4058), and the turn's fenced commit meets a head that moved since as
-//! a typed refusal. The check cannot select new work or change the admission's
-//! recorded base (ADR 0105 §2). A follow-on recovery run records its
-//! decision instead, `RecoverFollowOn`, whose body raises the recovery count
-//! and retains the head the follow-on's turn runs on, and whose answer, with
-//! that head and the turn's index, the run executes on every replay (FIG-4361,
-//! FIG-4380).
-//! Rule 6 of the substrate lint pins direct store calls and the orphan-repair
-//! helper in the shift.
-//!
-//! The shift epoch fences admission and repairs admissions left by older epochs.
-//! Commit CAS still protects the session head from stale writes.
-//!
-//! The shift names no engine. An engine that runs shifts in process hands
-//! [`work_session`] one controller, and the shift rescopes it per step
-//! ([`shift_admission_scope`], [`shift_run_scope`]). An engine that splits
-//! the shift over its own handlers calls [`admit_shift`] from its
-//! per-session handler and [`execute_admitted_run`] from its per-run handler.
-//!
-//! [`shift_admission_scope`]: crate::engine::shift_admission_scope
-//! [`shift_run_scope`]: crate::engine::shift_run_scope
+//! The session shift. Its root records an OS-random nonce, then the
+//! transaction that selects and seals work, binds its rows and cancellation
+//! authority, validates the head, and retains the exact admission receipt.
+//! Execution consumes that recorded receipt; retries never select at a
+//! position the root journal already answered.
 
 mod admission;
+mod materializer;
+pub use materializer::{ShiftAdmissionMaterializer, ShiftAdmissionTemplate};
 #[cfg(test)]
 mod attempt_drop_tests;
 mod close;
@@ -77,7 +45,6 @@ use std::sync::Arc;
 use crate::engine::{
     AdmitRequest, AdmitVerdict, Admitted, RunOutcome, ShiftAbort, ShiftLoop, ShiftOutcome,
     ShiftRequest, ShiftStop, shift_admission_replay_key, shift_admission_scope, shift_run_scope,
-    shift_run_start_replay_key, shift_seal_replay_key,
 };
 use crate::runtime::LashRuntime;
 use crate::{
@@ -176,7 +143,7 @@ impl RunExecution {
             terminal_written: false,
             work_remaining: true,
             trace_scope: None,
-            cancel_intent: None,
+            cancel_intent: admitted.root().map(|root| root.cancel_intent.clone()),
         }
     }
 
@@ -386,7 +353,10 @@ pub async fn admit_shift(
 #[doc(hidden)]
 pub async fn admit_shift_on_store(
     host: &crate::RuntimeHostConfig,
-    store: crate::store::SessionStore,
+    store: (
+        crate::store::SessionStore,
+        Arc<dyn ShiftAdmissionMaterializer>,
+    ),
     controller: &ScopedEffectController<'_>,
     request: &ShiftRequest,
     admitting_generation: &crate::engine::BuildGeneration,
@@ -422,13 +392,17 @@ struct AdmissionAuthority<'a> {
 /// runs the shift admits.
 async fn admit_on_store(
     host: &crate::RuntimeHostConfig,
-    store: crate::store::SessionStore,
+    store: (
+        crate::store::SessionStore,
+        Arc<dyn ShiftAdmissionMaterializer>,
+    ),
     controller: &ScopedEffectController<'_>,
     request: &ShiftRequest,
     authority: AdmissionAuthority<'_>,
     ordinal: u32,
     draining: Option<&crate::engine::BuildGeneration>,
 ) -> Result<AdmitVerdict, ShiftAbort> {
+    let (store, materializer) = store;
     // A generation this build cannot run is refused typed before anything
     // is admitted (FIG-3619): the recorded step's first read is that same
     // gate, so no unrecorded read precedes it here. The session's own
@@ -445,7 +419,11 @@ async fn admit_on_store(
         request,
         authority,
         ordinal,
-        Some((store, Arc::clone(&host.clock))),
+        Some(AdmissionStore {
+            store,
+            clock: Arc::clone(&host.clock),
+            materializer,
+        }),
         host.session_store_factory(),
         draining.map(|generation| admission::DrainRead {
             marks: host.backend().generation_drain(),
@@ -453,6 +431,12 @@ async fn admit_on_store(
         }),
     )
     .await
+}
+
+struct AdmissionStore {
+    store: crate::store::SessionStore,
+    clock: Arc<dyn crate::Clock>,
+    materializer: Arc<dyn ShiftAdmissionMaterializer>,
 }
 
 /// Emit admission `ordinal`'s journaled `AdmitShift` step through
@@ -467,7 +451,7 @@ async fn emit_admission_step(
     request: &ShiftRequest,
     authority: AdmissionAuthority<'_>,
     ordinal: u32,
-    store: Option<(crate::store::SessionStore, Arc<dyn crate::Clock>)>,
+    store: Option<AdmissionStore>,
     stores: Arc<dyn crate::DeploymentStore>,
     drain: Option<admission::DrainRead>,
 ) -> Result<AdmitVerdict, ShiftAbort> {
@@ -481,10 +465,47 @@ async fn emit_admission_step(
         RuntimeAttribution::for_session(request.session.clone()),
         format!("shift-admission-{ordinal}"),
     );
+    let identity = admission::admission_id(&request.request, ordinal);
+    let start = RuntimeEffectInvocation::new(
+        EffectAddress::new(
+            scope.scope().clone(),
+            format!("shift-run-start:{}", identity.as_str()),
+        )
+        .map_err(|error| ShiftAbort::Refused(RuntimeError::from(error)))?,
+        RuntimeAttribution::for_session(request.session.clone()),
+        format!("shift-run-start-{ordinal}"),
+    );
+    let run_start = controller
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                start,
+                RuntimeEffectCommand::DrawRunStart {
+                    admission: identity.clone(),
+                },
+            ),
+            lash_core_execution::core_internal::owned_runner_executor(
+                Box::new(crate::runtime::run_start::DrawRunStartRunner {
+                    admission: identity,
+                }),
+                None,
+            ),
+        )
+        .await
+        .and_then(crate::RuntimeEffectOutcome::into_draw_run_start)
+        .map_err(|error| controller_abort(None, error))?;
     let admit_request = AdmitRequest {
         session: request.session.clone(),
         request: request.request.clone(),
         build_generation: authority.generation.clone(),
+        run_start,
+    };
+    let (store, materializer) = match store {
+        Some(AdmissionStore {
+            store,
+            clock,
+            materializer,
+        }) => (Some((store, clock)), Some(materializer)),
+        None => (None, None),
     };
     controller
         .execute_effect(
@@ -497,6 +518,13 @@ async fn emit_admission_step(
             lash_core_execution::core_internal::owned_runner_executor(
                 Box::new(admission::AdmitShiftRunner {
                     store,
+                    materializer,
+                    run_scope: matches!(
+                        controller.execution_scope(),
+                        crate::ExecutionScope::Process { .. }
+                            | crate::ExecutionScope::RuntimeOperation { .. }
+                    )
+                    .then(|| controller.admitted_scope().clone()),
                     stores,
                     request: admit_request,
                     ordinal,
@@ -564,16 +592,7 @@ pub async fn execute_admitted_run_retired(
     controller: &ScopedEffectController<'_>,
     admitted: Admitted,
 ) -> Result<RunOutcome, ShiftAbort> {
-    let scope = controller.admitted_scope().clone();
-    // No store is open, so the seal names no executor to one.
-    let verdict = Box::pin(mark_and_seal_run(
-        controller,
-        &scope,
-        &admitted,
-        None,
-        crate::store::RunExecutor::run(admitted.admission()),
-    ))
-    .await?;
+    let verdict = recorded_seal(&admitted)?;
     if let crate::engine::SealVerdict::Refused(refusal) = verdict {
         return Ok(RunOutcome::Refused {
             run: admitted.run().clone(),
@@ -636,7 +655,7 @@ pub async fn execute_admitted_run_retired(
 
 /// Run `admitted`'s run to its terminal through `controller`, which must
 /// serve [`shift_run_scope`](crate::engine::shift_run_scope) for the run:
-/// the recorded `SealShiftAdmission` step, then the run's turns (a frame
+/// the retained atomic admission, then the run's turns (a frame
 /// switch's follow-on turns included) and their commits, then, for a run
 /// that ended, its recorded scope close in the same journal.
 pub async fn execute_admitted_run(
@@ -1007,7 +1026,13 @@ impl LashRuntime {
             .clone();
         Box::pin(admit_on_store(
             &self.host.core,
-            store,
+            (
+                store,
+                Arc::new(
+                    self.shift_admission_template()
+                        .map_err(ShiftAbort::Refused)?,
+                ),
+            ),
             controller,
             request,
             AdmissionAuthority {
@@ -1190,7 +1215,6 @@ impl LashRuntime {
         close: RunClose<'_>,
         executor: crate::store::RunExecutor,
     ) -> Result<ExecutedRun, ShiftAbort> {
-        let store = self.shift_store()?;
         let run = admitted.run().clone();
         // A run executes under its own turn scope (FIG-3607 contract 4), except
         // under a caller whose scope is a process or a runtime operation: a
@@ -1204,15 +1228,8 @@ impl LashRuntime {
         let host = Arc::clone(&self.host.core.control.effect_host);
         let run_controller = step_controller(controller, host.as_ref(), scope.clone())
             .map_err(ShiftAbort::Refused)?;
-        let marked = Box::pin(mark_and_seal_run(
-            &run_controller,
-            &scope,
-            &admitted,
-            Some(store),
-            executor.clone(),
-        ))
-        .await;
-        let fence = match marked? {
+        let marked = recorded_seal(&admitted)?;
+        let fence = match marked {
             crate::engine::SealVerdict::Sealed(fence) => fence,
             crate::engine::SealVerdict::Refused(refusal) => {
                 return Ok(ExecutedRun {
@@ -1411,70 +1428,30 @@ async fn emit_close_step(
         .map_err(|error| controller_abort(Some(run), error))
 }
 
-/// Draw this execution's start marker in the run's own journal, then seal
-/// the admission with it (ADR 0105 §2, L-S8). `store` is the session's
-/// history store, or `None` when the engine could not open the session at
-/// all — its close or tombstone already committed — in which case the seal's
-/// recorded body is the retirement itself (FIG-3881). `executor` is the
-/// execution that executes the run, which the seal records in its own
-/// transaction (FIG-4814).
-async fn mark_and_seal_run(
-    run_controller: &ScopedEffectController<'_>,
-    scope: &crate::AdmittedScope,
-    admitted: &Admitted,
-    store: Option<crate::store::SessionStore>,
-    executor: crate::store::RunExecutor,
-) -> Result<crate::engine::SealVerdict, ShiftAbort> {
-    let run = admitted.run().clone();
-    // The execution's start marker, drawn in the run's own journal before
-    // the seal: a retry replays it, an execution that cannot read the
-    // journal draws another, and the seal refuses that one (L-S8).
-    let start = RuntimeEffectInvocation::new(
-        EffectAddress::new(scope.scope().clone(), shift_run_start_replay_key(admitted))
-            .map_err(|error| ShiftAbort::Refused(RuntimeError::from(error)))?,
-        RuntimeAttribution::for_turn_admission(admitted.session().clone(), run.clone()),
-        format!("{run}.shift-run-start"),
-    );
-    let run_start = run_controller
-        .execute_effect(
-            RuntimeEffectEnvelope::new(
-                start,
-                RuntimeEffectCommand::DrawRunStart { run: run.clone() },
-            ),
-            lash_core_execution::core_internal::owned_runner_executor(
-                Box::new(crate::runtime::run_start::DrawRunStartRunner { run: run.clone() }),
-                None,
-            ),
-        )
-        .await
-        .and_then(crate::RuntimeEffectOutcome::into_draw_run_start)
-        .map_err(|error| controller_abort(Some(&run), error))?;
-    let invocation = RuntimeEffectInvocation::new(
-        EffectAddress::new(scope.scope().clone(), shift_seal_replay_key(admitted))
-            .map_err(|error| ShiftAbort::Refused(RuntimeError::from(error)))?,
-        RuntimeAttribution::for_turn_admission(admitted.session().clone(), run.clone()),
-        format!("{run}.shift-seal"),
-    );
-    let verdict = run_controller
-        .execute_effect(
-            RuntimeEffectEnvelope::new(
-                invocation,
-                RuntimeEffectCommand::SealShiftAdmission {
-                    admitted: Box::new(admitted.clone()),
-                },
-            ),
-            lash_core_execution::core_internal::owned_runner_executor(
-                Box::new(admission::SealShiftRunner {
-                    store,
-                    admitted: admitted.clone(),
-                    run_start,
-                    executor,
-                }),
-                None,
-            ),
-        )
-        .await
-        .and_then(crate::RuntimeEffectOutcome::into_seal_shift_admission)
-        .map_err(|error| controller_abort(Some(&run), error))?;
-    Ok(verdict)
+fn recorded_seal(admitted: &Admitted) -> Result<crate::engine::SealVerdict, ShiftAbort> {
+    let root = admitted.root().ok_or_else(|| {
+        ShiftAbort::Refused(RuntimeError::new(
+            RuntimeErrorCode::RuntimeStoreCorrupt,
+            "run lacks its recorded root admission",
+        ))
+    })?;
+    Ok(match &root.seal {
+        crate::store::ShiftEpochSeal::Sealed(fence) => {
+            crate::engine::SealVerdict::Sealed(fence.clone())
+        }
+        crate::store::ShiftEpochSeal::Superseded { epoch } => {
+            crate::engine::SealVerdict::Refused(crate::engine::SealRefusal::Superseded {
+                epoch: *epoch,
+            })
+        }
+        crate::store::ShiftEpochSeal::ExecutionLost => {
+            crate::engine::SealVerdict::Refused(crate::engine::SealRefusal::ExecutionLost)
+        }
+        crate::store::ShiftEpochSeal::HeldByAnotherExecutor { .. } => {
+            return Err(ShiftAbort::Refused(RuntimeError::new(
+                RuntimeErrorCode::SessionRunPending,
+                "root admission is held by another executor",
+            )));
+        }
+    })
 }

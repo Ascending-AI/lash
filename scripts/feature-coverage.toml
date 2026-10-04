@@ -600,5 +600,5 @@ commands = [
 [[lane]]
 name = "turn-admission-synthetic-next"
 commands = [
-  ["cargo", "test", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "restate,testing,synthetic-next", "--locked", "formats::tests::plugin_transition_generation::the_merged_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane", "--", "--exact"],
+  ["cargo", "test", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "restate,testing,synthetic-next", "--locked", "formats::tests::plugin_transition_generation::atomic_root_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane", "--", "--exact"],
 ]

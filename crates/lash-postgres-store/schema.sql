@@ -559,6 +559,13 @@ CREATE TABLE IF NOT EXISTS lash_session_ingress_sequence (
 -- run that executes it. `lash_control_intents` records an operator's verb or a
 -- session's close; a `close_session` row outlives its session as the
 -- deletion tombstone.
+CREATE TABLE IF NOT EXISTS lash_session_shift_admissions (
+    session_id TEXT NOT NULL,
+    admission TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, admission)
+);
+
 CREATE TABLE IF NOT EXISTS lash_session_runs (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,

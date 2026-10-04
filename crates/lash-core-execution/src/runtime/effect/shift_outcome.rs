@@ -19,18 +19,6 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_run_admission(
-        self,
-    ) -> Result<crate::store::RunAdmissionAnswer, RuntimeEffectControllerError> {
-        match self {
-            Self::AdmitRun { answer } => Ok(answer),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::AdmitRun,
-                other.kind(),
-            )),
-        }
-    }
-
     pub fn into_follow_on_recovery(
         self,
     ) -> Result<crate::store::FollowOnRecoveryAnswer, RuntimeEffectControllerError> {
@@ -84,18 +72,6 @@ impl RuntimeEffectOutcome {
             Self::BeginSessionClose { intent } => Ok(intent.map(|intent| *intent)),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::BeginSessionClose,
-                other.kind(),
-            )),
-        }
-    }
-
-    pub fn into_seal_shift_admission(
-        self,
-    ) -> Result<crate::engine::SealVerdict, RuntimeEffectControllerError> {
-        match self {
-            Self::SealShiftAdmission { verdict } => Ok(*verdict),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::SealShiftAdmission,
                 other.kind(),
             )),
         }

@@ -3,8 +3,7 @@
 //! level-one crash matrix, the FIG-3524 error-return sweep and the
 //! after-commit redrive (FIG-3547, the FIG-3561 port), the host-layer law
 //! over group children, the FIG-3571 generation-refusal pair, the
-//! direct-acceptance crash after its store commit, and the turn-cancel
-//! closure across a crash at each of its cuts.
+//! direct-acceptance crash after its store commit.
 
 use std::sync::Arc;
 
@@ -53,7 +52,3 @@ lash_conformance::turn_crash_after_commit_redrive_tests!({ turn_crash_runner_fix
 lash_conformance::turn_crash_admission_cells_tests!({ turn_crash_runner_fixture().await });
 
 lash_conformance::turn_crash_direct_acceptance_tests!({ turn_crash_runner_fixture().await });
-
-// Every closure cut recovers through the session shift, the one inside the
-// store write that applies the input effects included (FIG-3736).
-lash_conformance::turn_crash_cancel_closure_tests!({ turn_crash_runner_fixture().await });

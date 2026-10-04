@@ -56,6 +56,7 @@ pub(super) struct SurfaceScratch {
 /// One fallible store-trait method, executed as a compared differential step.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SurfaceMethod {
+    RefusedRootAdmission,
     ToolReceipts,
     WaitReceipts,
     LoadSession,
@@ -231,6 +232,7 @@ pub(super) enum SurfaceMethod {
 impl SurfaceMethod {
     pub(super) fn label(self) -> &'static str {
         match self {
+            Self::RefusedRootAdmission => "surface:refused_root_admission",
             Self::ToolReceipts => "surface:tool_receipts",
             Self::WaitReceipts => "surface:wait_receipts",
             Self::LoadSession => "surface:load_session",
@@ -518,6 +520,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
                 slot: LeaseSlot::First,
                 owner: "surface-sweep-owner",
             },
+            surface(SurfaceMethod::RefusedRootAdmission),
             surface(SurfaceMethod::ToolReceipts),
             surface(SurfaceMethod::WaitReceipts),
             surface(SurfaceMethod::ReadSessionStateVersion),
@@ -914,6 +917,62 @@ impl BackendRunner {
             .clone()
             .unwrap_or_else(|| unheld_shift_fence(&session_id));
         let answer = match method {
+            SurfaceMethod::RefusedRootAdmission => {
+                let identity = lash_core::store::AdmissionId::new("surface-root#0");
+                let executor = lash_core::store::RunExecutor::run(&identity);
+                assert!(
+                    store
+                        .read_shift_admission(&session_id, &identity)
+                        .await?
+                        .is_none()
+                );
+                let mut preparation = store
+                    .prepare_shift_admission(&session_id, &identity, &executor)
+                    .await?;
+                let Some(mut selection) = preparation.selection.take() else {
+                    panic!("the seeded surface turn is pending");
+                };
+                let head = match &selection.work {
+                    lash_core::store::AdmittedWork::Input { head } => {
+                        lash_core::store::AdmittedHead::Input(head.clone())
+                    }
+                    lash_core::store::AdmittedWork::Queued { head } => {
+                        lash_core::store::AdmittedHead::Batch(head.clone())
+                    }
+                    other => panic!("surface root has turn work: {other:?}"),
+                };
+                let mut run = surface_admit_request(
+                    &preparation.prospective_fence,
+                    selection.run.clone(),
+                    head,
+                );
+                run.executor = executor.clone();
+                run.unsealed_epoch = Some(preparation.epoch.epoch);
+                let Some(run) = store.prepare_run_admission(&run).await? else {
+                    panic!("the surface composition reaches its head");
+                };
+                selection.observed_epoch += 1;
+                preparation.selection = Some(selection);
+                let result = store
+                    .commit_shift_admission(
+                        &lash_core::store::ShiftAdmissionWrite {
+                            session_id: session_id.clone(),
+                            admission: identity,
+                            run_start: lash_core::engine::RunStartNonce::new("surface-nonce"),
+                            executor,
+                            preparation,
+                            run: Some(run),
+                        },
+                        &lash_core::TraceAnchor::Untraced,
+                    )
+                    .await;
+                assert!(
+                    matches!(result, Err(StoreError::PreparedRunAdmissionStale { .. })),
+                    "changed root selection is refused: {result:?}"
+                );
+                "selection_changed_without_writes".to_owned()
+            }
+
             SurfaceMethod::ToolReceipts => tool_receipt_law(store.as_ref(), &session_id).await?,
             SurfaceMethod::WaitReceipts => wait_receipt_law(store.as_ref(), &session_id).await?,
             SurfaceMethod::LoadSession => {

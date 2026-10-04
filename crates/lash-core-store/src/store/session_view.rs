@@ -126,6 +126,7 @@ macro_rules! carries_session_field {
 carries_session_field! {
     RuntimeCommit => |request| &request.session_id;
     ShiftFence => |request| request.session();
+    ShiftAdmissionWrite => |request| &request.session_id;
     AdmitRunRequest => |request| request.fence.session();
     PreparedRunAdmission => |request| request.session_id();
     CheckpointAdmissionRequest => |request| request.fence.session();

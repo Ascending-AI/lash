@@ -200,6 +200,7 @@ impl SessionShifts for RollShifts {
             RuntimeEffectInvocation::new(address, RuntimeAttribution::default(), "admit-shift"),
             RuntimeEffectCommand::AdmitShift {
                 request: Box::new(lash_core::engine::AdmitRequest {
+                    run_start: lash_core::engine::RunStartNonce::new("fixture"),
                     session: request.session.clone(),
                     request: request.request.clone(),
                     build_generation: admitting_generation.clone(),

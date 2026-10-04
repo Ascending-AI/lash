@@ -85,8 +85,7 @@ impl InterruptedTurnClosure {
         self.settlement.authorization().turn_id()
     }
 
-    /// Cancellation evidence selected by the final intent read, or by the
-    /// settled gate for an admission without a cancellation snapshot.
+    /// Cancellation evidence selected by the final intent read.
     #[must_use]
     pub fn cancellation(&self) -> Option<&crate::TurnCancellationEvidence> {
         self.settlement.effective_cancellation()
@@ -812,9 +811,9 @@ impl RuntimeCommit {
         if self.turn_commit.operation.key != "final" {
             return Ok(false);
         }
-        let Some(admitted) = admitted else {
-            return Ok(false);
-        };
+        let admitted = admitted.ok_or_else(|| {
+            StoreError::Backend("final turn lacks its admitted cancellation snapshot".into())
+        })?;
         let turn_id = self
             .turn_commit
             .operation

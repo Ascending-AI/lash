@@ -75,6 +75,7 @@ impl LashRuntime {
         let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
         let runner = PluginTransitionRunner {
             host: self.services.plugins.host().clone(),
+            plugins: std::sync::Arc::clone(&self.services.plugins),
             store: self.shift_store()?,
             initial: self.state.clone(),
             raw_plugins: self.services.plugins.export_state(),
@@ -126,6 +127,7 @@ impl LashRuntime {
         fence: &crate::store::ShiftFence,
         resume: Option<&crate::store::SessionHeadRef>,
     ) -> Result<(), crate::RuntimeError> {
+        let generation = record.generation.clone();
         let store = self.shift_store().map_err(ShiftAbort::into_error)?;
         let crate::plugin::PluginTransitionBase::Session { head } = &record.request.base else {
             return Err(crate::RuntimeError::new(
@@ -193,12 +195,14 @@ impl LashRuntime {
         }
         Box::pin(self.materialize_published_session())
             .await
-            .map_err(session_error)
+            .map_err(session_error)?;
+        crate::runtime::turn_loop::generation_fence::admit(self, generation.as_ref())
     }
 }
 
 struct PluginTransitionRunner {
     host: crate::PluginHost,
+    plugins: std::sync::Arc<crate::PluginSession>,
     store: crate::store::SessionStore,
     initial: crate::RuntimeSessionState,
     raw_plugins: crate::PluginState,
@@ -292,6 +296,7 @@ impl RuntimeEffectLocalRunner for PluginTransitionRunner {
                         .map(|(id, state)| (id, Ok(state)))
                         .collect(),
                     config: Ok(view.config),
+                    generation: view.generation,
                     publication: None,
                 }),
             });
@@ -367,9 +372,14 @@ impl RuntimeEffectLocalRunner for PluginTransitionRunner {
             .unwrap_or(&state.authority.plugin_config);
         let mut record = self.host.transition_plugins(*request, &plugins, config);
         if let Ok((native_state, native_config)) = record.candidate() {
+            let candidate = self.plugins.materialize_transition_candidate(&record)?;
+            record.generation = candidate
+                .code_executor()
+                .and_then(|executor| executor.executable_generation());
             let view = crate::plugin::PluginNativeView {
                 request: record.request.clone(),
                 source: record.source.clone(),
+                generation: record.generation.clone(),
                 state: native_state.clone(),
                 config: native_config.clone(),
             };
@@ -414,6 +424,3 @@ fn session_error(error: crate::SessionError) -> crate::RuntimeError {
         ),
     }
 }
-
-#[cfg(test)]
-mod tests;

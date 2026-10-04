@@ -70,25 +70,6 @@ pub fn turn_acceptance_effect_invocation(
     )
 }
 
-/// Invocation for the journaled initial shift set of an accepted turn input
-/// (ADR 0069 §6).
-///
-/// The shift is a child of the acceptance's admission: same execution scope and
-/// attribution, a replay key derived from the acceptance's, and a causal edge
-/// back to it. Nothing about the lease that performs the admission enters the
-/// identity, so every lease generation replays the same entry.
-pub fn turn_input_shift_effect_invocation(
-    acceptance: &RuntimeEffectInvocation,
-) -> RuntimeEffectInvocation {
-    let kind = RuntimeEffectKind::AdmitRun.as_str();
-    child_effect_invocation_from_effect(
-        acceptance.execution_scope(),
-        acceptance,
-        format!("{}.{kind}", acceptance.effect_id()),
-        kind,
-    )
-}
-
 /// Invocation for a later phase of a staged turn effect (FIG-1276).
 ///
 /// The phase carries its own effect id — `<id>.<kind>` — so its journal entry,
@@ -860,59 +841,6 @@ mod tests {
                 "{tail}"
             );
         }
-    }
-
-    #[test]
-    fn turn_invocations_use_admitted_scope_without_losing_turn_attribution() {
-        let session_id = SessionId::from("session:subagent:call");
-        let turn_id = TurnId::from("process:subagent:call");
-        let process_scope =
-            ExecutionScope::process(crate::process_id_for_test("process:subagent:call"));
-
-        let effect = turn_effect_invocation(
-            &process_scope,
-            &session_id,
-            &turn_id,
-            3,
-            5,
-            EffectId(7),
-            RuntimeEffectKind::LlmCall,
-        );
-        assert_eq!(effect.execution_scope(), &process_scope);
-        assert_eq!(effect.attribution.session_id.as_ref(), Some(&session_id));
-        assert_eq!(effect.attribution.turn_id.as_ref(), Some(&turn_id));
-        assert_eq!(effect.attribution.turn_index, Some(3));
-        assert_eq!(effect.attribution.protocol_iteration, Some(5));
-        assert_eq!(
-            effect.effect_replay_key(),
-            "session:subagent:call:process:subagent:call:3:5:llm_call:7"
-        );
-
-        let acceptance = turn_acceptance_effect_invocation(&process_scope, &session_id, &turn_id);
-        assert_eq!(acceptance.execution_scope(), &process_scope);
-        assert_eq!(
-            acceptance.attribution.session_id.as_ref(),
-            Some(&session_id)
-        );
-        assert_eq!(acceptance.attribution.turn_id.as_ref(), Some(&turn_id));
-        // The shift fixes the turn index; nothing before it names one
-        // (FIG-3682).
-        assert_eq!(acceptance.attribution.turn_index, None);
-        assert_eq!(acceptance.attribution.protocol_iteration, None);
-        assert_eq!(
-            acceptance.effect_replay_key(),
-            "session:subagent:call:process:subagent:call:accept_turn_input"
-        );
-
-        let shift = turn_input_shift_effect_invocation(&acceptance);
-        assert_eq!(shift.execution_scope(), &process_scope);
-        assert_eq!(shift.attribution, acceptance.attribution);
-        assert_eq!(
-            shift.effect_replay_key(),
-            "session:subagent:call:process:subagent:call:accept_turn_input:admit_run"
-        );
-        assert_eq!(shift.effect_id(), "process:subagent:call.accept.admit_run");
-        assert_eq!(shift.caused_by, Some(acceptance.causal_ref()));
     }
 
     #[test]

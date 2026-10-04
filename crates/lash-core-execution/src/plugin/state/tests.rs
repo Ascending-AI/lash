@@ -1183,6 +1183,7 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
     let request = transition_request("read-only-owner", &host);
     let record = host.transition_plugins(request, &Default::default(), &Default::default());
     let view = crate::plugin::PluginNativeView {
+        generation: None,
         request: record.request.clone(),
         source: record.source.clone(),
         state: record.candidate().unwrap().0,

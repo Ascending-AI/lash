@@ -511,6 +511,11 @@ table lash_session_runs
   unique (obligation_id)
   unique (session_id) where (admission_json is not null) and (terminal_kind is null)
   primary-key (session_id, run)
+table lash_session_shift_admissions
+  column admission text not-null
+  column receipt_json text not-null
+  column session_id text not-null
+  primary-key (session_id, admission)
 table lash_session_terminal_changes
   column change_seq bigint not-null
   column fault_json text nullable

@@ -119,6 +119,61 @@ fn commit<T>(outcome: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Resul
     })
 }
 
+pub(crate) fn seal_shift_epoch_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    admission: &AdmissionId,
+    observed_epoch: u64,
+    run_start: &RunStartNonce,
+    hold: Option<&RunHold>,
+) -> Result<ShiftEpochSeal, StoreError> {
+    ensure_session_not_deleted_conn(tx, session_id)?;
+    let stored = shift_epoch_conn(tx, session_id)?;
+    match decide_shift_epoch_seal(session_id, &stored, admission, observed_epoch, run_start) {
+        ShiftEpochSealDecision::Answer(seal) => Ok(seal),
+        ShiftEpochSealDecision::Raise { next } => {
+            // The recorded executor of the run keeps its
+            // fence (FIG-4814).
+            if let Some(hold) = hold
+                && let Some(refused) = decide_run_hold(
+                    hold,
+                    stored.epoch,
+                    crate::session_runs::held_run_conn(tx, session_id, &hold.run)?.as_ref(),
+                    crate::session_runs::unfinished_run_conn(tx, session_id)?.as_ref(),
+                    super::turn_cancel::pending_follow_on_conn(tx, session_id)?.as_ref(),
+                )
+            {
+                return Ok(refused);
+            }
+            let changed = tx
+                .execute(
+                    session_sql().meta.seal_shift_epoch.sql(),
+                    params![
+                        session_id.as_str(),
+                        sql_counter_value("shift_epoch", observed_epoch)?,
+                        sql_counter_value("shift_epoch", next)?,
+                        admission.as_str(),
+                        run_start.as_str()
+                    ],
+                )
+                .map_err(sqlite_error)?;
+            if changed != 1 {
+                return Ok(ShiftEpochSeal::Superseded {
+                    epoch: shift_epoch_conn(tx, session_id)?.epoch,
+                });
+            }
+            if let Some(hold) = hold {
+                crate::session_runs::record_run_hold_conn(tx, session_id, hold)?;
+            }
+            Ok(ShiftEpochSeal::Sealed(sealed_shift_fence(
+                session_id.clone(),
+                next,
+                admission.clone(),
+            )))
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl ShiftEpochStore for SqliteStore {
     async fn seal_shift_epoch(
@@ -135,62 +190,14 @@ impl ShiftEpochStore for SqliteStore {
         let hold = hold.cloned();
         self.conn
             .write_flow(move |tx| {
-                commit((|| {
-                    ensure_session_not_deleted_conn(tx, &session_id)?;
-                    let stored = shift_epoch_conn(tx, &session_id)?;
-                    match decide_shift_epoch_seal(
-                        &session_id,
-                        &stored,
-                        &admission,
-                        observed_epoch,
-                        &run_start,
-                    ) {
-                        ShiftEpochSealDecision::Answer(seal) => Ok(seal),
-                        ShiftEpochSealDecision::Raise { next } => {
-                            // The recorded executor of the run keeps its
-                            // fence (FIG-4814).
-                            if let Some(hold) = &hold
-                                && let Some(refused) = decide_run_hold(
-                                    hold,
-                                    stored.epoch,
-                                    crate::session_runs::held_run_conn(tx, &session_id, &hold.run)?
-                                        .as_ref(),
-                                    crate::session_runs::unfinished_run_conn(tx, &session_id)?
-                                        .as_ref(),
-                                    super::turn_cancel::pending_follow_on_conn(tx, &session_id)?
-                                        .as_ref(),
-                                )
-                            {
-                                return Ok(refused);
-                            }
-                            let changed = tx
-                                .execute(
-                                    session_sql().meta.seal_shift_epoch.sql(),
-                                    params![
-                                        session_id.as_str(),
-                                        sql_counter_value("shift_epoch", observed_epoch)?,
-                                        sql_counter_value("shift_epoch", next)?,
-                                        admission.as_str(),
-                                        run_start.as_str()
-                                    ],
-                                )
-                                .map_err(sqlite_error)?;
-                            if changed != 1 {
-                                return Ok(ShiftEpochSeal::Superseded {
-                                    epoch: shift_epoch_conn(tx, &session_id)?.epoch,
-                                });
-                            }
-                            if let Some(hold) = &hold {
-                                crate::session_runs::record_run_hold_conn(tx, &session_id, hold)?;
-                            }
-                            Ok(ShiftEpochSeal::Sealed(sealed_shift_fence(
-                                session_id.clone(),
-                                next,
-                                admission.clone(),
-                            )))
-                        }
-                    }
-                })())
+                commit(seal_shift_epoch_conn(
+                    tx,
+                    &session_id,
+                    &admission,
+                    observed_epoch,
+                    &run_start,
+                    hold.as_ref(),
+                ))
             })
             .await
             .map_err(sqlite_error)?

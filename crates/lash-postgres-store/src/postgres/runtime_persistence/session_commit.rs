@@ -621,6 +621,13 @@ impl PostgresStore {
         } else {
             None
         };
+        let root = match commit.shift_fence.as_ref() {
+            Some(fence) => {
+                super::shift_admission::read_tx(&mut tx, &commit.session_id, fence.admission())
+                    .await?
+            }
+            None => None,
+        };
         let admission = if commit.turn_commit.operation.key == "final" {
             match commit.settled_park_run() {
                 Some(run) => {
@@ -633,9 +640,11 @@ impl PostgresStore {
             None
         };
         let intent_authoritative = commit.validate_admitted_cancel_intent(
-            admission
-                .as_ref()
-                .and_then(|admission| admission.cancel_intent.as_ref()),
+            root.as_ref().map(|root| &root.cancel_intent).or_else(|| {
+                admission
+                    .as_ref()
+                    .and_then(|admission| admission.cancel_intent.as_ref())
+            }),
         )?;
         if let Some(interrupted) = commit.interrupted_turn.as_ref() {
             let closure = interrupted.settlement.authorization();
@@ -693,29 +702,6 @@ impl PostgresStore {
                     .await
                     .map_err(store_sqlx_error)?;
             if committed {
-                return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                    session_id: closure.session_id().clone(),
-                    turn_id: closure.turn_id().clone(),
-                });
-            }
-            let stored: Option<String> = sqlx::query_scalar(
-                crate::turn_ingress::turn_ingress_sql()
-                    .closures_postgres
-                    .select_by_turn
-                    .sql(),
-            )
-            .bind(closure.session_id().as_str())
-            .bind(closure.turn_id().as_str())
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-            let expected = serde_json::to_string(closure).map_err(|error| {
-                StoreError::RecordEncodingFailed {
-                    record_kind: "TurnCancelClosureAuthorization".to_string(),
-                    message: error.to_string(),
-                }
-            })?;
-            if !intent_authoritative && stored.as_deref() != Some(expected.as_str()) {
                 return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
                     session_id: closure.session_id().clone(),
                     turn_id: closure.turn_id().clone(),

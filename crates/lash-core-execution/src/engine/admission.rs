@@ -22,13 +22,14 @@ pub struct AdmitRequest {
     pub session: SessionId,
     pub request: ShiftRequestId,
     pub build_generation: super::contracts::BuildGeneration,
+    pub run_start: RunStartNonce,
 }
 
 /// Admission's decision.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "verdict", rename_all = "snake_case")]
 pub enum AdmitVerdict {
-    /// Admission may be sealed.
+    /// Admission recorded its seal and work.
     Admit(Admitted),
     /// A parked run blocks the session; nothing is admitted.
     Parked(ParkRef),
@@ -77,16 +78,9 @@ pub enum SealRefusal {
     ExecutionLost,
 }
 
-/// An admission granted by a recorded `AdmitShift` step, to be sealed.
-///
-/// It has no public constructor: it is decoded only from a recorded
-/// [`AdmitVerdict::Admit`].
-///
-/// It records no base. The head a run executes on, and its turn index, are
-/// recorded once, by the run's `AdmitRun` step, which a redrive replays
-/// (ADR 0105 §2, FIG-3682): the admission is the one source of truth for the
-/// base.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// The work and atomic receipt granted by a recorded root admission.
+/// Only the admission body mints it; execution requires the retained receipt.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Admitted {
     session: SessionId,
     run: TurnId,
@@ -99,39 +93,22 @@ pub struct Admitted {
     admitted_generation: super::contracts::BuildGeneration,
     /// What the run executes.
     work: AdmittedWork,
+    root: Option<Box<lash_core_store::store::ShiftAdmissionReceipt>>,
 }
 
-/// What an admitted run executes. Decided by admission and recorded with it,
-/// so the run's execution never re-reads the store to learn its own shape.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "work", rename_all = "snake_case")]
-pub enum AdmittedWork {
-    /// The prefix of accepted next-turn input headed by `head`.
-    Input { head: crate::InputId },
-    /// The prefix of ready queued work headed by `head`: a run like an
-    /// input run, admitted and executed the same way (FIG-3927).
-    Queued { head: crate::BatchId },
-    /// The session's open command run, applied at this boundary before any
-    /// turn-lane work (ADR 0101 §4). It admits no turn: the run names the
-    /// application and ends when the command lane is empty. `head` is the
-    /// `enqueue_seq` of the leading open command the admission saw, so a
-    /// later admission naming the same head shows the lane made no progress.
-    Commands { head: u64 },
-    /// A tool-bearing host operation at the head of the command lane: a
-    /// host's plugin task, executed as its own logical Run (K8, binding Q2),
-    /// named by the operation ([`OperationRun::run_id`]) so every admission
-    /// of it names the same run. The run's invocation owns every effect the
-    /// task issues until the task returned and its owned work drained.
-    ///
-    /// [`OperationRun::run_id`]: lash_core_store::tool_run::OperationRun::run_id
-    Operation { operation: crate::BatchId },
-    /// The follow-on the session head owes (ADR 0101 §3): its recovery, as
-    /// recovery number `attempts + 1`. The recorded count is what the
-    /// recovery raises from, so a redrive of the run never raises it twice.
-    FollowOn { follow_on: TurnId, attempts: u32 },
-}
+pub use lash_core_store::store::AdmittedWork;
 
 impl Admitted {
+    #[must_use]
+    pub fn with_root(mut self, root: lash_core_store::store::ShiftAdmissionReceipt) -> Self {
+        self.root = Some(Box::new(root));
+        self
+    }
+
+    pub fn root(&self) -> Option<&lash_core_store::store::ShiftAdmissionReceipt> {
+        self.root.as_deref()
+    }
+
     /// Only the `AdmitShift` body mints an admission, through
     /// [`admission_body::admitted`](super::shift::admission_body::admitted).
     pub(super) fn minted(
@@ -151,6 +128,7 @@ impl Admitted {
             observed_epoch,
             admitted_generation,
             work,
+            root: None,
         }
     }
 
@@ -242,3 +220,13 @@ pub struct ParkRef {
     pub run: TurnId,
     pub park: crate::store::ParkId,
 }
+
+impl PartialEq for Admitted {
+    fn eq(&self, other: &Self) -> bool {
+        match (serde_json::to_value(self), serde_json::to_value(other)) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        }
+    }
+}
+impl Eq for Admitted {}

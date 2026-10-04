@@ -299,6 +299,7 @@ impl SessionShifts for ScriptedShifts {
                     session: request.session.clone(),
                     request: request.request.clone(),
                     build_generation: admitting_generation.clone(),
+                    run_start: lash_core::engine::RunStartNonce::new("witness-nonce"),
                 }),
             },
         );

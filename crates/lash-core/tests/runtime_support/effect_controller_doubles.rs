@@ -640,13 +640,11 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::SyncExecutionEnvironment
             | RuntimeEffectCommand::AcceptTurnInput { .. }
             | RuntimeEffectCommand::TransitionPlugins { .. }
-            | RuntimeEffectCommand::AdmitRun { .. }
             | RuntimeEffectCommand::ObserveDrainMark { .. }
             | RuntimeEffectCommand::PluginCallbacks { .. }
             | RuntimeEffectCommand::RecoverFollowOn { .. }
             | RuntimeEffectCommand::AdmitShift { .. }
             | RuntimeEffectCommand::DrawRunStart { .. }
-            | RuntimeEffectCommand::SealShiftAdmission { .. }
             | RuntimeEffectCommand::ResolveTurnConfig { .. }
             | RuntimeEffectCommand::RecordCompactionBase { .. }
             | RuntimeEffectCommand::RenderCompactionPrompt { .. }

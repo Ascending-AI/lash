@@ -1936,7 +1936,6 @@ mod run_control {
     (run_admission_binds_cancellation_authority_with_its_rows, "run-admission-cancel-binding"),
     (preparing_or_refusing_admission_leaves_cancellation_authority_unbound, "run-admission-unbound-proposal"),
     (a_run_admission_is_idempotent_across_new_rows_and_fences, "run-admission-idempotent"),
-    (a_run_admission_survives_a_worker_crash_without_widening, "shift-admission-commit-crash"),
     (a_diverged_run_parks_once_holds_its_admitted_rows_blocks_admission_and_completes_after_restore, "s7b-15"),
     (an_exhausted_run_parks_engine_retry_exhausted_via_reconcile_idempotently_with_no_evidence, "s7b-13"),
     (a_parked_runs_fence_stays_current_until_a_verb, "s7b-14"),

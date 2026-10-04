@@ -249,9 +249,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::LoadExecutionEnv { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::AdmitShift { .. }
-        | RuntimeEffectCommand::SealShiftAdmission { .. }
         | RuntimeEffectCommand::TransitionPlugins { .. }
-        | RuntimeEffectCommand::AdmitRun { .. }
         | RuntimeEffectCommand::ObserveDrainMark { .. }
         | RuntimeEffectCommand::PluginCallbacks { .. }
         | RuntimeEffectCommand::RecoverFollowOn { .. }

@@ -1140,6 +1140,7 @@ pub(crate) async fn delete_session_runs_conn(
     let sql = session_runs_sql();
     for statement in [
         sql.runs.delete_by_session.sql(),
+        sql.runs.delete_shift_admissions.sql(),
         sql.inputs.delete_by_session.sql(),
         sql.intents.delete_verbs_by_session.sql(),
     ] {
@@ -1154,6 +1155,30 @@ pub(crate) async fn delete_session_runs_conn(
 
 #[async_trait::async_trait]
 impl RunStore for PostgresStore {
+    async fn prepare_shift_admission(
+        &self,
+        session_id: &SessionId,
+        admission: &lash_core_execution::store::AdmissionId,
+        executor: &RunExecutor,
+    ) -> Result<lash_core_execution::store::ShiftAdmissionPreparation, StoreError> {
+        crate::runtime_persistence::shift_admission::prepare(self, session_id, admission, executor)
+            .await
+    }
+    async fn read_shift_admission(
+        &self,
+        session_id: &SessionId,
+        admission: &lash_core_execution::store::AdmissionId,
+    ) -> Result<Option<lash_core_execution::store::ShiftAdmissionReceipt>, StoreError> {
+        crate::runtime_persistence::shift_admission::read(self, session_id, admission).await
+    }
+    async fn commit_shift_admission(
+        &self,
+        request: &lash_core_execution::store::ShiftAdmissionWrite,
+        anchor: &lash_core_execution::TraceAnchor,
+    ) -> Result<lash_core_execution::store::ShiftAdmissionReceipt, StoreError> {
+        crate::runtime_persistence::shift_admission::commit(self, request, anchor).await
+    }
+
     async fn run_executor(
         &self,
         session_id: &SessionId,

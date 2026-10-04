@@ -108,6 +108,7 @@ impl AdmittedRun {
         .await;
         let admission = store
             .admit_run(&crate::store::AdmitRunRequest {
+                unsealed_epoch: None,
                 fence: lease.clone(),
                 run: TurnId::fixture(name),
                 head,
@@ -120,7 +121,6 @@ impl AdmittedRun {
                     checkpoint: None,
                 },
                 turn_index: 1,
-                generation: None,
                 admitted_generation: stamp.clone(),
                 executor: crate::store::RunExecutor::run(&crate::store::AdmissionId::new(
                     "fixture#0",

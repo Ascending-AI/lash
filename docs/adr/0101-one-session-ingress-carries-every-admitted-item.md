@@ -204,7 +204,7 @@ Evidence: `crates/lash-core/src/runtime/shift/admission.rs:213`,
 `crates/lash-core-execution/src/runtime/effect/executor/control/task.rs`
 (`own_effect_controller_task`),
 `crates/lash/src/admin/host_commands.rs:1`, and
-`crates/lash-core-store/src/store/mod.rs:1591`.
+`crates/lash-core-store/src/store/mod.rs:1354`.
 
 ### 5. Ordering and composition
 
