@@ -561,9 +561,15 @@ pub(crate) mod test_support {
         let mut builder = LashCore::rlm_builder(backend, factory)
             .tool_source_policy(tool_source_policy)
             .llm_profiles(Arc::new(crate::OpenRouterLlmProfiles { provider }));
+        // Source loss preserves the installed composition's declaration.
+        let mut spec = lash::plugins::PluginSpec::new();
         if let Some(tools) = tools {
-            builder = builder.tools(tools);
+            spec = spec.with_tool_provider(tools);
         }
+        builder = builder.plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+            lash::plugins::PluginDeclaration::initial("agent-service-test-tools"),
+            spec,
+        )));
         if let Some(db) = board {
             builder = builder.plugin(Arc::new(crate::demo_plugin::DemoPluginFactory::new(db)));
         }

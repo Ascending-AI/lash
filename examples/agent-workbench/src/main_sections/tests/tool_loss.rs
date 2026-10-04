@@ -15,6 +15,19 @@ fn lost_tool_definition() -> lash::tools::ToolDefinition {
 
 struct SeedTools;
 
+fn source_plugin(
+    tools: Option<Arc<dyn lash::tools::ToolProvider>>,
+) -> Arc<lash::plugins::StaticPluginFactory> {
+    let mut spec = lash::plugins::PluginSpec::new();
+    if let Some(tools) = tools {
+        spec = spec.with_tool_provider(tools);
+    }
+    Arc::new(lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial("workbench-tool-loss-source"),
+        spec,
+    ))
+}
+
 #[async_trait]
 impl lash::tools::ToolProvider for SeedTools {
     fn tool_manifests(&self) -> Vec<lash::tools::ToolManifest> {
@@ -59,7 +72,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
                 .into_handle(),
             test_llm_profile(),
         )
-        .tools(Arc::new(SeedTools))
+        .plugin(source_plugin(Some(Arc::new(SeedTools))))
         .build(crate::test_core_owner())
         .expect("build the seeding core");
     let seeded = crate::created_session(&seeding_core, session_id.clone())
@@ -88,6 +101,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
                 .into_handle(),
             test_llm_profile(),
         )
+        .plugin(source_plugin(None))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
