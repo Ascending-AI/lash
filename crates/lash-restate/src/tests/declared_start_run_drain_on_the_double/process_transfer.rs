@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::durable_wait::LashDurableWaitRegistry as _;
+use crate::durable_wait::LashDurableWaitWorkflow as _;
 use crate::process::LashProcessWorkflow as _;
 use crate::process::{
     RestateProcessRunner, RestateProcessWorkflowInput, RestateProcessWorkflowPayload,
@@ -157,12 +158,14 @@ async fn check_transfer(deferred: bool, launched_before_cut: bool) {
                     )
                     .serve(),
                 )
+                .bind(crate::durable_wait::LashDurableWaitWorkflowImpl::default().serve())
                 .bind(
                     crate::durable_wait::LashDurableWaitRegistryImpl::new(
                         Default::default(),
                         Default::default(),
                         crate::RestateAdminClient::new(connection),
                     )
+                    .with_materials(stores.process_env_store())
                     .serve(),
                 )
                 .build(),
@@ -183,14 +186,23 @@ async fn check_transfer(deferred: bool, launched_before_cut: bool) {
         segment_ordinal: 0,
         sender_generation: super::super::test_build_generation(),
     });
-    let _: crate::process::RestateProcessWorkflowOutput = ingress
-        .call_lash_workflow("LashProcessWorkflow", process_id.as_str(), "run", &input)
-        .await
-        .unwrap();
+    let _: crate::process::RestateProcessWorkflowOutput = tokio::time::timeout(
+        Duration::from_secs(30),
+        ingress.call_lash_workflow("LashProcessWorkflow", process_id.as_str(), "run", &input),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "start predecessor did not finish, deferred={deferred}, launched={launched_before_cut}: {:#?}",
+            server.invocations()
+        )
+    })
+    .unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
         let record = registry.get_process(&process_id).await.unwrap().unwrap();
         if record.status().is_terminal() {
+            assert_eq!(record.status(), lash_core::ProcessStatus::Completed);
             break;
         }
         assert!(

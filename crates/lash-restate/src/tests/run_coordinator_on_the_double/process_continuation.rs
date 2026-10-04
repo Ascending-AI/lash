@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::durable_wait::LashDurableWaitRegistry as _;
+use crate::durable_wait::LashDurableWaitWorkflow as _;
 use crate::process::LashProcessWorkflow as _;
 use crate::process::{
     RestateProcessRunner, RestateProcessWorkflowInput, RestateProcessWorkflowOutput,
@@ -330,6 +331,7 @@ impl World {
                         )
                         .serve(),
                     )
+                    .bind(crate::durable_wait::LashDurableWaitWorkflowImpl::default().serve())
                     .bind(
                         crate::durable_wait::LashDurableWaitRegistryImpl::new(
                             Default::default(),
@@ -475,6 +477,40 @@ impl World {
             assert!(tokio::time::Instant::now() < deadline);
             tokio::task::yield_now().await;
         }
+        loop {
+            let finished = self.server.invocations().iter().any(|view| {
+                view.target == format!("LashProcessWorkflow/{}#1/run", self.process_id)
+                    && view.status == "completed"
+            });
+            if finished {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "successor did not finish: {:#?}",
+                self.server.invocations()
+            );
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            self.stores
+                .process_registry()
+                .get_process(&self.process_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status(),
+            lash_core::ProcessStatus::Completed
+        );
+        assert_eq!(
+            self.server
+                .object_state("LashDurableWaitIndex", &key)
+                .keys()
+                .filter(|key| key.starts_with("wait-index/v2/process-journal/"))
+                .count(),
+            0,
+            "terminal publication releases the successor journal pin"
+        );
         assert_eq!(
             self.runner.probe.executions.lock().unwrap().len(),
             expected_executions

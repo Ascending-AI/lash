@@ -12,6 +12,7 @@
 
 use super::*;
 use crate::durable_wait::LashDurableWaitRegistry as _;
+use crate::durable_wait::LashDurableWaitWorkflow as _;
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{RestateTestServer, ServerConfig};
 use restate_sdk::endpoint::{HandlerOptions, ServiceOptions};

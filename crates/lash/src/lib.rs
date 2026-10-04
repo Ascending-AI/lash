@@ -1498,6 +1498,8 @@ pub mod runtime {
     pub use lash_core::tool_run::run_event;
     /// Run-owned source descriptors, immutable seals and typed source refusals.
     pub use lash_core::tool_run::source_seal;
+    /// Complete Run transfers and their typed capture and adoption refusals.
+    pub use lash_core::tool_run::{FrontierStep, StateFrontier, continuation};
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
     /// wall-clock default; tests open a backend on their own to make expiry

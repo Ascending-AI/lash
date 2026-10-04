@@ -611,6 +611,12 @@
         }
       ]
     },
+    "AttemptOrdinal": {
+      "description": "The ordinal of an attempt of one logical call, from 1. A crash\nredelivery keeps it; only a reported retry advances it.",
+      "format": "uint32",
+      "minimum": 1,
+      "type": "integer"
+    },
     "AwaitEventKey": {
       "properties": {
         "key_id": {
@@ -1824,6 +1830,234 @@
           "const": "refusal",
           "description": "The owner's own refusal, which did not encode.",
           "type": "string"
+        }
+      ]
+    },
+    "ContinuationRefusal": {
+      "description": "Why a transfer cannot be captured or adopted.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/RunEventRefusal"
+            },
+            "refusal": {
+              "const": "records",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "event_frontier",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expected": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "found": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "capacity_frontier",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "expected",
+            "found"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "segment_frontier",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "missing_segment_authority",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "foreign_environment",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "unacknowledged_attempt",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "foreign_source",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "not_quiescent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "unretained_material",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "unleased_material",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "foreign_subscription",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "foreign_owner",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "owner_terminal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "found": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "from": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "not_successor",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "from",
+            "found"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -10667,6 +10901,469 @@
       ],
       "type": "object"
     },
+    "RunEventRefusal": {
+      "description": "Why the fold refused a record.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "aggregate_shape",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "key"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "unknown_aggregate",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "key"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "leaf": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "timer_order",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "key",
+            "leaf"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "cancel_order",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "empty_record",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expected": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "found": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "ordinal_gap",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "expected",
+            "found"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "active": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "found": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "not_active_segment",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "active",
+            "found"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "found": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "latest": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "stale_segment",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "latest",
+            "found"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "foreign_owner",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "admission_closed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "duplicate_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "unknown_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attempt": {
+              "$ref": "#/$defs/AttemptOrdinal"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "attempt_not_issued",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id",
+            "attempt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "failed": {
+              "$ref": "#/$defs/AttemptOrdinal"
+            },
+            "next": {
+              "$ref": "#/$defs/AttemptOrdinal"
+            },
+            "refusal": {
+              "const": "retry_not_eligible",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id",
+            "failed",
+            "next"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "decided_twice",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "last": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rank": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "refusal": {
+              "const": "rank_order",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "rank",
+            "last"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "decision_unsupported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "drain_frontier",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "boundary_order",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refusal": {
+              "const": "start_reused",
+              "type": "string"
+            },
+            "start_key": {
+              "$ref": "#/$defs/StartKey"
+            }
+          },
+          "required": [
+            "refusal",
+            "start_key"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "start_order",
+              "type": "string"
+            },
+            "start_key": {
+              "$ref": "#/$defs/StartKey"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id",
+            "start_key"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "start_owed",
+              "type": "string"
+            },
+            "start_key": {
+              "$ref": "#/$defs/StartKey"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id",
+            "start_key"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/RunLifecycle"
+            },
+            "refusal": {
+              "const": "lifecycle",
+              "type": "string"
+            },
+            "to": {
+              "$ref": "#/$defs/RunLifecycle"
+            }
+          },
+          "required": [
+            "refusal",
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "unsettled_work",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "call_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "RunInput": {
       "description": "An input of the run that the worker reads when it starts.",
       "oneOf": [
@@ -10696,6 +11393,23 @@
             "state"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "RunLifecycle": {
+      "description": "The lifecycle of a logical Run, at its owner.",
+      "oneOf": [
+        {
+          "enum": [
+            "live",
+            "settled"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "closing",
+          "description": "Admits nothing new; issued and protected work still finishes.",
+          "type": "string"
         }
       ]
     },
@@ -11088,6 +11802,23 @@
             },
             "refusal": {
               "$ref": "#/$defs/SourceRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A physical boundary or successor refused the logical Run's transfer.",
+          "properties": {
+            "kind": {
+              "const": "run_continuation_refused",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/ContinuationRefusal"
             }
           },
           "required": [

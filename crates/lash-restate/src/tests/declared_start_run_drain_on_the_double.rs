@@ -336,6 +336,16 @@ impl SingletonToolHandlers for Starter {
         self.cancel.load(Ordering::SeqCst)
     }
 
+    async fn cancel_call(
+        &self,
+        _call_id: &ToolCallId,
+        _source: Option<&lash_core::AwaitEventKey>,
+    ) -> Result<(), String> {
+        // This fixture's external work is its declared start. Its recorded
+        // obligation cancels the process and releases the hold in discharge_start.
+        Ok(())
+    }
+
     async fn realize_declarations(
         &self,
         _call_id: &ToolCallId,

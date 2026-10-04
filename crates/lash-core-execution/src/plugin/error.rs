@@ -1266,6 +1266,7 @@ fn keeps_its_code(error: &crate::RuntimeError) -> bool {
             error.cause.as_ref(),
             Some(
                 crate::RuntimeErrorCause::ProviderFailure { .. }
+                    | crate::RuntimeErrorCause::RunContinuationRefused { .. }
                     | crate::RuntimeErrorCause::ModuleArtifactRefused { .. }
                     | crate::RuntimeErrorCause::PluginFormat { .. }
                     | crate::RuntimeErrorCause::SchemaRefused { .. }
