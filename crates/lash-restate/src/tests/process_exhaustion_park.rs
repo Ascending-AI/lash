@@ -16,42 +16,6 @@ use super::process_session_turn_laws::{
 };
 use super::*;
 
-/// Fails every attempt live, retryably, until `fixed`; then completes.
-struct FlakyRunner {
-    fixed: AtomicBool,
-    runs: AtomicUsize,
-}
-
-#[async_trait::async_trait]
-impl RestateProcessRunner for FlakyRunner {
-    fn executable_generation(
-        &self,
-        _registration: &ProcessRegistration,
-    ) -> Option<lash_core::ExecutableGeneration> {
-        None
-    }
-
-    async fn run_process_segment(
-        &self,
-        _started: &SegmentStarted,
-        _process_id: ProcessId,
-        _registration: ProcessRegistration,
-        _execution_context: ProcessExecutionContext,
-        _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
-        _handover: Option<lash_core::SegmentHandover>,
-        _cancellation: tokio_util::sync::CancellationToken,
-    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        self.runs.fetch_add(1, Ordering::SeqCst);
-        if !self.fixed.load(Ordering::SeqCst) {
-            return Err(PluginError::Runtime(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::RuntimeStore,
-                "the process's store is unreachable",
-            )));
-        }
-        Ok(process_success(serde_json::json!({ "resumed": "completed" })).into())
-    }
-}
-
 const MAX_ATTEMPTS: u64 = 3;
 
 async fn wait_for_status(
@@ -95,184 +59,273 @@ async fn process_feed(
         .collect()
 }
 
-/// L-E4/L-E6 on Restate: a segment that exhausts its retries pauses, the
-/// reconcile pass parks its process exactly once with `EngineRetryExhausted` and no
-/// terminal evidence, and a resume under a fixed build completes the
-/// process once and closes the park.
-#[tokio::test]
-pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
-    let server = lash_restate_test::RestateTestServer::new(
-        lash_restate_test::ServerConfig::default().with_seed(3675),
-    )
-    .expect("start the server double");
-    let connection = RestateConnection::with_transport(server.ingress_url(), server.transport());
-    let stores = memory_process_stores().await;
-    let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
-    let runner = Arc::new(FlakyRunner {
-        fixed: AtomicBool::new(false),
-        runs: AtomicUsize::new(0),
-    });
-    let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
-    let session_stores = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("open the session store set");
+struct OwnerProcessWorld {
+    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    registry: Arc<dyn ProcessRegistry>,
+    continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+    control: crate::session_control::RestateSessionControl,
+    work: Arc<dyn lash_core::ProcessWorkSubstrate>,
+    endpoint: Endpoint,
+}
 
-    let sessions = session_stores.session_store_factory();
-    let endpoint = crate::services::bind_lash_services(
-        Endpoint::builder(),
-        crate::services::LashServiceParts {
-            effect_host: &host,
-            ingress: RestateIngressClient::new(connection.clone()),
-            admin: crate::RestateAdminClient::new(connection.clone()),
-            materials: session_stores.process_env_store(),
-            attachments: Arc::clone(&sessions) as Arc<dyn lash_core::AttachmentReferrers>,
+impl OwnerProcessWorld {
+    fn new(
+        stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+        connection: crate::RestateConnection,
+        runner: Arc<super::run_coordinator_on_the_double::owner_park::ProcessAttempts>,
+    ) -> Self {
+        let registry: Arc<dyn ProcessRegistry> = stores.process_registry();
+        runner.observe_registry(&registry);
+        let continuations = stores.process_continuations();
+        let sessions = stores.session_store_factory();
+        let admin = crate::RestateAdminClient::new(connection.clone());
+        let ingress = RestateIngressClient::new(connection.clone());
+        let generation = lash_core::engine::BuildGeneration::for_test("exhaustion-park");
+        let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
+        let endpoint = crate::services::bind_lash_services(
+            Endpoint::builder(),
+            crate::services::LashServiceParts {
+                effect_host: &host,
+                ingress: ingress.clone(),
+                admin: admin.clone(),
+                materials: stores.process_env_store(),
+                attachments: sessions.clone() as Arc<dyn lash_core::AttachmentReferrers>,
+                sessions: sessions.clone(),
+                process_workflow: LashProcessWorkflowImpl::new_for_test(
+                    runner,
+                    registry.clone(),
+                    continuations.clone(),
+                )
+                .with_retry_max_attempts(MAX_ATTEMPTS),
+                session_shifts: crate::RestateSessionShiftsSlot::new(),
+                build_generation: generation.clone(),
+                namespace: Default::default(),
+                fleet: Default::default(),
+            },
+        )
+        .build();
+        let work = RestateProcessDeployment::new_for_test(
+            connection,
+            registry.clone(),
+            continuations.clone(),
+        )
+        .test_process_work();
+        let control = crate::session_control::RestateSessionControl {
+            admin,
+            ingress,
+            namespace: Default::default(),
+            processes: registry.clone(),
+            continuations: continuations.clone(),
+            generation: lash_core::engine::EngineGeneration::fixed(generation),
             sessions,
-            process_workflow: LashProcessWorkflowImpl::new_for_test(
-                Arc::clone(&runner),
-                Arc::clone(&registry),
-                Arc::clone(&stores.continuations),
+            lost_processes: Default::default(),
+            lost_runs: Default::default(),
+        };
+        Self {
+            stores,
+            registry,
+            continuations,
+            control,
+            work,
+            endpoint,
+        }
+    }
+}
+
+/// L02/L20: concurrent X exhausts its owner after a sibling final is
+/// durable. Redrive reuses that X over the same journal; cancel requests
+/// retain their identity through resume. Both paths survive store reopen.
+#[tokio::test]
+pub(super) async fn l20_an_exhausted_process_parks_and_completes_without_group_catalog() {
+    for file in [false, true] {
+        for cancel in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let server = lash_restate_test::RestateTestServer::new(
+                lash_restate_test::ServerConfig::default().with_seed(4892),
             )
-            .with_retry_max_attempts(MAX_ATTEMPTS),
-            session_shifts: crate::RestateSessionShiftsSlot::new(),
-            build_generation: lash_core::engine::BuildGeneration::for_test("exhaustion-park"),
-            namespace: crate::RestateNamespace::default(),
-            fleet: crate::object_state::FleetView::default(),
-        },
-    )
-    .build();
-    server
-        .register(endpoint)
-        .await
-        .expect("register the endpoint on the server double");
-    let deployment = RestateProcessDeployment::new_for_test(
-        connection.clone(),
-        Arc::clone(&registry),
-        Arc::clone(&stores.continuations),
-    );
-    let admin = crate::RestateAdminClient::new(connection.clone());
-
-    let process_id = registry
-        .register_process(executed_registration())
-        .await
-        .expect("register the process")
-        .id;
-    let port: Arc<dyn lash_core::ProcessWorkSubstrate> = deployment.test_process_work();
-    let verdict = deliver_process_start_now(
-        &stores.start_ledger,
-        &registry,
-        &port,
-        &stores.clock,
-        &process_id,
-    )
-    .await;
-    assert_eq!(
-        verdict,
-        lash_core::runtime::shift::relay::RelayVerdict::Delivered,
-        "the armed start is delivered: {verdict:?}"
-    );
-    let target = format!("LashProcessWorkflow/{process_id}/run");
-    let paused = wait_for_status(&server, &target, "paused").await;
-    assert_eq!(
-        runner.runs.load(Ordering::SeqCst),
-        usize::try_from(MAX_ATTEMPTS).expect("small"),
-        "the segment runs its attempt bound and no more"
-    );
-
-    // The next pass reconciles the pause into a park.
-    reconcile_parked_processes(&admin, &registry, &stores.continuations).await;
-    let parked = registry
-        .get_process(&process_id)
-        .await
-        .expect("read the exhausted process")
-        .expect("the exhausted process is retained");
-    assert!(!parked.is_terminal(), "a park is non-terminal: {parked:?}");
-    assert_eq!(parked.outcome(), None, "a park writes no terminal evidence");
-    let park = parked.park().cloned().expect("the process is parked");
-    let lash_core::store::ParkReason::EngineRetryExhausted {
-        attempts, message, ..
-    } = &park.reason
-    else {
-        panic!("an exhausted process parks as EngineRetryExhausted: {park:?}");
-    };
-    assert_eq!(
-        u64::from(*attempts),
-        MAX_ATTEMPTS,
-        "the park counts the engine's attempts"
-    );
-    assert!(
-        message.contains("the process's store is unreachable"),
-        "the park carries the last failure: {message}"
-    );
-    assert_eq!(
-        park.engine
-            .as_ref()
-            .map(lash_core::store::EnginePark::as_str),
-        Some(paused.id.as_str()),
-        "the park holds the paused invocation as its engine handle"
-    );
-
-    // A further pass over the same pause writes nothing.
-    reconcile_parked_processes(&admin, &registry, &stores.continuations).await;
-    assert_eq!(
-        process_feed(&registry, &process_id).await,
-        vec![(
-            park.park_id,
-            lash_core::store::ParkEventKind::Parked {
-                reason: park.reason.clone()
-            }
-        )],
-        "the feed records the park exactly once"
-    );
-    assert_eq!(
-        registry
-            .get_process(&process_id)
-            .await
-            .expect("read the process again")
-            .and_then(|record| record.park().map(|park| park.attempts)),
-        Some(1),
-        "a repeated reconcile does not re-park"
-    );
-
-    // Fix the build and resume through the park: the retry completes the
-    // process once and the park closes.
-    runner.fixed.store(true, Ordering::SeqCst);
-    let resumed = crate::resume_parked_process(
-        &admin,
-        &crate::services::DEFAULT_NAMESPACE,
-        &registry,
-        &process_id,
-    )
-    .await
-    .expect("resume the parked process");
-    assert_eq!(resumed.as_str(), paused.id.as_str());
-    wait_for_status(&server, &target, "completed").await;
-    let completed = registry
-        .get_process(&process_id)
-        .await
-        .expect("read the resumed process")
-        .expect("the resumed process is retained");
-    assert_eq!(completed.status(), lash_core::ProcessStatus::Completed);
-    assert_eq!(completed.park(), None, "completion ends the park");
-    assert_eq!(
-        process_feed(&registry, &process_id).await,
-        vec![
-            (
-                park.park_id,
-                lash_core::store::ParkEventKind::Parked {
-                    reason: park.reason.clone()
-                }
-            ),
-            (
-                park.park_id,
-                lash_core::store::ParkEventKind::Unparked {
-                    cause: lash_core::store::UnparkCause::ProcessTerminal {
-                        status: lash_core::ProcessStatus::Completed
+            .unwrap();
+            let connection = super::run_owner_park::NoGroupCatalog::connection(&server);
+            let stores = Arc::new(if file {
+                lash_sqlite_store::SqliteStoreSet::open(directory.path())
+                    .await
+                    .unwrap()
+            } else {
+                lash_sqlite_store::SqliteStoreSet::memory().await.unwrap()
+            });
+            let runner =
+                Arc::new(super::run_coordinator_on_the_double::owner_park::ProcessAttempts::new());
+            let mut world = OwnerProcessWorld::new(stores, connection.clone(), runner.clone());
+            let deployment = server.register(world.endpoint.clone()).await.unwrap();
+            let process = world
+                .registry
+                .register_process(executed_registration())
+                .await
+                .unwrap()
+                .id;
+            let verdict = deliver_process_start_now(
+                &world
+                    .stores
+                    .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+                &world.registry,
+                &world.work,
+                &world.stores.clock(),
+                &process,
+            )
+            .await;
+            assert_eq!(
+                verdict,
+                lash_core::runtime::shift::relay::RelayVerdict::Delivered
+            );
+            let target = format!("LashProcessWorkflow/{process}/run");
+            runner.release_after_sibling(&server).await;
+            let paused = wait_for_status(&server, &target, "paused").await;
+            assert_eq!(runner.runs(), usize::try_from(MAX_ATTEMPTS).unwrap());
+            reconcile_parked_processes(&world.control.admin, &world.registry, &world.continuations)
+                .await;
+            let parked = world.registry.get_process(&process).await.unwrap().unwrap();
+            assert!(!parked.is_terminal());
+            assert_eq!(parked.outcome(), None);
+            let park = parked.park().cloned().unwrap();
+            let lash_core::store::ParkReason::EngineRetryExhausted {
+                attempts, message, ..
+            } = &park.reason
+            else {
+                panic!("{park:?}");
+            };
+            assert_eq!(u64::from(*attempts), MAX_ATTEMPTS);
+            assert!(message.contains("owner-local-X unavailable"), "{message}");
+            assert_eq!(park.engine.as_ref().unwrap().as_str(), paused.id);
+            reconcile_parked_processes(&world.control.admin, &world.registry, &world.continuations)
+                .await;
+            assert_eq!(
+                process_feed(&world.registry, &process).await,
+                vec![(
+                    park.park_id,
+                    lash_core::store::ParkEventKind::Parked {
+                        reason: park.reason.clone()
                     }
-                }
-            ),
-        ],
-        "the park closes once, when the resumed process completes"
-    );
+                )]
+            );
+            assert_eq!(runner.sibling_bodies(), 1);
+            let listed = world
+                .registry
+                .list_parked_processes(&lash_core::store::ProcessParkQuery {
+                    reasons: None,
+                    parked_at_or_before_ms: None,
+                    after: None,
+                    limit: std::num::NonZeroUsize::MIN,
+                })
+                .await
+                .unwrap();
+            assert_eq!(listed.len(), 1);
+            assert_eq!(listed[0].id, process);
+            assert_eq!(listed[0].park(), Some(&park));
+            drop(listed);
+            if file {
+                server
+                    .restart_deployment(&deployment, Endpoint::builder().build())
+                    .await
+                    .unwrap();
+                drop(world);
+                let stores = Arc::new(
+                    lash_sqlite_store::SqliteStoreSet::open(directory.path())
+                        .await
+                        .unwrap(),
+                );
+                world = OwnerProcessWorld::new(stores, connection, runner.clone());
+                server
+                    .restart_deployment(&deployment, world.endpoint.clone())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    world
+                        .registry
+                        .get_process(&process)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .park(),
+                    Some(&park)
+                );
+            }
+            runner.restore();
+            let cancel_request = lash_core::CancelRequest::new(
+                lash_core::CancelOrigin::OperatorRequested,
+                "l20-process-owner",
+                42,
+            );
+            if cancel {
+                world
+                    .work
+                    .deliver_cancel(&process, &cancel_request, "l20-process-cancel")
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(
+                lash_core::engine::SessionControlEngine::resume_process(
+                    &world.control,
+                    &process,
+                    park.park_id
+                )
+                .await
+                .unwrap(),
+                lash_core::engine::EngineAck::Resumed
+            );
+            let original = wait_for_status(&server, &target, "completed").await;
+            assert_eq!(
+                original.id, paused.id,
+                "L20 redrive uses the original journal"
+            );
+            let completed = world.registry.get_process(&process).await.unwrap().unwrap();
+            let status = if cancel {
+                lash_core::ProcessStatus::Cancelled
+            } else {
+                lash_core::ProcessStatus::Completed
+            };
+            assert_eq!(completed.status(), status);
+            if cancel {
+                assert_eq!(completed.cancel_request.as_deref(), Some(&cancel_request));
+            }
+            assert_eq!(
+                runner.sibling_bodies(),
+                1,
+                "L02 process redrive reuses durable X"
+            );
+            assert!(
+                server
+                    .invocations()
+                    .iter()
+                    .all(|view| !view.target.contains("EffectGroup")),
+                "L20 no group service is queried"
+            );
+            assert_eq!(completed.park(), None);
+            assert_eq!(
+                process_feed(&world.registry, &process).await,
+                vec![
+                    (
+                        park.park_id,
+                        lash_core::store::ParkEventKind::Parked {
+                            reason: park.reason.clone()
+                        }
+                    ),
+                    (
+                        park.park_id,
+                        if cancel {
+                            lash_core::store::ParkEventKind::Cancelled {
+                                cause: lash_core::store::ParkCancelCause::ProcessCancelled {
+                                    origin: Some(lash_core::CancelOrigin::OperatorRequested),
+                                },
+                            }
+                        } else {
+                            lash_core::store::ParkEventKind::Unparked {
+                                cause: lash_core::store::UnparkCause::ProcessTerminal { status },
+                            }
+                        }
+                    ),
+                ]
+            );
+        }
+    }
 }
 
 /// FIG-4727: a process a session turn started parks with the profile key

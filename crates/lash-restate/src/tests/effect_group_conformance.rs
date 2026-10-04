@@ -2386,35 +2386,6 @@ pub(super) async fn overwrite_index_state(
     .await;
 }
 
-/// Every entry an effect-group index retains, as the server holds it: what
-/// [`replace_index_state`] puts back.
-pub(super) async fn index_state(
-    admin: &HarnessAdmin,
-    group_key: &str,
-) -> serde_json::Map<String, serde_json::Value> {
-    #[derive(serde::Deserialize)]
-    struct Row {
-        key: String,
-        value_utf8: String,
-    }
-    let rows: Vec<Row> = crate::RestateAdminClient::new(admin.connection())
-        .query_json(&format!(
-            "SELECT key, value_utf8 FROM state WHERE service_name = 'EffectGroupIndex' \
-             AND service_key = {}",
-            crate::ingress::sql_string_literal(group_key),
-        ))
-        .await
-        .expect("read the effect-group index state");
-    rows.into_iter()
-        .map(|row| {
-            (
-                row.key,
-                serde_json::to_value(row.value_utf8.into_bytes()).expect("state bytes"),
-            )
-        })
-        .collect()
-}
-
 /// Replace every entry an effect-group index retains with `new_state`, each
 /// value its bytes, through the Restate admin API.
 pub(super) async fn replace_index_state(

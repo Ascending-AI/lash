@@ -285,8 +285,8 @@ pub trait SessionControlEngine: Send + Sync {
     /// shift is parked on its session's next run; one that stopped only
     /// behind a redrive that has since settled is resumed, and one whose
     /// session's next work names no run is released (ADR 0109 §3). Stalled
-    /// work a run waits on is parked on that run, which records the work's
-    /// handle; stalled work nothing waits for any more is released.
+    /// Run invocations are parked on their owners with their engine handles;
+    /// an invocation whose owner has ended is released.
     ///
     /// Each recovery catalog inspects at most `page.limit` records under
     /// `page.budget`. The stalled-work listing resumes after `page.after`
@@ -301,12 +301,12 @@ pub trait SessionControlEngine: Send + Sync {
         page: EnginePage,
     ) -> Result<ParkReconcileReport, EngineRefusal>;
 
-    /// O4 redrive: resume the execution holding the run's park, and the
-    /// stopped work `children` names: the handles the run's park recorded
-    /// (FIG-4630). The engine resumes exactly those and looks for no other
-    /// work of the run, the session or anyone else. An engine holding none
-    /// answers [`EngineAck::NothingHeld`], and the caller schedules a shift
-    /// instead.
+    /// O4 redrive: resume the invocation holding the Run's park over its
+    /// original journal, then resume the session's paused admission.
+    /// `children` is the retained legacy sidecar until its stored codec is
+    /// removed; Run-owned recovery ignores it. Other owners are untouched.
+    /// An engine holding none answers [`EngineAck::NothingHeld`], and the
+    /// caller schedules a shift instead.
     async fn resume_run(
         &self,
         target: &RunRef,

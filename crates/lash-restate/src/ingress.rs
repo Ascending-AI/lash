@@ -1125,26 +1125,9 @@ impl RestateAdminClient {
         let shifts = namespace.service_lanes_sql(crate::LashService::SessionShifts);
         let runs = namespace.service_lanes_sql(crate::LashService::TurnDriver);
         let segments = namespace.service_lanes_sql(crate::LashService::ProcessWorkflow);
-        // Preparation, children and retirement run outside their opener's
-        // invocation, so every dispatcher handler can hold its park.
-        let groups = namespace.service_lanes_sql(crate::LashService::EffectGroupDispatch);
         self.query_json(&format!(
-            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND (({shifts} AND target_handler_name = 'shift') OR (({runs} OR {segments}) AND target_handler_name = 'run') OR ({groups} AND target_handler_name IN ('run', 'child', 'retire'))) ORDER BY id LIMIT {}", limit.get()
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND (({shifts} AND target_handler_name = 'shift') OR (({runs} OR {segments}) AND target_handler_name = 'run')) ORDER BY id LIMIT {}", limit.get()
         )).await
-    }
-
-    /// Paused preparation, children and retirement on every dispatcher lane,
-    /// keyed by the group whose retained opener recovery parks and resumes.
-    pub(crate) async fn paused_group_work(
-        &self,
-        namespace: &crate::RestateNamespace,
-    ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
-        let paused = RestateInvocationLifecycle::Paused.sql_literal();
-        let groups = namespace.service_lanes_sql(crate::LashService::EffectGroupDispatch);
-        self.query_json(&format!(
-            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND {groups} AND target_handler_name IN ('run', 'child', 'retire') ORDER BY id"
-        ))
-        .await
     }
 
     /// The `run` invocations Restate retains for the segment workflow keys

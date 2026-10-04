@@ -64,8 +64,9 @@ use crate::ingress::{
 };
 use crate::services::LashService;
 
-/// Replaying an opener cannot redrive its paused engine child. Control
-/// clears that park before child resume; a segment only redrives its own.
+/// A segment redrives a refusing park backed by its own invocation.
+/// Engine exhaustion without an owner handle cannot redrive a segment;
+/// Lash refusals may retry without one.
 pub(crate) fn segment_can_redrive_park(record: &ProcessRecord) -> bool {
     record.park().is_some_and(|park| {
         park.refusing
@@ -123,10 +124,7 @@ pub(crate) async fn reconcile_process_invocations(
             continuations,
             &invocation,
             record,
-            (
-                segment_ordinal,
-                Some(EnginePark::new(invocation.id.clone())),
-            ),
+            (segment_ordinal, EnginePark::new(invocation.id.clone())),
             metrics,
         )
         .await?;
@@ -137,50 +135,13 @@ pub(crate) async fn reconcile_process_invocations(
     Ok(report)
 }
 
-/// A stopped dispatcher invocation parks the process that opened its
-/// group through the same registry transition as a stopped segment. No
-/// child handle is retained: redrive discovers all work by its opener.
-pub(crate) async fn reconcile_process_group_work(
-    admin: &RestateAdminClient,
-    registry: &Arc<dyn ProcessRegistry>,
-    continuations: &Arc<dyn ProcessContinuationStore>,
-    invocation: &RestatePausedInvocation,
-    process: &ProcessId,
-    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
-) -> Result<ProcessParkReconcileReport, PluginError> {
-    let Some(record) = registry.get_process(process).await? else {
-        admin
-            .kill_invocation(&invocation.invocation_id())
-            .await
-            .map_err(|error| engine_fault(error.to_string()))?;
-        return Ok(ProcessParkReconcileReport {
-            released: vec![process.clone()],
-            ..Default::default()
-        });
-    };
-    let ordinal = record
-        .external_ref
-        .as_ref()
-        .map_or(0, |reference| reference.segment_ordinal());
-    reconcile_process_work(
-        admin,
-        registry,
-        continuations,
-        invocation,
-        record,
-        (ordinal, None),
-        metrics,
-    )
-    .await
-}
-
 async fn reconcile_process_work(
     admin: &RestateAdminClient,
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn ProcessContinuationStore>,
     invocation: &RestatePausedInvocation,
     record: ProcessRecord,
-    segment: (u64, Option<EnginePark>),
+    segment: (u64, EnginePark),
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<ProcessParkReconcileReport, PluginError> {
     let (segment_ordinal, engine) = segment;
@@ -202,7 +163,7 @@ async fn reconcile_process_work(
         return Ok(report);
     };
     // Re-read after the park: a redrive may have resumed this invocation
-    // since the listing. A running child must not re-park its opener.
+    // since the listing. A running invocation must not re-park its owner.
     if record.park().is_some()
         && !admin
             .invocation_status(&invocation.invocation_id())
@@ -219,7 +180,7 @@ async fn reconcile_process_work(
         segment_checkpoint_generation(&record, continuations, segment_ordinal).await?;
     let park = ProcessParkWrite {
         reason: exhausted_reason(invocation),
-        engine,
+        engine: Some(engine),
         build_generation,
     };
     let parked = registry
@@ -545,28 +506,52 @@ pub async fn resume_parked_process(
         })
 }
 
-/// The segment half of a park redrive. Group work can hold a process park
-/// while the segment itself is running and needs no resume.
+/// Resume the process's current segment over its original journal.
 pub(crate) async fn resume_process_invocation(
     admin: &RestateAdminClient,
     namespace: &crate::RestateNamespace,
     record: &ProcessRecord,
 ) -> Result<Option<RestateInvocationId>, PluginError> {
-    let invocation = match record.park().and_then(|park| park.engine.as_ref()) {
-        Some(engine) => Some(RestateInvocationId::new(engine.as_str().to_string())),
-        None => paused_invocation_of(admin, namespace, &record.id).await?,
-    };
-    let Some(invocation) = invocation else {
+    let Some(reference) = record.external_ref.as_ref() else {
         return Ok(None);
     };
-    if !admin
-        .invocation_status(&invocation)
-        .await
-        .map_err(|error| engine_fault(error.to_string()))?
-        .is_some_and(|status| status.status == crate::ingress::RestateInvocationLifecycle::Paused)
-    {
+    if reference.backend != "restate" {
         return Ok(None);
     }
+    let key = super::process_segment_workflow_key(&record.id, reference.segment_ordinal());
+    let status = match record.park().and_then(|park| park.engine.as_ref()) {
+        Some(engine) => admin
+            .invocation_status(&RestateInvocationId::new(engine.as_str().to_owned()))
+            .await
+            .map_err(|error| engine_fault(error.to_string()))?,
+        None => admin
+            .segment_runs(namespace, std::slice::from_ref(&key))
+            .await
+            .map_err(|error| engine_fault(error.to_string()))?
+            .into_iter()
+            .find(|status| status.status == crate::ingress::RestateInvocationLifecycle::Paused),
+    };
+    let Some(status) = status else {
+        return Ok(None);
+    };
+    if !namespace
+        .parse(&status.target_service_name)
+        .is_some_and(|route| route.service() == LashService::ProcessWorkflow)
+        || status.target_handler_name != "run"
+        || status.target_service_key.as_deref() != Some(key.as_str())
+    {
+        return Err(PluginError::Runtime(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::EngineHandleMismatch,
+            format!(
+                "stored engine handle does not name process `{}`'s current segment",
+                record.id
+            ),
+        )));
+    }
+    if status.status != crate::ingress::RestateInvocationLifecycle::Paused {
+        return Ok(None);
+    }
+    let invocation = status.invocation_id();
     admin
         .resume_invocation(&invocation)
         .await
@@ -577,43 +562,6 @@ pub(crate) async fn resume_process_invocation(
             ))
         })?;
     Ok(Some(invocation))
-}
-
-/// The paused `run` invocation of any of `process_id`'s segments.
-async fn paused_invocation_of(
-    admin: &RestateAdminClient,
-    namespace: &crate::RestateNamespace,
-    process_id: &ProcessId,
-) -> Result<Option<RestateInvocationId>, PluginError> {
-    let paused = admin
-        .paused_invocations(&namespace.stable(LashService::ProcessWorkflow).name())
-        .await
-        .map_err(|error| {
-            engine_fault(format!(
-                "read paused process invocations from Restate: {error}"
-            ))
-        })?;
-    Ok(paused
-        .iter()
-        .filter(|invocation| invocation.target_handler_name == "run")
-        .find(|invocation| {
-            invocation
-                .target_service_key
-                .as_deref()
-                .is_some_and(|key| segment_key_names(key, process_id))
-        })
-        .map(RestatePausedInvocation::invocation_id))
-}
-
-/// Whether workflow key `key` is one of `process_id`'s segments:
-/// `process_segment_workflow_key` spells segment 0 as the id and a later one
-/// as `<id>#<ordinal>`.
-fn segment_key_names(key: &str, process_id: &ProcessId) -> bool {
-    key == process_id.as_str()
-        || key
-            .strip_prefix(process_id.as_str())
-            .and_then(|rest| rest.strip_prefix('#'))
-            .is_some_and(|ordinal| ordinal.parse::<u64>().is_ok())
 }
 
 /// The process a paused segment invocation runs and the segment the key
@@ -720,22 +668,4 @@ fn engine_fault(message: String) -> PluginError {
         lash_core::RuntimeErrorCode::EngineEffectController,
         message,
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::segment_key_names;
-    use lash_sansio::ProcessId;
-
-    #[test]
-    fn a_segment_key_names_its_process_and_no_other() {
-        let process = ProcessId::fixture("proc");
-        let other = ProcessId::fixture("other");
-        let id = process.as_str();
-        assert!(segment_key_names(id, &process));
-        assert!(segment_key_names(&format!("{id}#3"), &process));
-        assert!(!segment_key_names(&format!("{id}#x"), &process));
-        assert!(!segment_key_names(&format!("{id}0"), &process));
-        assert!(!segment_key_names(&format!("{other}#1"), &process));
-    }
 }

@@ -140,6 +140,7 @@ struct Probe {
     parallel_wake: tokio::sync::Notify,
     retry: lash_core::tool_run::RecordedRetryPolicy,
     gate: Option<(ToolCallId, ToolCallId)>,
+    unavailable: Option<(ToolCallId, Arc<AtomicBool>)>,
     gate_open: AtomicBool,
     gate_after_crash: bool,
     gate_wake: tokio::sync::Notify,
@@ -188,6 +189,7 @@ impl Probe {
             parallel_wake: Default::default(),
             retry: Default::default(),
             gate: None,
+            unavailable: None,
             gate_open: AtomicBool::new(false),
             gate_after_crash: false,
             gate_wake: Default::default(),
@@ -323,6 +325,13 @@ impl SingletonToolHandlers for Probe {
             );
         }
         let call_id = attempt.call_id;
+        if self
+            .unavailable
+            .as_ref()
+            .is_some_and(|(failed, restored)| failed == call_id && !restored.load(Ordering::SeqCst))
+        {
+            return Err("owner-local-X unavailable".to_owned());
+        }
         Ok(match &self.kinds[call_id] {
             Kind::Declares(intents) => SingletonBodyOutcome::Done {
                 commands: Default::default(),
@@ -2050,5 +2059,6 @@ async fn l15_admission_owns_one_namespace_image_for_a_wide_round() {
         "sixteen members reference one canonical namespace image"
     );
 }
+pub(super) mod owner_park;
 mod process_continuation;
 mod turn_handover;
