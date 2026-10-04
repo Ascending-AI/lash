@@ -169,7 +169,7 @@ impl Client {
             .as_mut()
             .context("host not booted")?
             .assert_running()?;
-        let socket = tokio::net::TcpStream::connect(
+        let socket = tokio::net::UnixStream::connect(
             &self
                 .ready
                 .as_ref()
@@ -205,6 +205,16 @@ impl Client {
             self.observations.push(reply.clone());
         }
         Ok(reply)
+    }
+    fn remove_control_socket(&self) -> Result<()> {
+        if let Some(ready) = &self.ready {
+            match std::fs::remove_file(&ready.control) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
     }
     async fn setup(&mut self, action: &str, input: serde_json::Value) -> Result<serde_json::Value> {
         Ok(self
@@ -250,13 +260,15 @@ impl HostAdapter for Client {
                 .arg(&config.directory)
                 .arg("--barrier-directory")
                 .arg(&config.barriers)
-                .args([
-                    "--bind",
-                    "127.0.0.1:0",
-                    "--control-bind",
-                    "127.0.0.1:0",
-                    "--ready-file",
-                ])
+                .args(["--bind", "127.0.0.1:0", "--control-socket"])
+                .arg(
+                    config
+                        .directory
+                        .join("control.sock")
+                        .strip_prefix(std::env::current_dir()?)
+                        .context("fleet control socket must be inside the fork")?,
+                )
+                .args(["--ready-file"])
                 .arg(&ready_file)
                 .args(["--timeout-secs", "240"]);
             if config.publication_cut {
@@ -326,6 +338,7 @@ impl HostAdapter for Client {
                 return Ok(Vec::new());
             };
             if process.is_reaped() {
+                self.remove_control_socket()?;
                 return Ok(Vec::new());
             }
             let pid = process.pid()?;
@@ -342,6 +355,7 @@ impl HostAdapter for Client {
             if result.is_err() && !process.is_reaped() {
                 process.kill_and_reap()?;
             }
+            self.remove_control_socket()?;
             Ok(vec![CleanupReceipt {
                 resource: format!("host:{pid}"),
                 closed: result.is_ok(),

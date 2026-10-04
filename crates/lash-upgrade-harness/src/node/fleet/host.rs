@@ -37,7 +37,7 @@ pub struct FleetServeArgs {
     #[arg(long)]
     pub bind: SocketAddr,
     #[arg(long)]
-    pub control_bind: SocketAddr,
+    pub control_socket: PathBuf,
     #[arg(long)]
     pub ready_file: PathBuf,
     #[arg(long)]
@@ -181,8 +181,13 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
     let endpoint = receiver::bind(builder, &args.restate, core.clone())?.build();
     let listener = tokio::net::TcpListener::bind(args.bind).await?;
     let uri = format!("http://{}", listener.local_addr()?);
-    let control = tokio::net::TcpListener::bind(args.control_bind).await?;
-    let control_address = control.local_addr()?.to_string();
+    let control = tokio::net::UnixListener::bind(&args.control_socket).with_context(|| {
+        format!(
+            "bind fleet control socket {}",
+            args.control_socket.display()
+        )
+    })?;
+    let control_address = args.control_socket.display().to_string();
     let (stop, stopped) = tokio::sync::oneshot::channel();
     let endpoint_task = tokio::spawn(async move {
         lash::restate::serve_endpoint(
@@ -274,6 +279,7 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
         Ok(())
     }.await;
     drop(control);
+    std::fs::remove_file(&args.control_socket).context("remove owned fleet control socket")?;
     commands.abort_all();
     while let Some(result) = commands.join_next().await {
         if let Err(error) = result

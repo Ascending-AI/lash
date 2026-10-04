@@ -32,9 +32,7 @@ mod tests {
     // host's JoinSet; no public command has been submitted on this connection.
     #[tokio::test]
     async fn a_closed_control_probe_is_not_a_host_failure() -> Result<()> {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let client = tokio::net::TcpStream::connect(listener.local_addr()?).await?;
-        let (server, _) = listener.accept().await?;
+        let (server, client) = tokio::net::UnixStream::pair()?;
         drop(client);
         let result = read_command(BufReader::new(server)).await;
         ensure!(
