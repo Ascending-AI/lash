@@ -685,6 +685,97 @@ async fn a_run_replayed_after_its_session_was_deleted_replays_its_journal() -> R
     Ok(())
 }
 
+/// FIG-4965 / L13: an unreplicable acknowledgement keeps the old runtime's
+/// writer alive. Both a fresh parent attempt and a run retry under the live
+/// parent must make progress without that writer; its late write is fenced.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_superseded_attempt_never_holds_its_successor_runtime_hostage() -> Result<()> {
+    for replace_parent in [true, false] {
+        let fixture = HeldShiftFixture::with_pending(
+            if replace_parent {
+                "held-parent-failover"
+            } else {
+                "held-run-redelivery"
+            },
+            0,
+        )
+        .await?;
+        let registry = Arc::new(crate::core::held_shifts::HeldShifts::default());
+        let mut parent = registry.hold(&fixture.session);
+        let old_run = registry.run(&fixture.session);
+        let old_handle = old_run
+            .runtime(async {
+                let session = fixture.core.session(fixture.session.clone()).open().await?;
+                Ok::<_, EmbedError>(session.runtime.clone())
+            })
+            .await?;
+        let (entered, reached) = tokio::sync::oneshot::channel();
+        let (ack, released) = tokio::sync::oneshot::channel();
+        let old_store = Arc::clone(&fixture.store);
+        let old = tokio::spawn(async move {
+            let writer = old_handle.writer();
+            let runtime = writer.lock().await;
+            let commit = lash_core::RuntimeCommit::persisted_state_for_test(runtime.state());
+            entered.send(()).expect("announce the pinned writer");
+            released.await.expect("the old acknowledgement is released");
+            let result =
+                lash_core::SessionCommitStore::commit_runtime_state(old_store.as_ref(), commit)
+                    .await;
+            drop(old_run);
+            result
+        });
+        reached
+            .await
+            .expect("the old run reached its acknowledgement");
+        if replace_parent {
+            parent = registry.hold(&fixture.session);
+        }
+        let next_run = registry.run(&fixture.session);
+        let next_handle = next_run
+            .runtime(async {
+                let session = fixture.core.session(fixture.session.clone()).open().await?;
+                Ok::<_, EmbedError>(session.runtime.clone())
+            })
+            .await?;
+        let writer = next_handle.writer();
+        let runtime = tokio::time::timeout(std::time::Duration::from_secs(1), writer.lock())
+            .await
+            .expect("the successor never waits for the superseded writer");
+        let commit = lash_core::RuntimeCommit::persisted_state_for_test(runtime.state());
+        lash_core::SessionCommitStore::commit_runtime_state(fixture.store.as_ref(), commit).await?;
+        let committed = lash_core::SessionCommitStore::load_session_head_meta(
+            fixture.store.as_ref(),
+            &fixture.session,
+        )
+        .await?
+        .expect("the successor committed its head");
+        drop(runtime);
+        drop(next_run);
+        ack.send(()).expect("release the old acknowledgement");
+        let refused = old
+            .await
+            .expect("the old run ends")
+            .expect_err("the late commit is refused");
+        assert!(
+            matches!(refused, lash_core::StoreError::HeadRevisionConflict { .. }),
+            "L13 preserves the typed head ownership refusal: {refused:?}"
+        );
+        assert_eq!(
+            lash_core::SessionCommitStore::load_session_head_meta(
+                fixture.store.as_ref(),
+                &fixture.session
+            )
+            .await?
+            .expect("the head remains committed")
+            .head_revision,
+            committed.head_revision,
+            "the late attempt never resurrects its head"
+        );
+        drop(parent);
+    }
+    Ok(())
+}
+
 macro_rules! session_shift_laws {
     ($engine:ident) => {
         mod $engine {

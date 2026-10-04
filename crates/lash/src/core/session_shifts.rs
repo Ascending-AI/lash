@@ -25,7 +25,7 @@ pub(crate) struct CoreSessionShiftsConfig {
 pub(crate) struct CoreSessionShifts {
     config: Arc<CoreSessionShiftsConfig>,
     /// The sessions a shift attempt holds open in this process, so its
-    /// admissions and runs share one runtime (FIG-3825).
+    /// runs share one runtime when it is idle (FIG-3825).
     held: super::held_shifts::HeldShifts,
     /// The core's resolved work ports, bound once the substrate slot exists:
     /// the reconcile pass asks this port for shifts, not the environment's
@@ -115,11 +115,10 @@ impl CoreSessionShifts {
         if let Some(borrow) = self.config.residents.borrow(session_id) {
             return Ok(ShiftRuntime::Resident(borrow));
         }
-        let open = Box::pin(self.open_runtime(session_id));
-        let Some(held) = self.held.held(session_id) else {
-            return open.await.map(ShiftRuntime::Opened);
-        };
-        let handle = held.runtime(open).await?;
+        let held = self.held.run(session_id);
+        let handle = held
+            .runtime(Box::pin(self.open_runtime(session_id)))
+            .await?;
         Ok(ShiftRuntime::Held { handle, held })
     }
 
@@ -238,16 +237,15 @@ enum ShiftRuntime {
     Resident(super::residents::ResidentBorrow),
     Held {
         handle: RuntimeHandle,
-        held: Arc<super::held_shifts::HeldSession>,
+        held: super::held_shifts::HeldRun,
     },
-    Opened(RuntimeHandle),
 }
 
 impl ShiftRuntime {
     fn handle(&self) -> &RuntimeHandle {
         match self {
             Self::Resident(borrow) => borrow.runtime(),
-            Self::Held { handle, .. } | Self::Opened(handle) => handle,
+            Self::Held { handle, .. } => handle,
         }
     }
 
@@ -256,7 +254,7 @@ impl ShiftRuntime {
     fn unsettled_run(&self) -> Option<&super::held_shifts::UnsettledRun> {
         match self {
             Self::Held { held, .. } => Some(held.unsettled_run()),
-            Self::Resident(_) | Self::Opened(_) => None,
+            Self::Resident(_) => None,
         }
     }
 }
