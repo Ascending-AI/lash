@@ -43,10 +43,13 @@ pub enum RestateDurableWaitResolveResponse {
 }
 
 /// The refusal arm of [`RestateDurableWaitResolveResponse`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RestateDurableWaitResolveRefusal {
     CancelDecided,
+    Source {
+        refusal: lash_core::tool_run::SourceRefusal,
+    },
 }
 
 impl RestateDurableWaitResolveResponse {
@@ -55,6 +58,9 @@ impl RestateDurableWaitResolveResponse {
     pub fn into_result(self) -> Result<ResolveOutcome, RuntimeError> {
         match self {
             Self::Outcome(outcome) => Ok(outcome),
+            Self::Refused(RestateDurableWaitResolveRefusal::Source { refusal }) => {
+                Err(lash_core::RuntimeEffectControllerError::from(refusal).into_runtime_error())
+            }
             Self::Refused(RestateDurableWaitResolveRefusal::CancelDecided) => {
                 Err(lash_core::facade_support::await_event_identity::cancel_decided_refusal())
             }

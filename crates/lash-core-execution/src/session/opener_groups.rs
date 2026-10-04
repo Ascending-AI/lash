@@ -88,6 +88,7 @@ use std::sync::Arc;
 use lash_sansio::sync::MutexExt;
 
 use super::execution_context::RuntimeExecutionContext;
+use super::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use crate::runtime::effect::LoserPolicy;
 use crate::runtime::effect::executor::RuntimeEffectControllerError;
 
@@ -490,6 +491,23 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub async fn close_opener_groups(
         &self,
     ) -> Result<OpenerGroupsClosed, RuntimeEffectControllerError> {
+        if let Some(run) = &self.tool_run {
+            run.close().await?;
+        } else if self.opener_state().holds_tool_run() {
+            self.drive_tool_run(None, |context| async move {
+                context
+                    .tool_run
+                    .as_ref()
+                    .ok_or_else(|| {
+                        RuntimeEffectControllerError::from(
+                            crate::tool_run::ContinuationRefusal::NotQuiescent,
+                        )
+                    })?
+                    .close()
+                    .await
+            })
+            .await??;
+        }
         let held = std::mem::take(&mut self.opener_groups.lock_recover().outstanding);
         let scoped = self.dispatch.effect_controller.clone();
         let controller = scoped.controller();

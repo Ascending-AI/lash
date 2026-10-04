@@ -56,14 +56,15 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     /// the attempt, and nothing after the step runs in it: the returned
     /// future never resolves to the fault.
     /// Register an owned X before waiting; SDK progress owns its closure.
-    fn run_json_eager_or_retry_send<T, Fut>(
-        &self,
+    fn run_json_eager_or_retry_send<'run, T, Fut>(
+        &'run self,
         effect_name: String,
         future: Fut,
-    ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'static
+    ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
     where
+        'ctx: 'run,
         T: Serialize + DeserializeOwned + Send + 'static,
-        Fut: Future<Output = Result<T, String>> + Send + 'static;
+        Fut: Future<Output = Result<T, String>> + Send + 'run;
 
     fn run_json_or_retry_send<'run, T, Fut>(
         &'run self,

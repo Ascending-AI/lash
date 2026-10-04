@@ -210,6 +210,7 @@ pub(super) fn turn_effect_executor(
         driver.trace_context(machine.protocol_iteration()),
     );
     let owned_driver = RuntimeTurnDriver {
+        tool_run_owner: driver.tool_run_owner.clone(),
         // An effect body takes no boundary of its own, but a cell it runs
         // asks whether its turn may end at one inside it (FIG-4739).
         segment: TurnSegment::new(driver.segment.allowed, None),

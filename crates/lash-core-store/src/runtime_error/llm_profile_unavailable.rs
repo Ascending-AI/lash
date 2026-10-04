@@ -26,7 +26,12 @@ impl RuntimeErrorCause {
                 refusal.as_ref(),
                 crate::tool_run::ContinuationRefusal::NotQuiescent
             ),
-            Self::SourceRefused { .. }
+            Self::ToolRunCutRefused { .. }
+            | Self::ToolRunIsolationRefused { .. }
+            | Self::ToolRunDrift { .. }
+            | Self::ToolRunControl { .. }
+            | Self::ToolRunAdmissionRefused { .. }
+            | Self::SourceRefused { .. }
             | Self::MaterialRefused { .. }
             | Self::ProviderFailure { .. }
             | Self::IngressReservedSourceKey { .. }

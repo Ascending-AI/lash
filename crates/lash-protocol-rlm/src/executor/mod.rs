@@ -1,3 +1,6 @@
+mod tool_run;
+pub(crate) use tool_run::execute_code_with_channel_and_bounds_with_trigger_resolver;
+
 mod globals;
 use globals::{apply_global_defaults, process_handle_names};
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
@@ -54,7 +57,7 @@ fn set_execution_bound_exhaustion_loud(loud: bool) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
+async fn execute_owned_code(
     dialect: &dyn crate::dialect::Dialect,
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,

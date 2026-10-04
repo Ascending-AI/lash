@@ -438,6 +438,7 @@ impl LashRuntime {
             .take()
             .expect("lash runtime session must be available");
         let driver = Box::new(RuntimeTurnDriver {
+            tool_run_owner: None,
             session,
             policy: resolved_turn_policy,
             prelude,

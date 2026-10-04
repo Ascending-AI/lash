@@ -1414,6 +1414,11 @@ impl RuntimeError {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
             RuntimeErrorCause::SourceRefused { .. }
+            | RuntimeErrorCause::ToolRunCutRefused { .. }
+            | RuntimeErrorCause::ToolRunIsolationRefused { .. }
+            | RuntimeErrorCause::ToolRunDrift { .. }
+            | RuntimeErrorCause::ToolRunControl { .. }
+            | RuntimeErrorCause::ToolRunAdmissionRefused { .. }
             | RuntimeErrorCause::RunContinuationRefused { .. }
             | RuntimeErrorCause::MaterialRefused { .. }
             | RuntimeErrorCause::ProviderFailure { .. }

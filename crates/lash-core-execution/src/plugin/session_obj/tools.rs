@@ -15,6 +15,38 @@ pub struct ResolvedToolSurface {
 }
 
 impl PluginSession {
+    pub(crate) fn tool_run_revisions(&self) -> Vec<crate::plugin::PluginRevision> {
+        self.host.plugin_revisions()
+    }
+
+    pub(crate) fn tool_run_binding(
+        &self,
+        tool: &crate::ToolId,
+        source: Option<&str>,
+    ) -> Result<crate::tool_run::AdmittedBinding, PluginError> {
+        let owner = self.tool_execution_owner(tool, source)?;
+        let executable = self
+            .capabilities()
+            .contributions
+            .tool_providers
+            .iter()
+            .find(|registered| {
+                registered.identity.owner == owner
+                    && registered.hook.resolve_manifest_by_id(tool).is_some()
+            })
+            .map(|registered| registered.identity.clone())
+            .ok_or_else(|| {
+                PluginError::Registration(format!(
+                    "tool `{tool}` has no registered executable callback"
+                ))
+            })?;
+        Ok(crate::tool_run::AdmittedBinding {
+            preparation: executable.clone(),
+            executable,
+            presentation: self.tool_presentation_plan(),
+        })
+    }
+
     /// Bind recorded provider identities to this worker's capabilities.
     pub fn resolve_context_tool_bindings(
         &self,

@@ -17,16 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use super::model::{ProcessStartRegistration, StartKey};
 
-/// The execution boundary a registered process implementation supplies.
-/// An invocation has independent lifetime, but no OS isolation guarantee.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessExecutionBoundary {
-    Invocation,
-    /// The implementation runs the work in a separate worker process and
-    /// can terminate and reap it before acknowledging cancellation.
-    WorkerProcess,
-}
+pub use crate::tool_run::ProcessExecutionBoundary;
 
 /// A registered implementation's observation that its physical worker ended.
 /// The implementation retains this receipt so a repeated cancellation can
@@ -57,28 +48,7 @@ pub struct IsolatedToolStart {
     pub registration: ProcessStartRegistration,
 }
 
-/// A process binding or physical termination that cannot honor admission.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum IsolatedStartRefusal {
-    #[error("an isolated start must name a registered engine input")]
-    NotEngine,
-    #[error("process implementation `{kind}` is unavailable")]
-    Unavailable { kind: String },
-    #[error("process implementation `{kind}` supplies {available:?}, not {recorded:?}")]
-    Boundary {
-        kind: String,
-        recorded: ProcessExecutionBoundary,
-        available: ProcessExecutionBoundary,
-    },
-    #[error("the isolated start is refused: {cause}")]
-    Start {
-        cause: DeclaredStartObligationRefusal,
-    },
-    #[error("the termination receipt names another process")]
-    TerminationOwner,
-    #[error("a physical worker's cancellation has no termination receipt")]
-    TerminationMissing,
-}
+pub use crate::tool_run::IsolatedStartRefusal;
 
 /// A declared start, admitted with its call.
 #[derive(Debug, Serialize, Deserialize)]
@@ -88,17 +58,7 @@ pub struct DeclaredStartObligation {
     pub registration: ProcessStartRegistration,
 }
 
-/// Why a registration cannot be a declared start.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
-#[serde(rename_all = "snake_case")]
-pub enum DeclaredStartObligationRefusal {
-    #[error("a declared start needs a stable start key")]
-    Keyless,
-    #[error("a declared start lash executes needs its captured execution environment")]
-    NoEnvironment,
-    #[error("a declared start needs the consuming call's hold")]
-    NoConsumerHold,
-}
+pub use crate::tool_run::DeclaredStartObligationRefusal;
 
 /// How far a declared start has gone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

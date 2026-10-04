@@ -293,18 +293,18 @@ where
     async fn record_run_schedule(
         &self,
         name: String,
-        step: lash_core::RunRecordStep<'static>,
+        step: lash_core::RunRecordStep<'_>,
     ) -> Result<lash_core::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
         self.run_records
             .record_schedule(&*self.inner, name, step)
             .await
     }
 
-    fn start_run_attempt(
-        &self,
+    fn start_run_attempt<'step>(
+        &'step self,
         name: String,
-        step: lash_core::tool_dispatch::RunAttemptStep,
-    ) -> lash_core::tool_dispatch::RunAttemptHandle {
+        step: lash_core::tool_dispatch::RunAttemptStep<'step>,
+    ) -> lash_core::tool_dispatch::RunAttemptHandle<'step> {
         self.inner.start_run_attempt(name, step)
     }
 

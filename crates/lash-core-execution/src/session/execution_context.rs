@@ -52,6 +52,8 @@ impl RecordedTurnCancel {
 #[derive(Clone)]
 pub struct RuntimeExecutionContext<'run> {
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
+    tool_material_store: Option<Arc<dyn crate::store::ToolMaterialStore>>,
+    pub(super) tool_run: Option<super::tool_run::ToolRunChannel>,
     pub(super) tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
     /// The catalog the live registry resolves to, when the dispatch catalog
     /// is a turn's recorded surface: what a code cell's journaled binding set
@@ -491,7 +493,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub fn record_nested_runtime_effect_error(&self, error: crate::RuntimeEffectControllerError) {
         self.record_nested_effect_error(error);
     }
-    pub(super) fn process_scope(
+    pub(crate) fn process_scope(
         &self,
         parent_invocation: Option<crate::RuntimeInvocation>,
     ) -> crate::ProcessOpScope<'_> {
@@ -518,6 +520,8 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub(crate) fn to_static(&self) -> Option<RuntimeExecutionContext<'static>> {
         Some(RuntimeExecutionContext {
             dispatch: Arc::new(self.dispatch.to_static()?),
+            tool_material_store: self.tool_material_store.clone(),
+            tool_run: self.tool_run.clone(),
             tool_children: self.tool_children.clone(),
             live_tool_catalog: self.live_tool_catalog.clone(),
             process_env_store: Arc::clone(&self.process_env_store),
@@ -558,6 +562,17 @@ impl<'run> RuntimeExecutionContext<'run> {
             #[cfg(any(test, feature = "testing"))]
             tool_child_host: self.tool_child_host.clone(),
         })
+    }
+
+    pub fn with_tool_material_store(
+        mut self,
+        store: Arc<dyn crate::store::ToolMaterialStore>,
+    ) -> Self {
+        self.tool_material_store = Some(store);
+        self
+    }
+    pub fn tool_material_store(&self) -> Option<Arc<dyn crate::store::ToolMaterialStore>> {
+        self.tool_material_store.clone()
     }
 
     pub fn take_nested_effect_error(&self) -> Option<crate::RuntimeEffectControllerError> {
@@ -817,7 +832,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    pub(super) fn attachment_acceptance(&self) -> &crate::provider::AttachmentCapabilitySnapshot {
+    pub(crate) fn attachment_acceptance(&self) -> &crate::provider::AttachmentCapabilitySnapshot {
         &self.execution_env_spec.policy.attachment_acceptance
     }
 

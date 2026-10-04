@@ -175,7 +175,7 @@ impl<'a> RunCoordinator<'a> {
         successor: SegmentOrdinal,
         available: Vec<PluginRevision>,
         transfer: crate::tool_run::RunTransfer,
-        handlers: std::sync::Arc<dyn SingletonToolHandlers>,
+        handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         clock: &dyn crate::Clock,
     ) -> Result<Self, SingletonRunError> {
         use crate::tool_run::{Cut, MaterialHolder, RunLifecycle};
@@ -308,6 +308,20 @@ impl<'a> RunCoordinator<'a> {
             }
         }
         for (id, member) in members {
+            let recorded: RecordedPreparedRequest =
+                run.journal.materials.decode(&member.request)?;
+            let request = SingletonPreparedRequest {
+                arguments: recorded.arguments,
+                environment: recorded.environment,
+                prepared: recorded.prepared,
+                state_snapshot: recorded
+                    .state_snapshot
+                    .as_ref()
+                    .map(|reference| run.journal.materials.snapshot(reference))
+                    .transpose()?,
+                isolation: recorded.isolation,
+            };
+            handlers.restore_request(&id, &member.binding, &request)?;
             if let Some((rank, decision)) = decisions.get(&id) {
                 if let Some(presentation) = presented.get(&id) {
                     run.presented.insert(
@@ -318,6 +332,20 @@ impl<'a> RunCoordinator<'a> {
                             launched: launched.get(&id).cloned(),
                         },
                     );
+                    super::drain::restore_contributions(&run.journal, &id, handlers.as_ref())?;
+                    match run.terminal(&id)? {
+                        SingletonTerminal::Final {
+                            capture,
+                            presentation,
+                            ..
+                        } => {
+                            handlers.incorporate(&id, Some(&capture), Some(&presentation), false)?
+                        }
+                        SingletonTerminal::Withheld { .. } => {
+                            handlers.incorporate(&id, None, None, false)?
+                        }
+                        SingletonTerminal::Deferred { .. } => return Err(boundary(&id)),
+                    }
                 } else {
                     let reference = match decision {
                         CallDecision::Final {
@@ -331,7 +359,8 @@ impl<'a> RunCoordinator<'a> {
                                 AttemptResult::Done { output }
                                 | AttemptResult::Failed { output, .. } => Some(output.clone()),
                                 AttemptResult::Deferred { .. }
-                                | AttemptResult::DeferredStart { .. } => None,
+                                | AttemptResult::DeferredStart { .. }
+                                | AttemptResult::Pending { .. } => None,
                             })
                             .or_else(|| {
                                 attempts.get(&id).and_then(|(_, result)| match result {
@@ -372,7 +401,9 @@ impl<'a> RunCoordinator<'a> {
                 }
             } else if let Some((
                 attempt,
-                result @ (AttemptResult::Deferred { .. } | AttemptResult::DeferredStart { .. }),
+                result @ (AttemptResult::Deferred { .. }
+                | AttemptResult::DeferredStart { .. }
+                | AttemptResult::Pending { .. }),
             )) = attempts.get(&id)
             {
                 let request: RecordedPreparedRequest =
@@ -390,6 +421,12 @@ impl<'a> RunCoordinator<'a> {
                     environment: request.environment,
                 };
                 let start = match result {
+                    AttemptResult::Pending {
+                        start: Some(start), ..
+                    } => Some(SingletonStart {
+                        start_key: start.start_key.clone(),
+                        obligation: start.obligation.clone(),
+                    }),
                     AttemptResult::DeferredStart {
                         start_key,
                         obligation,
@@ -409,11 +446,21 @@ impl<'a> RunCoordinator<'a> {
                     start,
                 };
                 if pending_start {
-                    let AttemptResult::DeferredStart { source, .. } = result else {
-                        return Err(crate::tool_run::ContinuationRefusal::ForeignSource.into());
+                    let source = match result {
+                        AttemptResult::DeferredStart { source, .. }
+                        | AttemptResult::Pending { source, .. } => source,
+                        _ => return Err(crate::tool_run::ContinuationRefusal::ForeignSource.into()),
                     };
                     run.pending_starts.insert(id, (waiting, source.clone()));
                 } else {
+                    if let AttemptResult::Pending { metadata, .. } = result {
+                        let pending: RecordedPending = run.journal.materials.decode(metadata)?;
+                        waiting
+                            .handlers
+                            .get()
+                            .arm_pending(&run.sources[&id], &pending.completion)
+                            .await?;
+                    }
                     run.waiting.insert(id, waiting);
                 }
             }

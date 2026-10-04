@@ -106,8 +106,8 @@ impl<'a> RunCoordinator<'a> {
     pub async fn start_aggregate(
         &mut self,
         plan: &AggregatePlan,
-        calls: &'a [SingletonToolCall],
-        handlers: std::sync::Arc<dyn SingletonToolHandlers>,
+        calls: &[SingletonToolCall],
+        handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         retry: crate::tool_run::RecordedRetryPolicy,
         clock: &dyn crate::Clock,
     ) -> Result<(), SingletonRunError> {
@@ -159,8 +159,21 @@ impl<'a> RunCoordinator<'a> {
         key: &str,
         consumer: AggregateConsumer,
     ) -> Result<RunAggregateOutcome, SingletonRunError> {
+        self.consume_aggregate_with_control(key, consumer, true)
+            .await
+    }
+
+    /// Native rounds collect cancellation completions in their source slots.
+    pub(crate) async fn consume_aggregate_with_control(
+        &mut self,
+        key: &str,
+        consumer: AggregateConsumer,
+        host_control: bool,
+    ) -> Result<RunAggregateOutcome, SingletonRunError> {
         self.begin_frame()?;
-        let result = self.consume_aggregate_inner(key, consumer).await;
+        let result = self
+            .consume_aggregate_inner(key, consumer, host_control)
+            .await;
         self.active_frame = false;
         self.note_fault(&result);
         result
@@ -170,10 +183,12 @@ impl<'a> RunCoordinator<'a> {
         &mut self,
         key: &str,
         consumer: AggregateConsumer,
+        host_control: bool,
     ) -> Result<RunAggregateOutcome, SingletonRunError> {
         let plan = self.aggregate_plan(key)?;
         let (selection, settlements) = loop {
-            let (selection, settlements) = self.select(&plan, consumer)?;
+            let (selection, settlements) =
+                self.select_with_control(&plan, consumer, host_control)?;
             if !matches!(selection, Selection::Pending)
                 || plan.operands.is_empty()
                 || (self.pending.is_empty() && self.timers.is_empty())
@@ -426,7 +441,7 @@ impl<'a> RunCoordinator<'a> {
         Ok(())
     }
 
-    fn aggregate_plan(&self, key: &str) -> Result<AggregatePlan, SingletonRunError> {
+    pub(crate) fn aggregate_plan(&self, key: &str) -> Result<AggregatePlan, SingletonRunError> {
         self.journal
             .records
             .iter()
@@ -482,7 +497,10 @@ impl<'a> RunCoordinator<'a> {
         self.journal.materials.decode(reference).map_err(Into::into)
     }
 
-    fn terminal(&self, call_id: &ToolCallId) -> Result<SingletonTerminal, SingletonRunError> {
+    pub(super) fn terminal(
+        &self,
+        call_id: &ToolCallId,
+    ) -> Result<SingletonTerminal, SingletonRunError> {
         let presented = self
             .presented
             .get(call_id)
@@ -509,10 +527,39 @@ impl<'a> RunCoordinator<'a> {
         }
     }
 
+    pub(crate) fn aggregate_settlement_order(
+        &self,
+        key: &str,
+    ) -> Result<Vec<usize>, SingletonRunError> {
+        let plan = self.aggregate_plan(key)?;
+        let (_, settlements) =
+            self.select_with_control(&plan, AggregateConsumer::AllSettled, false)?;
+        let mut order: Vec<_> = settlements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, settlement)| {
+                settlement
+                    .as_ref()
+                    .map(|settlement| (settlement.order, index))
+            })
+            .collect();
+        order.sort_unstable();
+        Ok(order.into_iter().map(|(_, index)| index).collect())
+    }
+
     fn select(
         &self,
         plan: &AggregatePlan,
         consumer: AggregateConsumer,
+    ) -> Result<(Selection, Vec<Option<Settlement>>), SingletonRunError> {
+        self.select_with_control(plan, consumer, true)
+    }
+
+    fn select_with_control(
+        &self,
+        plan: &AggregatePlan,
+        consumer: AggregateConsumer,
+        host_control: bool,
     ) -> Result<(Selection, Vec<Option<Settlement>>), SingletonRunError> {
         let mut settlements: Vec<Option<Settlement>> =
             (0..plan.leaves.len()).map(|_| None).collect();
@@ -552,7 +599,9 @@ impl<'a> RunCoordinator<'a> {
                         ..
                     } => {
                         let Some(leaf) = plan.leaves.iter().position(|leaf| matches!(leaf, AggregateLeaf::Call { call_id: id } if id == call_id)) else { continue; };
-                        if matches!(decision, CallDecision::Cancelled | CallDecision::Aborted) {
+                        if host_control
+                            && matches!(decision, CallDecision::Cancelled | CallDecision::Aborted)
+                        {
                             return Ok((
                                 Selection::HostControl(call_id.clone(), decision.clone()),
                                 settlements,

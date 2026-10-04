@@ -32,6 +32,7 @@ pub mod continuation;
 pub mod material;
 pub mod operation;
 pub mod receipt;
+pub mod refusal;
 pub mod retention;
 pub mod run_event;
 pub mod source_seal;
@@ -51,11 +52,15 @@ pub use material::{
 };
 pub use operation::{OperationRun, RunInputKind};
 pub use receipt::{BusinessReceipt, LogicalTerminal, ObservationPermit, ObservedFact};
+pub use refusal::{
+    DeclaredStartObligationRefusal, IsolatedStartRefusal, ProcessExecutionBoundary, RunCutRefusal,
+    SingletonDrift,
+};
 pub use retention::{MaterialBundle, MaterialHolder, MaterialRetentionError, RetainedBundle};
 pub use run_event::{
-    AttemptOrdinal, AttemptResult, CallDecision, ResultSource, RunAttemptEntry, RunEvent,
-    RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger, RunLifecycle, RunRecord,
-    RunTraceFacts, SegmentOrdinal,
+    AttemptOrdinal, AttemptResult, CallDecision, PendingStart, ResultSource, RunAttemptEntry,
+    RunEvent, RunEventOrdinal, RunEventRefusal, RunJournalEntry, RunLedger, RunLifecycle,
+    RunRecord, RunTraceFacts, SegmentOrdinal,
 };
 pub use source_seal::{
     SealOutcome, SealRefusal, SealWriter, SourceAuthority, SourceDescriptor, SourceRefusal,

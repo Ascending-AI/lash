@@ -440,120 +440,134 @@ async fn run_lashlang_process_scoped(
             &segment_state.held_tool_calls,
         );
     }
-    let ordinals = ReplayOrdinals::restore(segment_state.as_ref());
-    let run = crate::LashlangReplayRun::new(
-        identities.namespace(),
-        ReplayOrdinals::restore_commands(segment_state.as_ref()),
-    );
-    let host = LashlangProcessHost {
-        ctx,
-        host_environment,
-        artifact_store: engine.artifact_store(),
-        workers: engine.workers.clone(),
-        processes,
-        process_id: process_id.clone(),
-        identities,
-        run,
-        producer: serde_json::json!({
-            "compiler": lashlang::LASHLANG_COMPILER_VERSION,
-            "vm_abi": lashlang::LASHLANG_VM_ABI_VERSION,
-            "module_ref": input.module_ref.to_string(),
-        }),
-        lashlang_execution_trace: lashlang_execution_trace.clone(),
-        ordinals,
-        worker_recovery,
-        cancellation: cancellation.clone(),
-        host_failure: Default::default(),
-        effect_summary: segment_state
-            .as_ref()
-            .map_or_else(EffectSummaryWriter::default, |state| {
-                EffectSummaryWriter::restore(
-                    state.pending_summary.clone(),
-                    state.effect_omissions.clone(),
+    let owner = ctx.clone();
+    owner
+        .drive_tool_run(None, |ctx| async move {
+            let ordinals = ReplayOrdinals::restore(segment_state.as_ref());
+            let run = crate::LashlangReplayRun::new(
+                identities.namespace(),
+                ReplayOrdinals::restore_commands(segment_state.as_ref()),
+            );
+            let host = LashlangProcessHost {
+                ctx,
+                host_environment,
+                artifact_store: engine.artifact_store(),
+                workers: engine.workers.clone(),
+                processes,
+                process_id: process_id.clone(),
+                identities,
+                run,
+                producer: serde_json::json!({
+                    "compiler": lashlang::LASHLANG_COMPILER_VERSION,
+                    "vm_abi": lashlang::LASHLANG_VM_ABI_VERSION,
+                    "module_ref": input.module_ref.to_string(),
+                }),
+                lashlang_execution_trace: lashlang_execution_trace.clone(),
+                ordinals,
+                worker_recovery,
+                cancellation: cancellation.clone(),
+                host_failure: Default::default(),
+                effect_summary: segment_state.as_ref().map_or_else(
+                    EffectSummaryWriter::default,
+                    |state| {
+                        EffectSummaryWriter::restore(
+                            state.pending_summary.clone(),
+                            state.effect_omissions.clone(),
+                        )
+                    },
+                ),
+            };
+            let output = {
+                let _phase = host.ctx.named_phase("rlm_process.execute");
+                execute_lashlang(
+                    &engine.workers,
+                    &artifact,
+                    &input,
+                    execution_bounds,
+                    segment_controller.controller(),
+                    &host,
+                    (segment_state, current_program_hash),
                 )
-            }),
-    };
-    let output = {
-        let _phase = host.ctx.named_phase("rlm_process.execute");
-        execute_lashlang(
-            &engine.workers,
-            &artifact,
-            &input,
-            execution_bounds,
-            segment_controller.controller(),
-            &host,
-            (segment_state, current_program_hash),
-        )
-        .await
-    };
-    let output = match output {
-        Ok(output) => output,
-        Err(error) => {
-            let host_failure = host.host_failure.lock_recover().take();
-            drop(host);
-            guard
-                .shutdown(false)
                 .await
-                .map_err(lash_core::ProcessInfraError::new)?;
-            return Err(host_failure.map_or(error, lash_core::ProcessInfraError::new));
-        }
-    };
-    // A body refused at its journal (FIG-3586) stopped where it diverged: it
-    // writes nothing more — no summary, no group finalization — and its
-    // refusal surfaces from the run guard below as infrastructure, so the
-    // process stays non-terminal and every redrive refuses again with nothing
-    // dispatched until an operator acts.
-    let refused = host.ctx.nested_replay_mismatch().is_some();
-    let host_failure = host.host_failure.lock_recover().take();
-    let mut output = output;
-    if !refused && host_failure.is_none() && output.is_terminal() {
-        // A body that ends must end where the run that wrote its journal
-        // ended (FIG-3586). Its terminal is the registry's to record, so it
-        // journals no seal of its own.
-        host.commands().close_unsealed().await;
-        // The run's terminal batch (FIG-3571): its pending occurrences, then
-        // its omission record, ahead of the terminal event the runner commits
-        // in the same transaction.
-        if let lash_core::ProcessRunOutcome::Terminal { prelude, output } = &mut output {
-            *prelude = host
-                .effect_summary
-                .terminal_prelude(host.identities.effect_omissions(), host.ctx.fleet_format());
-            adopt_held_attachments(&host, output).await?;
-        }
-    }
-    // A process terminal is the process opener's end (ADR 0099 §7): every
-    // effect group it still holds is closed and finalized, and its losers'
-    // settled facts incorporated, before the terminal is handed back to be
-    // committed. A segment boundary is not an end — the successor reattaches
-    // the cursors the handover carried. A failed close leaves `closing`
-    // recorded and surfaces as infrastructure, so the run is retried rather
-    // than committing a terminal whose accounting was never incorporated.
-    if output.is_terminal() && !refused && host_failure.is_none() {
-        let _phase = host.ctx.named_phase("rlm_process.close_groups");
-        host.ctx.close_opener_groups().await.map_err(|error| {
+            };
+            let output = match output {
+                Ok(output) => output,
+                Err(error) => {
+                    let host_failure = host.host_failure.lock_recover().take();
+                    drop(host);
+                    guard
+                        .shutdown(false)
+                        .await
+                        .map_err(lash_core::ProcessInfraError::new)?;
+                    return Err(host_failure.map_or(error, lash_core::ProcessInfraError::new));
+                }
+            };
+            // A body refused at its journal (FIG-3586) stopped where it diverged: it
+            // writes nothing more — no summary, no group finalization — and its
+            // refusal surfaces from the run guard below as infrastructure, so the
+            // process stays non-terminal and every redrive refuses again with nothing
+            // dispatched until an operator acts.
+            let refused = host.ctx.nested_replay_mismatch().is_some();
+            let host_failure = host.host_failure.lock_recover().take();
+            let mut output = output;
+            if !refused && host_failure.is_none() && output.is_terminal() {
+                // A body that ends must end where the run that wrote its journal
+                // ended (FIG-3586). Its terminal is the registry's to record, so it
+                // journals no seal of its own.
+                host.commands().close_unsealed().await;
+                // The run's terminal batch (FIG-3571): its pending occurrences, then
+                // its omission record, ahead of the terminal event the runner commits
+                // in the same transaction.
+                if let lash_core::ProcessRunOutcome::Terminal { prelude, output } = &mut output {
+                    *prelude = host.effect_summary.terminal_prelude(
+                        host.identities.effect_omissions(),
+                        host.ctx.fleet_format(),
+                    );
+                    adopt_held_attachments(&host, output).await?;
+                }
+            }
+            // A process terminal is the process opener's end (ADR 0099 §7): every
+            // effect group it still holds is closed and finalized, and its losers'
+            // settled facts incorporated, before the terminal is handed back to be
+            // committed. A segment boundary is not an end — the successor reattaches
+            // the cursors the handover carried. A failed close leaves `closing`
+            // recorded and surfaces as infrastructure, so the run is retried rather
+            // than committing a terminal whose accounting was never incorporated.
+            if output.is_terminal() && !refused && host_failure.is_none() {
+                let _phase = host.ctx.named_phase("rlm_process.close_groups");
+                host.ctx.close_opener_groups().await.map_err(|error| {
+                    lash_core::ProcessInfraError::new(
+                        lash_core::PluginError::RuntimeEffectController(error),
+                    )
+                })?;
+            }
+            drop(host);
+            {
+                let _phase = lash_core::runtime::RuntimeNamedPhase::begin(
+                    phase_probe,
+                    "rlm_process.shutdown",
+                );
+                guard
+                    .shutdown(false)
+                    .await
+                    .map_err(lash_core::ProcessInfraError::new)?;
+            }
+            if let Some(fault) = host_failure {
+                return Err(lash_core::ProcessInfraError::new(fault));
+            }
+            if output.is_terminal()
+                && let Some(output) = output.terminal_output()
+            {
+                lashlang_execution_trace.emit_finished(output);
+            }
+            Ok(output)
+        })
+        .await
+        .map_err(|error| {
             lash_core::ProcessInfraError::new(lash_core::PluginError::RuntimeEffectController(
                 error,
             ))
-        })?;
-    }
-    drop(host);
-    {
-        let _phase =
-            lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, "rlm_process.shutdown");
-        guard
-            .shutdown(false)
-            .await
-            .map_err(lash_core::ProcessInfraError::new)?;
-    }
-    if let Some(fault) = host_failure {
-        return Err(lash_core::ProcessInfraError::new(fault));
-    }
-    if output.is_terminal()
-        && let Some(output) = output.terminal_output()
-    {
-        lashlang_execution_trace.emit_finished(output);
-    }
-    Ok(output)
+        })?
 }
 
 async fn execute_lashlang(
@@ -664,17 +678,21 @@ async fn execute_lashlang(
         .into(),
         lash_vm_broker::BrokeredEnd::Suspended { checkpoint } => {
             hold_segment_definitions(&host.ctx, checkpoint.vm.definition_ids()).await?;
+            let boundary_reason = reason
+                .lock_recover()
+                .take()
+                .unwrap_or(lash_core::BoundaryReason::HandOver);
+            host.ctx
+                .capture_tool_run(boundary_reason)
+                .await
+                .map_err(|error| {
+                    lash_core::ProcessInfraError::new(
+                        lash_core::PluginError::RuntimeEffectController(error),
+                    )
+                })?;
             lash_core::ProcessRunOutcome::SegmentBoundary(
-                capture_segment(
-                    checkpoint.vm,
-                    host,
-                    reason
-                        .lock_recover()
-                        .take()
-                        .unwrap_or(lash_core::BoundaryReason::HandOver),
-                    &program_hash,
-                )
-                .map_err(|(error, message)| infra(format!("{message}: {error}")))?,
+                capture_segment(checkpoint.vm, host, boundary_reason, &program_hash)
+                    .map_err(|(error, message)| infra(format!("{message}: {error}")))?,
             )
         }
         lash_vm_broker::BrokeredEnd::Cancelled => {

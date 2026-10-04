@@ -293,7 +293,7 @@ async fn prepare_authorized_tool_call_with_context(
     }
 }
 
-fn validate_args(
+pub(super) fn validate_args(
     contract: &crate::ToolContract,
     args: &serde_json::Value,
     code: &'static str,
@@ -308,7 +308,7 @@ fn validate_args(
 
 /// The bound provider's preparation of `pending`, whose identity is fixed:
 /// a preparation that names another call or tool fails the call.
-async fn prepare_with_provider(
+pub(super) async fn prepare_with_provider(
     context: &ToolDispatchContext<'_>,
     manifest: &ToolManifest,
     ids: &ToolCallIds,

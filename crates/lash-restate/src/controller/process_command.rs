@@ -506,22 +506,20 @@ where
                 process_cancel,
             )
             .await?;
+            context
+                .attach_process_terminal(
+                    namespace,
+                    RestateProcessTerminalRequest { process_id, key },
+                )
+                .await
+                .map_err(|err| {
+                    crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineProcessAwait)
+                })?;
             let outcome = match terminal {
                 Some(output) => ProcessEffectOutcome::Await {
                     output: Box::new(output),
                 },
-                None => {
-                    context
-                        .attach_process_terminal(
-                            namespace,
-                            RestateProcessTerminalRequest { process_id, key },
-                        )
-                        .await
-                        .map_err(|err| {
-                            crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineProcessAwait)
-                        })?;
-                    ProcessEffectOutcome::AttachTerminal
-                }
+                None => ProcessEffectOutcome::AttachTerminal,
             };
             Ok((outcome, lash_core::StoreRealization::Realized))
         }

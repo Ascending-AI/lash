@@ -282,6 +282,11 @@ pub enum SingletonBodyOutcome {
     DeferredStart {
         start: Box<ProcessStartRegistration>,
     },
+    /// The production body's pending completion. Its resolver, announcement
+    /// and cancellation hint are captured by X before the Run arms them.
+    Pending {
+        completion: Box<crate::PendingCompletion>,
+    },
     /// Parked on a Deferred source; the source's seal supplies the result.
     Deferred {
         source: AwaitEventKey,
@@ -350,6 +355,36 @@ pub trait SingletonToolHandlers: Send + Sync {
         None
     }
 
+    /// Hydrate the recorded admission, including at successor adoption.
+    /// This validates capabilities without rerunning preparation or hooks.
+    fn restore_request(
+        &self,
+        _call_id: &ToolCallId,
+        _binding: &AdmittedBinding,
+        _request: &SingletonPreparedRequest,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Ok(())
+    }
+
+    /// Policy sealed by the same admission as the prepared request.
+    fn retry_policy(
+        &self,
+        _call: &SingletonToolCall,
+        default: crate::tool_run::RecordedRetryPolicy,
+    ) -> crate::tool_run::RecordedRetryPolicy {
+        default
+    }
+
+    fn cached_capture(&self, output: String) -> Result<SingletonCapture, String> {
+        Ok(SingletonCapture::Done {
+            output,
+            commands: Vec::new(),
+            intents: Vec::new(),
+            stream: Default::default(),
+            start: None,
+        })
+    }
+
     /// Prepare the request (A).
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String>;
 
@@ -363,12 +398,61 @@ pub trait SingletonToolHandlers: Send + Sync {
     /// Execute the body once (X).
     async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String>;
 
+    /// Arm facts declared by a recorded pending completion. Repeated arming
+    /// must be idempotent, including after successor adoption.
+    async fn arm_pending(
+        &self,
+        _source: &crate::tool_run::SourceDescriptor,
+        _completion: &crate::PendingCompletion,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Ok(())
+    }
+
+    /// Whether the source result needs an X finalization under this admission.
+    fn finalizes_source(&self) -> bool {
+        false
+    }
+
+    async fn finalize_source(
+        &self,
+        _call_id: &ToolCallId,
+        _attempt: AttemptOrdinal,
+        capture: &SingletonCapture,
+        _completion: Option<&crate::PendingCompletion>,
+    ) -> Result<SingletonCapture, String> {
+        Ok(capture.clone())
+    }
+
     /// Every after-check's reply on the result candidate (D).
     async fn after_checks(
         &self,
         call_id: &ToolCallId,
         capture: &SingletonCapture,
     ) -> Vec<AttributedVerdict<AfterCheckVerdict>>;
+
+    /// Distinct after-check contributions recorded by D beside its verdicts.
+    fn decision_contributions(&self, _call_id: &ToolCallId) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    fn restore_decision_contributions(
+        &self,
+        _call_id: &ToolCallId,
+        _text: &str,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Ok(())
+    }
+
+    /// Apply recorded semantic channels only after V is acknowledged.
+    fn incorporate(
+        &self,
+        _call_id: &ToolCallId,
+        _capture: Option<&SingletonCapture>,
+        _presentation: Option<&str>,
+        _observe: bool,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Ok(())
+    }
 
     /// Whether the owning Run's cancellation is requested, read once inside
     /// the decision's step (D).
@@ -393,6 +477,14 @@ pub trait SingletonToolHandlers: Send + Sync {
         call_id: &ToolCallId,
         intents: &[ToolIntentKind],
     ) -> Result<(), String>;
+
+    async fn realize_capture(
+        &self,
+        call_id: &ToolCallId,
+        capture: &SingletonCapture,
+    ) -> Result<(), String> {
+        self.realize_declarations(call_id, capture.intents()).await
+    }
 
     /// The model-facing presentation of a final result (V). A declared
     /// refusal records the original result as fallback, with its typed cause.
@@ -464,14 +556,7 @@ pub struct SingletonRunOutcome {
     pub records: Vec<RunRecord>,
 }
 
-/// What a recorded admission names differently from the call replaying it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SingletonDrift {
-    CallId,
-    ToolName,
-    Arguments,
-    IsolationBinding,
-}
+pub use crate::tool_run::SingletonDrift;
 
 /// Why a singleton stopped before it ended. None of these runs a body.
 #[derive(Debug, thiserror::Error)]
@@ -539,21 +624,21 @@ pub async fn run_singleton_tool(
 }
 
 /// The body of one independently recorded X receipt.
-pub type RunAttemptStep = std::pin::Pin<
+pub type RunAttemptStep<'run> = std::pin::Pin<
     Box<
         dyn std::future::Future<Output = Result<crate::tool_run::RunAttemptEntry, String>>
             + Send
-            + 'static,
+            + 'run,
     >,
 >;
 
 /// An independently registered X; awaiting it does not register another command.
-pub type RunAttemptHandle = std::pin::Pin<
+pub type RunAttemptHandle<'run> = std::pin::Pin<
     Box<
         dyn std::future::Future<
                 Output = Result<crate::tool_run::RunAttemptEntry, RuntimeEffectControllerError>,
             > + Send
-            + 'static,
+            + 'run,
     >,
 >;
 
@@ -561,3 +646,59 @@ pub type RunAttemptHandle = std::pin::Pin<
 pub type RunRetryTimer<'run> = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<(), RuntimeEffectControllerError>> + Send + 'run>,
 >;
+
+impl SingletonRunError {
+    pub(crate) fn into_controller_error(self) -> RuntimeEffectControllerError {
+        match self {
+            Self::Controller(error) => error,
+            Self::Continuation(refusal) => refusal.into(),
+            Self::Material(refusal) => match refusal {
+                crate::tool_run::MaterialRetentionError::Refused(refusal) => refusal.into(),
+                crate::tool_run::MaterialRetentionError::Controller(error) => *error,
+                crate::tool_run::MaterialRetentionError::Store(error) => error.into(),
+                crate::tool_run::MaterialRetentionError::HolderEnded { holder } => {
+                    crate::RuntimeError::artifact_referrer_ended(holder.referrer()).into()
+                }
+            },
+            Self::Ledger(cause) => crate::tool_run::ContinuationRefusal::Records { cause }.into(),
+            Self::Admission(refusal) => {
+                let mut error = RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    refusal.to_string(),
+                );
+                error.cause = Some(crate::RuntimeErrorCause::ToolRunAdmissionRefused {
+                    refusal: Box::new(refusal),
+                });
+                error
+            }
+            Self::Cut(refusal) => run_refusal(
+                crate::RuntimeErrorCause::ToolRunCutRefused {
+                    refusal: Box::new(refusal),
+                },
+                refusal.to_string(),
+            ),
+            Self::Isolation(refusal) => {
+                let message = refusal.to_string();
+                run_refusal(
+                    crate::RuntimeErrorCause::ToolRunIsolationRefused {
+                        refusal: Box::new(refusal),
+                    },
+                    message,
+                )
+            }
+            Self::Drift { call_id, drift } => run_refusal(
+                crate::RuntimeErrorCause::ToolRunDrift { call_id, drift },
+                format!("recorded admission drifted in {drift:?}"),
+            ),
+        }
+    }
+}
+
+fn run_refusal(cause: crate::RuntimeErrorCause, message: String) -> RuntimeEffectControllerError {
+    let mut error = RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+        message,
+    );
+    error.cause = Some(cause);
+    error
+}

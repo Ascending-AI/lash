@@ -8,7 +8,9 @@ mod hooks;
 mod intent_executor;
 mod pending_resolver;
 mod preparation;
+mod production;
 mod retry;
+pub(crate) use production::ProductionToolHandlers;
 mod run_coordinator;
 mod singleton_run;
 
@@ -71,9 +73,7 @@ pub use preparation::{
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use retry::execute_once;
 pub(crate) use retry::settle_completed_pending_tool_call;
-pub(crate) use retry::{
-    mark_retry_exhausted, normalized_outcome, resolve_retry_policy, retry_after_ms,
-};
+pub(crate) use retry::{mark_retry_exhausted, normalized_outcome, retry_after_ms};
 
 /// The static checks over this module's own source; the dispatch tests that
 /// run tool attempts need an effect host and run over a SQLite memory

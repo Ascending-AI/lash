@@ -63,7 +63,7 @@ where
     pub(super) async fn journal_run_schedule(
         &self,
         name: String,
-        step: lash_core::RunRecordStep<'static>,
+        step: lash_core::RunRecordStep<'_>,
     ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
         let build_generation = self.sentinel_stamp();
         let first = build_generation.is_some();
@@ -92,11 +92,11 @@ where
         decode_run_journal_entry(&name, entry)
     }
 
-    pub(super) fn start_journal_run_attempt(
-        &self,
+    pub(super) fn start_journal_run_attempt<'run>(
+        &'run self,
         name: String,
-        step: lash_core::tool_dispatch::RunAttemptStep,
-    ) -> lash_core::tool_dispatch::RunAttemptHandle {
+        step: lash_core::tool_dispatch::RunAttemptStep<'run>,
+    ) -> lash_core::tool_dispatch::RunAttemptHandle<'run> {
         let result = self
             .context
             .run_json_eager_or_retry_send::<serde_json::Value, _>(name.clone(), async move {

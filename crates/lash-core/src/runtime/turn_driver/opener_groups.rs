@@ -40,7 +40,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         &self,
         event_tx: &TurnObserver,
     ) -> Result<OpenerForCommit<'run>, RuntimeError> {
-        let context = if self.opener_state.holds_groups() {
+        let context = if self.opener_state.holds_groups() || self.opener_state.holds_tool_run() {
             let context = self
                 .execution_context_observing(
                     crate::engine::NullObservationSink::arc(),
@@ -127,7 +127,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     }
 
     async fn close_turn_groups(&self, event_tx: &TurnObserver) -> Result<(), RuntimeError> {
-        if !self.opener_state.holds_groups() {
+        if !self.opener_state.holds_groups() && !self.opener_state.holds_tool_run() {
             return Ok(());
         }
         // The closing pass's emissions have no host lane: the old code

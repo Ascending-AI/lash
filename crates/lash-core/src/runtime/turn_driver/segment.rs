@@ -112,6 +112,12 @@ impl RuntimeTurnDriver<'_> {
         let Some(reason) = reason else {
             return Ok(false);
         };
+        if let Some(owner) = &self.tool_run_owner {
+            owner
+                .capture_tool_run(reason)
+                .await
+                .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
+        }
         self.segment.taken = Some(Box::new(BoundaryTaken {
             iterations: self.segment.spent_through(iteration, run_offset),
             cell: None,
@@ -141,7 +147,7 @@ impl RuntimeTurnDriver<'_> {
     /// segment, and the cell captured itself there. The machine is still
     /// waiting on the cell; the owed continuation records that work, and the
     /// successor's machine waits on it again.
-    pub(super) fn end_inside_cell(
+    pub(super) async fn end_inside_cell(
         &mut self,
         machine: &mut TurnMachine,
         run_offset: usize,
@@ -164,6 +170,12 @@ impl RuntimeTurnDriver<'_> {
             driver_plugin_id: driver_state.plugin_id.clone(),
             driver_state: driver_state.payload.clone(),
         };
+        if let Some(owner) = &self.tool_run_owner {
+            owner
+                .capture_tool_run(crate::BoundaryReason::HandOver)
+                .await
+                .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
+        }
         let mut opener = self
             .opener_state
             .boundary_snapshot(crate::BoundaryReason::HandOver)
@@ -220,7 +232,7 @@ impl RuntimeTurnDriver<'_> {
         Ok(())
     }
 
-    pub(super) fn end_waiting_for_tool_results(
+    pub(super) async fn end_waiting_for_tool_results(
         &mut self,
         machine: &mut TurnMachine,
         run_offset: usize,
@@ -238,6 +250,12 @@ impl RuntimeTurnDriver<'_> {
                 error.to_string(),
             )
         })?;
+        if let Some(owner) = &self.tool_run_owner {
+            owner
+                .capture_tool_run(reason)
+                .await
+                .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
+        }
         self.segment.taken = Some(Box::new(BoundaryTaken {
             iterations: self
                 .segment

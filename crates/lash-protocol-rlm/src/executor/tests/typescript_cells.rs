@@ -1190,103 +1190,116 @@ fn l05_middle_preparation_failure_keeps_survivor_source_pairing() {
             Arc::new(EchoToolProvider),
             catalog,
         );
-        let cell = Arc::new(crate::executor::cell_run::CellRun::open(&ctx));
-        let identities = cell
-            .as_ref()
-            .as_ref()
-            .expect("cell opener")
-            .identities()
-            .clone();
-        let host = HostBridge::new(HostBridgeConfig {
-            ctx,
-            cell,
-            prints: Arc::default(),
-            lashlang_execution_trace: None,
-            host_environment: environment,
-            deferred_execution_grants: BTreeMap::new(),
-            cell_bindings: Default::default(),
-            artifact_store: crate::testing::sqlite_memory_artifact_store().await,
-            workers: Default::default(),
-            ledgers: Default::default(),
-        });
-        let operation = |name: &str, text: &str| {
-            lashlang::ResourceOperationBatchLeaf::Operation(lashlang::ResourceOperation {
-                receiver: receiver.clone(),
-                operation: name.into(),
-                args: vec![lashlang::from_json(serde_json::json!({"text": text}))],
-                call_site: Some(resource_pairing_site()),
-            })
-        };
-        host.perform(AbilityOp::ResourceOperation(Box::new(
-            lashlang::ResourceOperation {
-                receiver: receiver.clone(),
-                operation: "say".into(),
-                args: vec![lashlang::from_json(serde_json::json!({"text": "scalar"}))],
-                call_site: Some(resource_pairing_site()),
-            },
-        )))
-        .await
-        .expect("scalar outcome");
-        let result = host
-            .perform(AbilityOp::ResourceOperationBatch(
-                lashlang::ResourceOperationBatch {
-                    leaves: vec![
-                        operation("left", "left"),
-                        operation("missing", "bad"),
-                        operation("right", "right"),
-                    ],
-                    consumer: lashlang::AggregateConsumer::AllSettled,
-                    settled_value_after: None,
-                },
-            ))
-            .await
-            .expect("batch host outcome");
-        let AbilityOutcome::ResourceOperationBatch(
-            lashlang::ResourceOperationBatchOutcome::AllResults(results),
-        ) = result
-        else {
-            panic!("all three operands keep their slots: {result:?}");
-        };
-        assert_eq!(results.len(), 3);
-        assert!(matches!(
-            &results[1],
-            lashlang::ResourceOperationOutcome::Error(_)
-        ));
-        let collected = host.into_collected();
-        assert_eq!(collected.calls.len(), 3);
-        let ids: Vec<_> = collected
-            .calls
-            .iter()
-            .map(|call| {
-                call.host_record
+        let owner = ctx.clone();
+        owner
+            .drive_tool_run(None, |ctx| async move {
+                let close = ctx.clone();
+                let cell = Arc::new(crate::executor::cell_run::CellRun::open(&ctx));
+                let identities = cell
                     .as_ref()
-                    .expect("host record")
-                    .call_id
-                    .to_string()
+                    .as_ref()
+                    .expect("cell opener")
+                    .identities()
+                    .clone();
+                let host = HostBridge::new(HostBridgeConfig {
+                    ctx,
+                    cell,
+                    prints: Arc::default(),
+                    lashlang_execution_trace: None,
+                    host_environment: environment,
+                    deferred_execution_grants: BTreeMap::new(),
+                    cell_bindings: Default::default(),
+                    artifact_store: crate::testing::sqlite_memory_artifact_store().await,
+                    workers: Default::default(),
+                    ledgers: Default::default(),
+                });
+                let operation = |name: &str, text: &str| {
+                    lashlang::ResourceOperationBatchLeaf::Operation(lashlang::ResourceOperation {
+                        receiver: receiver.clone(),
+                        operation: name.into(),
+                        args: vec![lashlang::from_json(serde_json::json!({"text": text}))],
+                        call_site: Some(resource_pairing_site()),
+                    })
+                };
+                host.perform(AbilityOp::ResourceOperation(Box::new(
+                    lashlang::ResourceOperation {
+                        receiver: receiver.clone(),
+                        operation: "say".into(),
+                        args: vec![lashlang::from_json(serde_json::json!({"text": "scalar"}))],
+                        call_site: Some(resource_pairing_site()),
+                    },
+                )))
+                .await
+                .expect("scalar outcome");
+                let result = host
+                    .perform(AbilityOp::ResourceOperationBatch(
+                        lashlang::ResourceOperationBatch {
+                            leaves: vec![
+                                operation("left", "left"),
+                                operation("missing", "bad"),
+                                operation("right", "right"),
+                            ],
+                            consumer: lashlang::AggregateConsumer::AllSettled,
+                            settled_value_after: None,
+                        },
+                    ))
+                    .await
+                    .expect("batch host outcome");
+                let AbilityOutcome::ResourceOperationBatch(
+                    lashlang::ResourceOperationBatchOutcome::AllResults(results),
+                ) = result
+                else {
+                    panic!("all three operands keep their slots: {result:?}");
+                };
+                assert_eq!(results.len(), 3);
+                assert!(matches!(
+                    &results[1],
+                    lashlang::ResourceOperationOutcome::Error(_)
+                ));
+                let collected = host.into_collected();
+                assert_eq!(collected.calls.len(), 3);
+                let ids: Vec<_> = collected
+                    .calls
+                    .iter()
+                    .map(|call| {
+                        call.host_record
+                            .as_ref()
+                            .expect("host record")
+                            .call_id
+                            .to_string()
+                    })
+                    .collect();
+                assert_eq!(
+                    ids,
+                    [
+                        "tc_77896c431d91c4e01fe0f47aaa15872641b7340298f2c11777243daddf6a066a",
+                        "tc_ae7efeed5a5107680422707c834a9c7e69b8df9d4ece9bf5d142f3cb36ae37e2",
+                        "tc_040a9cd44508dd7d7965e8a2cd77871154deb66daaa8ea5940c45f3f1f0829af",
+                    ]
+                );
+                assert_eq!(
+                    collected.calls[0]
+                        .host_record
+                        .as_ref()
+                        .expect("scalar")
+                        .call_id,
+                    identities.call_id(0)
+                );
+                for (call, (source, leaf)) in
+                    collected.calls[1..].iter().zip([("left", 0), ("right", 2)])
+                {
+                    assert_eq!(call.operation, format!("{}.{source}", module.alias));
+                    let record = call.host_record.as_ref().expect("survivor host record");
+                    assert_eq!(record.call_id, identities.child_call_id(1, leaf));
+                    assert_eq!(record.args["text"], source);
+                }
+                handler.close().await.expect("close handler");
+                close
+                    .close_opener_groups()
+                    .await
+                    .expect("close logical owner");
             })
-            .collect();
-        assert_eq!(
-            ids,
-            [
-                "tc_77896c431d91c4e01fe0f47aaa15872641b7340298f2c11777243daddf6a066a",
-                "tc_ae7efeed5a5107680422707c834a9c7e69b8df9d4ece9bf5d142f3cb36ae37e2",
-                "tc_040a9cd44508dd7d7965e8a2cd77871154deb66daaa8ea5940c45f3f1f0829af",
-            ]
-        );
-        assert_eq!(
-            collected.calls[0]
-                .host_record
-                .as_ref()
-                .expect("scalar")
-                .call_id,
-            identities.call_id(0)
-        );
-        for (call, (source, leaf)) in collected.calls[1..].iter().zip([("left", 0), ("right", 2)]) {
-            assert_eq!(call.operation, format!("{}.{source}", module.alias));
-            let record = call.host_record.as_ref().expect("survivor host record");
-            assert_eq!(record.call_id, identities.child_call_id(1, leaf));
-            assert_eq!(record.args["text"], source);
-        }
-        handler.close().await.expect("close handler");
+            .await
+            .expect("logical owner");
     });
 }

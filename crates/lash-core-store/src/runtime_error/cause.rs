@@ -18,6 +18,24 @@ pub enum RuntimeErrorCause {
     SourceRefused {
         refusal: Box<crate::tool_run::SourceRefusal>,
     },
+    ToolRunCutRefused {
+        refusal: Box<crate::tool_run::RunCutRefusal>,
+    },
+    ToolRunIsolationRefused {
+        refusal: Box<crate::tool_run::IsolatedStartRefusal>,
+    },
+    ToolRunDrift {
+        call_id: lash_sansio::ToolCallId,
+        drift: crate::tool_run::SingletonDrift,
+    },
+    ToolRunControl {
+        call_id: lash_sansio::ToolCallId,
+        aborted: bool,
+        cause: Option<Box<crate::tool_run::HookCause>>,
+    },
+    ToolRunAdmissionRefused {
+        refusal: Box<crate::tool_run::AdmissionRefusal>,
+    },
     /// A physical boundary or successor refused the logical Run's transfer.
     RunContinuationRefused {
         refusal: Box<crate::tool_run::ContinuationRefusal>,

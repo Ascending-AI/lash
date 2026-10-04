@@ -83,6 +83,8 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
     ) -> Self {
         Self {
             dispatch,
+            tool_material_store: None,
+            tool_run: None,
             tool_children: None,
             process_env_store,
             attachment_store,

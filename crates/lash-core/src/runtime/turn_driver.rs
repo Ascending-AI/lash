@@ -28,6 +28,7 @@ use handlers::foreground_exec_graph_key;
 pub(super) use trace::protocol_step_trace_event;
 
 pub(super) struct RuntimeTurnDriver<'a> {
+    pub(super) tool_run_owner: Option<lash_core_execution::core_internal::ToolRunOwner>,
     pub(super) session: Session,
     pub(super) policy: RuntimeSessionPolicy,
     /// The turn's committed content, recorded in program order from the

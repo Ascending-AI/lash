@@ -14,7 +14,7 @@ pub struct ToolCatalogContext {
 ///
 /// The code is the plugin's own spelling; the runtime namespaces it under the
 /// plugin that returned it, so no plugin can abort in another's name.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PluginAbort {
     pub code: String,
     pub message: String,

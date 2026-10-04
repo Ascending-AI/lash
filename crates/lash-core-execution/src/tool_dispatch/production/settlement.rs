@@ -1,0 +1,98 @@
+//! Recorded semantic channels applied after protected V acceptance.
+use super::*;
+
+impl ProductionToolHandlers<'_> {
+    pub(super) fn incorporate_capture(
+        &self,
+        call_id: &crate::ToolCallId,
+        capture: Option<&SingletonCapture>,
+        presentation: Option<&str>,
+        observe: bool,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        let fault = |message| {
+            crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RecordEncodingFailed,
+                message,
+            )
+        };
+        let captured: Option<Captured> = capture
+            .and_then(SingletonCapture::output)
+            .map(decode)
+            .transpose()
+            .map_err(fault)?;
+        let presented: Option<Presented> = presentation.map(decode).transpose().map_err(fault)?;
+        let prepared = self
+            .prepared
+            .lock_recover()
+            .get(call_id)
+            .cloned()
+            .ok_or_else(|| {
+                crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::EffectReplayDivergence,
+                    "the incorporated call has no admission",
+                )
+            })?;
+        let contributions = self
+            .contributions
+            .lock_recover()
+            .get(call_id)
+            .cloned()
+            .unwrap_or_default();
+        let outcomes = presented
+            .as_ref()
+            .map(|presented| presented.intent_outcomes.clone())
+            .unwrap_or_default();
+        let output = captured
+            .as_ref()
+            .map(|captured| captured.output.clone())
+            .unwrap_or_else(|| {
+                ToolCallOutput::cancelled(crate::ToolCancellation::runtime("the call is withheld"))
+            });
+        let settlement = crate::runtime::effect::ToolSettlement {
+            version: crate::runtime::effect::TOOL_SETTLEMENT_VERSION,
+            possession: crate::runtime::effect::tool_settlement::settlement_possession(&outcomes),
+            intent_outcomes: outcomes,
+            checkpoint_messages: captured
+                .as_ref()
+                .into_iter()
+                .flat_map(|captured| captured.messages.clone())
+                .chain(
+                    contributions
+                        .iter()
+                        .flat_map(|contribution| contribution.messages.clone()),
+                )
+                .collect(),
+            triggers: captured
+                .as_ref()
+                .map(|captured| captured.triggers.clone())
+                .unwrap_or_default(),
+            stream: Default::default(),
+            model_return: presented
+                .map(|presented| presented.presentation.model_return)
+                .unwrap_or_else(|| {
+                    crate::ModelToolReturn::from_output(prepared.call.tool_name, &output)
+                }),
+        };
+        self.context.incorporate_tool_settlement(
+            crate::session::SettlementSource::Invocation {
+                call_id: call_id.clone(),
+            },
+            &settlement,
+        )?;
+        if observe {
+            let mut cursor = self
+                .context
+                .dispatch()
+                .observation_cursor(&format!("run:{call_id}:after"));
+            for contribution in contributions {
+                crate::plugin::observe_plugin_runtime_events(
+                    &mut cursor,
+                    self.context.dispatch().observer.as_ref(),
+                    &contribution.plugin_id,
+                    contribution.events,
+                );
+            }
+        }
+        Ok(())
+    }
+}

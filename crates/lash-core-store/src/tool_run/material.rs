@@ -61,6 +61,8 @@ pub enum MaterialRole {
     /// One attempt's output and captures (X), or a cached success a
     /// before-check supplied in its place.
     AttemptOutput,
+    /// Messages and observations declared by after-checks in D.
+    CheckContributions,
     /// Presentation bytes distinct from the output (V).
     Presentation,
 }

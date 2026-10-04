@@ -1111,16 +1111,16 @@ where
     async fn record_run_schedule(
         &self,
         name: String,
-        step: lash_core::RunRecordStep<'static>,
+        step: lash_core::RunRecordStep<'_>,
     ) -> Result<lash_core::tool_run::RunJournalEntry, lash_core::RuntimeEffectControllerError> {
         self.journal_run_schedule(name, step).await
     }
 
-    fn start_run_attempt(
-        &self,
+    fn start_run_attempt<'run>(
+        &'run self,
         name: String,
-        step: lash_core::tool_dispatch::RunAttemptStep,
-    ) -> lash_core::tool_dispatch::RunAttemptHandle {
+        step: lash_core::tool_dispatch::RunAttemptStep<'run>,
+    ) -> lash_core::tool_dispatch::RunAttemptHandle<'run> {
         self.start_journal_run_attempt(name, step)
     }
 

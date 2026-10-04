@@ -198,6 +198,131 @@ pub(super) async fn arm_descriptor(
     Ok(RestateSourceArmReply::Armed { seal: None })
 }
 
+/// The existing signed completion entry resolves an armed K4 source directly.
+/// The source seal, rather than a second wait promise, chooses its outcome.
+pub(super) async fn resolve_completion(
+    registry: &LashDurableWaitRegistryImpl,
+    ctx: &ObjectContext<'_>,
+    writer: object_state::StoredValueWriter,
+    key: &AwaitEventKey,
+    resolution: lash_core::Resolution,
+) -> Result<Option<super::RestateDurableWaitResolveResponse>, TerminalError> {
+    use super::{
+        RestateDurableWaitResolveRefusal as Refused, RestateDurableWaitResolveResponse as Response,
+    };
+    use crate::controller::RestateControllerContext as _;
+    use lash_core::tool_run::{
+        MaterialBundle, MaterialHolder, MaterialOwner, MaterialPayload, MaterialRole,
+        SourceAuthority,
+    };
+    use lash_core::{Resolution, ResolveOutcome};
+    let address = derive_durable_wait_index_address(ctx.key(), key)?;
+    let Some(armed) = load_source(ctx, &address).await? else {
+        return Ok(None);
+    };
+    let refused = |refusal| Some(Response::Refused(Refused::Source { refusal }));
+    let materials = registry
+        .materials
+        .clone()
+        .ok_or_else(|| TerminalError::new("completion material store is unavailable"))?;
+    let holder = MaterialHolder::Source {
+        source: key.clone(),
+    };
+    let existing = armed.seal.clone();
+    let outcome = if let Some(seal) = existing {
+        SealOutcome::AlreadySealed { seal }
+    } else {
+        if armed.descriptor.authority != SourceAuthority::ExternalCompletion {
+            return Ok(refused(SourceRefusal::Seal {
+                seal: lash_core::tool_run::SealRefusal::WrongAuthority,
+            }));
+        }
+        let capture = match &resolution {
+            Resolution::Ok(value) => lash_core::tool_dispatch::SingletonCapture::Done {
+                output: serde_json::to_string(value).map_err(TerminalError::from_error)?,
+                commands: Vec::new(),
+                intents: Vec::new(),
+                stream: Default::default(),
+                start: None,
+            },
+            _ => lash_core::tool_dispatch::SingletonCapture::Failed {
+                output: serde_json::to_string(&resolution).map_err(TerminalError::from_error)?,
+                stream: Default::default(),
+            },
+        };
+        let payload = MaterialPayload::new(
+            MaterialOwner::Source {
+                source: key.clone(),
+            },
+            MaterialRole::AttemptOutput,
+            Some(armed.descriptor.resolver.clone()),
+            serde_json::to_string(&capture).map_err(TerminalError::from_error)?,
+        );
+        let bundle = MaterialBundle::of([payload])
+            .map_err(|error| TerminalError::new(error.to_record()))?
+            .ok_or_else(|| TerminalError::new("completion bundle is empty"))?;
+        let store = materials.clone();
+        let retained_holder = holder.clone();
+        let Json(retained) = ctx.run_json_or_retry_send::<Result<lash_core::tool_run::RetainedBundle, lash_core::RuntimeEffectControllerError>, _>("source:completion:retain".into(), async move {
+            match store.retain_material(&retained_holder, &bundle).await {
+                Err(lash_core::tool_run::MaterialRetentionError::Store(error)) => Err(error.to_string()),
+                outcome => Ok(outcome.map_err(super::process_terminal::material_error)),
+            }
+        }).await?;
+        let retained = retained.map_err(|error| TerminalError::new(error.to_record()))?;
+        let result = retained
+            .references
+            .first()
+            .cloned()
+            .ok_or_else(|| TerminalError::new("completion bundle has no result"))?;
+        match seal_descriptor(
+            registry,
+            ctx,
+            writer,
+            RestateSourceSealRequest {
+                source: key.clone(),
+                writer: SealWriter::External,
+                seal: SourceSeal::Resolved {
+                    result: Box::new(result),
+                },
+            },
+        )
+        .await?
+        {
+            RestateSourceSealReply::Outcome { outcome } => outcome,
+            RestateSourceSealReply::Refused { refusal } => return Ok(refused(refusal)),
+        }
+    };
+    let seal = match &outcome {
+        SealOutcome::Sealed { seal } | SealOutcome::AlreadySealed { seal } => seal,
+    };
+    let terminal = match seal {
+        SourceSeal::Cancelled => Resolution::Cancelled,
+        SourceSeal::Resolved { result } => {
+            let payload = materials
+                .read_material(
+                    &holder,
+                    result,
+                    &MaterialOwner::Source {
+                        source: key.clone(),
+                    },
+                    std::slice::from_ref(&armed.descriptor.resolver),
+                )
+                .await
+                .map_err(|error| {
+                    TerminalError::new(super::process_terminal::material_error(error).to_record())
+                })?;
+            super::process_terminal::terminal_resolution(
+                serde_json::from_str(&payload.text).map_err(TerminalError::from_error)?,
+            )?
+        }
+    };
+    Ok(Some(Response::Outcome(match outcome {
+        SealOutcome::Sealed { .. } => ResolveOutcome::Accepted,
+        SealOutcome::AlreadySealed { .. } => ResolveOutcome::AlreadyResolved { terminal },
+    })))
+}
+
 pub(super) async fn subscribe_source(
     registry: &LashDurableWaitRegistryImpl,
     ctx: ObjectContext<'_>,

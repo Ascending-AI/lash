@@ -21,6 +21,7 @@ mod settlement_incorporation;
 mod settlement_incorporation_tests;
 mod tool_attempt;
 pub(crate) mod tool_execution;
+pub(crate) mod tool_run;
 
 pub use execution_context::RuntimeExecutionContext;
 pub use execution_context::resolve_trigger_owner_scope;
@@ -36,7 +37,7 @@ pub use settlement_incorporation::{Incorporated, IncorporationLedger, Settlement
 pub use tool_execution::{
     CompletedProtocolToolCall, ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply,
     ToolAggregateOutcome, ToolAggregateRequest, ToolBatchReplies, ToolDispatchResult,
-    ToolInvocation, ToolInvocationReply,
+    ToolInvocation, ToolInvocationReply, ToolRunAggregateCursor, ToolRunAggregatePoll,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

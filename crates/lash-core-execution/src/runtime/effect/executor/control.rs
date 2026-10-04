@@ -503,7 +503,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     async fn record_run_schedule(
         &self,
         name: String,
-        step: RunRecordStep<'static>,
+        step: RunRecordStep<'_>,
     ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
         drop(step);
         Err(RuntimeEffectControllerError::new(
@@ -551,11 +551,11 @@ pub trait RuntimeEffectController: AwaitEventResolver {
 
     /// Register one independently completing attempt now, in command order.
     /// Replay must register the recorded prefix before awaiting an older X.
-    fn start_run_attempt(
-        &self,
+    fn start_run_attempt<'run>(
+        &'run self,
         name: String,
-        step: crate::tool_dispatch::RunAttemptStep,
-    ) -> crate::tool_dispatch::RunAttemptHandle {
+        step: crate::tool_dispatch::RunAttemptStep<'run>,
+    ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
         drop(step);
         Box::pin(async move {
             Err(RuntimeEffectControllerError::new(

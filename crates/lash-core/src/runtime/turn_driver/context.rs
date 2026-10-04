@@ -72,6 +72,12 @@ impl<'run> RuntimeTurnDriver<'run> {
             )
             .map(|context| {
                 self.register_live_opener(context.dispatch(), event_tx);
+                let context = context
+                    .with_tool_material_store(self.host.core.backend().tool_material_store());
+                let context = match &self.tool_run_owner {
+                    Some(owner) => context.with_tool_run_owner(owner),
+                    None => context,
+                };
                 context
                     .with_logical_run(crate::TurnAddress::new(
                         self.session_id.clone(),

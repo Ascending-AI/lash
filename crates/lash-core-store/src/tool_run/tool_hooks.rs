@@ -97,7 +97,7 @@ pub struct HookOccurrence {
 
 /// A recorded typed hook cause: a plugin's declared error type, its version
 /// and payload. Unknown payloads survive replay unchanged.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HookCause {
     pub error_type: String,

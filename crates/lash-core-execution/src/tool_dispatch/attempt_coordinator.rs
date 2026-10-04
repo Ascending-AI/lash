@@ -39,7 +39,7 @@ impl ToolAttemptLineage {
         Self { parent }
     }
 
-    fn attempt_invocation(
+    pub(super) fn attempt_invocation(
         &self,
         context: &ToolDispatchContext<'_>,
         call: &PreparedToolCall,

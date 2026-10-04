@@ -358,18 +358,25 @@ macro_rules! impl_restate_controller_context {
                     })
                 }
 
-                fn run_json_eager_or_retry_send<T, Fut>(
-                    &self,
+                fn run_json_eager_or_retry_send<'run, T, Fut>(
+                    &'run self,
                     effect_name: String,
                     future: Fut,
-                ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'static
-                where T: Serialize + DeserializeOwned + Send + 'static,
-                      Fut: Future<Output = Result<T, String>> + Send + 'static,
+                ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+                where 'ctx: 'run,
+                      T: Serialize + DeserializeOwned + Send + 'static,
+                      Fut: Future<Output = Result<T, String>> + Send + 'run,
                 {
-                    let run = restate_sdk::context::ContextSideEffects::run(self, move || async move {
-                        future.await.map(Json).map_err(|fault| HandlerError::from(std::io::Error::other(fault)))
-                    });
-                    restate_sdk::context::RunFuture::name(run, effect_name).start()
+                    let mut run = Box::pin(self.run_json_or_retry_send(effect_name, future));
+                    let waker = std::task::Waker::noop();
+                    let mut context = std::task::Context::from_waker(waker);
+                    let registered = run.as_mut().poll(&mut context);
+                    async move {
+                        match registered {
+                            std::task::Poll::Ready(result) => result,
+                            std::task::Poll::Pending => run.await,
+                        }
+                    }
                 }
 
                 fn run_json_or_retry_send<'run, T, Fut>(

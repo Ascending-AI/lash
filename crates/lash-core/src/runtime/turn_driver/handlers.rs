@@ -456,7 +456,9 @@ impl RuntimeTurnDriver<'_> {
                         journaled_bytes_estimate: None,
                     })
             {
-                return self.end_waiting_for_tool_results(machine, run_offset, reason);
+                return self
+                    .end_waiting_for_tool_results(machine, run_offset, reason)
+                    .await;
             }
             return Ok(());
         }
@@ -576,11 +578,13 @@ impl RuntimeTurnDriver<'_> {
                         )
                     })?;
                     machine.settle_tool_dispatch(state);
-                    return self.end_waiting_for_tool_results(
-                        machine,
-                        run_offset,
-                        crate::BoundaryReason::HandOver,
-                    );
+                    return self
+                        .end_waiting_for_tool_results(
+                            machine,
+                            run_offset,
+                            crate::BoundaryReason::HandOver,
+                        )
+                        .await;
                 }
                 Err(error) if error.code == RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled => {
                     context.note_turn_cancelled();
@@ -815,7 +819,7 @@ impl RuntimeTurnDriver<'_> {
                         )
                     })?;
             }
-            return self.end_inside_cell(machine, run_offset);
+            return self.end_inside_cell(machine, run_offset).await;
         }
         let cell_duration_ms = self
             .host

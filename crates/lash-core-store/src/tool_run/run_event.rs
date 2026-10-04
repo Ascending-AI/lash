@@ -104,6 +104,12 @@ pub struct SegmentOrdinal(pub u32);
 pub enum AttemptResult {
     /// A completed result.
     Done { output: MaterialRef },
+    /// A production pending completion, including its recorded resolver and stream.
+    Pending {
+        source: AwaitEventKey,
+        metadata: MaterialRef,
+        start: Option<PendingStart>,
+    },
     /// Parked on a Deferred source; the source's seal supplies the result.
     Deferred { source: AwaitEventKey },
     /// One start whose terminal supplies this call's result.
@@ -118,6 +124,14 @@ pub enum AttemptResult {
         output: MaterialRef,
         retryable: bool,
     },
+}
+
+/// The obligation of a pending call that declared a process start.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PendingStart {
+    pub start_key: StartKey,
+    pub obligation: MaterialRef,
 }
 
 /// Where a final result came from.
@@ -207,6 +221,11 @@ pub enum RunEvent {
         attempt: AttemptOrdinal,
         result: AttemptResult,
     },
+    /// X: a retained source's result passed through the admitted result transforms.
+    SourceCaptured {
+        call_id: ToolCallId,
+        output: MaterialRef,
+    },
     /// Eligibility and backoff are fixed before registering a durable timer.
     RetryTimerRegistered {
         call_id: ToolCallId,
@@ -221,6 +240,11 @@ pub enum RunEvent {
         failed: AttemptOrdinal,
         next: AttemptOrdinal,
         backoff_ms: u64,
+    },
+    /// The after-check's messages and observations, owned by its D record.
+    CheckContributions {
+        call_id: ToolCallId,
+        material: MaterialRef,
     },
     /// D: the call's one decision and its rank, with the after-check
     /// record when a result candidate existed.
@@ -708,6 +732,22 @@ impl RunLedger {
                 call.attempts.insert(*attempt, result.clone());
                 Ok(())
             }
+            RunEvent::SourceCaptured { call_id, .. } => {
+                let call = self.calls.get(call_id).ok_or_else(|| boundary(call_id))?;
+                if call.decision.is_some()
+                    || !call.attempts.values().any(|result| {
+                        matches!(
+                            result,
+                            AttemptResult::Deferred { .. }
+                                | AttemptResult::DeferredStart { .. }
+                                | AttemptResult::Pending { .. }
+                        )
+                    })
+                {
+                    return Err(boundary(call_id));
+                }
+                Ok(())
+            }
             RunEvent::RetryTimerRegistered {
                 call_id,
                 failed,
@@ -742,6 +782,14 @@ impl RunLedger {
                 }
                 self.schedule_retry(call_id, *failed, *next)?;
                 self.call(call_id)?.retry_timer = None;
+                Ok(())
+            }
+            RunEvent::CheckContributions { call_id, material } => {
+                if self.call(call_id)?.decision.is_some()
+                    || material.role != super::MaterialRole::CheckContributions
+                {
+                    return Err(boundary(call_id));
+                }
                 Ok(())
             }
             RunEvent::Decided {
@@ -969,7 +1017,8 @@ impl RunLedger {
         );
         let deferred = call.decision.is_none()
             && matches!(call.attempts.values().next_back(),
-            Some(AttemptResult::DeferredStart { start_key: recorded, .. }) if recorded == start_key);
+            Some(AttemptResult::DeferredStart { start_key: recorded, .. }) if recorded == start_key)
+            || matches!(call.attempts.values().last(), Some(AttemptResult::Pending { start: Some(start), .. }) if &start.start_key == start_key);
         if !(deferred || declaring && call.declarations_issued)
             || call.seated
             || call.start.is_some()
@@ -1066,7 +1115,11 @@ fn decision_follows(
                 ResultSource::DeferredCompletion { attempt, .. } => {
                     matches!(
                         call.attempts.get(attempt),
-                        Some(AttemptResult::Deferred { .. } | AttemptResult::DeferredStart { .. })
+                        Some(
+                            AttemptResult::Deferred { .. }
+                                | AttemptResult::DeferredStart { .. }
+                                | AttemptResult::Pending { .. }
+                        )
                     )
                 }
             };

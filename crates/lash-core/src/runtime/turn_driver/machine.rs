@@ -79,14 +79,30 @@ impl RuntimeTurnDriver<'_> {
         event_tx: TurnObserver,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
-        // The erasure's reason lives on `EffectLoop`: the alias exists to make
-        // the cut a named decision rather than an incidental annotation.
-        let result = {
-            let effect_loop: EffectLoop<'_> =
-                Box::pin(self.run_effect_loop(messages, event_tx.clone(), run_offset));
-            effect_loop.await
-        };
-        let result = Box::pin(self.end_opener_groups(result, &event_tx)).await;
+        let context = self
+            .execution_context(
+                &event_tx,
+                Arc::new(crate::ChronologicalProjection::default()),
+            )
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ToolCatalogResolutionFailed,
+                    error.to_string(),
+                )
+            })?;
+        let result = context
+            .drive_tool_run(None, |owned| {
+                self.tool_run_owner = owned.tool_run_owner();
+                async {
+                    let effect_loop: EffectLoop<'_> =
+                        Box::pin(self.run_effect_loop(messages, event_tx.clone(), run_offset));
+                    let result = effect_loop.await;
+                    Box::pin(self.end_opener_groups(result, &event_tx)).await
+                }
+            })
+            .await
+            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
+        self.tool_run_owner = None;
         self.live_opener.lock_recover().take();
         result
     }

@@ -64,6 +64,7 @@ impl<'a> RunCoordinator<'a> {
             capture,
         } = owed;
         let handlers = handlers.get();
+        restore_contributions(&self.journal, &call_id, handlers)?;
         let journal = &mut self.journal;
         let (CallDecision::Final { declares, source }, Some(capture)) =
             (&decision, capture.clone())
@@ -91,6 +92,12 @@ impl<'a> RunCoordinator<'a> {
             {
                 handlers.emit_stream(&call_id, stream);
             }
+            handlers.incorporate(
+                &call_id,
+                capture.as_ref(),
+                None,
+                fresh.load(Ordering::Relaxed),
+            )?;
             self.presented.insert(
                 call_id,
                 PresentedCall {
@@ -177,9 +184,7 @@ impl<'a> RunCoordinator<'a> {
         let executed = &fresh;
         let present = Box::pin(async move {
             if declares && !final_capture.intents().is_empty() {
-                handlers
-                    .realize_declarations(&step_call, final_capture.intents())
-                    .await?;
+                handlers.realize_capture(&step_call, &final_capture).await?;
             }
             let (text, failure) = match descriptor {
                 Some(descriptor) => (encode(&descriptor)?, None),
@@ -246,6 +251,12 @@ impl<'a> RunCoordinator<'a> {
         {
             handlers.emit_stream(&call_id, stream);
         }
+        handlers.incorporate(
+            &call_id,
+            Some(&capture),
+            Some(&presentation),
+            fresh.load(Ordering::Relaxed),
+        )?;
         Ok(SingletonTerminal::Final {
             source: source.clone(),
             capture,
@@ -275,4 +286,26 @@ fn presented(
         call_id: call_id.clone(),
     });
     events
+}
+
+pub(super) fn restore_contributions(
+    journal: &RunJournal<'_>,
+    call_id: &ToolCallId,
+    handlers: &dyn SingletonToolHandlers,
+) -> Result<(), SingletonRunError> {
+    if let Some(material) = journal
+        .records
+        .iter()
+        .flat_map(|record| &record.events)
+        .find_map(|event| match event {
+            RunEvent::CheckContributions {
+                call_id: id,
+                material,
+            } if id == call_id => Some(material),
+            _ => None,
+        })
+    {
+        handlers.restore_decision_contributions(call_id, journal.materials.read(material)?)?;
+    }
+    Ok(())
 }

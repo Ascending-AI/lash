@@ -18,9 +18,9 @@ pub(super) struct AggregateTimer<'a> {
 }
 
 #[derive(Clone)]
-enum SelectedWork {
+enum SelectedWork<'a> {
     Call {
-        work: std::sync::Arc<Work>,
+        work: std::sync::Arc<Work<'a>>,
         ordinal: AttemptOrdinal,
         timer: bool,
         delay: u64,
@@ -31,15 +31,15 @@ enum SelectedWork {
     },
 }
 
-struct Work {
+struct Work<'a> {
     call: SingletonToolCall,
     member: AdmittedCall,
     request: SingletonPreparedRequest,
-    handlers: std::sync::Arc<dyn SingletonToolHandlers>,
+    handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
 }
 
 pub(super) struct Pending<'a> {
-    work: std::sync::Arc<Work>,
+    work: std::sync::Arc<Work<'a>>,
     capture: Option<SingletonCapture>,
     ordinal: AttemptOrdinal,
     timer: bool,
@@ -91,7 +91,9 @@ fn captured(
     available: &[PluginRevision],
 ) -> Result<Option<SingletonCapture>, RuntimeEffectControllerError> {
     let output = match &entry.result {
-        AttemptResult::Deferred { .. } | AttemptResult::DeferredStart { .. } => return Ok(None),
+        AttemptResult::Deferred { .. }
+        | AttemptResult::DeferredStart { .. }
+        | AttemptResult::Pending { .. } => return Ok(None),
         AttemptResult::Done { output } | AttemptResult::Failed { output, .. } => output,
     };
     let mut materials = Materials {
@@ -116,8 +118,8 @@ impl<'a> RunCoordinator<'a> {
     /// A typed admission, journal, material or Run-fold refusal.
     pub async fn start_round(
         &mut self,
-        calls: &'a [SingletonToolCall],
-        handlers: std::sync::Arc<dyn SingletonToolHandlers>,
+        calls: &[SingletonToolCall],
+        handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         retry: RecordedRetryPolicy,
     ) -> Result<Vec<(ToolCallId, DecidedCall)>, SingletonRunError> {
         self.begin_frame()?;
@@ -129,8 +131,8 @@ impl<'a> RunCoordinator<'a> {
 
     pub(super) async fn start_round_inner(
         &mut self,
-        calls: &'a [SingletonToolCall],
-        handlers: std::sync::Arc<dyn SingletonToolHandlers>,
+        calls: &[SingletonToolCall],
+        handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         retry: RecordedRetryPolicy,
         aggregate: Option<(&crate::tool_run::AggregatePlan, &dyn crate::Clock)>,
     ) -> Result<Vec<(ToolCallId, DecidedCall)>, SingletonRunError> {
@@ -572,6 +574,30 @@ impl<'a> RunCoordinator<'a> {
                 [
                     RunEvent::AttemptRecorded {
                         result:
+                            AttemptResult::Pending {
+                                source,
+                                metadata,
+                                start,
+                            },
+                        ..
+                    },
+                ] => {
+                    let terminal = self
+                        .accept_pending(
+                            call,
+                            member.clone(),
+                            Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                            ordinal,
+                            source.clone(),
+                            metadata,
+                            start.as_ref(),
+                        )
+                        .await?;
+                    decision = Some((call.call_id.clone(), terminal));
+                }
+                [
+                    RunEvent::AttemptRecorded {
+                        result:
                             AttemptResult::DeferredStart {
                                 source,
                                 start_key,
@@ -699,8 +725,8 @@ impl<'a> RunCoordinator<'a> {
     /// A typed admission, journal, material or Run-fold refusal.
     pub async fn decide_round(
         &mut self,
-        calls: &'a [SingletonToolCall],
-        handlers: std::sync::Arc<dyn SingletonToolHandlers>,
+        calls: &[SingletonToolCall],
+        handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         retry: RecordedRetryPolicy,
     ) -> Result<Vec<DecidedCall>, SingletonRunError> {
         let mut decisions: BTreeMap<_, _> = self
@@ -728,7 +754,7 @@ impl<'a> RunCoordinator<'a> {
         call: &SingletonToolCall,
         member: &AdmittedCall,
         request: &SingletonPreparedRequest,
-        handlers: std::sync::Arc<dyn SingletonToolHandlers>,
+        handlers: std::sync::Arc<dyn SingletonToolHandlers + 'a>,
         ordinal: AttemptOrdinal,
     ) -> Result<Handle<'run>, SingletonRunError>
     where

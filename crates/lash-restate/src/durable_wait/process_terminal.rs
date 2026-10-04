@@ -64,7 +64,7 @@ fn refusal(cause: SourceRefusal) -> TerminalError {
     TerminalError::new(lash_core::RuntimeEffectControllerError::from(cause).to_record())
 }
 
-fn material_error(
+pub(super) fn material_error(
     error: lash_core::tool_run::MaterialRetentionError,
 ) -> lash_core::RuntimeEffectControllerError {
     use lash_core::tool_run::MaterialRetentionError;
@@ -437,7 +437,7 @@ pub(super) async fn deliver(
     Ok(Reply::at(wire, ()))
 }
 
-fn terminal_resolution(
+pub(super) fn terminal_resolution(
     capture: lash_core::tool_dispatch::SingletonCapture,
 ) -> Result<Resolution, TerminalError> {
     use lash_core::tool_dispatch::SingletonCapture;

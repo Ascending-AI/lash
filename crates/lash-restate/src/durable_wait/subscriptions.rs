@@ -209,6 +209,17 @@ pub(super) async fn resolve(
             ),
         ));
     }
+    if let Some(response) = source_seal::resolve_completion(
+        registry,
+        &ctx,
+        object.writer,
+        &request.key,
+        request.resolution.clone(),
+    )
+    .await?
+    {
+        return Ok(Reply::at(wire, response));
+    }
     let state_key = durable_wait_index_state_key(&address);
     if let Some(terminal) =
         object_state::get_stamped::<IndexedWait>(&ctx, &state_key, &DURABLE_WAIT_REGISTRY_FORMATS)

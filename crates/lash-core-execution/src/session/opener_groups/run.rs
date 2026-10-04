@@ -41,7 +41,7 @@ impl OpenerState {
         owner: crate::EffectOpener,
         successor: SegmentOrdinal,
         available: Vec<crate::store::plugin_writers::PluginRevision>,
-        handlers: Arc<dyn SingletonToolHandlers>,
+        handlers: Arc<dyn SingletonToolHandlers + 'a>,
         clock: &dyn crate::Clock,
     ) -> Result<RunCoordinator<'a>, SingletonRunError> {
         let transfer = {
@@ -63,6 +63,17 @@ impl OpenerState {
             }
             None => Ok(RunCoordinator::open(scoped, owner, successor, available)),
         }
+    }
+
+    pub fn holds_tool_run(&self) -> bool {
+        let registry = self.groups.lock_recover();
+        registry.active_run || registry.run.is_some()
+    }
+
+    pub(crate) fn finish_run(&self) {
+        let mut registry = self.groups.lock_recover();
+        registry.active_run = false;
+        registry.run = None;
     }
 
     /// Freeze admission and poll all issued X handles through ACK, retain their

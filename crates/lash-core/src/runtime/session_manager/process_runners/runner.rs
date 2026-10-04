@@ -182,6 +182,7 @@ impl RuntimeSessionServices {
             // The process's durable stamps (effect occurrences, its terminal
             // prelude) follow the `F` its store recorded, never this build's
             // own epoch: N+1 writes N's formats until finalize (FIG-3805).
+            .with_tool_material_store(services.current.host.core.backend().tool_material_store())
             .with_fleet_format(services.current.fleet_format())
             .with_turn_phase_probe(services.current.turn_phase_probe.clone())
             .with_process_execution(

@@ -62,7 +62,7 @@ impl RunRecordObserver {
         &self,
         engine: &dyn RuntimeEffectController,
         name: String,
-        step: RunRecordStep<'static>,
+        step: RunRecordStep<'_>,
     ) -> Result<RunJournalEntry, RuntimeEffectControllerError> {
         let (body, observations) = self.recording_step(engine, step)?;
         let entry = engine.record_run_schedule(name, body).await?;

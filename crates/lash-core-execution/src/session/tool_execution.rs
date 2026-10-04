@@ -1,14 +1,12 @@
 use super::execution_context::RuntimeExecutionContext;
 use crate::tool_dispatch::{
-    ToolAttemptLineage, ToolCallIds, ToolCallLaunch, ToolDispatchOutcome, ToolPreparationOutcome,
-    coordinate_tool_invocation, prepare_granted_tool_call_with_context,
-    prepare_tool_call_with_context,
+    ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
+    prepare_granted_tool_call_with_context, prepare_tool_call_with_context,
 };
 use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
     ToolFailure, ToolFailureClass, TurnActivityId, TurnEvent,
 };
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// v3 (FIG-3586) retires the opener occurrence ordinal v2 folded into the
@@ -132,6 +130,8 @@ pub struct ToolInvocation {
     pub id: crate::ToolCallId,
     pub tool_id: crate::ToolId,
     pub args: serde_json::Value,
+    /// Original native request correlation and replay data, when supplied.
+    pub pending: Option<Box<crate::sansio::PendingToolCall>>,
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     /// The binding a replayed code cell recorded for this call when the live
     /// tool has since drifted (FIG-3587). Never part of the call's identity.
@@ -148,11 +148,18 @@ impl ToolInvocation {
             id,
             tool_id,
             args,
+            pending: None,
             execution_grant: None,
             recorded_binding: None,
             child_execution_trace_hook: None,
             issuing_language_node_id: None,
         }
+    }
+
+    pub fn from_pending(pending: crate::sansio::PendingToolCall, tool_id: crate::ToolId) -> Self {
+        let mut invocation = Self::new(pending.call_id.clone(), tool_id, pending.args.clone());
+        invocation.pending = Some(Box::new(pending));
+        invocation
     }
 
     pub fn with_child_execution_trace_hook(
@@ -320,6 +327,7 @@ mod tests {
 pub struct ToolInvocationReply {
     pub output: ToolCallOutput,
     pub record: Option<ToolCallRecord>,
+    pub completed: Option<Box<crate::sansio::CompletedToolCall>>,
 }
 
 impl ToolInvocationReply {
@@ -327,6 +335,7 @@ impl ToolInvocationReply {
         Self {
             output: ToolCallOutput::success(value),
             record: None,
+            completed: None,
         }
     }
 
@@ -340,6 +349,7 @@ impl ToolInvocationReply {
         Self {
             output: ToolCallOutput::failure(failure),
             record: None,
+            completed: None,
         }
     }
 
@@ -347,6 +357,7 @@ impl ToolInvocationReply {
         Self {
             output,
             record: None,
+            completed: None,
         }
     }
 
@@ -408,6 +419,7 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
             id,
             tool_id,
             args,
+            pending: _,
             execution_grant,
             recorded_binding: _,
             child_execution_trace_hook: _,
@@ -522,15 +534,12 @@ mod group;
 
 pub use aggregate::{
     ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome, ToolAggregateRequest,
+    ToolRunAggregateCursor, ToolRunAggregatePoll,
 };
 pub use group::{ToolAggregateConsumer, ToolDispatchResult};
 #[cfg(test)]
 #[path = "tool_execution/turn_cancel_gate_tests.rs"]
 mod turn_cancel_gate_tests;
-
-#[cfg(test)]
-#[path = "tool_execution/scalar_presentation_tests.rs"]
-mod scalar_presentation_tests;
 
 impl RuntimeExecutionContext<'_> {
     pub fn tool_execution_owner(
@@ -1346,43 +1355,30 @@ impl RuntimeExecutionContext<'_> {
         command: &crate::CommandReplayKey,
         invocation: ToolInvocation,
     ) -> ToolInvocationReply {
-        let executed = Box::pin(self.execute_command_tool(command, invocation)).await;
-        let reply = ToolInvocationReply::from_output(executed.completed.output);
-        reply.with_record(executed.record)
-    }
-
-    pub(crate) async fn execute_command_tool(
-        &self,
-        command: &crate::CommandReplayKey,
-        mut invocation: ToolInvocation,
-    ) -> CompletedProtocolToolCall {
-        let authorization = ToolCallAuthorization::from_invocation(&mut invocation);
-        let ToolInvocation {
-            id,
-            args,
-            child_execution_trace_hook,
-            issuing_language_node_id,
-            ..
-        } = invocation;
-        let context = match issuing_language_node_id {
-            Some(node_id) => self.clone().with_issuing_language_node_id(node_id),
-            None => self.clone(),
-        };
-        let command = crate::runtime::command_invocation(
-            self.dispatch.effect_controller.execution_scope(),
-            self.effect_attribution(),
-            self.parent_invocation.as_ref(),
-            command,
-        )
-        .into_runtime_invocation();
-        Box::pin(context.execute_tool_call(
-            command,
-            id,
-            authorization,
-            args,
-            child_execution_trace_hook,
-        ))
-        .await
+        let call_id = invocation.id.clone();
+        let outcome = self
+            .call_tool_aggregate(ToolAggregateRequest {
+                leaves: vec![ToolAggregateLeaf::Tool(invocation)],
+                consumer: ToolAggregateConsumer::AllSettled,
+                settled_value_after: None,
+                command: command.clone(),
+            })
+            .await;
+        match outcome {
+            ToolAggregateOutcome::AllResults(mut replies) => match replies.pop().flatten() {
+                Some(ToolAggregateLeafReply::Tool(reply)) => *reply,
+                _ => ToolInvocationReply::error(serde_json::json!("a scalar tool has no terminal")),
+            },
+            ToolAggregateOutcome::HostControl(message) => {
+                ToolInvocationReply::error(serde_json::Value::String(message))
+            }
+            ToolAggregateOutcome::ToolCallLimitExceeded(exceeded) => {
+                ToolInvocationReply::error(serde_json::json!(exceeded.to_string()))
+            }
+            _ => ToolInvocationReply::error(serde_json::json!(format!(
+                "scalar call {call_id} returned an aggregate selection"
+            ))),
+        }
     }
 
     /// Delivers cancellation to a deferred tool handle for code-executor implementors.
@@ -1401,219 +1397,6 @@ impl RuntimeExecutionContext<'_> {
         handle: serde_json::Value,
     ) -> ToolInvocationReply {
         self.await_process_handle(call_id, handle).await
-    }
-
-    async fn execute_tool_call(
-        &self,
-        command: crate::RuntimeInvocation,
-        call_id: crate::ToolCallId,
-        authorization: ToolCallAuthorization,
-        args: serde_json::Value,
-        child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
-    ) -> CompletedProtocolToolCall {
-        let replay = None;
-        let tool_correlation_id = tool_activity_id(&call_id);
-        let ids = ToolCallIds {
-            call_id: call_id.clone(),
-            provider_call_id: None,
-        };
-        // The observed duration is this live window: measured here, carried
-        // only onto the Completed observation — the recorded outcome holds no
-        // wall-clock fields (FIG-3696).
-        let call_started = self.dispatch.clock.now();
-        let requested_at_ms = self.dispatch.clock.timestamp_ms();
-        let elapsed_ms = |this: &Self| {
-            this.dispatch
-                .clock
-                .now()
-                .saturating_duration_since(call_started)
-                .as_millis() as u64
-        };
-        // The command's replay key is the call's own effect-invocation key:
-        // every lane this call emits keys under it (ADR 0105 §1).
-        let call_key = command
-            .effect_replay_key()
-            .map_or_else(|| call_id.to_string(), str::to_owned);
-        let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
-            let tool_id = authorization.tool_id();
-            let outcome = ToolDispatchOutcome {
-                record: ToolCallRecord {
-                    call_id: call_id.clone(),
-                    provider_call_id: None,
-                    tool: tool_id.to_string(),
-                    args,
-                    output: ToolCallOutput::failure(ToolFailure::runtime(
-                        ToolFailureClass::Unavailable,
-                        "tool_unavailable",
-                        format!("Tool id `{tool_id}` is unavailable in this session"),
-                    )),
-                },
-                attempts: Vec::new(),
-                intents: crate::ToolIntents::default(),
-                intent_outcomes: Vec::new(),
-                captures: Vec::new(),
-                triggers: Vec::new(),
-            };
-            if let Err(error) = self
-                .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
-                .await
-            {
-                self.record_nested_effect_error(error);
-            }
-            return self
-                .complete_language_tool_call(
-                    AdmittedCallIdentity(call_id, tool_id.clone()),
-                    replay,
-                    outcome,
-                    true,
-                    &call_key,
-                    elapsed_ms(self),
-                )
-                .await;
-        };
-        let admitted_tool_id = authorization.tool_id().clone();
-        let park_trace_hook = child_execution_trace_hook.clone();
-        self.emit_tool_call_started(
-            &call_key,
-            &ids,
-            &manifest.name,
-            args.clone(),
-            tool_correlation_id.clone(),
-        )
-        .await;
-
-        let request = ToolCallRecord {
-            call_id: call_id.clone(),
-            provider_call_id: None,
-            tool: manifest.name.clone(),
-            args: args.clone(),
-            output: ToolCallOutput::success(serde_json::Value::Null),
-        };
-        if let Err(error) = self
-            .retain_unadmitted_tool_request(&request, requested_at_ms)
-            .await
-        {
-            return self
-                .refused_completion(
-                    ids,
-                    request.tool,
-                    request.args,
-                    error,
-                    &call_key,
-                    elapsed_ms(self),
-                )
-                .await;
-        }
-
-        let parent_invocation = Some(command.clone());
-        let mut dispatch = (*self.dispatch).clone();
-        dispatch.parent_invocation = parent_invocation.clone();
-        dispatch.observation_call_key = None;
-        let pending = crate::sansio::PendingToolCall {
-            call_id: call_id.clone(),
-            provider_call_id: None,
-            tool_name: manifest.name.clone(),
-            args,
-            replay: replay.clone(),
-        };
-        let launch = match authorization.prepare(&dispatch, pending).await {
-            ToolPreparationOutcome::Prepared(prepared) => {
-                let retry_policy = authorization.recorded_retry_policy().unwrap_or_else(|| {
-                    crate::tool_dispatch::resolve_retry_policy(&dispatch, &prepared.tool_id, None)
-                });
-                let execution_grant = authorization.into_execution_grant();
-                let intent_trace_hook = child_execution_trace_hook.clone();
-                let trace_hooks: BTreeMap<crate::ToolCallId, crate::ToolChildExecutionTraceHook> =
-                    child_execution_trace_hook
-                        .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
-                        .unwrap_or_default();
-                let turn_cancel_wait = Box::new(
-                    self.turn_cancel_wait(self.cancellation_token.clone().unwrap_or_default()),
-                );
-                let coordinated = coordinate_tool_invocation(
-                    &dispatch,
-                    *prepared,
-                    execution_grant,
-                    retry_policy,
-                    None,
-                    ToolAttemptLineage::under(command.clone()),
-                    turn_cancel_wait.as_ref(),
-                    intent_trace_hook,
-                    |completion_key| {
-                        crate::RuntimeEffectLocalExecutor::tool_attempt(
-                            self.clone(),
-                            trace_hooks.clone(),
-                            completion_key,
-                        )
-                    },
-                )
-                .await;
-                coordinated.launch
-            }
-            ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(outcome),
-        };
-        let mut outcome = match launch {
-            ToolCallLaunch::Done(outcome) => *outcome,
-            ToolCallLaunch::Pending(pending) => {
-                let (tool, args) = (pending.tool_name.clone(), pending.args.clone());
-                match self
-                    .complete_pending_tool_dispatch_outcome(
-                        parent_invocation.clone(),
-                        *pending,
-                        self.cancellation_token.clone(),
-                        park_trace_hook.as_ref(),
-                    )
-                    .await
-                {
-                    Ok(outcome) => outcome,
-                    Err(error) => {
-                        return self
-                            .refused_completion(ids, tool, args, error, &call_key, elapsed_ms(self))
-                            .await;
-                    }
-                }
-            }
-            // A refusal, not a settlement: the call has no recorded outcome to
-            // present, so it journals no presentation (a fabricated one would
-            // be replayed against the call's real result on the redrive).
-            ToolCallLaunch::ControllerAborted(error) => {
-                return self
-                    .refused_completion(
-                        ids,
-                        "runtime_effect_controller".to_string(),
-                        serde_json::Value::Null,
-                        error,
-                        &call_key,
-                        elapsed_ms(self),
-                    )
-                    .await;
-            }
-        };
-        outcome.record.call_id = call_id.clone();
-        outcome.record.provider_call_id = None;
-
-        self.complete_language_tool_call(
-            AdmittedCallIdentity(call_id, admitted_tool_id),
-            replay,
-            outcome,
-            false,
-            &call_key,
-            elapsed_ms(self),
-        )
-        .await
-    }
-
-    /// Delivers a named signal and JSON payload to a deferred tool handle for code-executor
-    /// implementors.
-    pub async fn signal_tool_handle(
-        &self,
-        call_id: crate::ToolCallId,
-        handle: serde_json::Value,
-        signal_name: String,
-        payload: serde_json::Value,
-    ) -> ToolInvocationReply {
-        self.signal_process_handle(call_id, handle, signal_name, payload)
-            .await
     }
 }
 

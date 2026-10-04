@@ -790,7 +790,8 @@ pub mod plugins {
     pub use lash_core::session::{
         CompletedProtocolToolCall, Incorporated, IncorporationLedger, OpenerGroupsClosed,
         SettlementSource, ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply,
-        ToolAggregateOutcome, ToolAggregateRequest, ToolDispatchResult,
+        ToolAggregateOutcome, ToolAggregateRequest, ToolDispatchResult, ToolRunAggregateCursor,
+        ToolRunAggregatePoll,
     };
     pub use lash_core::tool_dispatch::{
         ArmedResolver, DeferredToolCompletion, LaunchReceipt, PendingToolDispatchOutcome,
