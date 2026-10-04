@@ -49,6 +49,7 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
+use restate_sdk::context::macro_support::SealedDurableFuture;
 use restate_sdk::context::{ContextClient, RequestTarget, RunRetryPolicy, WorkflowContext};
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::prelude::Endpoint;
@@ -570,171 +571,6 @@ fn durable_turn_scope(
     ExecutionScope::turn(&session_id, turn_id)
 }
 
-struct PanicsWhenPolledAfterReady {
-    completed: bool,
-}
-
-impl Future for PanicsWhenPolledAfterReady {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        assert!(!self.completed, "non-fused future was polled after ready");
-        self.completed = true;
-        Poll::Ready(())
-    }
-}
-
-#[test]
-fn restate_context_future_repoll_after_ready_stays_pending() {
-    let mut future = Box::pin(guard_restate_context_future(PanicsWhenPolledAfterReady {
-        completed: false,
-    }));
-    let waker = Waker::noop();
-    let mut context = Context::from_waker(waker);
-
-    assert_eq!(future.as_mut().poll(&mut context), Poll::Ready(()));
-    assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
-}
-
-/// A future that wakes its own task once before completing - the shape
-/// `yield_now` and a re-armed `FuturesUnordered` both produce.
-fn self_waking_then_ready() -> impl Future<Output = u32> {
-    let mut woke = false;
-    std::future::poll_fn(move |cx: &mut Context<'_>| {
-        if woke {
-            return Poll::Ready(7);
-        }
-        woke = true;
-        cx.waker().wake_by_ref();
-        Poll::Pending
-    })
-}
-
-/// FIG-1464: `ctx.run` polls arbitrary lash code, and a `RuntimeEffectCommand::LlmCall`
-/// reaches this seam with no task boundary in between. A self-wake from that
-/// code arrives before the closure has produced a value, so it is not the SDK's
-/// terminal park and must not fuse the run - fusing it would hang the turn while
-/// holding a paid completion.
-#[test]
-fn restate_run_future_closure_self_wake_does_not_fuse() {
-    let relay = Arc::new(crate::controller::context::ClosureWakeRelay::default());
-    let mut future = Box::pin(crate::controller::context::guard_restate_run_future(
-        crate::controller::context::relay_closure_wakes(
-            self_waking_then_ready(),
-            Arc::clone(&relay),
-        ),
-        relay,
-    ));
-    let waker = Waker::noop();
-    let mut context = Context::from_waker(waker);
-
-    assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
-    assert_eq!(
-        future.as_mut().poll(&mut context),
-        Poll::Ready(7),
-        "a wake attributed to the run closure must leave the run future pollable"
-    );
-}
-
-/// The same wake shape from anywhere other than the closure's own future is the
-/// SDK recording a terminal handler state - the intercept-error `wake_by_ref`
-/// included, which is also the only wake the replay path can produce because the
-/// closure is never invoked there. It must fuse.
-#[test]
-fn restate_run_future_unattributed_wake_fuses() {
-    let relay = Arc::new(crate::controller::context::ClosureWakeRelay::default());
-    let mut future = Box::pin(crate::controller::context::guard_restate_run_future(
-        self_waking_then_ready(),
-        relay,
-    ));
-    let waker = Waker::noop();
-    let mut context = Context::from_waker(waker);
-
-    assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
-    assert_eq!(
-        future.as_mut().poll(&mut context),
-        Poll::Pending,
-        "an unattributed synchronous wake must never re-enter the SDK future"
-    );
-}
-
-/// A closure-side future that is woken from another thread while the guard is
-/// mid-poll - the shape a provider stream woken by the tokio I/O driver
-/// produces. The wake is joined before returning, so it is guaranteed to land
-/// inside this very poll.
-fn cross_thread_woken_closure_future() -> impl Future<Output = u32> {
-    let mut woke = false;
-    std::future::poll_fn(move |cx: &mut Context<'_>| {
-        if woke {
-            return Poll::Ready(11);
-        }
-        woke = true;
-        let waker = cx.waker().clone();
-        std::thread::spawn(move || waker.wake())
-            .join()
-            .expect("cross-thread closure wake");
-        Poll::Pending
-    })
-}
-
-/// An SDK-shaped future that parks terminally: it polls its inner future, wakes
-/// the task synchronously on the polling thread and returns `Pending`, exactly
-/// as `InterceptErrorFuture` does after `ctx.fail`. Being already resolved, a
-/// second poll is the bug this guard exists to prevent.
-struct SdkTerminalPark<F> {
-    inner: Pin<Box<F>>,
-    parked: bool,
-}
-
-impl<F> Future for SdkTerminalPark<F>
-where
-    F: Future,
-{
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        assert!(
-            !this.parked,
-            "the resolved SDK future must never be polled again"
-        );
-        let _ = this.inner.as_mut().poll(cx);
-        this.parked = true;
-        cx.waker().wake_by_ref();
-        Poll::Pending
-    }
-}
-
-/// FIG-1464 round 3, residual A: a cross-thread wake from inside the run closure
-/// landing during the same poll as the SDK's terminal park must not mask that
-/// park. Attributing by arithmetic did exactly that - the closure wake was
-/// invisible to the tracker's same-thread gate yet still counted against it, so
-/// the two cancelled out, the guard stayed unfused and the next poll re-entered
-/// the resolved SDK future.
-#[test]
-fn restate_run_future_cross_thread_closure_wake_does_not_mask_the_terminal_park() {
-    let relay = Arc::new(crate::controller::context::ClosureWakeRelay::default());
-    let mut future = Box::pin(crate::controller::context::guard_restate_run_future(
-        SdkTerminalPark {
-            inner: Box::pin(crate::controller::context::relay_closure_wakes(
-                cross_thread_woken_closure_future(),
-                Arc::clone(&relay),
-            )),
-            parked: false,
-        },
-        relay,
-    ));
-    let waker = Waker::noop();
-    let mut context = Context::from_waker(waker);
-
-    assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
-    assert_eq!(
-        future.as_mut().poll(&mut context),
-        Poll::Pending,
-        "a cross-thread closure wake must not cancel out the SDK's terminal park"
-    );
-}
-
 /// Restate service-protocol message types used by the FIG-779/FIG-790 gates.
 /// `restate_sdk_shared_core::service_protocol::header` keeps these private, so
 /// they are restated here (`SleepCommand = 0x040C`, `Suspension = 0x0001`,
@@ -811,10 +647,12 @@ impl Fig779TimerGuardRepro for Fig779TimerGuardReproImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig779TimerGuardReproInput>,
     ) -> HandlerResult<Json<()>> {
-        let timer = guard_restate_context_future(restate_sdk::context::ContextTimers::sleep(
+        let timer = restate_sdk::context::ContextTimers::sleep(
             &ctx,
             Duration::from_millis(input.duration_ms),
-        ));
+        );
+        let state = timer.inner_context();
+        let timer = guard_restate_context_future(timer, state);
         tokio::pin!(timer);
         std::future::poll_fn(|cx| {
             assert!(matches!(timer.as_mut().poll(cx), Poll::Pending));
@@ -1585,3 +1423,180 @@ mod admin_namespace_filters;
 mod lost_run_recovery;
 
 mod json_decode_ingress;
+
+/// L02: a sibling's registered wake requests progress without terminating X.
+#[restate_sdk::workflow]
+trait TerminalStateGuardProbe {
+    async fn sibling_wake() -> HandlerResult<Json<u32>>;
+    async fn hidden_terminal() -> HandlerResult<Json<()>>;
+    async fn terminal_notification() -> HandlerResult<Json<()>>;
+}
+
+struct TerminalStateGuardProbeImpl;
+
+impl TerminalStateGuardProbe for TerminalStateGuardProbeImpl {
+    async fn sibling_wake(&self, ctx: WorkflowContext<'_>) -> HandlerResult<Json<u32>> {
+        // Retain the real SDK attempt state while reproducing the registered
+        // sibling wake from the rejected guard experiment.
+        let sdk_result =
+            restate_sdk::context::ContextSideEffects::run(&ctx, || async { Ok(Json(42_u32)) })
+                .start();
+        let state = sdk_result.inner_context();
+        let mut polls = 0;
+        let mut registered = None;
+        let result = std::future::poll_fn(|cx| {
+            polls += 1;
+            match polls {
+                1 => {
+                    registered = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+                2 => {
+                    registered.take().expect("registered sibling").wake();
+                    Poll::Pending
+                }
+                3 => Poll::Ready(42),
+                _ => panic!("completed result was re-polled"),
+            }
+        });
+        let mut result = Box::pin(guard_restate_context_future(result, state.clone()));
+        std::future::poll_fn(|cx| {
+            assert!(result.as_mut().poll(cx).is_pending());
+            assert!(result.as_mut().poll(cx).is_pending());
+            assert!(!state.is_failed_or_suspended());
+            assert_eq!(result.as_mut().poll(cx), Poll::Ready(42));
+            assert!(result.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        Ok(Json(42))
+    }
+
+    async fn hidden_terminal(&self, ctx: WorkflowContext<'_>) -> HandlerResult<Json<()>> {
+        let mut timer = Box::pin(restate_sdk::context::ContextTimers::sleep(
+            &ctx,
+            Duration::from_secs(2),
+        ));
+        let state = timer.inner_context();
+        let mut polls = 0;
+        // Poll the SDK beneath a silent waker: the recorded terminal state is
+        // authoritative even when its synchronous wake never reaches the guard.
+        let result = std::future::poll_fn(|_| {
+            polls += 1;
+            timer.as_mut().poll(&mut Context::from_waker(Waker::noop()))
+        });
+        let mut result = Box::pin(guard_restate_context_future(result, state.clone()));
+        std::future::poll_fn(|cx| {
+            assert!(result.as_mut().poll(cx).is_pending());
+            assert!(
+                state.is_failed_or_suspended(),
+                "SDK hid its terminal error behind Pending"
+            );
+            assert!(result.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        drop(result);
+        assert_eq!(
+            polls, 1,
+            "recorded terminal Pending must never re-enter the SDK"
+        );
+        Ok(Json(()))
+    }
+
+    async fn terminal_notification(&self, ctx: WorkflowContext<'_>) -> HandlerResult<Json<()>> {
+        let mut result = Box::pin(
+            restate_sdk::context::ContextSideEffects::run(&ctx, || async {
+                Ok(Json(Fig1464UnjournalableEffectResult))
+            })
+            .start(),
+        );
+        let state = result.inner_context();
+        let mut result = Box::pin(guard_restate_context_future(
+            std::future::poll_fn(|_| {
+                result
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+            }),
+            state.clone(),
+        ));
+        std::future::poll_fn(|cx| {
+            assert!(result.as_mut().poll(cx).is_pending());
+            assert!(state.is_failed_or_suspended());
+            assert!(
+                state.is_failed_or_suspended(),
+                "observation must remain repeatable"
+            );
+            Poll::Ready(())
+        })
+        .await;
+        Ok(Json(()))
+    }
+}
+
+#[tokio::test]
+async fn l02_a_registered_sibling_wake_keeps_a_pending_result_live() {
+    let endpoint = Endpoint::builder()
+        .bind(TerminalStateGuardProbeImpl.serve())
+        .build();
+    invoke_endpoint(
+        &endpoint,
+        "TerminalStateGuardProbe",
+        "sibling_wake",
+        "sibling-wake",
+        &(),
+    )
+    .await
+    .expect("sibling wake preserves the pending result");
+}
+
+/// L02: the SDK's hidden terminal Pending ends polling even without a wake.
+#[tokio::test]
+async fn l02_a_hidden_terminal_pending_fuses_without_a_synchronous_wake() {
+    let endpoint = Endpoint::builder()
+        .bind(TerminalStateGuardProbeImpl.serve())
+        .build();
+    let output = invoke_endpoint(
+        &endpoint,
+        "TerminalStateGuardProbe",
+        "hidden_terminal",
+        "hidden-terminal",
+        &(),
+    )
+    .await
+    .expect("hidden terminal must not re-enter the SDK");
+    assert_eq!(
+        restate_message_types(&output).unwrap(),
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+}
+
+/// L02: observing terminal state leaves the outer handler's error notification intact.
+#[tokio::test]
+async fn l02_terminal_observation_preserves_the_outer_handler_notification() {
+    let endpoint = Endpoint::builder()
+        .bind(TerminalStateGuardProbeImpl.serve())
+        .build();
+    let output = invoke_endpoint(
+        &endpoint,
+        "TerminalStateGuardProbe",
+        "terminal_notification",
+        "terminal-notification",
+        &(),
+    )
+    .await
+    .expect("outer handler must receive its recorded failure");
+    assert!(
+        restate_error_message(&output)
+            .is_some_and(|message| message.contains("cannot be journaled"))
+    );
+    let types = restate_message_types(&output).unwrap();
+    assert!(
+        !types.contains(&RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE)
+            && !types.contains(&RESTATE_END_MESSAGE_TYPE),
+        "terminal observation must not fabricate a successful handler output"
+    );
+}

@@ -1,97 +1,27 @@
-//! The wake machinery `RestateContextFuture` fuses a context future
-//! across the SDK's two terminal poll shapes, and the relay that routes
-//! a guarded `ctx.run` closure's own wakes past the guard's tracker.
+//! Fuse context futures from recorded SDK terminal state and relay callback
+//! wakes to their logical Run owner.
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
-use std::thread::ThreadId;
 
 use lash_sansio::sync::MutexExt;
+use restate_sdk::endpoint::ContextInternal;
 
-/// Fuse a Restate context future across both of its terminal poll shapes.
-///
-/// `DurableFutureImpl` returns `Ready` on success. When the SDK records a
-/// terminal handler state (including a genuine suspension), it synchronously
-/// wakes the task and returns `Pending`; the SDK's outer
-/// `HandlerStateAwareFuture` consumes that state on the next poll. In both
-/// shapes the SDK future has produced its terminal outcome for this attempt and
-/// must never be polled again.
+/// Fuse success and the SDK's terminal failure or suspension, which it hides
+/// behind `Pending`. Wakes only request progress; they say nothing about the
+/// result's terminal state. Observation leaves the outer handler notification
+/// available to the SDK.
 pub(crate) struct RestateContextFuture<F> {
     future: Option<Pin<Box<F>>>,
-    /// The relay a guarded `ctx.run` closure's own future wakes through, when
-    /// there is one. The guard publishes its parent waker here before each poll
-    /// so those wakes bypass the tracker entirely and can never be mistaken for
-    /// the SDK's terminal park.
+    context: ContextInternal,
     closure_relay: Option<Arc<ClosureWakeRelay>>,
-    tracked: Option<TrackedWaker>,
 }
 
-/// The synchronous-wake tracker and the waker derived from it, kept together so
-/// the pair can be lent to one poll and handed back without ever being half
-/// present. The guard sits on the streaming-hot path, so the pair is reused
-/// across polls and only rebuilt when the parent waker or the polling thread
-/// changes - the tracker's verdict is scoped to one thread.
-struct TrackedWaker {
-    tracker: Arc<SynchronousWakeTracker>,
-    waker: Waker,
-}
-
-impl TrackedWaker {
-    fn new(parent: &Waker, polling_thread: ThreadId) -> Self {
-        let tracker = Arc::new(SynchronousWakeTracker {
-            parent: parent.clone(),
-            polling_thread,
-            polling: AtomicBool::new(false),
-            woke_during_poll: AtomicBool::new(false),
-        });
-        let waker = Waker::from(Arc::clone(&tracker));
-        Self { tracker, waker }
-    }
-
-    fn matches(&self, parent: &Waker, polling_thread: ThreadId) -> bool {
-        self.tracker.parent.will_wake(parent) && self.tracker.polling_thread == polling_thread
-    }
-
-    fn begin_poll(&self) {
-        self.tracker
-            .woke_during_poll
-            .store(false, Ordering::Release);
-        self.tracker.polling.store(true, Ordering::Release);
-    }
-
-    /// End the poll and report whether the guarded future woke this task
-    /// synchronously while it was being polled.
-    fn end_poll(&self) -> bool {
-        self.tracker.polling.store(false, Ordering::Release);
-        self.tracker.woke_during_poll.load(Ordering::Acquire)
-    }
-}
-
-/// The relay a `ctx.run` closure's own future wakes through.
-///
-/// The guarded `ctx.run` future polls arbitrary lash code inside the run
-/// closure, and a wake from that code - `yield_now`, a `FuturesUnordered`
-/// re-arm, a provider stream woken cross-thread by the I/O driver - is benign:
-/// it means the closure has more work, not that the attempt is over. Such a
-/// wake must therefore never reach the guard's synchronous-wake tracker.
-///
-/// Attribution is by construction rather than by arithmetic. The guard
-/// publishes its own parent waker here before each poll, and the waker
-/// [`relay_closure_wakes`] installs beneath the closure forwards straight to
-/// that parent - so a closure wake bypasses the tracker whatever thread it
-/// comes from and whenever it lands. Counting instead would be racy: a
-/// cross-thread closure wake is invisible to the tracker's same-thread gate,
-/// so subtracting it would cancel out the SDK's terminal park and leave the
-/// guard unfused.
-///
-/// What the tracker still sees is exactly the wake the closure cannot account
-/// for: the SDK recording a terminal handler state, including the synthetic
-/// `wake_by_ref` `InterceptErrorFuture` issues after `ctx.fail`. That holds on
-/// the replay path too, where the SDK never invokes the closure at all.
+/// Routes a registered Run callback's wakes to its logical owner, even when the
+/// SDK progresses that callback while polling another owner's result.
 #[derive(Default)]
 pub(crate) struct ClosureWakeRelay {
     /// The guard's parent waker, republished on every guard poll.
@@ -99,8 +29,7 @@ pub(crate) struct ClosureWakeRelay {
 }
 
 impl ClosureWakeRelay {
-    /// Publish the waker the guard was polled with, so closure wakes reach the
-    /// task without passing through the guard's tracker.
+    /// Publish the logical owner's current task before progressing the SDK.
     fn publish_parent(&self, parent: &Waker) {
         let mut slot = self.parent.lock_recover();
         match slot.as_ref() {
@@ -115,11 +44,11 @@ impl ClosureWakeRelay {
 }
 
 /// The waker handed to a run closure's future. It forwards to whatever parent
-/// the guard last published, never to the guard's tracked waker.
+/// the guard last published.
 struct RelayedWaker {
     relay: Arc<ClosureWakeRelay>,
-    /// Used only before the guard's first poll has published a parent, which
-    /// cannot happen while the closure is being polled by the guarded future.
+    /// Use the SDK's progress waker until the logical owner first publishes
+    /// its task; another result can progress this callback before then.
     fallback: Waker,
 }
 
@@ -195,105 +124,52 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let polling_thread = std::thread::current().id();
-        let tracked = match this.tracked.take() {
-            Some(tracked) if tracked.matches(cx.waker(), polling_thread) => tracked,
-            _ => TrackedWaker::new(cx.waker(), polling_thread),
-        };
+        if this.context.is_failed_or_suspended() {
+            this.future = None;
+            return Poll::Pending;
+        }
         let Some(future) = this.future.as_mut() else {
             return Poll::Pending;
         };
-        // Publish this poll's parent waker before entering the guarded future,
-        // so a wake from inside the run closure - on any thread, at any time -
-        // reaches the task directly instead of registering as a synchronous
-        // wake the closure cannot account for.
         if let Some(relay) = this.closure_relay.as_ref() {
             relay.publish_parent(cx.waker());
         }
-        tracked.begin_poll();
-        let result = future
-            .as_mut()
-            .poll(&mut Context::from_waker(&tracked.waker));
-        // Every wake the tracker saw is the SDK's own: the closure's wakes were
-        // routed past it by construction, and the attempt's request body never
-        // self-wakes inside a poll - a real Restate body is fed by another
-        // task, and the test double's `AttemptBody` upholds the same contract
-        // by delivering a raced-in frame as `Ready` instead.
-        let woke_during_poll = tracked.end_poll();
-
-        if result.is_ready() || woke_during_poll {
+        let result = future.as_mut().poll(cx);
+        if result.is_ready() || this.context.is_failed_or_suspended() {
             this.future = None;
-        } else {
-            this.tracked = Some(tracked);
         }
         result
     }
 }
 
-struct SynchronousWakeTracker {
-    // Deliberately redundant: the Restate SDK also wakes the handler through
-    // its output channel when it records suspension. Forwarding preserves the
-    // ordinary Future/Waker contract for other synchronous wake paths, but the
-    // suspension fix does not depend on this parent wake; the tracker flag is
-    // what fuses the one-shot SDK future.
-    parent: Waker,
-    polling_thread: ThreadId,
-    polling: AtomicBool,
-    woke_during_poll: AtomicBool,
-}
-
-impl Wake for SynchronousWakeTracker {
-    fn wake(self: Arc<Self>) {
-        self.record_wake();
-        self.parent.wake_by_ref();
-    }
-
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.record_wake();
-        self.parent.wake_by_ref();
-    }
-}
-
-impl SynchronousWakeTracker {
-    fn record_wake(&self) {
-        if self.polling.load(Ordering::Acquire)
-            && std::thread::current().id() == self.polling_thread
-        {
-            self.woke_during_poll.store(true, Ordering::Release);
-        }
-    }
-}
-
 #[cfg(test)]
-pub(crate) fn guard_restate_context_future<F>(future: F) -> RestateContextFuture<F>
-where
-    F: Future,
-{
-    RestateContextFuture {
-        future: Some(Box::pin(future)),
-        closure_relay: None,
-        tracked: None,
-    }
-}
-
-/// Guard a `ctx.run` future whose closure polls arbitrary lash code.
-///
-/// `closure_relay` is the relay the closure's own future wakes through (see
-/// [`relay_closure_wakes`]). Those wakes are routed to the guard's parent waker
-/// by construction, so a wake from inside the closure - on any thread - leaves
-/// the run pollable, while any synchronous wake that does reach the tracker -
-/// the SDK's terminal park, on a live attempt or on a replay that never invokes
-/// the closure - fuses it.
-pub(crate) fn guard_restate_run_future<F>(
+pub(crate) fn guard_restate_context_future<F>(
     future: F,
-    closure_relay: Arc<ClosureWakeRelay>,
+    context: ContextInternal,
 ) -> RestateContextFuture<F>
 where
     F: Future,
 {
     RestateContextFuture {
         future: Some(Box::pin(future)),
+        context,
+        closure_relay: None,
+    }
+}
+
+/// Fuse a Run result using its attempt's recorded terminal state, retaining
+/// wake routing to the logical owner of its registered callback.
+pub(crate) fn guard_restate_run_future<F>(
+    future: F,
+    closure_relay: Arc<ClosureWakeRelay>,
+    context: ContextInternal,
+) -> RestateContextFuture<F>
+where
+    F: Future,
+{
+    RestateContextFuture {
+        future: Some(Box::pin(future)),
+        context,
         closure_relay: Some(closure_relay),
-        tracked: None,
     }
 }

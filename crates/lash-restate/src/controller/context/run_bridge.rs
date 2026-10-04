@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use lash_sansio::sync::MutexExt;
+use restate_sdk::context::macro_support::SealedDurableFuture;
 
 /// Register owned callbacks with the SDK, including journaled work nested in V.
 /// Borrowing Run::poll can discard a not-yet-executable nested closure; start
@@ -39,9 +40,11 @@ where
         Some(policy) => restate_sdk::context::RunFuture::retry_policy(run, policy),
         None => run,
     };
+    let result = run.start();
+    let state = result.inner_context();
     owner.drive(
         body,
-        super::wake::guard_restate_run_future(run.start(), relay),
+        super::wake::guard_restate_run_future(result, relay, state),
     )
 }
 
@@ -69,7 +72,7 @@ where
             .map_err(|fault| restate_sdk::errors::HandlerError::from(std::io::Error::other(fault)))
     });
     let run = restate_sdk::context::RunFuture::name(run, name);
-    super::wake::guard_restate_run_future(run, relay)
+    super::wake::guard_restate_run_future(run, relay, context.inner_context().clone())
 }
 
 struct State<T> {

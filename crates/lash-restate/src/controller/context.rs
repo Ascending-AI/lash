@@ -3,8 +3,8 @@
 //! One responsibility: expose the durable primitives the controller needs
 //! (timer, `ctx.run`, workflow scheduling, durable wait, awakeable races) over
 //! every Restate context shape a handler can hold, and hold the SDK's
-//! suspension protocol — including the one-shot fusing of a context future that
-//! wakes synchronously and then returns `Pending`.
+//! suspension protocol — including one-shot fusing when the SDK records a
+//! terminal state behind `Pending`.
 
 /// version_surface = "coexist"
 use lash_sansio::SessionId;
@@ -76,8 +76,6 @@ use gate_race::{TurnGateRace, race_turn_cancel_gate, race_turn_gate};
 pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome, TurnSleepOutcome, TurnWaitOutcome};
 #[cfg(test)]
 pub(crate) use wake::guard_restate_context_future;
-#[cfg(test)]
-pub(crate) use wake::{ClosureWakeRelay, guard_restate_run_future, relay_closure_wakes};
 
 /// Whether `error` is the engine's cancellation of this invocation. The SDK
 /// surfaces it once, at whichever await the handler is parked on when the
