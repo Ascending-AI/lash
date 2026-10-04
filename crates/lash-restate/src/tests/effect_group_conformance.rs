@@ -124,6 +124,16 @@ impl RestateProcessRunner for LawProcessRunner {
         None
     }
 
+    async fn admit_plugins(
+        &self,
+    ) -> Result<Option<lash_core::store::plugin_writers::PluginAdmission>, lash_core::PluginError>
+    {
+        match self.installed() {
+            Some(runner) => runner.admit_plugins().await,
+            None => Ok(None),
+        }
+    }
+
     async fn run_process_segment(
         &self,
         started: &crate::SegmentStarted,

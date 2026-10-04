@@ -1704,41 +1704,6 @@ pub(super) async fn invoke_endpoint_body_with_named_call_responses_unbounded(
     Ok(output.freeze())
 }
 
-/// Splices the exact command prefix emitted around a journaled `RunCommand`,
-/// including any one-way or call commands that were incorrectly emitted from
-/// inside the run body. Replaying that prefix is the FIG-1127 mutation oracle:
-/// when a nested route is unguarded, the skipped run body shifts the next
-/// command onto the captured nested command and Restate reports RT0016.
-/// The journal command frame types an invocation emitted, in order
-/// (`0x0411` RunCommand, `0x040D` CallCommand, `0x040E` OneWayCommand).
-///
-/// Byte-level determinism evidence: a redrive that replays a captured journal
-/// must re-issue no command beyond the recorded ones, so the frame-type sequence
-/// is directly comparable against a literal.
-pub(super) fn restate_command_frame_types(input: &[u8]) -> Vec<u16> {
-    let mut cursor = 0;
-    let mut types = Vec::new();
-    while cursor + 8 <= input.len() {
-        let header = u64::from_be_bytes(
-            input[cursor..cursor + 8]
-                .try_into()
-                .expect("restate frame header"),
-        );
-        let message_type = (header >> 48) as u16;
-        let payload_len =
-            usize::try_from(header & 0x0000_FFFF_FFFF_FFFF).expect("restate frame payload length");
-        let frame_end = cursor + 8 + payload_len;
-        if frame_end > input.len() {
-            break;
-        }
-        if matches!(message_type, 0x040D | 0x040E | 0x0411) {
-            types.push(message_type);
-        }
-        cursor = frame_end;
-    }
-    types
-}
-
 async fn invoke_endpoint_body_with_scripted_responses_unbounded(
     endpoint: &Endpoint,
     service: &str,

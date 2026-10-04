@@ -1003,16 +1003,25 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
     }
 
     /// Process segments run in the endpoint's `LashProcessWorkflow`: the
-    /// worker is installed there, and the runtime's own port only observes
-    /// the registry that workflow writes terminals into.
+    /// worker is installed there, and the runtime's port delivers native start
+    /// obligations through that workflow's actual ingress.
     fn process_work(
         &self,
         watched: lash_core::WatchedRegistry,
         worker: lash_core_worker::DurableProcessWorker,
     ) -> lash_core::ProcessWorkWiring {
+        let continuations = worker
+            .config()
+            .runtime_host
+            .backend()
+            .stores()
+            .process_continuations();
         self.process_runner.install(worker);
-        let port = std::sync::Arc::new(lash_core::NoProcessWork::for_registry(
+        let port = std::sync::Arc::new(crate::process::RestateProcessIngressRunner::new(
+            self.connection.clone(),
             std::sync::Arc::clone(watched.registry()),
+            continuations,
+            lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         ));
         lash_core::ProcessWorkWiring::new(watched, port)
     }
