@@ -566,6 +566,7 @@ async fn capture_parked_loop_segment() {
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
         held_tool_calls: Default::default(),
+        tool_run: None,
         worker_recovery: Default::default(),
     };
     let input = parked_loop_input();
@@ -626,8 +627,7 @@ fn sealed_continuation(
     )
 }
 
-/// The worker-recovery ledger is part of the envelope (ADR 0123): a segment
-/// state that carries none is refused typed, not resumed with fresh totals.
+/// Required Run and worker-recovery ledgers cannot default to fresh facts.
 #[test]
 fn a_segment_state_without_its_worker_recovery_ledger_is_a_typed_format_rejection() {
     let program = lashlang::testing::harness::try_compile_program(&finish_null())
@@ -637,7 +637,7 @@ fn a_segment_state_without_its_worker_recovery_ledger_is_a_typed_format_rejectio
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
     let mut vm = lashlang::Vm::from_state(&program, &mut state, &environment)
         .expect("construct the boundary VM");
-    let mut envelope = serde_json::to_value(LashlangSegmentState {
+    let envelope = serde_json::to_value(LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm: sealed_continuation(
             &vm.suspend().expect("capture the boundary continuation"),
@@ -654,6 +654,7 @@ fn a_segment_state_without_its_worker_recovery_ledger_is_a_typed_format_rejectio
         effect_omissions: Default::default(),
         outstanding_groups: Vec::new(),
         held_tool_calls: Default::default(),
+        tool_run: None,
         worker_recovery: Default::default(),
     })
     .expect("encode the segment state");
@@ -663,23 +664,26 @@ fn a_segment_state_without_its_worker_recovery_ledger_is_a_typed_format_rejectio
         "the full envelope decodes"
     );
 
-    envelope
-        .as_object_mut()
-        .expect("the envelope is an object")
-        .remove("worker_recovery")
-        .expect("the envelope carries the ledger");
-    let partial = serde_json::to_vec(&envelope).expect("encode the partial envelope");
-    let Err(error) = decode_lashlang_segment_state(&partial) else {
-        panic!("an envelope without its ledger must not decode");
-    };
-    assert!(
-        matches!(
-            &error,
-            LashlangSegmentStateError::FormatMismatch { details }
-                if details.contains("missing field `worker_recovery`")
-        ),
-        "unexpected error: {error}"
-    );
+    for field in ["worker_recovery", "tool_run"] {
+        let mut partial = envelope.clone();
+        partial
+            .as_object_mut()
+            .expect("the envelope is an object")
+            .remove(field)
+            .expect("the envelope carries the ledger");
+        let partial = serde_json::to_vec(&partial).expect("encode the partial envelope");
+        let Err(error) = decode_lashlang_segment_state(&partial) else {
+            panic!("an envelope without {field} must not decode");
+        };
+        assert!(
+            matches!(
+                &error,
+                LashlangSegmentStateError::FormatMismatch { details }
+                    if details.contains(&format!("missing field `{field}`"))
+            ),
+            "unexpected error: {error}"
+        );
+    }
 }
 
 /// A handover with no version stamp has no compatibility decoder: it is the
@@ -837,6 +841,7 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
         effect_omissions: writer.omissions(),
         outstanding_groups: Vec::new(),
         held_tool_calls: Default::default(),
+        tool_run: None,
         worker_recovery: Default::default(),
     })
     .expect("encode the boundary's segment state");

@@ -55,6 +55,7 @@ pub struct ProcessExecutionWriteAuthority {
     process_id: ProcessId,
     execution_id: String,
     attempt: Option<u32>,
+    segment: Option<crate::tool_run::SegmentOrdinal>,
 }
 
 impl ProcessExecutionWriteAuthority {
@@ -65,6 +66,7 @@ impl ProcessExecutionWriteAuthority {
             process_id: process_id.into(),
             execution_id: execution_id.into(),
             attempt: None,
+            segment: None,
         }
     }
 
@@ -73,6 +75,19 @@ impl ProcessExecutionWriteAuthority {
         let mut bound = self.clone();
         bound.attempt = Some(attempt);
         bound
+    }
+
+    /// Bind the physical segment admitted by the process substrate. This
+    /// does not change the attempt fence used by lifecycle transactions.
+    pub fn bind_segment(&self, segment: crate::tool_run::SegmentOrdinal) -> Self {
+        let mut bound = self.clone();
+        bound.segment = Some(segment);
+        bound
+    }
+
+    /// The admitted physical segment, when the substrate supplied one.
+    pub fn segment(&self) -> Option<crate::tool_run::SegmentOrdinal> {
+        self.segment
     }
 
     /// The one-based process attempt this authority was admitted for.

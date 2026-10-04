@@ -95,6 +95,7 @@ pub struct OpenerGroupRegistry {
     outstanding: Vec<crate::EffectGroupHandle>,
     /// Tool calls held per group key, from formation to release (§9).
     reserved: std::collections::BTreeMap<String, usize>,
+    run: Option<crate::tool_run::RunTransfer>,
 }
 
 impl OpenerGroupRegistry {
@@ -525,3 +526,97 @@ impl<'run> RuntimeExecutionContext<'run> {
 #[cfg(test)]
 #[path = "opener_groups_tests.rs"]
 mod tests;
+
+impl RuntimeExecutionContext<'_> {
+    /// Keep the Run's acknowledged cut beside the opener's phase state.
+    /// The caller quiesces and retains the coordinator before handing it here.
+    /// No issued handle or future is stored in this registry.
+    ///
+    /// # Errors
+    /// An owner, admitted environment, segment or capture refusal.
+    pub fn retain_run_continuation(
+        &self,
+        transfer: crate::tool_run::RunTransfer,
+    ) -> Result<(), crate::tool_run::ContinuationRefusal> {
+        let owner = self
+            .process_id()
+            .map(|id| crate::EffectOpener::process(id.clone()))
+            .ok_or(crate::tool_run::ContinuationRefusal::ForeignOwner)?;
+        if transfer.owner != owner {
+            return Err(crate::tool_run::ContinuationRefusal::ForeignOwner);
+        }
+        self.validate_process_run(&transfer, false)?;
+        transfer.check_capture(&crate::tool_run::Cut::request(transfer.reason).observe(0))?;
+        self.opener_groups.lock_recover().run = Some(transfer);
+        Ok(())
+    }
+
+    /// Take the carried receipts to rebuild the successor's coordinator.
+    pub fn take_run_continuation(&self) -> Option<crate::tool_run::RunTransfer> {
+        self.opener_groups.lock_recover().run.take()
+    }
+
+    /// Capture a quiesced Run without closing the process's logical opener.
+    ///
+    /// # Errors
+    /// A stale, unretained or unacknowledged continuation is refused.
+    pub fn run_continuation_snapshot(
+        &self,
+    ) -> Result<Option<crate::tool_run::RunTransfer>, crate::tool_run::ContinuationRefusal> {
+        let transfer = self.opener_groups.lock_recover().run.clone();
+        if let Some(transfer) = &transfer {
+            self.validate_process_run(transfer, false)?;
+            transfer.check_capture(&crate::tool_run::Cut::request(transfer.reason).observe(0))?;
+        }
+        Ok(transfer)
+    }
+
+    /// Restore only the Run of this process and its admitted successor.
+    /// The coordinator subsequently reads material through successor leases.
+    ///
+    /// # Errors
+    /// An owner, admitted environment, segment or capture refusal.
+    pub fn restore_run_continuation(
+        &self,
+        transfer: crate::tool_run::RunTransfer,
+        successor: crate::tool_run::SegmentOrdinal,
+    ) -> Result<(), crate::tool_run::ContinuationRefusal> {
+        let owner = self
+            .process_id()
+            .map(|id| crate::EffectOpener::process(id.clone()))
+            .ok_or(crate::tool_run::ContinuationRefusal::ForeignOwner)?;
+        let admitted = self
+            .process_event_context()
+            .and_then(|context| context.execution_write_authority.segment())
+            .ok_or(crate::tool_run::ContinuationRefusal::MissingSegmentAuthority)?;
+        if admitted != successor {
+            return Err(crate::tool_run::ContinuationRefusal::SegmentFrontier);
+        }
+        self.validate_process_run(&transfer, true)?;
+        transfer.check_capture(&crate::tool_run::Cut::request(transfer.reason).observe(0))?;
+        // Keep the predecessor reference in the codec for the coordinator's
+        // adoption. The registry validates authority without advancing twice.
+        transfer
+            .clone()
+            .adopt(&owner, transfer.ledger()?.lifecycle(), successor)?;
+        self.opener_groups.lock_recover().run = Some(transfer);
+        Ok(())
+    }
+    fn validate_process_run(
+        &self,
+        transfer: &crate::tool_run::RunTransfer,
+        adopting: bool,
+    ) -> Result<(), crate::tool_run::ContinuationRefusal> {
+        let authority = self
+            .process_event_context()
+            .and_then(|context| context.execution_write_authority.segment())
+            .ok_or(crate::tool_run::ContinuationRefusal::MissingSegmentAuthority)?;
+        if !adopting && transfer.from != authority {
+            return Err(crate::tool_run::ContinuationRefusal::SegmentFrontier);
+        }
+        if transfer.environment.as_ref() != self.inherited_process_execution_env_ref().as_ref() {
+            return Err(crate::tool_run::ContinuationRefusal::ForeignEnvironment);
+        }
+        Ok(())
+    }
+}

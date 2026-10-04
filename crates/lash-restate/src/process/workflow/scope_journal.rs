@@ -46,6 +46,32 @@ impl ProcessJournalPin {
         Ok(pin)
     }
 
+    /// The accepted successor gets the same fixed invocation pin before this
+    /// segment releases. Its own registration is idempotent under this id.
+    pub(super) async fn transfer_to(
+        self,
+        ctx: &WorkflowContext<'_>,
+        namespace: &crate::RestateNamespace,
+        invocation_id: &str,
+    ) -> HandlerResult<()> {
+        let request = RestateDurableWaitProcessJournalRequest {
+            process_id: self.request.process_id.clone(),
+            invocation_id: crate::RestateInvocationId::new(invocation_id.to_owned()),
+        };
+        if !namespace
+            .durable_wait_registry(ctx, self.index_key.clone())
+            .register_process_journal(request)
+            .call()
+            .await?
+            .into_body()
+        {
+            return Err(
+                TerminalError::new("the accepted process successor's scope is retired").into(),
+            );
+        }
+        self.release(ctx, namespace).await
+    }
+
     pub(super) async fn release(
         self,
         ctx: &WorkflowContext<'_>,

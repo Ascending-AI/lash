@@ -230,7 +230,7 @@ pub struct SegmentStarted {
 impl SegmentStarted {
     fn new(
         process_id: ProcessId,
-        segment_ordinal: u64,
+        segment_ordinal: lash_core::tool_run::SegmentOrdinal,
         started_at_ms: u64,
         execution_id: String,
         generation: Option<lash_core::ExecutableGeneration>,
@@ -238,10 +238,11 @@ impl SegmentStarted {
         plugins: Option<lash_core::store::plugin_writers::PluginAdmission>,
     ) -> Self {
         let authority =
-            ProcessExecutionWriteAuthority::invocation(process_id.clone(), execution_id);
+            ProcessExecutionWriteAuthority::invocation(process_id.clone(), execution_id)
+                .bind_segment(segment_ordinal);
         Self {
             admitted: lash_core::AdmittedScope::process(process_id),
-            segment_ordinal,
+            segment_ordinal: u64::from(segment_ordinal.0),
             started_at_ms,
             authority,
             generation: generation.map(Box::new),
@@ -533,6 +534,10 @@ pub(crate) async fn admit_segment(
     plugins: impl Fn() -> PluginAdmissionFuture + Send + Sync + 'static,
     effect_budget: impl Fn() -> u64 + Send + Sync + 'static,
 ) -> Result<SegmentAdmission, HandlerError> {
+    let run_segment =
+        lash_core::tool_run::SegmentOrdinal(u32::try_from(segment_ordinal).map_err(|_| {
+            TerminalError::new("process segment ordinal exceeds the Run segment contract")
+        })?);
     let effect_budget = Arc::new(effect_budget);
     let plugins = Arc::new(plugins);
     let Json(verdict) = {
@@ -693,7 +698,7 @@ pub(crate) async fn admit_segment(
         } => Ok(SegmentAdmission::Started(Box::new(AdmittedSegment {
             started: SegmentStarted::new(
                 process_id,
-                segment_ordinal,
+                run_segment,
                 started_at_ms,
                 execution_id,
                 generation,

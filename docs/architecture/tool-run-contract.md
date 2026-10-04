@@ -70,9 +70,25 @@ rebuilds the recorded fold and obligations, and fences predecessor append
 before the successor writes its first record. It carries no native handle and
 performs no Closing, cancellation, reroute or successor publication. Turn
 and process continuation integration belongs to FIG-4739 and FIG-4890;
-source transfer belongs to FIG-4891. This seam does not activate production
-handover callers. Its journal logic epoch moves with this landing; stored
-format versions remain frozen.
+source transfer belongs to FIG-4891. Production aggregate callers activate
+the coordinator in FIG-4894 and FIG-1863. Stored format versions remain frozen.
+
+Process admission binds a `SegmentOrdinal` onto execution authority without
+changing its process-attempt fence. The native segment envelope carries the
+same `RunTransfer` beside the opaque VM continuation. Capture checks local ACK,
+retained material, event and capacity frontiers. Restore checks the process,
+admitted successor and inherited environment before loading definitions.
+Publication stores the original predecessor-stamped transfer unchanged.
+Coordinator adoption rebinds subscriptions and reads material only through
+successor-held references, including after the predecessor lease is fenced.
+The process registry still owns lifecycle transactions and child holds.
+
+Each physical process invocation keeps its fixed journal pin. A terminal
+publishes its lifecycle outcome before releasing that pin. A handover persists
+the successor state and accepts its send, registers the successor invocation's
+fixed pin, then releases the predecessor pin. Pending sources add no per-call
+pin or deadline. The process journal logic epoch changes with this command
+prefix; a predecessor journal retains its original generation's drain lane.
 
 `RunCoordinator::start_aggregate` records unique leaves, source positions,
 aliases and timer admission time with the round's A. Pending siblings are
@@ -100,8 +116,7 @@ durable ACK, drains accepted finals and records Settled. Ignore-policy work
 receives no external cancel. Worker loss leaves recovery to the original engine
 journal. A physical cut retains Live and transfers aggregate plans, deadlines,
 unconsumed material and pending source descriptors through its existing snapshot.
-Production aggregate and continuation callers remain assigned to FIG-4894,
-FIG-1863, FIG-4895, FIG-4739 and FIG-4890.
+Production aggregate callers remain assigned to FIG-4894, FIG-1863 and FIG-4895.
 
 The plugin registrar mints every callback key from `CallbackSlot`, so a
 callback slot cannot exist without its key prefix and its state authority.

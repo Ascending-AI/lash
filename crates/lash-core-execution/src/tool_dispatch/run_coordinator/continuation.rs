@@ -3,6 +3,17 @@
 use super::*;
 
 impl RunCoordinator<'_> {
+    fn owed_starts(&self) -> Vec<crate::StartKey> {
+        let mut keys: std::collections::BTreeSet<_> =
+            self.journal.ledger.owed_starts().into_iter().collect();
+        for owed in self.owed.values() {
+            if let Some(start) = owed.capture.as_ref().and_then(SingletonCapture::start) {
+                keys.insert(start.start_key.clone());
+            }
+        }
+        keys.into_iter().collect()
+    }
+
     /// Freeze admission at this boundary, retaining the first requested reason.
     /// Requesting a physical cut never closes or cancels the logical Run.
     pub fn request_cut(&mut self, reason: crate::BoundaryReason) -> crate::tool_run::Cut {
@@ -66,7 +77,13 @@ impl RunCoordinator<'_> {
             events: self.journal.ledger.next_ordinal(),
             entries: self.journal.entries.clone(),
             attempts: self.attempts.clone(),
-            material_aliases: self.journal.materials.entries.keys().cloned().collect(),
+            material_aliases: self
+                .journal
+                .materials
+                .entries
+                .iter()
+                .filter_map(|(reference, payload)| payload.as_ref().map(|_| reference.clone()))
+                .collect(),
             material: Vec::new(),
             sources: self.sources.values().cloned().collect(),
             subscriptions: self
@@ -78,7 +95,7 @@ impl RunCoordinator<'_> {
                     segment: self.journal.segment,
                 })
                 .collect(),
-            owed_starts: self.journal.ledger.owed_starts(),
+            owed_starts: self.owed_starts(),
             owed_cancels: self.journal.ledger.owed_cancels(),
             state: crate::tool_run::StateFrontier {
                 owner_segment: self.journal.segment,
@@ -352,7 +369,7 @@ impl<'a> RunCoordinator<'a> {
                     binding: member.binding.clone(),
                     available: run.journal.materials.available.clone(),
                     cancel: member.policy.cancel,
-                    environment: run.environment.clone(),
+                    environment: request.environment,
                 };
                 run.waiting.insert(
                     id,

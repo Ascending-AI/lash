@@ -2052,3 +2052,4 @@ async fn l15_admission_owns_one_namespace_image_for_a_wide_round() {
         "sixteen members reference one canonical namespace image"
     );
 }
+mod process_continuation;
