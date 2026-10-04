@@ -673,8 +673,8 @@ async fn start_law(storage: Storage, live: bool) {
                 .unwrap()
                 .unwrap();
         assert!(
-            matches!(terminal, lash_core::ProcessAwaitOutput::Settled { output } if matches!(output.outcome, lash_core::ToolCallOutcome::Success(_))),
-            "the one child settles successfully"
+            matches!(&terminal, lash_core::ProcessAwaitOutput::Settled { output } if matches!(output.outcome, lash_core::ToolCallOutcome::Success(_))),
+            "the one child settles successfully: {terminal:?}"
         );
         let rows = harness
             .backend()

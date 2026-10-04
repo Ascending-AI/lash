@@ -431,25 +431,18 @@ pub(super) async fn seal_descriptor(
             seal_and_wake(&registry.namespace, ctx, writer, &address, armed, seal).await?
         }
     };
-    if matches!(
-        &outcome,
-        SealOutcome::Sealed {
-            seal: SourceSeal::Cancelled
-        } | SealOutcome::AlreadySealed {
-            seal: SourceSeal::Cancelled
-        }
-    ) {
-        let mut metadata = load_durable_wait_index_metadata(ctx, writer).await?;
-        if super::process_terminal::detach(&registry.namespace, ctx, &mut metadata, |key| {
-            key == &request.source
-        }) {
-            object_state::set_stamped(
-                ctx,
-                super::DURABLE_WAIT_INDEX_METADATA_KEY,
-                writer,
-                metadata,
-            );
-        }
+    // The immutable seal now owns the result. End its terminal subscription
+    // only after sealing and waking, retaining source material until Run retirement.
+    let mut metadata = load_durable_wait_index_metadata(ctx, writer).await?;
+    if super::process_terminal::detach(&registry.namespace, ctx, &mut metadata, |key| {
+        key == &request.source
+    }) {
+        object_state::set_stamped(
+            ctx,
+            super::DURABLE_WAIT_INDEX_METADATA_KEY,
+            writer,
+            metadata,
+        );
     }
     Ok(RestateSourceSealReply::Outcome { outcome })
 }

@@ -152,6 +152,52 @@ fn decode_entry<T: serde::de::DeserializeOwned>(
 mod tests {
     use super::*;
 
+    /// L21: terminal unsubscription and physical Run admission change the
+    /// handler journal. The predecessor keeps its lane and its undecoded data.
+    #[tokio::test]
+    async fn l21_source_seal_and_physical_admission_refuse_predecessor_before_decode() {
+        use lash_core::engine::BuildGeneration;
+        let generation = |epoch: u32| {
+            let bytes = epoch.to_be_bytes();
+            BuildGeneration::from_digest([b's', b'p', bytes[0], bytes[1], bytes[2], bytes[3]])
+        };
+        #[cfg(not(feature = "synthetic-next"))]
+        const PREDECESSOR: u32 = 30;
+        #[cfg(feature = "synthetic-next")]
+        const PREDECESSOR: u32 = 31;
+        let old = generation(PREDECESSOR);
+        let new = generation(crate::JOURNAL_LOGIC_EPOCH);
+        assert_ne!(
+            old, new,
+            "changed commands require a new journal generation"
+        );
+        let entry = serde_json::json!({
+            BUILD_GENERATION_FIELD: old,
+            "record": "undecodable predecessor admission",
+        });
+        let sentinel = crate::sentinel::FoldedSentinel::new("LashTurn/run", new);
+        let decoded = std::sync::atomic::AtomicBool::new(false);
+        let refusal = sentinel
+            .guard(async {
+                sentinel.check(entry.get(BUILD_GENERATION_FIELD)).await;
+                decoded.store(true, std::sync::atomic::Ordering::SeqCst);
+                decode_run_journal_entry("physical-admission", entry.clone())
+            })
+            .await
+            .expect_err("refuse the predecessor before decoding");
+        assert!(format!("{refusal:?}").contains("RetiredGeneration"));
+        assert!(!decoded.load(std::sync::atomic::Ordering::SeqCst));
+        let predecessor = crate::sentinel::FoldedSentinel::new("LashTurn/run", old.clone());
+        predecessor.check(entry.get(BUILD_GENERATION_FIELD)).await;
+        assert!(
+            crate::services::lash_service_routes(&crate::services::DEFAULT_NAMESPACE, &old)
+                .iter()
+                .any(|route| route.generation_lane_name().is_some_and(|name| {
+                    crate::services::generation_lane_of(&name) == Some(old.clone())
+                }))
+        );
+    }
+
     /// L21: the added operation completion peek belongs to a new journal
     /// generation; the predecessor keeps its operation invocation drain lane.
     #[tokio::test]

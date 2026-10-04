@@ -519,12 +519,22 @@ async fn emit_admission_step(
                 Box::new(admission::AdmitShiftRunner {
                     store,
                     materializer,
-                    run_scope: matches!(
-                        controller.execution_scope(),
-                        crate::ExecutionScope::Process { .. }
-                            | crate::ExecutionScope::RuntimeOperation { .. }
-                    )
-                    .then(|| controller.admitted_scope().clone()),
+                    // The admission controller is already rescoped to the
+                    // session. Inline runs retain their executor's physical
+                    // cancellation authority instead of that step's scope.
+                    run_scope: match &authority.executor {
+                        crate::store::RunExecutor::Acceptor { scope }
+                        | crate::store::RunExecutor::Inline { scope } => match scope {
+                            crate::ExecutionScope::Process { process_id } => {
+                                Some(crate::AdmittedScope::process(process_id.clone()))
+                            }
+                            crate::ExecutionScope::RuntimeOperation { operation_id } => Some(
+                                crate::AdmittedScope::runtime_operation(operation_id.clone()),
+                            ),
+                            _ => None,
+                        },
+                        crate::store::RunExecutor::Run { .. } => None,
+                    },
                     stores,
                     request: admit_request,
                     ordinal,
