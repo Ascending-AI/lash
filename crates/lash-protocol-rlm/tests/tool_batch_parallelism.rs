@@ -223,16 +223,16 @@ mod restate_double {
                 .count()
         }
 
-        /// Process segments run in the double's process workflow: the
-        /// worker is installed there, and the runtime's own port only
-        /// observes the registry that workflow writes terminals into.
+        /// Native Run starts deliver process obligations through the same
+        /// ingress runner as the engine, while retaining the law's registry
+        /// watcher for process completion and worker crashes.
         fn process_work(
             &self,
             watched: lash_core::WatchedRegistry,
             worker: lash_core_worker::DurableProcessWorker,
         ) -> lash_core::ProcessWorkWiring {
             self.backend.install_process_worker(worker);
-            let port = Arc::new(lash_core::NoProcessWork::new(&watched));
+            let port = Arc::clone(self.backend.lash_backend().process_work().port());
             lash_core::ProcessWorkWiring::new(watched, port)
         }
     }
