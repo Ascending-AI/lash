@@ -239,4 +239,50 @@ mod tests {
             .unwrap();
         assert_ne!(predecessor_process, successor_process);
     }
+    #[tokio::test]
+    async fn l21_turn_continuation_generation_refuses_predecessor_before_decode() {
+        use lash_core::engine::BuildGeneration;
+        let generation = |epoch: u32| {
+            let bytes = epoch.to_be_bytes();
+            BuildGeneration::from_digest([b't', b'u', bytes[0], bytes[1], bytes[2], bytes[3]])
+        };
+        let old = generation(crate::JOURNAL_LOGIC_EPOCH - 1);
+        let new = generation(crate::JOURNAL_LOGIC_EPOCH);
+        let predecessor_lane = crate::services::DEFAULT_NAMESPACE
+            .generation(crate::LashService::TurnDriver, old.clone())
+            .generation_lane_name()
+            .unwrap();
+        let entry = serde_json::json!({BUILD_GENERATION_FIELD: old,
+            "continuation": "predecessor turn opener encoding"});
+        let sentinel = crate::sentinel::FoldedSentinel::new("LashTurn/run", new.clone());
+        let decoded = std::sync::atomic::AtomicBool::new(false);
+        let refused = sentinel
+            .guard(async {
+                sentinel.check(entry.get(BUILD_GENERATION_FIELD)).await;
+                decoded.store(true, std::sync::atomic::Ordering::SeqCst);
+                serde_json::from_value::<lash_core::store::RunContinuation>(
+                    entry["continuation"].clone(),
+                )
+            })
+            .await
+            .expect_err("generation refusal precedes continuation decoding");
+        assert!(format!("{refused:?}").contains("RetiredGeneration"));
+        assert!(!decoded.load(std::sync::atomic::Ordering::SeqCst));
+        let predecessor = crate::sentinel::FoldedSentinel::new("LashTurn/run", old.clone());
+        predecessor.check(entry.get(BUILD_GENERATION_FIELD)).await;
+        assert_eq!(
+            crate::services::DEFAULT_NAMESPACE
+                .generation(crate::LashService::TurnDriver, old)
+                .generation_lane_name()
+                .unwrap(),
+            predecessor_lane
+        );
+        assert_ne!(
+            crate::services::DEFAULT_NAMESPACE
+                .generation(crate::LashService::TurnDriver, new)
+                .generation_lane_name()
+                .unwrap(),
+            predecessor_lane
+        );
+    }
 }

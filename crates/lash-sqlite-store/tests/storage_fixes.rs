@@ -451,3 +451,32 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
     assert_eq!(version, 51);
     assert_eq!(before, after);
 }
+
+/// L09/L10: publishing a physical continuation transfers its material lease
+/// with the head. A rejected head write transfers nothing; the successor
+/// reads after cold reopen, and its terminal clears the last dependency.
+#[tokio::test]
+async fn run_handover_commits_material_ownership_with_the_head() {
+    for file in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.db");
+        let memory = if file {
+            None
+        } else {
+            Some(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap())
+        };
+        let store = match &memory {
+            Some(stores) => stores.session_store_factory(),
+            None => Arc::new(SqliteStore::open_file_for_testing(&path).await.unwrap()),
+        };
+        lash_conformance::material_retention::run_handover_commits_material_ownership_with_the_head(
+            store.clone(), store, async || {
+                let reopened = match &memory {
+                    Some(stores) => stores.session_store_factory(),
+                    None => Arc::new(SqliteStore::open_file_for_testing(&path).await.unwrap()),
+                };
+                (reopened.clone() as Arc<dyn lash_core::RuntimeStore>, reopened as Arc<dyn lash_core::store::ToolMaterialStore>)
+            },
+        ).await;
+    }
+}

@@ -22,7 +22,7 @@ pub(super) struct TurnDriverRemainder {
     pub(super) turn_cancel: Option<crate::TurnCancellationEvidence>,
     /// The protocol iterations the run has spent through this turn, when the
     /// turn ended at a segment boundary (FIG-4739).
-    pub(super) segment_boundary: Option<crate::runtime::turn_driver::BoundaryTaken>,
+    pub(super) segment_boundary: Option<Box<crate::runtime::turn_driver::BoundaryTaken>>,
 }
 
 /// Everything the execute phase needs to execute an already-prepared turn.
@@ -411,7 +411,15 @@ impl LashRuntime {
             .filter(|owed| owed.is_turn(&trace_turn_id))
             .and_then(|owed| owed.continuation.as_ref());
         let opener_state = continuation
-            .map(|owed| crate::session::OpenerState::from_snapshot(owed.opener.clone()))
+            .map(|owed| {
+                crate::session::OpenerState::from_snapshot_for(
+                    owed.opener.clone(),
+                    &crate::EffectOpener::turn(
+                        self.state.session_id.clone(),
+                        crate::store::PhysicalTurn::split_turn_id(&trace_turn_id).0,
+                    ),
+                )
+            })
             .transpose()
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?
             .unwrap_or_default();

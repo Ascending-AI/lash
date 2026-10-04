@@ -185,6 +185,7 @@ async fn run_boundary_restores_cursor_reservation_and_incorporated_prefix() {
 #[test]
 fn malformed_run_boundary_cursor_refuses_recovery() {
     let snapshot = crate::store::RunOpenerState {
+        run: None,
         incorporation: Default::default(),
         groups: vec![crate::store::RunOpenerGroup {
             group_key: "race".to_string(),

@@ -63,6 +63,7 @@ pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 
 #[path = "artifact_store/tool_material.rs"]
 mod tool_material;
+pub(crate) use tool_material::commit_run_material_tx;
 
 /// The namespace of a store-set artifact store; an engine's own store has
 /// none here.
@@ -389,6 +390,18 @@ impl PostgresLashlangArtifactStore {
         namespace: &str,
         cleanup: &ResolvedArtifactCleanup,
     ) -> Result<(), ArtifactStoreError> {
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(ArtifactStoreError::from)?;
+        Self::end_namespaced_tx(&mut tx, namespace, cleanup).await?;
+        tx.commit().await.map_err(backend)
+    }
+
+    pub(crate) async fn end_namespaced_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        namespace: &str,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
         for carry in &cleanup.carries {
             if !carry.to.kind().holds_artifacts() {
                 return Err(ArtifactStoreError::ReferrerKindRefused {
@@ -396,9 +409,6 @@ impl PostgresLashlangArtifactStore {
                 });
             }
         }
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(ArtifactStoreError::from)?;
         let mut referrers: Vec<ArtifactReferrer> = cleanup
             .carries
             .iter()
@@ -414,7 +424,7 @@ impl PostgresLashlangArtifactStore {
         });
         referrers.dedup();
         for referrer in &referrers {
-            lock_referrer_tx(&mut tx, referrer).await.map_err(backend)?;
+            lock_referrer_tx(tx, referrer).await.map_err(backend)?;
         }
         let edges = sqlx::query(
             artifact_sql()
@@ -446,9 +456,9 @@ impl PostgresLashlangArtifactStore {
             )
             .collect();
         for artifact_ref in &all_refs {
-            lock_artifact_tx(&mut tx, namespace, artifact_ref).await?;
+            lock_artifact_tx(tx, namespace, artifact_ref).await?;
         }
-        let now = crate::support::postgres_transaction_epoch_ms(&mut tx)
+        let now = crate::support::postgres_transaction_epoch_ms(tx)
             .await
             .map_err(ArtifactStoreError::from)?;
         sqlx::query(artifact_sql().fences.insert_fence.sql())
@@ -459,7 +469,7 @@ impl PostgresLashlangArtifactStore {
             .await
             .map_err(backend)?;
         for carry in &cleanup.carries {
-            if is_fenced_tx(&mut tx, &carry.to).await? {
+            if is_fenced_tx(tx, &carry.to).await? {
                 continue;
             }
             let artifact_ref = &carry.artifact.artifact_ref;
@@ -529,10 +539,9 @@ impl PostgresLashlangArtifactStore {
                     .map_err(ArtifactStoreError::from)?;
             }
             let witness = enumeration.finish().map_err(ArtifactStoreError::from)?;
-            Self::delete_unreferenced_artifact_tx(&mut tx, namespace, artifact_ref, &witness)
-                .await?;
+            Self::delete_unreferenced_artifact_tx(tx, namespace, artifact_ref, &witness).await?;
         }
-        tx.commit().await.map_err(backend)
+        Ok(())
     }
 
     async fn delete_unreferenced_artifact_tx(

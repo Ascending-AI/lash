@@ -42,7 +42,7 @@ pub(in crate::runtime) struct TurnSegment {
     pub(in crate::runtime) resume: Option<crate::store::SuspendedCell>,
     resume_tools: Option<serde_json::Value>,
     /// Set when the turn ended at a boundary.
-    pub(in crate::runtime) taken: Option<BoundaryTaken>,
+    pub(in crate::runtime) taken: Option<Box<BoundaryTaken>>,
 }
 
 impl TurnSegment {
@@ -112,12 +112,15 @@ impl RuntimeTurnDriver<'_> {
         let Some(reason) = reason else {
             return Ok(false);
         };
-        self.segment.taken = Some(BoundaryTaken {
+        self.segment.taken = Some(Box::new(BoundaryTaken {
             iterations: self.segment.spent_through(iteration, run_offset),
             cell: None,
-            opener: self.opener_state.snapshot(),
+            opener: self
+                .opener_state
+                .boundary_snapshot(reason)
+                .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?,
             tools: None,
-        });
+        }));
         machine.finish_with_outcome(TurnOutcome::SegmentBoundary { reason });
         Ok(true)
     }
@@ -161,14 +164,21 @@ impl RuntimeTurnDriver<'_> {
             driver_plugin_id: driver_state.plugin_id.clone(),
             driver_state: driver_state.payload.clone(),
         };
-        self.segment.taken = Some(BoundaryTaken {
+        let mut opener = self
+            .opener_state
+            .boundary_snapshot(crate::BoundaryReason::HandOver)
+            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
+        if let Some(run) = &mut opener.run {
+            run.vm_continuation = true;
+        }
+        self.segment.taken = Some(Box::new(BoundaryTaken {
             iterations: self
                 .segment
                 .spent_through(machine.protocol_iteration(), run_offset),
             cell: Some(cell),
-            opener: self.opener_state.snapshot(),
+            opener,
             tools: None,
-        });
+        }));
         machine.finish_with_outcome(TurnOutcome::SegmentBoundary {
             reason: crate::BoundaryReason::HandOver,
         });
@@ -228,14 +238,17 @@ impl RuntimeTurnDriver<'_> {
                 error.to_string(),
             )
         })?;
-        self.segment.taken = Some(BoundaryTaken {
+        self.segment.taken = Some(Box::new(BoundaryTaken {
             iterations: self
                 .segment
                 .spent_through(machine.protocol_iteration(), run_offset),
             cell: None,
             tools: Some(tools),
-            opener: self.opener_state.snapshot(),
-        });
+            opener: self
+                .opener_state
+                .boundary_snapshot(reason)
+                .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?,
+        }));
         machine.finish_with_outcome(TurnOutcome::SegmentBoundary { reason });
         Ok(())
     }

@@ -12,7 +12,7 @@
 //!
 //! A turn builds a fresh [`RuntimeExecutionContext`] per phase — one per code
 //! cell, one per tool batch — and a process builds one per segment. What must
-//! outlive a phase is the opener's, so [`OpenerState`] is two shared handles
+//! outlive a phase is the opener's, so [`OpenerState`] shares handles
 //! the owner creates once and hands to every phase context:
 //!
 //! * the [`IncorporationLedger`](super::IncorporationLedger), so a rank the
@@ -20,7 +20,9 @@
 //!   (and its usage charged) a second time when the turn's end incorporates
 //!   the losers (§6, §13);
 //! * the registry of groups whose consumer stopped early, with each group's
-//!   own cursor, so the end knows which groups still hold unconsumed ranks.
+//!   own cursor, so the end knows which groups still hold unconsumed ranks;
+//! * the retained tool Run and its capture fence, so later cells keep the
+//!   same receipts and only a quiescent boundary can publish them.
 //!
 //! # Opener end
 //!
@@ -79,6 +81,8 @@
 //! journaled prefix record, so running it here makes the opener's accounting
 //! independent of which finalizer won.
 
+pub(crate) mod run;
+
 use std::sync::Arc;
 
 use lash_sansio::sync::MutexExt;
@@ -96,6 +100,7 @@ pub struct OpenerGroupRegistry {
     /// Tool calls held per group key, from formation to release (§9).
     reserved: std::collections::BTreeMap<String, usize>,
     run: Option<Box<crate::tool_run::RunTransfer>>,
+    active_run: bool,
 }
 
 impl OpenerGroupRegistry {
@@ -116,9 +121,9 @@ impl OpenerGroupRegistry {
 }
 
 /// What an opener shares across the phase contexts it builds: the once-only
-/// incorporation ledger and the registry of groups it still holds.
+/// incorporation ledger, held groups and retained tool Run.
 ///
-/// Cloning shares both; [`OpenerState::default`] starts a fresh opener.
+/// Cloning shares them; [`OpenerState::default`] starts a fresh opener.
 #[derive(Clone, Debug, Default)]
 pub struct OpenerState {
     pub(crate) ledger: Arc<std::sync::Mutex<super::IncorporationLedger>>,
@@ -142,7 +147,15 @@ impl OpenerState {
     #[must_use]
     pub fn snapshot(&self) -> crate::store::RunOpenerState {
         let registry = self.groups.lock_recover();
+        self.snapshot_with_registry(&registry)
+    }
+
+    fn snapshot_with_registry(
+        &self,
+        registry: &OpenerGroupRegistry,
+    ) -> crate::store::RunOpenerState {
         crate::store::RunOpenerState {
+            run: registry.run.clone(),
             incorporation: self.ledger_snapshot(),
             groups: registry
                 .outstanding
@@ -180,6 +193,7 @@ impl OpenerState {
             }
             registry.outstanding.push(handle);
         }
+        registry.run = snapshot.run;
         Ok(Self {
             ledger: Arc::new(std::sync::Mutex::new(snapshot.incorporation)),
             groups: Arc::new(std::sync::Mutex::new(registry)),

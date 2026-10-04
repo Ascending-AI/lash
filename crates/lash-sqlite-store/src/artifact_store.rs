@@ -104,6 +104,7 @@ pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 
 mod tool_material;
+pub(crate) use tool_material::commit_run_material_tx;
 
 /// The namespace of a store-set artifact store; an engine's own store has
 /// none here.

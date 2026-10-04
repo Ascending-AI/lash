@@ -73,7 +73,7 @@ pub(super) struct TurnFinishInput {
     /// The protocol iterations the run has spent through this turn, when the
     /// turn ended at a segment boundary (FIG-4739): what the continuation its
     /// commit owes records.
-    pub(super) segment_boundary: Option<crate::runtime::turn_driver::BoundaryTaken>,
+    pub(super) segment_boundary: Option<Box<crate::runtime::turn_driver::BoundaryTaken>>,
 }
 
 struct PreparedTurn {
@@ -346,8 +346,14 @@ impl LashRuntime {
         else {
             return Ok(None);
         };
-        let opener = crate::session::OpenerState::from_snapshot(continuation.opener.clone())
-            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
+        let opener = crate::session::OpenerState::from_snapshot_for(
+            continuation.opener.clone(),
+            &crate::EffectOpener::turn(
+                self.state.session_id.clone(),
+                crate::store::PhysicalTurn::split_turn_id(turn).0,
+            ),
+        )
+        .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
         if !opener.holds_groups() {
             return Ok(None);
         }
@@ -727,7 +733,7 @@ impl LashRuntime {
                     .as_ref()
                     .map_or(&trace_turn_id, |ran_execution| ran_execution.run()),
                 assembled.state.current_frame_node_id.as_ref(),
-                segment_boundary.as_ref(),
+                segment_boundary.as_deref(),
             )?;
             self.state.adopt_snapshot(assembled.state.clone());
             self.state.pending_follow_on = pending_follow_on.map(Box::new);
@@ -845,7 +851,7 @@ impl LashRuntime {
                 .as_ref()
                 .map_or(&trace_turn_id, |ran_execution| ran_execution.run()),
             prepared.turn.state.current_frame_node_id.as_ref(),
-            segment_boundary.as_ref(),
+            segment_boundary.as_deref(),
         ) {
             Ok(pending_follow_on) => pending_follow_on,
             Err(err) => {

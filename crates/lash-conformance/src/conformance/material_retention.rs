@@ -339,3 +339,272 @@ where
         "material_retired"
     );
 }
+
+/// L09/L10: the fenced session-head transaction moves every dependency with
+/// its continuation, and the logical terminal retires the successor lease.
+#[expect(
+    clippy::unwrap_used,
+    reason = "the law requires every publication and read to succeed"
+)]
+pub async fn run_handover_commits_material_ownership_with_the_head(
+    store: Arc<dyn lash_core::RuntimeStore>,
+    materials: Arc<dyn ToolMaterialStore>,
+    reopen: impl AsyncFnOnce() -> (Arc<dyn lash_core::RuntimeStore>, Arc<dyn ToolMaterialStore>),
+) {
+    use lash_core::store::{PendingFollowOn, RunContinuation, RunOpenerState};
+    use lash_core::tool_run::{
+        MaterialBundle, MaterialHolder, MaterialOwner, MaterialPayload, MaterialRetentionError,
+        MaterialRole, RunEventOrdinal, RunTransfer, SegmentOrdinal, StateFrontier,
+    };
+    use lash_core::{
+        BoundaryReason, EffectOpener, OperationId, PersistedSessionConfig, ResolvedRun, TurnId,
+    };
+    use lash_core::{RuntimeCommit, RuntimeSessionState, SessionId, StoreError};
+    let session = SessionId::from("run-material-handover");
+    let turn = TurnId::fixture("logical-run");
+    let owner = EffectOpener::turn(session.clone(), turn.clone());
+    let predecessor = MaterialHolder::Segment {
+        opener: owner.clone(),
+        segment: SegmentOrdinal(0),
+    };
+    let successor = MaterialHolder::Segment {
+        opener: owner.clone(),
+        segment: SegmentOrdinal(1),
+    };
+    let payload = MaterialPayload::new(
+        MaterialOwner::Run {
+            opener: owner.clone(),
+        },
+        MaterialRole::AttemptOutput,
+        None,
+        "already durable, never execute again".to_string(),
+    );
+    let bundle = MaterialBundle::of([payload.clone()]).unwrap().unwrap();
+    let retained = materials
+        .retain_material(&predecessor, &bundle)
+        .await
+        .unwrap();
+    let transfer = RunTransfer {
+        owner,
+        reason: BoundaryReason::HandOver,
+        from: SegmentOrdinal(0),
+        entries: Vec::new(),
+        attempts: Vec::new(),
+        material_aliases: retained.references.clone(),
+        sources: Vec::new(),
+        environment: None,
+        plugin_state: None,
+        events: RunEventOrdinal(0),
+        material: vec![retained.clone()],
+        subscriptions: Vec::new(),
+        owed_starts: Vec::new(),
+        owed_cancels: Vec::new(),
+        state: StateFrontier::default(),
+        reserved_calls: 0,
+        vm_continuation: false,
+    };
+    let mut state = RuntimeSessionState {
+        session_id: session.clone(),
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ))
+    };
+    lash_core::testing::store_fixtures::admit_conformance_session(&store, &session).await;
+    state.ensure_agent_frame_initialized();
+    let mut owed = PendingFollowOn::after_boundary(
+        &turn,
+        0,
+        state.current_frame_node_id.clone().unwrap(),
+        RunContinuation {
+            reason: BoundaryReason::HandOver,
+            protocol_iterations: 1,
+            cell: None,
+            tools: None,
+            opener: RunOpenerState {
+                run: Some(Box::new(transfer)),
+                ..Default::default()
+            },
+        },
+        0,
+        ResolvedRun::snapshot(
+            PersistedSessionConfig::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ),
+            Default::default(),
+            3,
+        ),
+    )
+    .unwrap();
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state)
+        .with_operation(OperationId::turn(session.clone(), turn, "final"))
+        .unwrap()
+        .0;
+    owed.frame_id = lash_core::FrameNodeId::new(
+        commit
+            .graph
+            .nodes()
+            .iter()
+            .find(|node| node.frame_open().is_some())
+            .unwrap()
+            .node_id
+            .as_str()
+            .to_owned(),
+    )
+    .unwrap();
+    commit.pending_follow_on = Some(owed.clone());
+    let mut stale = commit.clone();
+    stale.expected_head_revision = 1;
+    let rejected = store.commit_runtime_state(stale).await;
+    assert!(
+        matches!(rejected, Err(StoreError::HeadRevisionConflict { .. })),
+        "{rejected:?}"
+    );
+    assert_eq!(
+        materials
+            .read_material(
+                &predecessor,
+                &retained.references[0],
+                &retained.references[0].owner,
+                &[]
+            )
+            .await
+            .unwrap(),
+        payload
+    );
+    assert!(matches!(
+        materials
+            .read_material(
+                &successor,
+                &retained.references[0],
+                &retained.references[0].owner,
+                &[]
+            )
+            .await,
+        Err(MaterialRetentionError::Refused(_))
+    ));
+    let receipt = store.commit_runtime_state(commit.clone()).await.unwrap();
+    let replayed = store.commit_runtime_state(commit).await.unwrap();
+    assert!(replayed.receipt_replayed);
+    assert_eq!(replayed.head_revision, receipt.head_revision);
+    assert_eq!(replayed.checkpoint_ref, receipt.checkpoint_ref);
+    assert_eq!(replayed.pending_follow_on, receipt.pending_follow_on);
+    drop(store);
+    drop(materials);
+    let (reopened, material_reopened) = reopen().await;
+    let head = reopened
+        .load_session_head_meta(&session)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(head.pending_follow_on, Some(owed.clone()));
+    assert_eq!(
+        material_reopened
+            .read_material(
+                &successor,
+                &retained.references[0],
+                &retained.references[0].owner,
+                &[]
+            )
+            .await
+            .unwrap_or_else(|error| panic!(
+                "the head publication also acquired the successor lease: {error}"
+            )),
+        payload
+    );
+    assert!(matches!(
+        material_reopened
+            .read_material(
+                &predecessor,
+                &retained.references[0],
+                &retained.references[0].owner,
+                &[]
+            )
+            .await,
+        Err(MaterialRetentionError::Refused(
+            lash_core::tool_run::MaterialRefusal::Retired { .. }
+        ))
+    ));
+    state = super::helpers::load_window_state(&reopened, &session)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut terminal = RuntimeCommit::persisted_state_for_test(&state)
+        .with_operation(OperationId::turn(
+            session.clone(),
+            owed.follow_on_turn_id,
+            "final",
+        ))
+        .unwrap()
+        .0;
+    terminal.pending_follow_on = None;
+    reopened.commit_runtime_state(terminal).await.unwrap();
+    assert!(matches!(
+        material_reopened
+            .acquire_material(&successor, &retained)
+            .await,
+        Err(MaterialRetentionError::HolderEnded { .. })
+    ));
+    // The same source in a fresh logical Run has its own material and no old lease.
+    let fresh_turn = TurnId::fixture("fresh-logical-run");
+    let fresh_owner = EffectOpener::turn(session.clone(), fresh_turn.clone());
+    let fresh_holder = MaterialHolder::Segment {
+        opener: fresh_owner.clone(),
+        segment: SegmentOrdinal(0),
+    };
+    let fresh_payload = MaterialPayload::new(
+        MaterialOwner::Run {
+            opener: fresh_owner,
+        },
+        MaterialRole::AttemptOutput,
+        None,
+        payload.text.clone(),
+    );
+    let fresh_bundle = MaterialBundle::of([fresh_payload.clone()])
+        .unwrap()
+        .unwrap();
+    let fresh_retained = material_reopened
+        .retain_material(&fresh_holder, &fresh_bundle)
+        .await
+        .unwrap();
+    assert_eq!(
+        material_reopened
+            .read_material(
+                &fresh_holder,
+                &fresh_retained.references[0],
+                &fresh_retained.references[0].owner,
+                &[]
+            )
+            .await
+            .unwrap(),
+        fresh_payload
+    );
+    state = super::helpers::load_window_state(&reopened, &session)
+        .await
+        .unwrap()
+        .unwrap();
+    // Cancellation after capture can suppress publication entirely: the
+    // terminal still ends the unpublished predecessor's dependency lease.
+    let mut cancelled = RuntimeCommit::persisted_state_for_test(&state)
+        .with_operation(OperationId::turn(session.clone(), fresh_turn, "final"))
+        .unwrap()
+        .0;
+    cancelled.pending_follow_on = None;
+    reopened.commit_runtime_state(cancelled).await.unwrap();
+    assert!(matches!(
+        material_reopened
+            .acquire_material(&fresh_holder, &fresh_retained)
+            .await,
+        Err(MaterialRetentionError::HolderEnded { .. })
+    ));
+    assert!(
+        reopened
+            .load_session_head_meta(&session)
+            .await
+            .unwrap()
+            .unwrap()
+            .pending_follow_on
+            .is_none()
+    );
+}

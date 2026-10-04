@@ -1,6 +1,6 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
-reads = 103
+reads = 102
 outputs = 136
 
 [[surfaces]]
@@ -63,7 +63,6 @@ row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", 
 "crates/lash/src/tests/control_admin.rs#compact_context_opens_compaction_frame_and_preserves_prior_frame" = { reads = 4, outputs = 0, kind = "evidence-read", reason = "compact_context_opens_compaction_frame_and_preserves_prior_frame inspects recorded state for a law assertion." }
 "crates/lash/src/tests/core_session_builder/session_lifecycle.rs#park_then_resume_preserves_session_transcript" = { reads = 3, outputs = 0, kind = "evidence-read", reason = "park_then_resume_preserves_session_transcript inspects recorded state for a law assertion." }
 "crates/lash/src/tests/core_session_builder/session_lifecycle.rs#open_with_state_uses_manual_state_and_persists_tool_state" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "open_with_state_uses_manual_state_and_persists_tool_state inspects recorded state for a law assertion." }
-"crates/lash/src/tests/drain_hand_over/opener_groups.rs#held_loser_survives" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "held_loser_survives inspects recorded state for a law assertion." }
 "crates/lash/src/tests/durable_session.rs#create_admits_an_absent_id_and_builds_no_runtime" = { reads = 0, outputs = 1, kind = "output-read", reason = "create_admits_an_absent_id_and_builds_no_runtime asserts the typed program result independently of rendered rows." }
 "crates/lash/src/tests/output_retention.rs#oversized_tool_output_is_retained_before_it_enters_history" = { reads = 0, outputs = 1, kind = "output-read", reason = "oversized_tool_output_is_retained_before_it_enters_history asserts the typed program result independently of rendered rows." }
 "crates/lash/src/tests/output_retention.rs#oversized_rlm_print_and_final_value_are_retained_before_they_enter_history" = { reads = 0, outputs = 1, kind = "output-read", reason = "oversized_rlm_print_and_final_value_are_retained_before_they_enter_history asserts the typed program result independently of rendered rows." }

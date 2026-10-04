@@ -173,46 +173,7 @@ impl ToolMaterialStore for SqliteStore {
         let referrer = holder.referrer();
         let now_ms = self.clock.timestamp_ms();
         self.conn
-            .write(move |tx| {
-                let held: Vec<String> = {
-                    let mut stmt = tx.prepare_cached(
-                        artifact_sql()
-                            .edges
-                            .select_referrer_edges_in_namespace
-                            .sql(),
-                    )?;
-                    stmt.query_map(
-                        params![
-                            TOOL_MATERIAL_NAMESPACE,
-                            referrer.kind().as_str(),
-                            referrer.canonical_id()
-                        ],
-                        |row| row.get(1),
-                    )?
-                    .collect::<rusqlite::Result<_>>()?
-                };
-                fence_artifact_referrer_tx(tx, &referrer, now_ms)?;
-                crate::conn::cached_execute(
-                    tx,
-                    artifact_sql()
-                        .edges
-                        .delete_referrer_edges_in_namespace
-                        .sql(),
-                    params![
-                        TOOL_MATERIAL_NAMESPACE,
-                        referrer.kind().as_str(),
-                        referrer.canonical_id()
-                    ],
-                )?;
-                for artifact_ref in held {
-                    Self::reclaim_unreferenced_artifact_tx(
-                        tx,
-                        TOOL_MATERIAL_NAMESPACE,
-                        &artifact_ref,
-                    )?;
-                }
-                Ok(())
-            })
+            .write(move |tx| release_material_tx(tx, &referrer, now_ms))
             .await
             .map_err(sqlite_error)?;
         Ok(())
@@ -278,4 +239,85 @@ impl ToolMaterialStore for SqliteStore {
         let bytes = read.map_err(|refusal| refusal.read_refusal(reference))?;
         Ok(MaterialBundle::read(&bytes, reference, owner, available)?)
     }
+}
+
+fn release_material_tx(
+    tx: &rusqlite::Connection,
+    referrer: &ArtifactReferrer,
+    now_ms: u64,
+) -> rusqlite::Result<()> {
+    let held: Vec<String> = {
+        let mut stmt = tx.prepare_cached(
+            artifact_sql()
+                .edges
+                .select_referrer_edges_in_namespace
+                .sql(),
+        )?;
+        stmt.query_map(
+            params![
+                TOOL_MATERIAL_NAMESPACE,
+                referrer.kind().as_str(),
+                referrer.canonical_id()
+            ],
+            |row| row.get(1),
+        )?
+        .collect::<rusqlite::Result<_>>()?
+    };
+    fence_artifact_referrer_tx(tx, referrer, now_ms)?;
+    crate::conn::cached_execute(
+        tx,
+        artifact_sql()
+            .edges
+            .delete_referrer_edges_in_namespace
+            .sql(),
+        params![
+            TOOL_MATERIAL_NAMESPACE,
+            referrer.kind().as_str(),
+            referrer.canonical_id()
+        ],
+    )?;
+    for artifact_ref in held {
+        SqliteStore::reclaim_unreferenced_artifact_tx(tx, TOOL_MATERIAL_NAMESPACE, &artifact_ref)?;
+    }
+    Ok(())
+}
+
+/// Carry and end material holders under the session head's write transaction.
+pub(crate) fn commit_run_material_tx(
+    tx: &rusqlite::Connection,
+    cleanups: &[ResolvedArtifactCleanup],
+    now_ms: u64,
+) -> Result<(), StoreError> {
+    for cleanup in cleanups {
+        for carry in &cleanup.carries {
+            if artifact_fenced_tx(tx, &carry.to).map_err(sqlite_error)? {
+                return Err(StoreError::ArtifactReferrerEnded {
+                    referrer: carry.to.clone(),
+                });
+            }
+            let leased: bool = tx
+                .query_row(
+                    artifact_sql().edges.select_edge_exists.sql(),
+                    params![
+                        TOOL_MATERIAL_NAMESPACE,
+                        carry.artifact.artifact_ref,
+                        cleanup.referrer.kind().as_str(),
+                        cleanup.referrer.canonical_id()
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(sqlite_error)?;
+            if !leased
+                || !bundle_exists_tx(tx, &carry.artifact.artifact_ref).map_err(sqlite_error)?
+            {
+                return Err(StoreError::ArtifactCarryMissing {
+                    artifact_ref: carry.artifact.artifact_ref.clone(),
+                    to: carry.to.clone(),
+                });
+            }
+            insert_lease_tx(tx, &carry.artifact.artifact_ref, &carry.to).map_err(sqlite_error)?;
+        }
+        release_material_tx(tx, &cleanup.referrer, now_ms).map_err(sqlite_error)?;
+    }
+    Ok(())
 }
