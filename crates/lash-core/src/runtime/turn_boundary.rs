@@ -523,6 +523,77 @@ impl TurnBoundary {
         Ok(work_remaining)
     }
 
+    pub(super) fn append_cancelled_opener_messages(&mut self, messages: &[crate::Message]) {
+        let clock = Arc::clone(&self.clock);
+        self.final_state_mut()
+            .append_active_conversation_messages_with_clock(messages, clock.as_ref());
+    }
+
+    /// A native intent CAS miss changes only terminal assembly. The issued
+    /// work and admission remain this turn's; neither is executed again.
+    pub(super) async fn refresh_cancelled_commit(
+        &mut self,
+        turn: &mut AssembledTurn,
+        interrupted: &mut crate::store::InterruptedTurnClosure,
+        store: &crate::store::SessionStore,
+    ) -> Result<(), StoreError> {
+        let authorization = interrupted.settlement.authorization();
+        let address = authorization.address();
+        let observed = store.turn_cancel_request_intent(&address).await?;
+        let refusal = || StoreError::TurnCancelIntentChanged {
+            session_id: address.session_id.clone(),
+            turn_id: address.turn_id.clone(),
+        };
+        if interrupted.admitted_intent.is_none() || observed == interrupted.observed_intent {
+            return Err(refusal());
+        }
+        let base = observed.request().ok_or_else(refusal)?.evidence();
+        let effective = interrupted
+            .settlement
+            .effective_cancellation()
+            .filter(|previous| {
+                previous.undelivered == base.undelivered
+                    && (previous.request_id == base.request_id
+                        || previous.mode.is_stronger_than(base.mode))
+            })
+            .cloned()
+            .unwrap_or_else(|| base.clone());
+        let shift = self.shift_commit.as_mut().ok_or_else(refusal)?;
+        let refreshed = crate::TurnCancelClosureAuthorization::new(
+            address.clone(),
+            authorization.binding_id(),
+            authorization.admitted_scope().clone(),
+            authorization.cancel_key().clone(),
+            authorization.escalation_key().clone(),
+            authorization.terminal_key().clone(),
+            crate::TurnCancelClosureProposal::CancelRequested(base.clone()),
+            observed.clone(),
+            &shift.fence,
+        )
+        .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
+            error: Box::new(error),
+        })?;
+        interrupted.observed_intent = observed;
+        interrupted.settlement =
+            crate::TurnCancelClosureSettlement::new(refreshed, Some(base), Some(effective.clone()));
+        let stop = crate::TurnStop::Cancelled {
+            evidence: effective,
+        };
+        shift.terminal = Some(crate::store::RunTerminalWrite {
+            run: shift.run.clone(),
+            commit: crate::store::TurnCommitId::of_physical_turn(&shift.run, &address.turn_id)
+                .ok_or_else(refusal)?,
+            turn: address.turn_id,
+            outcome: crate::store::RunCommittedOutcome::Stopped(stop.clone()),
+        });
+        // The failed commit materialized the graph but published none of it.
+        // Restore that candidate to the assembly before recapturing the
+        // terminated executor and clearing the successor intent.
+        turn.state = self.state().to_snapshot();
+        turn.outcome = TurnOutcome::Stopped(stop);
+        Ok(())
+    }
+
     pub(super) fn into_final_state(self) -> RuntimeSessionState {
         match self.stage {
             Some(TurnCommitStage::Drafting(draft)) => (*draft).into_final_state(),

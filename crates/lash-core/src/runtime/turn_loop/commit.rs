@@ -33,6 +33,31 @@ fn trace_commit_cas_rejected(
     );
 }
 
+fn opener_messages(turn: &TurnId, facts: Vec<crate::PluginMessage>) -> Vec<Message> {
+    let mut appended = Vec::new();
+    for (ordinal, fact) in facts.into_iter().enumerate() {
+        if !matches!(fact.role, MessageRole::User | MessageRole::System) {
+            continue;
+        }
+        let id = format!("{turn}:opener-end:{ordinal}");
+        let mut parts = fact.parts;
+        reassign_part_ids(&id, &mut parts);
+        appended.push(Message {
+            reply_marker: None,
+            id,
+            role: fact.role,
+            parts: shared_parts(parts),
+            origin: fact.origin.or_else(|| {
+                Some(crate::MessageOrigin::Plugin {
+                    plugin_id: "plugin".to_string(),
+                    transient: false,
+                })
+            }),
+        });
+    }
+    appended
+}
+
 pub(super) struct TurnFinishInput {
     pub(super) turn_pipeline: TurnBoundary,
     pub(super) recorded_assembly: RecordedTurnAssembly,
@@ -53,13 +78,17 @@ struct PreparedTurn {
 
 /// What the final commit writes: the session it advances and the ingress
 /// settlement it carries under its run's shift fence.
-struct TurnCommitRequest<'commit> {
+struct TurnCommitRequest<'commit, 'run> {
     session: Option<&'commit mut Session>,
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
     trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
     turn_control_resolver: &'commit dyn crate::AwaitEventResolver,
+    admissions: &'commit LogicalTurnAdmissions,
+    opener: Option<crate::runtime::turn_driver::OpenerForCommit<'run>>,
+    attachment_store: &'commit crate::RuntimeAttachmentStore,
+    attachment_source_policy: &'commit dyn crate::AttachmentSourcePolicy,
 }
 
 /// The local commit-admission handles: only the head-advancing attempt uses
@@ -76,7 +105,7 @@ impl PreparedTurn {
 
     async fn commit(
         self,
-        request: TurnCommitRequest<'_>,
+        request: TurnCommitRequest<'_, '_>,
         admission: TurnCommitAdmission<'_>,
     ) -> Result<CommittedTurn, crate::StoreError> {
         let TurnCommitAdmission {
@@ -121,29 +150,72 @@ impl PreparedTurn {
 
     async fn commit_after_admission(
         mut self,
-        request: TurnCommitRequest<'_>,
+        request: TurnCommitRequest<'_, '_>,
     ) -> Result<CommittedTurn, crate::StoreError> {
         let TurnCommitRequest {
-            session,
-            commit_effects,
+            mut session,
+            mut commit_effects,
             trace_turn_id: _,
             recorded_attachment_intent_ids,
-            interrupted_turn,
+            mut interrupted_turn,
             turn_control_resolver,
+            admissions,
+            mut opener,
+            attachment_store,
+            attachment_source_policy,
         } = request;
-        let work_remaining = Box::pin(self.turn_pipeline.final_commit(
-            &mut self.turn,
-            session,
-            commit_effects.ingress_settlement,
-            commit_effects.pending_follow_on,
-            // Any active-turn input that missed the turn's final
-            // checkpoint must become the next ordinary user turn: the
-            // closure names the turn.
-            interrupted_turn,
-            Some(turn_control_resolver),
-            recorded_attachment_intent_ids,
-        ))
-        .await?;
+        let work_remaining = loop {
+            match Box::pin(self.turn_pipeline.final_commit(
+                &mut self.turn,
+                session.as_deref_mut(),
+                commit_effects.ingress_settlement.clone(),
+                commit_effects.pending_follow_on.clone(),
+                interrupted_turn.clone(),
+                Some(turn_control_resolver),
+                recorded_attachment_intent_ids.clone(),
+            ))
+            .await
+            {
+                Ok(remaining) => break remaining,
+                Err(error @ crate::StoreError::TurnCancelIntentChanged { .. }) => {
+                    let Some(interrupted) = interrupted_turn.as_mut() else {
+                        return Err(error);
+                    };
+                    let Some(store) = session.as_deref().and_then(Session::history_store) else {
+                        return Err(error);
+                    };
+                    self.turn_pipeline
+                        .refresh_cancelled_commit(&mut self.turn, interrupted, &store)
+                        .await?;
+                    if let Some(opener) = opener.take() {
+                        let mut facts = opener.close().await.map_err(|error| {
+                            crate::StoreError::TurnOutcomeMaterializationRefused {
+                                error: Box::new(error),
+                            }
+                        })?;
+                        crate::runtime::turn_driver::normalize_plugin_message_attachments(
+                            &mut facts,
+                            attachment_store,
+                            attachment_source_policy,
+                        )
+                        .await
+                        .map_err(|error| {
+                            crate::StoreError::TurnOutcomeMaterializationRefused {
+                                error: Box::new(error),
+                            }
+                        })?;
+                        self.turn_pipeline
+                            .append_cancelled_opener_messages(&opener_messages(
+                                interrupted.turn_id(),
+                                facts,
+                            ));
+                        self.turn.state = self.turn_pipeline.state().to_snapshot();
+                    }
+                    commit_effects = admissions.commit_effects(&self.turn.outcome, None);
+                }
+                Err(error) => return Err(error),
+            }
+        };
         Ok(CommittedTurn {
             turn: self.turn,
             events: self.events,
@@ -435,7 +507,7 @@ impl LashRuntime {
         let termination = self.recorded_termination()?;
         let TurnCommitContext {
             finish,
-            opener,
+            mut opener,
             admissions,
             scoped_effect_controller,
             honoured_cancel,
@@ -561,7 +633,7 @@ impl LashRuntime {
         let interrupted = cancellation.is_some();
         if segment_boundary.is_none() || interrupted {
             let opener = match opener {
-                Some(opener) => Some(opener),
+                Some(_) => opener.take(),
                 None => self.recover_terminal_opener(
                     &turn_pipeline,
                     &trace_turn_id,
@@ -581,28 +653,7 @@ impl LashRuntime {
                 if !facts.is_empty() && new_messages.is_empty() {
                     new_messages = turn_pipeline.message_sequence();
                 }
-                let mut appended = Vec::new();
-                for (ordinal, fact) in facts.into_iter().enumerate() {
-                    if !matches!(fact.role, MessageRole::User | MessageRole::System) {
-                        continue;
-                    }
-                    let id = format!("{trace_turn_id}:opener-end:{ordinal}");
-                    let mut parts = fact.parts;
-                    reassign_part_ids(&id, &mut parts);
-                    appended.push(Message {
-                        reply_marker: None,
-                        id,
-                        role: fact.role,
-                        parts: shared_parts(parts),
-                        origin: fact.origin.or_else(|| {
-                            Some(crate::MessageOrigin::Plugin {
-                                plugin_id: "plugin".to_string(),
-                                transient: false,
-                            })
-                        }),
-                    });
-                }
-                new_messages.extend(appended);
+                new_messages.extend(opener_messages(&trace_turn_id, facts));
             }
         }
 
@@ -833,6 +884,10 @@ impl LashRuntime {
                         ),
                     interrupted_turn,
                     turn_control_resolver,
+                    admissions,
+                    opener,
+                    attachment_store: self.host.core.durability.attachment_store.as_ref(),
+                    attachment_source_policy: self.host.core.attachment_source_policy.as_ref(),
                 },
                 TurnCommitAdmission {
                     effect_controller: scoped_effect_controller.controller(),
@@ -843,7 +898,13 @@ impl LashRuntime {
         .await
         {
             Ok(committed) => {
-                if writes_run_terminal && let Some(run) = self.shift_run.as_mut() {
+                if (writes_run_terminal
+                    || matches!(
+                        committed.turn.outcome,
+                        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+                    ))
+                    && let Some(run) = self.shift_run.as_mut()
+                {
                     run.mark_terminal_written();
                 }
                 committed
@@ -879,6 +940,10 @@ impl LashRuntime {
         };
         self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(CommittedTurn::RUNTIME_PHASE);
+        let cancellation = match &committed.turn.outcome {
+            TurnOutcome::Stopped(TurnStop::Cancelled { evidence }) => Some(evidence.clone()),
+            _ => cancellation,
+        };
         let mut delivery = committed.adopt(self, &trace_turn_id)?;
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
