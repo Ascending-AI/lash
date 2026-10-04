@@ -531,6 +531,13 @@ impl ShiftEpochStore for Integrator {
 
 #[lash::async_trait]
 impl RunStore for Integrator {
+    async fn run_executor(
+        &self,
+        session_id: &SessionId,
+        run: &TurnId,
+    ) -> Result<Option<RunExecutor>, StoreError> {
+        unreachable!("external signature witness")
+    }
     async fn prepare_run_admission(
         &self,
         request: &AdmitRunRequest,

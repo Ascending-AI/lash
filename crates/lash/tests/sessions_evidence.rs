@@ -1308,10 +1308,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::durability::RuntimeAwaitEventOptions| {
         let _ = &value.clock;
     });
-    // W0417: lash::durability::RuntimeAwaitEventOptions::deadline [field]
-    field_witness(|value: &lash::durability::RuntimeAwaitEventOptions| {
-        let _ = &value.deadline;
-    });
     // W0418: lash::durability::RuntimeAwaitEventOptions::observe_turn_cancel [field]
     field_witness(|value: &lash::durability::RuntimeAwaitEventOptions| {
         let _ = &value.observe_turn_cancel;

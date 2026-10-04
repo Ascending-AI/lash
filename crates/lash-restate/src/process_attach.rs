@@ -69,6 +69,7 @@ pub struct RestateProcessAttachRequest {
 ///
 /// Deliberately the wait's own durable-wait workflow key: one arming per wait,
 /// re-sendable, and trivially correlated with the promise it resolves.
+#[cfg(test)]
 pub(crate) fn process_attach_workflow_key(key: &AwaitEventKey) -> String {
     RestateDurableWaitAddress::for_key(key).workflow_key
 }
