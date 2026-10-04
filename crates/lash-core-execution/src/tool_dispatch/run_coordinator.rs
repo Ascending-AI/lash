@@ -751,10 +751,25 @@ pub struct RunCoordinator<'a> {
 
 impl<'a> RunCoordinator<'a> {
     pub(crate) fn held_call_count(&self) -> usize {
-        self.handlers
-            .keys()
-            .filter(|id| !self.presented.contains_key(*id))
-            .count()
+        // A race winner releases no part of its round's reservation while
+        // any sibling is still held. Admission records survive cold replay
+        // and continuation; operand aliases never add another member.
+        self.journal
+            .records
+            .iter()
+            .flat_map(|record| &record.events)
+            .filter_map(|event| match event {
+                RunEvent::Admitted { round }
+                    if round
+                        .members
+                        .iter()
+                        .any(|member| !self.presented.contains_key(&member.call_id)) =>
+                {
+                    Some(round.members.len())
+                }
+                _ => None,
+            })
+            .sum()
     }
     pub(crate) fn prepared_value(
         &self,
