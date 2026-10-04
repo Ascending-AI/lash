@@ -150,6 +150,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// Epoch 23 (FIG-4848) records an OS nonce before one atomic root admission,
 /// replacing the separate selection, start, seal and composition records.
 /// Plugin transitions bind and record the executor generation before publication.
+/// Epoch 24 (FIG-4924) always subscribes Deferred waits before racing the
+/// recorded cancellation gate, removing the live cancel command branch.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -163,14 +165,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 23;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 24;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 24;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 25;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

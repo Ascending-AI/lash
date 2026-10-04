@@ -178,9 +178,8 @@ mod tests {
             );
         }
     }
-    // FIG-4926 replaces inline admission snapshots and changes V acceptance.
-    // Pin the predecessor rather than deriving it from the current epoch: an
-    // omitted lane move must fail this witness. Both lanes remain addressable.
+    // FIG-4924 always subscribes before the recorded cancel race. Pin the
+    // predecessor epoch so omitting this command-order lane move fails.
     #[tokio::test]
     async fn l21_a_predecessor_run_journal_parks_before_decode_and_keeps_its_lane() {
         use lash_core::engine::BuildGeneration;
@@ -189,9 +188,9 @@ mod tests {
             BuildGeneration::from_digest([b'r', b'u', bytes[0], bytes[1], bytes[2], bytes[3]])
         };
         #[cfg(not(feature = "synthetic-next"))]
-        const PREDECESSOR_EPOCH: u32 = 22;
-        #[cfg(feature = "synthetic-next")]
         const PREDECESSOR_EPOCH: u32 = 23;
+        #[cfg(feature = "synthetic-next")]
+        const PREDECESSOR_EPOCH: u32 = 24;
         let old = generation(PREDECESSOR_EPOCH);
         let new = generation(crate::JOURNAL_LOGIC_EPOCH);
         let old_lane = crate::services::DEFAULT_NAMESPACE

@@ -152,59 +152,43 @@ impl<'a> RunCoordinator<'a> {
         self.drain_starts().await?;
         while !self.waiting.is_empty() {
             let ids: Vec<_> = self.waiting.keys().cloned().collect();
-            let cancelling = ids
+            let subscriptions = ids
                 .iter()
-                .any(|id| self.waiting[id].handlers.get().run_cancel_requested());
-            let selected = if cancelling {
-                let id = &ids[0];
-                (
-                    0,
-                    self.journal
-                        .scoped
-                        .controller()
-                        .cancel_run_source(self.sources[id].clone())
-                        .await?,
-                )
-            } else {
-                let subscriptions = ids
-                    .iter()
-                    .map(|id| SourceSubscription {
-                        source: self.sources[id].source.clone(),
-                        owner: self.sources[id].owner.clone(),
-                        segment: self.journal.segment,
-                    })
-                    .collect();
-                let cancel = self
-                    .journal
-                    .scoped
-                    .turn_cancel_wait(tokio_util::sync::CancellationToken::new());
-                match self
-                    .journal
-                    .scoped
-                    .controller()
-                    .await_run_sources(subscriptions, cancel)
-                    .await
+                .map(|id| SourceSubscription {
+                    source: self.sources[id].source.clone(),
+                    owner: self.sources[id].owner.clone(),
+                    segment: self.journal.segment,
+                })
+                .collect();
+            let cancel = self
+                .journal
+                .scoped
+                .turn_cancel_wait(tokio_util::sync::CancellationToken::new());
+            let selected = match self
+                .journal
+                .scoped
+                .controller()
+                .await_run_sources(subscriptions, cancel)
+                .await
+            {
+                Ok(selected) => selected,
+                Err(error)
+                    if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled =>
                 {
-                    Ok(selected) => selected,
-                    Err(error)
-                        if error.code
-                            == crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled =>
-                    {
-                        // The gate is a request. Each source's reply decides
-                        // whether its real result already won.
-                        for id in &ids {
-                            let seal = self
-                                .journal
-                                .scoped
-                                .controller()
-                                .cancel_run_source(self.sources[id].clone())
-                                .await?;
-                            self.accept_source(id, seal).await?;
-                        }
-                        continue;
+                    // The gate is a request. Each source's reply decides
+                    // whether its real result already won.
+                    for id in &ids {
+                        let seal = self
+                            .journal
+                            .scoped
+                            .controller()
+                            .cancel_run_source(self.sources[id].clone())
+                            .await?;
+                        self.accept_source(id, seal).await?;
                     }
-                    Err(error) => return Err(error.into()),
+                    continue;
                 }
+                Err(error) => return Err(error.into()),
             };
             let id = ids.get(selected.0).ok_or_else(|| boundary(&ids[0]))?;
             self.accept_source(id, selected.1).await?;

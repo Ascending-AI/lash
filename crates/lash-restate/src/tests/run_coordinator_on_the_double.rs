@@ -2062,3 +2062,198 @@ async fn l15_admission_owns_one_namespace_image_for_a_wide_round() {
 pub(super) mod owner_park;
 mod process_continuation;
 mod turn_handover;
+
+/// L03/L07, FIG-4924: a cancel arriving after a subscribed worker dies must
+/// not replace its recorded subscription with a seal command on replay.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn l03_deferred_replay_after_cancel_keeps_the_subscription_and_source_winner() {
+    for resolved in [false, true] {
+        let backend = lash_restate_test::backend(0x4924, ServerConfig::default())
+            .await
+            .unwrap();
+        let call = call("cancel-after-subscribe", &Kind::Deferred);
+        let mut probe = Probe::new(&[(call.clone(), Kind::Deferred)]);
+        probe.materials = Some(backend.stores().process_env_store());
+        let probe = Arc::new(probe);
+        let replay = Arc::new(tokio::sync::Semaphore::new(0));
+        let records = Arc::new(Mutex::new(Vec::new()));
+        let attempt: lash_restate_test::HandlerAttempt = {
+            let probe = Arc::clone(&probe);
+            let replay = Arc::clone(&replay);
+            let records = Arc::clone(&records);
+            let call = call.clone();
+            Arc::new(move |scoped| {
+                let probe = Arc::clone(&probe);
+                let replay = Arc::clone(&replay);
+                let records = Arc::clone(&records);
+                let call = call.clone();
+                Box::pin(async move {
+                    if probe.handler_attempts.fetch_add(1, Ordering::SeqCst) > 0 {
+                        replay.acquire().await.unwrap().forget();
+                    }
+                    let mut run =
+                        RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                    assert!(matches!(
+                        run.decide(&call, probe.as_ref()).await.unwrap(),
+                        DecidedCall::Deferred { .. }
+                    ));
+                    run.await_deferred().await.unwrap();
+                    run.drain().await.unwrap();
+                    records.lock().unwrap().extend(run.into_records());
+                })
+            })
+        };
+        let cancel_after_crash = async {
+            let invocation = loop {
+                if let Some(view) = backend.server().invocations().into_iter().find(|view| {
+                    view.target.starts_with("LashTestHandlerHost/")
+                        && backend
+                            .server()
+                            .journal(&view.id)
+                            .unwrap()
+                            .iter()
+                            .any(|entry| {
+                                entry
+                                    .call_command()
+                                    .is_some_and(|call| call.handler_name == "subscribe_source")
+                            })
+                }) {
+                    break view;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            };
+            let prefix: Vec<_> = backend
+                .server()
+                .journal(&invocation.id)
+                .unwrap()
+                .into_iter()
+                .filter(|entry| entry.ty.is_command())
+                .collect();
+            assert!(backend.server().crash(&invocation.id));
+            while probe.handler_attempts.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            if resolved {
+                use lash_core::tool_run::{
+                    MaterialBundle, MaterialHolder, MaterialOwner, MaterialPayload, MaterialRole,
+                    SealWriter, SourceSeal,
+                };
+                let source = probe.sources.lock().unwrap()[&call.call_id].clone();
+                let capture = SingletonCapture::Done {
+                    output: output_of(&call.call_id),
+                    commands: Vec::new(),
+                    intents: Vec::new(),
+                    stream: Default::default(),
+                    start: None,
+                };
+                let bundle = MaterialBundle::of([MaterialPayload::new(
+                    MaterialOwner::Source {
+                        source: source.clone(),
+                    },
+                    MaterialRole::AttemptOutput,
+                    Some(revision()),
+                    serde_json::to_string(&capture).unwrap(),
+                )])
+                .unwrap()
+                .unwrap();
+                let retained = probe
+                    .materials
+                    .as_ref()
+                    .unwrap()
+                    .retain_material(
+                        &MaterialHolder::Source {
+                            source: source.clone(),
+                        },
+                        &bundle,
+                    )
+                    .await
+                    .unwrap();
+                let reply: crate::Reply<crate::durable_wait::RestateSourceSealReply> = backend
+                    .ingress()
+                    .call_object_json(
+                        "LashDurableWaitIndex",
+                        "session",
+                        "seal_source",
+                        &crate::Call::new(crate::durable_wait::RestateSourceSealRequest {
+                            source,
+                            writer: SealWriter::External,
+                            seal: SourceSeal::Resolved {
+                                result: Box::new(retained.references[0].clone()),
+                            },
+                        }),
+                    )
+                    .await
+                    .unwrap();
+                assert!(matches!(
+                    reply.into_body(),
+                    crate::durable_wait::RestateSourceSealReply::Outcome { .. }
+                ));
+            }
+            probe.cancel.store(true, Ordering::SeqCst);
+            let host = backend.lash_backend().effect_host();
+            let control = lash_core::runtime::turn_control::ActiveTurnControl::new(
+                host.as_ref(),
+                lash_core::runtime::TurnAddress::new("session", "turn"),
+            )
+            .await
+            .unwrap();
+            control
+                .request_local_stop(host.as_ref(), lash_sansio::TurnCancelMode::Immediate, None)
+                .await
+                .unwrap();
+            replay.add_permits(1);
+            (invocation.id, prefix)
+        };
+        let ((), (id, prefix)) = tokio::time::timeout(Duration::from_secs(15), async {
+            tokio::join!(
+                async {
+                    backend
+                        .run_in_handler(AdmittedScope::turn("session", "turn"), attempt)
+                        .await
+                        .unwrap()
+                },
+                cancel_after_crash,
+            )
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "cancelled Deferred replay did not finish: {:#?}",
+                backend.server().invocations()
+            )
+        });
+        let journal: Vec<_> = backend
+            .server()
+            .journal(&id)
+            .unwrap()
+            .into_iter()
+            .filter(|entry| entry.ty.is_command())
+            .collect();
+        assert_eq!(
+            &journal[..prefix.len()],
+            prefix,
+            "replay preserves every recorded command"
+        );
+        let records = records.lock().unwrap();
+        let decisions: Vec<_> = records
+            .iter()
+            .flat_map(|record| &record.events)
+            .filter_map(|event| match event {
+                RunEvent::Decided { decision, .. } => Some(decision),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(decisions.len(), 1, "the source has one decision");
+        assert_eq!(matches!(decisions[0], CallDecision::Final { .. }), resolved);
+        assert_eq!(matches!(decisions[0], CallDecision::Cancelled), !resolved);
+        assert_eq!(
+            probe.executions_of(&call.call_id),
+            1,
+            "replay serves the Deferred attempt"
+        );
+        assert_eq!(
+            probe.presentations.lock().unwrap().len(),
+            usize::from(resolved)
+        );
+    }
+}

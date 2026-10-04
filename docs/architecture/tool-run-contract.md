@@ -266,7 +266,9 @@ logical opener before starting a body admitted to defer. Its Deferred X
 retains the matching source key and leaves the call open without D, rank or
 V. `await_deferred` subscribes at the Run, reads a Resolved seal's canonical
 retained result under the source lease, and accepts its decision before
-`drain` presents it. Cancellation seals the source first and accepts the
+`drain` presents it. The wait always subscribes; pending sources race the
+recorded cancel gate. Its journaled commands follow that gate's recorded
+outcome. When the gate wins, cancellation seals the source first and accepts the
 actual winner; a Resolved winner remains protected through after-checks and
 presentation. A handover preserves the open source. Runtime per-call
 deadlines, timeout results and timer races are absent; body-owned transport
