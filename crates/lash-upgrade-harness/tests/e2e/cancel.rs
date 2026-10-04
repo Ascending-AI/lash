@@ -9,7 +9,7 @@ use lash_core::tool_run::{AttemptResult, CallDecision, LogicalTerminal, RunEvent
 use lash_remote_protocol::RemoteTurnStatus;
 use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseSpec, Channel, StoreKind};
 use lash_upgrade_harness::e2e::control::{BarrierKind, ToolControl};
-use lash_upgrade_harness::e2e::evidence::{DecodedRecord, Evidence};
+use lash_upgrade_harness::e2e::evidence::Evidence;
 use lash_upgrade_harness::e2e::host::{HostCommand, HostKind};
 use lash_upgrade_harness::e2e::provider::ProviderKind;
 
@@ -147,6 +147,19 @@ pub async fn pre_final(scenario: &mut Scenario<'_>, spec: &CaseSpec) -> Result<E
     scenario.cancel().await?;
     scenario.release(body).await?;
     let evidence = scenario.finish(RemoteTurnStatus::Cancelled, None).await?;
+    ensure!(
+        events(&evidence)?
+            .iter()
+            .filter(|event| matches!(
+                event,
+                RunEvent::Lifecycle {
+                    state: RunLifecycle::Closing
+                }
+            ))
+            .count()
+            == 1,
+        "cancelled Run needs one recorded Closing after the inline ACK"
+    );
     assert_call(&evidence, call, LogicalTerminal::Cancelled)?;
     ensure!(
         mutations(&evidence, call)?.is_empty(),

@@ -16,7 +16,9 @@ use lash_upgrade_harness::e2e::control::{
     Barrier, BarrierKind, BarrierProof, Control, Fault, ToolControl, WorkIdentity,
 };
 use lash_upgrade_harness::e2e::evidence::{DecodedRecord, Evidence, JournalFact};
-use lash_upgrade_harness::e2e::host::{HostAdapter, HostCommand, HostKind, HostReady};
+use lash_upgrade_harness::e2e::host::{
+    HostAdapter, HostCommand, HostKind, HostObservation, HostReady,
+};
 use lash_upgrade_harness::e2e::provider::ProviderKind;
 use lash_upgrade_harness::node::tools::ToolDelivery;
 
@@ -47,6 +49,7 @@ pub struct Scenario<'a> {
     pub work: Option<WorkIdentity>,
     pub proofs: Vec<BarrierProof>,
     pub faults: Vec<lash_upgrade_harness::e2e::control::FaultReceipt>,
+    pub cancellations: Vec<HostObservation>,
 }
 
 pub fn spec(id: &str, store: StoreKind, artifacts: Vec<ArtifactIdentity>) -> Result<CaseSpec> {
@@ -112,7 +115,10 @@ impl Scenario<'_> {
 
     pub async fn read(&self) -> Result<Evidence> {
         let work = self.work()?.clone();
-        let evidence = (self.snapshot)(work.clone()).await?;
+        let mut evidence = (self.snapshot)(work.clone()).await?;
+        evidence.effects.extend(self.cancellations.iter().map(|observation| {
+            serde_json::json!({"kind":"h2_public_cancel_response","observation":observation})
+        }));
         ensure!(
             !evidence.case.is_empty(),
             "snapshot has no scenario identity"
@@ -199,7 +205,51 @@ impl Scenario<'_> {
             observation.work.run == self.work()?.run,
             "cancel targeted another Run"
         );
-        self.wait_owner(BarrierKind::RunCancelRecorded).await?;
+        self.cancellations.push(observation.clone());
+        super::write(
+            &self.lease.directory.join("public-cancel-response.json"),
+            &observation,
+        )?;
+        ensure!(
+            observation.output["outcome"] == "requested",
+            "cancel was not accepted for a running Run"
+        );
+        let outcome: lash::TurnCancelOutcome =
+            serde_json::from_value(observation.output["cancellation"].clone())?;
+        let accepted = match outcome {
+            lash::TurnCancelOutcome::Requested(accepted)
+            | lash::TurnCancelOutcome::AlreadyRequested(accepted)
+            | lash::TurnCancelOutcome::Escalated(accepted) => accepted,
+            other => return Err(anyhow!("cancellation gate refused the request: {other:?}")),
+        };
+        // Recording a request precedes the noncooperative body's local ACK.
+        // Closing is an owner transition, which may follow that ACK. Compare
+        // the actual keyed-gate receipt with the native record before release.
+        let evidence = self.read().await?;
+        let stored = evidence
+            .stores
+            .iter()
+            .find(|fact| fact["kind"] == "h2_native_cancel_request")
+            .ok_or_else(|| anyhow!("accepted cancel has no native stored request"))?;
+        let record: lash_core::TurnCancelRequestRecord =
+            serde_json::from_value(stored["record"].clone())?;
+        ensure!(
+            record.request.address.turn_id.as_str() == self.work()?.run
+                && record.request.address.session_id.as_str()
+                    == observation.output["session_id"]
+                        .as_str()
+                        .unwrap_or_default()
+                && observation.output["turn_id"].as_str() == Some(self.work()?.run.as_str()),
+            "cancel receipt and stored request address another subject"
+        );
+        ensure!(
+            record.request.request_id == accepted.request_id
+                && record.request.origin == accepted.origin
+                && record.request.reason == accepted.reason
+                && record.request.undelivered == accepted.undelivered
+                && record.request.mode == accepted.mode,
+            "native cancel record differs from the accepted keyed-gate receipt"
+        );
         Ok(())
     }
 

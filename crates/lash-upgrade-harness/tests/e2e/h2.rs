@@ -22,7 +22,7 @@ use lash_upgrade_harness::e2e::{
 };
 use lash_upgrade_harness::node::tools::deliveries;
 use lash_upgrade_harness::restate_view::RestateView;
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::sync::Mutex;
 
 use super::tools::{Scenario, Snapshot};
@@ -136,6 +136,7 @@ impl Shared {
                 .push(json!({"kind":"h2_body_delivery", "delivery":delivery}));
         }
         self.retained_transfers(work, &mut evidence).await?;
+        self.retained_cancel(work, &mut evidence).await?;
         let host = self.host.lock().await;
         evidence.effects.extend(host.trace_records()?);
         if let Some(process) = self.receiver.lock().await.as_ref() {
@@ -149,6 +150,27 @@ impl Shared {
             );
         }
         Ok(evidence)
+    }
+    async fn retained_cancel(&self, work: &WorkIdentity, evidence: &mut Evidence) -> Result<()> {
+        use lash_core::store::TurnInputStore as _;
+        let chat = self
+            .chat
+            .lock()
+            .await
+            .clone()
+            .context("no bound native session")?;
+        let session = lash::SessionId::parse(chat)?;
+        let run = lash::TurnId::parse(&work.run)?;
+        let stores = lash::sqlite::SqliteStoreSet::open(&self.store_root).await?;
+        let store = stores.open_store().await?;
+        let address = lash::TurnAddress::new(session, run);
+        if let Some(record) = store.turn_cancel_request(&address).await? {
+            let artifact = self.directory.join("native-cancel-request.json");
+            super::write(&artifact, &record)?;
+            evidence.stores.push(json!({"kind":"h2_native_cancel_request",
+                "artifact":artifact,"store":self.store_root.join("durable-core.db"),"record":record}));
+        }
+        Ok(())
     }
     async fn retained_transfers(&self, work: &WorkIdentity, evidence: &mut Evidence) -> Result<()> {
         let chat = self
@@ -547,6 +569,7 @@ pub async fn run(row: Row) -> Result<()> {
         work: None,
         proofs: Vec::new(),
         faults: Vec::new(),
+        cancellations: Vec::new(),
     };
     let result = match row {
         Row::Singleton => super::tools::singleton(&mut scenario, &spec).await,
