@@ -1,6 +1,6 @@
 //! A fixture body reports only the identity it actually has. The controller
 //! binds the public logical run to the admitted invocation before releasing it.
-use super::{Barrier, BarrierKind, FileBarriers, WorkIdentity};
+use super::{Barrier, BarrierKind, BarrierProof, FileBarriers, WorkIdentity};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -20,11 +20,14 @@ pub struct ToolDelivery {
     pub ordinal: u32,
     pub logical_run: String,
     pub completion: serde_json::Value,
+    pub owner: lash_core::ExecutionOwner,
 }
 #[derive(Default)]
 struct Bindings {
     runs: Mutex<BTreeMap<String, WorkIdentity>>,
     changed: Notify,
+    held: Mutex<Vec<BarrierKind>>,
+    deliveries: Mutex<Vec<(ToolDelivery, BarrierProof)>>,
 }
 pub struct BodyCallbacks {
     /// POST ToolDelivery here. The response is sent after controller release.
@@ -32,6 +35,7 @@ pub struct BodyCallbacks {
     bindings: Arc<Bindings>,
     stop: watch::Sender<bool>,
     task: Option<JoinHandle<Result<()>>>,
+    deadline: Instant,
 }
 impl BodyCallbacks {
     pub async fn start(
@@ -43,6 +47,11 @@ impl BodyCallbacks {
         let listener = TcpListener::from_std(listener)?;
         let endpoint = format!("http://{}/BodyEntered", listener.local_addr()?);
         let bindings = Arc::new(Bindings::default());
+        bindings
+            .held
+            .lock()
+            .map_err(|_| anyhow::anyhow!("body phase registry poisoned"))?
+            .push(BarrierKind::BodyEntered);
         let registry = bindings.clone();
         let (stop, mut stopped) = watch::channel(false);
         let task = tokio::spawn(async move {
@@ -76,6 +85,7 @@ impl BodyCallbacks {
             bindings,
             stop,
             task: Some(task),
+            deadline,
         })
     }
     /// Bind from accepted public ingress plus sys_invocation, before a body
@@ -107,6 +117,50 @@ impl BodyCallbacks {
         }
         self.bindings.changed.notify_waiters();
         Ok(())
+    }
+    pub fn hold_phase(&self, phase: BarrierKind) -> Result<()> {
+        ensure!(!phase.durable(), "body cannot certify a durable phase");
+        self.bindings
+            .held
+            .lock()
+            .map_err(|_| anyhow::anyhow!("body phase registry poisoned"))?
+            .push(phase);
+        Ok(())
+    }
+    /// Discover the call identity from the live callback, after binding the
+    /// admitted run. BodyEntered is held automatically before this is visible.
+    pub async fn await_delivery(
+        &self,
+        logical_run: &str,
+        label: &str,
+        ordinal: u32,
+        phase: BarrierKind,
+    ) -> Result<BarrierProof> {
+        tokio::time::timeout_at(self.deadline.into(), async {
+            loop {
+                let mut changed = Box::pin(self.bindings.changed.notified());
+                changed.as_mut().enable();
+                let found = self
+                    .bindings
+                    .deliveries
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("body delivery registry poisoned"))?
+                    .iter()
+                    .find(|(delivery, proof)| {
+                        delivery.logical_run == logical_run
+                            && delivery.label == label
+                            && delivery.ordinal == ordinal
+                            && proof.barrier.kind == phase
+                    })
+                    .map(|(_, proof)| proof.clone());
+                if let Some(proof) = found {
+                    return Ok(proof);
+                }
+                changed.await;
+            }
+        })
+        .await
+        .context("actual body delivery did not arrive")?
     }
     pub async fn finish(&mut self) -> Result<()> {
         self.stop.send_replace(true);
@@ -220,9 +274,28 @@ async fn delivery(
             lash_core::stable_hash::sha256_hex(&data)
         ));
         crate::node::write_atomically(&path, &data)?;
-        FileBarriers::new(directory, deadline)?
-            .enter(&barrier, path.display().to_string())
-            .await
+        let barriers = FileBarriers::new(directory, deadline)?;
+        if bindings
+            .held
+            .lock()
+            .map_err(|_| anyhow::anyhow!("body phase registry poisoned"))?
+            .contains(&barrier.kind)
+        {
+            barriers.hold(&barrier)?;
+        }
+        let proof = BarrierProof {
+            barrier: barrier.clone(),
+            artifact: path.display().to_string(),
+            journal_index: None,
+        };
+        barriers.publish(&proof)?;
+        bindings
+            .deliveries
+            .lock()
+            .map_err(|_| anyhow::anyhow!("body delivery registry poisoned"))?
+            .push((delivery, proof));
+        bindings.changed.notify_waiters();
+        barriers.await_release(&barrier).await
     })
     .await
     .context("body callback missed its binding or release deadline")?;

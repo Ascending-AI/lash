@@ -7,8 +7,8 @@ use lash_restate_test::protocol::{
     FrameDecoder, MessageType,
     generated::{
         ProposeRunCompletionAckMessage, ProposeRunCompletionMessage, RunCommandMessage,
-        RunCompletionNotificationMessage, StartMessage, propose_run_completion_message,
-        run_completion_notification_message,
+        RunCompletionNotificationMessage, SleepCommandMessage, SleepCompletionNotificationMessage,
+        StartMessage, propose_run_completion_message, run_completion_notification_message,
     },
 };
 use std::collections::BTreeMap;
@@ -35,6 +35,7 @@ struct Registry {
     retries: Vec<Barrier>,
     active: usize,
     publications: Vec<PublicationCut>,
+    dynamic_cuts: Vec<TransportCut>,
 }
 #[derive(Default)]
 struct Connection {
@@ -42,6 +43,7 @@ struct Connection {
     invocations: BTreeMap<u32, String>,
     pending_sleeps: BTreeMap<u32, Barrier>,
     run_names: BTreeMap<(u32, u32), String>,
+    sleep_gates: BTreeMap<(u32, u32), Barrier>,
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransportCut {
@@ -67,7 +69,10 @@ impl V7Proxy {
             ensure!(
                 matches!(
                     cut.proposal.kind,
-                    BarrierKind::XProposed | BarrierKind::DProposed | BarrierKind::VProposed
+                    BarrierKind::XProposed
+                        | BarrierKind::DProposed
+                        | BarrierKind::VProposed
+                        | BarrierKind::DeclarationIssued
                 ),
                 "invalid transport proposal cut"
             );
@@ -105,16 +110,32 @@ impl V7Proxy {
                         let registry=registered.clone();
                         registry.lock().map_err(|_|anyhow::anyhow!("transport registry poisoned"))?.active+=1;
                         children.spawn(async move {
-                            let (client_read, client_write) = client.into_split();
-                            let (server_read, server_write) = server.into_split();
-                            let connection_state = Arc::new(Mutex::new(Connection::default()));
-                            let incoming = relay(client_read,server_write,true,connection,&directory,deadline,&cuts,connection_state.clone(),registry.clone());
-                            let outgoing = relay(server_read,client_write,false,connection,&directory,deadline,&cuts,connection_state,registry.clone());
+                            let session=async {
+                                let mut client=client;
+                                let mut server=server;
+                                let mut preface=[0;24];
+                                if let Err(error)=client.read_exact(&mut preface).await { return Err(error.into()); }
+                                server.write_all(&preface).await?;
+                                if &preface!=b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" {
+                                    tokio::io::copy_bidirectional(&mut client,&mut server).await?;
+                                    return Ok::<_,anyhow::Error>(());
+                                }
+                                let (client_read, client_write) = client.into_split();
+                                let (server_read, server_write) = server.into_split();
+                                let connection_state = Arc::new(Mutex::new(Connection::default()));
+                                let incoming = relay(client_read,server_write,true,connection,&directory,deadline,&cuts,connection_state.clone(),registry.clone());
+                                let outgoing = relay(server_read,client_write,false,connection,&directory,deadline,&cuts,connection_state,registry.clone());
+                                tokio::try_join!(incoming,outgoing)?;
+                                Ok(())
+                            };
                             let result=tokio::select! {
-                                result = incoming => result,
-                                result = outgoing => result,
+                                result = session => result,
                                 _ = stopped.changed() => Ok(()),
                                 _ = disconnected.changed() => Ok(()),
+                            };
+                            let result=match result {
+                                Err(error) if error.downcast_ref::<std::io::Error>().is_some_and(|error|matches!(error.kind(),std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof)) => Ok(()),
+                                other=>other,
                             };
                             registry.lock().map_err(|_|anyhow::anyhow!("transport registry poisoned"))?.active-=1;
                             result
@@ -136,6 +157,29 @@ impl V7Proxy {
             upstream,
             task: Some(task),
         })
+    }
+    pub fn arm_cut(&self, cut: TransportCut) -> Result<()> {
+        ensure!(
+            matches!(
+                cut.proposal.kind,
+                BarrierKind::XProposed
+                    | BarrierKind::DProposed
+                    | BarrierKind::VProposed
+                    | BarrierKind::DeclarationIssued
+            ),
+            "unsupported completion phase"
+        );
+        ensure!(
+            cut.before_ack.kind == BarrierKind::BeforeAck
+                && cut.before_ack.work == cut.proposal.work,
+            "ACK cut has another work identity"
+        );
+        self.registry
+            .lock()
+            .map_err(|_| anyhow::anyhow!("transport registry poisoned"))?
+            .dynamic_cuts
+            .push(cut);
+        Ok(())
     }
     pub fn arm_publication(&self, cut: PublicationCut) -> Result<()> {
         ensure!(
@@ -171,8 +215,10 @@ impl V7Proxy {
         }
         Ok(())
     }
-    /// Hold the real Sleep command following this call's recorded retry timer
-    /// registration. Ordinal names the failed attempt, as that schedule does.
+    /// Observe the forwarded Sleep command after this call's retry schedule;
+    /// a held barrier delays its matching wake notification. Confirm the actual
+    /// pending timer independently through RestateView::durable_sleep.
+    /// Ordinal names the failed attempt, as that schedule does.
     pub fn arm_retry(&self, barrier: Barrier) -> Result<()> {
         ensure!(
             barrier.kind == BarrierKind::RetryBackoffEntered
@@ -255,18 +301,10 @@ async fn relay(
     connection_state: Arc<Mutex<Connection>>,
     registry: Arc<Mutex<Registry>>,
 ) -> Result<()> {
-    if to_host {
-        let mut preface = [0; 24];
-        input.read_exact(&mut preface).await?;
-        ensure!(
-            &preface == b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",
-            "V7 barrier requires HTTP/2 transport"
-        );
-        output.write_all(&preface).await?;
-    }
     let barriers = FileBarriers::new(directory.to_owned(), deadline)?;
     let mut decoders: BTreeMap<u32, FrameDecoder> = BTreeMap::new();
     let mut observation = 0;
+    let mut non_sdk = std::collections::BTreeSet::new();
     loop {
         let mut header = [0; 9];
         match input.read_exact(&mut header).await {
@@ -287,7 +325,8 @@ async fn relay(
         let mut payload = vec![0; length];
         input.read_exact(&mut payload).await?;
         let stream = u32::from_be_bytes(header[5..9].try_into()?) & 0x7fff_ffff;
-        if header[3] == 0 && !payload.is_empty() {
+        let mut entered_sleeps = Vec::new();
+        if header[3] == 0 && !payload.is_empty() && !non_sdk.contains(&stream) {
             let data = if header[4] & 8 != 0 {
                 let padding = usize::from(payload[0]);
                 ensure!(padding < payload.len(), "invalid HTTP/2 padding");
@@ -297,7 +336,22 @@ async fn relay(
             };
             let decoder = decoders.entry(stream).or_default();
             decoder.push(data);
-            for frame in decoder.drain()? {
+            let frames = match decoder.drain() {
+                Ok(frames) => frames,
+                Err(error) => {
+                    ensure!(
+                        !connection_state
+                            .lock()
+                            .map_err(|_| anyhow::anyhow!("connection state poisoned"))?
+                            .invocations
+                            .contains_key(&stream),
+                        "active SDK stream is malformed: {error}"
+                    );
+                    non_sdk.insert(stream);
+                    Vec::new()
+                }
+            };
+            for frame in frames {
                 observation += 1;
                 let artifact = directory.join(format!(
                     "wire-{connection}-{stream}-{}-{observation}.json",
@@ -399,21 +453,28 @@ async fn relay(
                     None
                 };
                 if let (Some(work), Some((value, completion))) = (&work, value) {
-                    for cut in cuts {
+                    let mut active_cuts = cuts.to_vec();
+                    active_cuts.extend(
+                        registry
+                            .lock()
+                            .map_err(|_| anyhow::anyhow!("transport registry poisoned"))?
+                            .dynamic_cuts
+                            .clone(),
+                    );
+                    for cut in &active_cuts {
                         if same_run(work, &cut.proposal.work)
                             && proposal_matches(&value, &cut.proposal)
+                            && let Some(completion) = completion
                         {
-                            if let Some(completion) = completion {
-                                ensure!(frame.requested_ack, "proposal did not request a V7 ACK");
-                                connection_state
-                                    .lock()
-                                    .map_err(|_| anyhow::anyhow!("connection state poisoned"))?
-                                    .completions
-                                    .insert((stream, completion), cut.before_ack.clone());
-                                barriers
-                                    .enter(&cut.proposal, artifact.display().to_string())
-                                    .await?;
-                            }
+                            ensure!(frame.requested_ack, "proposal did not request a V7 ACK");
+                            connection_state
+                                .lock()
+                                .map_err(|_| anyhow::anyhow!("connection state poisoned"))?
+                                .completions
+                                .insert((stream, completion), cut.before_ack.clone());
+                            barriers
+                                .enter(&cut.proposal, artifact.display().to_string())
+                                .await?;
                         }
                     }
                     let retries = registry
@@ -432,15 +493,27 @@ async fn relay(
                     }
                 }
                 if !to_host && frame.ty == MessageType::SleepCommand {
+                    let message: SleepCommandMessage = frame.decode()?;
+                    let mut state = connection_state
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("connection state poisoned"))?;
+                    if let Some(barrier) = state.pending_sleeps.remove(&stream) {
+                        state
+                            .sleep_gates
+                            .insert((stream, message.result_completion_id), barrier.clone());
+                        entered_sleeps.push((barrier, artifact.display().to_string()));
+                    }
+                }
+                if to_host && frame.ty == MessageType::SleepCompletionNotification {
+                    let message: SleepCompletionNotificationMessage = frame.decode()?;
                     let barrier = connection_state
                         .lock()
                         .map_err(|_| anyhow::anyhow!("connection state poisoned"))?
-                        .pending_sleeps
-                        .remove(&stream);
+                        .sleep_gates
+                        .get(&(stream, message.completion_id))
+                        .cloned();
                     if let Some(barrier) = barrier {
-                        barriers
-                            .enter(&barrier, artifact.display().to_string())
-                            .await?;
+                        barriers.await_release(&barrier).await?;
                     }
                 }
                 if to_host && frame.ty == MessageType::ProposeRunCompletionAck {
@@ -461,6 +534,13 @@ async fn relay(
         }
         output.write_all(&header).await?;
         output.write_all(&payload).await?;
+        for (barrier, artifact) in entered_sleeps {
+            barriers.publish(&super::BarrierProof {
+                barrier,
+                artifact,
+                journal_index: None,
+            })?;
+        }
     }
 }
 
@@ -497,6 +577,7 @@ fn proposal_matches(value: &serde_json::Value, barrier: &Barrier) -> bool {
                         (&barrier.kind, phase),
                         (BarrierKind::DProposed, Some("decided"))
                             | (BarrierKind::VProposed, Some("presented"))
+                            | (BarrierKind::DeclarationIssued, Some("declarations_issued"))
                     )
             })
         })

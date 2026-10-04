@@ -120,6 +120,55 @@ impl RestateView {
             .with_context(|| format!("non-forced retirement of {id}"))?;
         Ok(())
     }
+    /// Correlate an actual forwarded V7 Sleep with its durable command slot.
+    /// Absence is still pending observation; an already elapsed timer misses
+    /// the requested pending-backoff fault and must fail selection.
+    pub async fn durable_sleep(
+        &self,
+        proof: &crate::e2e::control::BarrierProof,
+        invocation: &str,
+        protocol: u32,
+    ) -> Result<Option<crate::e2e::evidence::JournalFact>> {
+        use prost::Message;
+        anyhow::ensure!(
+            proof.barrier.kind == crate::e2e::control::BarrierKind::RetryBackoffEntered,
+            "proof is not an observed retry Sleep"
+        );
+        let wire: serde_json::Value = serde_json::from_slice(&std::fs::read(&proof.artifact)?)?;
+        anyhow::ensure!(
+            wire["type"].as_u64()
+                == Some(u64::from(
+                    lash_restate_test::protocol::MessageType::SleepCommand.code()
+                )),
+            "retry proof does not retain its actual Sleep command"
+        );
+        let bytes: Vec<u8> = serde_json::from_value(wire["payload"].clone())?;
+        let sleep =
+            lash_restate_test::protocol::generated::SleepCommandMessage::decode(bytes.as_slice())?;
+        let facts = self
+            .journal(&proof.barrier.work, invocation, protocol)
+            .await?;
+        let id = u64::from(sleep.result_completion_id);
+        anyhow::ensure!(
+            !facts.iter().any(|fact| fact
+                .value
+                .pointer("/Notification/Completion/Sleep/completion_id")
+                .and_then(serde_json::Value::as_u64)
+                == Some(id)),
+            "requested retry timer already elapsed before its pending cut"
+        );
+        Ok(facts.into_iter().find(|fact| {
+            fact.value
+                .pointer("/Command/Sleep/completion_id")
+                .and_then(serde_json::Value::as_u64)
+                == Some(id)
+                && fact
+                    .value
+                    .pointer("/Command/Sleep/wake_up_time")
+                    .and_then(serde_json::Value::as_u64)
+                    == Some(sleep.wake_up_time)
+        }))
+    }
 
     /// Every value one object holds, by state key, as the JSON it stores.
     pub async fn object_state(

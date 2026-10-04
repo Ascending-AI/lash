@@ -29,6 +29,9 @@ pub enum ProxyCommand {
         invocation: String,
         work: WorkIdentity,
     },
+    ArmCut {
+        cut: TransportCut,
+    },
     ArmRetry {
         barrier: Barrier,
     },
@@ -94,6 +97,10 @@ pub async fn run(config: ProxyConfig) -> Result<()> {
                     ProxyCommand::Bind { invocation, work } => {
                         proxy.bind_invocation(invocation, work)?;
                         serde_json::json!({"bound":true})
+                    }
+                    ProxyCommand::ArmCut { cut } => {
+                        proxy.arm_cut(cut)?;
+                        serde_json::json!({"armed":true})
                     }
                     ProxyCommand::ArmRetry { barrier } => {
                         proxy.arm_retry(barrier)?;

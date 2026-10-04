@@ -30,6 +30,7 @@ pub struct LocalCluster {
     deadline: Instant,
     provisioning: serde_json::Value,
     namespace: String,
+    server_version: String,
 }
 impl LocalCluster {
     pub fn new(port_base: u16, deadline: Instant) -> Self {
@@ -41,6 +42,7 @@ impl LocalCluster {
             deadline,
             provisioning: serde_json::Value::Null,
             namespace: String::new(),
+            server_version: String::new(),
         }
     }
     pub fn nodes(&self) -> Vec<NodeReceipt> {
@@ -225,14 +227,14 @@ impl LocalCluster {
                 if node.process.is_none() {
                     continue;
                 }
-                if let Ok(leaders) = self.leader_rows(&node.receipt).await {
-                    if let Some(leader) = leaders.into_iter().find(|leader| {
+                if let Ok(leaders) = self.leader_rows(&node.receipt).await
+                    && let Some(leader) = leaders.into_iter().find(|leader| {
                         leader.partition == prior.partition
                             && leader.node != prior.node
                             && leader.epoch > prior.epoch
-                    }) {
-                        return Ok(leader);
-                    }
+                    })
+                {
+                    return Ok(leader);
                 }
             }
             ensure!(
@@ -285,7 +287,7 @@ impl LocalCluster {
                     ensure!(health.pointer("/metadata_cluster_health/members").and_then(serde_json::Value::as_array).is_some_and(|members| members.len()==self.nodes.len()),"metadata quorum has not joined every node");
                     views.push(json!({"identity":ident,"configuration":config,"state":state,"health":health}));
                 }
-                Ok((expected.context("leaders absent")?,json!({"node_views":views,"peer_identity":"/proc/net/tcp + /proc/<owned-pid>/fd"})))
+                Ok((expected.context("leaders absent")?,json!({"node_views":views,"peer_identity":"/proc/net/tcp + /proc/<owned-pid>/fd","server_version":self.server_version})))
             }.await;
             match observed {
                 Ok((leaders, provisioning)) => {
@@ -319,6 +321,17 @@ impl ClusterControl for LocalCluster {
     ) -> Step<'a, ClusterReceipt> {
         Box::pin(async move {
             binary.verify()?;
+            let version = Command::new(&binary.path).arg("--version").output()?;
+            ensure!(
+                version.status.success(),
+                "Restate binary refused version inspection"
+            );
+            let version = String::from_utf8(version.stdout)?.trim().to_owned();
+            ensure!(
+                version.split_whitespace().any(|value| value == "1.7.13"),
+                "cluster requires the repository Restate 1.7.13 pin, observed {version}"
+            );
+            self.server_version = version;
             ensure!(nodes == 1 || nodes == 3, "unsupported cluster size");
             ensure!(self.nodes.is_empty(), "cluster already booted");
             ensure!(
@@ -341,13 +354,13 @@ impl ClusterControl for LocalCluster {
                 lease.ports.push(port);
             }
             let peers: Vec<_> = (0..nodes)
-                .map(|n| {
-                    format!(
+                .map(|n| -> Result<String> {
+                    Ok(format!(
                         "http://127.0.0.1:{}",
-                        self.port_base + u16::try_from(n * 4 + 3).expect("three nodes fit u16")
-                    )
+                        self.port_base + u16::try_from(n * 4 + 3)?
+                    ))
                 })
-                .collect();
+                .collect::<Result<_>>()?;
             for n in 0..nodes {
                 let id = u32::try_from(n + 1)?;
                 let base = self.port_base + u16::try_from(n * 4)?;

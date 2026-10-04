@@ -34,6 +34,15 @@ pub struct Evidence {
     pub effects: Vec<serde_json::Value>,
     pub outputs: Vec<HostObservation>,
     pub cleanup: Vec<CleanupReceipt>,
+    /// Canonical transfer bytes read from the actual fenced business store.
+    /// Their provenance stays distinct from a sys_journal completion slot.
+    pub transfers: Vec<RetainedTransferFact>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RetainedTransferFact {
+    pub work: WorkIdentity,
+    pub artifact: String,
+    pub transfer: lash_core_store::tool_run::RunTransfer,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verdict {
@@ -54,6 +63,73 @@ pub struct CaseReceipt {
     pub evidence: Evidence,
     pub verdict: Verdict,
 }
+impl CaseReceipt {
+    /// Write failed and unavailable selections too, before reconciliation.
+    /// The external selector may add its matrix coordinates around this body.
+    pub fn write(&self, directory: &std::path::Path) -> anyhow::Result<Counts> {
+        anyhow::ensure!(
+            !self.evidence.case.is_empty(),
+            "case receipt has no selected identity"
+        );
+        if self.verdict == Verdict::Passed {
+            anyhow::ensure!(
+                !self.evidence.cleanup.is_empty()
+                    && self.evidence.cleanup.iter().all(|receipt| receipt.closed),
+                "pass lacks complete cleanup"
+            );
+            anyhow::ensure!(
+                !self.evidence.artifacts.is_empty(),
+                "pass lacks prebuilt artifact provenance"
+            );
+            for artifact in &self.evidence.artifacts {
+                artifact.verify()?;
+            }
+        }
+        let counts = match &self.verdict {
+            Verdict::Passed => Counts {
+                selected: 1,
+                executed: 1,
+                passed: 1,
+                ..Default::default()
+            },
+            Verdict::Failed { .. } => Counts {
+                selected: 1,
+                executed: 1,
+                failed: 1,
+                ..Default::default()
+            },
+            Verdict::NotRun { .. } => Counts {
+                selected: 1,
+                not_run: 1,
+                ..Default::default()
+            },
+        };
+        crate::node::write_atomically(
+            &directory.join("receipt.json"),
+            &serde_json::to_vec_pretty(&serde_json::json!({"counts":counts,"case":self}))?,
+        )?;
+        let escape = |text: &str| {
+            text.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;")
+                .replace('\'', "&apos;")
+        };
+        let result = match &self.verdict {
+            Verdict::Passed => String::new(),
+            Verdict::Failed { reason } => format!("<failure message=\"{}\"/>", escape(reason)),
+            Verdict::NotRun { reason } => format!("<skipped message=\"{}\"/>", escape(reason)),
+        };
+        let xml = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><testsuite name=\"lash-e2e\" tests=\"1\" failures=\"{}\" skipped=\"{}\"><testcase name=\"{}\">{result}</testcase></testsuite>\n",
+            counts.failed,
+            counts.not_run,
+            escape(&self.evidence.case)
+        );
+        crate::node::write_atomically(&directory.join("receipt.xml"), xml.as_bytes())?;
+        Ok(counts)
+    }
+}
 
 pub trait EvidenceReader {
     fn collect<'a>(&'a mut self, work: &'a WorkIdentity) -> super::Step<'a, Evidence>;
@@ -70,7 +146,30 @@ impl Evidence {
             effects: Vec::new(),
             outputs: Vec::new(),
             cleanup: Vec::new(),
+            transfers: Vec::new(),
         }
+    }
+    pub fn retain_follow_on(
+        &mut self,
+        work: WorkIdentity,
+        follow_on: &lash_core_store::store::PendingFollowOn,
+        artifact: String,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !artifact.is_empty() && std::path::Path::new(&artifact).is_file(),
+            "retained transfer lacks an independently read store artifact"
+        );
+        let transfer = follow_on
+            .continuation
+            .as_ref()
+            .and_then(|continuation| continuation.opener.run.as_deref())
+            .ok_or_else(|| anyhow::anyhow!("fenced follow-on has no canonical Run transfer"))?;
+        self.transfers.push(RetainedTransferFact {
+            work,
+            artifact,
+            transfer: transfer.clone(),
+        });
+        Ok(())
     }
 }
 impl Counts {
@@ -168,6 +267,15 @@ pub fn decode_journal(
                     } else {
                         Some(DecodedRecord::Attempt(serde_json::from_value(result)?))
                     };
+                } else if result.get("effect_journal_version").is_some() {
+                    anyhow::ensure!(
+                        result["effect_journal_version"].as_u64()
+                            == Some(u64::from(lash_restate::EFFECT_JOURNAL_VERSION)),
+                        "foreign effect generation before transfer decoding"
+                    );
+                    if let Some(transfer) = find_transfer(&result)? {
+                        decoded = Some(DecodedRecord::Transfer(transfer));
+                    }
                 }
             }
         }
@@ -203,6 +311,64 @@ impl RestateEvidenceReader {
             bindings: Default::default(),
         }
     }
+    /// Resolve the public Run through its retained executor admission, never
+    /// by searching a physical workflow key for a public Run substring.
+    pub async fn bind_public_run(
+        &mut self,
+        stores: &dyn lash_core::store::RunStore,
+        session: &lash_core::SessionId,
+        run: &lash_core::TurnId,
+        ingress: String,
+    ) -> anyhow::Result<WorkIdentity> {
+        let key = lash_restate::recorded_turn_invocation_key(stores, session, run)
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!("public Run has no retained Restate executor admission")
+            })?;
+        #[derive(Deserialize)]
+        struct Row {
+            id: String,
+            target_service_name: String,
+            status: String,
+            pinned_service_protocol_version: Option<u32>,
+        }
+        let literal = key.replace('\'', "''");
+        let prefix = self.view.service_name("LashTurn");
+        let rows:Vec<Row>=self.view.query(&format!("SELECT id,target_service_name,status,pinned_service_protocol_version FROM sys_invocation WHERE target_service_key='{literal}' AND target_handler_name='run'")).await?;
+        let rows: Vec<_> = rows
+            .into_iter()
+            .filter(|row| {
+                row.target_service_name == prefix
+                    || row.target_service_name.starts_with(&format!("{prefix}_g"))
+            })
+            .collect();
+        let live: Vec<_> = rows
+            .iter()
+            .filter(|row| row.status != "completed")
+            .collect();
+        let row = if live.len() == 1 {
+            live[0]
+        } else {
+            anyhow::ensure!(
+                live.is_empty() && rows.len() == 1,
+                "public Run has no unique physical invocation; choose an observed generation explicitly"
+            );
+            &rows[0]
+        };
+        anyhow::ensure!(
+            row.pinned_service_protocol_version == Some(self.protocol) && self.protocol == 7,
+            "admitted invocation did not negotiate V7"
+        );
+        let work = WorkIdentity {
+            ingress,
+            run: run.to_string(),
+            segment: row.id.clone(),
+            call: None,
+            ordinal: None,
+        };
+        self.bind(&work, row.id.clone())?;
+        Ok(work)
+    }
     pub fn bind(&mut self, work: &WorkIdentity, invocation: String) -> anyhow::Result<()> {
         let key = serde_json::to_string(work)?;
         if let Some(previous) = self.bindings.get(&key) {
@@ -232,4 +398,43 @@ impl EvidenceReader for RestateEvidenceReader {
             Ok(evidence)
         })
     }
+}
+
+/// A canonical transfer may occur in a completion payload or the encoded
+/// canonical envelope it owns. Shape recognition is strict and never turns
+/// a store acknowledgement (often just unit) into transfer bytes.
+fn find_transfer(
+    value: &serde_json::Value,
+) -> anyhow::Result<Option<lash_core_store::tool_run::RunTransfer>> {
+    if value.get("owner").is_some()
+        && value.get("from").is_some()
+        && value.get("entries").is_some()
+        && value.get("attempts").is_some()
+        && value.get("material_aliases").is_some()
+    {
+        return Ok(Some(serde_json::from_value(value.clone())?));
+    }
+    match value {
+        serde_json::Value::Object(fields) => {
+            for child in fields.values() {
+                if let Some(found) = find_transfer(child)? {
+                    return Ok(Some(found));
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for child in values {
+                if let Some(found) = find_transfer(child)? {
+                    return Ok(Some(found));
+                }
+            }
+        }
+        serde_json::Value::String(text) if text.starts_with('{') || text.starts_with('[') => {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+                return find_transfer(&value);
+            }
+        }
+        _ => {}
+    }
+    Ok(None)
 }

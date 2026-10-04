@@ -136,13 +136,43 @@ impl FileBarriers {
             "barrier lacks evidence provenance"
         );
         anyhow::ensure!(
-            !proof.barrier.kind.durable() || proof.journal_index.is_some(),
+            !proof.barrier.kind.journal_backed() || proof.journal_index.is_some(),
             "durable barrier lacks decoded journal index"
         );
+        if proof.barrier.kind.durable() && !proof.barrier.kind.journal_backed() {
+            let bytes = std::fs::read(&proof.artifact)?;
+            anyhow::ensure!(
+                serde_json::from_slice::<serde_json::Value>(&bytes)?.is_object(),
+                "store barrier lacks an independently read JSON receipt"
+            );
+        }
         crate::node::write_atomically(
             &self.path(&proof.barrier, "reached")?,
             &serde_json::to_vec(proof)?,
         )
+    }
+    /// Adapter oracles publish independently read fenced-store facts here.
+    /// A store revision/fence is never relabelled as a V7 journal index.
+    pub fn publish_store(
+        &self,
+        barrier: &Barrier,
+        artifact: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            barrier.kind.durable() && !barrier.kind.journal_backed(),
+            "phase requires actual decoded journal provenance"
+        );
+        let bytes = std::fs::read(artifact)?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+        anyhow::ensure!(
+            value.is_object(),
+            "independent store receipt is not an object"
+        );
+        self.publish(&BarrierProof {
+            barrier: barrier.clone(),
+            artifact: artifact.display().to_string(),
+            journal_index: None,
+        })
     }
     pub async fn await_proof(&self, barrier: &Barrier) -> anyhow::Result<BarrierProof> {
         loop {
@@ -151,7 +181,7 @@ impl FileBarriers {
                     let proof: BarrierProof = serde_json::from_slice(&bytes)?;
                     anyhow::ensure!(proof.barrier == *barrier, "barrier identity mismatch");
                     anyhow::ensure!(
-                        !barrier.kind.durable() || proof.journal_index.is_some(),
+                        !barrier.kind.journal_backed() || proof.journal_index.is_some(),
                         "durable barrier lacks journal proof"
                     );
                     return Ok(proof);
@@ -178,6 +208,9 @@ impl FileBarriers {
             artifact,
             journal_index: None,
         })?;
+        self.await_release(barrier).await
+    }
+    pub async fn await_release(&self, barrier: &Barrier) -> anyhow::Result<()> {
         while self.path(barrier, "hold")?.exists() && !self.path(barrier, "release")?.exists() {
             anyhow::ensure!(
                 std::time::Instant::now() < self.deadline,
@@ -190,16 +223,24 @@ impl FileBarriers {
 }
 impl BarrierKind {
     pub fn durable(&self) -> bool {
+        self.journal_backed()
+            || matches!(
+                self,
+                Self::ContinuationPublished
+                    | Self::SuccessorAdmitted
+                    | Self::SourceSealed
+                    | Self::ParkCommitted
+                    | Self::SuccessorFence
+                    | Self::PublicationRefused
+            )
+    }
+    pub fn journal_backed(&self) -> bool {
         matches!(
             self,
             Self::AdmissionDurable
                 | Self::XDurable
                 | Self::DDurable
                 | Self::VDurable
-                | Self::ContinuationPublished
-                | Self::SuccessorAdmitted
-                | Self::SourceSealed
-                | Self::ParkCommitted
                 | Self::RunCancelRecorded
                 | Self::StartAdmitted
                 | Self::StartRegistered
@@ -291,7 +332,7 @@ impl CoreControl {
 impl Control for CoreControl {
     fn await_barrier<'a>(&'a mut self, barrier: &'a Barrier) -> Step<'a, BarrierProof> {
         Box::pin(async move {
-            let proof = if barrier.kind.durable() {
+            let proof = if barrier.kind.journal_backed() {
                 loop {
                     for (_, process) in self.processes.values_mut() {
                         if !process.is_reaped() {
@@ -458,7 +499,14 @@ fn journal_matches(fact: &super::evidence::JournalFact, barrier: &Barrier) -> bo
                 barrier.kind == BarrierKind::RunCancelRecorded
                     && *state == lash_core_store::tool_run::RunLifecycle::Closing
             }
-            RunEvent::Admitted { .. } => barrier.kind == BarrierKind::AdmissionDurable,
+            RunEvent::Admitted { round } => {
+                barrier.kind == BarrierKind::AdmissionDurable
+                    && (barrier.work.call.is_none()
+                        || round
+                            .members
+                            .iter()
+                            .any(|member| call_matches(&member.call_id)))
+            }
             RunEvent::AttemptRecorded {
                 call_id, attempt, ..
             } => {
@@ -472,9 +520,15 @@ fn journal_matches(fact: &super::evidence::JournalFact, barrier: &Barrier) -> bo
             RunEvent::Presented { call_id, .. } => {
                 barrier.kind == BarrierKind::VDurable && call_matches(call_id)
             }
-            RunEvent::RetryScheduled { call_id, .. }
-            | RunEvent::RetryTimerRegistered { call_id, .. } => {
-                barrier.kind == BarrierKind::RetryScheduleDurable && call_matches(call_id)
+            RunEvent::RetryScheduled {
+                call_id, failed, ..
+            }
+            | RunEvent::RetryTimerRegistered {
+                call_id, failed, ..
+            } => {
+                barrier.kind == BarrierKind::RetryScheduleDurable
+                    && call_matches(call_id)
+                    && barrier.work.ordinal == Some(failed.get())
             }
             _ => false,
         }),

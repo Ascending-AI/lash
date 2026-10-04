@@ -1,6 +1,10 @@
 //! H0 witnesses: R1 faults need actual work/journal provenance; R3 requires
 //! real process and peer loss, retained data, observed leaders and cleanup.
 use anyhow::{Context, Result, ensure};
+use lash_upgrade_harness::e2e::control::process::{
+    ProxyCommand, ProxyConfig, command as proxy_command,
+};
+use lash_upgrade_harness::e2e::control::transport::PublicationCut;
 use lash_upgrade_harness::e2e::{
     case::{ArtifactIdentity, CaseLease},
     cluster::{ClusterControl, LocalCluster},
@@ -9,6 +13,78 @@ use lash_upgrade_harness::e2e::{
 };
 use lash_upgrade_harness::harness::{Case, NodeBinary, ServeOptions, Services};
 use lash_upgrade_harness::identity::BuildLabel;
+
+#[tokio::test]
+async fn core_r1_body_callback_waits_for_admitted_identity_and_controller_release() -> Result<()> {
+    use lash_upgrade_harness::e2e::control::callback::{BodyCallbacks, ToolDelivery};
+    let directory = tempfile::tempdir()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut callbacks = BodyCallbacks::start(
+        std::net::TcpListener::bind("127.0.0.1:0")?,
+        directory.path().to_owned(),
+        deadline,
+    )
+    .await?;
+    let mut work = identity();
+    work.call = Some("actual-call".into());
+    work.ordinal = Some(2);
+    let barrier = Barrier {
+        work: work.clone(),
+        kind: BarrierKind::BodyEntered,
+    };
+    let barriers = FileBarriers::new(directory.path().to_owned(), deadline)?;
+    let endpoint = callbacks.endpoint.clone();
+    let request = tokio::spawn(async move {
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()?
+            .post(endpoint)
+            .json(&ToolDelivery {
+                label: "A".into(),
+                call_id: "actual-call".into(),
+                ordinal: 2,
+                logical_run: "accepted-run".into(),
+                completion: serde_json::Value::Null,
+                owner: lash_core::ExecutionOwner::SessionFrame {
+                    session_id: "callback-session".into(),
+                    agent_frame_id: lash_core::FrameNodeId::new("callback-frame")?,
+                },
+            })
+            .send()
+            .await?
+            .error_for_status()
+            .map_err(anyhow::Error::from)
+    });
+    callbacks.bind("accepted-run".into(), identity())?;
+    let proof = callbacks
+        .await_delivery("accepted-run", "A", 2, BarrierKind::BodyEntered)
+        .await?;
+    ensure!(
+        proof.barrier.work == work && proof.journal_index.is_none(),
+        "body receipt changed identity or asserted journal durability"
+    );
+    let held = std::fs::read_dir(directory.path())?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "hold"))
+        .any(|entry| {
+            std::fs::read(entry.path())
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Barrier>(&bytes).ok())
+                .as_ref()
+                == Some(&barrier)
+        });
+    ensure!(
+        held,
+        "body identity was revealed before its controller hold"
+    );
+    ensure!(
+        !request.is_finished(),
+        "body returned before explicit release"
+    );
+    barriers.release(&barrier)?;
+    tokio::time::timeout_at(deadline.into(), request).await???;
+    callbacks.finish().await
+}
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -45,6 +121,47 @@ fn identity() -> WorkIdentity {
 }
 fn write(path: &Path, value: &impl serde::Serialize) -> Result<()> {
     std::fs::write(path, serde_json::to_vec_pretty(value)?)?;
+    Ok(())
+}
+fn finish_case(
+    directory: &Path,
+    name: &str,
+    result: Result<Evidence>,
+    cleanup: Result<Vec<lash_upgrade_harness::e2e::control::CleanupReceipt>>,
+) -> Result<()> {
+    use lash_upgrade_harness::e2e::evidence::{CaseReceipt, Verdict};
+    let (mut evidence, mut reason) = match result {
+        Ok(evidence) => (evidence, None),
+        Err(error) => (Evidence::empty(name.into()), Some(error.to_string())),
+    };
+    match cleanup {
+        Ok(cleanup) => evidence.cleanup.extend(cleanup),
+        Err(error) => {
+            evidence
+                .cleanup
+                .push(lash_upgrade_harness::e2e::control::CleanupReceipt {
+                    resource: "cluster".into(),
+                    closed: false,
+                    detail: error.to_string(),
+                });
+            reason = Some(format!("{}; cleanup: {error}", reason.unwrap_or_default()));
+        }
+    }
+    let verdict = reason
+        .as_ref()
+        .map_or(Verdict::Passed, |reason| Verdict::Failed {
+            reason: reason.clone(),
+        });
+    let receipt = CaseReceipt { evidence, verdict };
+    let counts = receipt.write(directory)?;
+    if let Some(reason) = reason {
+        anyhow::bail!("{reason}");
+    }
+    counts.reconcile()?;
+    println!(
+        "{name} selected={} executed={} passed={} failed={} not_run={}",
+        counts.selected, counts.executed, counts.passed, counts.failed, counts.not_run
+    );
     Ok(())
 }
 #[test]
@@ -114,14 +231,39 @@ async fn core_r1_one_node_host_sigkill_reopens_real_journal_and_cleans_up() -> R
         let host = NodeBinary::at(host_artifact.path.clone(),BuildLabel::N);
         let services = Services { ingress_url: boot.nodes[0].ingress_url.clone(), admin_url: boot.nodes[0].admin_url.clone(), postgres_url: String::new() };
         let scratch = lease.directory.clone();
-        let (case, mut serving, pending, session) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let (case, mut serving) = tokio::task::spawn_blocking(move || -> Result<_> {
             let case = Case::sqlite("host",&services,&scratch)?;
-            let serving = host.serve(&case)?;
-            let session = case.session_id("real-ingress");
-            let pending = host.spawn_turn(&case,&session,"hold:core-r1")?;
+            let serving = host.serve_with(&case,&ServeOptions { unregistered:true,register_later:true,..Default::default() })?;
+            Ok((case,serving))
+        }).await??;
+        let proxy_artifact=artifact("publication-proxy",PathBuf::from(std::env::var("LASH_E2E_PROXY_BIN")?))?;
+        proxy_artifact.verify()?;
+        let proxy_directory=lease.directory.join("publication-proxy");
+        std::fs::create_dir(&proxy_directory)?;
+        let socket=PathBuf::from(format!("target/h0-proxy-{}.sock",std::process::id()));
+        let ready=proxy_directory.join("ready.json");
+        let config=ProxyConfig { listen:format!("127.0.0.1:{}",cluster.port_base+20).parse()?,upstream:serving.bind()?.parse()?,directory:proxy_directory.clone(),control_socket:socket.clone(),ready_file:ready.clone(),deadline_secs:120,cuts:Vec::new() };
+        let endpoint=format!("http://{}",config.listen);
+        let config_path=proxy_directory.join("config.json");
+        write(&config_path,&config)?;
+        let mut command=std::process::Command::new(&proxy_artifact.path);
+        command.arg(config_path);
+        let mut proxy=lash_upgrade_harness::harness::ServingNode::spawn(&mut command,&proxy_directory.join("process.log"))?;
+        loop {
+            proxy.assert_running()?;
+            if ready.is_file() { break; }
+            ensure!(Instant::now()<lease.deadline,"independent publication holder never became ready");
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let host_path=host_artifact.path.clone();
+        let (case,serving,pending,session)=tokio::task::spawn_blocking(move || -> Result<_> {
+            serving.register(&endpoint)?;
+            let session=case.session_id("real-ingress");
+            let pending=NodeBinary::at(host_path,BuildLabel::N).spawn_turn(&case,&session,"hold:core-r1")?;
             case.await_gate("core-r1")?;
             Ok((case,serving,pending,session))
         }).await??;
+        let mut serving=serving;
         let view = case.view()?;
         let prefix = view.service_name("LashTurn");
         #[derive(serde::Deserialize)]
@@ -134,13 +276,37 @@ async fn core_r1_one_node_host_sigkill_reopens_real_journal_and_cleans_up() -> R
         let pre = view.journal(&work,&row.id,protocol).await?;
         ensure!(!pre.is_empty(),"pre-fault journal must exist");
         write(&lease.directory.join("pre-fault-journal.json"),&pre)?;
-        let bind = serving.bind()?;
+        let slot=pre.iter().find(|fact|fact.entry_type=="Command: Run" && fact.name.as_deref().is_some_and(|name|name.contains(":llm_call:"))).context("provider gate has no actual LLM Run slot")?.name.clone().context("Run slot has no name")?;
+        let publication=Barrier { work:work.clone(),kind:BarrierKind::PublicationRequest };
+        let before_ack=Barrier { work:work.clone(),kind:BarrierKind::BeforeAck };
+        let barriers=FileBarriers::new(proxy_directory.clone(),lease.deadline)?;
+        barriers.hold(&publication)?;
+        proxy_command(&socket,&ProxyCommand::Bind { invocation:row.id.clone(),work:work.clone() },lease.deadline).await?;
+        proxy_command(&socket,&ProxyCommand::ArmPublication { cut:PublicationCut { invocation:row.id.clone(),journal_name:slot.clone(),proposal:publication.clone(),before_ack } },lease.deadline).await?;
+        case.release("core-r1")?;
+        let proof=barriers.await_proof(&publication).await?;
+        ensure!(!view.journal(&work,&row.id,protocol).await?.iter().any(|fact|fact.entry_type=="Notification: Run" && fact.name.as_deref()==Some(&slot)),"held proposal was already durable");
+        let bind=serving.bind()?;
+        let predecessor_pid=serving.pid()?;
         serving.kill_and_reap()?;
-        let path = host_artifact.path.clone();
-        let (case, serving) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let host = NodeBinary::at(path,BuildLabel::N);
-            let serving = host.serve_with(&case,&ServeOptions { bind: Some(bind), ..Default::default() })?;
-            case.release("core-r1")?;
+        let killed=lash_upgrade_harness::e2e::control::FaultReceipt {
+            fault:lash_upgrade_harness::e2e::control::Fault::KillHost { target:"upgrade-node".into() },
+            proof:proof.clone(),
+            target_incarnation:1,
+        };
+        proxy.assert_running()?;
+        barriers.release(&publication)?;
+        loop {
+            let observed=view.journal(&work,&row.id,protocol).await?;
+            if observed.iter().any(|fact|fact.entry_type=="Notification: Run" && fact.name.as_deref()==Some(&slot)) { break; }
+            proxy.assert_running()?;
+            ensure!(Instant::now()<lease.deadline,"independent holder did not deliver its retained completion after host SIGKILL");
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let path=host_artifact.path.clone();
+        let (case,serving)=tokio::task::spawn_blocking(move || -> Result<_> {
+            let host=NodeBinary::at(path,BuildLabel::N);
+            let serving=host.serve_with(&case,&ServeOptions { bind:Some(bind),unregistered:true,register_later:false })?;
             Ok((case,serving))
         }).await??;
         let deadline=lease.deadline;
@@ -149,30 +315,36 @@ async fn core_r1_one_node_host_sigkill_reopens_real_journal_and_cleans_up() -> R
         let post = case.view()?.journal(&work,&row.id,protocol).await?;
         ensure!(post.len() >= pre.len(), "retained journal shrank on host restart");
         write(&lease.directory.join("post-fault-journal.json"),&post)?;
-        let deployment = case.view()?.deployment_at(serving.uri()?).await?;
         let host_endpoint = serving.uri()?.to_owned();
+        let successor_pid=serving.pid()?;
+        ensure!(successor_pid!=predecessor_pid,"cold restart retained the dead physical process");
         serving.stop()?;
-        case.view()?.retire_deployment(&deployment.id).await?;
         ensure!(tokio::net::TcpStream::connect(host_endpoint.trim_start_matches("http://")).await.is_err(), "host listener leaked");
         let mut evidence = Evidence::empty("H0-R1".into());
-        evidence.artifacts = vec![binary.clone(),host_artifact];
+        evidence.artifacts = vec![binary.clone(),host_artifact,proxy_artifact];
+        evidence.barriers.push(proof);
+        evidence.faults.push(killed);
+        evidence.stores.push(serde_json::json!({"predecessor_pid":predecessor_pid,"successor_pid":successor_pid,"reopened_bind":host_endpoint}));
+        let effects=case.effects_of("hold:core-r1")?;
+        ensure!(effects.len()==1,"accepted retained provider completion was executed again after cold restart");
+        evidence.effects.push(serde_json::to_value(effects)?);
+        proxy_command(&socket,&ProxyCommand::Stop,lease.deadline).await?;
+        proxy.wait_success(lease.deadline).await?;
+        ensure!(tokio::net::UnixStream::connect(&socket).await.is_err(),"proxy control socket leaked");
+        evidence.cleanup.push(lash_upgrade_harness::e2e::control::CleanupReceipt { resource:"publication-proxy".into(),closed:true,detail:"independent process exited successfully; TCP and control listeners closed".into() });
         evidence.journals = post;
         evidence.stores.push(serde_json::to_value(report)?);
-        evidence.cleanup.push(lash_upgrade_harness::e2e::control::CleanupReceipt { resource: "host-and-deployment".into(), closed: true, detail: "host reaped and non-forced deployment retirement accepted".into() });
+        evidence.cleanup.push(lash_upgrade_harness::e2e::control::CleanupReceipt { resource: "host".into(), closed: true, detail: "host reaped; listener refused connections; case Restate deployment reclaimed with cluster shutdown".into() });
         Ok(evidence)
     }.await;
     let cleanup = cluster.finish().await;
-    let mut evidence = result?;
-    evidence.cleanup.extend(cleanup?);
-    write(&lease.directory.join("evidence.json"), &evidence)?;
-    println!("H0-R1 selected=1 executed=1 passed=1 failed=0 not_run=0");
-    Ok(())
+    finish_case(&lease.directory, "H0-R1", result, cleanup)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn core_r3_three_real_nodes_directed_partition_leader_loss_and_cleanup() -> Result<()> {
     let (mut lease, mut cluster, binary) = setup("three-node")?;
-    let result: Result<()> = async {
+    let result: Result<Evidence> = async {
         let boot = cluster.boot(&binary,3,&mut lease).await?;
         write(&lease.directory.join("boot.json"),&boot)?;
         let prior = boot.leaders.first().context("no observed active partition leader")?.clone();
@@ -200,16 +372,15 @@ async fn core_r3_three_real_nodes_directed_partition_leader_loss_and_cleanup() -
         let restarted = cluster.restart(prior.node).await?;
         let original = boot.nodes.iter().find(|node| node.node==prior.node).context("killed node missing from boot")?;
         ensure!(restarted.data_directory==original.data_directory && restarted.incarnation==original.incarnation+1,"restart did not retain node identity/data");
-        write(&lease.directory.join("restarted.json"),&cluster.converge().await?)?;
-        Ok(())
+        let final_cluster=cluster.converge().await?;
+        write(&lease.directory.join("restarted.json"),&final_cluster)?;
+        let mut evidence=Evidence::empty("H0-R3".into());
+        evidence.artifacts.push(binary.clone());
+        evidence.stores.push(serde_json::to_value(boot)?);
+        evidence.stores.push(serde_json::to_value(final_cluster)?);
+        evidence.faults.push(killed);
+        Ok(evidence)
     }.await;
     let cleanup = cluster.finish().await;
-    write(
-        &lease.directory.join("cleanup.json"),
-        &cleanup.as_ref().map_err(ToString::to_string),
-    )?;
-    result?;
-    cleanup?;
-    println!("H0-R3 selected=1 executed=1 passed=1 failed=0 not_run=0");
-    Ok(())
+    finish_case(&lease.directory, "H0-R3", result, cleanup)
 }
