@@ -16,7 +16,6 @@ pub trait ShiftAdmissionMaterializer: Send + Sync {
 pub struct ShiftAdmissionTemplate {
     host: crate::RuntimeHostConfig,
     policy: crate::TurnLaneAdmissionPolicy,
-    turn_index: u64,
     plugins: crate::plugin::PluginHost,
 }
 
@@ -30,7 +29,6 @@ impl LashRuntime {
                 .durability
                 .queued_work_batching
                 .admission_policy(self.max_context_tokens()?),
-            turn_index: (self.state.turn_index + 1) as u64,
             plugins: self.services.plugins.host().clone(),
         })
     }
@@ -66,6 +64,36 @@ impl ShiftAdmissionMaterializer for ShiftAdmissionTemplate {
                 "admission requires a session head",
             )
         })?;
+        let base = crate::store::SessionHeadRef {
+            generation: 0,
+            revision: live.head_revision,
+            leaf: live.leaf_node_id,
+            checkpoint: live.checkpoint_ref,
+        };
+        // The idle runtime may have opened before another run committed. The
+        // prepared head owns both the composition and its physical-turn index.
+        let loaded = crate::store::load_session_window_state(
+            store,
+            crate::store::WindowSelector::Admitted(base.clone()),
+        )
+        .await
+        .map_err(|error| admission::store_fault("admission turn index", error))?
+        .ok_or_else(|| {
+            admission::store_fault(
+                "admission turn index",
+                crate::StoreError::TurnBaseNotRetained {
+                    revision: base.revision,
+                },
+            )
+        })?;
+        let turn_index = (loaded.state.turn_index as u64)
+            .checked_add(1)
+            .ok_or_else(|| {
+                crate::RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::RuntimeStoreCorrupt,
+                    "admission exhausted its physical-turn indices",
+                )
+            })?;
         let effect_host = &self.host.control.effect_host;
         let scoped = effect_host
             .scoped(scope.clone())
@@ -91,13 +119,8 @@ impl ShiftAdmissionMaterializer for ShiftAdmissionTemplate {
                 .queued_work_batching
                 .max_turn_input_admission(),
             policy: self.policy.clone(),
-            base: crate::store::SessionHeadRef {
-                generation: 0,
-                revision: live.head_revision,
-                leaf: live.leaf_node_id,
-                checkpoint: live.checkpoint_ref,
-            },
-            turn_index: self.turn_index,
+            base,
+            turn_index,
             admitted_generation: admitted.admitted_generation().clone(),
             executor,
             plugins,
