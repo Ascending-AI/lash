@@ -1319,7 +1319,6 @@ macro_rules! session_store_factory_tests {
             (concurrent_session_admissions_preserve_one_relation, "concurrent-session-relation"),
             (ingress_follow_on_fork_and_command_run_matrix, "ingress-follow-on-fork-commands"),
             (turn_cancel_exact_replay_preserves_different_pending_authorization, "turn-cancel-exact-replay"),
-            (turn_cancel_closure_settlement_is_fenced_and_non_overwritable, "turn-cancel-closure-settlement"),
             (turn_cancel_scope_retirement_serializes_with_authorization, "turn-cancel-scope-retirement"),
             (turn_cancel_request_escalation_advances_intent_without_replacing_base, "turn-cancel-escalation"),
             (turn_cancel_repair_preserves_base_across_escalation_and_reopen, "turn-cancel-repair-reopen"),

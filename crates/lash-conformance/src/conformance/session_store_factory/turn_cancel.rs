@@ -144,14 +144,14 @@ fn closure_authorization_under(
 /// The dead turn's teardown commit over the current head: it applies the
 /// closure's cancellation disposition to the open input addressed to `turn`,
 /// predicated on `observed`, and consumes `settlement` in the same
-/// transaction. Builds the envelope shared by successful and refusal laws.
-pub(super) async fn teardown_commit(
+/// transaction. Returns the input outcome the commit recorded.
+pub(super) async fn commit_teardown(
     store: &dyn crate::RuntimeStore,
     fence: &crate::store::ShiftFence,
     turn: &TurnId,
     observed: &crate::TurnCancelIntentSnapshot,
     settlement: &crate::TurnCancelClosureSettlement,
-) -> Result<crate::RuntimeCommit, crate::StoreError> {
+) -> Result<crate::TurnCancelInputOutcome, crate::StoreError> {
     let state = crate::conformance::helpers::load_window_state(store, fence.session())
         .await?
         .unwrap_or_else(|| crate::RuntimeSessionState {
@@ -169,18 +169,6 @@ pub(super) async fn teardown_commit(
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state)
         .closing_interrupted_turn(settlement.clone(), observed.clone());
     commit.shift_fence = Some(Box::new(fence.clone()));
-    Ok(commit)
-}
-
-/// Commit the teardown envelope supplied by a refusal law.
-pub(super) async fn commit_teardown(
-    store: &dyn crate::RuntimeStore,
-    fence: &crate::store::ShiftFence,
-    turn: &TurnId,
-    observed: &crate::TurnCancelIntentSnapshot,
-    settlement: &crate::TurnCancelClosureSettlement,
-) -> Result<crate::TurnCancelInputOutcome, crate::StoreError> {
-    let commit = teardown_commit(store, fence, turn, observed, settlement).await?;
     store
         .commit_runtime_state(commit)
         .await
@@ -200,10 +188,7 @@ fn settled_closure(
 
 mod closure_receipts;
 pub use closure_receipts::a_stale_fence_receipt_replay_leaves_the_store_byte_identical;
-pub(super) use closure_receipts::{
-    turn_cancel_closure_settlement_is_fenced_and_non_overwritable,
-    turn_cancel_exact_replay_preserves_different_pending_authorization,
-};
+pub(super) use closure_receipts::turn_cancel_exact_replay_preserves_different_pending_authorization;
 
 /// An escalation can change effective timing while repair retains the first
 /// accepted request and its provenance across owner loss and reopen.

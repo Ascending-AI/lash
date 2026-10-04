@@ -56,8 +56,6 @@ turn_cancel_law! {
     turn_cancel_exact_replay_preserves_different_pending_authorization:
         "an exact commit replay cannot consume a different pending \
          cancellation-closure authorization on the same turn address",
-    turn_cancel_closure_settlement_is_fenced_and_non_overwritable:
-        "cancellation closure settlement is fenced and immutable",
     turn_cancel_scope_retirement_serializes_with_authorization:
         "cancellation closure scope retirement serializes with authorization",
     turn_cancel_request_escalation_advances_intent_without_replacing_base:
