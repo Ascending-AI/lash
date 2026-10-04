@@ -1172,6 +1172,19 @@ impl Case {
         Self::new(name, StoreSpec::Sqlite(dir), services, scratch)
     }
 
+    /// Reuse the Phase A controller with a scenario's stable private identity.
+    pub fn leased_sqlite(
+        name: &str,
+        services: &Services,
+        lease: &crate::e2e::case::CaseLease,
+    ) -> Result<Self> {
+        let mut case = Self::sqlite(name, services, &lease.directory)?;
+        case.authority = lease.authority.clone();
+        case.namespace = lease.namespace.clone();
+        case.token = lease.namespace.clone();
+        Ok(case)
+    }
+
     fn new(name: &str, store: StoreSpec, services: &Services, scratch: &Path) -> Result<Self> {
         let scratch = scratch.join(name);
         std::fs::create_dir_all(scratch.join("gates"))

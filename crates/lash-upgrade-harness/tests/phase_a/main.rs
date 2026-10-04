@@ -21,7 +21,4 @@ mod retention_delivery_rollback;
 mod skipped_compatibility_release_refused;
 mod support;
 
-#[path = "../e2e/plugin_upgrade.rs"]
-mod plugin_upgrade;
-
 mod workflow_graph_range;

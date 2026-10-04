@@ -94,11 +94,41 @@ impl Probe {
             &self.controls.join(format!("{name}.entered")),
             &serde_json::to_vec(detail)?,
         )?;
-        let release = self.controls.join(format!("{name}.release"));
+        let binding = self.controls.join(format!(
+            "{}.binding",
+            detail["call_id"].as_str().context("call identity")?
+        ));
         tokio::time::timeout(Duration::from_secs(120), async {
-            while !release.try_exists()? {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
+            let work: crate::e2e::control::WorkIdentity = loop {
+                match std::fs::read(&binding) {
+                    Ok(bytes) => break serde_json::from_slice(&bytes)?,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        tokio::time::sleep(Duration::from_millis(20)).await
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            };
+            ensure!(
+                Some(work.run.as_str()) == detail["run"].as_str()
+                    && work.call.as_deref() == detail["call_id"].as_str(),
+                "controller bound another body"
+            );
+            let barriers = crate::e2e::control::FileBarriers::new(
+                self.controls.clone(),
+                std::time::Instant::now() + Duration::from_secs(120),
+            )?;
+            barriers
+                .enter(
+                    &crate::e2e::control::Barrier {
+                        work,
+                        kind: crate::e2e::control::BarrierKind::BodyEntered,
+                    },
+                    self.controls
+                        .join(format!("{name}.entered"))
+                        .display()
+                        .to_string(),
+                )
+                .await?;
             Ok::<_, anyhow::Error>(())
         })
         .await
@@ -380,11 +410,12 @@ fn calls(variant: &str) -> Vec<lash_core::LlmOutputPart> {
 fn core(
     engine: Arc<lash::restate::RestateEngine>,
     controls: &std::path::Path,
+    converters: &[Arc<AtomicUsize>; 2],
 ) -> Result<lash::LashCore> {
     let probe = Probe {
         plugin: PLUGIN,
         controls: controls.to_path_buf(),
-        converters: Arc::default(),
+        converters: converters[0].clone(),
     };
     let observed = probe.clone();
     let provider = lash_core::testing::TestProvider::builder()
@@ -446,7 +477,7 @@ fn core(
         .plugin(Arc::new(Probe {
             plugin: OTHER,
             controls: controls.to_path_buf(),
-            converters: Arc::default(),
+            converters: converters[1].clone(),
         }))
         .recovery_lease(super::recovery_lease())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -478,7 +509,8 @@ pub async fn run(args: PluginUpgradeArgs) -> Result<()> {
         );
     }
     let engine = super::engine(stores, &args.restate)?;
-    let core = core(engine.clone(), &args.controls)?;
+    let converters = [Arc::default(), Arc::default()];
+    let core = core(engine.clone(), &args.controls, &converters)?;
     if matches!(args.action, Action::Serve) {
         let worker = lash::durability::DurableProcessWorker::new(
             core.durable_process_worker_config()
@@ -531,13 +563,22 @@ pub async fn run(args: PluginUpgradeArgs) -> Result<()> {
             super::print(handle.receipt())
         }
         Action::Follow => {
+            let input = args.input.context("follow requires --input")?;
             let outcome = tokio::time::timeout(
                 Duration::from_secs(120),
-                session
-                    .attach(args.input.context("follow requires --input")?)
-                    .outcome(),
+                session.attach(input.clone()).outcome(),
             )
             .await??;
+            super::write_atomically(
+                &args.controls.join(format!(
+                    "{}-{}.follow.json",
+                    BuildLabel::current(),
+                    std::process::id()
+                )),
+                &serde_json::to_vec(
+                    &json!({"input":input,"converters":converters.iter().map(|counter| counter.load(Ordering::SeqCst)).collect::<Vec<_>>()}),
+                )?,
+            )?;
             super::print(&outcome)
         }
         Action::Cancel => {
