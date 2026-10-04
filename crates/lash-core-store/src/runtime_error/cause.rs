@@ -25,7 +25,7 @@ pub enum RuntimeErrorCause {
         refusal: Box<crate::tool_run::IsolatedStartRefusal>,
     },
     ToolRunDrift {
-        call_id: lash_sansio::ToolCallId,
+        call_id: Box<lash_sansio::ToolCallId>,
         drift: Box<crate::tool_run::SingletonDrift>,
     },
     ToolRunControl {

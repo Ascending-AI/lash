@@ -1073,6 +1073,41 @@ fn a_declared_start_drains_inside_its_declarations_under_one_key() {
             "process_id": ProcessId::fixture("fig4884-process"),
         })
     );
+
+    // A production pending start obeys the same cancellation fence.
+    let mut pending = call("pending");
+    pending.declaration = ToolDeclaration::deferring().with_intents([ToolIntentKind::StartProcess]);
+    let id = pending.call_id.clone();
+    let mut log = Log::new();
+    log.push(RunEvent::Admitted {
+        round: round(vec![pending]),
+    })
+    .unwrap();
+    log.push(RunEvent::AttemptRecorded {
+        call_id: id.clone(),
+        attempt: attempt(1),
+        result: AttemptResult::Pending {
+            source: source_key(&id),
+            metadata: run_material(MaterialRole::AttemptOutput),
+            start: Some(Box::new(PendingStart {
+                start_key: key.clone(),
+                obligation: run_material(MaterialRole::AttemptOutput),
+            })),
+        },
+    })
+    .unwrap();
+    log.push(RunEvent::Decided {
+        call_id: id.clone(),
+        rank: 1,
+        decision: CallDecision::Cancelled,
+        after: None,
+    })
+    .unwrap();
+    assert_eq!(
+        log.push(admitted(&id, &key)),
+        Err(order(&id)),
+        "cancellation forbids admission of a recorded pending start"
+    );
 }
 
 #[test]

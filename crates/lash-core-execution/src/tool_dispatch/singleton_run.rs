@@ -689,7 +689,7 @@ impl SingletonRunError {
             }
             Self::Drift { call_id, drift } => run_refusal(
                 crate::RuntimeErrorCause::ToolRunDrift {
-                    call_id,
+                    call_id: Box::new(call_id),
                     drift: Box::new(drift),
                 },
                 format!("recorded admission drifted in {drift:?}"),

@@ -134,11 +134,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// Share the enclosing invocation's request channel with a phase context.
-    pub fn tool_run_owner(&self) -> Option<ToolRunOwner> {
+    pub(super) fn tool_run_owner(&self) -> Option<ToolRunOwner> {
         self.tool_run.clone().map(ToolRunOwner)
     }
 
-    pub fn with_tool_run_owner(mut self, owner: &ToolRunOwner) -> Self {
+    pub(super) fn with_tool_run_owner(mut self, owner: &ToolRunOwner) -> Self {
         self.tool_run = Some(owner.0.clone());
         self
     }

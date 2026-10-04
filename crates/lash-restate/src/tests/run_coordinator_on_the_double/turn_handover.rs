@@ -3,14 +3,7 @@ use super::*;
 use lash_core::StoreSet as _;
 use lash_core::facade_support::SystemClock;
 use lash_core::session::OpenerState;
-use lash_core::store::{
-    AdmittedHead, IngressSettlement, PendingFollowOn, RunContinuation, RuntimeStore,
-    ToolMaterialStore, TurnCancellationBinding,
-};
-use lash_core::testing::store_fixtures::{
-    admit_conformance_session, admit_run_request_for_test, authorize_completion_deferral_for_test,
-    seal_shift_fence_for_test,
-};
+use lash_core::store::{PendingFollowOn, RunContinuation, RuntimeStore, ToolMaterialStore};
 
 #[tokio::test]
 async fn l09_l16_turn_commit_adopts_prior_and_current_cell_receipts_without_bodies() {
@@ -220,7 +213,6 @@ async fn turn_receipts(side: CrashSide) {
                     }
                     let publishing_store = store.clone();
                     let publishing = published.clone();
-                    let publishing_host = source_engine.lash_backend().effect_host();
                     scoped
                         .controller()
                         .record_run_record(
@@ -249,45 +241,11 @@ async fn turn_receipts(side: CrashSide) {
                                     });
                                 }
                                 let runtime: Arc<dyn RuntimeStore> = publishing_store.clone();
-                                admit_conformance_session(
+                                lash_core::testing::store_fixtures::admit_conformance_session(
                                     &runtime,
                                     &lash_core::SessionId::from("session"),
                                 )
                                 .await;
-                                let turn = lash_core::TurnId::fixture("turn");
-                                let fence = seal_shift_fence_for_test(
-                                    &runtime,
-                                    &lash_core::SessionId::from("session"),
-                                    "l09-publication",
-                                )
-                                .await;
-                                let authority = lash_core::TurnCancellationAuthority::new(
-                                    publishing_host.turn_control_binding_id(),
-                                    publishing_host,
-                                );
-                                let head = runtime
-                                    .enqueue_pending_turn_input(
-                                        lash_core::PendingTurnInputDraft::new(
-                                            "session",
-                                            lash_core::TurnInputIngress::NextTurn,
-                                            lash_core::TurnInput::text("handover"),
-                                        )
-                                        .with_source_key(turn.as_str()),
-                                    )
-                                    .await
-                                    .unwrap();
-                                let mut request = admit_run_request_for_test(
-                                    &fence,
-                                    &turn,
-                                    AdmittedHead::Input(head.input_id),
-                                );
-                                request.turn_cancellation = Some(TurnCancellationBinding {
-                                    binding_id: authority.binding_id().to_owned(),
-                                    admitted_scope: lash_core::ExecutionScope::turn(
-                                        "session", &turn,
-                                    ),
-                                });
-                                let admission = runtime.admit_run(&request).await.unwrap().unwrap();
                                 let mut state = lash_core::RuntimeSessionState {
                                     session_id: lash_core::SessionId::from("session"),
                                     ..lash_core::RuntimeSessionState::new(
@@ -341,20 +299,6 @@ async fn turn_receipts(side: CrashSide) {
                                 .unwrap();
                                 authorize_publication(&runtime, &mut commit).await;
                                 commit.pending_follow_on = Some(owed.clone());
-                                let mut ingress = IngressSettlement::new(turn.clone());
-                                ingress
-                                    .completed_inputs
-                                    .push(admission.inputs.unwrap().completion());
-                                commit.ingress = Some(ingress);
-                                let commit = authorize_completion_deferral_for_test(
-                                    runtime.as_ref(),
-                                    &authority,
-                                    &fence,
-                                    turn,
-                                    commit,
-                                )
-                                .await
-                                .unwrap();
                                 runtime.commit_runtime_state(commit).await.unwrap();
                                 *publishing.lock().unwrap() = Some(owed);
                                 Ok(RunJournalEntry {

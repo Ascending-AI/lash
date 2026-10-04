@@ -564,3 +564,126 @@ async fn only_the_pinned_authority_and_owner_reach_a_source() {
         "refusals sealed nothing"
     );
 }
+
+/// L02/L12: the native terminal source retains its canonical capture under
+/// its own lease. Pruning the producer cannot remove or change that value.
+#[tokio::test]
+async fn l02_l12_process_terminal_source_keeps_material_after_producer_pruning() {
+    use lash_core::tool_run::MaterialHolder;
+    use lash_core::{
+        ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
+        StoreSet as _,
+    };
+
+    let world = World::new(0x1863_0012).await;
+    let registry = world.engine.stores().process_registry();
+    for (label, output) in [
+        (
+            "success",
+            process_success(serde_json::json!({ "retained": [1, 2, 3] })),
+        ),
+        (
+            "failure",
+            process_failure(
+                lash_core::ToolFailureClass::Execution,
+                "recorded_failure",
+                "the recorded failure",
+                Some(serde_json::json!({ "detail": 7 })),
+            ),
+        ),
+    ] {
+        let process = registry
+            .register_process(external_registration())
+            .await
+            .unwrap();
+        registry
+            .complete_process(
+                &process.id,
+                output.clone(),
+                lash_core::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .unwrap();
+        let mut source = world.source_by(
+            label,
+            SourceAuthority::ProcessTerminal {
+                process_id: process.id.clone(),
+            },
+        );
+        source.source =
+            test_restate_await_event_key(&source.source.scope, source.source.wait.clone())
+                .expect("the native producer requires an authority-bound source key");
+        let subscription =
+            crate::durable_wait::ProcessTerminalSubscription::for_source(source.clone()).unwrap();
+        assert!(
+            world
+                .call::<_, bool>("attach_process_terminal", subscription.clone())
+                .await
+        );
+        world
+            .call::<_, ()>(
+                "deliver_process_terminal",
+                crate::durable_wait::ProcessTerminalDelivery {
+                    subscription,
+                    output: output.clone(),
+                },
+            )
+            .await;
+        let RestateSourceSubscribeReply::Sealed { seal } =
+            world.subscribe(&source, 0, "before-prune").await
+        else {
+            panic!("the native terminal must seal its source");
+        };
+        let terminal = registry.get_process(&process.id).await.unwrap().unwrap();
+        registry
+            .prune_terminal_processes(
+                terminal.updated_at_ms.saturating_add(1),
+                None,
+                lash_core::ProjectionWatermark::NoProjector,
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                registry.get_process(&process.id).await,
+                Err(PluginError::ProcessNoLongerRetained { .. })
+            ),
+            "the producer was actually pruned"
+        );
+        assert_eq!(
+            world.subscribe(&source, 1, "after-prune").await,
+            RestateSourceSubscribeReply::Sealed { seal: seal.clone() }
+        );
+        let SourceSeal::Resolved { result } = seal else {
+            panic!("the recorded terminal must resolve the source");
+        };
+        let material = world
+            .engine
+            .stores()
+            .tool_material_store()
+            .read_material(
+                &MaterialHolder::Source {
+                    source: source.source.clone(),
+                },
+                &result,
+                &MaterialOwner::Source {
+                    source: source.source.clone(),
+                },
+                std::slice::from_ref(&source.resolver),
+            )
+            .await
+            .unwrap();
+        let capture: lash_core::tool_dispatch::SingletonCapture =
+            serde_json::from_str(&material.text).unwrap();
+        let lash_core::tool_dispatch::SingletonCapture::Done {
+            output: captured, ..
+        } = capture
+        else {
+            panic!("the native source must retain a captured process outcome");
+        };
+        assert_eq!(
+            serde_json::from_str::<ProcessAwaitOutput>(&captured).unwrap(),
+            output
+        );
+    }
+}

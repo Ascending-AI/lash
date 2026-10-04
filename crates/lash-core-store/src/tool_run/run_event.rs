@@ -1021,9 +1021,16 @@ impl RunLedger {
             Some((_, CallDecision::Final { declares: true, .. }))
         );
         let deferred = call.decision.is_none()
-            && matches!(call.attempts.values().next_back(),
-            Some(AttemptResult::DeferredStart { start_key: recorded, .. }) if recorded == start_key)
-            || matches!(call.attempts.values().last(), Some(AttemptResult::Pending { start: Some(start), .. }) if &start.start_key == start_key);
+            && match call.attempts.values().next_back() {
+                Some(AttemptResult::DeferredStart {
+                    start_key: recorded,
+                    ..
+                }) => recorded == start_key,
+                Some(AttemptResult::Pending {
+                    start: Some(start), ..
+                }) => &start.start_key == start_key,
+                _ => false,
+            };
         if !(deferred || declaring && call.declarations_issued)
             || call.seated
             || call.start.is_some()

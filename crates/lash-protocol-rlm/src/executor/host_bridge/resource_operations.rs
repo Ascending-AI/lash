@@ -22,7 +22,7 @@ enum PreparedOperation {
     },
     Tool {
         call: PreparedCall,
-        invocation: ToolInvocation,
+        invocation: Box<ToolInvocation>,
         drift: Option<lash_core::RuntimeEffectControllerError>,
     },
 }
@@ -95,7 +95,7 @@ impl HostBridge<'_> {
             });
         Ok(PreparedOperation::Tool {
             call,
-            invocation,
+            invocation: Box::new(invocation),
             drift,
         })
     }
@@ -210,7 +210,7 @@ impl HostBridge<'_> {
                 let reply = Box::pin(
                     in_flight
                         .ctx
-                        .call_command_tool(&in_flight.command.key, invocation),
+                        .call_command_tool(&in_flight.command.key, *invocation),
                 )
                 .await;
                 commands.finish(&in_flight)?;
@@ -301,7 +301,7 @@ impl HostBridge<'_> {
                         )
                     })?;
                     dispatched.insert(operand, call);
-                    lash_lashlang_runtime::BridgeAggregateLeaf::Tool(invocation)
+                    lash_lashlang_runtime::BridgeAggregateLeaf::Tool(*invocation)
                 }
                 Err(error) => lash_lashlang_runtime::BridgeAggregateLeaf::Settled(Err(error)),
             };

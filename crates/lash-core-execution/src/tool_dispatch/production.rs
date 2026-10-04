@@ -359,10 +359,10 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     }
     async fn before_checks(
         &self,
-        call: &SingletonToolCall,
+        _call: &SingletonToolCall,
         request: &SingletonPreparedRequest,
     ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
-        self.check_before(call, request).await
+        self.check_before(request).await
     }
     async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String> {
         let prepared: Prepared = serde_json::from_value(attempt.request.prepared.clone())

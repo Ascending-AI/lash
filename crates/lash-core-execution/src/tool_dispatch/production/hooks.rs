@@ -24,7 +24,6 @@ pub(super) fn context(
 impl ProductionToolHandlers<'_> {
     pub(super) async fn check_before(
         &self,
-        call: &SingletonToolCall,
         request: &SingletonPreparedRequest,
     ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
         let prepared: Prepared =

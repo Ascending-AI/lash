@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use super::super::OpenerState;
+use super::super::{OpenerState, tool_run::ToolRunOwner};
 use super::{
     ProcessId, RecordedTurnCancel, RuntimeExecutionContext, RuntimeExecutionProcessEventContext,
     RuntimeExecutionTracing, RuntimeProcessExecution, ToolDispatchContext,
@@ -24,6 +24,12 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     /// (ADR 0099 §3): a tool child of a group this turn opens borrows the live
     /// half of exactly this context.
     fn dispatch(&self) -> &Arc<ToolDispatchContext<'run>>;
+
+    /// The logical Run request channel shared by the turn's phase contexts.
+    fn tool_run_owner(&self) -> Option<ToolRunOwner>;
+
+    #[must_use]
+    fn with_tool_run_owner(self, owner: &ToolRunOwner) -> Self;
 
     #[must_use]
     fn with_tracing(self, tracing: Option<RuntimeExecutionTracing>) -> Self;
@@ -131,6 +137,14 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
     }
     fn dispatch(&self) -> &Arc<ToolDispatchContext<'run>> {
         &self.dispatch
+    }
+
+    fn tool_run_owner(&self) -> Option<ToolRunOwner> {
+        RuntimeExecutionContext::tool_run_owner(self)
+    }
+
+    fn with_tool_run_owner(self, owner: &ToolRunOwner) -> Self {
+        RuntimeExecutionContext::with_tool_run_owner(self, owner)
     }
 
     fn with_tracing(mut self, tracing: Option<RuntimeExecutionTracing>) -> Self {

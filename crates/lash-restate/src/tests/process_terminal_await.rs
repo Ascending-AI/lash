@@ -1,11 +1,8 @@
-//! Terminal awaits record their observed value once and replay it after prune.
+//! Direct terminal awaits record their observed value once without arming a source.
 
 use super::*;
-use lash_core::{
-    ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
-};
+use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _};
 use lash_restate_test::protocol::MessageType;
-use restate_sdk::context::{ContextPromises as _, SharedWorkflowContext};
 
 const PROBE: &str = "TerminalAwaitProbe";
 const BOUND: Duration = Duration::from_secs(60);
@@ -13,22 +10,16 @@ const BOUND: Duration = Duration::from_secs(60);
 #[derive(Serialize, serde::Deserialize)]
 struct Input {
     process_id: ProcessId,
-    park: bool,
-    attach: bool,
 }
 
 #[restate_sdk::workflow]
 trait TerminalAwaitProbe {
     async fn run(input: Json<Input>) -> HandlerResult<Json<ProcessAwaitOutput>>;
-    #[shared]
-    async fn release(input: Json<()>) -> HandlerResult<Json<()>>;
 }
 
 struct TerminalAwaitProbeImpl {
     registry: Arc<lash_core::testing::ProcessRegistryFaults>,
     attachments: Arc<dyn lash_core::AttachmentReferrers>,
-    observed: tokio::sync::mpsc::UnboundedSender<ProcessId>,
-    attempts: Arc<AtomicUsize>,
 }
 
 impl TerminalAwaitProbe for TerminalAwaitProbeImpl {
@@ -37,24 +28,9 @@ impl TerminalAwaitProbe for TerminalAwaitProbeImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Input>,
     ) -> HandlerResult<Json<ProcessAwaitOutput>> {
-        self.attempts.fetch_add(1, Ordering::SeqCst);
         let controller = RestateRuntimeEffectController::new_for_test(ctx);
-        let key = test_restate_await_event_key(
-            &durable_turn_scope("session", "turn"),
-            lash_core::AwaitEventWaitIdentity::Custom {
-                key: format!("terminal-await:{}", input.process_id),
-            },
-        )
-        .expect("the terminal wait key");
-        let command = if input.attach {
-            ProcessCommand::AttachTerminal {
-                process_id: input.process_id.clone(),
-                key: key.clone(),
-            }
-        } else {
-            ProcessCommand::Await {
-                process_id: input.process_id.clone(),
-            }
+        let command = ProcessCommand::Await {
+            process_id: input.process_id,
         };
         let outcome = controller
             .execute_effect(
@@ -75,41 +51,13 @@ impl TerminalAwaitProbe for TerminalAwaitProbeImpl {
             .map_err(TerminalError::from_error)?;
         let output = match outcome.into_process().map_err(TerminalError::from_error)? {
             ProcessEffectOutcome::Await { output } => output,
-            ProcessEffectOutcome::AttachTerminal if input.attach => {
-                let resolution = controller
-                    .context()
-                    .await_event(
-                        &crate::services::DEFAULT_NAMESPACE,
-                        crate::durable_wait::RestateDurableWaitAwaitRequest { key: key.clone() },
-                        key.key_id.clone(),
-                        tokio_util::sync::CancellationToken::new(),
-                    )
-                    .await?;
-                let lash_core::Resolution::Ok(value) = resolution else {
-                    return Err(TerminalError::new("the terminal wait did not resolve").into());
-                };
-                Box::new(serde_json::from_value(value).map_err(TerminalError::from_error)?)
-            }
             _ => {
                 return Err(
                     TerminalError::new("await returned a different command outcome").into(),
                 );
             }
         };
-        let _ = self.observed.send(input.process_id);
-        if input.park {
-            controller.context().promise::<String>("release").await?;
-        }
         Ok(Json(*output))
-    }
-
-    async fn release(
-        &self,
-        ctx: SharedWorkflowContext<'_>,
-        Json(()): Json<()>,
-    ) -> HandlerResult<Json<()>> {
-        ctx.resolve_promise("release", "released".to_string());
-        Ok(Json(()))
     }
 }
 
@@ -142,8 +90,6 @@ struct World {
     ingress: RestateIngressClient,
     server: Option<lash_restate_test::RestateTestServer>,
     registry: Arc<lash_core::testing::ProcessRegistryFaults>,
-    observed: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<ProcessId>>,
-    attempts: Arc<AtomicUsize>,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     serving: Option<tokio::task::JoinHandle<()>>,
 }
@@ -176,8 +122,6 @@ impl World {
         let registry = Arc::new(lash_core::testing::ProcessRegistryFaults::new(
             stores.process_registry(),
         ));
-        let (observed_tx, observed) = tokio::sync::mpsc::unbounded_channel();
-        let attempts = Arc::new(AtomicUsize::new(0));
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
         let endpoint = crate::services::bind_lash_services(
             Endpoint::builder(),
@@ -206,8 +150,6 @@ impl World {
             TerminalAwaitProbeImpl {
                 registry: Arc::clone(&registry),
                 attachments: stores.attachment_referrers(),
-                observed: observed_tx,
-                attempts: Arc::clone(&attempts),
             }
             .serve(),
         )
@@ -244,8 +186,6 @@ impl World {
             ingress,
             server,
             registry,
-            observed: tokio::sync::Mutex::new(observed),
-            attempts,
             shutdown,
             serving,
         }
@@ -340,31 +280,6 @@ impl World {
             serving.await.expect("the endpoint stops");
         }
     }
-
-    async fn wait_for_park(&self, key: &str) {
-        tokio::time::timeout(BOUND, async {
-            loop {
-                let parked = match &self.server {
-                    Some(server) => server
-                        .find_invocation(PROBE, key, "run", "suspended")
-                        .is_some(),
-                    None => crate::RestateAdminClient::new(RestateConnection::new(required(
-                        "RESTATE_ADMIN_URL",
-                    )))
-                    .workflow_invocation_status(PROBE, key, "run")
-                    .await
-                    .expect("read the live waiter")
-                    .is_some_and(|invocation| invocation.status.as_str() == "suspended"),
-                };
-                if parked {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("the waiter suspends before prune");
-    }
 }
 
 async fn sqlite() -> Arc<dyn lash_core::StoreSet> {
@@ -375,22 +290,7 @@ async fn sqlite() -> Arc<dyn lash_core::StoreSet> {
     )
 }
 
-async fn postgres() -> (tempfile::TempDir, Arc<dyn lash_core::StoreSet>) {
-    let storage =
-        lash_postgres_store::PostgresStorage::connect(&required("LASH_POSTGRES_DATABASE_URL"))
-            .await
-            .expect("PostgreSQL stores");
-    let directory = tempfile::tempdir().expect("attachment directory");
-    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
-        &storage,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            directory.path(),
-        )),
-    ));
-    (directory, stores)
-}
-
-async fn terminal_shape(attach: bool) {
+async fn terminal_shape() {
     let world = World::new(sqlite().await, false).await;
     let terminal = process_success(serde_json::json!({ "terminal": "recorded" }));
     let process_id = world.terminal(&terminal).await;
@@ -401,11 +301,7 @@ async fn terminal_shape(attach: bool) {
             PROBE,
             "shape",
             "run",
-            &Input {
-                process_id,
-                park: false,
-                attach,
-            },
+            &Input { process_id },
         ),
     )
     .await
@@ -423,143 +319,5 @@ async fn terminal_shape(attach: bool) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn terminal_await_journals_the_observed_output_once_without_wait_calls() {
-    terminal_shape(false).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn terminal_attachment_journals_the_observed_output_once_without_wait_calls() {
-    terminal_shape(true).await;
-}
-
-async fn replay_after_prune(stores: Arc<dyn lash_core::StoreSet>, live: bool) {
-    let world = World::new(stores, live).await;
-    for attach in [false, true] {
-        for (label, terminal) in [
-            (
-                "success",
-                process_success(serde_json::json!({ "preserved": [1, 2, 3] })),
-            ),
-            (
-                "failure",
-                process_failure(
-                    lash_core::ToolFailureClass::Execution,
-                    "recorded_failure",
-                    "the recorded failure",
-                    Some(serde_json::json!({"detail": 7})),
-                ),
-            ),
-        ] {
-            let key = format!("prune-{label}-{}", uuid::Uuid::new_v4());
-            let process_id = world.terminal(&terminal).await;
-            let live_reads = world.registry.process_point_reads();
-            let attempts = world.attempts.load(Ordering::SeqCst);
-            let ingress = world.ingress.clone();
-            let input = Input {
-                process_id: process_id.clone(),
-                park: true,
-                attach,
-            };
-            let awaited_key = key.clone();
-            let waiter = tokio::spawn(async move {
-                ingress
-                    .call_workflow_json::<_, ProcessAwaitOutput>(PROBE, &awaited_key, "run", &input)
-                    .await
-            });
-            tokio::time::timeout(BOUND, async {
-                let mut observed = world.observed.lock().await;
-                while observed.recv().await.expect("the endpoint stays live") != process_id {}
-            })
-            .await
-            .expect("the first await observes its terminal");
-            world.wait_for_park(&key).await;
-            if !live {
-                world.assert_fast_journal(&key, &terminal);
-            }
-            let reads = world.registry.process_point_reads();
-            let ended = world
-                .registry
-                .get_process(&process_id)
-                .await
-                .expect("the terminal is retained")
-                .expect("the terminal record");
-            world
-                .registry
-                .prune_terminal_processes(
-                    ended.updated_at_ms.saturating_add(1),
-                    None,
-                    lash_core::ProjectionWatermark::NoProjector,
-                )
-                .await
-                .expect("prune the terminal child");
-            assert!(
-                matches!(
-                    world.registry.get_process(&process_id).await,
-                    Err(PluginError::ProcessNoLongerRetained { .. })
-                ),
-                "the child was actually pruned"
-            );
-            world
-                .registry
-                .set_process_read_error(Some(PluginError::Session(
-                    "replay must not read the registry".to_string(),
-                )));
-            let replay_reads = world.registry.process_point_reads();
-            let attempts_at_prune = world.attempts.load(Ordering::SeqCst);
-            world
-                .ingress
-                .call_workflow_json::<_, ()>(PROBE, &key, "release", &())
-                .await
-                .expect("release the durable promise");
-            let output = tokio::time::timeout(BOUND, waiter)
-                .await
-                .expect("the replay completes")
-                .expect("the waiter task")
-                .expect("replay returns an outcome");
-            assert_eq!(
-                output, terminal,
-                "replay preserves the entire terminal output after pruning"
-            );
-            assert_eq!(
-                world.registry.process_point_reads(),
-                replay_reads,
-                "replay never re-reads the registry"
-            );
-            assert!(
-                world.attempts.load(Ordering::SeqCst) - attempts >= 2,
-                "the handler actually replayed"
-            );
-            assert!(
-                world.attempts.load(Ordering::SeqCst) > attempts_at_prune,
-                "the handler replays after pruning"
-            );
-            assert_eq!(reads - live_reads, 1, "one live terminal observation");
-            world.registry.set_process_read_error(None);
-        }
-    }
-    world.finish().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn terminal_await_replays_after_pruning_on_sqlite() {
-    replay_after_prune(sqlite().await, false).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires PostgreSQL through the process-await service gate"]
-async fn terminal_await_replays_after_pruning_on_postgres() {
-    let (_directory, stores) = postgres().await;
-    replay_after_prune(stores, false).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires live Restate through the process-await service gate"]
-async fn live_terminal_await_replays_after_pruning_on_sqlite() {
-    replay_after_prune(sqlite().await, true).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires live Restate and PostgreSQL through the process-await service gate"]
-async fn live_terminal_await_replays_after_pruning_on_postgres() {
-    let (_directory, stores) = postgres().await;
-    replay_after_prune(stores, true).await;
+    terminal_shape().await;
 }
