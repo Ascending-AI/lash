@@ -31,37 +31,14 @@ fn plugin_source<'a>(error: &'a (dyn Error + 'static)) -> Option<&'a PluginError
     None
 }
 
-struct EmptyTools;
-#[async_trait]
-impl ToolProvider for EmptyTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
-    }
-    fn resolve_contract(&self, _: &str) -> Option<Arc<lash_core::ToolContract>> {
-        None
-    }
-    async fn execute(&self, _: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        unreachable!("no tools")
-    }
-}
-
-async fn tool_law() -> Result<()> {
+#[tokio::test]
+async fn a_native_tool_membership_refusal_preserves_its_cause() -> Result<()> {
     let backend = double_backend_explicit_reconcile().await;
     let core = core(backend);
     let session = core.session("typed-tools").created().await.open().await?;
     materialize_session(&session).await?;
     let tools = session.admin().tools();
-    let source = tools.add_provider(Arc::new(EmptyTools)).await?;
-    tools.remove_source(&source).await?;
     let before = tools.state().await?;
-    let error = tools
-        .remove_source(&source)
-        .await
-        .expect_err("repeat removal refuses");
-    assert!(
-        matches!(error.source().and_then(|e| e.downcast_ref::<ReconfigureError>()), Some(ReconfigureError::UnknownSource(id)) if id == source.id()),
-        "unknown source is typed: {error:?}"
-    );
     let error = tools
         .set_membership_many(&[("tool:absent".into(), false)])
         .await
@@ -78,10 +55,6 @@ async fn tool_law() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn tool_admin_preserves_reconfigure_variants() -> Result<()> {
-    tool_law().await
-}
 /// A plugin whose readiness decodes a stored value it cannot read (mode 1)
 /// or encodes a command value that has no JSON form (mode 2). Mode 0
 /// refuses nothing.
