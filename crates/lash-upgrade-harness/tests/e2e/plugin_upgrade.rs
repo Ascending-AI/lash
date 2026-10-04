@@ -7,7 +7,7 @@ use lash_upgrade_harness::e2e::{
     control::{
         Barrier, BarrierKind, BarrierProof, Control, CoreControl, Fault, FileBarriers, WorkIdentity,
     },
-    evidence::{DecodedRecord, JournalFact, RestateEvidenceReader},
+    evidence::{CaseReceipt, DecodedRecord, Evidence, JournalFact, RestateEvidenceReader, Verdict},
 };
 use lash_upgrade_harness::harness::{Case, NodeBinary, NodeBuilds, Services, block_on, wait_for};
 use lash_upgrade_harness::identity::BuildLabel;
@@ -122,7 +122,38 @@ fn finish(case: &Case, lease: &CaseLease, spec: &CaseSpec) -> Result<()> {
         case,
         "ownership.json",
         &json!({"gate":lease.gate_id,"namespace":lease.namespace,"authority":lease.authority,"ports":lease.ports,"processes":lease.processes,"cleanup":lease.cleanup}),
-    )
+    )?;
+    let mut evidence = Evidence::empty(spec.id.clone());
+    evidence.artifacts = spec.artifacts.clone();
+    evidence.cleanup = lease.cleanup.clone();
+    let (cut, checkpoint) = if spec.id == "s24" {
+        ("s24-b-durable.json", "s24-frontiers.json")
+    } else {
+        ("s25-cut.json", "s25-final.json")
+    };
+    let proof: BarrierProof = serde_json::from_slice(&std::fs::read(case.gate_dir().join(cut))?)?;
+    evidence
+        .journals
+        .push(serde_json::from_slice(&std::fs::read(&proof.artifact)?)?);
+    evidence.barriers.push(proof);
+    evidence.stores.push(serde_json::from_slice(&std::fs::read(
+        case.gate_dir().join(checkpoint),
+    )?)?);
+    evidence.effects = entries(case)?
+        .into_iter()
+        .map(serde_json::to_value)
+        .collect::<std::result::Result<_, _>>()?;
+    if spec.id != "s24" {
+        evidence.faults.push(serde_json::from_slice(&std::fs::read(
+            case.gate_dir().join("s25-kill.json"),
+        )?)?);
+    }
+    CaseReceipt {
+        evidence,
+        verdict: Verdict::Passed,
+    }
+    .write(&case.gate_dir())?
+    .reconcile()
 }
 
 fn entries(case: &Case) -> Result<Vec<Entry>> {
