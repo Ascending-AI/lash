@@ -234,7 +234,8 @@ impl lash_lashlang_runtime::DeferredToolResolver for RetryOnceInstallResolver {
                 (
                     (*path).to_string(),
                     lash_lashlang_runtime::Resolution::Resolved(Box::new(
-                        lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition()),
+                        lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition())
+                            .with_source_id(lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID),
                     )),
                 )
             })
@@ -297,7 +298,8 @@ impl lash_lashlang_runtime::DeferredToolResolver for CountingDeferredResolver {
             .map(|path| {
                 let resolution = if *path == "web.fetch" {
                     lash_lashlang_runtime::Resolution::Resolved(Box::new(
-                        lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition()),
+                        lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition())
+                            .with_source_id(lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID),
                     ))
                 } else {
                     lash_lashlang_runtime::Resolution::NotAvailable
@@ -344,7 +346,7 @@ async fn restricted_empty_deferred_context<'h>(
     let mut factories = lash_core::testing::test_standard_protocol_factories();
     factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("deferred_grant_provider"),
-        lash_core::plugin::PluginSpec::new().with_tool_provider(provider),
+        lash_core::plugin::PluginSpec::new().with_tool_provider(provider.clone()),
     )));
     let session = lash_core::facade_support::PluginHost::new(factories)
         .build_session(PluginSessionRequest::creation(
@@ -372,7 +374,7 @@ async fn restricted_empty_deferred_context<'h>(
     (
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
             crate::testing::double_ports(double, handler),
-            session.tools(),
+            provider,
             catalog.as_ref().clone(),
             lash_core::testing::exec_code_invocation(
                 lash_core::SessionId::fixture(session_id),

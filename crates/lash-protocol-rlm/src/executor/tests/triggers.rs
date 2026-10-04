@@ -61,7 +61,8 @@ impl lash_lashlang_runtime::DeferredToolResolver for MixedToolResolver {
             .map(|path| {
                 let outcome = if *path == "web.fetch" {
                     lash_lashlang_runtime::Resolution::Resolved(Box::new(
-                        lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition()),
+                        lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition())
+                            .with_source_id(lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID),
                     ))
                 } else {
                     lash_lashlang_runtime::Resolution::NotAvailable
