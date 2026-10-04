@@ -219,6 +219,7 @@ fn state_path_for_log(root: &Path) -> PathBuf {
 
 fn text(value: &str) -> LlmResponse {
     LlmResponse {
+        terminal_reason: lash::direct::LlmTerminalReason::Stop,
         parts: vec![LlmOutputPart::Text {
             text: value.to_string(),
             response_meta: None,
@@ -229,6 +230,7 @@ fn text(value: &str) -> LlmResponse {
 
 fn tool(name: &str, args: serde_json::Value) -> LlmResponse {
     LlmResponse {
+        terminal_reason: lash::direct::LlmTerminalReason::ToolUse,
         parts: vec![LlmOutputPart::ToolCall {
             call_id: format!("fig1341-{name}"),
             tool_name: name.to_string(),

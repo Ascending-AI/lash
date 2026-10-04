@@ -444,39 +444,66 @@ class Journey:
         self.gate("03-mention", "dom", "one identical bot reply renders in both contexts", all(len([r for r in self.dom_rows(p) if r["bot"]]) == 1 for p in self.pages.values()) and self.dom_rows(self.pages["ada"])[-1]["text"] == self.dom_rows(self.pages["brix"])[-1]["text"], "03-mention-*.png")
         self.gate("03-mention", "platform", "one API/database bot row carries the originating event metadata", len(api_rows) == len(db_rows) == 4 and sum(r["bot_id"] is not None for r in db_rows) == 1 and self.room_event in (next(r["metadata_json"] for r in db_rows if r["bot_id"] is not None) or ""), "03-mention-four-layers.json")
         twin_ok = any(r["kind"] == "message" and r["stage"] == "ignored" and r["detail"] == "superseded_by_app_mention" for r in ledger)
-        # D16: one send per mention, and the send carries the route's folded
-        # ambient block ahead of the mention text. The ledger binds each folded
-        # row to that send's admission identity, so the ambient events are
-        # provably inside the one input the turn committed.
-        mention_turn = f"mention:{row['channel_id']}:{row['message_ts']}"
+        # FIG-4703: one atomic batch admits context and mention as distinct
+        # inputs. The native applications bind both to one Run and one
+        # committed conversation; the mention keeps its original source.
+        mention_source = f"mention:{row['channel_id']}:{row['message_ts']}"
+        context_source = f"ambient:{row['channel_id']}:{row['message_ts']}"
         channel_pending = [
             r for r in session["pending"] if r["session_id"] == f"channel:{self.channel}"
         ]
-        send_input = channel_pending[0]["input_json"] if len(channel_pending) == 1 else ""
-        drained = (
-            len(channel_pending) == 1
-            and channel_pending[0]["source_key"] == mention_turn
-            and all(
-                pending["state"] == "completed"
-                for pending in channel_pending
-            )
-        )
-        send_carries_fold = (
-            send_input.find("FIG1341-AMBIENT-ONE") != -1
-            and send_input.find("FIG1341-AMBIENT-ONE") < send_input.find("FIG1341-AMBIENT-TWO")
-            and send_input.find("FIG1341-AMBIENT-TWO") < send_input.find("FIG1341-ROOM-MENTION")
+        mention_inputs = [r for r in channel_pending if r["source_key"] == mention_source]
+        context_inputs = [r for r in channel_pending if r["source_key"] == context_source]
+        admissions_ok = (
+            len(channel_pending) == 2
+            and len(mention_inputs) == len(context_inputs) == 1
+            and mention_inputs[0]["input_id"] != context_inputs[0]["input_id"]
+            and mention_inputs[0]["input_id"] == row["input_id"]
+            and all(pending["state"] == "completed" for pending in channel_pending)
         )
         folded_rows = [
-            r
-            for r in ledger
+            r for r in ledger
             if r["stage"] == "folded" and "FIG1341-AMBIENT" in (r["input_text"] or "")
         ]
+        context_text = context_inputs[0]["input_json"] if context_inputs else ""
+        mention_text = mention_inputs[0]["input_json"] if mention_inputs else ""
         fold_bound = (
             len(folded_rows) == 2
-            and row["input_id"] is not None
-            and all(r["input_id"] == row["input_id"] for r in folded_rows)
+            and len(context_inputs) == 1
+            and all(r["input_id"] == context_inputs[0]["input_id"] for r in folded_rows)
+            and 0 <= context_text.find("FIG1341-AMBIENT-ONE") < context_text.find("FIG1341-AMBIENT-TWO")
+            and "FIG1341-ROOM-MENTION" not in context_text
+            and "FIG1341-ROOM-MENTION" in mention_text
+            and "FIG1341-AMBIENT" not in mention_text
         )
-        self.gate("03-mention", "bot", "mention replied, twin ignored, its one send carried the bound ambient fold, and ambient provenance committed", row["reply_ts"] is not None and twin_ok and drained and send_carries_fold and fold_bound and "FIG1341-AMBIENT-ONE" in node_text and "turn_input" in node_text, "03-mention-four-layers.json")
+        input_ids = {pending["input_id"] for pending in channel_pending}
+        applications = [
+            application
+            for commit in session["turns"]
+            for application in json.loads(commit["result_json"]).get("turn_input_applications", [])
+            if application["input_id"] in input_ids
+        ]
+        conversations = [
+            json.loads(node["node_json"]).get("event", {}).get("Conversation", {})
+            for node in session["nodes"]
+        ]
+        user_conversations = [conversation for conversation in conversations if conversation.get("role") == "User"]
+        committed_once = (
+            len(applications) == 2
+            and {application["input_id"] for application in applications} == input_ids
+            and {application["source_key"] for application in applications} == {context_source, mention_source}
+            and len({application["turn_id"] for application in applications}) == 1
+            and len({application["committed_message_id"] for application in applications}) == 1
+            and len(user_conversations) == 1
+            and user_conversations[0]["id"] == applications[0]["committed_message_id"]
+            and "turn_input" in node_text
+            and all(marker in json.dumps(user_conversations[0]) for marker in
+                    ("FIG1341-AMBIENT-ONE", "FIG1341-AMBIENT-TWO", "FIG1341-ROOM-MENTION"))
+        )
+        expected_reply = "Ada's ambient facts are retained — FIG1341-AMBIENT-ONE says cobalt and FIG1341-AMBIENT-TWO says cedar — and #general exists."
+        correct_reply = self.dom_rows(self.pages["ada"])[-1]["text"] == expected_reply
+        self.gate("03-mention", "bot", "mention replied, twin ignored, one atomic batch completed distinct context and mention admissions in one committed conversation with the correct reply", row["reply_ts"] is not None and twin_ok and admissions_ok and fold_bound and committed_once and correct_reply, "03-mention-four-layers.json")
+        mention_turn = applications[0]["turn_id"]
         starts = self.traces_for_turn(mention_turn, "tool_call_started")
         completions = self.traces_for_turn(mention_turn, "tool_call_completed")
         tool_pair_ok = (
