@@ -594,7 +594,14 @@ impl FleetFixture for RuntimeFixture {
             let mut selected = spec.clone();
             let mut landings = Vec::new();
             for requirement in &selected.requires {
-                let trailer = format!("^Closes {requirement}$");
+                // B01's authorized landed commit has a Part-of trailer;
+                // identify that exact main outcome by its canonical subject.
+                let landing = if requirement == "FIG-4739" {
+                    "^Turn continuations publish complete Run state with atomic material ownership$"
+                        .to_owned()
+                } else {
+                    format!("^Closes {requirement}$")
+                };
                 let output = Command::new("git")
                     .args([
                         "log",
@@ -602,7 +609,7 @@ impl FleetFixture for RuntimeFixture {
                         "-1",
                         "--format=%H",
                         "--grep",
-                        &trailer,
+                        &landing,
                     ])
                     .output()?;
                 ensure!(
@@ -610,7 +617,10 @@ impl FleetFixture for RuntimeFixture {
                     "read {requirement} main landing failed"
                 );
                 let tip = String::from_utf8(output.stdout)?.trim().to_owned();
-                ensure!(!tip.is_empty(), "{requirement} has no main landing trailer");
+                ensure!(
+                    !tip.is_empty(),
+                    "{requirement} has no canonical main landing"
+                );
                 ensure!(
                     Command::new("git")
                         .args(["merge-base", "--is-ancestor", &tip, "HEAD"])
