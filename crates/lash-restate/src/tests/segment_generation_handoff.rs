@@ -29,7 +29,6 @@ use crate::process::{
     RestateProcessAwaitRequest, RestateProcessCancelRequest, RestateProcessWorkflowInput,
     RestateProcessWorkflowPayload,
 };
-use crate::process_attach::RestateProcessAttachRequest;
 
 type BoxFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
@@ -615,34 +614,6 @@ impl Roll {
         awaiter
     }
 
-    /// Arm a `LashProcessAttach` for the process on the newest build now.
-    async fn arm_attach(&self, process_id: &ProcessId) -> String {
-        let key = test_restate_await_event_key(
-            &ExecutionScope::process(process_id.clone()),
-            lash_core::AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                "handoff-attach",
-            )),
-        )
-        .expect("an attach wait key");
-        let workflow_key = crate::process_attach::process_attach_workflow_key(&key);
-        self.ingress
-            .send_lash_workflow(
-                "LashProcessAttach",
-                &workflow_key,
-                "run",
-                &RestateProcessAttachRequest {
-                    process_id: process_id.clone(),
-                    key,
-                },
-            )
-            .await
-            .expect("send the attach");
-        let target = format!("LashProcessAttach/{workflow_key}/run");
-        self.wait_for(|roll| roll.invocations_of(&target).len() == 1)
-            .await;
-        target
-    }
-
     fn invocations_of(&self, target: &str) -> Vec<lash_restate_test::InvocationView> {
         self.server
             .invocations()
@@ -752,14 +723,13 @@ fn schedule_event(roll: &Roll, process_id: &ProcessId, cut: Cut, event: Event, a
     }
 }
 
-/// L1 + L8 (stable path) for one cut and deployment event.
+/// L1 (stable path) for one cut and deployment event.
 async fn successor_runs_once_on_the_newest_build(seed: u64, cut: Cut, event: Event) {
     let case = format!("seed {seed} cut {cut:?} event {event:?}");
     let roll = Roll::start(seed, PROGRAM, false).await;
-    // The awaiters arm before segment 0 is sent, so both are pinned to N.
+    // The awaiter arms before segment 0 is sent, so it is pinned to N.
     let process_id = roll.register_process().await;
     let awaiter = roll.arm_awaiter(&process_id).await;
-    let attach = roll.arm_attach(&process_id).await;
     schedule_event(&roll, &process_id, cut, event, Box::pin(async {}));
     roll.send_segment_zero(&process_id).await;
 
@@ -854,25 +824,6 @@ async fn successor_runs_once_on_the_newest_build(seed: u64, cut: Cut, event: Eve
         generation("N"),
         "{case}: the handover names the build that sent it"
     );
-
-    // L8: the attach armed on N resolved its wait exactly once.
-    let attaches = roll.invocations_of(&attach);
-    assert_eq!(attaches.len(), 1, "{case}: one attach");
-    assert_eq!(attaches[0].status, "completed", "{case}: the attach ended");
-    assert!(
-        roll.server
-            .outcome(&attaches[0].id)
-            .is_some_and(|outcome| outcome.is_ok()),
-        "{case}: the attach succeeded"
-    );
-    let resolves = roll
-        .server
-        .invocations()
-        .into_iter()
-        .filter(|view| view.target.starts_with("LashDurableWaitIndex/"))
-        .filter(|view| view.target.ends_with("/resolve"))
-        .count();
-    assert_eq!(resolves, 1, "{case}: the attach resolved its wait once");
 }
 
 /// L2 for one cut: a cancel issued inside the open step at the cut.
@@ -978,7 +929,7 @@ async fn cancel_reaches_the_live_segments_recorded_route(seed: u64, cut: Cut) {
     );
 }
 
-/// L6 + L8 (generation-lane path): build N+1 cannot run the process's
+/// L6 (generation-lane path): build N+1 cannot run the process's
 /// program, so it refuses the successor. The process parks
 /// `RetiredGeneration` carrying `G_N` after one attempt with no runner
 /// entered; the drain's re-send to `LashProcessWorkflow_g<G_N>` runs the
@@ -988,7 +939,6 @@ async fn a_refused_successor_parks_for_its_sender_and_reroutes(seed: u64) {
     let roll = Roll::start(seed, NEXT_PROGRAM, false).await;
     let process_id = roll.register_process().await;
     let awaiter = roll.arm_awaiter(&process_id).await;
-    let attach = roll.arm_attach(&process_id).await;
     roll.runner_n.on_segment(HANDING_OVER, roll.register_next());
     roll.send_segment_zero(&process_id).await;
 
@@ -1103,14 +1053,6 @@ async fn a_refused_successor_parks_for_its_sender_and_reroutes(seed: u64) {
         .len(),
         1,
         "{case}: the terminal is delivered to the stable root once"
-    );
-    let attaches = roll.invocations_of(&attach);
-    assert_eq!(attaches.len(), 1, "{case}: one attach");
-    assert!(
-        roll.server
-            .outcome(&attaches[0].id)
-            .is_some_and(|outcome| outcome.is_ok()),
-        "{case}: the attach armed on N got the terminal"
     );
 }
 

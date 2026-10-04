@@ -4,7 +4,6 @@ use super::*;
 use lash_core::{ArtifactReferrer, ReferrerClaim};
 use lash_core::{AttachmentId, AttachmentReferrers, ProcessRegistry, StoreError, StoreSet};
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet, testing::IsolatedDatabase};
-use lash_restate::{Call, RestateDurableWaitAddress, RestateProcessAttachRequest};
 
 #[derive(Clone, Copy, Debug)]
 enum Storage {
@@ -258,12 +257,6 @@ impl Harness {
             Self::Live { backend, .. } => backend.lash_backend(),
         }
     }
-    fn ingress(&self) -> lash_restate::RestateIngressClient {
-        match self {
-            Self::Double(backend) => backend.ingress(),
-            Self::Live { backend, .. } => backend.ingress(),
-        }
-    }
     async fn run(&self, scope: lash_core::AdmittedScope, attempt: HandlerAttempt) {
         tokio::time::timeout(BOUND, async {
             match self {
@@ -275,68 +268,7 @@ impl Harness {
         .expect("handler finishes without a retry loop")
         .unwrap();
     }
-    async fn attach_armed(&self, producer: &ProcessId) {
-        tokio::time::timeout(BOUND, async {
-            loop {
-                let armed = match self {
-                    Self::Double(backend) => backend.server().invocations().iter().any(|v| {
-                        v.target.contains(producer.as_str())
-                            && v.target.ends_with("/await_terminal")
-                    }),
-                    Self::Live { backend } => {
-                        backend.invocations().await.unwrap().iter().any(|v| {
-                            v.target.contains(producer.as_str())
-                                && v.target.ends_with("/await_terminal")
-                        })
-                    }
-                };
-                if armed {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("the attach is awaiting the producer before receiver retirement");
-    }
-    async fn await_attach(&self, invocation: &str) -> Result<(), String> {
-        tokio::time::timeout(Duration::from_secs(30), async {
-            loop {
-                match self {
-                    Self::Double(backend) => {
-                        if let Some(outcome) = backend.server().outcome(invocation) {
-                            return outcome.map(|_| ()).map_err(|error| format!("{error:?}"));
-                        }
-                        if let Some(view) = backend
-                            .server()
-                            .invocations()
-                            .into_iter()
-                            .find(|v| v.id == invocation && v.status == "paused")
-                        {
-                            return Err(format!(
-                                "attach paused after {} retries: {:?}",
-                                view.retry_count, view.last_failure
-                            ));
-                        }
-                    }
-                    Self::Live { backend } => {
-                        if let Some(outcome) = backend.outcome(invocation).await.unwrap() {
-                            return outcome;
-                        }
-                    }
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .map_err(|_| "ended receiver attach never settled".to_owned())?
-    }
-    async fn assert_run(
-        &self,
-        invocation: &str,
-        name: &str,
-        expected: Option<&lash_core::ProcessAwaitOutput>,
-    ) {
+    async fn assert_run(&self, invocation: &str, name: &str) {
         match self {
             Self::Double(backend) => {
                 let journal = backend.server().journal(invocation).unwrap();
@@ -348,40 +280,22 @@ impl Harness {
                         .count(),
                     1
                 );
-                if name == "process-attach-acquire" {
-                    use lash_core::runtime::attachment_delivery::DeliveryAcquisition;
-                    let results = journal
-                        .iter()
-                        .filter_map(|entry| entry.run_completion())
-                        .filter_map(Result::ok)
-                        .filter_map(|value| {
-                            serde_json::from_slice::<DeliveryAcquisition>(&value).ok()
-                        })
-                        .collect::<Vec<_>>();
-                    assert_eq!(results.len(), 1, "one completed acquisition verdict");
-                    match results.as_slice() {
-                        [DeliveryAcquisition::Held] => assert!(expected.is_some()),
-                        [DeliveryAcquisition::ReceiverEnded { .. }] => assert!(expected.is_none()),
-                        verdict => panic!("unexpected delivery acquisition: {verdict:?}"),
-                    }
-                } else {
-                    let results = journal
-                        .iter()
-                        .filter_map(|entry| entry.run_completion())
-                        .filter_map(Result::ok)
-                        .filter_map(|value| {
-                            serde_json::from_slice::<
-                                Result<serde_json::Value, lash_core::RuntimeEffectControllerError>,
-                            >(&value)
-                            .ok()
-                        })
-                        .collect::<Vec<_>>();
-                    assert!(!results.is_empty(), "the start records its result");
-                    assert!(
-                        results.iter().all(Result::is_ok),
-                        "no terminal start refusal is journaled"
-                    );
-                }
+                let results = journal
+                    .iter()
+                    .filter_map(|entry| entry.run_completion())
+                    .filter_map(Result::ok)
+                    .filter_map(|value| {
+                        serde_json::from_slice::<
+                            Result<serde_json::Value, lash_core::RuntimeEffectControllerError>,
+                        >(&value)
+                        .ok()
+                    })
+                    .collect::<Vec<_>>();
+                assert!(!results.is_empty(), "the start records its result");
+                assert!(
+                    results.iter().all(Result::is_ok),
+                    "no terminal start refusal is journaled"
+                );
             }
             Self::Live { backend, .. } => {
                 let journal = backend.journal(invocation).await.unwrap();
@@ -392,29 +306,6 @@ impl Harness {
                 );
             }
         }
-    }
-    /// `invocation` journaled no `name` step.
-    async fn assert_no_run(&self, invocation: &str, name: &str) {
-        let steps = match self {
-            Self::Double(backend) => backend
-                .server()
-                .journal(invocation)
-                .unwrap()
-                .iter()
-                .filter(|entry| {
-                    entry.ty == MessageType::RunCommand
-                        && entry.name.as_deref().is_some_and(|n| n.contains(name))
-                })
-                .count(),
-            Self::Live { backend, .. } => backend
-                .journal(invocation)
-                .await
-                .unwrap()
-                .iter()
-                .filter(|entry| entry.contains(name))
-                .count(),
-        };
-        assert_eq!(steps, 0, "no journaled `{name}` step");
     }
     async fn handler_id(&self) -> String {
         match self {
@@ -687,199 +578,8 @@ async fn start_law(storage: Storage, live: bool) {
             .unwrap();
         assert_eq!(rows.len(), 1, "one start produces one child");
         harness
-            .assert_run(&harness.handler_id().await, "process-start-register", None)
+            .assert_run(&harness.handler_id().await, "process-start-register")
             .await;
-        drop(core);
-        harness.finish().await;
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
-}
-
-async fn delivery_law(storage: Storage, live: bool) {
-    let mut failures = Vec::new();
-    // The final case is the live-receiver StorageFailure countercase.
-    for case in 0..3 {
-        let trace = Arc::new(AcquisitionTrace::default());
-        let (harness, _stores) = Harness::new(storage, live, Arc::clone(&trace)).await;
-        let core = core(&harness);
-        let attachment = put(&core, &harness).await;
-        let registry = harness.backend().process_registry();
-        let register = || {
-            lash_core::ProcessRegistration::new(
-                lash_core::ProcessInput::External {
-                    metadata: json!({}),
-                },
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-        };
-        let producer = registry.register_process(register()).await.unwrap().id;
-        let receiver = if case == 1 {
-            let receiver = registry.register_process(register()).await.unwrap().id;
-            lash_core::ExecutionScope::Process {
-                process_id: receiver,
-            }
-        } else {
-            lash_core::ExecutionScope::runtime_operation(run_tag("receiver"))
-        };
-        let claim = lash_core::runtime::attachment_delivery::receiving_claim(&receiver).unwrap();
-        let key = harness
-            .backend()
-            .effect_host()
-            .await_event_key(
-                &receiver,
-                lash_core::AwaitEventWaitIdentity::Custom {
-                    key: "terminal".into(),
-                },
-            )
-            .await
-            .unwrap();
-        let workflow_key = RestateDurableWaitAddress::for_key(&key).workflow_key;
-        let attach = harness
-            .ingress()
-            .send_workflow_json(
-                "LashProcessAttach",
-                &workflow_key,
-                "run",
-                &Call::new(RestateProcessAttachRequest {
-                    process_id: producer.clone(),
-                    key: key.clone(),
-                }),
-            )
-            .await
-            .unwrap();
-        harness.attach_armed(&producer).await;
-        if case == 1 {
-            let lash_core::ExecutionScope::Process { process_id } = &receiver else {
-                unreachable!()
-            };
-            registry
-                .complete_process(
-                    process_id,
-                    lash_core::ProcessAwaitOutput::from_tool_output(
-                        lash_core::ToolCallOutput::success(json!("done")),
-                    ),
-                    lash_core::ProcessCompletionAuthority::external_owner(),
-                )
-                .await
-                .unwrap();
-            registry
-                .prune_terminal_processes(
-                    u64::MAX,
-                    None,
-                    lash_core::ProjectionWatermark::NoProjector,
-                )
-                .await
-                .unwrap();
-        }
-        if case < 2 {
-            harness
-                .backend()
-                .effect_host()
-                .retire_await_events_for_scope(&receiver)
-                .await
-                .unwrap();
-            harness
-                .backend()
-                .attachment_referrers()
-                .end_attachment_referrer(&claim.referrer())
-                .await
-                .unwrap();
-        } else {
-            *trace.fault.lock().unwrap() = Some((claim.referrer().clone(), Fault::StorageFailure));
-        }
-        let terminal = lash_core::ProcessAwaitOutput::from_tool_output(
-            lash_core::ToolCallOutput::success_tool_value(lash_core::ToolValue::Attachment(
-                lash_core::AttachmentSource::stored(attachment.clone()),
-            )),
-        );
-        lash_core::runtime::attachment_delivery::acquire_completion_output(
-            harness.backend().attachment_referrers().as_ref(),
-            &producer,
-            &terminal,
-        )
-        .await
-        .unwrap();
-        registry
-            .complete_process(
-                &producer,
-                terminal.clone(),
-                lash_core::ProcessCompletionAuthority::external_owner(),
-            )
-            .await
-            .unwrap();
-        harness
-            .backend()
-            .process_work()
-            .port()
-            .publish_process_terminal(&producer, &terminal, "delivery-law")
-            .await
-            .unwrap();
-        if let Err(error) = harness.await_attach(attach.as_str()).await {
-            failures.push(format!("receiver {receiver:?}: {error}"));
-            drop(core);
-            harness.finish().await;
-            continue;
-        }
-        assert!(
-            harness
-                .backend()
-                .attachment_store()
-                .get(
-                    &attachment.id,
-                    lash_core::AttachmentReadPolicy::DEFAULT.max_blob_bytes
-                )
-                .await
-                .is_ok(),
-            "producer bytes remain available"
-        );
-        let edges = harness
-            .backend()
-            .attachment_referrers()
-            .attachment_referrers(&attachment.id)
-            .await
-            .unwrap();
-        assert_eq!(
-            edges.contains(&claim.referrer()),
-            case == 2,
-            "ended receivers gain no edge"
-        );
-        let attempts = trace
-            .attempts
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|r| *r == &claim.referrer())
-            .count();
-        // The attach lives as long as the wait it serves: the receiver's
-        // retirement ended it before the producer's terminal, so it acquires
-        // nothing for a receiver that is gone.
-        assert_eq!(
-            attempts,
-            if case == 2 { 2 } else { 0 },
-            "only StorageFailure retries, and a retired receiver is never attempted"
-        );
-        if case == 2 {
-            let resolution = harness
-                .backend()
-                .effect_host()
-                .await_await_event(&key, Default::default())
-                .await
-                .unwrap();
-            assert_eq!(
-                resolution,
-                lash_core::Resolution::Ok(serde_json::to_value(&terminal).unwrap())
-            );
-        }
-        if case == 2 {
-            harness
-                .assert_run(attach.as_str(), "process-attach-acquire", Some(&terminal))
-                .await;
-        } else {
-            harness
-                .assert_no_run(attach.as_str(), "process-attach-acquire")
-                .await;
-        }
         drop(core);
         harness.finish().await;
     }
@@ -949,16 +649,10 @@ macro_rules! laws {
             async fn start_input_acquisition_fault_retries_the_same_registered_process() { start_law($storage, false).await; }
             $(#[ignore = $service])?
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn ended_receiver_terminal_delivery_settles_without_retry() { delivery_law($storage, false).await; }
-            $(#[ignore = $service])?
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn acquisition_keeps_permanent_incompatibility_and_source_gone_distinct() { contrast_law($storage).await; }
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             #[ignore = "live Restate; crash-windows suite"]
             async fn live_restate_start_input_acquisition_fault_retries_the_same_registered_process() { start_law($storage, true).await; }
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            #[ignore = "live Restate; crash-windows suite"]
-            async fn live_restate_ended_receiver_terminal_delivery_settles_without_retry() { delivery_law($storage, true).await; }
         }
     };
 }

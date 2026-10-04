@@ -66,7 +66,7 @@ use std::sync::Arc;
 /// Generation 4 (FIG-3607) names the process by its minted id alone: the
 /// input carries the id beside its registration, which no longer names one,
 /// the start step journals the id it started, and the requests a caller sends
-/// into a running workflow (complete, await, cancel, attach) are stamped with
+/// into a running workflow (complete, await, cancel) are stamped with
 /// this generation and refused by it before their shape is decoded. An
 /// unstamped request is generation 1. Generation 4 changed in place under the
 /// pre-1.0 version freeze (FIG-3846): a registration records its lifetime,

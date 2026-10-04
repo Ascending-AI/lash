@@ -18,8 +18,6 @@ use lash_restate_test::{
 };
 
 use crate::durable_wait::RestateDurableWaitAwaitRequest;
-use crate::process::RestateProcessCompleteRequest;
-use crate::process_attach::RestateProcessAttachRequest;
 use lash_core::ClockWallTime as _;
 use lash_core::runtime::recovery_lease::RecoveryLease;
 use std::num::NonZeroUsize;
@@ -204,106 +202,6 @@ async fn joined<T>(task: tokio::task::JoinHandle<Result<T, String>>, what: &str)
         .unwrap_or_else(|_| panic!("{what} never returned"))
         .expect("the task")
         .unwrap_or_else(|error| panic!("{what} failed: {error}"))
-}
-
-/// L10: an `await_resolution` and a `LashProcessAttach` suspended on N
-/// resume on N+1 by resume-on-deployment, N is removed, and each completes
-/// as it would have on N: the wait returns its one resolution, the attach
-/// resolves its wait with the process terminal.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn l10_shared_wait_journals_suspended_on_n_resume_on_n_plus_1() {
-    let mut roll = Roll::start(0x3795_d010).await;
-
-    // A wait on N.
-    let key = roll.wait_key("fig-3795-l10-wait");
-    let workflow_key = crate::RestateDurableWaitAddress::for_key(&key).workflow_key;
-    let waiter = roll.await_resolution(&key);
-    let wait_target = format!("{WAIT_WORKFLOW}/{workflow_key}/await_resolution");
-    roll.wait_for(&wait_target, "suspended").await;
-
-    // An attach on N, for a process whose terminal is still to come.
-    let registry: Arc<dyn ProcessRegistry> = roll.stores.process_registry();
-    let process_id = registry
-        .register_process(executed_registration())
-        .await
-        .expect("register the attached process")
-        .id;
-    let attach_key = roll.wait_key("fig-3795-l10-attach");
-    let attach_workflow = crate::process_attach::process_attach_workflow_key(&attach_key);
-    let attached = roll.await_resolution(&attach_key);
-    roll.ingress
-        .send_lash_workflow(
-            "LashProcessAttach",
-            &attach_workflow,
-            "run",
-            &RestateProcessAttachRequest {
-                process_id: process_id.clone(),
-                key: attach_key.clone(),
-            },
-        )
-        .await
-        .expect("arm the attach");
-    let attach_target = format!("LashProcessAttach/{attach_workflow}/run");
-    roll.wait_for(&attach_target, "suspended").await;
-    roll.server.settle().await;
-    for target in [&wait_target, &attach_target] {
-        assert_eq!(
-            roll.view(target).pinned_deployment_id,
-            roll.deployment_n.as_str(),
-            "`{target}` started on N"
-        );
-    }
-
-    let next = roll.register_next().await;
-    roll.retire_n();
-
-    // Both complete on N+1 as they would have on N.
-    let resolution = Resolution::Ok(serde_json::json!({ "resolved": "after the roll" }));
-    assert_eq!(
-        roll.host_next
-            .resolve_await_event(&key, resolution.clone())
-            .await
-            .expect("resolve the wait suspended on N"),
-        ResolveOutcome::Accepted
-    );
-    roll.drain_n_until(|| waiter.is_finished()).await;
-    assert_eq!(joined(waiter, "the moved wait").await, resolution);
-
-    let terminal = process_success(serde_json::json!({ "process": "ended" }));
-    roll.ingress
-        .call_lash_workflow::<_, ()>(
-            "LashProcessWorkflow",
-            process_id.as_str(),
-            "complete_terminal",
-            &RestateProcessCompleteRequest {
-                process_id: process_id.clone(),
-                output: terminal.clone(),
-            },
-        )
-        .await
-        .expect("publish the process terminal");
-    roll.drain_n_until(|| attached.is_finished()).await;
-    let Resolution::Ok(value) = joined(attached, "the attach's wait").await else {
-        panic!("the attach resolves its wait with the terminal");
-    };
-    assert_eq!(
-        serde_json::from_value::<ProcessAwaitOutput>(value).expect("a process terminal"),
-        terminal,
-        "the moved attach resolved its wait with the process terminal"
-    );
-    roll.drain_n_until(|| roll.view(&attach_target).status == "completed")
-        .await;
-    for target in [&wait_target, &attach_target] {
-        let view = roll.view(target);
-        assert_eq!(view.status, "completed", "`{target}` completed");
-        assert_eq!(
-            view.pinned_deployment_id,
-            next.as_str(),
-            "`{target}` resumed on N+1"
-        );
-    }
-    roll.server.settle().await;
-    roll.remove_n();
 }
 
 /// L10W (FIG-3805): a shared journal N recorded replays on an N+1 whose

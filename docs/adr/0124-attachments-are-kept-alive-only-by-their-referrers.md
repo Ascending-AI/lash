@@ -25,7 +25,7 @@ keeps its name. Its claims, canonical codec, permanent fence
 (`referrer_fences`) and cleanup obligation are ADR 0113's, cited here and
 not restated.
 
-Five kinds may hold an attachment (`ArtifactReferrerKind::holds_attachments`):
+Six kinds may hold an attachment (`ArtifactReferrerKind::holds_attachments`):
 
 | Kind | Acquired by | Guard | Ends when |
 |---|---|---|---|
@@ -34,6 +34,7 @@ Five kinds may hold an attachment (`ArtifactReferrerKind::holds_attachments`):
 | `start_input` (`key`, `starter`) | the start input's stored ids, before registration | `AwaitStart { starter }` | Cleanup acquires the retained input under `ProcessRecord(p)` before ending this starter's staging. Without a retained row, the starter's settled journal ends staging. |
 | `session` (`s`) | the boundary commit, on the committed ids; an enqueue into `s` | none | Session deletion arms `AwaitSessionGraphRetired`; the executor ends it once `s` is deleted and no untombstoned graph node of `s` remains, so a fork keeps what its retained history names. |
 | `upload` (`s`, `u`) | a put in a session runtime with no execution bound | `AwaitUploadExpiry { expires_at_ms }` | `expires_at_ms` passes, or `s` is deleted or absent. Each put mints a fresh `u`, so one expiry never fences a later upload. |
+| `source` (`AwaitEventKey`) | K4 process-terminal delivery, before publishing the immutable result seal | source holder fence | Logical Run or scope retirement ends the source. |
 
 No other kind holds an attachment, and an attachment end carries nothing:
 the receiver acquires before the source may end (§4), so `Ended.carries`
@@ -126,27 +127,25 @@ The receiving claim is one function of the receiving scope,
 its journal: prune retires the journal before it removes the row, and the
 terminal output needs the row anyway.
 
-- **Parked and group calls.** The terminal resolver acquires before it
-  resolves the waiter's key: on Restate the journaled step
-  `process-attach-acquire` in `LashProcessAttach`, in-process the
-  `AttachTerminal` task. The waiter's journal records the value when the key
-  resolves; `release_consumer_hold` runs after.
-  The detached resolver journals acquisition refusals as typed results. An
-  ended receiver abandons delivery and completes without resolving or
-  recreating its wait. Compatibility and other permanent refusals resolve an
-  error for a live receiver; only transient store faults retry the acquisition.
+- **Deferred process results.** K4 subscribes the receiver source to the
+  process terminal through short index handlers. Delivery acquires the
+  source's attachment edges and retained material before publishing its
+  immutable completion seal. The source keeps those leases through physical
+  segment transfer until the logical Run or scope retires it. Cancellation
+  detaches a pending subscription; a late terminal cannot revive a cancelled
+  source. Resolution before cancellation retains the result and its leases.
+  An ended receiver acquires nothing. Permanent acquisition refusals remain
+  typed; transient storage faults retry the unrecorded acquisition.
 - **Direct awaits and process-to-process delivery.** A direct
-  `ProcessCommand::Await` is re-expressed as `AttachTerminal` plus a durable
-  wait on a derived key, so every terminal reaches its receiver through the
-  one resolver above. The key is the invocation's `AwaitEventKey` with wait
-  identity `Custom { key: "process-await:<process id>:<effect id>" }`: the
-  effect id makes two awaits of the same child from one scope two waits.
-  The wait races turn cancellation and process cancellation. A turn
-  stop that wins releases that wait as cancelled, so the await then arms a
-  second attach on `process-await:<process id>:<effect id>:after-turn-cancel`
-  and reads the cancelled process's terminal from it.
-  In-process, the `Await` arm acquires after the terminal returns and before
-  the outcome is recorded.
+  `ProcessCommand::Await` uses a K4 subscription and a durable wait on a
+  derived key. Its wait identity is
+  `Custom { key: "process-await:<process id>:<effect id>:invocation:<invocation id>" }`:
+  the logical command and physical invocation identify distinct receivers.
+  The wait races turn cancellation, process cancellation and segment
+  handover. Handover detaches the predecessor's receiver before returning;
+  the successor observes the same process terminal under its own receiver.
+  A turn stop that wins arms a second subscription on the same key with
+  `:after-turn-cancel` appended and reads the cancelled process's terminal.
 - **Queued inputs.** The enqueue transaction acquires `Session(s)` on the
   batch's stored ids and records the row together; an `UnknownAttachment`
   refuses the enqueue. A pending input therefore resolves its bytes when its
@@ -186,9 +185,9 @@ producer's edges were already ended and swept. That is the typed outcome of
 a race against prune, never a silent loss.
 
 A delivery into a fenced receiver answers `ReceiverEnded`, distinct from
-`SourceGone`: the producer can still hold all its bytes. The attach records
-the non-acquiring `process_result_receiver_ended` verdict once and finishes
-its wait-index resolution. The receiver gains no edge. Genuine storage
+`SourceGone`: the producer can still hold all its bytes. K4 delivery to an
+ended source completes without resolving or recreating its wait. The
+receiver gains no edge. Genuine storage
 faults retry the unrecorded acquisition; permanent compatibility refusals
 are recorded once with their typed controller error.
 
@@ -249,7 +248,7 @@ a stand-in for its own id.
 
 ## Implementation
 
-- `crates/lash-core-store/src/artifact_referrer.rs:116` selects the five
+- `crates/lash-core-store/src/artifact_referrer.rs:116` selects the six
   attachment-holding kinds; `crates/lash-core-store/src/attachments.rs:1651`
   chooses the claim before a put.
 - `crates/lash-core-store/src/store/attachment_referrers.rs:474` defines
@@ -258,9 +257,9 @@ a stand-in for its own id.
 - `crates/lash-core-execution/src/runtime/attachment_delivery.rs:36` chooses
   the receiver's claim; `:138`, `:153` and `:170` acquire terminal and start
   input references.
-- `crates/lash-restate/src/process_attach.rs:119` acquires before resolving
-  the wait. `crates/lash-core-execution/src/runtime/process/start_staging.rs:471`
-  stages input before registration and acquires the process record afterward.
+- `crates/lash-restate/src/durable_wait/process_terminal.rs` acquires
+  source-owned leases before sealing the result.
+  `crates/lash-core-execution/src/runtime/process/start_staging.rs:471` stages input before registration and acquires the process record afterward.
   `crates/lash-core/src/runtime/artifact_cleanup.rs:442` completes that
   acquisition before staging ends during recovery.
 - `crates/lash-sqlite-store/src/persistence/turn_input.rs:971` and
