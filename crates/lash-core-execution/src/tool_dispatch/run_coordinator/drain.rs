@@ -2,7 +2,18 @@
 
 use super::*;
 use crate::tool_dispatch::singleton_run::{IsolatedProcessDescriptor, SingletonPresentationError};
+use futures_util::FutureExt;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Protected work remains owned while the schedule accepts other results.
+pub(super) struct PendingPresentation<'a> {
+    pub call_id: ToolCallId,
+    pub handle: parallel::Handle<'a>,
+    pub consume: bool,
+    owed: Owed<'a>,
+    fresh: std::sync::Arc<AtomicBool>,
+    launched: Option<ProcessId>,
+}
 
 impl<'a> RunCoordinator<'a> {
     /// Drain every decided call in rank order: a final's declarations once
@@ -57,66 +68,65 @@ impl<'a> RunCoordinator<'a> {
         owed: Owed<'a>,
         consume: bool,
     ) -> Result<SingletonTerminal, SingletonRunError> {
-        let Owed {
-            call_id,
-            handlers,
-            decision,
-            capture,
-        } = owed;
-        let handlers = handlers.get();
+        let pending = self.begin_presentation(rank, owed, consume).await?;
+        let handle = pending.handle.clone();
+        self.journal.scoped.admit_journal_write()?;
+        let entry = self
+            .journal
+            .scoped
+            .controller()
+            .record_run_record(
+                record_name(&pending.call_id, "present"),
+                Box::pin(async move {
+                    match handle.await.map_err(|error| error.to_string())? {
+                        parallel::Ready::Presentation(entry) => Ok(entry.as_ref().clone()),
+                        _ => unreachable!("a presentation handle returns V"),
+                    }
+                }),
+            )
+            .await?;
+        let record = self.journal.accept(entry)?;
+        self.finish_presentation(pending, &record)
+    }
+
+    pub(super) async fn begin_presentation(
+        &mut self,
+        rank: u64,
+        owed: Owed<'a>,
+        consume: bool,
+    ) -> Result<PendingPresentation<'a>, SingletonRunError> {
+        let call_id = owed.call_id.clone();
+        let callback = owed.handlers.clone();
+        let handlers = callback.get();
+        let decision = owed.decision.clone();
+        let capture = owed.capture.clone();
         restore_contributions(&self.journal, &call_id, handlers)?;
-        let observed_cause = self
-            .withheld_verdict(&call_id)
-            .map(|(callback, verdict)| AttributedVerdict { callback, verdict });
         let journal = &mut self.journal;
-        let (CallDecision::Final { declares, source }, Some(capture)) =
-            (&decision, capture.clone())
+        let (CallDecision::Final { declares, .. }, Some(capture)) = (&decision, capture.clone())
         else {
-            // V: a withheld call is presented by its decision and
-            // incorporated; the stream its body emitted is still the host's.
-            let present = journal.record(presented(&call_id, None, consume, None));
-            let fresh = AtomicBool::new(false);
-            let executed = &fresh;
-            journal
-                .append(
-                    record_name(&call_id, "present"),
-                    Box::pin(async move {
-                        executed.store(true, Ordering::Relaxed);
-                        Ok(RunJournalEntry {
-                            state: Vec::new(),
-                            record: present,
-                            materials: Vec::new(),
-                        })
-                    }),
-                )
-                .await?;
-            if fresh.load(Ordering::Relaxed)
-                && let Some(stream) = capture.as_ref().and_then(SingletonCapture::stream)
-            {
-                handlers.emit_stream(&call_id, stream);
+            let record = journal.record(presented(&call_id, None, consume, None));
+            let fresh = std::sync::Arc::new(AtomicBool::new(false));
+            let executed = std::sync::Arc::clone(&fresh);
+            let handle = async move {
+                executed.store(true, Ordering::Relaxed);
+                Ok(parallel::Ready::Presentation(std::sync::Arc::new(
+                    RunJournalEntry {
+                        state: Vec::new(),
+                        record,
+                        materials: Vec::new(),
+                    },
+                )))
             }
-            handlers.incorporate(
-                &call_id,
-                capture.as_ref(),
-                None,
-                fresh.load(Ordering::Relaxed),
-            )?;
-            handlers.observe_terminal(
-                &call_id,
-                &decision,
-                observed_cause.as_ref(),
-                capture.as_ref(),
-                None,
-            )?;
-            self.presented.insert(
+            .boxed()
+            .shared();
+            return Ok(PendingPresentation {
                 call_id,
-                PresentedCall {
-                    decision: decision.clone(),
-                    presentation: None,
-                    launched: None,
-                },
-            );
-            return Ok(SingletonTerminal::Withheld { decision });
+                handle,
+                owed,
+                fresh,
+                launched: None,
+                consume,
+            });
         };
 
         // A final's declarations are issued only after its decision is
@@ -191,9 +201,10 @@ impl<'a> RunCoordinator<'a> {
             _ => None,
         };
         let observation_decision = decision.clone();
-        let fresh = AtomicBool::new(false);
-        let executed = &fresh;
-        let present = Box::pin(async move {
+        let fresh = std::sync::Arc::new(AtomicBool::new(false));
+        let executed = std::sync::Arc::clone(&fresh);
+        let present: crate::RunRecordStep<'a> = Box::pin(async move {
+            let handlers = callback.get();
             if declares && !final_capture.intents().is_empty() {
                 handlers.realize_capture(&step_call, &final_capture).await?;
             }
@@ -249,17 +260,53 @@ impl<'a> RunCoordinator<'a> {
                 materials: owned,
             })
         });
-        let presented_record = journal
-            .append(record_name(&call_id, "present"), present)
-            .await?;
-        let presentation = presented_record
+        let handle = async move {
+            let entry = present.await.map_err(|message| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::EngineEffectController,
+                    message,
+                )
+            })?;
+            Ok(parallel::Ready::Presentation(std::sync::Arc::new(entry)))
+        }
+        .boxed()
+        .shared();
+        Ok(PendingPresentation {
+            call_id,
+            handle,
+            owed,
+            fresh,
+            launched,
+            consume,
+        })
+    }
+
+    pub(super) fn finish_presentation(
+        &mut self,
+        pending: PendingPresentation<'a>,
+        record: &RunRecord,
+    ) -> Result<SingletonTerminal, SingletonRunError> {
+        let PendingPresentation {
+            owed,
+            fresh,
+            launched,
+            ..
+        } = pending;
+        let Owed {
+            call_id,
+            handlers,
+            decision,
+            capture,
+        } = owed;
+        let handlers = handlers.get();
+        let presentation_ref = record
             .events
             .iter()
             .find_map(|event| match event {
                 RunEvent::Presented { presentation, .. } => Some(presentation.clone()),
                 _ => None,
-            });
-        let presentation_ref = presentation.flatten();
+            })
+            .flatten();
         self.presented.insert(
             call_id.clone(),
             PresentedCall {
@@ -268,6 +315,32 @@ impl<'a> RunCoordinator<'a> {
                 launched: launched.clone(),
             },
         );
+        let (CallDecision::Final { source, .. }, Some(capture)) = (&decision, capture.clone())
+        else {
+            if fresh.load(Ordering::Relaxed)
+                && let Some(stream) = capture.as_ref().and_then(SingletonCapture::stream)
+            {
+                handlers.emit_stream(&call_id, stream);
+            }
+            handlers.incorporate(
+                &call_id,
+                capture.as_ref(),
+                None,
+                fresh.load(Ordering::Relaxed),
+            )?;
+            let observed_cause = self
+                .withheld_verdict(&call_id)
+                .map(|(callback, verdict)| AttributedVerdict { callback, verdict });
+            handlers.observe_terminal(
+                &call_id,
+                &decision,
+                observed_cause.as_ref(),
+                capture.as_ref(),
+                None,
+            )?;
+            return Ok(SingletonTerminal::Withheld { decision });
+        };
+        let journal = &self.journal;
         let presentation = match presentation_ref {
             Some(reference) => journal.materials.read(&reference)?.to_owned(),
             None => capture

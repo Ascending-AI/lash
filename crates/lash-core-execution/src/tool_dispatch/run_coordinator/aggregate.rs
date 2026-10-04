@@ -186,18 +186,27 @@ impl<'a> RunCoordinator<'a> {
         host_control: bool,
     ) -> Result<RunAggregateOutcome, SingletonRunError> {
         let plan = self.aggregate_plan(key)?;
+        let mut presentation = None;
         let (selection, settlements) = loop {
             let (selection, settlements) =
                 self.select_with_control(&plan, consumer, host_control)?;
             if !matches!(selection, Selection::Pending)
                 || plan.operands.is_empty()
-                || (self.pending.is_empty() && self.timers.is_empty())
+                || (self.pending.is_empty()
+                    && self.timers.is_empty()
+                    && self.owed.is_empty()
+                    && presentation.is_none())
             {
                 break (selection, settlements);
             }
-            self.progress_inner().await?;
+            self.begin_aggregate_drain(u64::MAX, &BTreeSet::new(), &mut presentation)
+                .await?;
+            self.progress_with_presentation(&mut presentation).await?;
         };
         if let Selection::HostControl(call_id, decision) = selection {
+            while presentation.is_some() {
+                self.progress_with_presentation(&mut presentation).await?;
+            }
             return Ok(RunAggregateOutcome::HostControl { call_id, decision });
         }
         if matches!(selection, Selection::Pending) {
@@ -221,7 +230,19 @@ impl<'a> RunCoordinator<'a> {
             .filter_map(|index| settlements[*index].as_ref()?.rank)
             .max();
         if let Some(through) = through {
-            self.drain_through(through, &consumed).await?;
+            loop {
+                self.begin_aggregate_drain(through, &consumed, &mut presentation)
+                    .await?;
+                if presentation.is_none() {
+                    break;
+                }
+                self.progress_with_presentation(&mut presentation).await?;
+            }
+        }
+        // An immediate or timer winner owns no ranked operand, but a drain
+        // this frame already started remains protected through acceptance.
+        while presentation.is_some() {
+            self.progress_with_presentation(&mut presentation).await?;
         }
         // A background drain may have presented a result before this consumer
         // asked for it. Taking its value is a separate recorded fact then.
@@ -276,6 +297,31 @@ impl<'a> RunCoordinator<'a> {
                 unreachable!("handled before consumption")
             }
         })
+    }
+
+    /// Start only the lowest owed V. Its protected work is polled by the
+    /// recorded scheduler, so higher X+D can publish while it is blocked.
+    async fn begin_aggregate_drain(
+        &mut self,
+        through: u64,
+        consumed: &BTreeSet<ToolCallId>,
+        presentation: &mut Option<drain::PendingPresentation<'a>>,
+    ) -> Result<(), SingletonRunError> {
+        if presentation.is_none()
+            && self
+                .owed
+                .first_key_value()
+                .is_some_and(|(rank, _)| *rank <= through)
+        {
+            self.drain_starts().await?;
+            if let Some((rank, owed)) = self.owed.pop_first() {
+                *presentation = Some(self.begin_presentation(rank, owed, false).await?);
+            }
+        }
+        if let Some(presentation) = presentation {
+            presentation.consume = consumed.contains(&presentation.call_id);
+        }
+        Ok(())
     }
 
     /// Poll issued attempts beside a program effect without consuming any

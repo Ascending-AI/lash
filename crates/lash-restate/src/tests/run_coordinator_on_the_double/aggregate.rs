@@ -5,6 +5,399 @@ use lash_core::facade_support::SystemClock;
 use lash_core::tool_dispatch::RunAggregateOutcome;
 use lash_core::tool_run::{AggregateConsumer, AggregateLeaf, AggregatePlan};
 
+/// A second program tool completes while the main aggregate owes V1.
+/// It enters through the coordinator's normal owned X and recorded D.
+pub(super) struct ProgramRelease {
+    pub(super) call_id: ToolCallId,
+    ranked: [ToolCallId; 3],
+    server: lash_restate_test::RestateTestServer,
+}
+
+impl ProgramRelease {
+    pub(super) async fn run(&self, probe: &Probe) {
+        loop {
+            if probe
+                .seen()
+                .contains(&Seen::RealizeBegin(self.ranked[0].clone()))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !probe
+                .seen()
+                .contains(&Seen::RealizeBegin(self.ranked[2].clone())),
+            "L18: higher declarations cannot bypass the blocked lower drain"
+        );
+        assert_eq!(
+            probe
+                .executions
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(id, _)| self.ranked.contains(id))
+                .map(|(id, _)| id.clone())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            3,
+            "all bodies entered before rank 1 drains"
+        );
+        assert_eq!(
+            probe.parallel_completed.load(Ordering::SeqCst),
+            1,
+            "rank 1 drains before either higher body can finish"
+        );
+        probe.gate_open.store(true, Ordering::SeqCst);
+        probe.gate_wake.notify_waiters();
+        // S10 keeps rank 1's protected callback held while
+        // ranks 2 and 3 commit. Rank 2 seats at its intent-free
+        // decision; rank 3 must still owe its declaration.
+        loop {
+            let decided: BTreeSet<_> = self
+                .server
+                .invocations()
+                .iter()
+                .flat_map(|view| self.server.journal(&view.id).unwrap())
+                .filter_map(|entry| {
+                    let Some(Ok(bytes)) = entry.run_completion() else {
+                        return None;
+                    };
+                    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+                    serde_json::from_value::<RunRecord>(value.get("record")?.clone()).ok()
+                })
+                .flat_map(|record| {
+                    record.events.into_iter().filter_map(|event| match event {
+                        RunEvent::Decided { call_id, .. } => Some(call_id),
+                        _ => None,
+                    })
+                })
+                .collect();
+            if decided.contains(&self.ranked[1]) && decided.contains(&self.ranked[2]) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !probe
+                .seen()
+                .contains(&Seen::RealizeBegin(self.ranked[2].clone())),
+            "rank 3 remains behind the blocked lower drain after its D"
+        );
+    }
+}
+
+/// FIG-4975 / L18: Promise.all must issue rank 1's protected declaration
+/// while the higher bodies are held. The unrelated effect releases those
+/// bodies only after that declaration begins; waiting for all X deadlocks.
+#[tokio::test]
+async fn l18_all_drains_a_committed_operand_before_the_remaining_bodies_finish() {
+    let calls = Arc::new(vec![
+        (
+            call(
+                "all-rank-one",
+                &Kind::Declares(vec![ToolIntentKind::EmitTrigger]),
+            ),
+            Kind::Declares(vec![ToolIntentKind::EmitTrigger]),
+        ),
+        (call("all-rank-two", &Kind::IntentFree), Kind::IntentFree),
+        (
+            call(
+                "all-rank-three",
+                &Kind::Declares(vec![ToolIntentKind::EmitTrigger]),
+            ),
+            Kind::Declares(vec![ToolIntentKind::EmitTrigger]),
+        ),
+    ]);
+    let ids: Vec<_> = calls.iter().map(|(call, _)| call.call_id.clone()).collect();
+    let mut cuts = vec![
+        Some(name(&ids[2], "declare")),
+        Some(name(&ids[0], "declare")),
+        None,
+    ];
+    while let Some(cut) = cuts.pop() {
+        let program_call = call("all-unrelated-program", &Kind::IntentFree);
+        let mut all_calls = calls.as_ref().clone();
+        all_calls.push((program_call.clone(), Kind::IntentFree));
+        let mut probe = Probe::new(&all_calls);
+        probe.body_barrier = Some(Arc::new(tokio::sync::Barrier::new(3)));
+        probe.parallel_order = ids.clone();
+        probe.gate = Some((ids[1].clone(), ids[0].clone()));
+        probe.held.insert(ids[0].clone());
+        let backend = lash_restate_test::backend(4975, ServerConfig::default())
+            .await
+            .unwrap();
+        let crashes = lash_restate_test::CrashCount::new();
+        assert!(backend.server().on_crash(crashes.listener()));
+        if let Some(cut) = &cut {
+            backend
+                .server()
+                .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
+                    name: Some(cut.clone()),
+                }));
+        }
+        probe.program_release = Some(ProgramRelease {
+            call_id: program_call.call_id.clone(),
+            ranked: [ids[0].clone(), ids[1].clone(), ids[2].clone()],
+            server: backend.server().clone(),
+        });
+        let probe = Arc::new(probe);
+        let finished = Arc::new(Mutex::new(Vec::new()));
+        let attempt: lash_restate_test::HandlerAttempt = {
+            let probe = Arc::clone(&probe);
+            let calls = Arc::clone(&calls);
+            let finished = Arc::clone(&finished);
+            Arc::new(move |scoped| {
+                let probe = Arc::clone(&probe);
+                let calls = Arc::clone(&calls);
+                let finished = Arc::clone(&finished);
+                let program_call = program_call.clone();
+                Box::pin(async move {
+                    let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+                    let plan = aggregate_plan("protected-all", &round, vec![0, 1, 2]);
+                    let mut run =
+                        RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                    run.start_aggregate(
+                        &plan,
+                        &round,
+                        Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                        Default::default(),
+                        &SystemClock,
+                    )
+                    .await
+                    .unwrap();
+                    let independent = aggregate_plan(
+                        "independent-program-effect",
+                        std::slice::from_ref(&program_call),
+                        vec![0],
+                    );
+                    run.start_aggregate(
+                        &independent,
+                        std::slice::from_ref(&program_call),
+                        Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                        Default::default(),
+                        &SystemClock,
+                    )
+                    .await
+                    .unwrap();
+                    let answer = run
+                        .consume_aggregate(&plan.key, AggregateConsumer::All)
+                        .await;
+                    assert!(
+                        matches!(answer.unwrap(), RunAggregateOutcome::AllResults(results) if results.len() == 3 && results.iter().all(Option::is_some))
+                    );
+                    assert!(
+                        matches!(run.consume_aggregate(&independent.key, AggregateConsumer::All).await.unwrap(), RunAggregateOutcome::AllResults(results) if results.len() == 1)
+                    );
+                    run.close().await.unwrap();
+                    finished.lock().unwrap().push(run.into_records());
+                })
+            })
+        };
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+        )
+        .await
+        .expect("L18: rank 1 must drain before Promise.all waits for the held higher bodies")
+        .unwrap_or_else(|error| panic!("cut={cut:?}: {error}"));
+        assert_eq!(
+            crashes.get(),
+            u64::from(cut.is_some()),
+            "cut={cut:?}: the named boundary must execute"
+        );
+        if cut.is_none() {
+            // Cut each V boundary selected by the recorded schedule. V has
+            // no separate callback command which could serialize later D.
+            for view in backend.server().invocations() {
+                for entry in backend.server().journal(&view.id).unwrap() {
+                    let Some(Ok(bytes)) = entry.run_completion() else {
+                        continue;
+                    };
+                    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    let Some(record) = value.get("record") else {
+                        continue;
+                    };
+                    let record: RunRecord = serde_json::from_value(record.clone()).unwrap();
+                    if record
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, RunEvent::Presented { .. }))
+                    {
+                        cuts.push(Some(format!("lash:run:schedule:{}", record.first.0)));
+                    }
+                }
+            }
+        }
+        let finished = finished.lock().unwrap();
+        let records = finished.last().expect("the aggregate completed");
+        assert!(
+            drain_violations(records, &BTreeSet::new(), None).is_empty(),
+            "cut={cut:?}: the protected drain remains transitive"
+        );
+        for id in &ids {
+            assert_eq!(
+                probe.executions_of(id),
+                if cut.as_ref() == Some(&name(&ids[0], "declare")) && *id != ids[0] {
+                    2
+                } else {
+                    1
+                },
+                "cut={cut:?}: only the still-unrecorded higher bodies redeliver"
+            );
+        }
+        assert_eq!(probe.realized.lock().unwrap().len(), 2);
+        let events: Vec<_> = records.iter().flat_map(|record| &record.events).collect();
+        let declaration = events.iter().position(|event| matches!(event, RunEvent::DeclarationsIssued { call_id } if *call_id == ids[0])).unwrap();
+        let second = events.iter().position(|event| matches!(event, RunEvent::Decided { call_id, rank: 2, .. } if *call_id == ids[1])).unwrap();
+        let settled = events.iter().position(|event| matches!(event, RunEvent::DeclarationsSettled { call_id } if *call_id == ids[0])).unwrap();
+        let unrelated = events.iter().position(|event| matches!(event, RunEvent::Decided { call_id, .. } if *call_id == probe.program_release.as_ref().unwrap().call_id)).unwrap();
+        assert!(
+            second < unrelated && unrelated < settled,
+            "the independent program tool completes and publishes D while V1 remains blocked"
+        );
+        assert!(
+            declaration < second && second < settled,
+            "rank 2 commits and seats while rank 1's declaration is blocked"
+        );
+    }
+}
+
+#[tokio::test]
+async fn l18_protected_io_stays_live_after_every_x_ack_and_recovers_mid_v() {
+    for crash in [false, true] {
+        let calls = Arc::new(vec![(
+            call(
+                "slow-protected-io",
+                &Kind::Declares(vec![ToolIntentKind::EmitTrigger]),
+            ),
+            Kind::Declares(vec![ToolIntentKind::EmitTrigger]),
+        )]);
+        let id = calls[0].0.call_id.clone();
+        let mut probe = Probe::new(&calls);
+        probe.held_after_realization.insert(id.clone());
+        let probe = Arc::new(probe);
+        let backend = lash_restate_test::backend(
+            4975,
+            ServerConfig {
+                inactivity_timeout: Duration::from_millis(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let crashes = lash_restate_test::CrashCount::new();
+        assert!(backend.server().on_crash(crashes.listener()));
+        let finished = Arc::new(Mutex::new(Vec::new()));
+        let attempt: lash_restate_test::HandlerAttempt = {
+            let calls = Arc::clone(&calls);
+            let probe = Arc::clone(&probe);
+            let finished = Arc::clone(&finished);
+            Arc::new(move |scoped| {
+                let calls = Arc::clone(&calls);
+                let probe = Arc::clone(&probe);
+                let finished = Arc::clone(&finished);
+                Box::pin(async move {
+                    probe.handler_attempts.fetch_add(1, Ordering::SeqCst);
+                    let round = vec![calls[0].0.clone()];
+                    let plan = aggregate_plan("slow-protected-all", &round, vec![0]);
+                    let mut run =
+                        RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                    run.start_aggregate(
+                        &plan,
+                        &round,
+                        Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                        Default::default(),
+                        &SystemClock,
+                    )
+                    .await
+                    .unwrap();
+                    assert!(
+                        matches!(run.consume_aggregate(&plan.key, AggregateConsumer::All).await.unwrap(), RunAggregateOutcome::AllResults(results) if results.len() == 1)
+                    );
+                    run.close().await.unwrap();
+                    finished.lock().unwrap().push(run.into_records());
+                })
+            })
+        };
+        let server = backend.server().clone();
+        let external_ack = async {
+            let invocation = loop {
+                if !probe.realized.lock().unwrap().is_empty()
+                    && let Some(view) = server.invocations().into_iter().find(|view| {
+                        server.journal(&view.id).unwrap().into_iter().any(|entry| {
+                            entry.run_completion().and_then(Result::ok).and_then(|bytes| {
+                                let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+                                serde_json::from_value::<RunRecord>(value.get("record")?.clone()).ok()
+                            }).is_some_and(|record| record.events.iter().any(|event| matches!(event, RunEvent::Decided { call_id, .. } if *call_id == id)))
+                        })
+                    })
+                {
+                    break view;
+                }
+                tokio::task::yield_now().await;
+            };
+            // No owned X or unrelated SDK callback is left to keep V alive.
+            // Its external outcome exists, but the I/O acknowledgment is slow.
+            let attempts = probe.handler_attempts.load(Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let view = server
+                .invocations()
+                .into_iter()
+                .find(|view| view.id == invocation.id)
+                .unwrap();
+            assert_eq!(
+                view.status, "running",
+                "V must not suspend while external I/O is in flight"
+            );
+            assert_eq!(
+                probe.handler_attempts.load(Ordering::SeqCst),
+                attempts,
+                "slow protected I/O must retain its owning attempt"
+            );
+            assert!(probe.presentations.lock().unwrap().is_empty());
+            if crash {
+                assert!(server.crash(&invocation.id));
+                loop {
+                    if probe
+                        .seen()
+                        .iter()
+                        .filter(
+                            |event| matches!(event, Seen::RealizeBegin(call_id) if *call_id == id),
+                        )
+                        .count()
+                        == 2
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+                assert_eq!(
+                    probe.realized.lock().unwrap().len(),
+                    1,
+                    "the recorded intent recovers through its external outcome fence"
+                );
+            }
+            probe.run_unrelated();
+        };
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let (answer, ()) = tokio::join!(
+                backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+                external_ack
+            );
+            answer.unwrap();
+        })
+        .await
+        .expect("L18: SDK-owned protected I/O survives a slow acknowledgment and a mid-V crash");
+        assert_eq!(crashes.get(), u64::from(crash));
+        assert_eq!(probe.executions_of(&id), 1);
+        assert_eq!(probe.realized.lock().unwrap().len(), 1);
+        assert_eq!(probe.presentations.lock().unwrap().len(), 1);
+        let finished = finished.lock().unwrap();
+        assert!(drain_violations(finished.last().unwrap(), &BTreeSet::new(), None).is_empty());
+    }
+}
+
 #[tokio::test]
 async fn l06_race_returns_before_inline_loser_and_keeps_it_unconsumed() {
     let calls = Arc::new(vec![

@@ -143,6 +143,7 @@ struct Probe {
     cancelled_calls: Mutex<Vec<ToolCallId>>,
     parallel: Option<Arc<tokio::sync::Barrier>>,
     body_barrier: Option<Arc<tokio::sync::Barrier>>,
+    program_release: Option<aggregate::ProgramRelease>,
     parallel_order: Vec<ToolCallId>,
     parallel_completed: std::sync::atomic::AtomicUsize,
     parallel_wake: tokio::sync::Notify,
@@ -164,6 +165,8 @@ struct Probe {
     realized: Mutex<Vec<(ToolCallId, ToolIntentKind)>>,
     /// Calls whose realization holds until the unrelated effect has run.
     held: BTreeSet<ToolCallId>,
+    /// Slow external acknowledgment after the fenced outcome exists.
+    held_after_realization: BTreeSet<ToolCallId>,
     unrelated: AtomicBool,
     unrelated_ran: tokio::sync::Notify,
     /// A fault the first realization of a call takes after its first
@@ -194,6 +197,7 @@ impl Probe {
             cancelled_calls: Mutex::new(Vec::new()),
             parallel: None,
             body_barrier: None,
+            program_release: None,
             parallel_order: Vec::new(),
             parallel_completed: Default::default(),
             parallel_wake: Default::default(),
@@ -213,6 +217,7 @@ impl Probe {
             executions: Mutex::new(Vec::new()),
             realized: Mutex::new(Vec::new()),
             held: BTreeSet::new(),
+            held_after_realization: BTreeSet::new(),
             unrelated: AtomicBool::new(false),
             unrelated_ran: tokio::sync::Notify::new(),
             fault_after_first_intent: None,
@@ -282,6 +287,17 @@ impl SingletonToolHandlers for Probe {
             .lock()
             .unwrap()
             .push((attempt.call_id.clone(), attempt.attempt));
+        if let Some(program) = &self.program_release
+            && program.call_id == *attempt.call_id
+        {
+            program.run(self).await;
+            return Ok(SingletonBodyOutcome::Done {
+                commands: Default::default(),
+                output: output_of(attempt.call_id),
+                intents: Vec::new(),
+                start: None,
+            });
+        }
         if let Some(barrier) = &self.body_barrier
             && self.executions_of(attempt.call_id) == 1
         {
@@ -304,6 +320,8 @@ impl SingletonToolHandlers for Probe {
             tokio::time::timeout(Duration::from_secs(1), barrier.wait())
                 .await
                 .expect("L01: every body reaches its barrier before any can finish");
+        }
+        if !self.parallel_order.is_empty() {
             loop {
                 let wake = self.parallel_wake.notified();
                 tokio::pin!(wake);
@@ -410,7 +428,13 @@ impl SingletonToolHandlers for Probe {
         call_id: &ToolCallId,
         _capture: &SingletonCapture,
     ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
-        if !self.parallel_order.is_empty() {
+        if self
+            .program_release
+            .as_ref()
+            .is_some_and(|program| program.call_id == *call_id)
+        {
+            self.run_unrelated();
+        } else if !self.parallel_order.is_empty() {
             let index = self.parallel_completed.fetch_add(1, Ordering::SeqCst);
             assert_eq!(self.parallel_order[index], *call_id);
             self.parallel_wake.notify_waiters();
@@ -489,6 +513,17 @@ impl SingletonToolHandlers for Probe {
                 && !self.faulted.swap(true, Ordering::SeqCst)
             {
                 return Err("a fault after the first intent".to_owned());
+            }
+        }
+        if self.held_after_realization.contains(call_id) {
+            loop {
+                let acknowledged = self.unrelated_ran.notified();
+                tokio::pin!(acknowledged);
+                acknowledged.as_mut().enable();
+                if self.unrelated.load(Ordering::SeqCst) {
+                    break;
+                }
+                acknowledged.await;
             }
         }
         self.seen

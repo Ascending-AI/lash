@@ -9,6 +9,7 @@ pub(super) type Handle<'a> = Shared<BoxFuture<'a, Result<Ready, RuntimeEffectCon
 pub(super) enum Ready {
     Attempt(std::sync::Arc<RunAttemptEntry>),
     Timer,
+    Presentation(std::sync::Arc<RunJournalEntry>),
 }
 
 pub(super) struct AggregateTimer<'a> {
@@ -19,6 +20,10 @@ pub(super) struct AggregateTimer<'a> {
 
 #[derive(Clone)]
 enum SelectedWork<'a> {
+    Presentation {
+        call_id: ToolCallId,
+        consume: bool,
+    },
     Call {
         work: std::sync::Arc<Work<'a>>,
         ordinal: AttemptOrdinal,
@@ -272,7 +277,14 @@ impl<'a> RunCoordinator<'a> {
     pub(super) async fn progress_inner(
         &mut self,
     ) -> Result<Option<(ToolCallId, DecidedCall)>, SingletonRunError> {
-        if self.pending.is_empty() && self.timers.is_empty() {
+        self.progress_with_presentation(&mut None).await
+    }
+
+    pub(super) async fn progress_with_presentation(
+        &mut self,
+        presentation: &mut Option<drain::PendingPresentation<'a>>,
+    ) -> Result<Option<(ToolCallId, DecidedCall)>, SingletonRunError> {
+        if self.pending.is_empty() && self.timers.is_empty() && presentation.is_none() {
             return Ok(None);
         }
         let mut decision = None;
@@ -309,6 +321,15 @@ impl<'a> RunCoordinator<'a> {
                     },
                 )
             }));
+            let protected = presentation.as_ref().map(|pending| {
+                (
+                    pending.handle.clone(),
+                    SelectedWork::Presentation {
+                        call_id: pending.call_id.clone(),
+                        consume: pending.consume,
+                    },
+                )
+            });
             let name = format!("lash:run:schedule:{}", record.first.0);
             let address = crate::EffectAddress::new(
                 self.journal.scoped.execution_scope().clone(),
@@ -338,24 +359,73 @@ impl<'a> RunCoordinator<'a> {
             let available = self.journal.materials.available.clone();
 
             // Register a replayed D before polling an unfinished X. Only a
-            // fresh schedule requests selection; its owner waits for X outside
-            // the SDK callback and sends the acknowledged receipt back.
+            // fresh schedule requests selection; its owner waits for X ACK
+            // outside the SDK callback. Protected V runs inside the borrowed
+            // callback, keeping the invocation live even after all X ACKs.
+            // Cached V never polls or repeats protected callbacks.
             let needs_selection = std::sync::Arc::new(tokio::sync::Notify::new());
             let needed = std::sync::Arc::clone(&needs_selection);
             let (send_choice, receive_choice) = tokio::sync::oneshot::channel();
             let selector = async move {
                 needs_selection.notified().await;
-                let (ready, chosen, _) =
-                    select_all(choices.iter().map(|entry| entry.0.clone())).await;
-                let _ = send_choice.send((ready, choices[chosen].1.clone()));
+                if !choices.is_empty() {
+                    let (ready, chosen, _) =
+                        select_all(choices.iter().map(|entry| entry.0.clone())).await;
+                    let _ = send_choice.send((ready, choices[chosen].1.clone()));
+                } else {
+                    std::future::pending::<()>().await;
+                }
             };
             let step = Box::pin(async move {
                 needed.notify_one();
-                let (ready, selected_work) = receive_choice
-                    .await
-                    .map_err(|_| "the owning selection frame ended".to_owned())?;
+                let acknowledged = async {
+                    receive_choice
+                        .await
+                        .map_err(|_| "the owning selection frame ended".to_owned())
+                };
+                let protected = async move {
+                    match protected {
+                        Some((handle, work)) => Ok::<_, String>((handle.await, work)),
+                        None => std::future::pending().await,
+                    }
+                };
+                let (ready, selected_work) = tokio::select! {
+                    result = acknowledged => result?,
+                    result = protected => result?,
+                };
                 let ready = ready.map_err(|error| error.to_string())?;
                 let (work, ordinal, timer, delay) = match selected_work {
+                    SelectedWork::Presentation { call_id, consume } => {
+                        let Ready::Presentation(entry) = ready else {
+                            return Err("a presentation returned an X receipt".to_owned());
+                        };
+                        if !entry.record.events.iter().any(|event| matches!(event, RunEvent::Presented { call_id: id, .. } if *id == call_id)) {
+                            return Err("a presentation returned another call".to_owned());
+                        }
+                        let mut entry = entry.as_ref().clone();
+                        // V takes its ordinal when selected, after any X+D
+                        // accepted while its protected work was unfinished.
+                        entry.record.first = record.first;
+                        if consume
+                            && !entry
+                                .record
+                                .events
+                                .iter()
+                                .any(|event| matches!(event, RunEvent::Consumed { .. }))
+                        {
+                            let position = entry
+                                .record
+                                .events
+                                .iter()
+                                .position(|event| matches!(event, RunEvent::Incorporated { .. }))
+                                .ok_or("V has no incorporation")?;
+                            entry
+                                .record
+                                .events
+                                .insert(position, RunEvent::Consumed { call_id });
+                        }
+                        return Ok(entry);
+                    }
                     SelectedWork::AggregateTimer { key, leaf } => {
                         if !matches!(ready, Ready::Timer) {
                             return Err("aggregate timer returned an X receipt".to_owned());
@@ -442,6 +512,7 @@ impl<'a> RunCoordinator<'a> {
                             .await
                         }
                     }
+                    Ready::Presentation(_) => Err("an X returned a presentation".to_owned()),
                     Ready::Timer => {
                         if !timer {
                             return Err("an X handle returned a timer wake".to_owned());
@@ -483,6 +554,15 @@ impl<'a> RunCoordinator<'a> {
                 result = &mut selection => result?,
                 () = &mut selector => selection.await?,
             };
+            if let Some(pending) = presentation.as_ref()
+                && selected.record.events.iter().any(|event| matches!(event, RunEvent::Presented { call_id, .. } if *call_id == pending.call_id))
+            {
+                let call_id = pending.call_id.clone();
+                let pending = presentation.take().ok_or_else(|| boundary(&call_id))?;
+                let record = self.journal.accept(selected)?;
+                self.finish_presentation(pending, &record)?;
+                return Ok(None);
+            }
             let event = selected
                 .record
                 .events
