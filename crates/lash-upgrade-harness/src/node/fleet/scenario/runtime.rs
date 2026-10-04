@@ -945,6 +945,12 @@ pub async fn run(scenario: Scenario) -> Result<()> {
         Scenario::TerminalPublication => "s16",
         Scenario::TerminalRedrive => "s16-sigkill",
     };
+    run_named(scenario, name).await
+}
+
+/// Compose an existing fleet subcase under the caller's unique case slug.
+/// The subcase still owns its services, barriers, receipts and cleanup.
+pub async fn run_named(scenario: Scenario, name: &str) -> Result<()> {
     let (mut lease, cluster, binary) = setup(name)?;
     lease.deadline = Instant::now() + Duration::from_secs(240);
     let host = artifact(
@@ -997,13 +1003,31 @@ pub async fn run(scenario: Scenario) -> Result<()> {
     )
     .await;
     let executed = usize::from(!fixture.primary.observations.is_empty());
-    let counts = crate::e2e::evidence::Counts {
-        selected: 1,
-        executed,
-        passed: usize::from(result.is_ok()),
-        failed: usize::from(result.is_err()) * executed,
-        not_run: 1 - executed,
+    let receipt = crate::e2e::evidence::CaseReceipt {
+        evidence: match &result {
+            Ok(proof) => {
+                let mut evidence = proof.after.clone();
+                evidence.case = name.into();
+                evidence
+            }
+            Err(_) => {
+                let mut evidence = Evidence::empty(name.into());
+                evidence.artifacts = vec![fixture.binary.clone(), fixture.host.clone()];
+                evidence.cleanup = lease.cleanup.clone();
+                evidence
+            }
+        },
+        verdict: match &result {
+            Ok(_) => crate::e2e::evidence::Verdict::Passed,
+            Err(error) if executed == 0 => crate::e2e::evidence::Verdict::NotRun {
+                reason: format!("{error:#}"),
+            },
+            Err(error) => crate::e2e::evidence::Verdict::Failed {
+                reason: format!("{error:#}"),
+            },
+        },
     };
+    let counts = receipt.write(&lease.directory)?;
     write(&lease.directory.join("counts.json"), &counts)?;
     println!(
         "{name} selected=1 executed={} passed={} failed={} not_run={}",

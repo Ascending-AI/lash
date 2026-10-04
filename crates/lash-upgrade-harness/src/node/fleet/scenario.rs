@@ -20,7 +20,7 @@ use anyhow::{Context, Result, ensure};
 use lash_core_store::tool_run::{CallDecision, RunEvent, RunJournalEntry, RunLedger};
 
 mod runtime;
-pub use runtime::run;
+pub use runtime::{run, run_named};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Scenario {
