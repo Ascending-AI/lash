@@ -843,31 +843,7 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
                 .await
                 .expect("read the law's resident state")
             {
-                Some(state) => {
-                    let authority = crate::plugin::SessionAuthorityContext {
-                        tool_access: state.authority.tool_access.clone(),
-                        subagent: state.authority.subagent.clone(),
-                        plugin_config: state.admitted_plugin_config(),
-                    };
-                    let request = match state.plugin_state() {
-                        Some(snapshot) => crate::plugin::PluginSessionRequest::rematerialization(
-                            parts.session_id.clone(),
-                            snapshot,
-                            authority,
-                        ),
-                        None => crate::plugin::PluginSessionRequest::creation(
-                            parts.session_id.clone(),
-                            authority,
-                        ),
-                    };
-                    let plugins = crate::plugin::PluginHost::new(factories)
-                        .isolated_registry()
-                        .build_session(request)
-                        .expect("rematerialize the law's plugins");
-                    builder
-                        .with_initial_state(state)
-                        .with_plugin_session(plugins)
-                }
+                Some(state) => builder.with_initial_state(state),
                 None => builder,
             };
         builder.with_store(crate::conformance::helpers::session_view(
