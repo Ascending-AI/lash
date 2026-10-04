@@ -22,7 +22,6 @@ async fn start_key_feed_and_plugin_state_survive_worker_replacement() -> Result<
         .await;
     core.shutdown().await?;
     drop(core);
-    drop(plugin);
 
     let double = double.restart().await?;
     let plugin = StatePlugin::default();

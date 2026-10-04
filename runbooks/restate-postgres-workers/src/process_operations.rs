@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, ensure};
 use lash::plugins::{
-    PluginDeclaration, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
-    PluginStateView, SessionPlugin, SessionReadyContext, StateCommands,
+    PluginDeclaration, PluginError, PluginFactory, PluginOperation, PluginQuery, PluginRegistrar,
+    PluginSessionContext, SessionParam, SessionPlugin, StateCommands,
 };
 use lash::process::{
     Lifetime, ObservedProcessEvent, ProcessCursor, ProcessEventPageEvents, ProcessEventPageMore,
@@ -24,18 +24,26 @@ pub const SESSION_ID: &str = "process-operations-plugin-state";
 const START_KEY: &str = "process-operations-replacement-start";
 const STATE_KEY: &str = "replacement-value";
 
-#[derive(Clone)]
-pub struct StatePlugin {
-    state: tokio::sync::watch::Sender<Option<PluginStateView>>,
-}
+#[derive(Clone, Default)]
+pub struct StatePlugin {}
 
-impl Default for StatePlugin {
-    fn default() -> Self {
-        Self {
-            state: tokio::sync::watch::channel(None).0,
-        }
+struct StateSnapshot;
+
+impl PluginOperation for StateSnapshot {
+    const NAME: &'static str = "process_operations.state_snapshot";
+    const DESCRIPTION: &'static str = "Read the session's published replacement state.";
+    const SESSION_PARAM: SessionParam = SessionParam::Required;
+    type Args = Value;
+    type Output = Value;
+    type Error = String;
+    const ERROR_TYPE: &'static str = Self::NAME;
+    const ERROR_VERSION: lash::plugins::FormatVersion = lash::plugins::FormatVersion::ONE;
+    fn error_class(_: &Self::Error) -> lash::plugins::PluginFailureClass {
+        lash::plugins::PluginFailureClass::Terminal
     }
 }
+
+impl PluginQuery for StateSnapshot {}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StateEvidence {
@@ -44,12 +52,12 @@ pub struct StateEvidence {
 }
 
 impl StatePlugin {
-    fn snapshot(&self) -> Result<StateEvidence> {
-        let state = self.state.borrow().clone().context("plugin is not ready")?;
-        Ok(StateEvidence {
-            value: state.get(STATE_KEY),
-            generation: state.generation(),
-        })
+    async fn snapshot(&self, session: &lash::LashSession) -> Result<StateEvidence> {
+        let state = session
+            .plugin_operations()
+            .query::<StateSnapshot>(Value::Null)
+            .await?;
+        serde_json::from_value(state).context("decode the published plugin state")
     }
 }
 
@@ -73,6 +81,17 @@ impl SessionPlugin for StatePlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+        let state = reg.state();
+        reg.operations()
+            .typed_query::<StateSnapshot, _, _>(move |_, _| {
+                let state = state.clone();
+                async move {
+                    Ok(json!({
+                        "value": state.get(STATE_KEY),
+                        "generation": state.generation(),
+                    }))
+                }
+            })?;
         reg.turn().before(
             lash::hook_key!("process-operations"),
             Arc::new(move |_| {
@@ -85,11 +104,6 @@ impl SessionPlugin for StatePlugin {
                 })
             }),
         )?;
-        Ok(())
-    }
-
-    fn session_ready(&self, ctx: SessionReadyContext) -> Result<(), PluginError> {
-        self.state.send_replace(Some(ctx.state));
         Ok(())
     }
 }
@@ -250,7 +264,7 @@ pub async fn prepare(
         .output()
         .await?;
     ensure!(matches!(output.result.outcome, TurnOutcome::Finished(_)));
-    let state = plugin.snapshot()?;
+    let state = plugin.snapshot(&session).await?;
     ensure!(state.value == Some(json!({"value": "survives replacement"})) && state.generation > 0);
     let baseline = ReplacementBaseline {
         first,
@@ -336,7 +350,7 @@ pub async fn recover(
     );
 
     let session = core.session(SESSION_ID).open().await?;
-    let restored = plugin.snapshot()?;
+    let restored = plugin.snapshot(&session).await?;
     ensure!(
         restored == before.state,
         "replacement lost plugin value or generation"
@@ -347,10 +361,10 @@ pub async fn recover(
         .output()
         .await?;
     ensure!(matches!(output.result.outcome, TurnOutcome::Finished(_)));
-    let next = plugin.snapshot()?;
+    let next = plugin.snapshot(&session).await?;
     ensure!(
         next.value == before.state.value && next.generation > restored.generation,
-        "the next accepted plugin write did not advance its generation"
+        "the next accepted plugin write did not advance its generation: restored={restored:?}, next={next:?}"
     );
     println!(
         "{}",
