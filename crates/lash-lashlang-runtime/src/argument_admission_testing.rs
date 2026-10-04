@@ -14,7 +14,10 @@ pub async fn process_event_host_failure_stops_execution(
 }
 
 /// A real worker-backed process must return the run guard's typed failure.
-pub async fn process_shutdown_preserves_typed_failures(backend: &lash_core::Backend) {
+pub async fn process_shutdown_preserves_typed_failures(
+    backend: &lash_core::Backend,
+    scoped: lash_core::ScopedEffectController<'_>,
+) {
     use lash_core::ProcessEngine as _;
 
     let environment = LashlangHostEnvironment::default();
@@ -68,11 +71,6 @@ pub async fn process_shutdown_preserves_typed_failures(backend: &lash_core::Back
             ))
             .expect("record settings");
         let process_id = lash_core::mint_process_id();
-        let scoped = backend
-            .effect_host()
-            .scoped_static(lash_core::AdmittedScope::process(process_id.clone()))
-            .expect("scope")
-            .expect("static controller");
         let built = lash_core::testing::TestExecutionContextBuilder::new(
             lash_core::testing::TestExecutionPorts::of(backend),
         )
@@ -113,7 +111,7 @@ pub async fn process_shutdown_preserves_typed_failures(backend: &lash_core::Back
             true,
             lash_core::CancellationToken::new(),
             None,
-            scoped,
+            scoped.clone(),
             None,
             Box::new(move |_| {
                 Ok(lash_core::runtime::ProcessEngineRuntimeContext::new(

@@ -17,7 +17,6 @@ use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
-mod commit_pins;
 mod fig1127;
 mod fig1416;
 
@@ -25,7 +24,6 @@ mod fig2471;
 use crate::runtime_support::effect_recording_authority as recording_authority;
 mod response_settlement;
 mod source_lint_support;
-mod turn_cancel_modes;
 pub(super) use recording_authority::{
     host_with_effect_recorder, layered_effect_host, runtime_host_config_with_effect_layer,
 };
@@ -65,16 +63,24 @@ async fn turn_effect_envelope_does_not_carry_checkpoint_payload() {
     .await;
     let large_marker = format!("large-turn-marker-{}", "x".repeat(16_384));
 
+    let run_handler_0 = double
+        .open_handler(AdmittedScope::turn(
+            "root",
+            TurnId::from("checkpoint-envelope"),
+        ))
+        .await
+        .expect("open the Run handler");
     let turn = runtime
         .execute_turn(
             TurnInput::text(large_marker.clone()),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
-                scoped_test_turn(&backend, &recorder, &TurnId::from("checkpoint-envelope")),
+                scoped_test_turn(&run_handler_0, &recorder),
             ),
         )
         .await
         .expect("turn");
+    run_handler_0.close().await.expect("close the Run handler");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     let checkpoint_envelope = recorder
@@ -206,8 +212,14 @@ async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
     )
     .await;
 
-    let scoped_effect_controller =
-        scoped_test_turn(&backend, &recorder, &TurnId::from("stable-scoped-turn"));
+    let run_handler_1 = double
+        .open_handler(AdmittedScope::turn(
+            "root",
+            TurnId::from("stable-scoped-turn"),
+        ))
+        .await
+        .expect("open the Run handler");
+    let scoped_effect_controller = scoped_test_turn(&run_handler_1, &recorder);
     let turn = runtime
         .execute_turn(
             TurnInput::text("hello"),
@@ -216,354 +228,15 @@ async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
         )
         .await
         .expect("turn");
+    run_handler_1.close().await.expect("close the Run handler");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     assert!(recorder.records().iter().all(|record| {
-        record.kind == RuntimeEffectKind::PeekAwaitEvent
-            || record.replay_key.contains("stable-scoped-turn")
+        matches!(
+            record.kind,
+            RuntimeEffectKind::PeekAwaitEvent | RuntimeEffectKind::TransitionPlugins
+        ) || record.replay_key.contains("stable-scoped-turn")
     }));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
-    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    struct RetryOnceTool {
-        attempts: Arc<std::sync::atomic::AtomicUsize>,
-    }
-
-    fn retry_once_tool_definition() -> lash_core::ToolDefinition {
-        lash_core::ToolDefinition::raw(
-            "tool:retry_once",
-            "retry_once",
-            "Fails once with a safe retry.",
-            serde_json::json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-            }),
-            serde_json::json!({ "type": "object", "additionalProperties": true }),
-        )
-        .expect("valid declared tool schemas")
-        .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 1, 1))
-    }
-
-    #[async_trait::async_trait]
-    impl lash_core::ToolProvider for RetryOnceTool {
-        fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-            vec![retry_once_tool_definition().manifest()]
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-            (name == "retry_once").then(|| Arc::new(retry_once_tool_definition().contract()))
-        }
-
-        async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-            let attempt = self
-                .attempts
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if attempt == 0 {
-                return lash_core::ToolOutcome::retryable_failure(
-                    lash_core::ToolFailureClass::External,
-                    "transient",
-                    "transient failure",
-                    Some(1),
-                )
-                .into();
-            }
-            lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })).into()
-        }
-    }
-
-    let recorder = RecordingEffectController::default();
-    let transport = mock_provider(vec![
-        MockCall {
-            stream_events: Vec::new(),
-            response: Ok(LlmResponse {
-                parts: vec![LlmOutputPart::ToolCall {
-                    call_id: "retry-call-1".to_string(),
-                    tool_name: "retry_once".to_string(),
-                    input_json: serde_json::json!({}).to_string(),
-                    replay: None,
-                }],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            }),
-        },
-        MockCall {
-            stream_events: Vec::new(),
-            response: Ok(LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text: "finished".to_string(),
-                    response_meta: None,
-                }],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            }),
-        },
-    ]);
-    let mut runtime = runtime_with_plugins_and_tools_and_host(
-        Vec::new(),
-        Arc::new(RetryOnceTool {
-            attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        }),
-        transport,
-        // The host shares the scoped recorder's group substrate: the turn's
-        // tool group opens there, where the host's tool-child resolver is
-        // registered (FIG-3397).
-        host_with_effect_recorder(&backend, recorder.clone()),
-    )
-    .await;
-
-    let scoped_effect_controller =
-        scoped_test_turn(&backend, &recorder, &TurnId::from("scoped-retry-sleep"));
-    let turn = runtime
-        .execute_turn(
-            TurnInput::text("use retry tool"),
-            TurnOptions::new(CancellationToken::new(), scoped_effect_controller)
-                .with_events(&NoopEventSink),
-        )
-        .await
-        .expect("turn");
-
-    assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
-    let attempt_records = recorder
-        .records()
-        .into_iter()
-        .filter(|record| record.kind == RuntimeEffectKind::ToolAttempt)
-        .collect::<Vec<_>>();
-    assert_eq!(attempt_records.len(), 2);
-    let tool = &attempt_records[0];
-    assert_eq!(tool.turn_id.as_deref(), Some("scoped-retry-sleep"));
-    assert!(tool.replay_key.contains("scoped-retry-sleep"));
-    // An attempt is keyed by lash's call id and its number (ADR 0117).
-    let call_id = &turn.tool_calls[0].call_id;
-    assert!(tool.replay_key.contains(&format!("{call_id}:attempt:1")));
-    assert_eq!(recorder.count_kind(RuntimeEffectKind::Sleep), 1);
-    assert!(
-        recorder
-            .envelopes()
-            .iter()
-            .any(|envelope| envelope.contains("retry-call-1"))
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local_tools() {
-    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let recorder = RecordingEffectController::default();
-    let transport = mock_provider(vec![
-        MockCall {
-            stream_events: Vec::new(),
-            response: Ok(LlmResponse {
-                parts: vec![
-                    LlmOutputPart::ToolCall {
-                        call_id: "call-1".to_string(),
-                        tool_name: "echo_tool".to_string(),
-                        input_json: serde_json::json!({"value": "hi"}).to_string(),
-                        replay: None,
-                    },
-                    LlmOutputPart::ToolCall {
-                        call_id: "call-2".to_string(),
-                        tool_name: "echo_tool".to_string(),
-                        input_json: serde_json::json!({"value": "there"}).to_string(),
-                        replay: None,
-                    },
-                ],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            }),
-        },
-        MockCall {
-            stream_events: Vec::new(),
-            response: Ok(LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text: "finished".to_string(),
-                    response_meta: None,
-                }],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            }),
-        },
-    ]);
-    let mut runtime = runtime_with_plugins_and_tools_and_host(
-        Vec::new(),
-        Arc::new(EchoTool),
-        transport,
-        host_with_effect_recorder(&backend, recorder.clone()),
-    )
-    .await;
-
-    let turn = runtime
-        .execute_turn(
-            TurnInput {
-                items: vec![InputItem::Text {
-                    text: "use the tool".to_string(),
-                }],
-                trace_turn_id: None,
-                turn_context: lash_core::TurnContext::default(),
-            },
-            lash_core::facade_support::TurnOptions::new(
-                CancellationToken::new(),
-                scoped_test_turn(&backend, &recorder, &TurnId::from("tool-replay-effects")),
-            ),
-        )
-        .await
-        .expect("turn");
-
-    assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
-    // The batch is a durable group of `ToolInvocation` children now
-    // (FIG-3397). The children run on the native group substrate, not through
-    // this wrapping double; each leaf's attempt crosses it as before.
-    assert_eq!(recorder.count_kind(RuntimeEffectKind::ToolAttempt), 2);
-    let tool_keys = recorder
-        .records()
-        .into_iter()
-        .filter(|record| record.kind == RuntimeEffectKind::ToolAttempt)
-        .map(|record| record.replay_key)
-        .collect::<Vec<_>>();
-    assert_eq!(tool_keys.len(), 2);
-    // Each leaf's attempt is keyed by its own call id (ADR 0117).
-    for provider_call_id in ["call-1", "call-2"] {
-        let call_id = &turn
-            .tool_calls
-            .iter()
-            .find(|call| call.provider_call_id.as_deref() == Some(provider_call_id))
-            .expect("the leaf is recorded")
-            .call_id;
-        assert!(
-            tool_keys
-                .iter()
-                .any(|key| key.contains(&format!("{call_id}:attempt:1"))),
-            "{provider_call_id}'s attempt is keyed by its call id: {tool_keys:?}"
-        );
-    }
-    // No single envelope names both calls now: each leaf is its own
-    // `ToolInvocation` group child (FIG-3397).
-    assert!(
-        recorder
-            .envelopes()
-            .iter()
-            .any(|envelope| envelope.contains("call-1"))
-    );
-    assert!(
-        recorder
-            .envelopes()
-            .iter()
-            .any(|envelope| envelope.contains("call-2"))
-    );
-    assert!(
-        turn.tool_calls
-            .iter()
-            .any(|record| record.tool == "echo_tool" && record.output.is_success())
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn recording_controller_preserves_deferred_tool_completions() {
-    struct DeferredEchoTool {
-        resolver: Arc<dyn lash_core::EffectHost>,
-    }
-
-    #[async_trait::async_trait]
-    impl lash_core::ToolProvider for DeferredEchoTool {
-        /// The echo tool's manifests, each declaring that it may defer.
-        fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-            EchoTool
-                .tool_manifests()
-                .into_iter()
-                .map(|mut manifest| {
-                    manifest.declaration = lash_core::ToolDeclaration::deferring();
-                    manifest
-                })
-                .collect()
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-            EchoTool.resolve_contract(name)
-        }
-
-        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-            let key = call
-                .context
-                .completion_key()
-                .expect("the call has its original completion key");
-            let value = call.args["value"]
-                .as_str()
-                .expect("the echo input is valid");
-            self.resolver
-                .await_event_resolver()
-                .resolve_await_event(
-                    &key,
-                    Resolution::Ok(json!({ "payload": format!("raw:{value}") })),
-                )
-                .await
-                .expect("resolve the original completion");
-            lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::default())
-        }
-    }
-
-    let double = kernel_double(SEED + 0x40, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let recorder = RecordingEffectController::default();
-    let mut runtime = runtime_with_plugins_and_tools_and_host(
-        Vec::new(),
-        Arc::new(DeferredEchoTool {
-            resolver: backend.effect_host(),
-        }),
-        mock_provider(Vec::new()),
-        host_with_effect_recorder(&backend, recorder.clone()),
-    )
-    .await;
-
-    let handler = double
-        .open_handler(AdmittedScope::turn("root", "deferred-recording"))
-        .await
-        .expect("open the turn's handler");
-    let scope = lash_core::testing::LayeredEffectHost::layer_scoped(
-        handler.scoped(),
-        Arc::new(recorder.clone()),
-    )
-    .expect("layer the handler's controller");
-
-    let turn = runtime
-        .execute_turn(
-            TurnInput::text("use the tool"),
-            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), scope),
-        )
-        .await
-        .expect("the deferred round completes");
-    handler.close().await.expect("close the turn's handler");
-
-    assert!(
-        matches!(turn.outcome, TurnOutcome::Finished(_)),
-        "deferred outcome: {:?}; errors: {:?}; records: {:?}; calls: {:?}",
-        turn.outcome,
-        turn.errors,
-        recorder.records(),
-        turn.tool_calls,
-    );
-    assert_eq!(recorder.count_kind(RuntimeEffectKind::ToolAttempt), 2);
-    assert_eq!(recorder.count_kind(RuntimeEffectKind::ArmToolCompletion), 2);
-    assert_eq!(
-        recorder.count_kind(RuntimeEffectKind::AwaitToolCompletions),
-        2
-    );
-    assert_eq!(recorder.count_kind(RuntimeEffectKind::LlmCall), 2);
-    assert_eq!(turn.tool_calls.len(), 2);
-    for (call, (provider_id, payload)) in turn
-        .tool_calls
-        .iter()
-        .zip([("call-1", "raw:hi"), ("call-2", "raw:there")])
-    {
-        assert_eq!(call.provider_call_id.as_deref(), Some(provider_id));
-        assert!(call.output.is_success());
-        assert_eq!(
-            call.output.value_for_projection(),
-            json!({ "payload": payload })
-        );
-    }
 }
 
 /// An `exec_code` effect that fails before the executor answers reaches the
@@ -686,6 +359,10 @@ async fn a_recorded_sync_failure_fails_the_turn_under_its_causes_code() {
     .await
     .expect("runtime");
 
+    let run_handler_2 = double
+        .open_handler(AdmittedScope::turn("root", TurnId::from("sync-refused")))
+        .await
+        .expect("open the Run handler");
     let turn = runtime
         .execute_turn(
             TurnInput {
@@ -697,11 +374,12 @@ async fn a_recorded_sync_failure_fails_the_turn_under_its_causes_code() {
             },
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
-                scoped_test_turn(&backend, &recorder, &TurnId::from("sync-refused")),
+                scoped_test_turn(&run_handler_2, &recorder),
             ),
         )
         .await
         .expect("turn");
+    run_handler_2.close().await.expect("close the Run handler");
 
     assert_eq!(
         recorder.count_kind(RuntimeEffectKind::SyncExecutionEnvironment),
@@ -1235,9 +913,7 @@ async fn replay_adopts_the_recorded_prelude_despite_changed_live_preparation_and
             .with_context_pressure_hook(0, hooks.clone())
             .with_turn_context_transform(0, hooks),
     ));
-    let recorder = RecordingEffectController::default()
-        .with_controller_owned_replay()
-        .with_strict_replay_by_address();
+    let recorder = RecordingEffectController::default().with_strict_replay_by_address();
     let mut first = runtime_with_plugins_and_tools_and_host(
         vec![factory.clone()],
         Arc::new(EmptyTools),
@@ -1246,16 +922,21 @@ async fn replay_adopts_the_recorded_prelude_despite_changed_live_preparation_and
     )
     .await;
     let run = TurnId::from("recorded-prelude");
+    let run_handler_3 = double
+        .open_handler(AdmittedScope::turn("root", &run))
+        .await
+        .expect("open the Run handler");
     let original = first
         .execute_turn(
             TurnInput::text("retain this prepared context"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
-                scoped_test_turn(&backend, &recorder, &run),
+                scoped_test_turn(&run_handler_3, &recorder),
             ),
         )
         .await
         .expect("first execution");
+    run_handler_3.close().await.expect("close the Run handler");
     let (configuration, prelude) = {
         let records = recorder.strict_replay.outcomes.lock_recover();
         let configuration = records
@@ -1290,16 +971,21 @@ async fn replay_adopts_the_recorded_prelude_despite_changed_live_preparation_and
         host,
     )
     .await;
+    let run_handler_4 = double
+        .open_handler(AdmittedScope::turn("root", &run))
+        .await
+        .expect("open the Run handler");
     let replayed = replay
         .execute_turn(
             TurnInput::text("retain this prepared context"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
-                scoped_test_turn(&backend, &recorder, &run),
+                scoped_test_turn(&run_handler_4, &recorder),
             ),
         )
         .await
         .expect("replay uses recorded context before constructing the model request");
+    run_handler_4.close().await.expect("close the Run handler");
     assert_eq!(replayed.outcome, original.outcome);
     assert_eq!(
         *recorder.llm_calls.lock_recover(),

@@ -114,6 +114,8 @@ impl lash_core::testing::EffectLayer for RejectingEffectController {
         if matches!(
             &envelope.command,
             RuntimeEffectCommand::ResolveTurnConfig { .. }
+                | RuntimeEffectCommand::TransitionPlugins { .. }
+                | RuntimeEffectCommand::TraceBoundary { .. }
         ) {
             return local_executor.execute(envelope).await;
         }
@@ -164,6 +166,8 @@ impl lash_core::testing::EffectLayer for WrongOutcomeEffectController {
         if matches!(
             &envelope.command,
             RuntimeEffectCommand::ResolveTurnConfig { .. }
+                | RuntimeEffectCommand::TransitionPlugins { .. }
+                | RuntimeEffectCommand::TraceBoundary { .. }
         ) {
             return local_executor.execute(envelope).await;
         }
@@ -211,11 +215,6 @@ pub struct RecordingEffectController {
     pub records: Arc<Mutex<Vec<EffectControllerRecord>>>,
     pub envelopes: Arc<Mutex<Vec<String>>>,
     pub llm_calls: Arc<Mutex<usize>>,
-    pub cancel_after_llm: bool,
-    pub cancel_after_step: bool,
-    pub escalate_after_llm: bool,
-    pub controller_owned_replay: bool,
-    pub engine_paced_lane: bool,
     pub replay_by_key: bool,
     pub strict_replay: StrictReplayJournal,
     pub execute_llm_locally: bool,
@@ -239,46 +238,6 @@ pub struct RecordingEffectController {
 }
 
 impl RecordingEffectController {
-    pub fn with_cancel_after_llm(mut self) -> Self {
-        self.cancel_after_llm = true;
-        self
-    }
-
-    /// The journaled cancel gate holds an after-step request once the model
-    /// has run; the escalation promise stays unresolved.
-    pub fn with_after_step_cancel(mut self) -> Self {
-        self.cancel_after_step = true;
-        self
-    }
-
-    /// Alongside [`Self::with_after_step_cancel`]: the escalation promise
-    /// holds an immediate abort by the time the after-LLM peek runs.
-    pub fn with_escalation_after_llm(mut self) -> Self {
-        self.escalate_after_llm = true;
-        self
-    }
-
-    /// A replaying owner with no live cancel state: every canned gate
-    /// resolution is off, so what replay sees comes from the journal alone.
-    pub fn without_canned_cancel(mut self) -> Self {
-        self.cancel_after_llm = false;
-        self.cancel_after_step = false;
-        self.escalate_after_llm = false;
-        self
-    }
-
-    pub fn with_controller_owned_replay(mut self) -> Self {
-        self.controller_owned_replay = true;
-        self
-    }
-
-    /// Deliberately separate from controller-owned replay, so tests hold the two behaviors
-    /// apart exactly as the product does.
-    pub fn with_engine_paced_lane(mut self) -> Self {
-        self.engine_paced_lane = true;
-        self
-    }
-
     pub fn with_replay_by_key(mut self) -> Self {
         self.replay_by_key = true;
         self
@@ -726,60 +685,6 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             RuntimeEffectCommand::AwaitEvent { .. } => Ok(RuntimeEffectOutcome::AwaitEvent {
                 resolution: lash_core::Resolution::Ok(serde_json::json!(null)),
             }),
-            RuntimeEffectCommand::PeekAwaitEvent { key }
-                if self.cancel_after_step && *self.llm_calls.lock_recover() > 0 =>
-            {
-                let resolution = match key.wait {
-                    AwaitEventWaitIdentity::TurnCancelGate => {
-                        Some(Resolution::Ok(serde_json::json!({
-                            "state": "cancel_requested",
-                            "cancellation": {
-                                "request_id": "stop-after-step",
-                                "origin": "effect-controller-test",
-                                "reason": "stop after the current step",
-                                "mode": "after_step"
-                            }
-                        })))
-                    }
-                    AwaitEventWaitIdentity::TurnCancelEscalation if self.escalate_after_llm => {
-                        Some(Resolution::Ok(serde_json::json!({
-                            "state": "escalated",
-                            "cancellation": {
-                                "request_id": "abort-escalated",
-                                "origin": "effect-controller-test",
-                                "reason": "escalated to an immediate abort"
-                            }
-                        })))
-                    }
-                    _ => None,
-                };
-                if let Some(resolution) = resolution {
-                    inner.resolve_await_event(&key, resolution).await?;
-                }
-                Ok(RuntimeEffectOutcome::PeekAwaitEvent {
-                    resolution: inner.peek_await_event(&key).await?,
-                })
-            }
-            RuntimeEffectCommand::PeekAwaitEvent { key }
-                if self.cancel_after_llm && *self.llm_calls.lock_recover() > 0 =>
-            {
-                inner
-                    .resolve_await_event(
-                        &key,
-                        Resolution::Ok(serde_json::json!({
-                            "state": "cancel_requested",
-                            "cancellation": {
-                                "request_id": "cancel-after-llm",
-                                "origin": "effect-controller-test",
-                                "reason": "cancel landed during the journaled LLM run"
-                            }
-                        })),
-                    )
-                    .await?;
-                Ok(RuntimeEffectOutcome::PeekAwaitEvent {
-                    resolution: inner.peek_await_event(&key).await?,
-                })
-            }
             // A peek reads the real gate: since FIG-3672 P9 the turn learns a
             // cancellation only from its peeks and its steps' outcomes.
             RuntimeEffectCommand::PeekAwaitEvent { key } => {

@@ -179,6 +179,14 @@ impl AwaitEventResolver for RecordingEffectController<'_> {
 
 #[async_trait]
 impl RuntimeEffectController for RecordingEffectController<'_> {
+    async fn record_run_record(
+        &self,
+        name: String,
+        step: lash_core::RunRecordStep<'_>,
+    ) -> Result<lash_core::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        self.inner.controller().record_run_record(name, step).await
+    }
+
     async fn read_recorded_journal(
         &self,
         range: &lash_core::RecordedKeyRange,

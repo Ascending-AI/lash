@@ -47,17 +47,16 @@ pub fn layered_scope(
         .expect("the backend host lends a static controller")
 }
 
-/// The recorder's scoped controller for `turn_id` of the root session.
-pub fn scoped_test_turn(
-    backend: &lash_core::Backend,
+/// The recorder over the controller lent by one Run's handler.
+pub fn scoped_test_turn<'run>(
+    handler: &'run lash_restate_test::OpenHandler,
     recorder: &RecordingEffectController,
-    turn_id: &TurnId,
-) -> ScopedEffectController<'static> {
-    layered_scope(
-        backend,
+) -> ScopedEffectController<'run> {
+    lash_core::testing::LayeredEffectHost::layer_scoped(
+        handler.scoped(),
         Arc::new(recorder.clone()),
-        AdmittedScope::turn("root", turn_id),
     )
+    .expect("layer the Run's handler controller")
 }
 
 pub fn host_with_effect_recorder(

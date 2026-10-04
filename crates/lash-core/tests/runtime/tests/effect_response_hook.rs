@@ -132,21 +132,27 @@ fn journaled_raw_completion(recorder: &RecordingEffectController) -> LlmResponse
 /// journal entries, which is what the engine's redrive of the run is.
 async fn execute_turn(
     runtime: &mut LashRuntime,
-    backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     recorder: &RecordingEffectController,
     turn_id: &TurnId,
 ) -> Result<AssembledTurn, RuntimeError> {
     let mut input = TurnInput::text("produce a completion");
     input.trace_turn_id = Some(turn_id.clone());
-    runtime
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", turn_id))
+        .await
+        .expect("open the Run handler");
+    let result = runtime
         .execute_turn(
             input,
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
-                scoped_test_turn(backend, recorder, turn_id),
+                scoped_test_turn(&handler, recorder),
             ),
         )
-        .await
+        .await;
+    handler.close().await.expect("close the Run handler");
+    result
 }
 
 /// Anchor (a): a hook that fails *after* the provider completed.
@@ -172,7 +178,7 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
 
     let failed = execute_turn(
         &mut runtime,
-        &backend,
+        &double,
         &recorder,
         &TurnId::from("response-hook-failure"),
     )
@@ -211,7 +217,7 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
 
     let redriven = execute_turn(
         &mut runtime,
-        &backend,
+        &double,
         &recorder,
         &TurnId::from("response-hook-failure"),
     )
@@ -254,7 +260,7 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
 
     let crashed = execute_turn(
         &mut runtime,
-        &backend,
+        &double,
         &recorder,
         &TurnId::from("phase-crash"),
     )
@@ -276,7 +282,7 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
 
     let redriven = execute_turn(
         &mut runtime,
-        &backend,
+        &double,
         &recorder,
         &TurnId::from("phase-crash"),
     )
@@ -314,7 +320,7 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
 
     let first = execute_turn(
         &mut runtime,
-        &backend,
+        &double,
         &recorder,
         &TurnId::from("hook-events"),
     )
@@ -357,7 +363,7 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
     .await;
     let replayed = execute_turn(
         &mut redriven_runtime,
-        &backend,
+        &double,
         &recorder,
         &TurnId::from("hook-events"),
     )
@@ -554,7 +560,7 @@ async fn phase_two_on_another_worker_derives_from_the_journaled_stream_state() {
         host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
-    execute_turn(&mut streaming_worker, &backend, &recorder, &turn_id)
+    execute_turn(&mut streaming_worker, &double, &recorder, &turn_id)
         .await
         .expect_err("the streaming worker dies between the phases");
     drop(streaming_worker);
@@ -566,7 +572,7 @@ async fn phase_two_on_another_worker_derives_from_the_journaled_stream_state() {
         host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
-    let redriven = execute_turn(&mut other_worker, &backend, &recorder, &turn_id)
+    let redriven = execute_turn(&mut other_worker, &double, &recorder, &turn_id)
         .await
         .expect("another worker completes phase 2 from the journal");
 

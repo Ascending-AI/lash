@@ -6,8 +6,23 @@ const SEED: u64 = 0x1a5_1a9;
 
 #[tokio::test]
 async fn process_shutdown_preserves_typed_failures() {
-    crate::testing::process_shutdown_preserves_typed_failures(&sqlite_recording_backend().await)
-        .await;
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("double");
+    let backend = double.lash_backend();
+    double
+        .run_in_handler(
+            lash_core::AdmittedScope::turn("shutdown-law", "guard"),
+            Arc::new(move |scoped| {
+                let backend = backend.clone();
+                Box::pin(async move {
+                    crate::testing::process_shutdown_preserves_typed_failures(&backend, scoped)
+                        .await;
+                })
+            }),
+        )
+        .await
+        .expect("Run-owned process shutdown fixture");
 }
 
 #[tokio::test]

@@ -26,10 +26,30 @@ async fn process_shutdown_preserves_typed_failures() {
         &storage,
         Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(bytes.path())),
     ));
-    lash_lashlang_runtime::testing::process_shutdown_preserves_typed_failures(
-        &lash_conformance::recording_backend_over(stores),
+    let double = lash_restate_test::backend_with_store_set(
+        0x1a5_1a9,
+        lash_restate_test::ServerConfig::default(),
+        lash_restate_test::DeploymentHooks::default(),
+        move |_| async { Ok(stores as Arc<dyn lash_core::StoreSet>) },
     )
     .await;
+    let double = double.expect("PostgreSQL double");
+    let backend = double.lash_backend();
+    double
+        .run_in_handler(
+            lash_core::AdmittedScope::turn("shutdown-law", "guard"),
+            Arc::new(move |scoped| {
+                let backend = backend.clone();
+                Box::pin(async move {
+                    lash_lashlang_runtime::testing::process_shutdown_preserves_typed_failures(
+                        &backend, scoped,
+                    )
+                    .await;
+                })
+            }),
+        )
+        .await
+        .expect("Run-owned process shutdown fixture");
 }
 
 #[tokio::test]
