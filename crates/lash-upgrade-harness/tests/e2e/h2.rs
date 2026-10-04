@@ -12,7 +12,9 @@ use lash_upgrade_harness::e2e::{
     cluster::{ClusterControl, LocalCluster},
     control::{
         Barrier, BarrierKind, BarrierProof, CleanupReceipt, Control, CoreControl, Fault,
-        FaultReceipt, FileBarriers, ToolControl, WorkIdentity, callback::BodyCallbacks,
+        FaultReceipt, FileBarriers, ToolControl, WorkIdentity,
+        callback::BodyCallbacks,
+        transport::{TransportCut, V7Proxy},
     },
     evidence::{Evidence, EvidenceReader},
     host::{HostAdapter, HostCommand, HostObservation, HostReady},
@@ -91,6 +93,11 @@ struct Shared {
     admitted: Mutex<Option<WorkIdentity>>,
     receiver: Mutex<Option<String>>,
     ready: Mutex<Option<HostReady>>,
+    proxy: Mutex<V7Proxy>,
+    admin: String,
+    namespace: String,
+    store_root: PathBuf,
+    chat: Mutex<Option<String>>,
 }
 impl Shared {
     async fn journals(&self, work: &WorkIdentity) -> Result<Evidence> {
@@ -124,6 +131,7 @@ impl Shared {
                 .effects
                 .push(json!({"kind":"h2_body_delivery", "delivery":delivery}));
         }
+        self.retained_transfers(work, &mut evidence).await?;
         let host = self.host.lock().await;
         evidence.effects.extend(host.trace_records()?);
         if let Some(process) = self.receiver.lock().await.as_ref() {
@@ -138,76 +146,75 @@ impl Shared {
         }
         Ok(evidence)
     }
-    async fn bind(&self, mut work: WorkIdentity) -> Result<WorkIdentity> {
-        #[derive(serde::Deserialize)]
-        struct Invocation {
-            id: String,
-            pinned_service_protocol_version: Option<u32>,
-        }
-        let prefix = self.view.service_name("LashTurn").replace('\'', "''");
-        loop {
-            let rows: Vec<Invocation> = self.view.query(&format!(
-                "SELECT id, pinned_service_protocol_version FROM sys_invocation WHERE target_service_name LIKE '{prefix}%' AND target_handler_name = 'run'"
-            )).await?;
-            if let [row] = rows.as_slice() {
-                ensure!(
-                    row.pinned_service_protocol_version == Some(7),
-                    "admission did not negotiate V7"
-                );
-                work.segment = row.id.clone();
-                break;
-            }
-            ensure!(
-                rows.len() <= 1,
-                "more than one turn existed before admission binding"
-            );
-            ensure!(
-                Instant::now() < self.deadline,
-                "admitted invocation was not observable"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        // Identities below come from the synced body ledger. Holding before
-        // callback binding closes the otherwise unknown-ID admission window.
-        loop {
-            let deliveries = deliveries(&self.delivery)?;
-            if self
-                .row
-                .labels()
-                .iter()
-                .all(|label| deliveries.iter().any(|d| d.label == *label))
-            {
-                let gates = FileBarriers::new(self.directory.clone(), self.deadline)?;
-                for delivery in deliveries {
-                    ensure!(
-                        delivery
-                            .logical_run
-                            .as_ref()
-                            .map(ToString::to_string)
-                            .as_deref()
-                            == Some(work.run.as_str()),
-                        "body belongs to another run"
-                    );
-                    let mut call = work.clone();
-                    call.call = Some(delivery.call_id.to_string());
-                    call.ordinal = Some(delivery.ordinal);
-                    gates.hold(&Barrier {
-                        work: call,
-                        kind: BarrierKind::BodyEntered,
-                    })?;
-                }
-                break;
-            }
-            ensure!(
-                Instant::now() < self.deadline,
-                "actual tool bodies did not enter"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        self.callbacks
+    async fn retained_transfers(&self, work: &WorkIdentity, evidence: &mut Evidence) -> Result<()> {
+        let chat = self
+            .chat
             .lock()
             .await
-            .bind(work.run.clone(), work.clone())?;
+            .clone()
+            .context("no bound native session")?;
+        let session = lash::SessionId::parse(&chat)?;
+        let path = self.store_root.join("durable-core.db");
+        let rows = tokio::task::spawn_blocking(move || -> Result<Vec<(String,String)>> {
+            let db = rusqlite::Connection::open_with_flags(path,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let mut query = db.prepare("SELECT turn_id,result_json FROM runtime_turn_commits WHERE session_id=?1 ORDER BY change_seq")?;
+            Ok(query.query_map([chat], |row| Ok((row.get(0)?,row.get(1)?)))?.collect::<std::result::Result<_,_>>()?)
+        }).await??;
+        for (turn, raw) in rows {
+            let receipt = lash_core::store::decode_runtime_commit_receipt(&session, &turn, &raw)?;
+            if let Some(follow_on) = &receipt.pending_follow_on {
+                if follow_on
+                    .continuation
+                    .as_ref()
+                    .and_then(|c| c.opener.run.as_deref())
+                    .is_some()
+                {
+                    let artifact = self.directory.join(format!(
+                        "native-transfer-{}.json",
+                        lash_core::stable_hash::sha256_hex(turn.as_bytes())
+                    ));
+                    super::write(
+                        &artifact,
+                        &json!({"session_id":session,"turn_id":turn,"receipt":receipt}),
+                    )?;
+                    evidence.retain_follow_on(
+                        work.clone(),
+                        follow_on,
+                        artifact.display().to_string(),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+    async fn bind(&self, work: WorkIdentity, chat: &str) -> Result<WorkIdentity> {
+        let stores = lash::sqlite::SqliteStoreSet::open(&self.store_root).await?;
+        let store = stores.open_store().await?;
+        let mut reader = lash_upgrade_harness::e2e::evidence::RestateEvidenceReader::new(
+            self.row.slug().into(),
+            RestateView::new(&self.admin, &self.namespace)?,
+            7,
+        );
+        let work = reader
+            .bind_public_run(
+                store.as_ref(),
+                &lash::SessionId::parse(chat)?,
+                &lash::TurnId::parse(&work.run)?,
+                work.ingress,
+            )
+            .await?;
+        self.proxy
+            .lock()
+            .await
+            .bind_invocation(work.segment.clone(), work.clone())?;
+        let callbacks = self.callbacks.lock().await;
+        callbacks.bind(work.run.clone(), work.clone())?;
+        for label in self.row.labels() {
+            callbacks
+                .await_delivery(&work.run, label, 1, BarrierKind::BodyEntered)
+                .await?;
+        }
+        *self.chat.lock().await = Some(chat.into());
         *self.admitted.lock().await = Some(work.clone());
         Ok(work)
     }
@@ -260,7 +267,15 @@ impl HostAdapter for Host {
             let submitting = matches!(command, HostCommand::Submit { .. });
             let mut observation = self.0.host.lock().await.command(command).await?;
             if submitting {
-                observation.work = self.0.bind(observation.work).await?;
+                observation.work = self
+                    .0
+                    .bind(
+                        observation.work,
+                        observation.output["chat_id"]
+                            .as_str()
+                            .context("Submit has no actual chat id")?,
+                    )
+                    .await?;
             } else if !observation.work.run.is_empty() {
                 let admitted = self.0.admitted.lock().await;
                 let admitted = admitted.as_ref().context("host has no bound admission")?;
@@ -294,6 +309,22 @@ struct Controller {
 impl Control for Controller {
     fn await_barrier<'a>(&'a mut self, barrier: &'a Barrier) -> Step<'a, BarrierProof> {
         Box::pin(async move {
+            if barrier.kind == BarrierKind::ContinuationPublished {
+                loop {
+                    let evidence = self.shared.journals(&barrier.work).await?;
+                    if let Some(fact) = evidence.transfers.first() {
+                        self.core
+                            .barriers
+                            .publish_store(barrier, &PathBuf::from(&fact.artifact))?;
+                        break;
+                    }
+                    ensure!(
+                        Instant::now() < self.shared.deadline,
+                        "continuation publication was absent"
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
             let proof = self.core.await_barrier(barrier).await?;
             self.observed.push(proof.clone());
             Ok(proof)
@@ -375,6 +406,20 @@ impl Control for Controller {
                     .await?;
                 Ok(())
             } else {
+                if let ToolControl::Hold(barrier) = &command {
+                    if matches!(
+                        barrier.kind,
+                        BarrierKind::DeclarationIssued | BarrierKind::VProposed
+                    ) {
+                        self.shared.proxy.lock().await.arm_cut(TransportCut {
+                            proposal: barrier.clone(),
+                            before_ack: Barrier {
+                                work: barrier.work.clone(),
+                                kind: BarrierKind::BeforeAck,
+                            },
+                        })?;
+                    }
+                }
                 self.core.tool(command).await
             }
         })
@@ -387,8 +432,8 @@ pub async fn run(row: Row) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(180);
     let mut lease = CaseLease::new(row.slug(), root.join(row.slug()), deadline)?;
     let base: u16 = std::env::var("LASH_E2E_PORT_BASE")?.parse()?;
-    ensure!(base <= u16::MAX - 20, "private port range overflow");
-    lease.ports = (base..base + 20).collect();
+    ensure!(base <= u16::MAX - 50, "private port range overflow");
+    lease.ports = (base + 10..base + 14).collect();
     let server = super::artifact(
         "restate-server",
         std::env::var("LASH_RESTATE_SERVER_BIN")?.into(),
@@ -403,6 +448,15 @@ pub async fn run(row: Row) -> Result<()> {
     std::fs::create_dir_all(&callback_dir)?;
     let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, base + 12))?;
     let callbacks = BodyCallbacks::start(listener, callback_dir.clone(), deadline).await?;
+    let proxy = V7Proxy::start(
+        std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, base + 13))?,
+        std::net::SocketAddr::from(([127, 0, 0, 1], base + 11)),
+        callback_dir.clone(),
+        deadline,
+        Vec::new(),
+    )
+    .await?;
+    let advertised_uri = proxy.endpoint.clone();
     let delivery = lease.directory.join("tool-deliveries.jsonl");
     let fixture = json!({"scenario":row.id(), "delivery_ledger":delivery,
         "provider_ledger":lease.directory.join("provider.jsonl"), "body_callback_url":callbacks.endpoint,
@@ -420,10 +474,10 @@ pub async fn run(row: Row) -> Result<()> {
         fixture,
         callback_dir.clone(),
     )?
-    .configure(BTreeMap::from([(
-        "AGENT_SERVICE_PROTOCOL".into(),
-        protocol.into(),
-    )]))?;
+    .configure(BTreeMap::from([
+        ("AGENT_SERVICE_PROTOCOL".into(), protocol.into()),
+        ("AGENT_SERVICE_RESTATE_ADVERTISE_URL".into(), advertised_uri),
+    ]))?;
     let shared = Arc::new(Shared {
         host: Mutex::new(host),
         view: RestateView::new(&boot.nodes[0].admin_url, &lease.namespace)?,
@@ -435,6 +489,11 @@ pub async fn run(row: Row) -> Result<()> {
         admitted: Mutex::new(None),
         receiver: Mutex::new(None),
         ready: Mutex::new(None),
+        proxy: Mutex::new(proxy),
+        admin: boot.nodes[0].admin_url.clone(),
+        namespace: lease.namespace.clone(),
+        store_root: lease.directory.join("agent-service-data/lash-sessions"),
+        chat: Mutex::new(None),
     });
     let source = shared.clone();
     let snapshot: Snapshot = Arc::new(move |work| {
@@ -506,6 +565,7 @@ pub async fn run(row: Row) -> Result<()> {
     };
     let host_cleanup = host.stop().await;
     let callback_cleanup = shared.callbacks.lock().await.finish().await;
+    let proxy_cleanup = shared.proxy.lock().await.finish().await;
     let cluster_cleanup = cluster.finish().await;
     super::write(
         &lease.directory.join("result.json"),
@@ -516,6 +576,7 @@ pub async fn run(row: Row) -> Result<()> {
     let mut evidence = result?;
     evidence.cleanup.extend(host_cleanup?);
     callback_cleanup?;
+    proxy_cleanup?;
     evidence.cleanup.extend(cluster_cleanup?);
     ensure!(
         evidence.cleanup.iter().all(|r| r.closed),

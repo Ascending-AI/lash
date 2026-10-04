@@ -169,7 +169,6 @@ impl Scenario<'_> {
                 | BarrierKind::XDurable
                 | BarrierKind::DDurable
                 | BarrierKind::VDurable
-                | BarrierKind::ContinuationPublished
         ) {
             ensure!(
                 proof.journal_index.is_some(),

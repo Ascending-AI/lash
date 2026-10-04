@@ -294,14 +294,13 @@ pub async fn empty_middle_rank(scenario: &mut Scenario<'_>, spec: &CaseSpec) -> 
         "rank1 already seated at cut"
     );
     ensure!(
-        before
-            .effects
-            .iter()
-            .any(
-                |effect| effect.get("kind").and_then(|v| v.as_str()) == Some("h2_program_effect")
-                    && effect.get("value") == Some(&serde_json::json!("unrelated-progress"))
-            ),
-        "unrelated program effect did not progress"
+        before.effects.iter().any(|effect| {
+            effect["kind"] == "h2_trace_record"
+                && effect["record"]["type"] == "durable_wait_resolved"
+                && effect["record"]["wait_kind"] == "timer"
+                && effect["record"]["resolution"] == "resolved"
+        }),
+        "the real VM timer did not progress while protected tool declarations waited"
     );
     scenario.kill_and_reopen(&cut).await?;
     scenario
@@ -417,10 +416,7 @@ pub async fn live_loser(
     if !deferred {
         let held = scenario.read().await?;
         ensure!(
-            !held
-                .journals
-                .iter()
-                .any(|fact| matches!(fact.decoded, Some(DecodedRecord::Transfer(_)))),
+            held.transfers.is_empty(),
             "executing inline loser permitted a physical cut"
         );
         ensure!(
@@ -446,12 +442,9 @@ pub async fn live_loser(
         .await?;
     let transferred = scenario.read().await?;
     let transfers: Vec<_> = transferred
-        .journals
+        .transfers
         .iter()
-        .filter_map(|fact| match &fact.decoded {
-            Some(DecodedRecord::Transfer(transfer)) => Some(transfer),
-            _ => None,
-        })
+        .map(|fact| &fact.transfer)
         .collect();
     ensure!(
         transfers.len() == 1,
