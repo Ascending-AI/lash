@@ -398,9 +398,9 @@ pub async fn live_loser(
         RunEvent::Decided {call_id,decision:CallDecision::Cancelled,..} if call_id==loser)),
         "race winner cancelled its live loser"
     );
-    scenario
-        .release(scenario.barrier(after, BarrierKind::BodyEntered)?)
-        .await?;
+    // Keep the post-race program effect held until the physical request is
+    // accepted. The next VM boundary then sees the cut before finish can
+    // close the owner; the race's losing handle is not awaited a second time.
     if deferred {
         scenario.release(loser_body.clone()).await?;
         scenario
@@ -426,6 +426,9 @@ pub async fn live_loser(
         request.work.run == scenario.work()?.run,
         "handover targeted another logical Run"
     );
+    scenario
+        .release(scenario.barrier(after, BarrierKind::BodyEntered)?)
+        .await?;
     if !deferred {
         let held = scenario.read().await?;
         ensure!(

@@ -228,7 +228,7 @@ fn response(
                     "const timer = sleep(0); const a = tools.rank_one({}); const b = tools.rank_two({}); const c = tools.rank_three({}); await timer; print('unrelated-progress'); await Promise.all([a,b,c]); finish('drained');"
                 }
                 "S11" => {
-                    "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); await tools.after({}); await loser; finish(value);"
+                    "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); await tools.after({}); finish(value);"
                 }
                 _ => return Err(anyhow!("scenario needs a Standard channel")),
             };
