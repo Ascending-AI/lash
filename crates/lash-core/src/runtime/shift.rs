@@ -423,6 +423,7 @@ async fn admit_on_store(
             store,
             clock: Arc::clone(&host.clock),
             materializer,
+            tracing: host.tracing.clone(),
         }),
         host.session_store_factory(),
         draining.map(|generation| admission::DrainRead {
@@ -437,6 +438,7 @@ struct AdmissionStore {
     store: crate::store::SessionStore,
     clock: Arc<dyn crate::Clock>,
     materializer: Arc<dyn ShiftAdmissionMaterializer>,
+    tracing: crate::trace::TraceRuntime,
 }
 
 /// Emit admission `ordinal`'s journaled `AdmitShift` step through
@@ -499,13 +501,14 @@ async fn emit_admission_step(
         build_generation: authority.generation.clone(),
         run_start,
     };
-    let (store, materializer) = match store {
+    let (store, materializer, tracing) = match store {
         Some(AdmissionStore {
             store,
             clock,
             materializer,
-        }) => (Some((store, clock)), Some(materializer)),
-        None => (None, None),
+            tracing,
+        }) => (Some((store, clock)), Some(materializer), tracing),
+        None => (None, None, crate::trace::TraceRuntime::default()),
     };
     controller
         .execute_effect(
@@ -519,6 +522,8 @@ async fn emit_admission_step(
                 Box::new(admission::AdmitShiftRunner {
                     store,
                     materializer,
+                    tracing,
+                    live: None,
                     // The admission controller is already rescoped to the
                     // session. Inline runs retain their executor's physical
                     // cancellation authority instead of that step's scope.

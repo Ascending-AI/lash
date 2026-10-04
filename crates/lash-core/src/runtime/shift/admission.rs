@@ -85,6 +85,8 @@ pub(in crate::runtime) struct AdmitShiftRunner {
     /// intent id, and whether that redrive is settled lives here (D15).
     pub(in crate::runtime) run_scope: Option<crate::AdmittedScope>,
     pub(in crate::runtime) materializer: Option<Arc<dyn super::ShiftAdmissionMaterializer>>,
+    pub(in crate::runtime) tracing: crate::trace::TraceRuntime,
+    pub(in crate::runtime) live: Option<Arc<crate::trace::LiveStep>>,
     pub(in crate::runtime) stores: Arc<dyn crate::DeploymentStore>,
     pub(in crate::runtime) request: AdmitRequest,
     pub(in crate::runtime) ordinal: u32,
@@ -121,6 +123,10 @@ impl DrainRead {
 
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for AdmitShiftRunner {
+    fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
+        self.live = Some(live);
+    }
+
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
@@ -356,6 +362,37 @@ impl AdmitShiftRunner {
             });
         }
         let receipt = result.map_err(|error| store_fault("atomic root admission", error))?;
+        if let (Some(live), Some(crate::store::RunAdmissionAnswer::Admitted { admission, .. })) =
+            (&self.live, &receipt.run_admission)
+            && admission.recorded_by_this_call
+        {
+            self.tracing
+                .body(admission.trace.clone(), live)
+                .observe(|| {
+                    let causes = admission
+                        .queued
+                        .as_ref()
+                        .map(|queued| queued.materialize_queued_checkpoint_work().turn_causes)
+                        .unwrap_or_default();
+                    (
+                        lash_trace::TraceContext::default()
+                            .for_session(session_id.clone())
+                            .for_turn_index(admission.turn_index as usize)
+                            .for_turn(receipt.selection.run.clone()),
+                        lash_trace::TraceEvent::Custom {
+                            name: "ingress.admitted".to_string(),
+                            payload: crate::runtime::turn_loop::ingress_admitted_trace_payload(
+                                &receipt.selection.run,
+                                crate::store::RUN_ADMISSION_STEP,
+                                crate::AdmissionBoundary::Idle,
+                                admission.inputs.as_deref(),
+                                admission.queued.as_deref(),
+                                &causes,
+                            ),
+                        },
+                    )
+                });
+        }
         if let ShiftEpochSeal::HeldByAnotherExecutor { run, recorded } = &receipt.seal {
             return Err(held_by_another_executor(session_id, run, recorded));
         }
