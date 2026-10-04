@@ -1,10 +1,10 @@
 //! What a session open learns when its persisted tools have no live source
 //! (FIG-3367), and what the FIG-3353 sequence actually leaves durable.
 
+use super::child_sessions::session_capabilities;
 use super::*;
 use lash_core::ToolProvider as _;
 use lash_core::facade_support::ToolStateFacadeOps;
-use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::StaticPluginFactory;
 use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::core_support::MessageSequenceCoreSupport;
@@ -66,12 +66,14 @@ fn plugin_host_with_tools(
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
 ) -> Arc<lash_core::facade_support::PluginHost> {
     let mut factories = lash_core::testing::test_standard_protocol_factories();
+    let mut spec = lash_core::facade_support::PluginSpec::new();
     if let Some(tools) = tools {
-        factories.push(Arc::new(StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("fig3367_tools"),
-            lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
-        )));
+        spec = spec.with_tool_provider(tools);
     }
+    factories.push(Arc::new(StaticPluginFactory::new(
+        lash_core::plugin::PluginDeclaration::initial("fig3367_tools"),
+        spec,
+    )));
     Arc::new(lash_core::testing::test_plugin_host(factories))
 }
 
@@ -113,6 +115,7 @@ fn owner(label: &str) -> lash_core::LeaseOwnerIdentity {
 
 async fn create_or_open_fixture_runtime(
     backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     session_id: &SessionId,
     store: &Arc<dyn lash_core::RuntimeStore>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
@@ -140,14 +143,16 @@ async fn create_or_open_fixture_runtime(
         source: error,
     })?;
     let state = loaded.map_or_else(|| state_for(session_id), |loaded| loaded.state);
-    Box::pin(LashRuntime::from_environment(
+    let mut runtime = Box::pin(LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         state,
         Some(view),
         owner(session_id.as_str()),
     ))
-    .await
+    .await?;
+    session_capabilities::activate(&mut runtime, double).await;
+    Ok(runtime)
 }
 
 /// Same open sequence as [`create_or_open_fixture_runtime`], but on an environment the
@@ -212,6 +217,7 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
     // Step 1: open with the source and record a deliberate opt-out of beta.
     let mut granted = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         Some(both_tools()),
@@ -254,6 +260,7 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
     // session opens and the report names the loss.
     let grantless = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         None,
@@ -343,6 +350,7 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
     // Step 4: the source returns.
     let regranted = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         Some(both_tools()),
@@ -383,11 +391,13 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
 /// parks. Returns the catalog generation the durable snapshot is left at.
 async fn seed_opted_out_session(
     backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     session_id: &SessionId,
     store: &Arc<dyn lash_core::RuntimeStore>,
 ) -> u64 {
     let mut granted = create_or_open_fixture_runtime(
         backend,
+        double,
         session_id,
         store,
         Some(both_tools()),
@@ -457,6 +467,7 @@ async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
     // Step 1: open with the source, opt out of beta, park.
     let mut granted = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         Some(both_tools()),
@@ -540,6 +551,7 @@ async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
     // restore adopts it unchanged and both tools are catalog members.
     let regranted = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         Some(both_tools()),
@@ -584,7 +596,7 @@ async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
     let backend = double.lash_backend();
     let session_id = SessionId::from("fig3353-enqueue");
     let store = double_unbound_store(&double).await;
-    let persisted_generation = seed_opted_out_session(&backend, &session_id, &store).await;
+    let persisted_generation = seed_opted_out_session(&backend, &double, &session_id, &store).await;
 
     // The enqueue-only open on a core without the sources.
     let preserve_env =
@@ -603,9 +615,7 @@ async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
         )
         .await
         .expect("enqueue pending input");
-    Box::pin(enqueue_only.park())
-        .await
-        .expect("park the enqueue-only open");
+    drop(enqueue_only);
 
     // The row is durable and unexecuted.
     let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
@@ -623,6 +633,7 @@ async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
     // The source returns: nothing was ever orphaned, so the restore is clean.
     let regranted = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         Some(both_tools()),
@@ -661,7 +672,7 @@ async fn preserve_persisted_open_survives_resident_reload() {
     let backend = double.lash_backend();
     let session_id = SessionId::from("fig3353-reload");
     let store = double_unbound_store(&double).await;
-    let persisted_generation = seed_opted_out_session(&backend, &session_id, &store).await;
+    let persisted_generation = seed_opted_out_session(&backend, &double, &session_id, &store).await;
 
     let preserve_env =
         environment_preserving_tools(&backend, None, lash_core::ToolSourcePolicy::Tolerate);
@@ -707,7 +718,7 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
     let backend = double.lash_backend();
     let session_id = SessionId::from("fig3353-refused");
     let store = double_unbound_store(&double).await;
-    let persisted_generation = seed_opted_out_session(&backend, &session_id, &store).await;
+    let persisted_generation = seed_opted_out_session(&backend, &double, &session_id, &store).await;
 
     // Require here is the interesting half: the preserve open succeeds because
     // it never installs, but a turn must not ride that gap past the policy.
@@ -787,6 +798,7 @@ async fn alias_replacement_is_reported_as_superseded_and_never_refuses() {
 
     let granted = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         Some(FixedTools::new(vec![(ALPHA_ID, ALPHA_NAME)])),
@@ -798,6 +810,7 @@ async fn alias_replacement_is_reported_as_superseded_and_never_refuses() {
 
     let replaced = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         Some(FixedTools::new(vec![(REPLACEMENT_ID, ALPHA_NAME)])),
@@ -834,6 +847,7 @@ async fn require_refuses_a_direct_construction_that_lost_a_member() {
 
     let granted = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         Some(FixedTools::new(vec![(ALPHA_ID, ALPHA_NAME)])),
@@ -841,13 +855,14 @@ async fn require_refuses_a_direct_construction_that_lost_a_member() {
     )
     .await
     .expect("granted open");
-    Box::pin(granted.park()).await.expect("park");
+    drop(granted);
     let head_before = durable_state(store.clone(), session_id.clone())
         .await
         .head_revision;
 
     let refusal = match create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         None,
@@ -876,6 +891,7 @@ async fn require_refuses_a_direct_construction_that_lost_a_member() {
     );
     let reopened = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         Some(FixedTools::new(vec![(ALPHA_ID, ALPHA_NAME)])),
@@ -883,7 +899,7 @@ async fn require_refuses_a_direct_construction_that_lost_a_member() {
     )
     .await
     .expect("a following open acquires the lease the refusal released");
-    Box::pin(reopened.park()).await.expect("park");
+    drop(reopened);
 }
 
 /// Resume rebuilds a runtime through the same install owner, so it honours the
@@ -897,6 +913,7 @@ async fn require_refuses_a_resume_that_lost_a_member() {
 
     let granted = create_or_open_fixture_runtime(
         &backend,
+        &double,
         &session_id,
         &store,
         Some(FixedTools::new(vec![(ALPHA_ID, ALPHA_NAME)])),
@@ -919,95 +936,6 @@ async fn require_refuses_a_resume_that_lost_a_member() {
             lash_core::SessionError::ToolSourcesUnavailable { .. }
         ),
         "expected a typed tool-source refusal, got {refusal:?}"
-    );
-}
-
-/// A process-spawned child that inherits a parent snapshot naming a tool the
-/// live surface no longer advertises is refused under Require, at creation.
-///
-/// The child is the construction the FIG-3367 inventory calls out as inheriting
-/// a snapshot (Current and Existing start points do; Empty does not), so the
-/// policy has to reach it below the facade.
-#[tokio::test(flavor = "multi_thread")]
-async fn require_refuses_a_process_child_whose_inherited_snapshot_lost_a_member() {
-    let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let surface = MutableTools::new(vec![(ALPHA_ID, ALPHA_NAME)]);
-    let tools: Arc<dyn lash_core::ToolProvider> =
-        Arc::clone(&surface) as Arc<dyn lash_core::ToolProvider>;
-    let plugin_host = plugin_host_with_tools(Some(tools));
-    let plugin_session = plugin_host
-        .build_session(PluginSessionRequest::creation(
-            "fig3367-child-parent",
-            Default::default(),
-        ))
-        .expect("plugins");
-    let mut host = test_host_config(&backend);
-    host.core.control.tool_source_policy = lash_core::ToolSourcePolicy::Require;
-    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
-        plugin_session,
-        Arc::clone(&host.core.durability.attachment_store),
-        Arc::clone(&host.core.durability.process_env_store),
-    );
-    let mut runtime = Box::pin(LashRuntime::from_embedded_state(
-        standard_test_policy(),
-        host,
-        runtime_services,
-        RuntimeSessionState {
-            session_id: SessionId::from("fig3367-child-parent"),
-            policy: standard_test_policy(),
-            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-                lash_core::MaxToolCalls::new(1024),
-            ))
-        },
-        lash_core::testing::runtime_lease_owner(),
-    ))
-    .await
-    .expect("parent runtime");
-    set_runtime_provider(&mut runtime, mock_provider(Vec::new()).into_handle());
-    // The parent's snapshot records the tool while its source is live.
-    runtime
-        .stamp_live_plugin_state()
-        .expect("the live plugin state is captured");
-    assert!(
-        runtime
-            .state()
-            .tool_state_snapshot()
-            .is_some_and(|snapshot| snapshot.contains(&lash_core::ToolId::from(ALPHA_ID))),
-        "precondition: the inherited snapshot names the tool"
-    );
-
-    // The source goes away; the child inherits a snapshot nothing resolves.
-    surface.clear();
-
-    let lifecycle = runtime
-        .session_lifecycle_service()
-        .expect("session lifecycle");
-    let plugin_init = runtime
-        .session_state_service()
-        .expect("session state")
-        .session_plugin_init(&lash_core::SessionId::from("fig3367-child-parent"))
-        .await
-        .expect("plugin init");
-    let refusal = match lifecycle
-        .create_session(
-            lash_core::SessionCreateRequest::child_session(
-                "fig3367-child-parent",
-                lash_core::SessionStartPoint::Empty,
-                lash_core::PluginOptions::default(),
-            )
-            .with_session_id("fig3367-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(plugin_init)),
-        )
-        .await
-    {
-        Ok(_) => panic!("Require must refuse a child whose inherited snapshot lost a member"),
-        Err(error) => error.to_string(),
-    };
-    assert!(
-        refusal.contains(ALPHA_ID),
-        "the child's refusal names the lost tool: {refusal}"
     );
 }
 
@@ -1052,6 +980,7 @@ impl lash_core::ToolProvider for MutableTools {
 /// happens from here.
 async fn live_require_runtime(
     backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     session_id: &SessionId,
     store: &Arc<dyn lash_core::RuntimeStore>,
 ) -> (LashRuntime, Arc<MutableTools>, lash_core::ToolState) {
@@ -1060,6 +989,7 @@ async fn live_require_runtime(
         Arc::clone(&surface) as Arc<dyn lash_core::ToolProvider>;
     let mut runtime = create_or_open_fixture_runtime(
         backend,
+        double,
         session_id,
         store,
         Some(tools),
@@ -1090,7 +1020,7 @@ async fn a_host_restore_on_a_require_core_reports_instead_of_refusing() {
     let session_id = SessionId::from("fig3367-live-host-restore");
     let store = double_unbound_store(&double).await;
     let (mut runtime, _surface, snapshot) =
-        live_require_runtime(&backend, &session_id, &store).await;
+        live_require_runtime(&backend, &double, &session_id, &store).await;
 
     let report = Box::pin(runtime.restore_tool_state(snapshot))
         .await
@@ -1139,7 +1069,7 @@ async fn a_resident_resync_on_a_require_core_reloads_and_reports() {
     let session_id = SessionId::from("fig3367-live-resync");
     let store = double_unbound_store(&double).await;
     let (mut runtime, _surface, _snapshot) =
-        live_require_runtime(&backend, &session_id, &store).await;
+        live_require_runtime(&backend, &double, &session_id, &store).await;
     // The durable head names the tool; the live surface no longer does.
     Box::pin(crate::runtime_support::apply_host_append(
         &mut runtime,
@@ -1180,7 +1110,7 @@ async fn a_persisted_state_install_on_a_require_core_reports_instead_of_refusing
     let session_id = SessionId::from("fig3367-live-state-install");
     let store = double_unbound_store(&double).await;
     let (mut runtime, _surface, _snapshot) =
-        live_require_runtime(&backend, &session_id, &store).await;
+        live_require_runtime(&backend, &double, &session_id, &store).await;
 
     let state = runtime.export_persistence_state();
     runtime

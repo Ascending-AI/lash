@@ -1,3 +1,4 @@
+use super::child_sessions::session_capabilities;
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::SessionCommitStore as _;
@@ -265,7 +266,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     .await
     .expect("save session meta");
     let owner = lash_core::LeaseOwnerIdentity::opaque("parked-test-worker", "parked-test-boot");
-    let runtime = LashRuntime::from_environment(
+    let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("parked-session")),
@@ -274,6 +275,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     )
     .await
     .expect("persistent runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     let expected = session_view(store.clone(), "parked-session")
         .load_session_meta()
         .await
@@ -357,6 +359,7 @@ async fn park_resume_restores_tool_and_subagent_authority() {
     )
     .await
     .expect("initial authority runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     runtime
         .stamp_live_plugin_state()
         .expect("the live plugin state is captured");
@@ -424,6 +427,7 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
     )
     .await
     .expect("initial narrower-authority runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     assert!(
         !catalog_names(&runtime).contains(&hidden.name.to_string()),
         "the live session-open authority must start narrower"
@@ -471,6 +475,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
     )
     .await
     .expect("persistent runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     let requests = Arc::new(Mutex::new(Vec::<Vec<String>>::new()));
     let captured_requests = Arc::clone(&requests);
     let transport = TestProvider::builder()
@@ -575,6 +580,7 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
     )
     .await
     .expect("persistent runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     assert!(plugin_catalog_names(&runtime).contains(&tool.name.to_string()));
     assert!(catalog_names(&runtime).contains(&tool.name.to_string()));
 
@@ -633,6 +639,7 @@ async fn updated_tool_access_survives_park_and_resume() {
     )
     .await
     .expect("persistent runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     let narrowed = lash_core::SessionToolAccess::ambient()
         .with_hidden_tools([hidden.name])
         .expect("valid hidden tool");
@@ -1402,6 +1409,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     )
     .await
     .expect("initial persistent runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     let mut curated = runtime.tool_state().expect("initial tool state");
     curated
         .set_membership(&lash_core::ToolId::from(original.id), false)
@@ -1513,15 +1521,18 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
     let provider: Arc<dyn lash_core::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
+    let store = double_unbound_store(&double).await;
+    create_fixture_session(store.as_ref(), "fork-parent").await;
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("fork-parent")),
-        None,
+        Some(session_view(store, "fork-parent")),
         lash_core::testing::runtime_lease_owner(),
     )
     .await
     .expect("parent runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
 
     let mut parent_state = runtime.tool_state().expect("parent tool state");
     parent_state
@@ -1559,7 +1570,8 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
         .await
         .expect("fork child from standing parent");
 
-    let child = reopen_session_runtime(&runtime, &handle.session_id).await;
+    let mut child = reopen_session_runtime(&runtime, &handle.session_id).await;
+    session_capabilities::activate(&mut child, &double).await;
     let child_state = child.tool_state().expect("child tool state");
     assert!(
         !child_state
@@ -1808,6 +1820,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     )
     .await
     .expect("initial hidden persistent runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     assert!(!catalog_names(&runtime).contains(&hidden.name.to_string()));
     assert!(
         runtime
@@ -1893,6 +1906,7 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
     )
     .await
     .expect("initial persistent runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     let mut curated = runtime.tool_state().expect("original tool state");
     curated
         .set_membership(&lash_core::ToolId::from(original.id), false)
@@ -1979,15 +1993,18 @@ async fn public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing()
     let provider: Arc<dyn lash_core::ToolProvider> = surface;
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
+    let store = double_unbound_store(&double).await;
+    create_fixture_session(store.as_ref(), "apply-state-round-trip").await;
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("apply-state-round-trip")),
-        None,
+        Some(session_view(store, "apply-state-round-trip")),
         lash_core::testing::runtime_lease_owner(),
     )
     .await
     .expect("live runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
 
     let stale = runtime.tool_state().expect("export base state");
     let mut edited = stale.clone();

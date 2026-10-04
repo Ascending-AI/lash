@@ -1,6 +1,6 @@
 use super::*;
 #[path = "../../runtime_support/session_capabilities.rs"]
-mod session_capabilities;
+pub(super) mod session_capabilities;
 use lash_core::AttachmentStore as _;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::plugin::PluginSessionRequest;
@@ -282,7 +282,7 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
-    let runtime = LashRuntime::from_persistent_embedded_state(
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         runtime_host,
         runtime_services,
@@ -291,6 +291,7 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
     )
     .await
     .expect("durable root runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
 
     let lifecycle = runtime
         .session_lifecycle_service()
@@ -424,7 +425,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         std::sync::Arc::clone(&runtime_host.embedded().core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.embedded().core.durability.process_env_store),
     );
-    let runtime = LashRuntime::from_persistent_background_state(
+    let mut runtime = LashRuntime::from_persistent_background_state(
         standard_test_policy(),
         runtime_host,
         runtime_services,
@@ -439,7 +440,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     )
     .await
     .expect("durable root runtime");
-
+    session_capabilities::activate(&mut runtime, &double).await;
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
@@ -991,8 +992,17 @@ async fn a_child_records_the_config_its_owners_chose_from_the_parent() {
         .build_session(PluginSessionRequest::creation("root", Default::default()))
         .expect("plugins");
     let runtime_host = test_host_config(&backend);
-    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
+    let store = double_unbound_store(&double).await;
+    create_runtime_fixture_session(
+        store.as_ref(),
+        &SessionId::from("root"),
+        &standard_test_policy(),
+    )
+    .await
+    .expect("create the parent fixture session");
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugin_session,
+        session_view(store, "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -1004,7 +1014,7 @@ async fn a_child_records_the_config_its_owners_chose_from_the_parent() {
         .authority
         .plugin_config
         .insert(CAP_OWNER, serde_json::json!({ "cap": 7 }));
-    let mut runtime = LashRuntime::from_embedded_state(
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         runtime_host,
         runtime_services,
@@ -1013,6 +1023,7 @@ async fn a_child_records_the_config_its_owners_chose_from_the_parent() {
     )
     .await
     .expect("runtime");
+    session_capabilities::activate(&mut runtime, &double).await;
     set_runtime_provider(&mut runtime, mock_provider(Vec::new()).into_handle());
     let lifecycle = runtime
         .session_lifecycle_service()
@@ -1041,7 +1052,8 @@ async fn a_child_records_the_config_its_owners_chose_from_the_parent() {
             )
             .await
             .expect("child session");
-        let child = reopen_session_runtime(&runtime, &handle.session_id).await;
+        let mut child = reopen_session_runtime(&runtime, &handle.session_id).await;
+        session_capabilities::activate(&mut child, &double).await;
         assert_eq!(
             child.state().authority.plugin_config.get(CAP_OWNER),
             Some(&expected),
