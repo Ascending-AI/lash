@@ -62,10 +62,15 @@ async fn install_rlm_session_projection(runtime: &mut BenchmarkRuntime) -> anyho
         .as_ref()
         .expect("benchmark session")
         .admin()
-        .protocol()
-        .apply_session_extension(lash_protocol_rlm::rlm_session_projection_extension(
-            rlm_perf_projected_bindings(RuntimePerfScenario::RlmGlobals, 0)?,
-        ))
+        .state()
+        .append_session_nodes(lash::plugins::AppendSessionNodesRequest {
+            operation_id: "runtime-perf-rlm-projection".into(),
+            nodes: lash_protocol_rlm::rlm_seed_initial_nodes(rlm_perf_projected_seed(
+                RuntimePerfScenario::RlmGlobals,
+                0,
+            )?),
+            requires_ancestor_node_id: None,
+        })
         .await?;
     let turn_input =
         lash::TurnInput::text("Seed current working variables, then finish the benchmark marker.");
@@ -77,32 +82,27 @@ async fn install_rlm_session_projection(runtime: &mut BenchmarkRuntime) -> anyho
     Ok(())
 }
 
-fn rlm_perf_projected_bindings(
+fn rlm_perf_projected_seed(
     scenario: RuntimePerfScenario,
     turn_index: usize,
-) -> anyhow::Result<lash_protocol_rlm::RlmProjectedBindings> {
-    Ok(lash_protocol_rlm::RlmProjectedBindings::new()
-        .bind_json(
-            "benchmark",
-            serde_json::json!({
-                "name": "runtime_perf",
-                "scenario": scenario.name(),
-            }),
-        )?
-        .bind_json(
-            "input",
-            serde_json::json!({
-                "turn": turn_index + 1,
-                "goal": "measure runtime overhead across a longer same-session chat",
-                "path": "crates/lash/src/runtime",
-            }),
-        )?
-        .bind_json(
-            "chat",
-            serde_json::json!({
-                "turn_count": turn_index + 1,
-                "scenario": scenario.name(),
-                "mode": "runtime_perf",
-            }),
-        )?)
+) -> anyhow::Result<lash_protocol_rlm::RlmSeed> {
+    let projected = |value| {
+        serde_json::json!({
+            "__projected__": {"kind": "materialized", "value": value},
+        })
+    };
+    lash_protocol_rlm::RlmSeed::from_seed_value(&serde_json::json!({
+        "benchmark": projected(serde_json::json!({
+            "name": "runtime_perf", "scenario": scenario.name(),
+        })),
+        "input": projected(serde_json::json!({
+            "turn": turn_index + 1,
+            "goal": "measure runtime overhead across a longer same-session chat",
+            "path": "crates/lash/src/runtime",
+        })),
+        "chat": projected(serde_json::json!({
+            "turn_count": turn_index + 1, "scenario": scenario.name(), "mode": "runtime_perf",
+        })),
+    }))
+    .map_err(anyhow::Error::msg)
 }
