@@ -54,6 +54,11 @@ impl ProcessStarted {
 pub struct ProcessExecutionWriteAuthority {
     process_id: ProcessId,
     execution_id: String,
+    admission: Option<Box<ProcessExecutionAdmission>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ProcessExecutionAdmission {
     attempt: Option<u32>,
     segment: Option<crate::tool_run::SegmentOrdinal>,
 }
@@ -65,15 +70,14 @@ impl ProcessExecutionWriteAuthority {
         Self {
             process_id: process_id.into(),
             execution_id: execution_id.into(),
-            attempt: None,
-            segment: None,
+            admission: None,
         }
     }
 
     /// Binds invocation authority to the process attempt admitted by the engine.
     pub fn bind_attempt(&self, attempt: u32) -> Self {
         let mut bound = self.clone();
-        bound.attempt = Some(attempt);
+        bound.admission.get_or_insert_with(Box::default).attempt = Some(attempt);
         bound
     }
 
@@ -81,24 +85,28 @@ impl ProcessExecutionWriteAuthority {
     /// does not change the attempt fence used by lifecycle transactions.
     pub fn bind_segment(&self, segment: crate::tool_run::SegmentOrdinal) -> Self {
         let mut bound = self.clone();
-        bound.segment = Some(segment);
+        bound.admission.get_or_insert_with(Box::default).segment = Some(segment);
         bound
     }
 
     /// The admitted physical segment, when the substrate supplied one.
     pub fn segment(&self) -> Option<crate::tool_run::SegmentOrdinal> {
-        self.segment
+        self.admission
+            .as_deref()
+            .and_then(|admission| admission.segment)
     }
 
     /// The one-based process attempt this authority was admitted for.
     pub fn attempt(&self) -> Option<u32> {
-        self.attempt
+        self.admission
+            .as_deref()
+            .and_then(|admission| admission.attempt)
     }
 
     /// Returns the bound attempt only when this authority names `process_id`.
     pub fn attempt_for(&self, process_id: &ProcessId) -> Option<u32> {
         (self.process_id == *process_id)
-            .then_some(self.attempt)
+            .then_some(self.attempt())
             .flatten()
     }
 
@@ -106,7 +114,7 @@ impl ProcessExecutionWriteAuthority {
     pub fn invocation_started(&self) -> Option<ProcessStarted> {
         Some(ProcessStarted {
             owner: self.owner_identity(),
-            attempt: self.attempt?,
+            attempt: self.attempt()?,
             started_at_ms: 0,
             generation: None,
             build_generation: None,
@@ -135,7 +143,7 @@ impl ProcessExecutionWriteAuthority {
     /// Returns the engine execution ID only after this authority
     /// is bound to the named process and one execution attempt.
     pub fn engine_execution_id(&self, process_id: &ProcessId) -> Option<&str> {
-        (self.process_id == *process_id && self.attempt.is_some())
+        (self.process_id == *process_id && self.attempt().is_some())
             .then_some(self.execution_id.as_str())
     }
 
@@ -152,7 +160,7 @@ impl ProcessExecutionWriteAuthority {
             presented_process_id = self.process_id.as_str(),
             presented_owner_id = presented_owner.owner_id,
             presented_invocation_id = self.execution_id,
-            presented_attempt = ?self.attempt,
+            presented_attempt = ?self.attempt(),
             proposed_owner_id = proposed_start.map(|started| started.owner.owner_id.as_str()),
             proposed_invocation_id =
                 proposed_start.map(|started| started.owner.incarnation_id.as_str()),

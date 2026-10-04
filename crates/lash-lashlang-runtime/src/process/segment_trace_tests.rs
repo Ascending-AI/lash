@@ -4,11 +4,12 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::EffectSummaryWriter;
+use super::segment_state::ReplayOrdinalsState;
 use super::{
     EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangProcessExecutionTrace,
     LashlangProcessTraceIdentity, LashlangSegmentState, LashlangSegmentStateError,
-    ReplayOrdinalsState, decode_lashlang_segment_state, process_lashlang_execution_result,
-    process_trace_session_id, refuse_foreign_program,
+    decode_lashlang_segment_state, process_lashlang_execution_result, process_trace_session_id,
+    refuse_foreign_program,
 };
 use lash_sansio::ExecutionNodeKind;
 use lash_sansio::sync::MutexExt;

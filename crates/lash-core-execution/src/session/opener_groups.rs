@@ -95,7 +95,7 @@ pub struct OpenerGroupRegistry {
     outstanding: Vec<crate::EffectGroupHandle>,
     /// Tool calls held per group key, from formation to release (§9).
     reserved: std::collections::BTreeMap<String, usize>,
-    run: Option<crate::tool_run::RunTransfer>,
+    run: Option<Box<crate::tool_run::RunTransfer>>,
 }
 
 impl OpenerGroupRegistry {
@@ -547,13 +547,17 @@ impl RuntimeExecutionContext<'_> {
         }
         self.validate_process_run(&transfer, false)?;
         transfer.check_capture(&crate::tool_run::Cut::request(transfer.reason).observe(0))?;
-        self.opener_groups.lock_recover().run = Some(transfer);
+        self.opener_groups.lock_recover().run = Some(Box::new(transfer));
         Ok(())
     }
 
     /// Take the carried receipts to rebuild the successor's coordinator.
     pub fn take_run_continuation(&self) -> Option<crate::tool_run::RunTransfer> {
-        self.opener_groups.lock_recover().run.take()
+        self.opener_groups
+            .lock_recover()
+            .run
+            .take()
+            .map(|transfer| *transfer)
     }
 
     /// Capture a quiesced Run without closing the process's logical opener.
@@ -563,7 +567,7 @@ impl RuntimeExecutionContext<'_> {
     pub fn run_continuation_snapshot(
         &self,
     ) -> Result<Option<crate::tool_run::RunTransfer>, crate::tool_run::ContinuationRefusal> {
-        let transfer = self.opener_groups.lock_recover().run.clone();
+        let transfer = self.opener_groups.lock_recover().run.as_deref().cloned();
         if let Some(transfer) = &transfer {
             self.validate_process_run(transfer, false)?;
             transfer.check_capture(&crate::tool_run::Cut::request(transfer.reason).observe(0))?;
@@ -599,7 +603,7 @@ impl RuntimeExecutionContext<'_> {
         transfer
             .clone()
             .adopt(&owner, transfer.ledger()?.lifecycle(), successor)?;
-        self.opener_groups.lock_recover().run = Some(transfer);
+        self.opener_groups.lock_recover().run = Some(Box::new(transfer));
         Ok(())
     }
     fn validate_process_run(

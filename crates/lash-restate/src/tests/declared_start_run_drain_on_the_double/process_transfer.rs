@@ -186,18 +186,20 @@ async fn check_transfer(deferred: bool, launched_before_cut: bool) {
         segment_ordinal: 0,
         sender_generation: super::super::test_build_generation(),
     });
-    let _: crate::process::RestateProcessWorkflowOutput = tokio::time::timeout(
-        Duration::from_secs(30),
-        ingress.call_lash_workflow("LashProcessWorkflow", process_id.as_str(), "run", &input),
-    )
-    .await
-    .unwrap_or_else(|_| {
-        panic!(
+    let completed = tokio::time::timeout(Duration::from_secs(30), async {
+        ingress
+            .call_lash_workflow("LashProcessWorkflow", process_id.as_str(), "run", &input)
+            .await
+            .map_err(Box::new)
+    })
+    .await;
+    let _: crate::process::RestateProcessWorkflowOutput = match completed {
+        Ok(result) => result.unwrap(),
+        Err(_) => panic!(
             "start predecessor did not finish, deferred={deferred}, launched={launched_before_cut}: {:#?}",
             server.invocations()
-        )
-    })
-    .unwrap();
+        ),
+    };
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
         let record = registry.get_process(&process_id).await.unwrap().unwrap();

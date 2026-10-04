@@ -224,7 +224,7 @@ pub(super) struct LashlangSegmentState {
     pub(super) held_tool_calls: BTreeMap<String, usize>,
     /// The complete tool Run, sealed after local durable acceptance.
     #[serde(deserialize_with = "deserialize_tool_run")]
-    pub(super) tool_run: Option<lash_core::tool_run::RunTransfer>,
+    pub(super) tool_run: Option<Box<lash_core::tool_run::RunTransfer>>,
     /// The worker accounting the body carries across this boundary
     /// (ADR 0123).
     pub(super) worker_recovery: WorkerRecoveryLedger,
@@ -232,7 +232,7 @@ pub(super) struct LashlangSegmentState {
 
 fn deserialize_tool_run<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<Option<lash_core::tool_run::RunTransfer>, D::Error> {
+) -> Result<Option<Box<lash_core::tool_run::RunTransfer>>, D::Error> {
     serde::Deserialize::deserialize(deserializer)
 }
 
@@ -283,7 +283,7 @@ pub(super) fn capture_segment(
         effect_omissions: host.effect_summary.omissions(),
         outstanding_groups: host.ctx.outstanding_groups_snapshot(),
         held_tool_calls: host.ctx.held_tool_calls_snapshot(),
-        tool_run,
+        tool_run: tool_run.map(Box::new),
         // The worker released at this boundary settled its measured usage,
         // so the budget holds everything the body consumed so far.
         worker_recovery: host.worker_recovery.crossed(

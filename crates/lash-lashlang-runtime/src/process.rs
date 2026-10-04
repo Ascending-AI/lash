@@ -11,8 +11,7 @@ use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 pub use segment_state::LASHLANG_SEGMENT_STATE_VERSION;
 use segment_state::{
     LashlangSegmentState, LashlangSegmentStateError, MAX_SEGMENT_CONTINUATION_BYTES,
-    ReplayOrdinals, ReplayOrdinalsState, SEGMENT_STATE_CUTOVER_REMEDY, capture_segment,
-    decode_lashlang_segment_state,
+    ReplayOrdinals, capture_segment, decode_lashlang_segment_state,
 };
 mod definition_holds;
 use definition_holds::hold_segment_definitions;
@@ -430,7 +429,7 @@ async fn run_lashlang_process_scoped(
                     lash_core::tool_run::ContinuationRefusal::MissingSegmentAuthority,
                 ));
             };
-            if let Err(error) = ctx.restore_run_continuation(transfer, successor) {
+            if let Err(error) = ctx.restore_run_continuation(*transfer, successor) {
                 return Err(segment_state::continuation_refused(error));
             }
         }

@@ -521,7 +521,6 @@ impl SingletonToolHandlers for Probe {
 enum Step {
     Decide(usize),
     Concurrent,
-    AwaitDeferred,
     /// Request the Run's cancellation.
     Cancel,
     Drain,
@@ -859,7 +858,6 @@ async fn drive(
                                     }
                                 }
                             }),
-                        Step::AwaitDeferred => run.await_deferred().await,
                         Step::Cancel => {
                             probe.cancel.store(true, Ordering::SeqCst);
                             Ok(())

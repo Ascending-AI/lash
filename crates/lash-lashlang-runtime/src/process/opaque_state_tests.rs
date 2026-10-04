@@ -2,10 +2,11 @@
 //! decode of the envelope never reaches the VM's semantic decoder, which
 //! validates and compiles regular expressions from guest-controlled bytes.
 
+use super::segment_state::ReplayOrdinalsState;
 use super::segment_trace_tests::worker_parked_continuation;
 use super::{
-    LASHLANG_SEGMENT_STATE_VERSION, LashlangSegmentState, ReplayOrdinalsState,
-    decode_lashlang_segment_state, segment_continuation_expectation, segment_continuation_owner,
+    LASHLANG_SEGMENT_STATE_VERSION, LashlangSegmentState, decode_lashlang_segment_state,
+    segment_continuation_expectation, segment_continuation_owner,
 };
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 
