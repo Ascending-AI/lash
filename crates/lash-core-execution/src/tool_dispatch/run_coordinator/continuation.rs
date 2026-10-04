@@ -290,6 +290,7 @@ impl<'a> RunCoordinator<'a> {
                 RunEvent::Presented {
                     call_id,
                     presentation,
+                    ..
                 } => {
                     presented.insert(call_id.clone(), presentation.clone());
                 }
@@ -374,7 +375,7 @@ impl<'a> RunCoordinator<'a> {
                 result @ (AttemptResult::Deferred { .. } | AttemptResult::DeferredStart { .. }),
             )) = attempts.get(&id)
             {
-                let request: SingletonPreparedRequest =
+                let request: RecordedPreparedRequest =
                     run.journal.materials.decode(&member.request)?;
                 let call = SingletonToolCall {
                     owner: run.journal.owner.clone(),

@@ -1812,6 +1812,7 @@ fn l09_capture_rebuilds_the_complete_acknowledged_run() {
         RunEvent::Presented {
             call_id: prior.call_id.clone(),
             presentation: None,
+            failure: None,
         },
         RunEvent::Consumed {
             call_id: prior.call_id.clone(),

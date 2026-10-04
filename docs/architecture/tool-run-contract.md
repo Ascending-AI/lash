@@ -83,6 +83,11 @@ Coordinator adoption rebinds subscriptions and reads material only through
 successor-held references, including after the predecessor lease is fenced.
 The process registry still owns lifecycle transactions and child holds.
 
+The state frontier carries each acknowledged publication's receipt by ordinal.
+After adoption, an identical historical receipt remains `AlreadyApplied`.
+A changed receipt at that ordinal yields `FrontierRefusal::ReceiptMismatch`,
+including when its original publisher has already been fenced.
+
 Each physical process invocation keeps its fixed journal pin. A terminal
 publishes its lifecycle outcome before releasing that pin. A handover persists
 the successor state and accepts its send, registers the successor invocation's

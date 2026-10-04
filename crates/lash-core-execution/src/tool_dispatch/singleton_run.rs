@@ -122,6 +122,7 @@ pub struct SingletonPreparedRequest {
 #[serde(deny_unknown_fields)]
 pub(super) struct RecordedPreparedRequest {
     pub arguments: serde_json::Value,
+    pub environment: Option<ProcessExecutionEnvRef>,
     pub prepared: serde_json::Value,
     pub state_snapshot: Option<MaterialRef>,
     pub isolation: Option<RecordedIsolatedStart>,

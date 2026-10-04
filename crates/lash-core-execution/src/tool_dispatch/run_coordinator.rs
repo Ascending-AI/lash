@@ -399,6 +399,7 @@ async fn prepare_admitted_call(
         MaterialRole::PreparedRequest,
         encode(&RecordedPreparedRequest {
             arguments: request.arguments.clone(),
+            environment: request.environment.clone(),
             prepared: request.prepared.clone(),
             state_snapshot: snapshot.map(|(reference, _)| reference),
             isolation: request.isolation.clone(),
@@ -449,6 +450,7 @@ fn validate_admitted_call(
     let recorded: RecordedPreparedRequest = journal.materials.decode(&member.request)?;
     let request = SingletonPreparedRequest {
         arguments: recorded.arguments,
+        environment: recorded.environment,
         prepared: recorded.prepared,
         state_snapshot: recorded
             .state_snapshot
