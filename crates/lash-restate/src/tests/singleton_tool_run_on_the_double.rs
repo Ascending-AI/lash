@@ -1826,3 +1826,155 @@ async fn an_undeclared_outcome_is_refused_before_anything_it_declared_is_realize
         assert_eq!(probe.realizations.load(Ordering::SeqCst), 0, "{label}");
     }
 }
+
+/// L04: a protected intent's own journal command is replayed even after V
+/// became durable. Serving V must not bypass the nested command it issued.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn l04_a_journaled_intent_replays_before_its_protected_presentation() {
+    struct JournaledIntent<'a> {
+        scoped: &'a lash_core::ScopedEffectController<'a>,
+        probe: Arc<Probe>,
+        mutations: Arc<AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl SingletonToolHandlers for JournaledIntent<'_> {
+        async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
+            self.probe.prepare(call).await
+        }
+        async fn before_checks(
+            &self,
+            call: &SingletonToolCall,
+            request: &SingletonPreparedRequest,
+        ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
+            self.probe.before_checks(call, request).await
+        }
+        async fn execute(
+            &self,
+            attempt: SingletonAttempt<'_>,
+        ) -> Result<SingletonBodyOutcome, String> {
+            self.probe.execute(attempt).await
+        }
+        async fn after_checks(
+            &self,
+            call: &ToolCallId,
+            capture: &SingletonCapture,
+        ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
+            self.probe.after_checks(call, capture).await
+        }
+        async fn run_cancel_requested(&self) -> Result<bool, String> {
+            Ok(false)
+        }
+        async fn wait_run_retry(
+            &self,
+            timer: lash_core::tool_dispatch::RunRetryTimer<'_>,
+        ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+            timer.await
+        }
+        async fn realize_declarations(
+            &self,
+            call: &ToolCallId,
+            intents: &[ToolIntentKind],
+        ) -> Result<(), String> {
+            self.scoped
+                .controller()
+                .record_run_record(
+                    "l04:external-intent".to_owned(),
+                    Box::pin(async {
+                        self.mutations.fetch_add(1, Ordering::SeqCst);
+                        Ok(lash_core::tool_run::RunJournalEntry {
+                            state: Vec::new(),
+                            materials: Vec::new(),
+                            record: RunRecord {
+                                segment: SegmentOrdinal(0),
+                                first: lash_core::tool_run::RunEventOrdinal(0),
+                                events: Vec::new(),
+                                trace: None,
+                            },
+                        })
+                    }),
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            self.probe.realize_declarations(call, intents).await
+        }
+        async fn present(
+            &self,
+            call: &ToolCallId,
+            capture: &SingletonCapture,
+        ) -> Result<String, lash_core::tool_dispatch::SingletonPresentationError> {
+            self.probe.present(call, capture).await
+        }
+        fn emit_stream(&self, _: &ToolCallId, _: &AttemptStream) {}
+        async fn launch_start(
+            &self,
+            _: &DeclaredStartObligation,
+        ) -> Result<lash_core::ProcessId, String> {
+            Err("the witness declares no start".into())
+        }
+        async fn discharge_start(
+            &self,
+            _: &DeclaredStartObligation,
+            _: &lash_core::ProcessId,
+            _: bool,
+        ) -> Result<(), String> {
+            Err("the witness declares no start".into())
+        }
+    }
+    let backend = lash_restate_test::backend(0x493309, ServerConfig::default())
+        .await
+        .unwrap();
+    // V is accepted; a lost handler output then replays the entire journal,
+    // including the intent command V issued before it finished.
+    backend
+        .server()
+        .crash_on(CrashRule::new(CrashPoint::BeforeFrame {
+            ty: MessageType::OutputCommand,
+        }));
+    let mut call = call("journaled-intent");
+    call.declaration = ToolDeclaration::default().with_intents([ToolIntentKind::EmitProcessEvent]);
+    let probe = Probe::new(
+        SingletonBodyOutcome::Done {
+            commands: Default::default(),
+            output: OUTPUT.to_owned(),
+            intents: vec![ToolIntentKind::EmitProcessEvent],
+            start: None,
+        },
+        CancelAt::Never,
+    );
+    let mutations = Arc::new(AtomicUsize::new(0));
+    let returned: Returned = Arc::new(Mutex::new(Vec::new()));
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let mutations = mutations.clone();
+        let returned = returned.clone();
+        Arc::new(move |scoped| {
+            let call = call.clone();
+            let probe = probe.clone();
+            let mutations = mutations.clone();
+            let returned = returned.clone();
+            Box::pin(async move {
+                let handlers = JournaledIntent {
+                    scoped: &scoped,
+                    probe,
+                    mutations,
+                };
+                let result = run_singleton_tool(&scoped, &call, &handlers).await;
+                returned.lock().unwrap().push(result);
+            })
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+    )
+    .await
+    .expect("protected replay settles")
+    .expect("handler replay succeeds");
+    let result = returned
+        .lock()
+        .unwrap()
+        .pop()
+        .expect("the replay returned")
+        .expect("the replay completed");
+    assert!(matches!(result.terminal, SingletonTerminal::Final { .. }));
+    assert_eq!(mutations.load(Ordering::SeqCst), 1, "one external mutation");
+}
