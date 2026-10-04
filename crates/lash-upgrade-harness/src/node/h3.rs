@@ -374,10 +374,10 @@ pub async fn operation_invocation(
             matches.len()
         );
     }
-    Ok(matches
+    matches
         .into_iter()
         .next()
-        .ok_or_else(|| anyhow!("missing operation journal"))?)
+        .ok_or_else(|| anyhow!("missing operation journal"))
 }
 
 /// The real durable-wait registry boundary used by S21. Material is retained

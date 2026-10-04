@@ -3,7 +3,7 @@ use anyhow::{Result, ensure};
 use lash_core::tool_run::{RunEvent, RunJournalEntry, RunTransfer};
 use lash_upgrade_harness::e2e::{
     case::{ArtifactIdentity, CaseSpec, Channel, StoreKind},
-    control::{Barrier, BarrierKind, Control, Fault, ToolControl, WorkIdentity},
+    control::{Barrier, BarrierKind, BarrierProof, Control, Fault, ToolControl, WorkIdentity},
     evidence::{DecodedRecord, Evidence},
     host::{HostAdapter, HostCommand, HostKind},
     provider::ProviderKind,
@@ -85,17 +85,27 @@ pub fn records<'a>(
 /// in a Restate Run completion. Read the retained follow-on independently.
 pub fn transfer(evidence: &Evidence, work: &WorkIdentity) -> Result<RunTransfer> {
     let matches: Vec<RunTransfer> = evidence
-        .stores
+        .transfers
         .iter()
-        .filter(|snapshot| snapshot["run"].as_str() == Some(work.run.as_str()))
-        .filter(|snapshot| {
-            snapshot["store_source"].as_str()
-                == Some("deployment_store.session_head.pending_follow_on_json")
+        .filter(|fact| fact.work == *work)
+        .map(|fact| {
+            let snapshot: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&fact.artifact)?)?;
+            ensure!(
+                snapshot["run"].as_str() == Some(work.run.as_str()),
+                "retained artifact belongs to a different Run"
+            );
+            let value = snapshot
+                .pointer("/continuation/continuation/opener/run")
+                .ok_or_else(|| anyhow::anyhow!("store artifact has no canonical transfer"))?;
+            let actual: RunTransfer = serde_json::from_value(value.clone())?;
+            ensure!(
+                actual == fact.transfer,
+                "typed transfer differs from store artifact"
+            );
+            Ok(actual)
         })
-        .filter_map(|snapshot| snapshot.pointer("/continuation/continuation/opener/run"))
-        .filter(|value| !value.is_null())
-        .map(|value| serde_json::from_value(value.clone()))
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<_>>()?;
     ensure!(
         !matches.is_empty(),
         "{} has no retained follow-on store receipt",
@@ -108,6 +118,24 @@ pub fn transfer(evidence: &Evidence, work: &WorkIdentity) -> Result<RunTransfer>
     );
     first.ledger()?;
     Ok(first.clone())
+}
+
+/// Store publication cuts retain an independently read fenced-store receipt.
+/// They cannot substitute a store revision for a Restate journal index.
+fn store_cut(proof: &BarrierProof, barrier: &Barrier) -> Result<()> {
+    ensure!(
+        proof.barrier == *barrier
+            && barrier.kind.durable()
+            && !barrier.kind.journal_backed()
+            && proof.journal_index.is_none(),
+        "publication cut lacks store provenance"
+    );
+    let snapshot: serde_json::Value = serde_json::from_slice(&std::fs::read(&proof.artifact)?)?;
+    ensure!(
+        snapshot.is_object(),
+        "store publication receipt is not an object"
+    );
+    Ok(())
 }
 
 /// Kill only after the independently proved successor-publication cut. The
@@ -129,10 +157,7 @@ pub async fn s12_retire_pending_source(
         kind: BarrierKind::SuccessorAdmitted,
     };
     let proof = control.await_barrier(&barrier).await?;
-    ensure!(
-        proof.barrier == barrier && proof.journal_index.is_some(),
-        "missing durable successor barrier"
-    );
+    store_cut(&proof, &barrier)?;
     let retired = control
         .inject(
             Fault::DrainAndRetire {
@@ -272,7 +297,7 @@ pub async fn s23_cancel_then_fresh_input(
     })
     .await?;
     let proof = control.await_barrier(&barrier).await?;
-    ensure!(proof.journal_index.is_some(), "S23 cut is not durable");
+    store_cut(&proof, &barrier)?;
     evidence.barriers.push(proof);
     let cancel = host
         .command(HostCommand::Cancel {
@@ -387,10 +412,7 @@ pub async fn s31_publication_crash(
     })
     .await?;
     let proof = control.await_barrier(&barrier).await?;
-    ensure!(
-        proof.journal_index.is_some(),
-        "process cut has no publication journal"
-    );
+    store_cut(&proof, &barrier)?;
     let receipt = control
         .inject(
             Fault::KillHost {
@@ -429,10 +451,7 @@ pub async fn s32_remove_retained_result(
         kind: BarrierKind::SuccessorAdmitted,
     };
     let proof = control.await_barrier(&barrier).await?;
-    ensure!(
-        proof.journal_index.is_some(),
-        "successor ownership is not durable"
-    );
+    store_cut(&proof, &barrier)?;
     evidence.barriers.push(proof);
     let removed = host
         .command(HostCommand::Process {
@@ -504,11 +523,23 @@ async fn s13_owned_work_refuses_operator_retirement_sqlite_memory() -> Result<()
     // Abort this drain while the application finishes naturally, then ask for
     // retirement again. No readiness condition is implemented by elapsed time.
     drain.clear_draining(&generation).await?;
-    double
-        .server()
-        .advance(std::time::Duration::from_secs(86_400));
+    let timers = double.server().timers();
+    let timer = timers
+        .iter()
+        .filter(|timer| timer.invocation == invocation.id && timer.kind == "sleep")
+        .max_by_key(|timer| timer.fire_at_ms)
+        .ok_or_else(|| anyhow::anyhow!("pinned application has no sleep timer: {timers:?}"))?;
+    double.server().advance_to(timer.fire_at_ms);
     let outcome =
-        tokio::time::timeout(std::time::Duration::from_secs(10), handle.outcome()).await??;
+        match tokio::time::timeout(std::time::Duration::from_secs(10), handle.outcome()).await {
+            Ok(outcome) => outcome?,
+            Err(error) => anyhow::bail!(
+                "application timer wake failed: {error}; now={}; timers={:?}; invocations={:?}",
+                double.server().now_ms(),
+                double.server().timers(),
+                double.server().invocations()
+            ),
+        };
     ensure!(
         outcome.status() == lash::TurnStatus::Answered && outcome.run() == Some(&run),
         "pinned application did not finish its original Run: {outcome:?}"

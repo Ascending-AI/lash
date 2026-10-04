@@ -237,12 +237,25 @@ async fn s18_cancel_suspended_application_timer_sqlite_memory() -> Result<()> {
         "operation timer never actually suspended: {invocation:?}"
     );
     let suspended_id = invocation.id.clone();
-    let application_timers = double.server().timers();
+    let application_timers: Vec<_> = double
+        .server()
+        .timers()
+        .into_iter()
+        .filter(|timer| timer.invocation == suspended_id && timer.kind == "sleep")
+        .collect();
     ensure!(
         !application_timers.is_empty(),
         "application sleep registered no real timer"
     );
-    let before = double.server().now_ms();
+    let deadline = application_timers
+        .iter()
+        .map(|timer| timer.fire_at_ms)
+        .min()
+        .ok_or_else(|| anyhow::anyhow!("application sleep has no deadline"))?;
+    ensure!(
+        double.server().now_ms() < deadline,
+        "application timer already fired"
+    );
     ensure!(
         double
             .stores()
@@ -274,7 +287,7 @@ async fn s18_cancel_suspended_application_timer_sqlite_memory() -> Result<()> {
         "stored timer terminal is not cancellation"
     );
     ensure!(
-        double.server().now_ms().saturating_sub(before) < 86_400_000,
+        double.server().now_ms() < deadline,
         "cancellation waited for the application timer"
     );
     let late = tokio::time::timeout(

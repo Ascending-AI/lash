@@ -1,13 +1,11 @@
 //! The operator floor: independent drain evidence precedes forced retirement.
 use lash::GenerationDrainStatus;
 use lash_core::engine::BuildGeneration;
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "cause", rename_all = "snake_case")]
+#[derive(Debug)]
 pub enum RetirementRefusal {
     OwnedWork { status: Box<GenerationDrainStatus> },
-    UnreadableRegistry { detail: String },
+    DrainReadFailed { cause: Box<lash::EmbedError> },
     DeploymentMismatch { deployment: String },
 }
 
@@ -19,8 +17,8 @@ pub async fn proof(
     let status = core
         .generation_drain_status(generation)
         .await
-        .map_err(|error| RetirementRefusal::UnreadableRegistry {
-            detail: error.to_string(),
+        .map_err(|cause| RetirementRefusal::DrainReadFailed {
+            cause: Box::new(cause),
         })?;
     if !status.drained() {
         return Err(RetirementRefusal::OwnedWork {
