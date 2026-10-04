@@ -139,9 +139,7 @@ impl Scenario<'_> {
                         "decoded Run record differs from retrieved journal bytes"
                     ),
                     DecodedRecord::Transfer(transfer) => ensure!(
-                        serde_json::from_value::<lash_core::tool_run::RunTransfer>(
-                            record_payload(fact)?
-                        )? == *transfer,
+                        contains_record(&record_payload(fact)?, &serde_json::to_value(transfer)?),
                         "decoded transfer differs from retrieved journal bytes"
                     ),
                 }
@@ -254,57 +252,67 @@ impl Scenario<'_> {
         status: lash_remote_protocol::RemoteTurnStatus,
         answer: Option<&str>,
     ) -> Result<Evidence> {
-        let result = async {
-            let outcome = self
-                .host
-                .command(HostCommand::Attach {
-                    run: self.work()?.run.clone(),
-                })
-                .await?;
+        let outcome = self
+            .host
+            .command(HostCommand::Attach {
+                run: self.work()?.run.clone(),
+            })
+            .await?;
+        ensure!(
+            outcome.work.ingress == self.work()?.ingress && outcome.work.run == self.work()?.run,
+            "follow returned another input/Run"
+        );
+        let remote: lash_remote_protocol::RemoteSendOutcome = serde_json::from_value(
+            outcome
+                .output
+                .get("outcome")
+                .cloned()
+                .ok_or_else(|| anyhow!("Attach has no typed outcome"))?,
+        )?;
+        let lash_remote_protocol::RemoteSendOutcome::Settled {
+            report, input_id, ..
+        } = remote
+        else {
+            return Err(anyhow!("host input did not settle: {:?}", outcome.output));
+        };
+        report.validate()?;
+        ensure!(
+            input_id == self.work()?.ingress && report.turn_id.to_string() == self.work()?.run,
+            "host terminal is bound to another input/Run"
+        );
+        ensure!(
+            report.status() == status,
+            "host terminal status differs: {:?}",
+            report.outcome
+        );
+        if let Some(answer) = answer {
             ensure!(
-                outcome.work.ingress == self.work()?.ingress
-                    && outcome.work.run == self.work()?.run,
-                "follow returned another input/Run"
+                report.assistant_output.safe_text == answer
+                    && report.assistant_output.raw_text == answer,
+                "host terminal answer differs: {:?}",
+                report.assistant_output
             );
-            let remote: lash_remote_protocol::RemoteSendOutcome = serde_json::from_value(
-                outcome
-                    .output
-                    .get("outcome")
-                    .cloned()
-                    .ok_or_else(|| anyhow!("Attach has no typed outcome"))?,
-            )?;
-            let lash_remote_protocol::RemoteSendOutcome::Settled {
-                report, input_id, ..
-            } = remote
-            else {
-                return Err(anyhow!("host input did not settle: {:?}", outcome.output));
-            };
-            report.validate()?;
-            ensure!(
-                input_id == self.work()?.ingress && report.turn_id.to_string() == self.work()?.run,
-                "host terminal is bound to another input/Run"
-            );
-            ensure!(
-                report.status() == status,
-                "host terminal status differs: {:?}",
-                report.outcome
-            );
-            if let Some(answer) = answer {
-                ensure!(
-                    report.assistant_output.safe_text == answer
-                        && report.assistant_output.raw_text == answer,
-                    "host terminal answer differs: {:?}",
-                    report.assistant_output
-                );
-            }
-            let mut evidence = self.read().await?;
-            evidence.outputs.push(outcome);
-            evidence.barriers.extend(self.proofs.clone());
-            evidence.faults.extend(self.faults.clone());
-            Ok::<_, anyhow::Error>(evidence)
         }
-        .await;
-        result
+        let mut evidence = self.read().await?;
+        evidence.outputs.push(outcome);
+        evidence.barriers.extend(self.proofs.clone());
+        evidence.faults.extend(self.faults.clone());
+        Ok(evidence)
+    }
+}
+
+/// Transfer capture is nested in a native commit result. Compare its exact
+/// serialized value with the retained bytes, independently of H0's decoder.
+fn contains_record(value: &serde_json::Value, expected: &serde_json::Value) -> bool {
+    if value == expected {
+        return true;
+    }
+    match value {
+        serde_json::Value::Object(fields) => fields.values().any(|v| contains_record(v, expected)),
+        serde_json::Value::Array(values) => values.iter().any(|v| contains_record(v, expected)),
+        serde_json::Value::String(encoded) => serde_json::from_str::<serde_json::Value>(encoded)
+            .is_ok_and(|value| contains_record(&value, expected)),
+        _ => false,
     }
 }
 

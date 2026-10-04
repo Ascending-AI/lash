@@ -590,7 +590,6 @@ pub async fn run(row: Row) -> Result<()> {
             evidence
         }
     };
-    drop(scenario);
     evidence.artifacts = shared.artifacts.clone();
     let host_cleanup = host.stop().await;
     let callback_cleanup = shared.callbacks.lock().await.finish().await;
