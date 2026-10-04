@@ -701,29 +701,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.turn_cancel.note();
     }
 
-    /// Execution-side only: run one recorded step body that this execution
-    /// issues in process (a tool attempt) under a cooperative stop that fires
-    /// when the turn's gate pair asks it to stop now (FIG-3672 P9). The body
-    /// gets the stop; what it returns is the step's recorded outcome. A watch
-    /// that gives up leaves the body running to its end (the engine records
-    /// every tool outcome, so the fault must not become one). An execution
-    /// with no gate control runs the body under its own token.
-    pub(crate) async fn run_turn_step_body<T, F, Fut>(&self, body: F) -> T
-    where
-        F: FnOnce(Option<CancellationToken>) -> Fut,
-        Fut: std::future::Future<Output = T>,
-    {
-        let (Some(control), Some(host)) = (
-            self.turn_cancel.control.as_ref(),
-            self.turn_cancel.host.as_ref(),
-        ) else {
-            return body(self.cancellation_token.clone()).await;
-        };
-        control
-            .run_recorded_step_body(host, self.is_cancelled(), |stop| body(Some(stop)))
-            .await
-    }
-
     /// A code cell's cancel checkpoint (FIG-3672 P9): a journaled peek of the
     /// turn's gate pair under the checkpoint's own identity, which advances
     /// this execution's recorded fact when the turn must stop now. A replay

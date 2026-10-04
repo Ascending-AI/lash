@@ -1,5 +1,5 @@
 //! Production A/X/D/V callbacks. Canonical preparation and body facts live
-//! in their owning records; live maps carry only invocation attribution.
+//! in their owning records; live maps carry invocation attribution and body stops.
 use super::*;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use crate::session::tool_execution::{ToolAggregateOutcome, ToolAggregateRequest};
@@ -24,8 +24,15 @@ pub(crate) struct ProductionToolHandlers<'run> {
     calls: Mutex<BTreeMap<crate::ToolCallId, CallInput>>,
     prepared: Mutex<BTreeMap<crate::ToolCallId, Prepared>>,
     pending: Mutex<BTreeMap<crate::ToolCallId, crate::PendingCompletion>>,
+    inline_stops: Mutex<BTreeMap<crate::ToolCallId, InlineStop>>,
     contributions: Mutex<BTreeMap<crate::ToolCallId, Vec<CheckContribution>>>,
     declarations: Mutex<BTreeMap<crate::ToolCallId, Vec<crate::ToolIntentExecutionOutcome>>>,
+}
+
+#[derive(Default)]
+struct InlineStop {
+    token: Option<tokio_util::sync::CancellationToken>,
+    cancelled: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -98,9 +105,38 @@ impl<'run> ProductionToolHandlers<'run> {
             calls: Mutex::default(),
             prepared: Mutex::default(),
             pending: Mutex::default(),
+            inline_stops: Mutex::default(),
             contributions: Mutex::default(),
             declarations: Mutex::default(),
         }
+    }
+    fn cancel_inline_stop(&self, call_id: &crate::ToolCallId, accepted: bool) {
+        let mut stops = self.inline_stops.lock_recover();
+        let stop = if accepted {
+            Some(stops.entry(call_id.clone()).or_default())
+        } else {
+            stops.get_mut(call_id)
+        };
+        if let Some(stop) = stop {
+            stop.cancelled = true;
+            if let Some(token) = &stop.token {
+                token.cancel();
+            }
+        }
+    }
+    fn remember_inline_stop(
+        &self,
+        call_id: &crate::ToolCallId,
+        token: Option<tokio_util::sync::CancellationToken>,
+    ) {
+        let mut stops = self.inline_stops.lock_recover();
+        let stop = stops.entry(call_id.clone()).or_default();
+        if stop.cancelled
+            && let Some(token) = &token
+        {
+            token.cancel();
+        }
+        stop.token = token;
     }
     async fn dispatch(&self, input: &CallInput) -> Result<ToolDispatchContext<'run>, String> {
         let mut dispatch = self.context.dispatch().as_ref().clone();
@@ -215,6 +251,9 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .lock_recover()
             .insert(call_id.clone(), prepared);
         Ok(())
+    }
+    fn restore_cancel(&self, call_id: &crate::ToolCallId) {
+        self.cancel_inline_stop(call_id, true);
     }
     fn retry_policy(
         &self,
@@ -453,6 +492,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         // The watch belongs inside X: replay consults X's recorded outcome,
         // rather than a live token when deciding whether A may publish state.
         let body = self.context.run_turn_step_body(|stop| {
+            self.remember_inline_stop(attempt.call_id, stop.clone());
             let dispatch = &dispatch;
             let authority = &authority;
             let call = &prepared.call;
@@ -461,7 +501,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 if let Some(stop) = &stop {
                     context = context.with_step_stop(stop.clone());
                 }
-                let outcome = Box::pin(retry::execute_leaf_tool_attempt(
+                let execute = Box::pin(retry::execute_leaf_tool_attempt(
                     dispatch,
                     authority,
                     call,
@@ -471,8 +511,31 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         crate::ToolRetryPolicy::Never => 1,
                         crate::ToolRetryPolicy::Safe { max_attempts, .. } => max_attempts,
                     },
-                ))
-                .await;
+                ));
+                let cancelled = async {
+                    match &stop {
+                        Some(stop) => stop.cancelled().await,
+                        None => std::future::pending().await,
+                    }
+                };
+                let cancelled_outcome = || {
+                    crate::ToolOutcome::cancelled(
+                        "the inline attempt stopped before its body completed",
+                    )
+                    .into()
+                };
+                let outcome = if stop
+                    .as_ref()
+                    .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
+                {
+                    cancelled_outcome()
+                } else {
+                    tokio::select! {
+                        biased;
+                        outcome = execute => outcome,
+                        () = cancelled => cancelled_outcome(),
+                    }
+                };
                 let stopped = if matches!(&outcome, crate::ToolAttemptOutcome::HostFailed(_)) {
                     false
                 } else {
@@ -786,6 +849,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         capture: Option<&SingletonCapture>,
         presentation: Option<&str>,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.inline_stops.lock_recover().remove(call_id);
         let record = self
             .observed_record(call_id, decision, cause, capture, presentation)
             .map_err(|message| {
@@ -849,6 +913,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         call_id: &crate::ToolCallId,
         _source: Option<&crate::AwaitEventKey>,
     ) -> Result<(), String> {
+        self.cancel_inline_stop(call_id, false);
         let pending = self.pending.lock_recover().get(call_id).cloned();
         if let Some(crate::PendingCompletion {
             on_cancel: crate::CancelHint::CancelExternalWork,

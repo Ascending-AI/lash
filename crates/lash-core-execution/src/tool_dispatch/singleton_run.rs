@@ -329,8 +329,8 @@ pub enum SingletonPresentationError {
     Fault { message: String },
 }
 
-/// The callbacks a singleton's records run. Each runs inside the step of the
-/// record that owns its answer and never on a replay that serves the record.
+/// A singleton's execution callbacks run inside the record owning their answer;
+/// replay serves that record. Passive restoration hydrates invocation-local facts.
 /// An `Err` is a fault: the record stays unjournaled and its step runs again.
 #[async_trait::async_trait]
 pub trait SingletonToolHandlers: Send + Sync {
@@ -385,6 +385,10 @@ pub trait SingletonToolHandlers: Send + Sync {
     ) -> Result<(), RuntimeEffectControllerError> {
         Ok(())
     }
+
+    /// Reapply an accepted cancellation to invocation-local inline work.
+    /// This hydrates existing stops on cold replay; it performs no external work.
+    fn restore_cancel(&self, _call_id: &ToolCallId) {}
 
     /// Policy sealed by the same admission as the prepared request.
     fn retry_policy(

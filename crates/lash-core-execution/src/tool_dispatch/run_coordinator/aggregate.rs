@@ -421,6 +421,9 @@ impl<'a> RunCoordinator<'a> {
             ),
         )
         .await??;
+        if !self.presented.contains_key(call_id) {
+            handlers.restore_cancel(call_id);
+        }
         Ok(())
     }
 
