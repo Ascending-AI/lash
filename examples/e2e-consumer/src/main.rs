@@ -213,7 +213,7 @@ async fn main() -> Result<()> {
         "file" => lash::sqlite::SqliteStoreSet::open(&root).await?,
         store => anyhow::bail!("unsupported consumer store {store}"),
     });
-    let engine = Arc::new(lash::restate::RestateEngine::new(stores, config));
+    let engine = Arc::new(lash::restate::RestateEngine::new(stores.clone(), config));
     let controls = Arc::new(fixture::Controls::default());
     let scenario = match std::env::var("E2E_CONSUMER_SCENARIO").ok().as_deref() {
         None => None,
@@ -316,7 +316,7 @@ async fn main() -> Result<()> {
                 telemetry: telemetry.clone(),
             });
         let app = match scenario {
-            Some(scenario) => app.merge(scenario.router()),
+            Some(scenario) => app.merge(scenario.router(stores.clone())),
             None => app,
         };
         let listener = tokio::net::TcpListener::bind(http_addr).await?;

@@ -138,11 +138,45 @@ impl Scenario {
         Arc::new(TelemetryPlugin(self.0.clone()))
     }
 
-    pub fn router(&self) -> Router {
+    pub fn router(&self, stores: Arc<lash::sqlite::SqliteStoreSet>) -> Router {
         let controls = self.0.clone();
         let releases = self.0.clone();
         let receipts = self.0.clone();
         Router::new()
+            .route(
+                "/control/s34/head/{session}",
+                get(move |Path(session): Path<String>| {
+                    let stores = stores.clone();
+                    async move {
+                        use lash::persistence::SessionCommitStore as _;
+                        let head = stores
+                            .session_store_factory()
+                            .load_session_head_meta(&lash::SessionId::fixture(session))
+                            .await
+                            .map_err(|error| {
+                                (
+                                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                    error.to_string(),
+                                )
+                            })?
+                            .ok_or_else(|| {
+                                (
+                                    axum::http::StatusCode::NOT_FOUND,
+                                    "session head absent".into(),
+                                )
+                            })?;
+                        Ok::<_, (axum::http::StatusCode, String)>(Json(json!({
+                            "session_id":head.session_id,
+                            "schema_version":head.schema_version,
+                            "head_revision":head.head_revision,
+                            "checkpoint_ref":head.checkpoint_ref,
+                            "leaf_node_id":head.leaf_node_id,
+                            "pending_follow_on":head.pending_follow_on,
+                            "published_by_shift":head.published_by_shift
+                        })))
+                    }
+                }),
+            )
             .route(
                 "/control/s34/wait/{phase}",
                 get(move |Path(phase): Path<u32>| {

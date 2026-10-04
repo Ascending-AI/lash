@@ -238,8 +238,28 @@ impl HostAdapter for ConsumerHost {
                 .as_array()
                 .context("no deployment listing")?
                 .iter()
-                .find(|deployment| deployment["uri"] == uri)
-                .context("consumer deployment is not registered")?;
+                .find(|deployment| {
+                    deployment["uri"]
+                        .as_str()
+                        .is_some_and(|registered| registered.trim_end_matches('/') == uri)
+                })
+                .with_context(|| format!("consumer deployment is not registered: {listing}"))?;
+            let deployment: Value = self
+                .http
+                .get(format!(
+                    "{}/deployments/{}",
+                    self.admin_url,
+                    deployment["id"].as_str().context("deployment has no id")?
+                ))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            std::fs::write(
+                lease.directory.join("consumer-deployment.json"),
+                serde_json::to_vec_pretty(&deployment)?,
+            )?;
             let version: Value = self
                 .http
                 .get(format!("{}/version", self.admin_url))

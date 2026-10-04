@@ -411,8 +411,28 @@ impl HostAdapter for SlackHost {
                 .as_array()
                 .context("deployment listing")?
                 .iter()
-                .find(|deployment| deployment["uri"] == endpoint)
+                .find(|deployment| {
+                    deployment["uri"]
+                        .as_str()
+                        .is_some_and(|registered| registered.trim_end_matches('/') == endpoint)
+                })
                 .context("Slack deployment registration")?;
+            let deployment: Value = self
+                .http
+                .get(format!(
+                    "{}/deployments/{}",
+                    self.admin,
+                    deployment["id"].as_str().context("deployment has no id")?
+                ))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            std::fs::write(
+                lease.directory.join("slack-deployment.json"),
+                serde_json::to_vec_pretty(&deployment)?,
+            )?;
             ensure!(
                 deployment["max_protocol_version"] == 7,
                 "Slack did not negotiate V7: {deployment}"
