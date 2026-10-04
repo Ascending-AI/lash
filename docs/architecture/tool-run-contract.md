@@ -7,17 +7,13 @@ final-or-cancel decision, protected drain, presentation, incorporation,
 aggregates and surviving losers. Long, isolated or independently living work
 is a process admitted before its body runs.
 
-The seams below are pinned as types, pure transitions and codec/refusal
-witnesses. They are expansion interfaces: each names the ticket that wires
-it into production, and no production route reads it before that ticket
-lands. The normative specification behind them is the FIG-4864 arc
-specification (`tool-final-spec.md`), including the binding Q2-Q5 rulings,
-the hook policy and the adopted hook-composition ruling. FIG-529's
-effect-host simulator targets these seams. FIG-4899 removes the tool-child
-driver, request/settlement transport and live-context lending. Atomic
-`ToolAttempt` capture and logical public `ToolInvocation` keep their own jobs;
-presentation callbacks receive realized declarations through
-`ToolPresentationFacts`. Generic group transport remains until FIG-4900.
+The seams below describe the implemented contract. Their types, transitions and
+codec/refusal witnesses share one Run execution path. Production standard,
+RLM, generic aggregate and host operation callers use that path. The normative
+source is the FIG-4864 `tool-final-spec.md`, including binding Q2-Q5 and the
+adopted hook-composition ruling. [ADR 0099](../adr/0099-tool-children-of-effect-groups-are-live-closing-settled.md)
+records ownership and [ADR 0116](../adr/0116-tools-are-opaque.md) defines authoring.
+The historical child/group implementation is not a runtime option.
 
 ## Seams
 
@@ -72,10 +68,9 @@ leases canonical material before publication and removes payload bytes from
 transferred receipts. `RunCoordinator::adopt` acquires the successor lease,
 rebuilds the recorded fold and obligations, and fences predecessor append
 before the successor writes its first record. It carries no native handle and
-performs no Closing, cancellation, reroute or successor publication. Turn
-and process continuation integration belongs to FIG-4739 and FIG-4890;
-source transfer belongs to FIG-4891. Production aggregate callers activate
-the coordinator in FIG-4894 and FIG-1863. Stored format versions remain frozen.
+performs no Closing, cancellation, reroute or successor publication. Turn and process owners retain their separate continuation transactions
+(FIG-4739/4890); source subscriptions rebind during adoption (FIG-4891).
+Stored format versions remain frozen.
 
 Process admission binds a `SegmentOrdinal` onto execution authority without
 changing its process-attempt fence. The native segment envelope carries the
@@ -125,7 +120,8 @@ durable ACK, drains accepted finals and records Settled. Ignore-policy work
 receives no external cancel. Worker loss leaves recovery to the original engine
 journal. A physical cut retains Live and transfers aggregate plans, deadlines,
 unconsumed material and pending source descriptors through its existing snapshot.
-Production aggregate callers remain assigned to FIG-4894, FIG-1863 and FIG-4895.
+Standard, RLM and generic aggregate callers share this recorded selection path
+(FIG-4894/1863/4895).
 
 The plugin registrar mints every callback key from `CallbackSlot`, so a
 callback slot cannot exist without its key prefix and its state authority.
@@ -136,7 +132,7 @@ callback slot cannot exist without its key prefix and its state authority.
 `isolated`, as the `ToolDeclaration` on the tool's `ToolManifest`
 (`lash_sansio`, re-exported by `tool_run::admission`). Admission records it
 with the manifest the call is admitted under — the catalog's, the grant's, a
-replayed cell's recorded binding or a group child's retained admission — and
+replayed cell's recorded binding or a call's retained Run admission — and
 dispatch reads only that record; no provider hook is consulted after
 admission (FIG-4875). A round's calls are admitted together before any
 prepares: an invalid declaration or an isolated declaration with no bound
@@ -163,9 +159,8 @@ plan is explicit and does not adopt callbacks installed later. An owed
 presentation resolves the entire plan before invoking any callback; missing
 keys and changed revisions retain the typed callback refusal. Completed
 presentation replay serves its recorded return without resolving callbacks.
-The current scalar and child completion callers record selection through
-`LanguageRuntimeValue` before `PresentToolResult`; the Run admission owner
-consumes the same K1 binding when it replaces those callers.
+K1 records this complete binding before attempts; V consumes it after the
+protected decision and declarations. Completed V replay resolves no callback.
 
 **Material (Q4).** A reference carries owner (Run, process or source), role
 (prepared request, attempt output, presentation), location (journal-local or
@@ -272,9 +267,8 @@ the same record). A final that declares adds `declare` between D and V, and V
 then also settles the declarations. A replay whose call drifts from its
 recorded admission (tool name, arguments, owner, or a recorded plugin revision
 this build no longer executes) refuses typed before any body; the recorded
-declaration governs, never the live catalog. The route is an expansion
-interface: production rounds keep their route until FIG-4894, FIG-1863 and
-FIG-4895 move them. Reported retries are FIG-4879's schedule.
+declaration governs, never the live catalog. Whole-round calls use `RunCoordinator::decide_round` and independent X records.
+Reported retries follow the recorded dynamic schedule (K9).
 
 **Deferred completion (K4, FIG-4740).** The Run arms a source under the
 logical opener before starting a body admitted to defer. Its Deferred X
@@ -288,8 +282,7 @@ actual winner; a Resolved winner remains protected through after-checks and
 presentation. A handover preserves the open source. Runtime per-call
 deadlines, timeout results and timer races are absent; body-owned transport
 failures, Run cancellation and Run limits retain their own semantics.
-These calls use the new journal logic generation; production round
-activation remains with the integration tickets named above.
+These calls use the owning handler's admitted journal logic generation.
 
 **Protected drain (K3, FIG-4880).** `lash_core::tool_dispatch::RunCoordinator`
 runs several calls in one logical Run, each admitted as a singleton round.
@@ -325,8 +318,7 @@ a typed `AttemptStreamTruncation`. The Run emits it after the presentation recor
 nothing, and a replay that serves the presentation emits nothing again.
 A declared presentation refusal records the original result as fallback
 alongside its typed `HookCause`; an invocation fault leaves V uncommitted
-for engine recovery. A lost V acknowledgement may omit the observation. The tool-child settlement still carries the same
-representation until FIG-4899 removes that transport.
+for engine recovery. A lost V acknowledgement may omit the observation. The X capture is the canonical stream owner; V grants its fresh emission permit.
 
 **Declared starts (K5, FIG-4884).** A final may declare one process start.
 Its attempt record owns the start's obligation as material: the body's
@@ -348,8 +340,8 @@ refuses a start outside its issued declarations, a second launch or
 discharge, a key another start of the Run holds, and settled declarations
 while a start is owed; `RunLedger::owed_starts` names what a successor
 segment owes. Registration arms the process's start obligation, which the
-process outbox delivers; production park sites keep their launch until
-FIG-4740 turns them into Deferred attempts.
+process outbox delivers. Process-backed Deferred calls retain the same launch
+identity and source through park, redrive and transfer.
 
 **Process-backed Deferred starts (D06, FIG-4887).**
 `SingletonBodyOutcome::DeferredStart` records one K5 obligation in X, with a
@@ -364,7 +356,7 @@ capture and seals the source through the existing K4 writer. The Run accepts
 that immutable winner before discharging the start's policy and consumer hold.
 Session-owned subagents record `Ignore` for cancellation of their observing turn;
 starter-owned work records `CancelExternalWork`. `processes.await` observes work
-with `Ignore`. Production round activation remains F01's responsibility.
+with `Ignore`. Standard rounds use this source path through the shared Run coordinator.
 
 ## Field ownership
 
@@ -407,19 +399,25 @@ composition (ADR 0106 §1). Every landing that changes a handler's journaled
 command structure — what it records, the order of its records, or a step's
 name — moves that handler's lane in the same commit:
 
-| Handler | Lane | Moves with |
+| Handler | Journal owner | Shape owner |
 | --- | --- | --- |
-| `LashTurn` `run`/`close` and the Run's A/X/D/V records | pinned | `EFFECT_JOURNAL_VERSION` for recorded effect bytes or positions; `LASH_SESSION_SHIFT_VERSION` for run requests and replies |
-| `LashSession` `shift`, including the operation input kind | pinned | `LASH_SESSION_SHIFT_VERSION` |
-| `LashProcessWorkflow` segments and declared starts | pinned | `RESTATE_PROCESS_JOURNAL_VERSION`, `PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION`, and `EFFECT_JOURNAL_VERSION` for the effects it records |
-| `EffectGroupDispatch` | generation only | `EFFECT_GROUP_DISPATCH_JOURNAL_VERSION`; no new structure, removed by FIG-4900 |
-| `LashDurableWaitWorkflow` source seals | shared | `DURABLE_WAIT_REGISTRY_FORMAT_VERSION` covers indexed source state; key-only wait requests carry no deadline version |
-| Step order or names with unchanged bytes | all pinned | `JOURNAL_LOGIC_EPOCH` |
+| `LashTurn` `run`/`close`, including A/X/D/V | Admitted generation | Effect journal and session-shift formats |
+| `LashSession` `shift`, including operation input | Admitted generation | Session-shift format |
+| `LashProcessWorkflow` segments and starts | Fixed segment generation | Process journal, command payload and effect formats |
+| `LashDurableWaitWorkflow` source seals | Shared stamped state | Durable-wait registry format |
+
+During the version freeze those stored shapes change in place. Any changed
+handler command stream, step name or order still increments `JOURNAL_LOGIC_EPOCH`
+and its synthetic-next counterpart in `crates/lash-restate/src/process/admission.rs`.
+At final rebase use main's epoch plus one, never merge counter values. The new
+lane refuses a predecessor journal before decode; the predecessor retains its
+drain lane. No compatibility reader or old/new command-stream coexistence is
+introduced by an in-place shape refresh.
 
 Shared object state keeps its stamped coexistence rules and has no lane.
 The release replay corpus (`crates/lash-restate/src/tests/replay_corpus.rs`)
-refuses an added or reordered step under an unchanged generation. Moving a
-lane is the one version change the pre-1.0 freeze still requires: stored
+refuses an added or reordered step under an unchanged generation. Moving the
+journal logic epoch is the generation change the pre-1.0 freeze still requires: stored
 shapes change in place, but a journal never replays under another command
 structure. No revision replays old and new structure together. FIG-4862's
 `unfinished_invocations` drain hold keeps the old deployment registered until
@@ -461,7 +459,7 @@ FIG-4894, FIG-1863, FIG-4895, FIG-4855 and FIG-4878. Each owns its lane move.
 `tool-run-inventory.tsv` beside this document lists all 742 files the end
 state touches: 55 delete, 608 edit and 79 survive with a recorded job. Each
 row names its owning ticket, the earlier tickets whose closures stage edits
-in the same file, the matched families and the replacement or surviving job.
+in the matched families and the replacement or surviving job.
 Line anchors are intake anchors at 48f11c5fa7; owners re-run the census at
 intake, classify new hits and inspect every match in their files. The
 hook-composition removal rows HC01-HC17 belong to FIG-1399, FIG-4855,

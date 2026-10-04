@@ -81,14 +81,14 @@ is deleted returns the recorded start. A tool-intent redelivery claims its
 submission-ledger row before it realizes anything, and a row that already
 holds an outcome answers that outcome.
 
-Evidence: `crates/lash-restate/src/controller/journaled_effect.rs:314`,
-`crates/lash-restate/src/controller/execution.rs:122`,
-`crates/lash-core/src/runtime/observation_publisher.rs:1`,
-`crates/lash-core/src/runtime/turn_boundary/recorded_assembly.rs:1`,
-`crates/lash-core-execution/src/engine/testing/controller.rs:40`,
-`crates/lash-core-execution/src/runtime/process/start_staging.rs:1`,
-`crates/lash-restate/src/controller/process_command.rs:1`,
-`crates/lash/src/tool_intent_ingress.rs:1`.
+Evidence: `crates/lash-restate/src/controller/journaled_effect.rs`,
+`crates/lash-restate/src/controller/execution.rs`,
+`crates/lash-core/src/runtime/observation_publisher.rs`,
+`crates/lash-core/src/runtime/turn_boundary/recorded_assembly.rs`,
+`crates/lash-core-execution/src/engine/testing/controller.rs`,
+`crates/lash-core-execution/src/runtime/process/start_staging.rs`,
+`crates/lash-restate/src/controller/process_command.rs`,
+`crates/lash/src/tool_intent_ingress.rs`.
 
 ### 2. Unfenced admission, separate from fenced execution
 
@@ -135,27 +135,17 @@ adopts the recorded head and pins the recorded index before its turn, so a
 replay past the follow-on's own commit runs the turn its journal holds on the
 head it was recorded on, never on the head that commit moved (FIG-4380).
 
-A live read outside the recorded steps never decides which steps a run
-journals: not the resident-session refresh before `AdmitRun`, not the engine's
-opening of the session. A sealed run whose shift holds no current head,
-because the engine cannot open its session (its close or tombstone committed)
-or because the refresh fails, runs headless. It still issues its recorded steps
-under the envelopes a run with a head issues: `AdmitRun` and
-`InspectAdmittedHead` for an input- or queued-headed run, the
-`session-command-run:{n}` reads for a command run, and `RecoverFollowOn` for a
-follow-on recovery run. A command run also reads on headless once its session
-retires under a run it read, because every command but a compaction settles and
-commits off the journal. The bodies of those steps admit, inspect, read and
-decide nothing. A deleted session is the step's recorded outcome: the catalog's
-tombstone, read inside the step, or a session the engine cannot open. The run
-then ends with the typed `SessionDeleted` refusal of
-[ADR 0049](0049-session-ids-are-used-once.md) where its journal holds nothing
-more. A recorded `Ceded` cedes the run as it does with a head. Any other refresh
-fault is the attempt's and is recorded nowhere. A journal holding work past
-those steps (the turn after `InspectAdmittedHead` or after a recorded `Run` or
-`Exhausted`, a compaction's apply) cannot be retraced without the session's
-head. That attempt ends as a live fault that journals nothing, and the engine's
-park reconcile releases a run whose session stays deleted as `TargetGone`.
+A live read outside recorded steps never chooses a run's journaled command
+shape. If refresh fails or its session has retired, headless replay serves the
+recorded root composition and plugin transition, command-lane reads or follow-on
+recovery facts. Their bodies perform no fresh admission or head mutation. A
+recorded refusal cedes the run; a recorded session retirement ends it with the
+typed `SessionDeleted` refusal of [ADR 0049](0049-session-ids-are-used-once.md).
+A missing recorded root is `RuntimeStoreCorrupt`, never permission to select a
+new one. Work beyond the recorded admission and transition cannot replay without
+the session head. That attempt ends as a live fault rather than journaling a
+replacement answer; park reconciliation can release a deleted target as
+`TargetGone`.
 
 A sealed execution carries `ShiftFence`. Head-changing writes and ingress
 settlement check that fence in their transaction. Replay envelopes do not hash
@@ -179,19 +169,12 @@ the same fence, such as a second execution of the run. That commit ends its
 run with `StoreCommitSuperseded` and never wedges; the redrive that reloads
 the head is a new run.
 
-Evidence: `crates/lash-core/src/runtime/shift/admission.rs:94`,
-`crates/lash-core/src/runtime/run_start.rs:1`,
-`crates/lash-core-store/src/store/shift_fence.rs:185`,
-`crates/lash-core-store/src/store/head_ownership.rs:1`,
-`crates/lash-core/src/runtime/shift/run.rs:105`,
-`crates/lash-core/src/runtime/shift/run.rs:457`,
-`crates/lash-core/src/runtime/shift/run.rs:1125`,
-`crates/lash-core/src/runtime/shift/run.rs:677`,
-`crates/lash-core/src/runtime/shift/run.rs:828`,
-`crates/lash-core/src/runtime/shift/run.rs:876`,
-`crates/lash-core/src/runtime/shift/run.rs:929`,
-`crates/lash-core/src/runtime/shift.rs:886`,
-`crates/lash-core/src/runtime/shift.rs:922`.
+Evidence: `crates/lash-core/src/runtime/shift/admission.rs`,
+`crates/lash-core/src/runtime/run_start.rs`,
+`crates/lash-core-store/src/store/shift_fence.rs`,
+`crates/lash-core-store/src/store/head_ownership.rs`,
+`crates/lash-core/src/runtime/shift/run.rs`,
+`crates/lash-core/src/runtime/shift.rs`.
 
 ### 3. Cancel races and losing work
 
@@ -220,30 +203,32 @@ handler journals registry steps for admission, resume, completion, boundary,
 handover, cancel forwarding and handover retirement. A retryable store fault
 is the attempt's fault rather than a durable decision.
 
-Evidence: `crates/lash-restate/src/controller/context.rs:1`,
-`crates/lash-core-execution/src/runtime/turn_control/local_stop.rs:235`,
-`crates/lash-core-execution/src/runtime/turn_control/local_stop.rs:350`,
-`crates/lash-core-execution/src/runtime/turn_control/local_stop.rs:369`,
-`crates/lashlang/src/runtime/mod.rs:185`,
-`crates/lash-restate/src/process/workflow.rs:1`.
+Evidence: `crates/lash-restate/src/controller/context.rs`,
+`crates/lash-core-execution/src/runtime/turn_control/local_stop.rs`,
+`crates/lashlang/src/runtime/mod.rs`,
+`crates/lash-restate/src/process/workflow.rs`.
 
-### 4. Group operations are complete
+### 4. The Run owns concurrent calls and aggregate selection
 
-The controller opens durable groups, serves ranked settlements, reads a rank
-without advancing its cursor, waits for generic protected drain and closes under the loser policy.
-`EffectGroupHandle` owns the generic settlement cursor. Native tool calls
-use the Run final-or-cancel decision and protected drain frontier.
+`RunCoordinator` records whole-round admission, independent attempts, final or
+cancel decisions, rank, protected drain, presentation and incorporation in the
+opener's journal. Aggregate consumption preserves its recorded prefix. An early
+winner leaves losers live; a later program effect can progress beside them.
+Only the logical owner records Closing. A physical cut quiesces local X through
+durable acknowledgement and carries pending sources and the entire Run forward.
 
-A wait child races its guarded timer or keyed wait against the child's durable
-cancel wait in the journal. A native tool attempt runs under its Run step's
-cancellation token; the Run records the final-or-cancel decision. A lost watch does not fabricate cancellation. Settlement,
-retirement and cancel admission retain their group fences across replay.
+Deferred completion is an immutable `Resolved(ref)` or `Cancelled` source seal.
+Short subscriptions rebind to a successor segment. The Run accepts the sealed
+winner before protected finalization; a descriptor never wins an aggregate.
+Cancellation observations that choose journaled commands are recorded, so replay
+uses the same branch. Tools own transport timeouts; Run cancellation and existing
+turn/no-progress bounds limit their owners. No runtime tool deadline exists.
 
-Evidence: `crates/lash-core-execution/src/runtime/effect/executor/control.rs:369`,
-`crates/lash-restate/src/effect_group/child_cancel.rs:1`,
-`crates/lash-restate/src/controller/context/child_cancel.rs:1`,
-`crates/lash-restate/src/effect_group/dispatch.rs:368`,
-`crates/lash-core-execution/src/runtime/turn_control/local_stop.rs:300`.
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md) owns
+the lifecycle and drain rules. Evidence:
+`crates/lash-core-execution/src/tool_dispatch/run_coordinator/`,
+`crates/lash-restate/src/controller/run_record.rs` and
+`crates/lash-restate/src/durable_wait/source_seal.rs`.
 
 ### 5. Keyed promises
 
@@ -255,10 +240,9 @@ waits; later resolves return `UnknownOrRevoked`.
 An acknowledged resolution is durable. The engine's wait identities remain
 private behind neutral keys under ADRs 0003 and 0012.
 
-Evidence: `crates/lash-restate/src/durable_wait.rs:1057`,
-`crates/lash-restate/src/durable_wait.rs:1414`,
-`crates/lash-restate/src/durable_wait/run_retirement.rs:1`,
-`crates/lash-core-effect/src/retirement.rs:200`.
+Evidence: `crates/lash-restate/src/durable_wait.rs`,
+`crates/lash-restate/src/durable_wait/run_retirement.rs`,
+`crates/lash-core-effect/src/retirement.rs`.
 
 ### 6. Protocol drivers and hooks use recorded inputs
 
@@ -286,12 +270,10 @@ An unfinished derivation resolves every recorded callback before invoking any
 and parks if a key or revision is unavailable. Stream end state pairs with
 one response callback identity, including its revision.
 
-Evidence: `crates/lash-sansio/src/sansio/turn_protocol.rs:699`,
-`crates/lash-sansio/src/sansio/turn_protocol.rs:779`,
-`crates/lash-core/src/runtime/turn_loop/context_pressure.rs:1`,
-`crates/lash-core/src/runtime/turn_loop/context_pressure.rs:114`,
-`crates/lash-core-execution/src/runtime/effect/llm_outcome.rs:44`,
-`crates/lash/src/tests/response_phase_replay.rs:1`.
+Evidence: `crates/lash-sansio/src/sansio/turn_protocol.rs`,
+`crates/lash-core/src/runtime/turn_loop/context_pressure.rs`,
+`crates/lash-core-execution/src/runtime/effect/llm_outcome.rs`,
+`crates/lash/src/tests/response_phase_replay.rs`.
 
 ### 7. Continue-as-new and version decisions
 
@@ -343,10 +325,10 @@ next segment can enter the latest compatible build; replay does not patch the
 old segment's journal in place. Durable formats follow the current freeze
 and compatibility rules of ADR 0106.
 
-Evidence: `crates/lash-core-execution/src/engine/shift.rs:1`,
-`crates/lash-restate/src/session_shifts.rs:1113`,
-`crates/lash-restate/src/process/workflow.rs:1`,
-`crates/lash-core-execution/src/engine/contracts.rs:37`.
+Evidence: `crates/lash-core-execution/src/engine/shift.rs`,
+`crates/lash-restate/src/session_shifts.rs`,
+`crates/lash-restate/src/process/workflow.rs`,
+`crates/lash-core-execution/src/engine/contracts.rs`.
 
 ### 8. Send and !Send
 
@@ -356,8 +338,8 @@ returns `Send` async futures. The local replay-check harness accepts a
 use the production controller. The local harness's execution model supplies
 no shipping engine or scheduling guarantee.
 
-Evidence: `crates/lash-core-execution/src/runtime/effect/executor/control.rs:369`,
-`crates/lash-core-execution/src/engine/testing/check.rs:1`.
+Evidence: `crates/lash-core-execution/src/runtime/effect/executor/control.rs`,
+`crates/lash-core-execution/src/engine/testing/check.rs`.
 
 ### 9. Commit, park and settlement use fenced store writes
 
@@ -382,11 +364,11 @@ run refusal writes its terminal before returning its engine outcome, as in
 variants. External operations still need stable idempotency identities; a
 store fence cannot retract a request already sent.
 
-Evidence: `crates/lash-core/src/runtime/turn_boundary.rs:1`,
-`crates/lash-core/src/runtime/turn_loop/commit.rs:1`,
-`crates/lash-core/src/runtime/shift/park.rs:1`,
-`crates/lash-core/src/runtime/shift.rs:922`,
-`crates/lash-core-store/src/store/runtime_commit.rs:1`.
+Evidence: `crates/lash-core/src/runtime/turn_boundary.rs`,
+`crates/lash-core/src/runtime/turn_loop/commit.rs`,
+`crates/lash-core/src/runtime/shift/park.rs`,
+`crates/lash-core/src/runtime/shift.rs`,
+`crates/lash-core-store/src/store/runtime_commit.rs`.
 
 ### 10. Commands and executors
 
@@ -397,17 +379,17 @@ envelope before returning a recorded result. An envelope mismatch is
 `EffectReplayDivergence` and parks.
 
 Environment sync records prompt and catalog definitions, and the shift
-installs what it returns. Recorded Run admission retains the tool execution
-environment and prepared request. Deterministic refusals remain recorded answers.
+installs what it returns. Run admission fixes the tool's prepared caller
+environment and executable binding; replay uses that recorded material. Deterministic refusals remain recorded answers.
 A live store or session fault in an uncommitted derivation is retry authority:
 the engine ends the attempt without recording that fault as the step's answer.
 The same rule applies to sync and assistant-response hook derivations.
 Recorded tool definitions and drift handling follow ADR 0103.
 
-Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs:1`,
-`crates/lash-restate/src/controller/journaled_effect.rs:314`,
+Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs`,
+`crates/lash-restate/src/controller/journaled_effect.rs`,
 `crates/lash-core-execution/src/tool_dispatch/production.rs`,
-`crates/lash-core-execution/src/runtime/effect/executor.rs:1`.
+`crates/lash-core-execution/src/runtime/effect/executor.rs`.
 
 ### 11. Validation and laws
 
@@ -494,15 +476,15 @@ Restate runs only inside a handler scope: each redelivery arrives on a fresh
 invocation with an empty journal and must answer the submission ledger's
 recorded outcome and register nothing.
 
-Evidence: `crates/lash-core-execution/src/engine/testing/check.rs:25`,
-`crates/lash-conformance/src/conformance/shift_admission.rs:1`,
-`crates/lash-conformance/src/conformance/run_start_marker.rs:1`,
-`crates/lash-restate/src/tests/shift_laws_on_the_double.rs:1`,
-`crates/lash-restate-test/tests/process_crash_replay.rs:1`,
-`crates/lash-upgrade-harness/tests/phase_a/main.rs:1`,
-`crates/lash-core-execution/src/replay_read_gate.rs:1`,
-`crates/lash/tests/replay_after_advance.rs:1`,
-`crates/lash/src/tests/tool_intent_ingress/replay_after_advance.rs:1`.
+Evidence: `crates/lash-core-execution/src/engine/testing/check.rs`,
+`crates/lash-conformance/src/conformance/shift_admission.rs`,
+`crates/lash-conformance/src/conformance/run_start_marker.rs`,
+`crates/lash-restate/src/tests/shift_laws_on_the_double.rs`,
+`crates/lash-restate-test/tests/process_crash_replay.rs`,
+`crates/lash-upgrade-harness/tests/phase_a/main.rs`,
+`crates/lash-core-execution/src/replay_read_gate.rs`,
+`crates/lash/tests/replay_after_advance.rs`,
+`crates/lash/src/tests/tool_intent_ingress/replay_after_advance.rs`.
 
 ### 12. Journal generations and the version freeze
 
@@ -517,10 +499,9 @@ The existence of a stamp does not promise compatibility across those edits.
 Release compatibility, migration and drain are governed by ADR 0106 and
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
 
-Evidence: `crates/lash-restate/src/controller/effect_journal.rs:182`,
-`crates/lash-restate/src/controller/effect_journal.rs:226`,
-`crates/lash-restate/src/sentinel.rs:89`,
-`scripts/versioned-surfaces.toml:1`.
+Evidence: `crates/lash-restate/src/controller/effect_journal.rs`,
+`crates/lash-restate/src/sentinel.rs`,
+`scripts/versioned-surfaces.toml`.
 
 ## Rejected alternatives
 

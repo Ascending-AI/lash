@@ -348,7 +348,7 @@ The deterministic transcript gate reconciles graph nodes, canonical rows,
 Surfaces A–E, including reasoning, successful and failed code, nested tool
 summaries, terminal values, retry retraction, attachments, and reload.
 `scripts/check_transcript_projection.py` inventories both raw-history reads and
-turn-output selectors; `scripts/transcript_projection_harness.mjs` executes the
+turn-output selectors; `examples/agent-workbench/tests/transcript_projection_harness.mjs` executes the
 registered production renderer blocks. A new renderer needs an explicit
 registry disposition and harness coverage.
 

@@ -118,7 +118,7 @@ accepted. A raw process handle in an aggregate operand is refused with a repair
 naming `processes.await(handle)`. Direct async maps have the separately
 registered callback discipline. Non-arrays receive a typed runtime failure.
 
-A mixed aggregate is one resource-operation batch. Durable effect groups record
+A mixed aggregate is one resource-operation batch. The logical Run records
 settlement ranks. `all` rejects at the first consumed rejection; `allSettled`
 returns outcomes in input order. `race` returns the first settlement; `any`
 returns the first fulfilment or an `AggregateError` with reasons in input order.
@@ -133,7 +133,7 @@ the aggregate admits its pending operands.
 
 ### Two host lifetime contracts
 
-ADR 0099 owns the group and tool-child lifecycle. These rules describe the
+ADR 0099 owns Run admission, aggregate selection and logical Closing. These rules describe the
 execution host's lifetime rather than alternate ECMA promise meanings.
 
 #### 1. Opener close cancels an unfinished arm

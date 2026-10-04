@@ -26,11 +26,10 @@ A nested replay refusal stops further dispatch; a seal cannot hide it.
 Replaying a checkpoint treats its recorded result as the authority for messages
 already incorporated there, so a later checkpoint does not deliver them twice.
 
-Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs:580`,
-`crates/lash-restate/src/controller/execution.rs:122`,
-`crates/lash-protocol-rlm/src/executor/mod.rs:152`,
-`crates/lash-protocol-rlm/src/executor/mod.rs:547`,
-`crates/lash-core/src/runtime/turn_driver/effects.rs:260`.
+Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs`,
+`crates/lash-restate/src/controller/execution.rs`,
+`crates/lash-protocol-rlm/src/executor/mod.rs`,
+`crates/lash-core/src/runtime/turn_driver/effects.rs`.
 
 ### Issue-ordinal identity
 
@@ -52,13 +51,8 @@ controller answers `RecordedJournal::Positional`; Restate's journal and
 canonical-envelope checks enforce its replay. A replay mismatch is a typed
 refusal before fresh dispatch, not permission to run the missing work live.
 
-Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs:127`,
-`crates/lash-lashlang-runtime/src/replay_run.rs:391`,
-`crates/lash-lashlang-runtime/src/replay_run.rs:518`,
-`crates/lash-lashlang-runtime/src/replay_run.rs:545`,
-`crates/lash-lashlang-runtime/src/replay_run.rs:565`,
-`crates/lash-lashlang-runtime/src/replay_run.rs:674`,
-`crates/lash-restate/src/controller/mod.rs:990`.
+Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs`,
+`crates/lash-restate/src/controller/mod.rs`.
 
 ### Journaled prompt and binding set
 
@@ -80,24 +74,32 @@ The engine answers whether it can serve the outcome. Once a guarded command
 refuses, its later writes refuse too. A turn parks without a terminal result,
 and a restored compatible tool can allow its replay to complete.
 
-Evidence: `crates/lash-core/src/runtime/turn_driver/effects.rs:346`,
-`crates/lash-core/src/runtime/turn_driver/handlers.rs:339`,
-`crates/lash-lashlang-runtime/src/cell_bindings.rs:108`,
-`crates/lash-lashlang-runtime/src/cell_bindings.rs:164`,
-`crates/lash-lashlang-runtime/src/cell_bindings.rs:193`,
-`crates/lash-protocol-rlm/src/executor/mod.rs:601`,
-`crates/lash-restate/src/controller/journaled_effect.rs:314`.
+Evidence: `crates/lash-core/src/runtime/turn_driver/effects.rs`,
+`crates/lash-core/src/runtime/turn_driver/handlers.rs`,
+`crates/lash-lashlang-runtime/src/cell_bindings.rs`,
+`crates/lash-protocol-rlm/src/executor/mod.rs`,
+`crates/lash-restate/src/controller/journaled_effect.rs`.
 
-### Recorded Run admission judges tool bindings
+### Per-call binding belongs to Run admission
 
-The Run retains the admitted executable, preparation and presentation
-bindings. Replay serves durable attempts without a fresh body; binding or
-canonical-material drift refuses typed before new work. There is no
-independently replayed tool-child request or live-context reconstruction.
-Tool bodies remain opaque under [ADR 0116](0116-tools-are-opaque.md).
+K1 admission records the prepared call and its executable, preparation and
+presentation callback identities before the body runs. The recorded request,
+owner, capabilities and revisions remain authoritative across crash redelivery,
+reported retries and handover. A changed request or unavailable admitted
+revision refuses with its typed cause before a fresh body, route or identity.
+A retained result is served without re-executing preparation or the body.
 
-Evidence: `crates/lash-core-execution/src/tool_dispatch/production.rs` and
-`crates/lash-restate/src/tests/singleton_tool_run_on_the_double.rs`.
+The cell's recorded ambient binding set and this per-call gate have separate
+jobs: the former reconstructs the cell's link environment; the latter protects
+every admitted call wherever it resumes. Tool bodies remain opaque under
+[ADR 0116](0116-tools-are-opaque.md). K1 in the
+[tool-run contract](../architecture/tool-run-contract.md) and
+[ADR 0099 §1](0099-tool-children-of-effect-groups-are-live-closing-settled.md#1-logical-opener-identity-and-admission-k1-l12)
+carry that guarantee for every host.
+
+Evidence: `crates/lash-core-store/src/tool_run/admission.rs`,
+`crates/lash-core-execution/src/tool_dispatch/production.rs` and
+`crates/lash-core-execution/src/tool_dispatch/run_coordinator.rs`.
 
 ### Executable generation at admission
 
@@ -115,24 +117,24 @@ and grammar stamps do not imply a compatibility reader for arbitrary builds.
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) govern the
 release boundary.
 
-Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs:82`,
-`crates/lash-core/src/runtime/shift/run.rs:457`,
-`crates/lash-core/src/runtime/turn_loop/generation_fence.rs:1`.
+Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs`,
+`crates/lash-core/src/runtime/shift/run.rs`,
+`crates/lash-core/src/runtime/turn_loop/generation_fence.rs`.
 
 ### Laws
 
 `effect_controller_code_cell_replays_by_reexecution` requires two local cell
 executions across live and replay passes and one nested effect execution.
-The binding, native Run admission and model-call drift laws require recorded results to
+The binding, Run-admission and model-call drift laws require recorded results to
 replay, fresh drifted dispatch to park, and restored tools to complete.
 The laws use the controller/backend contracts. The current storage matrix is
 SQLite file, SQLite memory and PostgreSQL; execution hosts are the Restate
 server double, live Restate and lash-sim's in-process effect host.
 
-Evidence: `crates/lash-conformance/src/conformance/effect_host.rs:595`,
-`crates/lash-conformance/src/conformance/cell_binding_drift.rs:306`,
-`crates/lash-restate/src/tests/singleton_tool_run_on_the_double.rs`,
-`crates/lash-conformance/src/conformance/model_call_drift_park.rs:203`.
+Evidence: `crates/lash-conformance/src/conformance/effect_host.rs`,
+`crates/lash-conformance/src/conformance/cell_binding_drift.rs`,
+`crates/lash-core-store/src/tool_run/tests.rs`,
+`crates/lash-conformance/src/conformance/model_call_drift_park.rs`.
 
 ## Rejected alternatives
 

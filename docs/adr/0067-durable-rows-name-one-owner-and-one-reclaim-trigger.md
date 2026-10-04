@@ -20,7 +20,7 @@ factory-wide maintenance. These authorities need one ownership vocabulary.
 ### 1. Universal ownership axiom, with no exceptions
 
 Every durable row class names exactly one owner and one reclaim trigger class.
-The owner is the session, turn, process, effect group, factory or exact referrer
+The owner is the session, Run, process, factory or exact referrer
 whose obligation the row records. Trigger classes are owner-delete cascade,
 terminal-state vacuum and an explicitly armed reclaim pass. An unowned table
 is a missing domain decision, even if it is small or bounded by age.
@@ -243,7 +243,9 @@ typed stall. `stalled_ids` keeps the report incomplete. There is no operator
 re-arm or condemnation-release lever. A restoring writer claims a surviving
 condemnation with its opaque token and clears it only after restoring the bytes.
 
-Effect-group retirement likewise severs owned state rather than expiring it.
+Run aggregate retirement likewise waits for every recovery, consumer and material
+dependency, severs owned state atomically and preserves its identity fence.
+Logical Closing is not garbage collection (L13).
 The engine retains an identity fence and discharges group cleanup as a whole
 under ADR 0065 and ADR 0099.
 

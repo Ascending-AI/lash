@@ -37,39 +37,31 @@ limits characters and lines, keeps head and tail, and records visible ranges.
 Every cut retains full text, including failure output.
 
 Sources: `crates/lash-core-execution/src/plugin/session_obj/tools.rs`,
-`crates/lash-core-execution/src/plugin/registrar.rs:229`, and
-`crates/lash-protocol-standard/src/render.rs:419`.
+`crates/lash-core-execution/src/plugin/registrar.rs`, and
+`crates/lash-protocol-standard/src/render.rs`.
 
 ### B. Presentation is a journaled effect
 
-Scalar completion and group-child completion execute
-`RuntimeEffectCommand::PresentToolResult` through their scoped controller,
-under `{call_id}:present`. The command contains the call and tool identities,
-name, recorded render configuration, arguments, settled output and the
-recorded callback plan. Scalar and child completion first record that plan
-under `{call_id}:presentation_plan` through the existing
-`LanguageRuntimeValue` boundary, with operation `tool-presentation-plan`.
-This selection records no callback decision and invokes no callback. The
-presentation then consumes that record, even when registrations were reordered
-or added after selection. K1 admission uses the same `PresentationBinding`
-when the Run coordinator takes ownership of these callers. Duration
-is a local-executor observation, not part of the command identity.
+K1 admission records the complete `PresentationBinding` before execution. The
+Run's V step consumes that binding after D has protected the final and every
+lower protected rank has seated. Declarations finish before presentation;
+presentation precedes incorporation. V retains only bytes distinct from the
+canonical A/X material and records incorporation in the same boundary.
 
-The outcome is `ToolPresentation { version, model_return, artifacts,
-retention }`. Its reader validates `TOOL_PRESENTATION_VERSION` and refuses
-unknown fields. A recorded presentation replays without running its presenter
-or optional steps. The logical call uses its recorded model return; realized intent outcomes
-supply the call's model addenda through `ToolPresentationFacts`.
-`ToolPresentationInput::facts` contains this declaration evidence, and
-`previous` carries the preceding presentation step's return.
+The presentation reader validates its stored format. Replay serves the recorded
+model return without resolving callbacks or running presenters and steps.
+Realized intent outcomes supply the model addenda. Duration is an observation,
+not identity. An unavailable callback needed for an owed presentation refuses
+typed; a completed presentation does not consult the live registry.
 
-A journal or envelope failure is not fallback model text. It fails the scalar
-completion or refuses the logical Run. Presentation-step fallback applies to
-optional plugin failures, not to failure of the effect that records them.
+A declared presentation refusal records the original result as fallback with its
+typed `HookCause`. An invocation fault leaves V uncommitted for engine recovery;
+a journal or material refusal is never fallback model text. Optional-step
+fallback remains the plugin-composition policy, not a repair for replay failure.
 
-Sources: `crates/lash-core-execution/src/session/tool_execution.rs:653`,
-`crates/lash-core-execution/src/tool_dispatch/production/settlement.rs`, and
-`crates/lash-core-execution/src/runtime/effect/tool_presentation.rs:38`.
+Sources: `crates/lash-core-execution/src/tool_dispatch/run_coordinator/drain.rs`,
+`crates/lash-core-execution/src/tool_dispatch/production/settlement.rs`
+and `crates/lash-core-execution/src/runtime/effect/tool_presentation.rs`.
 
 ### C. Retention uses content-addressed attachments
 
@@ -100,8 +92,8 @@ A session turn holds its puts through `Execution`; a process holds its puts
 through `ProcessRecord`. A session boundary acquires the retained ids it names.
 
 Sources: `crates/lash-core-execution/src/plugin/session_obj/tools.rs`,
-`crates/lash-core-execution/src/runtime/effect/tool_presentation.rs:106`, and
-`crates/lash-protocol-rlm/src/executor/mod.rs:236`.
+`crates/lash-core-execution/src/runtime/effect/tool_presentation.rs`, and
+`crates/lash-protocol-rlm/src/executor/mod.rs`.
 
 ## Consequences
 
@@ -117,11 +109,10 @@ governs the 1.0 upgrade contract.
 
 ## Links
 
-- The [Tool-run contract](../architecture/tool-run-contract.md) defines
-  protected declaration, presentation and incorporation order.
-- `crates/lash-core-execution/src/plugin/hooks.rs` defines presentation facts;
-  `crates/lash-core-execution/src/runtime/effect/tool_attempt_capture.rs`
-  defines committed attempt facts for incorporation.
+- [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
+  defines protected drain, presentation and incorporation.
+- `crates/lash-core-store/src/tool_run/run_event.rs` defines their recorded fold.
+
 - `crates/lash-restate-test/tests/crash_windows.rs` exercises the crash between
   the retained put and the journaled presentation on the server double and
   live Restate.

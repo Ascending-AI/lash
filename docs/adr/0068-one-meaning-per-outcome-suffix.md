@@ -107,8 +107,8 @@ These current types demonstrate the roles rather than recording a rename list.
 | `ToolOutcome` | The tool body's return. |
 | `ToolCallOutcome` | The call's settlement. |
 | `ToolRetryStatus` | Retry progress observation. |
-| `LoserPolicy` | Caller-chosen group policy, not an answer. |
-| `RecoveryContract` | Producer declaration, not an answer. |
+| `AggregateConsumer` | Caller-chosen Run selection policy, not an answer. |
+| `ToolDeclaration` | Producer capabilities, not an answer. |
 | `ProcessHandleView` | Read projection of the process handle. |
 | `TurnExecutionMetrics` | Measured execution facts. |
 | `TurnReport` | Aggregate of the turn outcome, calls, errors and usage. |

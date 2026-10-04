@@ -4,7 +4,6 @@
 > objective gates, three-layer reconciliation, Abort/RCA, screenshots, boot,
 > and teardown. This runbook adds only the approval scenarios.
 
-
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
 > same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
 > journals and the application data. It is verified: the phases below execute it, and no step
@@ -17,41 +16,53 @@ on Lash's real Restate completion-key machinery, the workbench exposes the wait
 to an operator, approve resumes successfully, deny reaches the cell as a typed
 tool failure, and a parked wait survives a workbench process restart.
 
-**Deterministic companion.** Run
-`kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=approval --test_arg=--nocapture` plus the three named
-tests in `src/main_sections/tests/approvals.rs`. These use a scripted provider
-and the Restate test double over a file SQLite store set; this judged run uses
-the production Restate deployment and a real model from `.env`.
+**Deterministic companion.** The completion laws use a scripted provider,
+file-backed workbench approval state and the in-process Restate server double
+with SQLite stores. The judged scenarios below use live Restate and the real
+model from `.env`; their receipts are separate.
 
-## FIG-1346 — deterministic out-of-band completion across reopen and redrive
+## FIG-1346 — out-of-band completion across reopen and redrive
 
-From the fork root, source `env.sh`, then run:
+From the fork root, source `env.sh`. Run each full path once and retain the
+printed executed-case report:
 
 ```sh
-kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=async_completion_
+. ./env.sh
+kiln test //examples/agent-workbench:agent-workbench__unit_test \
+  --test_arg=tests::approvals_tests::async_completion_success_crosses_session_reopen_and_redrive \
+  --test_arg=--exact
+kiln test //examples/agent-workbench:agent-workbench__unit_test \
+  --test_arg=tests::approvals_tests::async_completion_failure_crosses_session_reopen_and_redrive \
+  --test_arg=--exact
+kiln test //examples/agent-workbench:agent-workbench__unit_test \
+  --test_arg=tests::approvals_tests::async_completion_cancel_crosses_session_reopen_and_redrive \
+  --test_arg=--exact
 ```
 
-Require **3 passed**: `async_completion_{success,failure,cancel}_crosses_session_reopen_and_redrive`.
-Each row runs the real workbench approval tool with a scripted provider. The tool
-records its correlation key and returns Pending. The test aborts and joins the
-original turn task, drops the core, advances the injected effect clock past the
-interrupted claim's lease, and reopens the ledger, effect host, core, and session.
-The reconstructed host resolves the saved key through `core.completions().resolve`,
-then redrives the original turn id. No provider network call or sleep executes this
-companion.
+Require one executed pass per invocation, three total. The approval body records
+its correlation key and returns Pending, which the Run records as Deferred.
+The fixture drops the caller and reopens the core and approval state over the
+same engine and stores. The reconstructed host resolves the saved key through
+`core.completions().resolve`; the engine resumes the accepted Run. Re-sending
+its stable input identity follows the recorded result, never drives a new turn.
+No provider network call or sleep occurs.
 
-Gate every row on exactly **one provider invocation**, an accepted callback,
-`AlreadyResolved` retaining the exact typed terminal outcome after redrive, the
-program's success/failure/cancellation result, one user input in history, retained
-program/tool arguments, and identical terminal history after another core/session
-reopen. Runtime per-call timeouts are absent. Cancellation is a tool completion,
-not cancellation of the redriven turn.
+Require exactly one provider invocation, accepted completion, the exact typed
+`AlreadyResolved` terminal on duplicate resolution, one user input, retained
+program/tool arguments and identical terminal history on another reopen.
+The host callback API uses `Resolution`; K4 authenticates and retains its
+canonical result under `Resolved(ref)` or `Cancelled`. There is no runtime
+per-call deadline or timeout result.
 
-| Completion | Typed durable terminal | Program result |
+| Completion | Host callback | Program result |
 | --- | --- | --- |
 | Success | `Resolution::Ok` | `ok=true`, exact supplied value |
-| Failure | `Resolution::Err` | `ok=false`, `execution` / `approval_denied` |
-| Cancel | `Resolution::Cancelled` | `ok=false`, runtime cancellation message |
+| Failure | `Resolution::Err` | `ok=false`, typed `execution` / `approval_denied` cause |
+| Cancel | `Resolution::Cancelled` | host cancellation terminal; no guest final value |
+
+A cancelled completion is uncatchable host control under the current RLM
+contract. Do not score it as a caught `ok=false` value or claim the turn stays
+live. A Deferred descriptor itself is never a completed-tool observation.
 
 This companion is deterministic CI evidence, not a judged browser run. Scenarios
 A–C below remain the live approval/restart scorecard. The browser

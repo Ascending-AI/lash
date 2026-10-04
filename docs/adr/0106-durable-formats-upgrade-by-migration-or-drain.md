@@ -26,9 +26,9 @@ both supported forms across a compatibility window. A policy declaration is
 not evidence that every decoder already reads a predecessor: the decoder's
 registered range and upcaster rows decide what it accepts.
 
-Evidence: `crates/lash-core-execution/src/engine/contracts.rs:23`,
-`crates/lash-core-store/src/compat.rs:1`,
-`scripts/discover_version_surfaces.py:1`.
+Evidence: `crates/lash-core-execution/src/engine/contracts.rs`,
+`crates/lash-core-store/src/compat.rs`,
+`scripts/discover_version_surfaces.py`.
 
 ### 1. Long-running work and build generations
 
@@ -46,20 +46,16 @@ it is built and binds it into the engine, and there is no other way to obtain
 one, so no caller can open work on a lane no deployment serves.
 The engine's journal-bearing services bind a stable
 name and a generation name, `<Service>_g<G>`. Shared state services keep one
-stable name. `EffectGroupDispatch` binds only its generation name, since
-every group opener records its build's lane. The fleet epoch `F`, described
-in §2, selects durable writer
+stable name. The fleet epoch `F`, described in §2, selects durable writer
 formats independently of `G`.
 
-A route is retained data beside the segment handover or group record. Replay
-and child dispatch use that route rather than deriving it from the current
-caller. Restate keys workflow and idempotency identity by service name, so
-recomputing a route can start different work. New segment successors use the
-stable route to the latest build; incompatible handovers retain their writer's
-generation route. Process terminal and attach use the stable root. Every
-effect-group opener — a runtime controller or a host — names its build's `G`
-at construction, and a group's dispatch route is always its opener's
-generation lane; there is no stable fallback.
+A route is retained data beside a segment handover. Replay uses that route rather
+than deriving it from the current caller. Restate keys workflow and idempotency
+identity by service name, so recomputing a route can start different work. New
+segment successors use the stable route to the latest build; incompatible
+handovers retain their writer's generation route. Process terminals and source
+seals use their shared stable services. The Run's ordinary tool records belong
+to its owning handler's journal and generation.
 
 Journal-bearing handlers check the recorded build generation before replaying
 work. The session and turn handlers fold that sentinel into their first
@@ -73,9 +69,11 @@ processes for handover through a distinct handoff arm, not cancellation.
 Generation status counts store-tracked live and parked processes, parked and
 in-flight turns, and closing sessions. A submitted successor remains counted
 until its admission changes the process's generation. The engine's
-`DeploymentRegistry` also reports the group children on the generation's lane
-whose final committed and whose seat is still owed; each holds the drain until
-its group seats it (ADR 0099 §8). Stalled obligations are
+`DeploymentRegistry` also counts `unfinished_invocations`
+pinned to retained deployments, including paused work and old shifts. Short
+source subscriptions transfer without leaving a pending waiter on the old lane;
+unresolved transferred sources alone do not hold that deployment (L11). An
+unreadable invocation count refuses drain or removal. Stalled obligations are
 reported separately and do not hold the drain. These reads are not one atomic
 snapshot or an enumeration of every engine invocation. Finalize additionally
 checks retained deployments in §2. Parked work requires compatible replay or
@@ -108,20 +106,18 @@ parks
 under its generation, and the draining generation counts only the run still
 running on its own build.
 
-Evidence: `crates/lash/src/formats.rs:594`,
-`crates/lash-core/src/runtime/shift/admission.rs:193`,
-`crates/lash-restate/src/session_shifts.rs:1144`,
-`crates/lash-restate/src/session_shifts/continuation.rs:9`,
-`crates/lash/src/tests/drain_hand_over.rs:1`,
-`crates/lash-core-store/src/store/state_version.rs:51`,
-`crates/lash-restate/src/services.rs:35`,
-`crates/lash-restate/src/deployment_registry.rs:66`,
-`crates/lash-restate/src/sentinel.rs:49`,
-`crates/lash-restate/src/sentinel.rs:89`,
-`crates/lash-core-store/src/store/generation_drain.rs:28`,
-`crates/lash-core-store/src/store/generation_drain.rs:156`,
-`crates/lash-restate/src/process/workflow.rs:1`,
-`crates/lash-restate/src/tests/wait_handoff_generations.rs:1`.
+Evidence: `crates/lash/src/formats.rs`,
+`crates/lash-core/src/runtime/shift/admission.rs`,
+`crates/lash-restate/src/session_shifts.rs`,
+`crates/lash-restate/src/session_shifts/continuation.rs`,
+`crates/lash/src/tests/drain_hand_over.rs`,
+`crates/lash-core-store/src/store/state_version.rs`,
+`crates/lash-restate/src/services.rs`,
+`crates/lash-restate/src/deployment_registry.rs`,
+`crates/lash-restate/src/sentinel.rs`,
+`crates/lash-core-store/src/store/generation_drain.rs`,
+`crates/lash-restate/src/process/workflow.rs`,
+`crates/lash-restate/src/tests/wait_handoff_generations.rs`.
 
 ### 2. Shared rows: the fleet format and finalize
 
@@ -155,28 +151,22 @@ Rollback is supported while the expanded store and writer formats remain
 inside the older build's read/write windows. After finalize fences it, the
 older build cannot keep serving writes.
 
-Evidence: `crates/lash-core-store/src/store/fleet_format.rs:23`,
-`crates/lash-core-store/src/store/fleet_format.rs:117`,
-`crates/lash-core-store/src/store/fleet_finalize.rs:29`,
-`crates/lash-core-store/src/store/fleet_finalize.rs:182`,
-`crates/lash-postgres-store/src/postgres/finalize.rs:105`,
-`crates/lash-postgres-store/src/lib.rs:902`,
-`crates/lashctl/src/main.rs:660`,
-`crates/lash-sqlite-store/src/backend.rs:325`,
-`crates/lash-sqlite-store/src/finalize.rs:125`,
-`crates/lash-sqlite-store/src/finalize.rs:147`.
+Evidence: `crates/lash-core-store/src/store/fleet_format.rs`,
+`crates/lash-core-store/src/store/fleet_finalize.rs`,
+`crates/lash-postgres-store/src/postgres/finalize.rs`,
+`crates/lash-postgres-store/src/lib.rs`,
+`crates/lashctl/src/main.rs`,
+`crates/lash-sqlite-store/src/backend.rs`,
+`crates/lash-sqlite-store/src/finalize.rs`.
 
 ### 3. Restate object state
 
-The durable-wait registry, effect-group state and effect-group payload live
-in Restate under stable object keys. Their registered names are
-`LashDurableWaitIndex`, `EffectGroupIndex`, `EffectGroupDrainIndex` and
-`EffectGroupPayload`. The derived generation directory shares the effect-group
-state family's compatibility and stored-value format; its entries select
-candidate groups, while each group's own record decides the retirement count.
-Stored-value format, handler wire and dispatch-journal format are distinct
-registered surfaces. The Rust traits use `LashDurableWaitRegistry` and
-`EffectGroupState`.
+The durable-wait registry and source seals live in Restate under stable object
+keys. `LashDurableWaitIndex` and `LashDurableWaitWorkflow` retain their shared-state
+compatibility rules. Stored-value format and handler wire are distinct registered
+surfaces. The Rust registry trait is `LashDurableWaitRegistry`. Run aggregate
+records and material references live in the opener journal rather than object
+state in another service.
 
 Stored values carry `{format, body}`. A supported predecessor is lifted by the
 surface's registered upcasters; a foreign stamp refuses before the handler
@@ -195,14 +185,9 @@ refuses with `NotFinalized`; finalize selects its newest format. The operator
 exposes these operations through `lashctl objects-preflight` and
 `lashctl objects-sweep`.
 
-Evidence: `crates/lash-restate/src/object_state.rs:50`,
-`crates/lash-restate/src/object_state.rs:84`,
-`crates/lash-restate/src/object_state.rs:143`,
-`crates/lash-restate/src/object_state.rs:170`,
-`crates/lash-restate/src/object_state.rs:489`,
-`crates/lash-restate/src/object_upgrade.rs:54`,
-`crates/lash-restate/src/object_upgrade.rs:156`,
-`crates/lashctl/src/main.rs:31`.
+Evidence: `crates/lash-restate/src/object_state.rs`,
+`crates/lash-restate/src/object_upgrade.rs`,
+`crates/lashctl/src/main.rs`.
 
 ### 4. Per-surface policy
 
@@ -241,15 +226,15 @@ predecessor conversion. A registry policy does not grant blanket additive
 compatibility. The freeze changes normal shapes in place; synthetic-next
 widens the selected ranges and registries for executable upgrade evidence.
 
-Evidence: `scripts/discover_version_surfaces.py:1`,
-`scripts/check_format_registry.py:1`,
-`crates/lash/src/formats.rs:580`,
-`crates/lash-core-store/src/store/fleet_format.rs:215`,
-`crates/lash-core-store/src/store/state_version.rs:43`,
-`crates/lash-sqlite-store/src/persistence/session_commit.rs:166`,
-`crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs:220`,
-`crates/lash-core-store/src/store/persisted_state_tests.rs:1`,
-`crates/lash-upgrade-harness/tests/phase_a/history_after_finalize.rs:1`.
+Evidence: `scripts/discover_version_surfaces.py`,
+`scripts/check_format_registry.py`,
+`crates/lash/src/formats.rs`,
+`crates/lash-core-store/src/store/fleet_format.rs`,
+`crates/lash-core-store/src/store/state_version.rs`,
+`crates/lash-sqlite-store/src/persistence/session_commit.rs`,
+`crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs`,
+`crates/lash-core-store/src/store/persisted_state_tests.rs`,
+`crates/lash-upgrade-harness/tests/phase_a/history_after_finalize.rs`.
 
 ### 5. PostgreSQL and SQLite schema changes
 
@@ -302,11 +287,10 @@ terms and checks the live server's capacity and reserved connections before
 the roll. The [rolling runbook](../../runbooks/rolling-upgrade/runbook.md#postgresql-connection-budget)
 states the operator declaration.
 
-Evidence: `crates/lash-postgres-store/src/postgres/migrate.rs:1`,
-`crates/lash-sqlite-store/src/migration.rs:1`,
-`crates/lash-sqlite-store/src/backend.rs:234`,
-`crates/lashctl/src/main.rs:301`,
-`crates/lashctl/src/main.rs:726`.
+Evidence: `crates/lash-postgres-store/src/postgres/migrate.rs`,
+`crates/lash-sqlite-store/src/migration.rs`,
+`crates/lash-sqlite-store/src/backend.rs`,
+`crates/lashctl/src/main.rs`.
 
 ### 6. Tests and gates
 
@@ -327,11 +311,11 @@ in-process effect host. The handoff laws check signal and event delivery across
 segment transitions. Format-registry checks validate policy declarations;
 release fixture capture writes `fixtures/release/<tag>/`.
 
-Evidence: `crates/lash-upgrade-harness/tests/phase_a/main.rs:19`,
-`crates/lash-upgrade-harness/tests/rolling/main.rs:1`,
-`crates/lash-restate/src/tests/wait_handoff_generations.rs:1`,
-`scripts/capture_release_fixtures.py:1`,
-`scripts/check_format_registry.py:1`.
+Evidence: `crates/lash-upgrade-harness/tests/phase_a/main.rs`,
+`crates/lash-upgrade-harness/tests/rolling/main.rs`,
+`crates/lash-restate/src/tests/wait_handoff_generations.rs`,
+`scripts/capture_release_fixtures.py`,
+`scripts/check_format_registry.py`.
 
 ### 7. What stays fail-closed
 
@@ -344,10 +328,10 @@ registry or a hold in automatic mode. A stale writer refuses after the fleet
 epoch leaves its writable range. These are typed outcomes; missing evidence
 is not permission to mutate or replay under another contract.
 
-Evidence: `crates/lash-core-store/src/compat.rs:1`,
-`crates/lash-core-store/src/store/fleet_finalize.rs:84`,
-`crates/lash-restate/src/sentinel.rs:110`,
-`crates/lash-upgrade-harness/tests/phase_a/skipped_compatibility_release_refused.rs:1`.
+Evidence: `crates/lash-core-store/src/compat.rs`,
+`crates/lash-core-store/src/store/fleet_finalize.rs`,
+`crates/lash-restate/src/sentinel.rs`,
+`crates/lash-upgrade-harness/tests/phase_a/skipped_compatibility_release_refused.rs`.
 
 ### 8. The release boundary
 
@@ -359,10 +343,10 @@ upgrade gates, the baseline migration catalog, fixture capture at `v1.0.0`,
 and the fixture read-back target. ADR 0115 specifies that cut; the presence of
 its mechanisms here does not make a pre-1.0 build a compatibility release.
 
-Evidence: `crates/lash-core-store/src/store/fleet_format.rs:30`,
-`crates/lash-sqlite-store/src/migration.rs:80`,
-`crates/lash-postgres-store/src/postgres/migrate.rs:81`,
-`scripts/capture_release_fixtures.py:1`.
+Evidence: `crates/lash-core-store/src/store/fleet_format.rs`,
+`crates/lash-sqlite-store/src/migration.rs`,
+`crates/lash-postgres-store/src/postgres/migrate.rs`,
+`scripts/capture_release_fixtures.py`.
 
 ## Rejected alternatives
 

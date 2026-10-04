@@ -43,3 +43,21 @@ with the trace definitions and pins their `schema_version` to
 schemas the runtime registers and validates appends against, so there is no
 second description to drift. ADR 0100's compatibility matrix states each
 shape's decode rule and names the tests that enforce it.
+
+## Run-owned tool and operation contracts
+
+Host schemas describe the surviving public facade. Tool-bearing host tasks use
+operation Run handles with explicit completion and follow/cancel/result, driven
+by the session's existing turn service. Deferred descriptors remain pending;
+they are not ToolCompletion values. Source terminals are immutable
+`Resolved(ref)` or `Cancelled`, with no core deadline or timeout terminal.
+Typed admission, plugin-revision and retained-material causes stay typed through
+remote conversion; a text message cannot replace their fields.
+
+Definition contraction removes obsolete variants, exhaustive matches, schema
+entries and generated TypeScript in the same compiling closure. Refresh the
+current shape in place during the freeze. `kiln build //:schema_checks` is the
+owning check when a serialized shape changes; documentation alone creates no
+schema version or migration. [ADR 0099](../../docs/adr/0099-tool-children-of-effect-groups-are-live-closing-settled.md)
+and the [tool-run contract](../../docs/architecture/tool-run-contract.md) define
+ownership, canonical material and source/continuation laws.

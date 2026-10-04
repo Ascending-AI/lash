@@ -6,10 +6,11 @@ journals. Do not edit fixture contents by hand.
 - The controller scenarios hold `RecordedRuntimeEffect` journals.
 - `service-<Service>` holds one lash Restate service's handler journals,
   recorded from the real handlers on the in-process server double over SQLite
-  memory (FIG-4805). One workload runs a session turn with a tool call, a
-  process, a durable wait and a process attach. Per handler the fixture lists
-  each distinct ordered command sequence its invocations wrote, with minted
-  ids elided as `#`.
+  memory. Capture workloads for surviving session/turn handlers, Run A/X/D/V,
+  independent attempts and retries, process segments, short terminal subscriptions,
+  source seals and complete continuations. Per handler the fixture lists each
+  distinct ordered command sequence its invocations wrote, with minted ids elided
+  as `#`. There is no child/group service or long attach scenario.
 
 The workload initializes the session's durable-wait index through `reinstate`
 before starting the turn, keeping the bootstrap commands in its initialization
@@ -33,5 +34,7 @@ kiln test //crates/lash-restate:lash-restate__unit_test \
   --test_arg=tests::replay_corpus::regenerate_replay_corpus_fixtures
 ```
 
-Review the resulting fixture diff and run `kiln test
-//crates/lash-restate:lash-restate__unit_test --test_arg=replay_corpus` before committing it.
+Review the generated diff and run its changed replay laws by full test path,
+requiring nonzero executed counts. Z04 captures final handler fixtures; the
+1.0 cut captures the tagged corpus after the baseline reset, with read-back
+and same-generation replay red/green receipts. See `docs/release/cut-1.0.md`.

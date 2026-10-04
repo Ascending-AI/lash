@@ -1,255 +1,55 @@
-# Concurrent settlement is a durable group at the effect-host seam
+# 0065: Concurrent settlement is recorded by the logical Run
 
 ## Status
 
-Accepted.
-
-## Context
-
-An aggregate can resume at a deciding child while other children remain
-unfinished. Its settlement order must survive a crash and be readable by a
-successor invocation. A live completion race cannot supply that durable fact,
-and an all-settled batch cannot supply an early return.
-
-The effect host owns execution and replay. Restate implements the production
-engine contract; SQLite and PostgreSQL store session and process state.
-The [Tool-run contract](../architecture/tool-run-contract.md) owns logical
-tool-call lifetime, protected drain and incorporation. The generic transport
-in this ADR remains until FIG-4900; it no longer dispatches tool calls.
-
-### Restate satisfaction: the group virtual object is the rank authority
-
-Restate's `EffectGroupIndex` virtual object, keyed by the group key, owns the
-shape fence, lifecycle, final-commit decisions and settlement ranks. Its keyed
-serialization makes a child's decision and rank durable. `EffectGroupPayload`
-holds the child's payload separately, so the index stores terminal metadata
-and rank references rather than tool-output bytes.
-
-A rank read checks recorded state before waiting. A fresh invocation can read
-the same rank without possessing the first invocation's futures. The read can
-serve a consecutive run of seated ranks and payloads; controller read-ahead
-still advances the public cursor one returned settlement at a time.
-
-Deployments bind the index, payload, membership and dispatch handlers used by
-the controller. SDK notification order within one invocation is insufficient
-for cross-invocation rank reads. A missing handler is an engine routing failure;
-a missing executor cannot be converted into a fabricated child terminal.
+Accepted. Concurrent settlement follows the Run-owned contract in
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md). The
+[arc-baseline text](https://github.com/Ascending-AI/lash/blob/48f11c5fa761cabb4991e8497218bb870db83169/docs/adr/0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md)
+records the group-service design this decision rejects.
 
 ## Decision
 
-Concurrent settlement is a structured, durable group on
-`RuntimeEffectController`. Its three required group methods have no default
-bodies. A controller implements them or explicitly refuses all three with
-`EffectGroupUnsupported`. Resolver registration is wiring, not a second
-durability or capability flag.
+The sole active admitted Run segment records membership, independent attempts,
+selection, final-or-cancel decisions, rank, protected drain and consumed prefixes
+in its opener journal. Replay follows those facts rather than racing ready
+futures again. There is one execution journal; SQL stores hold domain state.
 
-Every process executor requires its engine registry and `HostStartAdmission`
-at construction. `register_process_start` owns engine admission and identity
-stamping for every start, including group children, host intents and trigger
-deliveries. The local executor calls it directly; Restate calls it inside the
-start's recorded registration step. Replay serves that recorded outcome,
-including a refusal, without consulting the live engine registry again.
-An empty registry refuses engine starts. A host admission without a session
-catalog refuses host session grants. Callers do not validate or stamp engine
-starts before issuing their commands.
+Whole-round admission fixes all leaves, aliases and positions before any body
+starts. An immediate winner cannot leave a pending sibling unowned. Each X has
+its own durable receipt. Replay registers the recorded command prefix before
+waiting on an older unresolved handle, so an unfinished sibling cannot hide a
+recorded retry, timer or later attempt.
 
-### Open, await and close
+Consumer policy retains the distinctions between `race`, `any`, `all`,
+`allSettled` and a list batch. `race` selects the first decision; `any` waits
+for success; `all` rejects early; `allSettled` returns source order. The list
+batch waits for every leaf and reports its first rejection in written order.
+Duplicate aliases consume one unique call. Empty aggregates retain their
+language semantics; an empty race never fabricates a result.
 
-`open_effect_group(RuntimeEffectGroup)` accepts envelopes, not caller closures.
-The registered `GroupExecutors` resolves an envelope to its executor. Dispatch
-and recovery use the same resolver for generic children. Tool calls use
-recorded Run admission and atomic `ToolAttempt` bodies; they have no child
-request or independently replayed child driver.
+Timer leaves and admitted effect handles use `AggregatePlan`, recorded timer
+admission and the Run's selection schedule. `GroupWakePolicy` remains a sansio
+consumer-policy enum; it is not a service or execution owner.
 
-A first open resolves all children before creating group state. A missing
-runner refuses the whole open with a shape error naming the child and its
-replay key. Repeating the refused open cannot reinterpret a partly recorded
-group as accepted. A reopen uses the retained shape and dispatch route. A
-deployment that does not carry a recorded child now leaves it accepted: the
-miss remains visible and retryable, and it neither invents a settlement nor
-denies access to ranks already recorded.
+An early result leaves losing calls live under the logical Run. Program effects
+continue beside them. Only the logical terminal records Closing and discharges
+cancellation and protected finals. A physical cut quiesces local attempts and
+transfers the entire Run, including unconsumed decisions and source seals;
+it never closes the logical owner. Retirement waits for all recovery, consumer
+and material dependencies and retains an identity fence.
 
-A resolver tells a placement miss apart from a missing deployment
-capability (`GroupExecutors::missing_capability`). This answer uses only the
-recorded generic envelope and registered deployment wiring. Tool calls do
-not use this resolver or lend a live opener context.
+## Evidence
 
-The durable opener closes its generic groups under `Cancel` before
-committing its terminal, and the
-index seats an uncommitted child as `RuntimeEffectGroupChildCancelled`
-without resolving an executor. Every child routing miss reads the index's durable child
-notification through ingress before retrying. Cancellation, retirement or
-an already seated settlement releases the invocation through the engine's
-existing admin kill operation, without executing or seating anything. A
-successful handler return cannot skip a recorded executor's journal tail;
-the kill ends the invocation while preserving its decided seat. A committed
-drain keeps retrying while its seat is still owed,
-because close cannot cancel its committed final (FIG-4604, FIG-4634).
-
-A handler-driven engine records the answer once, in the child's own journal,
-so every replay takes the same branch on whichever worker retries it. A child
-recorded as unroutable settles `Failed` with the terminal
-`RuntimeEffectGroupChildUnroutable`, whose cause names the missing capability,
-and its opener's rank wait resolves. A child recorded as routable keeps
-retrying routing misses while the index still needs its seat.
-
-`GroupReopen::RetainedShape` preserves recorded membership;
-`GroupReopen::RetainedContent` also checks the offered child content. The shape
-fence protects arity, replay keys, wake policy, loser policy and opener.
-
-`await_next_settlement(&mut handle, cancel)` returns the next durable settlement.
-`EffectGroupHandle` is the sole consumption cursor. Open starts at
-`consumed = 0`; a restored continuation supplies its saved cursor. The host
-advances it exactly once for each returned settlement and retains no independent
-consumption cursor. Await cancellation changes neither the cursor nor the rank.
-Exhaustion is checked locally; advancing beyond the child count refuses.
-
-`close_effect_group(handle, policy)` releases consumer interest and is
-idempotent. It does not retire the group or erase ranks and protected work.
-A replay may close the same serialized handle again. Reopening establishes new
-consumer interest under the retained lifecycle and policy.
-
-### The settlement obligation
-
-Settlement `n` of a group is a durable fact. Every replay observes the same
-child at that rank; it never races children again to decide an existing rank.
-
-The contract serves the `(consumed + 1)`-th smallest recorded sequence, not a
-literal sequence value. Sequences need not be gapless. Three rules preserve
-rank, including the group-atomic rule cited as N3:
-
-1. Sequence allocation is strictly monotonic within the group.
-2. The recorded set is append-only below any consumed rank.
-3. Retirement is group-atomic. Removing a child below a saved cursor cannot
-   shift the remaining ranks.
-
-Restate allocates settlement ranks in the serialized index handler. A child
-seats only once; duplicate settlement reads its existing rank. Commit sequence
-and settlement rank are distinct facts: cancel-decided children have a rank
-without a final-commit sequence.
-
-### Wake policy is journaled identity
-
-`GroupWakePolicy` has `First`, `FirstSuccess` and `All`. `race` consumes the
-first deciding settlement; `any` consumes through the first success. `all` and
-`allSettled` both use `All`: the caller stops on the first rejection for `all`
-and consumes every settlement for `allSettled`. That stopping condition does
-not require another host policy. `settlement_order` is a projection of durable
-settlements, not an in-memory authority for the answer.
-
-### Normative: ungrouped effects stay hash-identical
-
-`RuntimeEffectEnvelope::group` is optional and omitted when absent. Group
-membership carries its key, position, wake rule and loser policy in the
-canonical envelope, so those facts participate in the hash fence. An ungrouped
-effect carries no membership bytes. Incompatible format changes follow the
-version-freeze and 1.0 cut contract of
-[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
-
-### Normative: a group's copies are made to agree by construction
-
-`RuntimeEffectGroup::try_new` is the checked constructor. It stamps each
-unstamped envelope with the group's identity and index, and refuses a foreign
-key, wrong position, changed wake rule or changed loser policy. It also refuses
-an empty key, empty children and duplicate child replay keys.
-
-A dispatch path unable to honor membership refuses it rather than stripping the
-fence. Restate executes timer and durable-wait children as child invocations;
-the retained group shape supplies their membership fence.
-
-Zero-operand aggregates do not open groups. `all([])` resolves locally;
-`any([])` rejects with an empty `AggregateError`; `race([])` never settles in
-ECMA semantics and the host returns a typed unsettled-await failure rather than
-parking an unbounded durable group.
-
-### Group identity carries an occurrence discriminator
-
-Language aggregates use the runtime-issued `CommandReplayKey`, whose issue
-ordinal belongs to the recorded run. The tool-batch content digest is a content
-check on that path, not its durable group address. A compiler instruction
-pointer or live-only counter is not the identity authority.
-
-Host tool batches use `{scope_id}:group:{batch_id}`, or
-`{scope_id}:group:{parent_effect_id}:{batch_id}` beneath a parent effect. Their
-batch id hashes the calls, including call identities and execution grants.
-Protocol-standard `batch` contributes members to the turn step's top-level
-group beside native calls. Tool bodies do not dispatch nested tool groups;
-[ADR 0116](0116-tools-are-opaque.md) owns that tool contract.
-
-### Loser disposition is declared at open
-
-`LoserPolicy` is a durable group fact. Close may narrow `RunToCompletion` to
-`Cancel`, but cannot widen `Cancel` to `RunToCompletion`. Recovery applies the
-recorded policy rather than guessing what a caller would choose at close.
-
-Promise aggregates use `RunToCompletion` while their opener lives. Selecting a
-winner cancels no losing promise. A deadline select can declare `Cancel`.
-Normal opener end has ADR 0099's closing protocol; `RunToCompletion` does not
-grant an unfinished opaque tool permission to create new work after that end.
-
-## Tool calls belong to a logical Run
-
-The Run records one final-or-cancel decision and protects a committed final
-through declarations, presentation and incorporation. Its drain frontier is
-transitive across empty ranks. Worker death and a segment handover transfer
-that Run; they do not close its owner or cancel a losing call. Independently
-living work is a declared process. See the
-[Tool-run contract](../architecture/tool-run-contract.md) for the native
-records, retention dependencies and replacement laws.
-
-## Alternatives rejected
-
-An all-settled batch cannot return a race winner early. Rewriting partial
-outcomes in one growing batch payload couples progress and storage to the
-slowest child and duplicates the engine's ordering authority.
-
-A second SQL settlement journal makes storage an effect engine and cannot
-satisfy a Restate deployment without that database. The index is engine-owned
-keyed state.
-
-Caller-owned executor closures cannot reconstruct a child in another handler or
-on recovery. The deployment's resolver supplies that code from retained data.
-
-Always cancelling losers changes Promise behavior while the opener is live.
-Never cancelling at opener end permits implicit background tool work beyond
-its admitted lifetime. The live, closing and settled phases express both rules.
-
-Deleting state at close destroys protected drains and saved ranks. Time-based
-deletion destroys continuation without proving severance. Retirement checks the
-actual dependencies and retains the identity fence.
+The [tool-run contract](../architecture/tool-run-contract.md) pins K1/K3/K6/K9
+and L03-L06/L09/L13/L16-L18. `RunCoordinator` implements those contracts in
+`crates/lash-core-execution/src/tool_dispatch/run_coordinator/`.
+`crates/lash-restate/src/tests/run_coordinator_on_the_double/aggregate.rs`
+exercises aliases, timers, early rejection, surviving losers and logical close;
+`run_coordinator_on_the_double.rs` holds the transitive protected-drain oracle.
 
 ## Consequences
 
-Each child is an independently durable execution and contributes to engine
-command accounting. Wide groups share a rank authority, but consecutive-rank
-reads and a transitive drain barrier avoid a wait or read per lower sibling.
-Early aggregate return leaves explicit child obligations; normal opener end
-settles those obligations under ADR 0099.
-
-## Executable evidence
-
-- [Checked group construction](../../crates/lash-core-execution/src/runtime/effect/group.rs#L183),
-  [cursor](../../crates/lash-core-execution/src/runtime/effect/group.rs#L404),
-  [policy narrowing](../../crates/lash-core-execution/src/runtime/effect/group.rs#L632)
-  and [controller methods](../../crates/lash-core-execution/src/runtime/effect/executor/control.rs#L528)
-  define the portable contract.
-- [Restate open preflight](../../crates/lash-restate/src/controller/mod.rs#L737),
-  [final commit](../../crates/lash-restate/src/effect_group.rs#L759),
-  [rank seating](../../crates/lash-restate/src/effect_group.rs#L917),
-  [close](../../crates/lash-restate/src/effect_group.rs#L1119) and retirement in
-  that file implement the index authority.
-- [Separate payload storage](../../crates/lash-restate/src/effect_group/payload.rs),
-  [rank runs](../../crates/lash-restate/src/effect_group/rank_run.rs#L13),
-  [transitive barrier](../../crates/lash-restate/src/effect_group/drain_barrier.rs#L58)
-  and [child driver](../../crates/lash-restate/src/effect_group/dispatch.rs#L374)
-  implement serving and recovery.
-- [Runtime command keys](../../crates/lash-lashlang-runtime/src/replay_run.rs#L145),
-  [aggregate formation](../../crates/lash-lashlang-runtime/src/aggregate.rs#L35)
-  and [host batch keys](../../crates/lash-core-execution/src/session/tool_execution/group.rs#L169)
-  define group addressing.
-- [Opener reservation](../../crates/lash-core-execution/src/session/opener_groups.rs#L293)
-  bounds retained children; [segment budget](../../crates/lash-restate/src/controller/mod.rs#L1057)
-  requests a controller boundary separately.
-- Shared group laws run against the in-process Restate server double, live
-  Restate and lash-sim's in-process effect host. Store laws use SQLite file,
-  SQLite memory and PostgreSQL. Upgrade proofs use the synthetic-next tier.
+An aggregate has durable selection without an independent rank object, payload
+service or dispatcher. Independent attempt replay avoids rerunning completed
+siblings. Selection, presentation and incorporation remain separate recorded
+facts, and a consumer cannot destroy work that its logical owner still owes.

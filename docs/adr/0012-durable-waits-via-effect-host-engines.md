@@ -2,7 +2,7 @@
 
 ## Decision
 
-Long-lived work waits through one durable one-shot keyed promise, `AwaitEvent`, and its resolve operation. Named signals, process joins and timer wakes compile to that wait mechanism. Effect groups compose independently journaled children under ADR 0065; they are a separate composition contract rather than extra semantic wait commands.
+Long-lived work waits through one durable one-shot keyed promise, `AwaitEvent`, and its resolve operation. Named signals, process joins and timer wakes compile to that wait mechanism. Run-owned aggregates compose admitted effects and timers under ADR 0065. Deferred tools use an authenticated immutable source seal with short subscriptions (K4); those descriptors remain pending until the source resolves or cancellation seals it.
 
 Lash owns the effect-controller contract. Restate supplies the execution journal and durable suspension under ADR 0104. SQLite and PostgreSQL store domain state. Settled session history and effect replay are separate responsibilities joined by stable operation identity; the process event log supplies observation rather than a second replay journal.
 

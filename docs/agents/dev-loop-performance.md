@@ -5,7 +5,9 @@ tools and commands describe that measurement period. Use the current
 [build guide](hermetic-build.md) and [migration measurements](buck2-migration.md)
 for supported workflows and current evidence.
 
-This change follows PR #1908 and the investigation of the effect-group lanes.
+This historical measurement follows PR #1908 and the investigation of the then
+existing effect-group lanes. Those services are superseded by Run-owned records
+(ADR 0099); their timings are not a baseline for the current tool path.
 Measurements used Rust 1.98.1, Bazel 9.1.0 and the shared NativeLink pool,
 starting at Lash `ee9ef46ff62543681d58301c851cd55c214e493a`.
 Compiler-action counts establish invalidation behavior. Individual elapsed
@@ -72,7 +74,7 @@ unit frontend. Keep the existing test batching and resource policy.
 
 ## Diagnostics and placement
 
-The opt-in `scripts/bazel-diagnose.py` captures profiles, compact execution logs
+The opt-in [historical diagnosis script](https://github.com/Ascending-AI/lash/blob/094984cda2a29e77ae041c8a87d01b2054ea3899/scripts/bazel-diagnose.py) captures profiles, compact execution logs
 and REAPI metadata. The checksum-pinned BuildBuddy CLI decodes Bazel 9.1 logs
 and explains source, argument, environment and execution-property changes
 without a BuildBuddy service. Actual remote metadata identified a worker and

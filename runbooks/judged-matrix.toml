@@ -54,7 +54,7 @@ context-overflow-recovery = { tier = "deterministic", model = "scripted-provider
 process-operations = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the `just process-operations-e2e` companion, the FIG-1292 preflight, and Phases 0-10; only the five FIG-1293 tool rows call a provider" }
 rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 tictactoe-full-game = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
-workbench-approval = { tier = "economy", model = "deepseek/deepseek-v4-pro", deterministic_phases = "FIG-1346 four-variant async_completion_ nextest companion; Scenarios A-C remain live judged rows" }
+workbench-approval = { tier = "economy", model = "deepseek/deepseek-v4-pro", deterministic_phases = "FIG-1346 three-variant completion companion on the Restate double; Scenarios A-C remain live judged rows" }
 workbench-attachments = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the shared `just agent-workbench-attachment-usage-gate` companion; only Phase 2 calls a provider" }
 workbench-break-glass = { tier = "deterministic", model = "scripted-provider" }
 workbench-chat-projection = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "Surfaces A-E, on the named dev-provider scenarios; only Phases 0-4 call a provider" }

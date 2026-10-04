@@ -101,7 +101,7 @@ The generated region below is checked against the live filenames and headings.
 | 0062 | [The TypeScript dialect is an exact ECMA-262 subset](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md) |
 | 0063 | [One RLM turn is prompted in its dialect](0063-one-rlm-turn-is-prompted-in-one-dialect.md) |
 | 0064 | [The TypeScript dialect is broad, and every gap is an explicit ruling](0064-the-typescript-dialect-is-broad-and-every-gap-is-an-explicit-ruling.md) |
-| 0065 | [Concurrent settlement is a durable group at the effect-host seam](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md) |
+| 0065 | [Concurrent settlement is recorded by the logical Run](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md) |
 | 0066 | [Durable session facts are a typed read and a guarded set-if-unset write](0066-durable-session-facts-are-a-typed-read-and-a-guarded-write.md) |
 | 0067 | [Every durable row names one owner and one reclaim trigger](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md) |
 | 0068 | [One meaning per outcome-type suffix](0068-one-meaning-per-outcome-suffix.md) |
@@ -132,7 +132,7 @@ The generated region below is checked against the live filenames and headings.
 | 0096 | [One IR and VM, extensible dialects, TypeScript today](0096-typescript-is-the-sole-rlm-dialect.md) |
 | 0097 | [Commit-identity families mint frozen unframed preimages](0097-commit-identity-families-mint-frozen-unframed-preimages.md) |
 | 0098 | [One owner per SQL table across both stores](0098-one-owner-per-sql-table-across-both-stores.md) |
-| 0099 | [Tool children of effect groups have one lifecycle — live, closing, settled (superseded)](0099-tool-children-of-effect-groups-are-live-closing-settled.md) |
+| 0099 | [Tool calls and aggregates belong to the logical Run](0099-tool-children-of-effect-groups-are-live-closing-settled.md) |
 | 0100 | [The run-observation contract](0100-the-run-observation-contract.md) |
 | 0101 | [One session ingress carries every admitted item](0101-one-session-ingress-carries-every-admitted-item.md) |
 | 0102 | [Every backend binds one journaled engine to one store set](0102-zero-infra-is-a-sqlite-in-memory-backend.md) |

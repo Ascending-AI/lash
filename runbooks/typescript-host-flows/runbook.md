@@ -94,7 +94,7 @@ the record body, so the practical gate is
 `grep -c invalid_tool_args trace.jsonl` == 2 over the phase's trace slice. Do not assert a wall-clock
 winner or an A/B marker. Save `01-promise-{dom,state,trace}.json` and
 `01-promise.png`. Each extract holds the surface named in its suffix, scoped to this phase:
-`-dom` the rendered assistant row plus its code-block/tool child elements with their badges;
+`-dom` the rendered assistant row plus its code-block/tool card elements with their badges;
 `-state` the `/api/state` transcript entries for the turn; `-trace` the phase's `trace.jsonl`
 slice including both `tool_call_completed` records. An artifact whose contents are left to
 the driver's guess is a screenshot of prose, not reproducible evidence.

@@ -97,10 +97,10 @@ ends and its pending row is removed, completion refuses the typed
 `StaleWritePermit`, and abort without a permit is an idempotent no-op.
 The permit carries the referrer and kind `begin` checked, so SQLite's
 completion and abort need no second kind check
-(`crates/lash-sqlite-store/src/attachments.rs:764-819`, with
-`abort_write_conn` at `crates/lash-sqlite-store/src/attachments.rs:150`);
+(`crates/lash-sqlite-store/src/attachments.rs`, with
+`abort_write_conn` at `crates/lash-sqlite-store/src/attachments.rs`);
 PostgreSQL obtains one through referrer locking, which is equivalent
-(`crates/lash-postgres-store/src/postgres/attachments.rs:663-718`).
+(`crates/lash-postgres-store/src/postgres/attachments.rs`).
 
 `end_attachment_referrer` fences the referrer, deletes its pending writes
 (releasing their condemnation claims) and deletes its edges. It reclaims
@@ -127,25 +127,21 @@ The receiving claim is one function of the receiving scope,
 its journal: prune retires the journal before it removes the row, and the
 terminal output needs the row anyway.
 
-- **Deferred process results.** K4 subscribes the receiver source to the
-  process terminal through short index handlers. Delivery acquires the
-  source's attachment edges and retained material before publishing its
-  immutable completion seal. The source keeps those leases through physical
-  segment transfer until the logical Run or scope retires it. Cancellation
-  detaches a pending subscription; a late terminal cannot revive a cancelled
-  source. Resolution before cancellation retains the result and its leases.
-  An ended receiver acquires nothing. Permanent acquisition refusals remain
-  typed; transient storage faults retry the unrecorded acquisition.
-- **Direct awaits and process-to-process delivery.** A direct
-  `ProcessCommand::Await` uses a K4 subscription and a durable wait on a
-  derived key. Its wait identity is
-  `Custom { key: "process-await:<process id>:<effect id>:invocation:<invocation id>" }`:
-  the logical command and physical invocation identify distinct receivers.
-  The wait races turn cancellation, process cancellation and segment
-  handover. Handover detaches the predecessor's receiver before returning;
-  the successor observes the same process terminal under its own receiver.
-  A turn stop that wins arms a second subscription on the same key with
-  `:after-turn-cancel` appended and reads the cancelled process's terminal.
+- **Deferred and process-terminal delivery.** Short process-terminal
+  subscriptions retain the producer's terminal and name the receiver's source.
+  Delivery acquires the receiver's attachment references before retaining the
+  canonical result and sealing `Resolved(ref)`. The Run journals the terminal
+  under its source lease, then discharges the consumer hold. An ended receiver
+  refuses delivery and cannot recreate a subscription. Permanent acquisition
+  refusal stays typed; transient store faults retain retry ownership.
+- **Direct awaits and process-to-process delivery.** The controller's
+  process-terminal path uses the same short registration and acquire-before-seal
+  rule. An already-terminal process records its outcome after acquisition.
+  Cancellation and revocation observations are journaled. Transfer acquires
+  successor references before releasing predecessor interest; no long attach
+  invocation is needed. A cancelled observer does not cancel the process unless
+  its recorded cancel policy requires that separate obligation.
+
 - **Queued inputs.** The enqueue transaction acquires `Session(s)` on the
   batch's stored ids and records the row together; an `UnknownAttachment`
   refuses the enqueue. A pending input therefore resolves its bytes when its
@@ -227,9 +223,8 @@ a stand-in for its own id.
 - **Tool intents** are keyed by `RuntimeOwner`. The identity encoding tags
   the owner, and the durable `tool_intent_submissions` column is `owner` on
   both backends.
-- **A tool call in a process Run** uses that process's recorded admission,
-  environment and owner. It does not reconstruct a child runtime or borrow
-  live opener state.
+- **A process-owned tool call** runs under its admitted process runtime and
+  recorded environment, including after segment adoption.
 - **A subagent spawned inside a process** parents under the session that
   originated the process chain, read by name, and is caused by the process.
   A host-originated chain and a `ParentFork` capability refuse (ADR 0116).
@@ -249,27 +244,26 @@ a stand-in for its own id.
 
 ## Implementation
 
-- `crates/lash-core-store/src/artifact_referrer.rs:116` selects the six
-  attachment-holding kinds; `crates/lash-core-store/src/attachments.rs:1651`
+- `crates/lash-core-store/src/artifact_referrer.rs` selects the six
+  attachment-holding kinds; `crates/lash-core-store/src/attachments.rs`
   chooses the claim before a put.
-- `crates/lash-core-store/src/store/attachment_referrers.rs:474` defines
-  the eight verbs. `crates/lash-sqlite-store/src/attachments.rs:694` and
-  `crates/lash-postgres-store/src/postgres/attachments.rs:595` implement them.
-- `crates/lash-core-execution/src/runtime/attachment_delivery.rs:36` chooses
-  the receiver's claim; `:138`, `:153` and `:170` acquire terminal and start
-  input references.
-- `crates/lash-restate/src/durable_wait/process_terminal.rs` acquires
-  source-owned leases before sealing the result.
-  `crates/lash-core-execution/src/runtime/process/start_staging.rs:471` stages input before registration and acquires the process record afterward.
-  `crates/lash-core/src/runtime/artifact_cleanup.rs:442` completes that
+- `crates/lash-core-store/src/store/attachment_referrers.rs` defines
+  the eight verbs. `crates/lash-sqlite-store/src/attachments.rs` and
+  `crates/lash-postgres-store/src/postgres/attachments.rs` implement them.
+- `crates/lash-core-execution/src/runtime/attachment_delivery.rs` chooses
+  the receiver's claim and acquires terminal and start input references.
+- `crates/lash-restate/src/durable_wait/process_terminal.rs` acquires before
+  sealing the receiving source. `crates/lash-core-execution/src/runtime/process/start_staging.rs`
+  stages input before registration and acquires the process record afterward.
+  `crates/lash-core/src/runtime/artifact_cleanup.rs` completes that
   acquisition before staging ends during recovery.
-- `crates/lash-sqlite-store/src/persistence/turn_input.rs:971` and
-  `crates/lash-postgres-store/src/postgres/runtime_persistence/turn_input.rs:513`
+- `crates/lash-sqlite-store/src/persistence/turn_input.rs` and
+  `crates/lash-postgres-store/src/postgres/runtime_persistence/turn_input.rs`
   acquire queued input in the acceptance transaction.
-- `crates/lash-sqlite-store/src/persistence/session_commit.rs:853` and
-  `crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs:1028`
+- `crates/lash-sqlite-store/src/persistence/session_commit.rs` and
+  `crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs`
   acquire committed ids in the boundary transaction.
-- `crates/lash-core/src/runtime/process_runtime.rs:139` builds a process-owned
+- `crates/lash-core/src/runtime/process_runtime.rs` builds a process-owned
   runtime and attachment store.
 
 Using age as the root predicate would forget a slow but live producer.

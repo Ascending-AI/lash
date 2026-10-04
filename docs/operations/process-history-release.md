@@ -21,7 +21,7 @@ does not make process-owned rows prune-eligible.
 | Process events | One row per producer emit, signal or lifecycle transition. Replay matching, pages, event awaiters and observation summaries read them. | Terminal process pruning deletes the log. A running process previously had no release lever. | Strips selected payloads; retains ordering, invocation, semantics, admitted signal binding and replay fences. |
 | Effect-summary events | At most eight individually recorded occurrences per effect node; later occurrences accumulate omission counts. Pending summaries travel in segment state until a boundary write. Producer emits and signals have no such cap. | Runtime incorporation writes events in the next boundary's transaction; terminal pruning owns their rows. | Releases committed payloads. Suffix snapshots report their summary incomplete. Pending summaries stay untouched. |
 | Segment handovers and start markers | Each successor records a continuation, route, generation and execution-start fence. Normal retirement removes consumed handovers. Rows can coexist while retirement is owed or fails. | Engine-owned journaled resume and retirement; terminal pruning removes survivors. | Nothing. The successor continuation and start marker remain replay authority. |
-| Restate invocation journals and results | Segment budgets bound completed effect count, not arbitrary result bytes or the number of completed segments. Tool children have their own invocations. | Restate completion retention; active execution retains its journal. | Nothing. SQL cleanup cannot replace engine retention. |
+| Restate invocation journals and results | Segment budgets bound completed effect count, not arbitrary result bytes or the number of completed segments. Independent tool attempts are records in their owning Run journal; process-backed work has process invocations. | Restate completion retention; active execution retains its journal. | Nothing. SQL cleanup cannot replace engine retention. |
 | Wake delivery rows | A wake-producing event adds a row with its own content. Claim, enqueue and discard update it. Settled rows stay process-owned; the outbox contract has no running-process deletion. | Process deletion cascades the rows. Owed wakes prevent terminal pruning; discarded wakes permit explicit redrive. | Nothing. Release preserves content and claims, including pending work. These rows can also accumulate during a long process. |
 | Wake allocation and receiver floors | One monotonic floor per process and target session, independent of queue-row lifetime. | Session/process-state cleanup and receiver terminal transitions. | Nothing. Event sequences and floors never reset. |
 | Process record, wait, cancellation and outcome | Current state replaces the record; its values can be large. | Lifecycle writes and terminal pruning. | Nothing. Outcomes stay awaitable. Cancellation retains its special replay-matching payload. |
@@ -29,7 +29,7 @@ does not make process-owned rows prune-eligible.
 | Triggers and mutation receipts | Deliveries follow their process; receipts fence retries. Occurrence accounting has its own terminal frontier. | Trigger reconciliation and explicit eligible receipt/tombstone maintenance, under ADRs 0021 and 0067. | Nothing. The process id remains stable, preserving delivery linkage. |
 | Session history, inputs and commit receipts | Child-session turns can retain graph nodes, revisions, receipts and input identity evidence. | Shared reachability, session deletion, vacuum and eligible evidence retention, under ADRs 0047 and 0023. | Nothing. Release neither compacts conversations nor releases history pins. |
 | Attachments, artifacts and process environments | Bytes follow live referrers and may outlive the event mentioning them. | Referrer cleanup and attachment GC, under ADRs 0113 and 0124. | Nothing. Releasing JSON does not authorize deletion of referenced bytes. |
-| Live program state and effect groups | VM stacks, retained values, child ids and outstanding group handles cross segments; they can grow by program choice. | Program consumption and group recovery/consumer contracts, under ADRs 0025 and 0099. | Nothing. Age cannot discard live state. |
+| Live program and Run state | VM stacks, values, aggregate prefixes, unseated finals, source seals, material, state frontier, capacity and owed starts/cancels cross segments. | Run consumption, protected drain, dependency release and identity-fenced retirement under ADRs 0025 and 0099. | Nothing. Age cannot discard live state; Closing is not garbage collection. |
 
 Evidence: [event SQL](../../crates/lash-store-sql/src/process/events.rs),
 [append and replay matching](../../crates/lash-core-execution/src/runtime/process/validation.rs),
@@ -102,8 +102,8 @@ expires readers needing that prefix; the cursor reports the loss explicitly.
 Terminal pruning's projection watermark keeps its separate contract.
 
 Lash protects execution dependencies by preserving them. Continuations,
-admission, pending summaries, effect groups, cancellation state, signal
-promises, child work, trigger linkage, holds and wake content are outside
+admission, pending summaries, Run aggregates and source seals, cancellation
+state, signal promises, process work, trigger linkage, holds and wake content are outside
 release. Counts include released signal rows, so a successor cannot reuse an
 ordinal. Recorded engine steps replay their recorded answers. An old segment
 or native Run attempt retrying an unrecorded append still has its digest fence. Hosts
@@ -122,8 +122,8 @@ set journal, idempotency and workflow completion retention to 24 hours.
 These are source-verified defaults, not deployed-server measurements.
 
 [Lash service binding](../../crates/lash-restate/src/services.rs) sets authority,
-lazy-state and retry options, but no retention override. The pinned Rust SDK
-0.11.1 leaves retention options absent until configured. Hosts must inspect
+lazy-state and retry options, but no retention override. The SDK dependency and host re-export contract are recorded in the
+[lash-restate README](../../crates/lash-restate/README.md). Hosts must inspect
 their namespace-qualified services and handlers because server defaults and
 existing overrides can differ. The [pinned service contract](https://github.com/restatedev/restate/blob/v1.7.12/crates/types/src/schema/service.rs#L121)
 caps journal retention by workflow completion retention for workflows and

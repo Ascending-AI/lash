@@ -52,15 +52,18 @@ the invocation's timers. An exclusive object handler cannot wait for a run its
 own object may serve: it accepts, returns the receipt, and a shared handler or
 the caller waits.
 
-The adapter records atomic Lash LLM calls, tool attempts, independent direct
-completions, checkpoints, and execution-surface syncs with Restate
-`ctx.run(...).name(lash:<replay_key>)`. A direct completion made by opaque tool
-code runs inside the open atomic tool attempt. Composite tool-batch and
-exec-code interpreters are rebuilt for every handler attempt; their nested
-atomic effects retain stable replay keys. Runtime sleeps outside tool attempts
-use Restate durable timers.
+The adapter records Lash LLM calls, tool attempts, independent direct
+completions, checkpoints and execution-surface syncs with named Restate runs.
+A direct completion made by opaque tool code is captured inside that attempt.
+Standard batch expansion and the code interpreter dispatch admitted members
+through the same Run coordinator; they create no wrapper invocation. Runtime
+sleeps outside tool attempts use Restate durable timers.
 
-The workspace pins the concurrent-run SDK fork to an exact git revision.
+The workspace pins SDK 0.12.1 from `SamGalanakis/sdk-rust` at
+`c25608305340e431dff8808a3303bc3106762d6c` in `Cargo.toml` and `Cargo.lock` (H01).
+`lash-restate` alone owns that dependency. Hosts import
+`lash_restate::restate_sdk` or `lash::restate::restate_sdk`; they do not add
+a direct SDK edge or a separate handler context.
 Sequential `ctx.run` calls retain fluent `.name(...)` and `.retry_policy(...)`
 configuration and are awaited directly. To start concurrent work, configure
 each run and call consuming `.start()` in deterministic order before awaiting
@@ -68,6 +71,12 @@ any result. Started closures own their captures and futures for the invocation;
 they keep progressing while the handler awaits another result. Sequential
 actions may borrow local values. Hosts use the existing SDK re-export and one
 Endpoint.
+
+This git pin supports development and runtime acceptance, not crates.io
+publication. U02/FIG-4906 must replace it with an upstream release containing
+the concurrent-run fix or the approved Lash-owned published fork, remove the
+`deny.toml` allow-git entry, and prove registry-resolvable dependencies and the
+external-consumer build. Runtime and reset-gate success do not waive that exit.
 
 A started result is settled only once awaited. Dropping its future neither
 cancels nor settles the run, and a successful return drops any run still
@@ -81,14 +90,12 @@ The [SDK acceptance recipe](SDK_ACCEPTANCE.md) selects the unchanged handler
 laws and the concurrent-run laws by full test path, verifies executed-case
 receipts, and records the accepted dependency and predecessor live V7 proof.
 
-Upgrade note: invocations that journaled `ExecCode` under the pre-fix wrapping
-will diverge on replay after upgrade; they were already panic-looping and need
-an admin `KILL`.
-Substrate-native Restate turns do not use store-side in-flight replay rows; Lash
-only commits final session state through its turn-commit idempotency contract.
-Replaying a handler with the same turn id returns Restate-recorded effect
-outcomes, validates the current Lash envelope hash, and retries the final commit
-without exposing partial session state.
+The Run journals admitted calls and independent attempts in its opener. It
+records final-or-cancel, protected drain, presentation and incorporation there.
+SQL stores retain domain state and final session commits; they do not replay
+effects. The [tool-run contract](../../docs/architecture/tool-run-contract.md)
+and [ADR 0099](../../docs/adr/0099-tool-children-of-effect-groups-are-live-closing-settled.md)
+define K1-K10 and their laws.
 
 Each handler's effect journal keeps a payload of at least 1 KiB inline once.
 Later envelopes and outcomes name it by a domain-separated BLAKE3 digest.
@@ -123,38 +130,27 @@ adapter returns an explicit terminal error code to the handler. Hosts should
 surface that failure and clear their running state rather than leaving the
 invocation to back off forever.
 
-Lash's own Restate services — the durable-wait workflow and index, the
-`LashProcessWorkflow` background tasks run on, process attach, and the
-effect-group index, payload and dispatcher — are bound by lash, never by the
-host. A deployment that serves lash work starts its endpoint from
-`RestateEngine::endpoint_builder`, which binds every one of them, and binds
-only its own services beside them:
+Lash binds its session and turn handlers, `LashProcessWorkflow`, and the durable
+wait index/workflow, including immutable source seals. A deployment serving
+Lash work starts with `RestateEngine::endpoint_builder` and binds its own host
+services on that same Endpoint. A submit-only host serves no handlers.
 
 ```rust,no_run
-use lash_restate::{RestateEngine, RestateProcessServing};
-use restate_sdk::prelude::*;
+use lash_restate::{RestateEngine, RestateProcessServing, restate_sdk};
 
 fn endpoint(
     engine: &RestateEngine,
-    // The process worker of the core built over `engine`.
     worker: lash_core::DurableProcessWorker,
 ) -> restate_sdk::endpoint::Endpoint {
     engine
-        // A bare worker serves processes under the default segment policy;
-        // `RestateProcessServing` sets an effect budget.
         .endpoint_builder(RestateProcessServing::new(worker))
-        .bind(lash_restate::turn_service(
-            AgentTurnWorkflowImpl.serve(),
-            "run",
-        ))
         .build()
 }
 ```
 
-Effect-group children route through the resolver registered on the backend's
-effect host, so there is one resolver and one authority by construction. A
-process that only submits work to Restate and serves no handlers does not call
-`endpoint_builder`.
+The Run coordinates its admitted callbacks and recorded attempts on the owning
+handler. Process-backed work uses a captured environment and admitted worker;
+it needs no child resolver or independently reconstructed tool context.
 
 A missing binding is itself a deterministic contract failure, so it is treated
 as one: Restate answers an invocation of a service no deployment binds with
@@ -169,32 +165,38 @@ EOF, timeouts, overload, and ingress-generated 5xx responses, preserving the
 durable process and its wait address. An invocation's terminal error stays
 terminal even with a 5xx code. See ADR 0016.
 
-An await of an already-terminal child journals the registry's full outcome in
-one step, after acquiring the receiver's references to its stored attachments.
-Replay reads that outcome even after retention prunes the child. The controller
-also journals its cancellation and revocation observations. Terminal attachment
-commands return the same observed value, so pending tool calls settle without
-opening a wait. Non-terminal or cancelled children and closed control gates use the attach and durable-wait path.
+An already-terminal process await records the outcome after acquiring receiver
+attachment references. Otherwise short process-terminal registration delivers
+the result to a retained source seal. Transfer rebinds subscriptions and acquires
+successor leases before predecessor release. A `Resolved(ref)` winner drains
+protected finalization; a `Cancelled` seal cannot later revive work. Recorded
+cancellation/revocation observations decide the journaled command branch.
 
-The wait workflow owns Restate promises and durable deadline timers for every
-Lash execution scope. The virtual-object index serializes wait registration,
-session-wide cancellation, and permanent revocation during session deletion.
-Deadline-bearing waits journal their absolute deadline once in the invoking
-handler, then send deadline wire version 2 to the wait workflow. This preserves
-one total time budget across worker replacement and keeps the replay-compared
-nested call payload stable. The former unversioned `timeout_ms` request is
-refused; drain deadline-bearing waits before upgrading. Requests without a
-deadline retain their prior wire bytes and journal shape.
-At turn start, Lash reads the cancellation gate through the handler-scoped
-controller, so Restate journals the observation before any turn effect. A
-pre-registered cancellation is therefore still observed before execution, and
-handler replay reuses the original observation instead of branching on a later
-out-of-band ingress result. After that, cancellation reaches a turn only as
-journaled facts (ADR 0105 §3): durable waits race the turn's gate in the journal, the turn peeks the gate at its step
-boundaries, and a model call's `ctx.run` body watches the gate itself and
-records whether it was stopped. That watch, and a host-local stop forwarded to
-the gate, are the only users of the deployment-level ingress controller;
-nothing live races the handler.
+## Run recovery and deployment drain
+
+A paused invocation retains its journal. Redrive and cancel address its logical
+Run owner; recorded material, admission, source seals and protected finals remain
+authoritative. Missing material refuses typed rather than rerunning a body.
+`tests::run_coordinator_on_the_double::owner_park` holds the owner-recovery law
+on the Restate server double.
+
+Wait workflows retain scoped promise and revocation facts. Deferred tool sources
+have no runtime deadline, timeout terminal or long attach invocation. Tools own
+transport timeouts inside their bodies; Runs retain cancellation and existing
+turn/no-progress bounds. Generic sleep and retry timers retain their own jobs.
+A physical cut quiesces issued local attempts through durable acknowledgement,
+then transfers pending sources without closing the logical opener.
+
+At turn start the handler records its cancellation observation. Later branches
+use recorded Run decisions, gate peeks and subscribed wakes. A host-local stop
+reaches the durable gate; an out-of-band observation never chooses replay's
+command order. Compatible redrive serves durable X without body execution.
+
+Non-forced deployment removal requires `unfinished_invocations` and independently
+owned old work to be drained. Transferred pending sources alone must not pin the
+predecessor. A failed admin query refuses removal. The
+[deployment guide](../../docs/operations/deploying-and-upgrading.md) describes the
+operator contract; an invocation kill cannot substitute for it.
 
 The controller submits workflow `run` with workflow key
 `ProcessRegistration.id` and sends cancellation to the workflow's shared
@@ -217,7 +219,6 @@ body, so an unsupported range never materializes it. Direct callers can choose
 all four allowances with `Call::decode_json_with_limits`; SDK ingress uses the
 default allowances. Remote envelopes and turn inputs use the same preflight
 through their `decode_json_with_limits` methods.
-
 
 ## Release journal replay
 

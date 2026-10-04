@@ -6,7 +6,7 @@ A process can execute arbitrarily many effects without requiring an unbounded si
 
 ### 1. The engine stays authoritative for durable execution within a segment
 
-Restate's journal is the source of effect outcomes inside a segment. Cross-segment state is a VM continuation and the runtime ledgers needed to resume it, rather than a growing effect-result ledger. Making the engine a scheduler over a second Lash replay store is rejected because it duplicates durable execution to address an engine-specific journal limit.
+Restate's journal is the source of effect outcomes inside a segment. Cross-segment state is a VM continuation and the Run event and state frontiers needed to resume it, rather than a growing effect-result ledger. Making the engine a scheduler over a second Lash replay store is rejected because it duplicates durable execution to address an engine-specific journal limit.
 
 ### 2. The boundary trigger is step-count, decided by the controller
 
@@ -16,7 +16,10 @@ Thresholds tune liveness without changing authored results. There is no implemen
 
 ### 3. Cross-boundary state is a bounded VM continuation
 
-The continuation retains instruction position, live slots and stacks. Its envelope retains replay ordinals, started-process ids, incorporation state, pending summaries and outstanding effect-group handles. The successor restores those fields before executing. The bound is live program data, not a universal byte limit: a program retaining an ever-growing value can grow its continuation independently of journal segmentation.
+The continuation retains instruction position, live slots and stacks. Its envelope retains replay ordinals, started-process ids, incorporation state, pending summaries and the complete `RunTransfer`. That
+transfer retains earlier/current aggregates, unconsumed and unseated finals,
+unranked source seals, retained material leases, state frontier, capacity and
+owed process starts and cancels. The successor restores those fields before executing. The bound is live program data, not a universal byte limit: a program retaining an ever-growing value can grow its continuation independently of journal segmentation.
 
 ### 4. Code-version pinning and journal cost are separate concerns
 
@@ -28,22 +31,34 @@ Three requirements govern a boundary:
 
 1. Handover consists of ordered durable steps in one workflow handler. The handler records the successor reference and continuation, journals the successor send, forwards cancellation and retires the preceding continuation. Each store write is idempotent and the send belongs to the engine journal. After a crash, replay completes the sequence and reaches exactly one logical successor scheduling. Recovery produces the complete handover without an observable half-handover or a lost continuation. These steps span storage transactions.
 2. Successor execution is idempotent under the stable process identity across segment resets.
-3. No pending operation remains uncaptured at the cut. Required child identities, consumed settlement prefix and retention dependencies travel in the continuation.
+3. No issued local attempt remains unacknowledged at the cut. Stop new admission,
+   quiesce through durable ACK, then transfer pending sources, consumed prefixes,
+   protected drain and retention dependencies with the continuation. A physical
+   exit never records logical Closing (L09/L16).
 
 The process remains non-terminal through a segment boundary. A retained handover is replay authority until its resume step journals the continuation. After successor scheduling and cancellation forwarding, the predecessor retires the continuation it resumed from. Its replay uses the journaled resume value even after that retirement. The successor's continuation remains retained through terminal publication until pruning permits deletion.
 
 The [build-roll handoff laws](../../crates/lash-restate/src/tests/segment_generation_handoff.rs) exercise crashes after the continuation write, before successor send, during cancellation forwarding after send and after retirement. The [handover crash-cut laws](../../crates/lash-restate/src/tests/segment_generation_handoff/crash_cuts.rs) run the continuation-write, retirement, before-send and immediately-after-send cuts with forced replay over SQLite memory, SQLite file and PostgreSQL. They assert one successor invocation, exact continuation restoration on every replay and one retained terminal outcome. The [segment redrive law](../../crates/lash-conformance/src/conformance/segment_redrive.rs) checks recorded effects within a segment; the [simulator process crash cases](../../crates/lash-sim/src/crash_matrix/cases/process.rs) check process start and terminal recovery.
 
-## Outstanding tool children at a boundary
+## Outstanding Run work at a boundary
 
-Outstanding children do not block a capturable boundary. Otherwise repeated races against a hung child can grow one journal indefinitely. Successors reattach by retained invocation identity and continue from the captured settlement cursor under ADR 0099. Expired attachment is a typed recovery failure rather than permission to rerun a side effect.
+An inline attempt blocks a successful cut until its result is durably accepted.
+A Deferred X releases the local attempt and transfers its pending source without
+waiting for resolution. `request_cut`, `quiesce` and `capture_cut` distinguish
+those cases; a worker loss leaves recovery on the predecessor journal rather
+than exporting a native future. The successor adopts the same logical owner.
 
-Group admission bounds retained work per exact logical opener, including settled results still needed by replay or consumers. Reservations happen before dispatch, replay reuses them, and release requires discharging recovery and consumer dependencies. Command headroom is per executing controller/segment. Close budgets are attempt-local and do not alter committed obligations. ADR 0099 owns the full group accounting contract.
+Run admission bounds retained work, including settled results still needed by
+replay or consumers. Reserve before issuing attempts, reuse the reservation on
+replay, and release only after recovery, consumer and material dependencies end.
+Command headroom belongs to the executing segment. Closing does not reclaim
+material. Typed retained-result refusal never authorizes a fresh body. See
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
 ## Payload and lifecycle consequences
 
 Segmentation bounds completed effect count, not the byte size of every result.
-Tool children journal their own outcomes. Intent admission allows at most 32
+The owning Run journals each independent attempt outcome. Intent admission allows at most 32
 declarations, 16 of one kind, and 64 KiB of canonical intent JSON per completed
 attempt. The byte bound measures the complete declaration, including its
 captured environment's digest. The capture lives once in the content-addressed

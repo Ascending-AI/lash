@@ -25,9 +25,8 @@ against ancestry. These scope rules belong to
 identity belongs to
 [ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md).
 
-Evidence: `crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs:1`,
-`:34`, `:98`, `:132`, `:278`, `:402`, and
-`crates/lash-core-execution/src/runtime/process/model/start_request.rs:14`.
+Evidence: `crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs`, and
+`crates/lash-core-execution/src/runtime/process/model/start_request.rs`.
 
 ### Storage and scope-close ledger
 
@@ -52,11 +51,11 @@ per-scope/per-child delivery key, request identity, and settle marker are
 idempotent. Retryable delivery failure retries the application; a permanent
 refusal still records the request. Settlement does not await child termination.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/registry.rs:83`,
-`crates/lash-core-execution/src/runtime/process/parent_end.rs:1`, `:75`,
-`crates/lash-core-execution/src/runtime/process/scope_close.rs:1`,
-`crates/lash-sqlite-store/src/process_registry/registration.rs:51`, and
-`crates/lash-postgres-store/src/postgres/process_registry.rs:288`.
+Evidence: `crates/lash-core-execution/src/runtime/process/registry.rs`,
+`crates/lash-core-execution/src/runtime/process/parent_end.rs`,
+`crates/lash-core-execution/src/runtime/process/scope_close.rs`,
+`crates/lash-sqlite-store/src/process_registry/registration.rs`, and
+`crates/lash-postgres-store/src/postgres/process_registry.rs`.
 
 ### Stop and Cancel Origin
 
@@ -74,9 +73,9 @@ row follows the typed refusal path. The cancellation family is version 3 under
 `lash.process-cancellation-request`; its preimage contains process id, the
 permanent origin tag, and requester, with no timestamp.
 
-Evidence: `crates/lash-sansio/src/tool_output.rs:909`, `:920`,
-`crates/lash-core-execution/src/runtime/process/validation.rs:236`, and
-`crates/lash-core-execution/src/runtime/process/events.rs:960`.
+Evidence: `crates/lash-sansio/src/tool_output.rs`,
+`crates/lash-core-execution/src/runtime/process/validation.rs`, and
+`crates/lash-core-execution/src/runtime/process/events.rs`.
 
 ### Start compensation
 
@@ -90,27 +89,26 @@ A `StartFailed` request against a never-started row with no external reference
 makes it Cancelled. A registration conflict cannot license cancellation of
 another start's record.
 
-Evidence: `crates/lash-restate/src/controller/process_scheduling.rs:145`,
-`:429`, and `crates/lash-core-execution/src/runtime/process/validation.rs:827`.
+Evidence: `crates/lash-restate/src/controller/process_scheduling.rs`, and `crates/lash-core-execution/src/runtime/process/validation.rs`.
 
 ### 12. An opener close cancels waits, not registered processes
 
-Logical Run close stops new tool admission and drains protected obligations.
-Generic effect-group close releases its Durable Wait children. A process
-realized by a declared tool start has its own registered lifetime. Closing the Run or cancelling `processes.await(job)`
+Logical Run Closing stops new tool admission, settles protected obligations
+and releases source subscriptions. A process realized by a declared start has its own
+registered lifetime. Closing the Run or cancelling `processes.await(job)`
 does not itself request cancellation of `job`. The process can nevertheless be
 cancelled when its recorded `Until` scope closes. Work that must survive the
 turn needs a lifetime that reaches beyond that turn.
 
 A dead worker and segment handover are neither scope closure nor opener close.
-Finalization settles protected obligations and accounting, commits the outcome,
+Finalization settles protected obligations and recorded usage, commits the outcome,
 then records scope closure and completes retirement. Recovery resumes missing
-steps. The logical tool lifetime belongs to the
-[Tool-run contract](../architecture/tool-run-contract.md).
+steps. The Run ownership contract belongs to
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
-Evidence: `crates/lash-core-execution/src/runtime/process/scope_close.rs:1`,
-`crates/lash-restate/src/process/mod.rs:241`, and
-`crates/lash-core-execution/src/runtime/process/parent_end.rs:75`.
+Evidence: `crates/lash-core-execution/src/runtime/process/scope_close.rs`,
+`crates/lash-restate/src/process/mod.rs`, and
+`crates/lash-core-execution/src/runtime/process/parent_end.rs`.
 
 ## Alternatives considered
 

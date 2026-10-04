@@ -392,6 +392,9 @@ cancel drops its wait and does not cancel its parked child, so the workload must
 do this cleanup explicitly. An incomplete census retains its metric/histogram
 outputs with `qualification.status=INCOMPLETE` and exits unsuccessfully. Missing
 or vanished internal completions are never excused as inferred cancellations.
+Tool attempts and aggregate selection are records in their owning Run journal;
+no tool/group service invocation belongs to the final population. Include
+incorporation and every surviving process/source descendant in the census.
 The collector retains run-owned `sys_journal` signal commands with their exact
 target invocation IDs. A disappeared inboxed descendant invocation is explained
 only by a recorded built-in cancel signal targeting that ID, matching Restate

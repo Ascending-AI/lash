@@ -25,13 +25,13 @@ A dot separates a namespace from a base name. An underscore introduces a
 generation suffix and is a wildcard in admin SQL, so neither belongs in a
 namespace.
 
-Evidence: `crates/lash-restate/src/services.rs:150`.
+Evidence: `crates/lash-restate/src/services.rs`.
 
 ### 2. Every name carries it
 
 Stable names are `{namespace}.{Base}` and generation lanes are
 `{namespace}.{Base}_g{generation}`. The default namespace omits the prefix.
-`LashDurableWaitIndex` and `EffectGroupIndex` are base names in this scheme.
+`LashDurableWaitIndex` and `LashSession` are base names in this scheme.
 
 Host ingress, typed handler clients and admin queries use these qualified
 names. Namespace-aware route parsing and service-lane filters keep queries
@@ -39,9 +39,7 @@ within the configured namespace. [ADR 0106](0106-durable-formats-upgrade-by-migr
 and [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
 own generation routing and compatibility.
 
-Evidence: `crates/lash-restate/src/services.rs:187`,
-`crates/lash-restate/src/services.rs:251`, and
-`crates/lash-restate/src/services.rs:269`.
+Evidence: `crates/lash-restate/src/services.rs`.
 
 ### 3. Keys stay scoped to their services
 
@@ -71,8 +69,8 @@ The checks and registration are separate admin operations. They detect
 misconfiguration and do not serialize racing registrations. They perform
 no authentication or host security policy.
 
-Evidence: `crates/lash-restate/src/engine.rs:263` and
-`crates/lash-restate/src/engine.rs:308`.
+Evidence: `crates/lash-restate/src/engine.rs` and
+`crates/lash-restate/src/engine.rs`.
 
 ### 5. Hosts share a server
 
@@ -83,7 +81,7 @@ The workbench's valid-empty fixture uses `agent-workbench-valid-empty` on
 the workbench's server. Launch-script hosts can register their default
 namespace endpoint through their scripts.
 
-Evidence: `examples/shared/local_restate.rs:196`, `:210`.
+Evidence: `examples/shared/local_restate.rs`.
 
 Executable evidence is the namespace suite in
 `crates/lash-restate-test/tests/namespaces.rs`, which runs on the Restate

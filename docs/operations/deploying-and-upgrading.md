@@ -143,15 +143,21 @@ state while investigating either refusal.
    Repeat `drain-status` until its `drained` field is true and exit code is 0.
    Drained means nothing left needs N's deployment: the generation is marked,
    and it holds no live or parked process, no parked or in-flight turn, no
-   session is closing, and no unfinished engine invocation is pinned to a deployment
-   serving N. `unfinished_invocations` includes waits, attaches, terminal
-   reads, session shifts and paused invocations until they return.
-   `drain-status` reads this count from Restate's admin API, so it requires
-   `--restate-admin-url`; an unreachable or unreadable admin API fails the
-   command rather than reporting drained. A code 5 means some of that remains;
-   inspect those counts. Keep N's deployment registered while any invocation or recorded
-   route still needs it. Settle stuck work through the owning host; do not
-   treat a missing heartbeat or an empty host queue as retirement evidence.
+   session is closing, and no unfinished engine invocation is pinned to a
+   deployment serving N. `unfinished_invocations` includes real old work,
+   terminal reads, session shifts and paused invocations until they return.
+   `drain-status` obtains that evidence through Restate's admin API and requires
+   `--restate-admin-url`. An unreachable or unreadable API fails the command;
+   it never reports drained. Code 5 means retained work remains: inspect the
+   counts and settle it through its owning host.
+
+   Continuation adoption transfers the complete logical Run and rebinds short
+   source subscriptions to N+1. A source may remain unresolved after N is
+   removed; stale subscriptions, waits, reads or shifts must not pin N. L11's
+   deployment witness resolves that source after non-forced removal. Process
+   segment journal pins and independently owned old work still hold the drain.
+   Keep N registered until every real invocation or retained route needs it
+   no longer. A missing heartbeat or empty host queue is no retirement proof.
 
    Stalled obligations do not hold the drain, so a drained result can still
    list them. `stalled_obligations` counts them per kind, and `stalled` lists
@@ -203,7 +209,7 @@ Finalize changes nothing, and refuses typed, until all of these hold:
 
 | Refusal | Exit | Meaning and action |
 | --- | --- | --- |
-| `generation_not_drained` | 5 | N's generation is not marked draining, or it still holds a live or parked process, a parked or in-flight turn, a closing session, or an undrained committed effect-group child. The refusal carries the drain status; keep polling `drain-status`. |
+| `generation_not_drained` | 5 | N's generation is not marked draining, or it still holds a live or parked process, a parked or in-flight turn, a closing session, or unfinished invocations pinned to its deployment. The refusal carries the drain status; keep polling `drain-status`. |
 | `deployments_retained` | 3 | The Restate server still holds a deployment serving N's generation lanes, in any namespace. The refusal lists each by id and URI. Remove them once their pinned invocations have drained. |
 | `held` | 3 | An operator holds the automatic finalize. The refusal carries the hold's reason and when it was set. |
 

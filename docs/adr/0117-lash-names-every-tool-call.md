@@ -81,9 +81,9 @@ worker broker. Process segment boundaries preserve the whole-program ordinal.
 Provider ids, arguments, tool names, attempt numbers, scheduling order and
 user labels are absent from the preimage.
 
-Sources: `crates/lash-sansio/src/tool_call_id.rs:19`,
-`crates/lash-sansio/src/sansio/turn_protocol.rs:897`, and
-`crates/lash-vm-broker/src/identity.rs:86`.
+Sources: `crates/lash-sansio/src/tool_call_id.rs`,
+`crates/lash-sansio/src/sansio/turn_protocol.rs`, and
+`crates/lash-vm-broker/src/identity.rs`.
 
 ### 3. The type
 
@@ -95,7 +95,7 @@ checks the spelling, not proof that a particular admission minted it.
 
 The type lives beside the identity domain registry in lash-sansio.
 
-Source: `crates/lash-sansio/src/tool_call_id.rs:243`.
+Source: `crates/lash-sansio/src/tool_call_id.rs`.
 
 ### 4. When the identity becomes durable
 
@@ -105,9 +105,9 @@ journaled issue position; a host submission uses its admission. Replaying the
 same plan yields the same ids. A fresh response has a fresh position even if
 its provider ids match another response's.
 
-Sources: `crates/lash-sansio/src/sansio/turn_protocol.rs:846`,
-`crates/lash-core-execution/src/session/tool_execution/group.rs:294`, and
-`crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs:42`.
+Sources: `crates/lash-sansio/src/sansio/turn_protocol.rs`,
+`crates/lash-core-execution/src/session/tool_execution/group.rs`, and
+`crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs`.
 
 ### 5. The tool-facing API
 
@@ -127,7 +127,7 @@ stores the id and retry information and builds the attempt context.
 Provider correlation belongs to protocol, transcript and display records,
 rather than an accessor on the attempt context.
 
-Source: `crates/lash-core-execution/src/tool_provider.rs:372`.
+Source: `crates/lash-core-execution/src/tool_provider.rs`.
 
 ### 6. Derived keys
 
@@ -136,22 +136,23 @@ cancellation keys derive from the call id. Attempts and retry sleeps add the
 attempt number. Intent identities add the intent index; final-emission
 attribution remains separate evidence. Completion keys include the execution
 scope. Commit records retain both lash identity and provider correlation.
-Group slots govern ordering independently of identity.
+Run operand slots govern ordering independently of identity.
 
-Sources: `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs:42`,
-`crates/lash-core-execution/src/tool_intent.rs:401`,
-`crates/lash-core-store/src/await_event_identity.rs:1`, and
-`crates/lash-sansio/src/frame_key.rs:39`.
+Sources: `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs`,
+`crates/lash-core-execution/src/tool_intent.rs`,
+`crates/lash-core-store/src/await_event_identity.rs`, and
+`crates/lash-sansio/src/frame_key.rs`.
 
 ### 7. Retained payload drift is refused before any effect
 
-Whole-round Run admission records call ids, canonical bindings, argument
-and authority material, prepared requests and operand aliases before any
-body starts. Replay validates retained admission and serves its prepared
-payload. A changed identity or missing material refuses typed before a
-fresh body; it never remints a call id.
+Whole-round K1 admission records each call id, canonical request digest, prepared
+payload, owner, capabilities and executable/preparation/presentation bindings.
+Replay compares identity and content before fresh execution. The id is never
+reminted on drift. Preparation is served from canonical A material and every
+later attempt uses it. A changed request, missing binding or retained-material
+failure refuses with its typed cause instead of running a new body (L12).
 
-Source: `crates/lash-core-execution/src/session/tool_run.rs` and
+Source: `crates/lash-core-store/src/tool_run/admission.rs` and
 `crates/lash-core-execution/src/tool_dispatch/production.rs`.
 
 ### 8. The provider boundary
@@ -169,9 +170,9 @@ maps other ids to a permitted prefix plus a hash suffix, checking request-wide
 collisions. RLM enforces its one-`execute_code` grammar independently of lash
 call identity.
 
-Sources: `crates/lash-core/src/runtime/assembly.rs:596`,
-`crates/lash-provider-anthropic/src/request.rs:707`, and
-`crates/lash-protocol-rlm/src/native/tool.rs:121`.
+Sources: `crates/lash-core/src/runtime/assembly.rs`,
+`crates/lash-provider-anthropic/src/request.rs`, and
+`crates/lash-protocol-rlm/src/native/tool.rs`.
 
 ### 9. Generation ownership
 
@@ -182,27 +183,28 @@ An executable record is never reminted to fit a new derivation. Shapes change
 in place during the pre-1.0 version freeze; upgrade read contracts belong to
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
 
-Sources: `crates/lash-core/src/runtime/turn_loop/generation_fence.rs:25` and
-`crates/lash-restate/src/process/workflow.rs:1210`.
+Sources: `crates/lash-core/src/runtime/turn_loop/generation_fence.rs` and
+`crates/lash-restate/src/process/workflow.rs`.
 
 ### 11. Laws
 
 `tool_call_identity_tests!` registers identity laws, including:
 
-- `tool_identity_survives_unrecorded_effect_crash`;
 - `reported_failure_retry_preserves_call_id`;
-- `recorded_outcome_skips_execution`;
 - `repeated_provider_id_across_turns_is_distinct`;
-- `same_scope_completion_collision`.
+- `same_scope_completion_collision`;
+- `code_cells_keep_identity_and_distinguish_fresh_calls`.
 
-The conformance laws also cover batch identity and retained-request drift.
+`batch_admission_and_identity_contract` covers batch identity. Run admission
+refuses retained-request drift (L12).
 The store matrix is SQLite file, SQLite memory and PostgreSQL. Host coverage
 uses the in-process Restate server double, live Restate and lash-sim's
 in-process effect host. Upgrade proofs use the synthetic-next tier.
 
-Sources: `crates/lash-conformance/src/macros/tool_call_identity.rs:1`,
-`crates/lash-conformance/src/conformance/tool_call_identity/drift.rs:1`, and
-`crates/lash-sim/src/invariants/tool_call_identity.rs:1`.
+Sources: `crates/lash-conformance/src/macros/tool_call_identity.rs`,
+`crates/lash-conformance/src/conformance/batch_sugar.rs`,
+`crates/lash-core-store/src/tool_run/admission.rs`, and
+`crates/lash-sim/src/invariants/tool_call_identity.rs`.
 
 ## Consequences
 

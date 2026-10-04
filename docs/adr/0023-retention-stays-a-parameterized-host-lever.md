@@ -24,8 +24,8 @@ replays match on the cancellation rather than on payload bytes and a process
 holds one. Sequence allocation and signal ordinals count rows, so they are
 unchanged. A re-presented replay key of a released event coalesces when the
 payload has the released digest and refuses as a durable-identity conflict
-otherwise. Segment replays, tool children reattached across segments and
-host signal retries can all re-present a key, and storage cannot observe when
+otherwise. Segment replays, transferred Run attempts and host signal retries
+can all re-present a key, and storage cannot observe when
 the last of them has finished, so the release keeps every fence the way
 trigger mutation receipts keep theirs. Release therefore reclaims payload
 bytes; the retained row of an event with a small payload stays roughly its

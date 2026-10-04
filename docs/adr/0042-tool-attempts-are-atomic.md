@@ -25,8 +25,8 @@ retries preserve `ToolCallId`, while `attempt_number` identifies the attempt
 `Done` carries terminal output and ordered `ToolIntents`. `Pending` cannot
 carry general intents. It may carry a `PendingAnnouncement`, appended by the
 runtime at park time, or exactly one same-session `DeclaredStart` through its
-pending resolver. The runtime seals the declaration's recoverable launch
-obligation at the child cancellation boundary. A non-final attempt's
+pending resolver. The Run records the declaration's recoverable launch obligation and its
+pre-admission cancellation decision. A non-final attempt's
 declarations are discarded.
 
 A direct model completion inside the attempt runs locally as part of its
@@ -46,8 +46,7 @@ The engine's journal owns replay; an external invocation is not automatically
 an idempotency lookup. Child lifetime and scope-end settlement are registration
 facts governed by ADRs 0094 and 0108.
 
-Standard `batch` is protocol sugar expanded into the turn's top-level tool
-group. `spawn_agent` is an ordinary opaque tool returning Pending with a
+Standard `batch` is protocol sugar expanded into the turn's admitted tool round. `spawn_agent` is an ordinary opaque tool returning Pending with a
 `DeclaredStart`. There is one tool execution route, with no separate
 orchestrating body class.
 
@@ -64,16 +63,16 @@ durable fenced decision point (ADR 0099):
 - Worker loss does not cancel a recorded declaration. Cancellation does not
   undo admitted commands or destroy retained descendant obligations.
 
-Cross-child drain admission follows recorded final-commit order. It does not
+Cross-call protected-drain admission follows recorded final-commit order. It does not
 wait for a sibling that has not committed, but an earlier committed drain can
 hold a later drain until it finishes. This is distinct from source order
 inside one attempt.
 
-Retry, completion-key derivation and deferred waiting run at handler level on
-the child's admitted controller. Only the opaque attempt body runs inside the
-recorded effect. A recorded body emits no commands into an ordinal-addressed
-journal. First dispatch and recovery use the registered child executor rather
-than a caller closure that disappears after the first execution.
+Retries, completion-key derivation, Deferred subscription, final decision and
+protected drain run in the owning Run coordinator. Only the opaque body runs
+inside X. Each attempt records its own result; replay of a durable result runs
+no body. The admitted executable and prepared input supply recovery, so a
+caller does not reconstruct an independent child handler.
 
 ## Consequences
 
@@ -92,7 +91,7 @@ preparation or execution; it is not a store-dependent start-admission verdict.
 ## Implementation
 
 - [Opaque provider and attempt context](../../crates/lash-core-execution/src/tool_provider.rs) and [exclusive outcome variants](../../crates/lash-core-execution/src/tool_intent.rs).
-- [Prepared atomic attempt runner](../../crates/lash-core-execution/src/tool_dispatch/atomic_attempt.rs). Direct and group-child callers share validation, attempt-local completion and capture buffers, and body execution. The runner requires no child request or reconstruction and issues no coordination commands.
+- [Prepared atomic attempt runner](../../crates/lash-core-execution/src/tool_dispatch/atomic_attempt.rs). Run callers share validation, attempt-local completion and capture buffers, and body execution. The runner consumes the admitted prepared call and issues no coordination commands.
 - [Pending declarations](../../crates/lash-core-execution/src/tool_result.rs) and [pending launch](../../crates/lash-core-execution/src/tool_dispatch/pending_resolver.rs).
-- [Final recording and intent drain](../../crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs).
-- [Durable child arbitration](../../crates/lash-restate/src/effect_group/state_record.rs).
+- [Final recording and intent drain](../../crates/lash-core-execution/src/tool_dispatch/run_coordinator/drain.rs).
+- [Run final-or-cancel arbitration](../../crates/lash-core-store/src/tool_run/run_event.rs).

@@ -27,9 +27,9 @@ snapshots, and replay. Process lifetime and identity follow
 [ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md) and
 [ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md).
 
-Evidence: `crates/lash-lashlang-runtime/src/process_create_tool.rs:31`,
-`crates/lash-lashlang-runtime/src/trigger_tools.rs:1`,
-`crates/lashlang/src/runtime/vm/continuation.rs:140`, and
+Evidence: `crates/lash-lashlang-runtime/src/process_create_tool.rs`,
+`crates/lash-lashlang-runtime/src/trigger_tools.rs`,
+`crates/lashlang/src/runtime/vm/continuation.rs`, and
 `crates/lashlang/src/trigger.rs`.
 
 ### Contracts say `Process` through one tagged keyword
@@ -42,9 +42,9 @@ is a claim; engine resolution supplies authority and refuses mismatches before
 registration, under
 [ADR 0090](0090-named-process-signatures-are-authoritative.md).
 
-Evidence: `crates/lashlang/src/json_schema.rs:24`,
+Evidence: `crates/lashlang/src/json_schema.rs`,
 `crates/lash-lashlang-runtime/src/process/schema.rs`,
-`crates/lash-core-execution/src/runtime/process/definition.rs:417`, and
+`crates/lash-core-execution/src/runtime/process/definition.rs`, and
 `crates/lashlang/src/linker/catalog.rs`.
 
 ### Definitions are immutable values
@@ -94,14 +94,12 @@ host pins hold the artifact closure under
 Both a definition value and its tagged id can retain the closure in a frame;
 `continue_as` carries only the values its seed supplies.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/definition.rs:89`,
-`:148`, `:189`, `:274`, `:417`,
+Evidence: `crates/lash-core-execution/src/runtime/process/definition.rs`,
 `crates/lash-sansio/src/definition_id.rs`,
-`crates/lash-core-execution/src/runtime/process/definition_store.rs:151`, and
-`crates/lash-lashlang-runtime/src/process_create_tool.rs:1`.
+`crates/lash-core-execution/src/runtime/process/definition_store.rs`, and
+`crates/lash-lashlang-runtime/src/process_create_tool.rs`.
 The independent golden vectors and laws live in
-`crates/lash-core-execution/src/runtime/process/definition_tests.rs:145`,
-`:259`, `:329`, `:408`.
+`crates/lash-core-execution/src/runtime/process/definition_tests.rs`.
 
 ### No new intent-identity mechanism
 
@@ -112,7 +110,7 @@ issue ordinal names a command; structural node id and occurrence are telemetry.
 
 Evidence: `crates/lash-core-execution/src/runtime/process/model/start_request.rs`,
 `crates/lash-core-store/src/process_identity.rs`, and
-`crates/lash-lashlang-runtime/src/host_identity.rs:1`.
+`crates/lash-lashlang-runtime/src/host_identity.rs`.
 
 ### Literals lift syntactically, and are accepted type-directed
 
@@ -123,8 +121,7 @@ Immutable, durably representable captured locals become hidden parameters.
 The linker infers signals from `waitSignal` sites and refuses disagreeing
 payload types. No call-site marker or trigger-receiver special case owns lifting.
 
-Evidence: `crates/lashlang/src/linker/process_literal.rs:1`, `:21`, `:56`,
-`:112`, and `crates/lash-typescript/src/lower`.
+Evidence: `crates/lashlang/src/linker/process_literal.rs`, and `crates/lash-typescript/src/lower`.
 
 ### One handle kind, and await is a Durable Wait
 
@@ -132,24 +129,24 @@ The shared handle record is `{ __handle__: "lash", id }`. A process handle id
 is `p.<minted process id>`; the codec distinguishes that target from a tool
 request. Pending requests use handle ids.
 
-`processes.await` parks on the Durable Wait seam. In an effect group it is a
-resumable child, retained across segment boundaries, and takes its rank when
-completion arrives. There is no running attempt body to join at close.
-A raw process handle at an aggregate element must be replaced by the
-`processes.await` call so the wait participates in group settlement.
+`processes.await` returns Deferred on a process-terminal source. The logical
+Run retains its descriptor through handover and takes a rank only when the
+immutable source seal becomes a final decision. There is no local body waiting
+on a long attach handler. A raw process handle in an aggregate must be replaced
+by the explicit await call.
 
-Selection leaves a losing wait admitted while the opener lives. Opener close
-releases it without cancelling the process. The process's own lifetime still
-applies. Process success, failure, or cancellation travels through
-`Resolution::Ok` as a `ProcessAwaitOutput`; `Resolution::Cancelled` describes
-wait cancellation and becomes `process_await_cancelled`.
+A losing wait stays admitted while the logical Run lives. Closing releases that
+subscription under `Ignore` without cancelling the observed process. The
+process's independent lifetime still applies. `Resolved(ref)` carries the
+canonical `ProcessAwaitOutput`, including process failure or cancellation;
+`Cancelled` is cancellation of the observing wait. No source timeout exists.
 
-Evidence: `crates/lash-sansio/src/handle.rs:46`, `:85`, `:142`,
-`crates/lashlang/src/runtime/vm/pending_tools.rs:176`,
-`crates/lash-restate/src/process/mod.rs:208`, `:241`, and
-`crates/lash-core-execution/src/runtime/effect/executor/process_local.rs:1`.
-The [Tool-run contract](../architecture/tool-run-contract.md) owns logical
-tool aggregates, and
+Evidence: `crates/lash-sansio/src/handle.rs`,
+`crates/lashlang/src/runtime/vm/pending_tools.rs`,
+`crates/lash-restate/src/process/mod.rs`, and
+`crates/lash-core-execution/src/runtime/effect/executor/process_local.rs`.
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
+owns Run settlement, and
 [ADR 0016](0016-process-waits-live-on-the-work-driver-seam.md) owns Durable Wait.
 
 ### The workflow graph sees calls, not a start effect
@@ -157,7 +154,7 @@ tool aggregates, and
 A process start projects as a call; a literal projects as a process container.
 The code-graph-code lens follows
 [ADR 0037](0037-lashlang-workflows-use-a-code-graph-code-lens.md).
-Evidence: `crates/lashlang/src/workflow_graph/projection.rs:390`, `:660`.
+Evidence: `crates/lashlang/src/workflow_graph/projection.rs`.
 
 ## Alternatives considered
 

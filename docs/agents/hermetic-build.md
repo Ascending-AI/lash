@@ -716,6 +716,17 @@ To convert another package, tag its tests `hermetic-postgres`, add it to
 PostgreSQL major other than 16, or a server shared with another process stays
 on `with-service.sh`.
 
+## Tool-run proof selection
+
+The tool contract in [ADR 0099](../adr/0099-tool-children-of-effect-groups-are-live-closing-settled.md)
+uses owning Run/source laws. Select a full test path from the current source and
+verify the executed-case count in the printed `kiln test` report. A successful
+zero-case filter proves nothing. Use the Restate server double and SQLite for
+the developer proof; registered live or synthetic-next gates retain their own
+release jobs. Do not select retired child/group-service test families or revive
+removed targets. Generated target membership changes through `kiln sync` in the
+owning definition closure.
+
 ## Service and Cargo-owned gates
 
 Registered Restate suites without a `ci_driver` run as cacheable remote

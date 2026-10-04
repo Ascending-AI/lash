@@ -110,7 +110,11 @@ an object-valued `inputs` each reject by name with
 `TS_TRIGGER_INPUTS_LITERAL_REQUIRED`.
 
 Every `Promise` aggregate evaluates any array-valued expression and aggregates
-its pending handles and already-settled values as one durable effect group.
+its pending handles and already-settled values in one Run-owned aggregate.
+Whole-plan admission owns pending siblings before an immediate winner returns.
+An early winner leaves losers live; a physical cell/segment boundary never
+closes their logical Run. Deferred descriptors become values only after source
+resolution, and cancellation uses the recorded final-or-cancel decision.
 Unawaited tool calls create handles. A bare tool-call statement, including
 `void tools.x(...)`, and a `const` or `let` tool handle never read in the cell
 are refused at lowering with `TS_UNAWAITED_TOOL`, before any effects run.

@@ -42,9 +42,9 @@ keyed by the artifact referrer; its owner and guard rules are in
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 Wake deliveries have their own equivalent ledger vocabulary.
 
-Evidence: `crates/lash-store-sql/src/obligation.rs:15`,
-`crates/lash-store-sql/src/process/processes.rs:151`, and
-`crates/lash-core-store/src/store/obligation.rs:163`.
+Evidence: `crates/lash-store-sql/src/obligation.rs`,
+`crates/lash-store-sql/src/process/processes.rs`, and
+`crates/lash-core-store/src/store/obligation.rs`.
 
 ### 1.2 Kinds
 
@@ -63,9 +63,7 @@ Unknown stored vocabulary returns `StoreError::Incompatible` with
 `UnknownVocabulary`. A key that cannot decode remains addressable by its
 obligation id and is returned as an undecodable claimed row.
 
-Evidence: `crates/lash-core-store/src/store/obligation.rs:35`,
-`crates/lash-core-store/src/store/obligation.rs:135`, and
-`crates/lash-core-store/src/store/obligation.rs:527`.
+Evidence: `crates/lash-core-store/src/store/obligation.rs`.
 
 ### 1.3 Store half: the ledger
 
@@ -88,9 +86,7 @@ with attempts reset. Re-arm accepts only a stalled row and resets attempts.
 Producers arm work due at once where delivery must not depend on a database
 clock being ahead of the relay's host clock.
 
-Evidence: `crates/lash-core-store/src/store/obligation.rs:401`,
-`crates/lash-core-store/src/store/obligation.rs:555`, and
-`crates/lash-core-store/src/store/obligation.rs:594`.
+Evidence: `crates/lash-core-store/src/store/obligation.rs`.
 
 ### 1.4 Engine half: the relay
 
@@ -119,8 +115,8 @@ attempts, 60-second claim TTL and 30-second attempt budget. Backoff doubles
 per attempt and starts at the attempt's start time. The host owns these
 policy values; the attempt budget must remain below the claim TTL.
 
-Evidence: `crates/lash-core/src/runtime/shift/relays.rs:148` and
-`crates/lash-core-execution/src/runtime/shift/relay.rs:55`, `:255`, `:338`, `:388`.
+Evidence: `crates/lash-core/src/runtime/shift/relays.rs` and
+`crates/lash-core-execution/src/runtime/shift/relay.rs`.
 
 ### 1.5 Stalled surfacing
 
@@ -136,9 +132,9 @@ implicitly re-arms a delivered process start or a stalled row. Operational
 metrics record delivery outcomes, stalled counts and recovery-leader
 standing.
 
-Evidence: `crates/lash/src/core.rs:302`,
-`crates/lash/src/core/drain.rs:38`, and
-`crates/lash-core-execution/src/runtime/shift/relay.rs:243`.
+Evidence: `crates/lash/src/core.rs`,
+`crates/lash/src/core/drain.rs`, and
+`crates/lash-core-execution/src/runtime/shift/relay.rs`.
 
 ### 1.6 Leader lease
 
@@ -160,9 +156,9 @@ leader duties. Drain and shutdown resign; dropping the deployment also
 resigns a grant whose initiating caller lost its answer. The lease controls
 load and is not an execution fence.
 
-Evidence: `crates/lash-core-execution/src/engine/reconcile.rs:140`,
-`crates/lash-core/src/runtime/recovery_lease.rs:151`,
-`crates/lash/src/core/recovery.rs:76`, and
+Evidence: `crates/lash-core-execution/src/engine/reconcile.rs`,
+`crates/lash-core/src/runtime/recovery_lease.rs`,
+`crates/lash/src/core/recovery.rs`, and
 `crates/lash-store-sql/src/recovery_leader.rs`.
 
 ### 1.7 Duties
@@ -173,7 +169,7 @@ SQLite restricts due claims to the leader. Parks, repair, drain handover,
 park-feed compaction and opt-in evidence retention are leader duties.
 All duties remain idempotent when leader activity overlaps.
 
-Evidence: `crates/lash-core/src/runtime/recovery_lease.rs:151` and
+Evidence: `crates/lash-core/src/runtime/recovery_lease.rs` and
 `crates/lash-core/src/runtime/shift/reconcile.rs`.
 
 ### 1.8 Detection and delivery bounds
@@ -201,9 +197,9 @@ latency within the tick budget. They are not a throughput guarantee under
 an unbounded incoming queue. Simulation varies scheduling to exercise loss,
 retry, stalled delivery and failover.
 
-Evidence: `crates/lash-core/src/runtime/shift/interval.rs:19`,
+Evidence: `crates/lash-core/src/runtime/shift/interval.rs`,
 `crates/lash-core/src/runtime/shift/lanes.rs`, and
-`crates/lash-core-execution/src/engine/reconcile.rs:105`.
+`crates/lash-core-execution/src/engine/reconcile.rs`.
 
 ## 2. Rationale
 
@@ -292,11 +288,11 @@ and retain separate cursors across ticks. Cursors advance before engine
 requests, so failed or timed-out items cannot pin a page; an exhausted
 catalog wraps and retries them.
 
-Evidence: `crates/lash-core/src/runtime/shift/relays.rs:148`,
-`crates/lash-core-execution/src/runtime/trigger_delivery.rs:50`,
-`crates/lash-sqlite-store/src/process_registry/registration.rs:117`,
-`crates/lash-restate/src/process/park_reconcile.rs:109`, and
-`crates/lash-core-execution/src/runtime/vocabulary.rs:493`.
+Evidence: `crates/lash-core/src/runtime/shift/relays.rs`,
+`crates/lash-core-execution/src/runtime/trigger_delivery.rs`,
+`crates/lash-sqlite-store/src/process_registry/registration.rs`,
+`crates/lash-restate/src/process/park_reconcile.rs`, and
+`crates/lash-core-execution/src/runtime/vocabulary.rs`.
 
 The same pass reads a run whose key Restate holds no execution of on any
 generation lane. An admission delivers its input's ingress obligation in the
@@ -338,8 +334,8 @@ closure authorizations. A pending authorization refuses it as
 Nothing has closed. The turn's final commit consumes its exact authorization;
 its answer does not prove that a successor or a replaying turn holds no pin.
 `LashCore::await_turn_cancel_closures` observes consumption of these stored
-pins before a host attempts a close again. It does not wait for effect-group
-pins. Every close still checks its refusals, since new work can race readiness.
+pins before a host attempts a close again. Run protected-drain and material
+dependencies retain their own eligibility checks. Every close still checks its refusals, since new work can race readiness.
 
 Delete records `CloseSession` and marks the session closing. New sends refuse
 as `SessionClosing`. The engine half stops its runs and closes its scopes.
@@ -403,7 +399,7 @@ Delayed delivery uses `obligation_due_at_ms`. Retry backoff is the relay's
 policy. Queued work carries no separate `available_at_ms` scheduling field.
 
 Evidence: `crates/lash-store-sql/src/turn_ingress/queued_batches.rs` and
-`crates/lash-core-execution/src/runtime/shift/relay.rs:215`.
+`crates/lash-core-execution/src/runtime/shift/relay.rs`.
 
 ## 6. Scope-close recovery
 
@@ -414,8 +410,8 @@ it settled. A delivered close does not become new work on the next tick.
 ADR 0108 §5 owns the lifetime meaning of the close. A close that meets
 corrupt stored data is refused rather than retried (§9).
 
-Evidence: `crates/lash-sqlite-store/src/session_runs.rs:169` and
-`crates/lash-core/src/runtime/shift/scope_close.rs:85`.
+Evidence: `crates/lash-sqlite-store/src/session_runs.rs` and
+`crates/lash-core/src/runtime/shift/scope_close.rs`.
 
 ## 7. Commands and adjacent writers present the shift fence
 
@@ -429,8 +425,8 @@ commit. A later sealed admission refuses that write as `StaleShiftFence`.
 The writer does not raise the epoch to gain authority. [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
 owns command admission and ordering.
 
-Evidence: `crates/lash-core-store/src/store/shift_fence.rs:275` and
-`crates/lash-core/src/runtime/session_api.rs:1161`, `:1478`.
+Evidence: `crates/lash-core-store/src/store/shift_fence.rs` and
+`crates/lash-core/src/runtime/session_api.rs`.
 
 ## 8. Executable evidence
 
@@ -439,10 +435,11 @@ The store matrix is SQLite file, SQLite memory and PostgreSQL. Host laws use
 the in-process Restate server double, live Restate and Lash-sim's in-process
 effect host. Upgrade proofs use the synthetic-next tier.
 
-`crates/lash-restate/src/tests/obligation_relay_on_the_double.rs` exercises
-engine delivery. `crates/lash-restate/src/tests/process_terminal_obligation_on_the_double.rs`
-checks terminal publication. `crates/lash/src/tests/obligation_relays.rs`
-checks core relay assembly. The session-delete finalizer is covered by
+The Run owner-recovery laws in
+`crates/lash-restate/src/tests/run_coordinator_on_the_double/owner_park.rs`
+exercise engine redelivery. `crates/lash-restate/src/tests/process_terminal_obligation_on_the_double.rs`
+checks terminal publication. `crates/lash/src/core/session_shifts.rs`
+assembles the core relays. The session-delete finalizer is covered by
 `crates/lash/src/tests/core_session_builder/session_delete_finalizer.rs` and
 `crates/lash-sim/tests/session_delete_bounds.rs`.
 
