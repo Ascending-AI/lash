@@ -5,6 +5,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
@@ -59,12 +60,14 @@ pub struct Entry {
     pub plugin: String,
     pub phase: String,
     pub detail: Value,
+    pub converter_calls: usize,
 }
 
 #[derive(Clone)]
 struct Probe {
     plugin: &'static str,
     controls: PathBuf,
+    converters: Arc<AtomicUsize>,
 }
 
 impl Probe {
@@ -74,6 +77,7 @@ impl Probe {
             plugin: self.plugin.into(),
             phase: phase.into(),
             detail,
+            converter_calls: self.converters.load(Ordering::SeqCst),
         })?;
         bytes.push(b'\n');
         let mut log = std::fs::OpenOptions::new()
@@ -111,14 +115,107 @@ impl PluginFactory for Probe {
     fn declaration(&self) -> PluginDeclaration {
         let mut declaration = PluginDeclaration::initial(self.plugin);
         if cfg!(feature = "synthetic-next") {
+            declaration.format_version =
+                lash_core::FormatVersion::new(2).unwrap_or(lash_core::FormatVersion::ONE);
+            declaration.writable_formats =
+                vec![lash_core::FormatVersion::ONE, declaration.format_version];
             declaration.behavior_revision = lash_core::plugin::BehaviorRevision::new(2)
                 .unwrap_or(lash_core::plugin::BehaviorRevision::ONE);
         }
         declaration
     }
 
+    fn register_config(
+        &self,
+        registrar: &mut lash_core::ConfigRegistrar,
+    ) -> Result<(), lash_core::ConfigRegistrationError> {
+        registrar.owner(ConfigOwner)
+    }
+
+    fn migrate_format(
+        &self,
+        from: lash_core::FormatVersion,
+        namespace: lash_core::FormatNamespace,
+        value: Value,
+    ) -> Result<Value, lash_core::FormatRefusal> {
+        let native = self.declaration().format_version;
+        if from == native {
+            return Ok(value);
+        }
+        if from == lash_core::FormatVersion::ONE {
+            self.converters.fetch_add(1, Ordering::SeqCst);
+            return Ok(value);
+        }
+        Err(lash_core::FormatRefusal {
+            plugin: self.plugin.into(),
+            namespace,
+            stored: from,
+            readable: native,
+        })
+    }
+
+    fn encode_format(
+        &self,
+        to: lash_core::FormatVersion,
+        namespace: lash_core::FormatNamespace,
+        value: &Value,
+    ) -> Result<Value, lash_core::FormatRefusal> {
+        let native = self.declaration().format_version;
+        if to == native || to == lash_core::FormatVersion::ONE {
+            return Ok(value.clone());
+        }
+        Err(lash_core::FormatRefusal {
+            plugin: self.plugin.into(),
+            namespace,
+            stored: to,
+            readable: native,
+        })
+    }
+
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(self.clone()))
+    }
+}
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct RecordedConfig {
+    label: String,
+}
+
+struct ConfigOwner;
+
+impl lash_core::ConfigOwner for ConfigOwner {
+    type Create = RecordedConfig;
+    type Recorded = RecordedConfig;
+    type Refusal = String;
+    type RunOptions = lash_core::NoRunOptions;
+    fn create(
+        &self,
+        input: Option<RecordedConfig>,
+        _: lash_core::CreationFacts<'_, RecordedConfig>,
+    ) -> Result<Option<RecordedConfig>, String> {
+        Ok(Some(input.unwrap_or(RecordedConfig {
+            label: BuildLabel::current().to_string(),
+        })))
+    }
+    fn validate(
+        &self,
+        _: &RecordedConfig,
+        _: Option<&RecordedConfig>,
+        _: &lash_core::CandidateFacts<'_>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn apply_run_options(
+        &self,
+        config: &RecordedConfig,
+        _: lash_core::NoRunOptions,
+    ) -> Result<RecordedConfig, String> {
+        Ok(config.clone())
     }
 }
 
@@ -138,7 +235,7 @@ impl SessionPlugin for Probe {
             Arc::new(move |reduction: lash_core::plugin::StateReduction<'_>| {
                 probe
                     .record("reducer", reduction.input.clone())
-                    .map_err(|error| lash_core::store::tool_run::HookCause {
+                    .map_err(|error| lash_core::tool_run::HookCause {
                         error_type: "fixture_io".into(),
                         error_version: std::num::NonZeroU32::MIN,
                         payload: json!(error.to_string()),
@@ -153,6 +250,9 @@ impl SessionPlugin for Probe {
                 Ok(Some(json!(value)))
             }),
         )?;
+        if self.plugin == OTHER {
+            return Ok(());
+        }
         let probe = self.clone();
         registrar.turn().after(
             lash_core::hook_key!("completed"),
@@ -166,7 +266,11 @@ impl SessionPlugin for Probe {
                         state: lash_core::plugin::StateCommands::new().apply(
                             "hooks",
                             "append",
-                            json!("H"),
+                            json!(if cfg!(feature = "synthetic-next") {
+                                "J"
+                            } else {
+                                "H"
+                            }),
                         ),
                         ..Default::default()
                     })
@@ -208,7 +312,7 @@ impl lash_core::ToolProvider for Probe {
         let result = async {
             let symbol = call.args["symbol"].as_str().context("symbol")?;
             let key = call.args["key"].as_str().context("key")?;
-            let detail = json!({"symbol":symbol, "key":key, "call_id":call.context.call_id(), "attempt":call.context.attempt_number()});
+            let detail = json!({"symbol":symbol, "key":key, "call_id":call.context.call_id(), "attempt":call.context.attempt_number(), "run":call.context.logical_run().context("tool has no logical Run")?});
             self.record("body", detail.clone())?;
             if call.args["hold"].as_bool() == Some(true) {
                 self.hold(symbol, &detail).await?;
@@ -231,7 +335,15 @@ impl lash_core::ToolProvider for Probe {
 
 fn calls(variant: &str) -> Vec<lash_core::LlmOutputPart> {
     let mut calls = vec![(
-        "B",
+        if variant == "single" {
+            if cfg!(feature = "synthetic-next") {
+                "S"
+            } else {
+                "N"
+            }
+        } else {
+            "B"
+        },
         if variant == "disjoint" { "b" } else { "value" },
         false,
         variant == "namespace",
@@ -272,6 +384,7 @@ fn core(
     let probe = Probe {
         plugin: PLUGIN,
         controls: controls.to_path_buf(),
+        converters: Arc::default(),
     };
     let observed = probe.clone();
     let provider = lash_core::testing::TestProvider::builder()
@@ -300,6 +413,10 @@ fn core(
                         })
                     });
                 let message = super::provider::newest_message(&request);
+                let variant = ["single", "same", "disjoint", "namespace"]
+                    .into_iter()
+                    .find(|variant| message.split_whitespace().any(|word| word == *variant))
+                    .unwrap_or("single");
                 Ok(lash_core::LlmResponse {
                     parts: if answered {
                         vec![lash_core::LlmOutputPart::Text {
@@ -307,12 +424,12 @@ fn core(
                             response_meta: None,
                         }]
                     } else {
-                        calls(&message)
+                        calls(variant)
                     },
                     terminal_reason: if answered {
                         lash_core::LlmTerminalReason::Stop
                     } else {
-                        lash_core::LlmTerminalReason::Stop
+                        lash_core::LlmTerminalReason::ToolUse
                     },
                     ..Default::default()
                 })
@@ -329,8 +446,11 @@ fn core(
         .plugin(Arc::new(Probe {
             plugin: OTHER,
             controls: controls.to_path_buf(),
+            converters: Arc::default(),
         }))
         .recovery_lease(super::recovery_lease())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "h5",
             format!("{}-{}", BuildLabel::current(), std::process::id()),
@@ -372,7 +492,7 @@ pub async fn run(args: PluginUpgradeArgs) -> Result<()> {
                 listener,
                 endpoint,
                 lash::restate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
-                std::future::pending(),
+                std::future::pending::<()>(),
             )
             .await;
         });

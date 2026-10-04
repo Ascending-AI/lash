@@ -30,6 +30,22 @@ impl Leg {
     /// directory named for the leg.
     pub fn start(name: &str) -> Result<Self> {
         let services = Services::from_env()?;
+        Self::with_services(name, services)
+    }
+
+    /// The same live host and binary pair on SQLite, without a PostgreSQL lease.
+    pub fn sqlite(name: &str) -> Result<Self> {
+        Self::with_services(
+            name,
+            Services {
+                ingress_url: std::env::var("RESTATE_INGRESS_URL")?,
+                admin_url: std::env::var("RESTATE_ADMIN_URL")?,
+                postgres_url: String::new(),
+            },
+        )
+    }
+
+    fn with_services(name: &str, services: Services) -> Result<Self> {
         let builds = NodeBuilds::from_env()?;
         ensure!(
             builds.n.label() == BuildLabel::N && builds.next.label() == BuildLabel::Next,

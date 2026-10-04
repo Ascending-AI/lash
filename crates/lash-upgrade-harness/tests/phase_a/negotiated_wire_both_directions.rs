@@ -344,3 +344,20 @@ fn negotiated_wire_both_directions() -> Result<()> {
     n_node.stop()?;
     Ok(())
 }
+
+/// S33/L21: the existing wire and rollback choreography on the cheapest
+/// persistent store. This uses both real node binaries and live Restate;
+/// final release selection additionally requires the Z03/Z04 artifacts.
+#[test]
+#[ignore = "needs both node builds and private live Restate"]
+fn s33_negotiated_wire_both_directions_sqlite() -> Result<()> {
+    let leg = Leg::sqlite("s33-wire")?;
+    let case = Case::sqlite("wire", &leg.services, &leg.scratch)?;
+    // Provision N's store before the successor may expand it.
+    leg.builds.n.probe(&case, None)?;
+    remote_protocol(&leg, &case.beside("remote")?).context("the remote protocol")?;
+    let n_node = leg.builds.n.serve(&case)?;
+    restate_wire(&leg, &case, &n_node).context("the Restate wire")?;
+    n_node.stop()?;
+    Ok(())
+}

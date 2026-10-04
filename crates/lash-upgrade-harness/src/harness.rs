@@ -276,6 +276,61 @@ impl NodeBinary {
         self.label
     }
 
+    /// Run one H5 live plugin host control against the case's stable identity.
+    pub fn plugin_upgrade(&self, case: &Case, args: &[&str]) -> Result<serde_json::Value> {
+        let output = self.plugin_upgrade_command(case).args(args).output()?;
+        report(&self.path, "plugin-upgrade", output)
+    }
+
+    fn plugin_upgrade_command(&self, case: &Case) -> Command {
+        let mut command = Command::new(&self.path);
+        command
+            .arg("plugin-upgrade")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .arg("--controls")
+            .arg(case.gate_dir());
+        command
+    }
+
+    /// Serve H5's plugin fixture using the existing ready, kill and reap owner.
+    pub fn serve_plugin_upgrade(&self, case: &Case, bind: Option<&str>) -> Result<ServingNode> {
+        let ready_file = case.gate_dir().join(format!(
+            "plugin-{}-{}.json",
+            self.label(),
+            case.next_ordinal()
+        ));
+        let log_path = ready_file.with_extension("log");
+        let log = std::fs::File::create(&log_path)?;
+        let mut command = self.plugin_upgrade_command(case);
+        command
+            .args(["--action", "serve"])
+            .arg("--ready-file")
+            .arg(&ready_file);
+        let bind = bind
+            .map(str::to_owned)
+            .map_or_else(|| unregistered_address(case), Ok)?;
+        let child = command
+            .args(["--bind", &bind])
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(log.try_clone()?))
+            .stderr(Stdio::from(log))
+            .spawn()?;
+        let mut node = ServingNode {
+            child: Some(child),
+            ready: None,
+            log_path,
+            register_trigger: None,
+        };
+        let ready = node.await_ready(&ready_file)?;
+        ensure!(
+            ready.build == self.label,
+            "plugin node served another build"
+        );
+        node.ready = Some(ready);
+        Ok(node)
+    }
+
     /// Open the store in this build's own process without registering a
     /// deployment. A requested session is read through the backend view.
     fn probe_report(&self, case: &Case, session: Option<&str>) -> Result<ProbeReport> {
