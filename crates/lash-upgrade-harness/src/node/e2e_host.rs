@@ -57,6 +57,10 @@ pub enum ProviderHostCommand {
     Snapshot {
         session: String,
     },
+    Address {
+        session: String,
+        id: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -125,11 +129,13 @@ pub async fn serve(args: ProviderHostArgs) -> Result<()> {
                     let core = core.clone();
                     let stores = Arc::clone(&stores);
                     let timeout = Duration::from_millis(config.timeout_ms);
+                    let restate = args.restate.clone();
+                    let controls = config.tools.controls.clone();
                     commands.spawn(async move {
                         let outcome = tokio::time::timeout(timeout, async {
                             let request = wire::read(&mut stream).await?;
                             ensure!(request.method == "POST" && request.path == "/command", "unknown H1 host transport");
-                            command(&core, stores.as_ref(), serde_json::from_value(request.body)?).await
+                            command(&core, stores.as_ref(), &restate, controls.as_ref(), serde_json::from_value(request.body)?).await
                         }).await.unwrap_or_else(|error| Err(error.into()));
                         let (status, value) = match outcome {
                             Ok(value) => (200, value),
@@ -156,15 +162,18 @@ pub async fn serve(args: ProviderHostArgs) -> Result<()> {
 async fn command(
     core: &lash::LashCore,
     stores: &dyn lash::StoreSet,
+    restate: &RestateArgs,
+    controls: Option<&super::e2e_body_control::BodyControls>,
     command: ProviderHostCommand,
 ) -> Result<serde_json::Value> {
     let session_name = match &command {
         ProviderHostCommand::Submit { session, .. }
         | ProviderHostCommand::Attach { session, .. }
         | ProviderHostCommand::Cancel { session, .. }
-        | ProviderHostCommand::Snapshot { session } => session,
+        | ProviderHostCommand::Snapshot { session }
+        | ProviderHostCommand::Address { session, .. } => session,
     };
-    let id = lash::SessionId::fixture(session_name.clone());
+    let id = lash::SessionId::parse(session_name.clone())?;
     if matches!(command, ProviderHostCommand::Submit { .. }) {
         match core
             .session(id.clone())
@@ -180,23 +189,17 @@ async fn command(
         ProviderHostCommand::Submit { id, text, .. } => {
             let accepted = session
                 .send(lash::TurnInput::text(text))
-                .id(lash::TurnId::fixture(id))
+                .id(lash::TurnId::parse(id)?)
                 .await?;
             Ok(
                 serde_json::json!({ "acceptance": accepted.receipt(), "run": accepted.run().await? }),
             )
         }
         ProviderHostCommand::Attach { id, .. } => Ok(serde_json::to_value(
-            session
-                .attach_id(lash::TurnId::fixture(id))
-                .output()
-                .await?,
+            session.attach_id(lash::TurnId::parse(id)?).output().await?,
         )?),
         ProviderHostCommand::Cancel { id, .. } => {
-            let receipt = session
-                .attach_id(lash::TurnId::fixture(id))
-                .cancel()
-                .await?;
+            let receipt = session.attach_id(lash::TurnId::parse(id)?).cancel().await?;
             match receipt {
                 lash::CancelReceipt::Requested { run, receipt } => {
                     Ok(serde_json::json!({ "status": "requested", "run": run, "receipt": receipt }))
@@ -209,6 +212,41 @@ async fn command(
                 }
                 other => anyhow::bail!("unexpected session cancel receipt {other:?}"),
             }
+        }
+        ProviderHostCommand::Address { id: source, .. } => {
+            let accepted = session.attach_id(lash::TurnId::parse(source)?);
+            let run = accepted
+                .run()
+                .await?
+                .ok_or_else(|| anyhow!("input has no admitted Run"))?;
+            let store = stores.session_store_factory();
+            let key = lash_restate::recorded_turn_invocation_key(store.as_ref(), &id, &run)
+                .await?
+                .ok_or_else(|| anyhow!("Run has no recorded executor invocation"))?;
+            let view =
+                crate::restate_view::RestateView::new(&restate.admin_url, &restate.namespace)?;
+            #[derive(Deserialize)]
+            struct Row {
+                id: String,
+                pinned_service_protocol_version: Option<u32>,
+            }
+            let service = view.service_name("LashTurn").replace('\'', "''");
+            let rows: Vec<Row> = view.query(&format!("SELECT id, pinned_service_protocol_version FROM sys_invocation WHERE target_service_name LIKE '{service}%' AND target_service_key = '{}' AND target_handler_name = 'run'", key.replace('\'', "''"))).await?;
+            ensure!(
+                rows.len() == 1 && rows[0].pinned_service_protocol_version == Some(7),
+                "Run must own one actual negotiated V7 invocation"
+            );
+            let work = crate::e2e::control::WorkIdentity {
+                ingress: accepted.input_id().to_string(),
+                run: run.to_string(),
+                segment: rows[0].id.clone(),
+                call: None,
+                ordinal: None,
+            };
+            if let Some(controls) = controls {
+                controls.bind(&work)?;
+            }
+            Ok(serde_json::json!({ "work": work, "invocation": rows[0].id, "protocol": 7 }))
         }
         ProviderHostCommand::Snapshot { .. } => {
             let view = session

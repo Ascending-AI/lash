@@ -24,6 +24,7 @@
 //! label and `G`, so a turn's reply names the build that drove it, and it
 //! records and holds calls as [`provider`] describes.
 
+pub mod e2e_body_control;
 pub mod e2e_host;
 pub mod e2e_provider;
 pub mod e2e_tools;

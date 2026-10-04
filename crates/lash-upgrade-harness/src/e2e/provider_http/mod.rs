@@ -3,6 +3,7 @@
 
 mod adapter;
 pub mod ledger;
+pub mod node_host;
 pub mod scenarios;
 pub mod transcript;
 pub(crate) mod wire;

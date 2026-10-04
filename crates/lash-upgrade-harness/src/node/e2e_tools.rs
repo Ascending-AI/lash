@@ -28,6 +28,7 @@ pub struct ToolFixtureArgs {
     /// It is execution evidence only, never an X/D/V durability oracle.
     pub bodies: PathBuf,
     pub backoff_ms: u64,
+    pub controls: Option<super::e2e_body_control::BodyControls>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -128,6 +129,17 @@ impl ToolFixtureArgs {
             .open(&self.bodies)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
+        if let Some(controls) = &self.controls {
+            controls
+                .enter(
+                    label,
+                    &delivery.run,
+                    &delivery.call_id,
+                    delivery.attempt,
+                    self.bodies.display().to_string(),
+                )
+                .await?;
+        }
         match call.name() {
             "h1_retry" if delivery.attempt == 1 => Ok(ToolOutcome::retryable_failure(
                 ToolFailureClass::External,

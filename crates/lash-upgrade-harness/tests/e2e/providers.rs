@@ -78,10 +78,10 @@ async fn s26_rate_limit_and_observer_reconnect_commit_one_answer() -> Result<()>
         let completions = double.server().invocations().into_iter().flat_map(|invocation| {
             double.server().journal(&invocation.id).unwrap_or_default().into_iter()
                 .filter_map(|entry| entry.run_completion().and_then(Result::ok))
-                // Atomic effect-group children journal their Completed
-                // envelope, rather than the bare inner runtime outcome.
+                // The direct controller journals a generation-stamped
+                // envelope and outcome, rather than the bare outcome.
                 .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-                .filter(|value| value["type"] == "completed")
+                .filter(|value| value["effect_journal_version"] == lash_restate::EFFECT_JOURNAL_VERSION && value.get("envelope").is_some())
                 .filter_map(|value| value["outcome"].get("Ok").cloned())
                 .filter_map(|value| serde_json::from_value::<lash_core::RuntimeEffectOutcome>(value).ok())
                 .filter_map(|outcome| match outcome {
@@ -95,7 +95,7 @@ async fn s26_rate_limit_and_observer_reconnect_commit_one_answer() -> Result<()>
         let call = call_record.as_ref().ok_or_else(|| anyhow::anyhow!("journaled completion has no attempt ledger"))?;
         let attempts = &call.attempts;
         ensure!(attempts.len() == 2 && attempts[0].ordinal == 1 && attempts[1].ordinal == 2, "reported 429 retry ordinals differ");
-        ensure!(attempts[0].error.as_ref().is_some_and(|error| error.class == ProviderFailureKind::Http), "429 lost typed HTTP failure");
+        ensure!(attempts[0].error.as_ref().is_some_and(|error| error.class == ProviderFailureKind::Quota && error.http_status == Some(429)), "429 lost typed throttle/status evidence");
         ensure!(response.usage.input_tokens == 11 && response.usage.output_tokens == 2, "journal usage disagrees with transcript");
         if output.result.source == lash::turn::ReportSource::Live {
             ensure!(output.result.llm_calls == vec![call.clone()], "live receipts disagree with journal");
