@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 2,
   "cargo_package_count": 55,
-  "cargo_target_count": 220,
+  "cargo_target_count": 221,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_0f5f2ec4[static]",
     "//crates/lash-conformance:lash-conformance__fv_110ca6ce[static]",
@@ -573,6 +573,8 @@
     "//crates/lash-typescript:lash-typescript__fv_fc51d540[static]",
     "//crates/lash-upgrade-harness:e2e__test__fv_8022765d",
     "//crates/lash-upgrade-harness:e2e__test__fv_f25cccb0",
+    "//crates/lash-upgrade-harness:e2e_h3__test__fv_8022765d",
+    "//crates/lash-upgrade-harness:e2e_h3__test__fv_f25cccb0",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_8022765d",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_f25cccb0",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test__fv_8022765d",
@@ -1645,6 +1647,8 @@
     "//crates/lash-typescript:lash-typescript__fv_fc51d540[check]",
     "//crates/lash-upgrade-harness:e2e__test__fv_8022765d[check]",
     "//crates/lash-upgrade-harness:e2e__test__fv_f25cccb0[check]",
+    "//crates/lash-upgrade-harness:e2e_h3__test__fv_8022765d[check]",
+    "//crates/lash-upgrade-harness:e2e_h3__test__fv_f25cccb0[check]",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_8022765d[check]",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_f25cccb0[check]",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test__fv_8022765d[check]",
@@ -2735,6 +2739,8 @@
     "//crates/lash-typescript:lash-typescript__fv_fc51d540",
     "//crates/lash-upgrade-harness:e2e__test__fv_8022765d",
     "//crates/lash-upgrade-harness:e2e__test__fv_f25cccb0",
+    "//crates/lash-upgrade-harness:e2e_h3__test__fv_8022765d",
+    "//crates/lash-upgrade-harness:e2e_h3__test__fv_f25cccb0",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_8022765d",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_f25cccb0",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test__fv_8022765d",
@@ -38610,6 +38616,26 @@
       "package": "lash-upgrade-harness"
     },
     {
+      "build_label": "//crates/lash-upgrade-harness:e2e_h3__test__fv_8022765d",
+      "check_label": "//crates/lash-upgrade-harness:e2e_h3__test__fv_8022765d[check]",
+      "clippy_label": "//crates/lash-upgrade-harness:e2e_h3__test__fv_8022765d__clippy[clippy.txt]",
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash-upgrade-harness:e2e_h3__test__fv_8022765d",
+      "package": "lash-upgrade-harness"
+    },
+    {
+      "build_label": "//crates/lash-upgrade-harness:e2e_h3__test__fv_f25cccb0",
+      "check_label": "//crates/lash-upgrade-harness:e2e_h3__test__fv_f25cccb0[check]",
+      "clippy_label": "//crates/lash-upgrade-harness:e2e_h3__test__fv_f25cccb0__clippy[clippy.txt]",
+      "features": [
+        "synthetic-next"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-upgrade-harness:e2e_h3__test__fv_f25cccb0",
+      "package": "lash-upgrade-harness"
+    },
+    {
       "build_label": "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_8022765d",
       "check_label": "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_8022765d[check]",
       "clippy_label": "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_8022765d__clippy[clippy.txt]",
@@ -50386,6 +50412,8 @@
       "//crates/lash-typescript:lash-typescript__fv_f2c181e7",
       "//crates/lash-upgrade-harness:e2e__test__fv_8022765d",
       "//crates/lash-upgrade-harness:e2e__test__fv_f25cccb0",
+      "//crates/lash-upgrade-harness:e2e_h3__test__fv_8022765d",
+      "//crates/lash-upgrade-harness:e2e_h3__test__fv_f25cccb0",
       "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_8022765d",
       "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__fv_f25cccb0",
       "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test__fv_8022765d",
@@ -50462,7 +50490,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_41763c4b"
     ]
   },
-  "generated_label_count": 287,
+  "generated_label_count": 288,
   "packages": [
     {
       "declared_features": [
@@ -53637,6 +53665,15 @@
           ]
         },
         {
+          "build_label": "//crates/lash-upgrade-harness:e2e_h3__test",
+          "cargo": "e2e_h3",
+          "check_label": "//crates/lash-upgrade-harness:e2e_h3__test[check]",
+          "clippy_label": "//crates/lash-upgrade-harness:e2e_h3__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-upgrade-harness:e2e_h3__test",
+          "tags": []
+        },
+        {
           "build_label": "//crates/lash-upgrade-harness:phase_a__test",
           "cargo": "phase_a",
           "check_label": "//crates/lash-upgrade-harness:phase_a__test[check]",
@@ -55644,6 +55681,9 @@
     "//crates/lash-upgrade-harness:e2e__test": 300,
     "//crates/lash-upgrade-harness:e2e__test__fv_8022765d": 300,
     "//crates/lash-upgrade-harness:e2e__test__fv_f25cccb0": 300,
+    "//crates/lash-upgrade-harness:e2e_h3__test": 300,
+    "//crates/lash-upgrade-harness:e2e_h3__test__fv_8022765d": 300,
+    "//crates/lash-upgrade-harness:e2e_h3__test__fv_f25cccb0": 300,
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test": 300,
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test__fv_8022765d": 300,
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test__fv_f25cccb0": 300,
@@ -56222,6 +56262,7 @@
     "//crates/lash-typescript:tsvm_allocations__example",
     "//crates/lash-typescript:tsvm_costs__example",
     "//crates/lash-upgrade-harness:e2e__test",
+    "//crates/lash-upgrade-harness:e2e_h3__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness[static]",
@@ -56510,6 +56551,7 @@
     "//crates/lash-typescript:tsvm_allocations__example[check]",
     "//crates/lash-typescript:tsvm_costs__example[check]",
     "//crates/lash-upgrade-harness:e2e__test[check]",
+    "//crates/lash-upgrade-harness:e2e_h3__test[check]",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin[check]",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test[check]",
     "//crates/lash-upgrade-harness:lash-upgrade-harness[check]",
@@ -56798,6 +56840,7 @@
     "//crates/lash-typescript:tsvm_allocations__example__clippy[clippy.txt]",
     "//crates/lash-typescript:tsvm_costs__example__clippy[clippy.txt]",
     "//crates/lash-upgrade-harness:e2e__test__clippy[clippy.txt]",
+    "//crates/lash-upgrade-harness:e2e_h3__test__clippy[clippy.txt]",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__clippy[clippy.txt]",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test__clippy[clippy.txt]",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__clippy[clippy.txt]",
@@ -57086,6 +57129,7 @@
     "//crates/lash-typescript:tsvm_allocations__example",
     "//crates/lash-typescript:tsvm_costs__example",
     "//crates/lash-upgrade-harness:e2e__test",
+    "//crates/lash-upgrade-harness:e2e_h3__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness",
@@ -57375,6 +57419,7 @@
     "//crates/lash-typescript:tsvm_allocations__example",
     "//crates/lash-typescript:tsvm_costs__example",
     "//crates/lash-upgrade-harness:e2e__test",
+    "//crates/lash-upgrade-harness:e2e_h3__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness",
@@ -57578,6 +57623,7 @@
     "//crates/lash-tool-support:lash-tool-support__unit_test",
     "//crates/lash-trace:test_batch",
     "//crates/lash-typescript:test_batch",
+    "//crates/lash-upgrade-harness:e2e_h3__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -57715,6 +57761,7 @@
     "//crates/lash-tool-support:lash-tool-support__unit_test",
     "//crates/lash-trace:test_batch",
     "//crates/lash-typescript:test_batch",
+    "//crates/lash-upgrade-harness:e2e_h3__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -57883,6 +57930,7 @@
     "//crates/lash-typescript:fuel_law__test",
     "//crates/lash-typescript:lash-typescript__unit_test",
     "//crates/lash-typescript:test262__test",
+    "//crates/lash-upgrade-harness:e2e_h3__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -58244,6 +58292,7 @@
     "//crates/lash-typescript:test262_full__test",
     "//crates/lash-typescript:test262_ratchet__test",
     "//crates/lash-typescript:test_batch",
+    "//crates/lash-upgrade-harness:e2e_h3__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -58424,6 +58473,7 @@
     "//crates/lash-typescript:test262_full__test",
     "//crates/lash-typescript:test262_ratchet__test",
     "//crates/lash-upgrade-harness:e2e__test",
+    "//crates/lash-upgrade-harness:e2e_h3__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",

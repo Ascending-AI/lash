@@ -43,6 +43,10 @@ path = "tests/rolling/main.rs"
 name = "e2e"
 path = "tests/e2e/main.rs"
 
+[[test]]
+name = "e2e_h3"
+path = "tests/e2e/h3.rs"
+
 [lints]
 workspace = true
 

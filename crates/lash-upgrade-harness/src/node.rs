@@ -24,6 +24,7 @@
 //! label and `G`, so a turn's reply names the build that drove it, and it
 //! records and holds calls as [`provider`] describes.
 
+pub mod h3;
 pub mod objects;
 pub mod plugin_state;
 pub mod process;
@@ -87,6 +88,8 @@ pub enum Command {
     Retention(RetentionArgs),
     /// Publish, read or finalize the probe plugin's state over a SQLite store.
     PluginState(plugin_state::PluginStateArgs),
+    /// Submit, reattach, cancel or inspect H3's engine-owned operation fixture.
+    H3(h3::H3Args),
 }
 
 /// Which store a command opens.
@@ -311,6 +314,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::ProcessStatus(args) => print(&process::status(args).await?),
         Command::Retention(args) => retention::run(args).await,
         Command::PluginState(args) => print(&plugin_state::run(args).await?),
+        Command::H3(args) => print(&h3::run(args).await?),
     }
 }
 
@@ -599,6 +603,7 @@ fn core_builder(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash:
             artifacts,
             worker_recovery,
         )))
+        .plugin(h3::plugin(""))
         .recovery_lease(recovery_lease())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)))

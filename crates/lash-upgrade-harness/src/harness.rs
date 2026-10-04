@@ -543,6 +543,25 @@ impl NodeBinary {
         report(&self.path, "process-start", output)
     }
 
+    /// H3's controls use the public operation Run admission/follow/cancel path.
+    pub fn h3(
+        &self,
+        case: &Case,
+        session: &str,
+        command: &crate::node::h3::H3Command,
+    ) -> Result<serde_json::Value> {
+        let output = Command::new(&self.path)
+            .arg("h3")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .args(["--session", session])
+            .arg("--command")
+            .arg(serde_json::to_string(command)?)
+            .output()
+            .with_context(|| format!("run {} h3", self.label()))?;
+        report(&self.path, "h3", output)
+    }
+
     /// Signal `process` through this build's deployment.
     pub fn signal_process(
         &self,
