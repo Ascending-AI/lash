@@ -286,9 +286,9 @@ async fn atomic_root_admission_refuses_a_predecessor_before_decoding_and_keeps_i
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn native_activation_refuses_predecessor_before_decode_and_retains_drain() {
     let predecessor_epoch = if cfg!(feature = "synthetic-next") {
-        31
+        32
     } else {
-        30
+        31
     };
     // The malformed transition makes decoding visible: generation refusal
     // must happen first, and restoring the old build must retain its result.
