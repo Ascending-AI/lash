@@ -1,7 +1,7 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
 reads = 100
-outputs = 137
+outputs = 138
 
 [[surfaces]]
 name = "workbench"
@@ -31,6 +31,7 @@ harness = "examples/agent-workbench/tests/transcript_projection_harness.mjs"
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 
 [sites]
+"crates/lash-upgrade-harness/tests/e2e/telemetry.rs#send" = { reads = 0, outputs = 1, kind = "output-read", reason = "S34's socket witness verifies telemetry loss cannot change a Run's programmatic answer; this is no transcript renderer." }
 "crates/lash/src/tests/adr_claims.rs#resumed_session_observe_wait_cancel_shift_keep_original_owners" = { reads = 0, outputs = 2, kind = "output-read", reason = "resumed_session_observe_wait_cancel_shift_keep_original_owners asserts the typed program result independently of rendered rows." }
 "crates/lash/src/tests/agent_scenarios/contracts.rs#assert_no_false_finishted_success" = { reads = 0, outputs = 2, kind = "output-read", reason = "assert_no_false_finishted_success asserts the typed program result independently of rendered rows." }
 "crates/lash/src/tests/agent_scenarios/harness.rs#run_agent_process_llm_query_scenario" = { reads = 0, outputs = 1, kind = "output-read", reason = "run_agent_process_llm_query_scenario asserts the typed program result independently of rendered rows." }

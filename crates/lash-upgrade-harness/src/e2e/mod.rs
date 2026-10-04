@@ -5,6 +5,7 @@ pub mod control;
 pub mod evidence;
 pub mod host;
 pub mod host_adapters;
+pub mod otlp;
 pub mod provider;
 
 /// Object-safe asynchronous adapter operation.

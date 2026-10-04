@@ -3140,6 +3140,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-vm-client",
  "lash-runtime",
+ "opentelemetry_sdk",
  "prost",
  "reqwest",
  "rusqlite",

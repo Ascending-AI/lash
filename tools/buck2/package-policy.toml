@@ -574,6 +574,13 @@ store_seam = [
 [facade]
 package = "lash-runtime"
 
+# S34 uses the executing consumer's exact host-owned exporter fixture.
+[[rule]]
+packages = ["lash-upgrade-harness"]
+kinds = ["test"]
+targets = ["e2e_telemetry"]
+compile_data = ["//examples/e2e-consumer:rust_sources"]
+
 [[rule]]
 packages = ["transcript-contract"]
 compile_data = ["//crates/lash-core-execution:rust_sources"]

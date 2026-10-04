@@ -1205,8 +1205,10 @@ PACKAGE_DEPS = {
     "lash-upgrade-harness": {
         "build": {},
         "dev": {
+            "lash": "//crates/lash:lash",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "opentelemetry_sdk": "//third-party/rust:p0236",
             "rusqlite": "//third-party/rust:p0305",
             "tempfile": "//third-party/rust:p0390"
         },
