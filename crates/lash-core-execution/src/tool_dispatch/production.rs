@@ -34,12 +34,14 @@ struct CallInput {
     grant: Option<Box<crate::ToolExecutionGrant>>,
     parent: Option<crate::RuntimeInvocation>,
     binding: AdmittedBinding,
+    environment: crate::ProcessExecutionEnvRef,
+    render: Option<crate::RecordedRender>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Prepared {
     input: CallInput,
-    original_args: serde_json::Value,
+    original_args: Option<serde_json::Value>,
     call: PreparedToolCall,
     failure: Option<crate::ToolFailure>,
 }
@@ -341,6 +343,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 failure = Some(cause.clone());
             }
         }
+        let original_args = (original_args != prepared.args).then_some(original_args);
         serde_json::to_value(Prepared {
             input,
             original_args,

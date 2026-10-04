@@ -59,7 +59,12 @@ impl ProductionToolHandlers<'_> {
             .plugins
             .check_tool_args(
                 &context(&dispatch, &prepared),
-                &Arc::new(prepared.original_args.clone()),
+                &Arc::new(
+                    prepared
+                        .original_args
+                        .clone()
+                        .unwrap_or_else(|| prepared.call.args.clone()),
+                ),
                 &PreparedCallReadView::new(prepared.call.clone()),
             )
             .await
@@ -273,7 +278,7 @@ impl ProductionToolHandlers<'_> {
             call_id: call_id.clone(),
             tool_id: prepared.call.tool_id,
             tool_name: prepared.call.tool_name.clone(),
-            render: None,
+            render: prepared.input.render.clone(),
             args: prepared.call.args.clone(),
             output,
             duration_ms: 0,

@@ -144,7 +144,11 @@ impl RuntimeExecutionContext<'_> {
                     crate::tool_run::ContinuationRefusal::NotQuiescent,
                 )
             })?
-            .admit(request, self.parent_invocation.clone())
+            .admit(
+                request,
+                self.parent_invocation.clone(),
+                self.tool_run_env_spec(),
+            )
             .await
     }
     pub async fn consume_tool_run_aggregate(

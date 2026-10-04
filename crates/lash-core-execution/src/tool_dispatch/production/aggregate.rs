@@ -48,6 +48,7 @@ impl<'run> ProductionToolHandlers<'run> {
         run: &mut RunCoordinator<'owner>,
         request: ToolAggregateRequest,
         parent: Option<crate::RuntimeInvocation>,
+        environment_spec: crate::ProcessExecutionEnvSpec,
     ) -> Result<ToolRunAggregateCursor, SingletonRunError>
     where
         'run: 'owner,
@@ -94,6 +95,7 @@ impl<'run> ProductionToolHandlers<'run> {
         let mut calls = Vec::new();
         let mut positions = Vec::new();
         let mut invocations = BTreeMap::new();
+        let mut captured_environment = self.environment.clone();
         for (position, leaf) in leaves.into_iter().enumerate() {
             if settled_value_after == Some(position) {
                 plan.leaves.push(AggregateLeaf::Settled { fulfilled: true });
@@ -233,12 +235,39 @@ impl<'run> ProductionToolHandlers<'run> {
                             .validate_tool_owner(&grant.owner)
                             .map_err(crate::RuntimeEffectControllerError::from)?;
                     }
+                    let environment = match &recorded {
+                        Some(prepared) => prepared.input.environment.clone(),
+                        None => match &captured_environment {
+                            Some(reference) => reference.clone(),
+                            None => {
+                                let context = self
+                                    .context
+                                    .clone()
+                                    .with_execution_env_spec(environment_spec.clone());
+                                let claim = crate::session::execution_claim_of(
+                                    context.dispatch().effect_controller.execution_scope(),
+                                )
+                                .map_err(crate::RuntimeEffectControllerError::from)?;
+                                let reference = context
+                                    .captured_process_execution_env_ref(&claim)
+                                    .await
+                                    .map_err(crate::RuntimeEffectControllerError::from)?;
+                                captured_environment = Some(reference.clone());
+                                reference
+                            }
+                        },
+                    };
                     let input = CallInput {
                         definition: definition.clone(),
                         pending: invocation.pending.clone(),
                         grant: invocation.execution_grant.clone(),
                         parent: parent.clone(),
                         binding: binding.clone(),
+                        environment: environment.clone(),
+                        render: recorded
+                            .as_ref()
+                            .and_then(|prepared| prepared.input.render.clone())
+                            .or_else(|| environment_spec.render.clone()),
                     };
                     self.calls
                         .lock_recover()
@@ -254,7 +283,7 @@ impl<'run> ProductionToolHandlers<'run> {
                             binding,
                             available: self.context.dispatch().plugins.tool_run_revisions(),
                             cancel: ExternalCancelPolicy::CancelExternalWork,
-                            environment: self.environment.clone(),
+                            environment: Some(environment),
                         });
                     }
                     plan.leaves.push(AggregateLeaf::Call {

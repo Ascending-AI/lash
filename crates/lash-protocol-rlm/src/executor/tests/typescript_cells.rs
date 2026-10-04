@@ -1293,7 +1293,6 @@ fn l05_middle_preparation_failure_keeps_survivor_source_pairing() {
                     assert_eq!(record.call_id, identities.child_call_id(1, leaf));
                     assert_eq!(record.args["text"], source);
                 }
-                handler.close().await.expect("close handler");
                 close
                     .close_opener_groups()
                     .await
@@ -1301,6 +1300,9 @@ fn l05_middle_preparation_failure_keeps_survivor_source_pairing() {
             })
             .await
             .expect("logical owner");
+        drop(owner);
+        drop(ctx);
+        handler.close().await.expect("close handler");
     });
 }
 
@@ -1308,9 +1310,10 @@ fn l05_middle_preparation_failure_keeps_survivor_source_pairing() {
 #[test]
 fn l05_unavailable_member_keeps_native_completion_and_source_slots() {
     block_on(async {
-        use lash_core::facade_support::{
+        use lash_core::facade_support::ToolInvocation;
+        use lash_core::session::{
             ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome,
-            ToolAggregateRequest, ToolInvocation,
+            ToolAggregateRequest,
         };
         let double =
             crate::testing::kernel_double(SEED + 1865, lash_restate_test::ServerConfig::default())
@@ -1369,7 +1372,7 @@ fn l05_unavailable_member_keeps_native_completion_and_source_slots() {
                             assert_eq!(failure.code, "tool_unavailable")
                         }
                         lash_core::ToolCallOutcome::Success(value) if index != 1 => {
-                            assert_eq!(value, serde_json::json!(index))
+                            assert_eq!(value.to_json_value(), serde_json::json!(index))
                         }
                         other => panic!("wrong source {index}: {other:?}"),
                     }
@@ -1381,6 +1384,7 @@ fn l05_unavailable_member_keeps_native_completion_and_source_slots() {
             })
             .await
             .expect("owned program");
+        drop(context);
         handler.close().await.expect("close handler");
     });
 }
@@ -1450,6 +1454,7 @@ fn l06_race_loser_stays_owned_across_cells_until_logical_closing() {
             context.close_opener_groups().await.expect("close logical owner");
             assert_eq!(completed.load(Ordering::SeqCst), 3, "closing drains the retained loser");
         }).await.expect("owned program");
+        drop(context);
         handler.close().await.expect("close handler");
         let invocations = double.server().invocations();
         assert!(

@@ -38,6 +38,7 @@ enum Request {
     Admit {
         request: ToolAggregateRequest,
         parent: Option<crate::RuntimeInvocation>,
+        environment: crate::ProcessExecutionEnvSpec,
         reply: Reply<Result<ToolRunAggregateCursor, SingletonRunError>>,
     },
     Consume {
@@ -62,12 +63,14 @@ impl ToolRunChannel {
         &self,
         request: ToolAggregateRequest,
         parent: Option<crate::RuntimeInvocation>,
+        environment: crate::ProcessExecutionEnvSpec,
     ) -> Result<ToolRunAggregateCursor, RuntimeEffectControllerError> {
         let (reply, receive) = reply();
         self.0
             .send(Request::Admit {
                 request,
                 parent,
+                environment,
                 reply,
             })
             .map_err(|_| owner_gone())?;
@@ -196,16 +199,14 @@ impl<'run> RuntimeExecutionContext<'run> {
                 .await
                 .map_err(crate::PluginError::from)
                 .map_err(RuntimeEffectControllerError::from)?;
-            environment
+            Some(environment)
         } else {
-            self.captured_process_execution_env_ref(&claim)
-                .await
-                .map_err(RuntimeEffectControllerError::from)?
+            None
         };
         let handlers = Arc::new(ProductionToolHandlers::new(
             self.clone(),
             materials.clone(),
-            Some(environment),
+            environment,
         ));
         let mut run = state
             .adopt_run(
@@ -239,11 +240,14 @@ impl<'run> RuntimeExecutionContext<'run> {
                     Some(Request::Admit {
                         request,
                         parent,
+                        environment,
                         reply,
                     }),
                     _,
                 )) => {
-                    let result = handlers.admit_aggregate(&mut run, request, parent).await;
+                    let result = handlers
+                        .admit_aggregate(&mut run, request, parent, environment)
+                        .await;
                     let _ = reply.send(result);
                 }
                 Either::Right((

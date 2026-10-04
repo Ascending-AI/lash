@@ -44,57 +44,76 @@ pub(super) async fn capture_attempt(
             ),
         }),
         Some(SingletonBodyOutcome::Pending { completion }) => {
-            if let Err(refusal) = declaration.admits(OutcomeShape::Deferred) {
-                Ok(SingletonCapture::Refused { refusal })
-            } else {
-                let source = if completion.resolved_by.is_some() {
-                    process_source
-                } else {
-                    completion_key
-                }
-                .ok_or("the pending source was not reserved")?
-                .clone();
-                let mut materials = Vec::new();
-                let start = if let Some(crate::PendingResolver::DeclaredStart(start)) =
-                    &completion.resolved_by
-                {
-                    declaration
-                        .admits(OutcomeShape::Done {
-                            intents: &[ToolIntentKind::StartProcess],
-                        })
-                        .map_err(|error| error.to_string())?;
-                    let obligation =
-                        bind_start(call, &member.policy, start.request().into_registration())
-                            .map_err(|error| error.to_string())?;
-                    let (reference, entry) =
-                        mint(&owner, MaterialRole::AttemptOutput, encode(&obligation)?)?;
-                    materials.push(entry);
-                    Some(crate::tool_run::PendingStart {
-                        start_key: obligation.start_key().clone(),
-                        obligation: reference,
+            let admitted = declaration.admits(OutcomeShape::Deferred).and_then(|()| {
+                if matches!(
+                    completion.resolved_by,
+                    Some(crate::PendingResolver::DeclaredStart(_))
+                ) {
+                    declaration.admits(OutcomeShape::Done {
+                        intents: &[ToolIntentKind::StartProcess],
                     })
                 } else {
-                    None
-                };
-                let (metadata, entry) = mint(
-                    &owner,
-                    MaterialRole::AttemptOutput,
-                    encode(&RecordedPending {
-                        completion: *completion,
-                        stream,
-                    })?,
-                )?;
-                materials.push(entry);
-                return Ok(crate::tool_run::RunAttemptEntry {
-                    call_id: call.call_id.clone(),
-                    attempt: ordinal,
-                    result: AttemptResult::Pending {
-                        source,
-                        metadata,
-                        start,
-                    },
-                    materials,
-                });
+                    Ok(())
+                }
+            });
+            match admitted {
+                Err(refusal) => Ok(SingletonCapture::Refused { refusal }),
+                Ok(()) => {
+                    let obligation = match &completion.resolved_by {
+                        Some(crate::PendingResolver::DeclaredStart(start)) => {
+                            bind_start(call, &member.policy, start.request().into_registration())
+                                .map(Some)
+                        }
+                        _ => Ok(None),
+                    };
+                    match obligation {
+                        Err(refusal) => Ok(SingletonCapture::StartRefused { refusal }),
+                        Ok(obligation) => {
+                            let source = if completion.resolved_by.is_some() {
+                                process_source
+                            } else {
+                                completion_key
+                            }
+                            .ok_or("the pending source was not reserved")?
+                            .clone();
+                            let mut materials = Vec::new();
+                            let start = match obligation {
+                                Some(obligation) => {
+                                    let (reference, entry) = mint(
+                                        &owner,
+                                        MaterialRole::AttemptOutput,
+                                        encode(&obligation)?,
+                                    )?;
+                                    materials.push(entry);
+                                    Some(crate::tool_run::PendingStart {
+                                        start_key: obligation.start_key().clone(),
+                                        obligation: reference,
+                                    })
+                                }
+                                None => None,
+                            };
+                            let (metadata, entry) = mint(
+                                &owner,
+                                MaterialRole::AttemptOutput,
+                                encode(&RecordedPending {
+                                    completion: *completion,
+                                    stream,
+                                })?,
+                            )?;
+                            materials.push(entry);
+                            return Ok(crate::tool_run::RunAttemptEntry {
+                                call_id: call.call_id.clone(),
+                                attempt: ordinal,
+                                result: AttemptResult::Pending {
+                                    source,
+                                    metadata,
+                                    start,
+                                },
+                                materials,
+                            });
+                        }
+                    }
+                }
             }
         }
         Some(SingletonBodyOutcome::DeferredStart { start }) => {

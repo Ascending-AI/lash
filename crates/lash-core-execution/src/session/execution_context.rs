@@ -839,7 +839,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// The session's recorded tool-call limit, as this execution runs under
     /// it: a run's snapshot for a turn, the recorded environment for a
     /// process.
-    pub(super) fn max_tool_calls(&self) -> crate::MaxToolCalls {
+    pub(crate) fn max_tool_calls(&self) -> crate::MaxToolCalls {
         self.execution_env_spec.policy.max_tool_calls
     }
 
@@ -849,6 +849,10 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Self {
         self.execution_env_spec = execution_env_spec;
         self
+    }
+
+    pub(crate) fn tool_run_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
+        self.execution_env_spec.clone()
     }
 
     pub fn recorded_render(&self) -> Option<&crate::RecordedRender> {
@@ -1187,7 +1191,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                     .is_some_and(CancellationToken::is_cancelled))
     }
 
-    pub(super) fn process_id(&self) -> Option<&ProcessId> {
+    pub(crate) fn process_id(&self) -> Option<&ProcessId> {
         self.process_execution.as_ref().map(|exec| &exec.process_id)
     }
 

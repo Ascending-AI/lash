@@ -732,9 +732,14 @@ impl RunLedger {
                 call.attempts.insert(*attempt, result.clone());
                 Ok(())
             }
-            RunEvent::SourceCaptured { call_id, .. } => {
+            RunEvent::SourceCaptured { call_id, output } => {
                 let call = self.calls.get(call_id).ok_or_else(|| boundary(call_id))?;
-                if call.decision.is_some()
+                if output.role != super::MaterialRole::AttemptOutput
+                    || output.owner
+                        != (super::MaterialOwner::Run {
+                            opener: self.owner.clone(),
+                        })
+                    || call.decision.is_some()
                     || !call.attempts.values().any(|result| {
                         matches!(
                             result,
