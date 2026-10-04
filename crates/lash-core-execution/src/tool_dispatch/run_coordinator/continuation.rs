@@ -6,6 +6,11 @@ impl RunCoordinator<'_> {
     fn owed_starts(&self) -> Vec<crate::StartKey> {
         let mut keys: std::collections::BTreeSet<_> =
             self.journal.ledger.owed_starts().into_iter().collect();
+        for (waiting, _) in self.pending_starts.values() {
+            if let Some(start) = &waiting.start {
+                keys.insert(start.start_key.clone());
+            }
+        }
         for owed in self.owed.values() {
             if let Some(start) = owed.capture.as_ref().and_then(SingletonCapture::start) {
                 keys.insert(start.start_key.clone());
@@ -317,7 +322,8 @@ impl<'a> RunCoordinator<'a> {
                             .and_then(|entry| match &entry.result {
                                 AttemptResult::Done { output }
                                 | AttemptResult::Failed { output, .. } => Some(output.clone()),
-                                AttemptResult::Deferred { .. } => None,
+                                AttemptResult::Deferred { .. }
+                                | AttemptResult::DeferredStart { .. } => None,
                             })
                             .or_else(|| {
                                 attempts.get(&id).and_then(|(_, result)| match result {
@@ -356,7 +362,11 @@ impl<'a> RunCoordinator<'a> {
                         },
                     );
                 }
-            } else if let Some((attempt, AttemptResult::Deferred { .. })) = attempts.get(&id) {
+            } else if let Some((
+                attempt,
+                result @ (AttemptResult::Deferred { .. } | AttemptResult::DeferredStart { .. }),
+            )) = attempts.get(&id)
+            {
                 let request: SingletonPreparedRequest =
                     run.journal.materials.decode(&member.request)?;
                 let call = SingletonToolCall {
@@ -371,15 +381,33 @@ impl<'a> RunCoordinator<'a> {
                     cancel: member.policy.cancel,
                     environment: request.environment,
                 };
-                run.waiting.insert(
-                    id,
-                    Waiting {
-                        call,
-                        member,
-                        handlers: Handlers::Owned(std::sync::Arc::clone(&handlers)),
-                        attempt: *attempt,
-                    },
-                );
+                let start = match result {
+                    AttemptResult::DeferredStart {
+                        start_key,
+                        obligation,
+                        ..
+                    } => Some(SingletonStart {
+                        start_key: start_key.clone(),
+                        obligation: obligation.clone(),
+                    }),
+                    _ => None,
+                };
+                let pending_start = start.is_some() && !launched.contains_key(&id);
+                let waiting = Waiting {
+                    call,
+                    member,
+                    handlers: Handlers::Owned(std::sync::Arc::clone(&handlers)),
+                    attempt: *attempt,
+                    start,
+                };
+                if pending_start {
+                    let AttemptResult::DeferredStart { source, .. } = result else {
+                        return Err(crate::tool_run::ContinuationRefusal::ForeignSource.into());
+                    };
+                    run.pending_starts.insert(id, (waiting, source.clone()));
+                } else {
+                    run.waiting.insert(id, waiting);
+                }
             }
         }
         if run.journal.ledger.lifecycle() == RunLifecycle::Live {

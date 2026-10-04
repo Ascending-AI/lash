@@ -7,7 +7,6 @@ use crate::process::{
     RestateProcessRunner, RestateProcessWorkflowInput, RestateProcessWorkflowPayload,
     SegmentStarted,
 };
-use lash_core::store::ToolMaterialStore as _;
 use lash_core::tool_dispatch::RunCoordinator;
 use lash_core::tool_run::{MaterialHolder, RunLifecycle, RunTransfer};
 use lash_core::{
@@ -18,6 +17,7 @@ use restate_sdk::prelude::Endpoint;
 struct Runner {
     starter: Arc<Starter>,
     call: SingletonToolCall,
+    launched_before_cut: bool,
 }
 
 #[async_trait::async_trait]
@@ -47,6 +47,9 @@ impl RestateProcessRunner for Runner {
             call.owner = owner.clone();
             let mut run = RunCoordinator::open(&scoped, owner, segment, call.available.clone());
             run.decide(&call, self.starter.as_ref()).await.unwrap();
+            if self.launched_before_cut {
+                run.drain().await.unwrap();
+            }
             run.request_cut(lash_core::BoundaryReason::JournalBudget);
             let mut transfer = run.quiesce().await.unwrap();
             run.retain_cut(&mut transfer, material.as_ref())
@@ -55,7 +58,10 @@ impl RestateProcessRunner for Runner {
             assert_eq!(transfer.owed_starts, vec![start_key("process-transfer")]);
             assert_eq!(transfer.environment, call.environment);
             assert_eq!(transfer.reserved_calls, 1);
-            assert!(self.starter.launches().is_empty());
+            assert_eq!(
+                self.starter.launches().len(),
+                usize::from(self.launched_before_cut)
+            );
             return Ok(lash_core::ProcessRunOutcome::SegmentBoundary(
                 lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
@@ -97,22 +103,43 @@ impl RestateProcessRunner for Runner {
 
 #[tokio::test]
 async fn l08_process_cut_carries_start_environment_and_cancel_hold_without_body_replay() {
+    for (deferred, launched_before_cut) in [(false, false), (true, false), (true, true)] {
+        check_transfer(deferred, launched_before_cut).await;
+    }
+}
+
+async fn check_transfer(deferred: bool, launched_before_cut: bool) {
     let stores = SqliteStoreSet::memory().await.unwrap();
     let key = start_key("process-transfer");
-    let starter = Starter::new(
-        stores.process_registry(),
-        declaring(Some(key.clone())),
-        CancelAt::Never,
-    );
+    let body = declaring(Some(key.clone()));
+    let body = if deferred {
+        let SingletonBodyOutcome::Done {
+            start: Some(start), ..
+        } = body
+        else {
+            unreachable!()
+        };
+        SingletonBodyOutcome::DeferredStart { start }
+    } else {
+        body
+    };
+    let starter = Starter::new(stores.process_registry(), body, CancelAt::Never);
     assert!(starter.materials.set(stores.process_env_store()).is_ok());
+    let mut call = call("process-start", ExternalCancelPolicy::CancelExternalWork);
+    if deferred {
+        call.declaration =
+            ToolDeclaration::deferring().with_intents([ToolIntentKind::StartProcess]);
+    }
     let runner = Arc::new(Runner {
         starter: Arc::clone(&starter),
-        call: call("process-start", ExternalCancelPolicy::CancelExternalWork),
+        call,
+        launched_before_cut,
     });
     let server = lash_restate_test::RestateTestServer::new(ServerConfig::default()).unwrap();
     let connection =
         crate::RestateConnection::with_transport(server.ingress_url(), server.transport());
     let ingress = crate::RestateIngressClient::new(connection.clone());
+    assert!(starter.ingress.set(ingress.clone()).is_ok());
     let registry = stores.process_registry();
     server
         .register(
@@ -174,11 +201,15 @@ async fn l08_process_cut_carries_start_environment_and_cancel_hold_without_body_
         tokio::task::yield_now().await;
     }
     assert_eq!(starter.executions.load(Ordering::SeqCst), 1);
-    assert_eq!(starter.launches().len(), 1);
-    assert_eq!(
-        starter.discharges(),
-        vec![(starter.launches()[0].clone(), true)]
-    );
+    let launches = starter.launches();
+    let expected_launches = usize::from(!deferred || launched_before_cut);
+    assert_eq!(launches.len(), expected_launches);
+    let expected_discharges = launches
+        .iter()
+        .cloned()
+        .map(|process_id| (process_id, true))
+        .collect::<Vec<_>>();
+    assert_eq!(starter.discharges(), expected_discharges);
     let rows: Vec<_> = Stores {
         tier: Tier::Memory,
         set: stores,
@@ -189,5 +220,11 @@ async fn l08_process_cut_carries_start_environment_and_cancel_hold_without_body_
     .into_iter()
     .filter(|row| row.start_key.as_deref() == Some(key.as_str()))
     .collect();
-    assert_eq!(rows, vec![Row::drained(&starter.launches()[0], &key, true)]);
+    assert_eq!(
+        rows,
+        launches
+            .iter()
+            .map(|id| Row::drained(id, &key, true))
+            .collect::<Vec<_>>()
+    );
 }
