@@ -350,7 +350,11 @@ async fn l05_check_cancel_never_replaces_an_earlier_winner() {
     }
 }
 
-fn aggregate_plan(key: &str, calls: &[SingletonToolCall], operands: Vec<u32>) -> AggregatePlan {
+pub(super) fn aggregate_plan(
+    key: &str,
+    calls: &[SingletonToolCall],
+    operands: Vec<u32>,
+) -> AggregatePlan {
     AggregatePlan {
         key: key.to_owned(),
         leaves: calls

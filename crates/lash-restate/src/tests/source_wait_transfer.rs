@@ -349,3 +349,268 @@ async fn wait_until(server: &RestateTestServer, done: impl Fn() -> bool) {
     .await
     .unwrap_or_else(|_| panic!("wait never settled: {:?}", server.invocations()));
 }
+
+/// L09/L11: the ACK retires one physical subscription, while a successor's
+/// subscription to the same immutable source keeps its authority. Both sides
+/// of the index write recover, and removal cannot precede that ACK.
+#[tokio::test]
+async fn native_retirement_preserves_the_successor_on_both_crash_sides() {
+    for point in [
+        lash_restate_test::CrashPoint::BeforeFrame {
+            ty: lash_restate_test::protocol::MessageType::SetStateCommand,
+        },
+        lash_restate_test::CrashPoint::BeforeFrame {
+            ty: lash_restate_test::protocol::MessageType::OutputCommand,
+        },
+    ] {
+        native_retirement(Some(point), false).await;
+    }
+}
+
+/// L07/L09/L11: resolve and cancel can land while retirement is awaiting its
+/// ACK. The successor observes the one seal, and external work stays live.
+#[tokio::test]
+async fn completion_and_cancellation_survive_a_retirement_in_flight() {
+    for cancel in [false, true] {
+        native_retirement(None, cancel).await;
+    }
+}
+
+async fn native_retirement(crash: Option<lash_restate_test::CrashPoint>, cancel: bool) {
+    use lash_core::{ProcessQuery as _, ProcessRegistrar as _};
+    let server = RestateTestServer::new(ServerConfig::default().with_seed(0x4928)).expect("server");
+    let connection = RestateConnection::with_transport(server.ingress_url(), server.transport());
+    let ingress = RestateIngressClient::new(connection.clone());
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("SQLite");
+    let old = server
+        .register(endpoint(&connection, &stores, "N").await)
+        .await
+        .expect("N");
+    let process = stores
+        .process_registry()
+        .register_process(external_registration())
+        .await
+        .expect("external process")
+        .id;
+    let owner = lash_core::EffectOpener::turn("native-source-session", "logical-run");
+    let call_id = lash_core::ToolCallId::fixture("retirement-call");
+    let source = SourceDescriptor {
+        source: test_restate_await_event_key(
+            owner.admitted_scope().scope(),
+            AwaitEventWaitIdentity::tool_completion(call_id.clone()),
+        )
+        .expect("source key"),
+        owner,
+        call_id,
+        resolver: lash_core::plugin::PluginRevision::new(
+            "tools",
+            lash_core::plugin::BehaviorRevision::ONE,
+        ),
+        authority: SourceAuthority::ProcessTerminal {
+            process_id: process.clone(),
+        },
+        cancel: ExternalCancelPolicy::Ignore,
+    };
+    let address = crate::RestateDurableWaitAddress::for_key(&source.source);
+    let arm: crate::Reply<RestateSourceArmReply> = ingress
+        .call_object_json(
+            INDEX,
+            &address.index_key(),
+            "arm_source",
+            &crate::Call::new(RestateSourceArmRequest {
+                descriptor: source.clone(),
+            }),
+        )
+        .await
+        .expect("arm");
+    assert!(matches!(
+        arm.body,
+        RestateSourceArmReply::Armed { seal: None }
+    ));
+    let wait = |key: &'static str, segment| {
+        let ingress = ingress.clone();
+        let source = source.clone();
+        tokio::spawn(async move {
+            ingress
+                .call_workflow_json::<_, WaitEnd>(PROBE, key, "run", &Input { source, segment })
+                .await
+        })
+    };
+    let predecessor = wait("native-old", 0);
+    wait_until(&server, || {
+        server.invocations().iter().any(|view| {
+            view.target == format!("{PROBE}/native-old/run") && view.blocked_on_server == Some(true)
+        })
+    })
+    .await;
+    server
+        .register(endpoint(&connection, &stores, "N+1").await)
+        .await
+        .expect("N+1");
+    let successor = wait("native-next", 1);
+    wait_until(&server, || {
+        server.invocations().iter().any(|view| {
+            view.target == format!("{PROBE}/native-next/run")
+                && view.blocked_on_server == Some(true)
+        })
+    })
+    .await;
+    let read = || {
+        let bytes = server
+            .object_state(INDEX, &address.index_key())
+            .remove(&format!("wait-index/v2/source/{}", address.workflow_key))
+            .expect("source row");
+        let row: serde_json::Value = serde_json::from_slice(&bytes).expect("stamped row");
+        serde_json::from_value::<crate::durable_wait::source_seal::IndexedSource>(
+            row["body"].clone(),
+        )
+        .expect("source")
+    };
+    assert_eq!(read().subscribers.len(), 2);
+    let count = lash_restate_test::CrashCount::new();
+    assert!(server.on_crash(count.listener()));
+    let held = if crash.is_none() {
+        Some(server.hold(INDEX, &address.index_key()).await)
+    } else {
+        None
+    };
+    if let Some(point) = &crash {
+        server.crash_on(
+            lash_restate_test::CrashRule::new(point.clone())
+                .service(INDEX)
+                .handler("unsubscribe_source"),
+        );
+    }
+    ingress
+        .call_workflow_json::<_, ()>(
+            PROBE,
+            "native-old",
+            "hand_over",
+            &lash_core::engine::BuildGeneration::for_test("N"),
+        )
+        .await
+        .expect("handover");
+    let seal = if cancel {
+        SourceSeal::Cancelled
+    } else {
+        SourceSeal::Resolved {
+            result: Box::new(MaterialRef {
+                owner: MaterialOwner::Source {
+                    source: source.source.clone(),
+                },
+                role: MaterialRole::AttemptOutput,
+                location: MaterialLocation::RetainedArtifact {
+                    artifact: lash_core::ArtifactName {
+                        store: lash_core::ArtifactStoreId::ToolMaterial,
+                        artifact_ref: "retirement-result".into(),
+                    },
+                },
+                digest: MaterialDigest::parse(&"a".repeat(64)).expect("digest"),
+            }),
+        }
+    };
+    if let Some(held) = held {
+        wait_until(&server, || {
+            predecessor.is_finished()
+                || server.invocations().iter().any(|view| {
+                    view.target.ends_with("/unsubscribe_source") && view.status != "completed"
+                })
+        })
+        .await;
+        assert!(
+            !predecessor.is_finished(),
+            "the predecessor cannot answer before retirement ACK"
+        );
+        assert!(
+            server.remove_deployment(&old, false).is_err(),
+            "the unacknowledged retirement still holds N"
+        );
+        let resolving = {
+            let ingress = ingress.clone();
+            let source = source.clone();
+            let seal = seal.clone();
+            let key = address.index_key();
+            let process = process.clone();
+            tokio::spawn(async move {
+                ingress
+                    .call_object_json::<_, crate::Reply<RestateSourceSealReply>>(
+                        INDEX,
+                        &key,
+                        "seal_source",
+                        &crate::Call::new(RestateSourceSealRequest {
+                            source: source.source,
+                            writer: if cancel {
+                                SealWriter::Owner {
+                                    opener: source.owner,
+                                }
+                            } else {
+                                SealWriter::Process {
+                                    process_id: process,
+                                }
+                            },
+                            seal,
+                        }),
+                    )
+                    .await
+            })
+        };
+        wait_until(&server, || {
+            server
+                .invocations()
+                .iter()
+                .any(|view| view.target.ends_with("/seal_source") && view.status != "completed")
+        })
+        .await;
+        held.release();
+        resolving
+            .await
+            .expect("resolver task")
+            .expect("one terminal");
+    }
+    assert_eq!(
+        predecessor.await.expect("task").expect("predecessor"),
+        WaitEnd::HandedOver
+    );
+    if crash.is_some() {
+        let subscribers = read().subscribers;
+        assert_eq!(subscribers.len(), 1, "only the predecessor read retired");
+        assert_eq!(subscribers[0].segment, SegmentOrdinal(1));
+        assert_eq!(count.get(), 1, "the chosen retirement crash fired once");
+        assert!(!successor.is_finished());
+        server.settle().await;
+        server
+            .remove_deployment(&old, false)
+            .expect("N drains before the external source resolves");
+        let _: crate::Reply<RestateSourceSealReply> = ingress
+            .call_object_json(
+                INDEX,
+                &address.index_key(),
+                "seal_source",
+                &crate::Call::new(RestateSourceSealRequest {
+                    source: source.source,
+                    writer: SealWriter::Process {
+                        process_id: process.clone(),
+                    },
+                    seal: seal.clone(),
+                }),
+            )
+            .await
+            .expect("seal");
+    }
+    assert_eq!(
+        successor.await.expect("task").expect("successor"),
+        WaitEnd::Sealed(seal)
+    );
+    let record = stores
+        .process_registry()
+        .get_process(&process)
+        .await
+        .expect("process query")
+        .expect("process row");
+    assert!(
+        record.outcome().is_none() && record.cancel_request.is_none(),
+        "retirement and Run cancellation cannot cancel detached external work"
+    );
+}

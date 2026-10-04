@@ -213,7 +213,7 @@ fn event_output_crash(
     .handler("run")
 }
 
-async fn hand_over_event(
+pub(super) async fn hand_over_event(
     double: &lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
     session: &lash_core::SessionId,
 ) {

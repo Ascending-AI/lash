@@ -473,17 +473,39 @@ struct World {
 }
 
 async fn double_world(storage: Storage) -> World {
+    double_world_with_config(storage, lash_restate_test::ServerConfig::default()).await
+}
+
+async fn double_world_with_config(
+    storage: Storage,
+    config: lash_restate_test::ServerConfig,
+) -> World {
+    double_world_with_script(storage, config, None).await
+}
+
+async fn double_world_with_script(
+    storage: Storage,
+    config: lash_restate_test::ServerConfig,
+    script: Option<Arc<lash_core::testing::Script>>,
+) -> World {
     let (opening, keep) = prepare(storage).await;
     let lever = DrainLever::default();
     let opened = lever.clone();
     let double = lash_restate_test::backend_with_store_set(
         SEED,
-        lash_restate_test::ServerConfig::default(),
+        config,
         lash_restate_test::DeploymentHooks::default(),
         |clock| async move {
-            open(opening, clock, opened)
+            let stores = open(opening, clock, opened)
                 .await
-                .map_err(lash_restate_test::BackendError::Stores)
+                .map_err(lash_restate_test::BackendError::Stores)?;
+            Ok(if let Some(script) = script {
+                lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                    .map_session_store_factory(|store| script.wrap("cell", store))
+                    .into_store_set()
+            } else {
+                stores
+            })
         },
     )
     .await

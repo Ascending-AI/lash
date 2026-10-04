@@ -54,4 +54,5 @@ fn cell_core(
         .expect("build the core")
 }
 
+mod native_run;
 mod waits;

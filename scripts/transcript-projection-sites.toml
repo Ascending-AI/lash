@@ -1,7 +1,7 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
 reads = 102
-outputs = 136
+outputs = 138
 
 [[surfaces]]
 name = "workbench"
@@ -261,3 +261,15 @@ row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", 
 "examples/slack-clone/tests/mcp.rs#transcript_text" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "transcript_text inspects recorded state for a law assertion." }
 "examples/toolbench/src/runtime.rs#run_task_with_shutdown_witness" = { reads = 0, outputs = 1, kind = "output-read", reason = "run_task_with_shutdown_witness exposes programmatic execution results or provider data, not a transcript renderer." }
 "examples/agent-workbench/src/main_sections/tests/continue_as_projection.rs#canonical_transcript_scenario_survives_a_frame_switch" = { reads = 0, outputs = 1, kind = "output-read", reason = "Asserts the frame-switch program result independently of canonical source and rendered rows." }
+
+[sites."crates/lash/src/tests/drain_hand_over/cell_segment/native_run.rs#finish"]
+reads = 0
+outputs = 1
+kind = "output-read"
+reason = "The native VM resume law checks the committed typed final value after handover."
+
+[sites."crates/lash/src/tests/drain_hand_over/cell_segment/native_run.rs#cancel_cell"]
+reads = 0
+outputs = 1
+kind = "output-read"
+reason = "The native cancellation law checks the typed final value of a fresh logical Run."
