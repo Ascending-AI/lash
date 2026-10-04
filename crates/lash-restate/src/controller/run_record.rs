@@ -152,6 +152,52 @@ fn decode_entry<T: serde::de::DeserializeOwned>(
 mod tests {
     use super::*;
 
+    /// L21: X acknowledgement precedes schedule registration. A predecessor
+    /// keeps its drain lane and is refused before its schedule is decoded.
+    #[tokio::test]
+    async fn l21_x_acknowledgement_precedes_schedule_and_retains_predecessor_lane() {
+        use lash_core::engine::BuildGeneration;
+        let generation = |epoch: u32| {
+            let bytes = epoch.to_be_bytes();
+            BuildGeneration::from_digest([b'x', b's', bytes[0], bytes[1], bytes[2], bytes[3]])
+        };
+        let old = generation(crate::JOURNAL_LOGIC_EPOCH - 1);
+        let new = generation(crate::JOURNAL_LOGIC_EPOCH);
+        let entry = serde_json::json!({
+            BUILD_GENERATION_FIELD: old,
+            "record": "an undecodable predecessor schedule",
+        });
+        let sentinel = crate::sentinel::FoldedSentinel::new("LashProcessWorkflow/run", new);
+        let decoded = std::sync::atomic::AtomicBool::new(false);
+        let refusal = sentinel
+            .guard(async {
+                sentinel.check(entry.get(BUILD_GENERATION_FIELD)).await;
+                decoded.store(true, std::sync::atomic::Ordering::SeqCst);
+                decode_run_journal_entry("lash:run:schedule:2", entry.clone())
+            })
+            .await
+            .expect_err("refuse the predecessor before schedule decoding");
+        assert!(format!("{refusal:?}").contains("RetiredGeneration"));
+        assert!(!decoded.load(std::sync::atomic::Ordering::SeqCst));
+        let predecessor =
+            crate::sentinel::FoldedSentinel::new("LashProcessWorkflow/run", old.clone());
+        predecessor.check(entry.get(BUILD_GENERATION_FIELD)).await;
+        for service in [
+            crate::LashService::ProcessWorkflow,
+            crate::LashService::TurnDriver,
+        ] {
+            let lane = crate::services::DEFAULT_NAMESPACE
+                .generation(service, old.clone())
+                .generation_lane_name()
+                .unwrap();
+            assert!(
+                crate::services::lash_service_routes(&crate::services::DEFAULT_NAMESPACE, &old)
+                    .iter()
+                    .any(|route| route.generation_lane_name().as_ref() == Some(&lane))
+            );
+        }
+    }
+
     /// L21: terminal unsubscription and physical Run admission change the
     /// handler journal. The predecessor keeps its lane and its undecoded data.
     #[tokio::test]
