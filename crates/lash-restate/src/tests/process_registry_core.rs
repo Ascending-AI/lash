@@ -100,8 +100,13 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
         .expect("open raw session sqlite store");
     let rows: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1",
-            rusqlite::params![session_id],
+            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2",
+            rusqlite::params![
+                session_id,
+                lash_core::store::OperationId::turn(session_id, turn_id, "final")
+                    .storage_key()
+                    .expect("the final operation key")
+            ],
             |row| row.get(0),
         )
         .expect("count turn commit stamps");
@@ -158,10 +163,10 @@ pub(super) async fn restate_replay_shift_seal_takes_recorded_branch() {
             .expect("open session store"),
     );
     let underlying_store = session_view(store.clone(), session_id);
-    let shift_seal_count = Arc::new(AtomicUsize::new(0));
+    let admission_count = Arc::new(AtomicUsize::new(0));
     let probed_store = decorated_view(&underlying_store, |inner| CommitRetryStore {
         inner,
-        shift_seal_count: Arc::clone(&shift_seal_count),
+        admission_count: Arc::clone(&admission_count),
     });
     let runtime_store: lash_core::store::SessionStore = probed_store;
     let policy = lash_core::testing::mock_session_policy();
@@ -193,7 +198,7 @@ pub(super) async fn restate_replay_shift_seal_takes_recorded_branch() {
     )
     .await
     .expect("first durable worker reaches provider suspension");
-    assert_eq!(shift_seal_count.load(Ordering::SeqCst), 1);
+    assert_eq!(admission_count.load(Ordering::SeqCst), 1);
     assert!(
         !context.runs().is_empty(),
         "the suspended handler reached the real Restate run boundary"
@@ -236,8 +241,8 @@ pub(super) async fn restate_replay_shift_seal_takes_recorded_branch() {
     let replay_turn = replay_turn.unwrap_or_else(|error| {
         panic!(
             "fresh durable worker must redrive under a new admission: \
-             {error:?}; shift_seals={}",
-            shift_seal_count.load(Ordering::SeqCst)
+             {error:?}; admissions={}",
+            admission_count.load(Ordering::SeqCst)
         )
     });
     assert!(matches!(
@@ -249,7 +254,7 @@ pub(super) async fn restate_replay_shift_seal_takes_recorded_branch() {
         "fresh worker progressed"
     );
     assert_eq!(
-        shift_seal_count.load(Ordering::SeqCst),
+        admission_count.load(Ordering::SeqCst),
         1,
         "the fresh worker replays the recorded shift seal"
     );
@@ -263,8 +268,13 @@ pub(super) async fn restate_replay_shift_seal_takes_recorded_branch() {
         .expect("open raw session sqlite store");
     let rows: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1",
-            rusqlite::params![session_id],
+            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2",
+            rusqlite::params![
+                session_id,
+                lash_core::store::OperationId::turn(session_id, turn_id, "final")
+                    .storage_key()
+                    .expect("the final operation key")
+            ],
             |row| row.get(0),
         )
         .expect("count liveness turn commit stamps");

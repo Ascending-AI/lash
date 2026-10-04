@@ -42,11 +42,10 @@ async fn within<T>(what: &str, step: impl std::future::Future<Output = T>) -> T 
 
 /// Holds the acceptor at the start of its shift admission.
 ///
-/// The session's first read of its shift epoch is the acceptor's admission
-/// reading the epoch its seal will raise: it is held until the law resumes
-/// it, so the acceptor has accepted its input and admitted nothing, and
-/// what it then observes is the session as the run's executor left it.
-/// Once resumed, every further read of the unfinished run is a re-decision
+/// The acceptor's first atomic preparation is held until the law resumes
+/// it, after input acceptance and before Run admission. It then observes
+/// the session as the run's executor left it.
+/// Once resumed, every further preparation is a re-decision
 /// of that admission (a refused attempt's retry on Restate) and is held
 /// until the law settles, so the retries spend none of the invocation's
 /// attempt budget while the run's executor is still running it.
@@ -90,30 +89,25 @@ impl crate::store::RuntimeStoreDecorator for AdmissionGate {
         self.inner.as_ref()
     }
 
-    async fn shift_epoch(
+    async fn prepare_shift_admission(
         &self,
         session_id: &SessionId,
-    ) -> Result<crate::store::StoredShiftEpoch, crate::StoreError> {
+        admission: &crate::store::AdmissionId,
+        executor: &RunExecutor,
+    ) -> Result<crate::store::ShiftAdmissionPreparation, crate::StoreError> {
         if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
             self.held.notify_one();
             let _ = self.resumed.subscribe().wait_for(|resumed| *resumed).await;
         }
-        self.inner.shift_epoch(session_id).await
-    }
-
-    async fn unfinished_run(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<crate::store::UnfinishedRun>, crate::StoreError> {
-        // The resumed acceptor's own decision reads through; what follows
-        // it is a retry.
         if *self.resumed.borrow()
             && !*self.settled.borrow()
             && self.decisions.fetch_add(1, Ordering::SeqCst) > 0
         {
             let _ = self.settled.subscribe().wait_for(|settled| *settled).await;
         }
-        self.inner.unfinished_run(session_id).await
+        self.inner
+            .prepare_shift_admission(session_id, admission, executor)
+            .await
     }
 }
 
