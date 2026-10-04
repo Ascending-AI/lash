@@ -1140,12 +1140,10 @@ impl ProcessCommand {
             Self::Await { process_id } => {
                 crate::runtime::causal::CommandSubKey::ProcessAwait(process_id.as_ref()).to_string()
             }
-            // One arming per (process, wait): a turn may park several
-            // waits on the same process, and each redrive re-issues the
-            // same id so the arming replays against its own journal entry
-            // instead of colliding with the terminal wait above.
+            // One K4 subscription per (process, source). Replays use the
+            // same receiver identity without colliding with a direct await.
             Self::AttachTerminal { process_id, key } => {
-                crate::runtime::causal::CommandSubKey::ProcessAttachTerminal(&format!(
+                crate::runtime::causal::CommandSubKey::ProcessSubscribeTerminal(&format!(
                     "{process_id}:{}",
                     key.key_id
                 ))

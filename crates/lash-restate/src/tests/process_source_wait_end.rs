@@ -194,8 +194,7 @@ impl World {
                 .server
                 .invocations()
                 .iter()
-                .any(|view| view.target.starts_with("LashProcessAttach/")
-                    || view.target.ends_with("/await_terminal")),
+                .any(|view| view.target.ends_with("/await_terminal")),
             "short subscriptions create no attach or terminal read"
         );
     }

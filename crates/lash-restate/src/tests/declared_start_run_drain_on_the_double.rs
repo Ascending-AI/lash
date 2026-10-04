@@ -1461,8 +1461,7 @@ async fn a_deferred_start_replays_one_identity_and_consumes_its_terminal() {
                 .server()
                 .invocations()
                 .iter()
-                .all(|view| !view.target.starts_with("LashProcessAttach/")
-                    && !view.target.ends_with("/await_terminal")),
+                .all(|view| !view.target.ends_with("/await_terminal")),
             "no process waiter invocation survives"
         );
     }

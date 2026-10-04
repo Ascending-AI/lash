@@ -3,7 +3,7 @@
 //! the in-process server double.
 //!
 //! The waiters these laws protect are the journal-side ones: a
-//! A non-terminal `ProcessCommand::Await` or a `LashProcessAttach` waits on
+//! A non-terminal `ProcessCommand::Await` or a K4 source subscription waits on
 //! the process's terminal promise, through the root workflow's `await_terminal`.
 //! An already-terminal await journals the registry's outcome directly.
 //! A segment that stored its terminal and stopped before
@@ -222,7 +222,7 @@ impl World {
     }
 
     /// A journal-side waiter: the root workflow's `await_terminal`, the
-    /// promise wait `ProcessCommand::Await` and `LashProcessAttach` make.
+    /// promise wait `ProcessCommand::Await` and K4 subscriptions make.
     fn waiter(
         &self,
         process_id: &ProcessId,

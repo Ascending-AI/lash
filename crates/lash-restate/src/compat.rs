@@ -35,7 +35,6 @@ pub use lash_sansio::VersionRange;
 ///         RestateProcessCancelRequest, RestateProcessCompleteRequest, RestateProcessAwaitRequest,
 ///         RestateProcessHandOverRequest, RestateProcessCancelSignal,
 ///     ),
-///     roots(path = "crates/lash-restate/src/process_attach.rs", RestateProcessAttachRequest),
 ///     roots(
 ///         path = "crates/lash-restate/src/session_shifts.rs", RestateSessionShiftRequest,
 ///         RestateRunRequest, RestateRunCloseRequest,

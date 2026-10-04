@@ -1188,8 +1188,8 @@ pub(super) async fn an_undecodable_input_is_refused_after_the_sentinel_not_by_it
 /// FIG-3607 review item 4: the requests a caller sends into a running process
 /// workflow are refused by generation before their shape is decoded. Each is a
 /// real payload of the retired generation: the cancel request of generation 3
-/// named a `process_ref` with its incarnation, and the await, complete and
-/// attach requests carried no stamp at all.
+/// named a `process_ref` with its incarnation, and the await and complete
+/// requests carried no stamp at all.
 #[test]
 pub(super) fn retired_process_requests_are_refused_by_generation_not_by_shape() {
     let cancel = serde_json::json!({
@@ -1214,14 +1214,6 @@ pub(super) fn retired_process_requests_are_refused_by_generation_not_by_shape() 
             serde_json::from_value::<RestateProcessAwaitRequest>(unstamped.clone())
                 .expect_err("an unstamped await request is refused")
                 .to_string(),
-        ),
-        (
-            "attach",
-            serde_json::from_value::<crate::process_attach::RestateProcessAttachRequest>(
-                serde_json::json!({ "process_ref": { "process_id": "legacy-host-name", "incarnation": 1 }, "key": "legacy" }),
-            )
-            .expect_err("an unstamped attach request is refused")
-            .to_string(),
         ),
         (
             "complete",

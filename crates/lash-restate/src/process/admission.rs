@@ -83,7 +83,6 @@ use std::sync::Arc;
 ///         RestateProcessWorkflowPayload, RestateProcessCancelRequest,
 ///         RestateProcessCompleteRequest, RestateProcessAwaitRequest,
 ///     ),
-///     roots(path = "crates/lash-restate/src/process_attach.rs", RestateProcessAttachRequest),
 ///     items(ADMIT_STEP, START_STEP, stamped_journal_version, decode_stamped_request),
 ///     items(path = "crates/lash-restate/src/controller/scope_recording.rs", execute_effect),
 ///     roots(path = "crates/lash-restate/src/durable_wait/messages.rs", RestateDurableWaitProcessJournalRequest),

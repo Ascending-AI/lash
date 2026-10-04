@@ -95,7 +95,6 @@ mod ingress;
 mod object_state;
 mod object_upgrade;
 mod process;
-mod process_attach;
 mod process_stop;
 mod sentinel;
 mod serve;
@@ -182,7 +181,6 @@ pub use process::{
     RestateProcessWorkflowInput, RestateProcessWorkflowOutput, RestateProcessWorkflowPayload,
     SegmentStarted, resume_parked_process,
 };
-pub use process_attach::RestateProcessAttachRequest;
 pub use serve::{RestateEndpointLimits, serve_endpoint};
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use session_shifts::{

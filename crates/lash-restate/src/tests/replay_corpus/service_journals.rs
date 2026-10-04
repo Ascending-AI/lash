@@ -2,7 +2,7 @@
 //! handlers on the in-process server double (FIG-4805).
 //!
 //! One workload runs a session turn with a tool call (an effect group), a
-//! process, a durable wait and the process attach that resolves it, each
+//! process and a K4 durable source, each
 //! through the deployment's bound services. A service's journal is the
 //! ordered commands its handlers wrote; notifications, which the server
 //! stores in arrival order, are left out.
@@ -472,77 +472,6 @@ async fn run_workload() -> (RestateTestBackend, lash_core::engine::BuildGenerati
         .expect("the terminal resolves");
     server.settle().await;
 
-    // The durable wait and its process attach: a handler parks on a wait,
-    // and the attach resolves it with the process's terminal.
-    let key = backend
-        .lash_backend()
-        .effect_host()
-        .await_event_key(
-            &scope,
-            lash_core::AwaitEventWaitIdentity::Custom {
-                key: "replay-corpus-attach".to_owned(),
-            },
-        )
-        .await
-        .expect("the wait's key");
-    let wait: HandlerAttempt = {
-        let key = key.clone();
-        Arc::new(move |scoped| {
-            let key = key.clone();
-            Box::pin(async move {
-                let envelope = lash_core::RuntimeEffectEnvelope::new(
-                    lash_core::RuntimeEffectInvocation::new(
-                        lash_core::EffectAddress::new(
-                            scoped.execution_scope().clone(),
-                            "replay-corpus-await",
-                        )
-                        .expect("the wait's effect address"),
-                        lash_core::RuntimeAttribution::default(),
-                        "replay-corpus-await",
-                    ),
-                    lash_core::RuntimeEffectCommand::AwaitEvent { key },
-                );
-                scoped
-                    .execute_effect(
-                        envelope,
-                        lash_core::RuntimeEffectLocalExecutor::testing(|_| async {
-                            unreachable!("a durable wait runs no local executor")
-                        }),
-                    )
-                    .await
-                    .expect("the wait resolves");
-            })
-        })
-    };
-    let waiting = backend.run_in_handler(lash_core::AdmittedScope::new(scope), wait);
-    let attach = async {
-        until(&server, "the wait never parked", |views| {
-            views
-                .iter()
-                .any(|view| runs(view, "LashDurableWaitWorkflow", "await_resolution"))
-                && views
-                    .iter()
-                    .all(|view| view.status == "completed" || parked(view))
-        })
-        .await;
-        backend
-            .ingress()
-            .send_workflow_json(
-                "LashProcessAttach",
-                &crate::durable_wait::RestateDurableWaitAddress::for_key(&key).workflow_key,
-                "run",
-                &crate::Call::new(crate::RestateProcessAttachRequest {
-                    process_id: process_id.clone(),
-                    key: key.clone(),
-                }),
-            )
-            .await
-            .expect("send the attach");
-    };
-    let (waited, ()) = tokio::time::timeout(BOUND, async { tokio::join!(waiting, attach) })
-        .await
-        .expect("the wait finishes");
-    waited.expect("the waiting handler succeeds");
     server.settle().await;
     until(&server, "a handler never ended", |views| {
         views.iter().all(|view| view.status == "completed")

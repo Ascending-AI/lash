@@ -963,9 +963,8 @@ where
     let output = match terminal {
         Some(output) => output,
         None => {
-            // The ordinary wait receives its terminal through the attach,
-            // which acquires this scope's attachment edges before resolving
-            // the wait (ADR 0124). Arm it on this command's own wait key.
+            // Subscribe this command's source to the process terminal. K4
+            // acquires source-owned attachment leases before sealing it.
             let await_key = crate::durable_wait::restate_await_event_key_for_authority(
                 authority_id,
                 invocation.execution_scope(),
@@ -1037,7 +1036,7 @@ where
                 )) => process_await_output_from_resolution(resolution)?,
                 RestateTurnCancelRaceOutcome::Completed(context::TurnWaitOutcome::HandedOver) => {
                     // Retire this physical subscription before the boundary.
-                    // Its attach watches the key and cancels its terminal read.
+                    // K4 detaches the ended receiver from the terminal source.
                     // The process terminal and logical opener remain live;
                     // the successor observes the terminal or arms its own key.
                     context
@@ -1142,8 +1141,8 @@ where
                             })?;
                     }
                     // The race released the first wait as cancelled, so the
-                    // cancelled process's terminal arrives through an attach
-                    // armed on a wait of its own, acquired like any other.
+                    // cancelled process's terminal arrives through a new K4
+                    // subscription, acquired like any other.
                     let after_key = crate::durable_wait::restate_await_event_key_for_authority(
                         authority_id,
                         invocation.execution_scope(),
@@ -1230,8 +1229,8 @@ fn process_await_after_turn_cancel_wait_key(
     )
 }
 
-/// The terminal a resolved process-await wait carries. The attach workflow
-/// resolves the wait with the whole terminal as its value; an error
+/// The terminal a resolved process-await source carries. K4 seals the
+/// source with the whole terminal as its value; an error
 /// resolution is a terminal it could not observe.
 fn process_await_output_from_resolution(
     resolution: lash_core::Resolution,

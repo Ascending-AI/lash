@@ -16,7 +16,6 @@ mod stamped_requests;
 pub use admission::{JOURNAL_LOGIC_EPOCH, RESTATE_PROCESS_JOURNAL_VERSION, SegmentStarted};
 pub(crate) use admission::{SegmentAdmission, admit_segment, handover_digest};
 pub use park_reconcile::{ProcessParkReconcileReport, resume_parked_process};
-pub(crate) use stamped_requests::attach::StampedAttachRequest;
 
 use std::sync::Arc;
 

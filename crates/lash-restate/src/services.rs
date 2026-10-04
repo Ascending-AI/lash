@@ -95,7 +95,6 @@ use crate::effect_group::{
 use crate::ingress::RestateIngressClient;
 use crate::object_state::FleetView;
 use crate::process::{LashProcessWorkflow as _, LashProcessWorkflowImpl, RestateProcessRunner};
-use crate::process_attach::{LashProcessAttach as _, LashProcessAttachImpl};
 use crate::session_shifts::{
     LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl, RestateSessionShiftsSlot,
 };
@@ -368,14 +367,12 @@ macro_rules! lash_services {
 }
 
 lash_services! {
-    /// Exact-address promises and deadline timers for every await-event key.
+    /// Immutable completion seals for every await-event source.
     DurableWaitWorkflow => "LashDurableWaitWorkflow", Shared;
     /// The per-scope registry that cancels, revokes and fences a scope's waits.
     DurableWaitRegistry => "LashDurableWaitIndex", Shared, object(crate::durable_wait::DURABLE_WAIT_REGISTRY_FAMILY);
     /// The segment runner a process submission starts and awaits.
     ProcessWorkflow => "LashProcessWorkflow", Pinned;
-    /// Arms a process terminal for a caller parked on it.
-    ProcessAttach => "LashProcessAttach", Shared;
     /// An effect group's lifecycle and settlement rank.
     EffectGroupState => "EffectGroupIndex", Shared, object(crate::effect_group::EFFECT_GROUP_STATE_FAMILY);
     /// The derived group directory keyed by drain generation.
@@ -927,13 +924,6 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
                     .serve(),
                     &name,
                     claimed().enable_lazy_state(true),
-                    &wire,
-                ),
-                LashService::ProcessAttach => bind_as(
-                    builder,
-                    LashProcessAttachImpl::new(namespace.clone(), Arc::clone(&attachments)).serve(),
-                    &name,
-                    claimed(),
                     &wire,
                 ),
                 // Lazy, so each index handler loads only the keys it reads:

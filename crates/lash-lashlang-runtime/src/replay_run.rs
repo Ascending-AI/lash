@@ -233,7 +233,7 @@ pub enum CommandShape {
     /// A tool call: `{command}:{call_id}:attempt:{n}` and its sub-rows, its deferred
     /// `{command}:{call_id}:await`, and a declared start's rows — the start
     /// (`{command}:process:start:{key}`) and its armed terminal
-    /// (`{command}:process:attach-terminal:{id}:{key}`).
+    /// (`{command}:process:subscribe-terminal:{id}:{key}`).
     ToolCall,
     /// A journaled value at the command's own key: a runtime value
     /// (`Date.now()`, `Math.random()`) or a trigger operation.
@@ -267,7 +267,7 @@ impl CommandShape {
             | CommandSubKey::ToolAwait { .. }
             | CommandSubKey::ToolCancelWork { .. }
             | CommandSubKey::ProcessStart(_)
-            | CommandSubKey::ProcessAttachTerminal(_) => Self::ToolCall,
+            | CommandSubKey::ProcessSubscribeTerminal(_) => Self::ToolCall,
             CommandSubKey::ProcessAwait(_) => Self::AwaitHandle,
         })
     }
