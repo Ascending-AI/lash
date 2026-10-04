@@ -761,8 +761,6 @@ impl RestateProcessRunner for RecordingRunner {
     }
 }
 
-pub(super) struct TerminalFailureRunner;
-
 pub(super) struct DivergenceThenSuccessRunner {
     pub(super) runs: AtomicUsize,
 }
@@ -832,32 +830,6 @@ impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
             ));
         }
         Ok(process_success(serde_json::json!({"rerun": "succeeded"})).into())
-    }
-}
-
-#[async_trait::async_trait]
-impl RestateProcessRunner for TerminalFailureRunner {
-    fn executable_generation(
-        &self,
-        _registration: &ProcessRegistration,
-    ) -> Option<lash_core::ExecutableGeneration> {
-        None
-    }
-
-    async fn run_process_segment(
-        &self,
-        _started: &SegmentStarted,
-        _process_id: ProcessId,
-        _registration: ProcessRegistration,
-        _execution_context: ProcessExecutionContext,
-        _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
-        _handover: Option<lash_core::SegmentHandover>,
-        _cancellation: tokio_util::sync::CancellationToken,
-    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        Err(PluginError::Runtime(lash_core::RuntimeError::new(
-            lash_core::RuntimeErrorCode::EngineServiceUnregistered,
-            "no deployment binds the child worker",
-        )))
     }
 }
 
