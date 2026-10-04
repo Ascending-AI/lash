@@ -377,6 +377,53 @@ impl ProcessCapability {
         Ok((Some(env_ref), Some(spec)))
     }
 
+    /// K5 launches the Run's admitted registration through the same process
+    /// command executor as recorded intents. No live tool policy is consulted.
+    pub(in crate::runtime::session_manager) async fn start_bound_process(
+        &self,
+        current: &CurrentOwnerCapability,
+        registration: crate::ProcessStartRegistration,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let observers = match &registration.provenance.originator {
+            crate::ProcessOriginator::Session { session_id, .. } => {
+                self.mark_current_process_sync_needed(current, session_id);
+                vec![session_id.clone()]
+            }
+            crate::ProcessOriginator::Host { .. } => Vec::new(),
+        };
+        let registration = with_admitted_start_cx(current, registration, &scope).await?;
+        let env_spec = if matches!(
+            registration.input.as_ref(),
+            crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn { .. })
+        ) {
+            match registration.env_ref.as_ref() {
+                Some(reference) => Some(
+                    crate::load_process_execution_env(
+                        current.host.core.durability.process_env_store.as_ref(),
+                        reference,
+                    )
+                    .await?,
+                ),
+                None => None,
+            }
+        } else {
+            None
+        };
+        let registration = self
+            .admit_session_turn_start(current, registration, env_spec.as_ref())
+            .await?;
+        let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
+        let execution_context = options.execution_context(&scope);
+        self.command_runner(current, &scope)?
+            .start(
+                registration,
+                options.initial_observers.into_iter().collect(),
+                execution_context,
+            )
+            .await
+    }
+
     pub(in crate::runtime::session_manager) async fn start_process(
         &self,
         current: &CurrentOwnerCapability,

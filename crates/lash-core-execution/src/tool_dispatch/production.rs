@@ -880,34 +880,26 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         &self,
         obligation: &DeclaredStartObligation,
     ) -> Result<crate::ProcessId, String> {
-        let invocation = self
+        let parent = self
             .context
             .language_runtime_invocation(&format!("run:start:{}", obligation.start_key()));
-        let outcome = self
+        let record = self
             .context
             .dispatch()
-            .effect_controller
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
-                        registration: obligation.registration.clone(),
-                        observers: Vec::new(),
-                        execution_context: Box::default(),
-                    }),
-                ),
-                crate::RuntimeEffectLocalExecutor::unavailable(),
+            .processes
+            .start_bound(
+                obligation.registration.clone(),
+                self.context
+                    .process_scope(Some(parent.into_runtime_invocation())),
             )
             .await
-            .and_then(crate::RuntimeEffectOutcome::into_process)
             .map_err(|error| {
-                self.context.record_nested_effect_error(error.clone());
+                self.context
+                    .record_nested_effect_error(error.clone().into());
                 error.to_string()
             })?;
-        match outcome {
-            crate::ProcessEffectOutcome::Start { record, .. } => Ok(record.id),
-            _ => Err("the start command returned a different process outcome".to_owned()),
-        }
+        self.context.record_started_process(&record.id);
+        Ok(record.id)
     }
 
     async fn attach_start_terminal(

@@ -76,6 +76,20 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessHandleView, PluginError>;
 
+    /// Launch the registration admitted by a logical Run, without repeating
+    /// the tool's preparation or lifetime policy. The service supplies the
+    /// process executor and storage ports inside the owning invocation.
+    async fn start_bound(
+        &self,
+        registration: ProcessStartRegistration,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessRecord, PluginError> {
+        let _ = (registration, scope);
+        Err(PluginError::Session(
+            "bound process starts are unavailable in this runtime".to_owned(),
+        ))
+    }
+
     async fn start(
         &self,
         session_id: &SessionId,

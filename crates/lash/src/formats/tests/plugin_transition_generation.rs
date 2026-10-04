@@ -296,6 +296,18 @@ async fn native_activation_refuses_predecessor_before_decode_and_retains_drain()
         .await;
 }
 
+/// L21: binding a Run's process launch to the live executor changes its
+/// journaled command stream. The epoch alone must refuse a retained journal
+/// even when its effect entry still decodes under the current stored format.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bound_process_launch_keeps_predecessor_journals_on_their_drain_lane() {
+    predecessor_journal_keeps_its_lane(
+        crate::restate::JOURNAL_LOGIC_EPOCH - 1,
+        PredecessorShape::TaggedTransition,
+    )
+    .await;
+}
+
 enum PredecessorShape {
     UntaggedTransition,
     TaggedTransition,

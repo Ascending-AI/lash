@@ -218,6 +218,17 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         Ok(crate::ProcessHandleView::from_record(record))
     }
 
+    async fn start_bound(
+        &self,
+        registration: crate::ProcessStartRegistration,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.services
+            .processes
+            .start_bound_process(&self.services.current, registration, scope)
+            .await
+    }
+
     async fn start(
         &self,
         session_id: &SessionId,
