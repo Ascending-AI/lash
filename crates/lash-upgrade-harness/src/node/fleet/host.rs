@@ -17,6 +17,8 @@ use crate::node::tools::{BodyResult, BodyStep, FixtureProtocol, ToolBodies, Tool
 use crate::node::{RestateArgs, ServeReady, StoreArgs};
 use crate::restate_view::RestateView;
 
+mod receiver;
+
 #[derive(Clone, Debug, Args)]
 pub struct FleetServeArgs {
     #[command(flatten)]
@@ -29,6 +31,8 @@ pub struct FleetServeArgs {
     pub session: String,
     #[arg(long)]
     pub directory: PathBuf,
+    #[arg(long)]
+    pub barrier_directory: PathBuf,
     #[arg(long)]
     pub bind: SocketAddr,
     #[arg(long)]
@@ -49,6 +53,8 @@ pub struct FleetReady {
 
 struct State {
     core: lash::LashCore,
+    engine: Arc<lash::restate::RestateEngine>,
+    receiver: Arc<std::sync::OnceLock<lash::ProcessId>>,
     stores: Arc<dyn lash::StoreSet>,
     args: FleetServeArgs,
     deadline: Instant,
@@ -102,7 +108,7 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
                 work,
                 kind: BarrierKind::BodyEntered,
             };
-            let barriers = FileBarriers::new(args.directory.join("barriers"), deadline)?;
+            let barriers = FileBarriers::new(args.barrier_directory.clone(), deadline)?;
             if (args.scenario == "S14" && delivery.label == "b") || args.scenario == "S15" {
                 barriers.hold(&barrier)?;
             }
@@ -116,16 +122,25 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
         })
     });
     let mut plan = BTreeMap::new();
+    let receiver = Arc::new(std::sync::OnceLock::new());
     for label in labels {
         plan.insert(
             (*label).to_owned(),
-            BodyResult::Inline {
-                value: serde_json::json!(match *label {
-                    "a" => "A",
-                    "b" => "B",
-                    value => value,
-                }),
-                intents: Default::default(),
+            if args.scenario == "S15" {
+                BodyResult::EmitToReceiver {
+                    value: serde_json::json!("intent"),
+                    receiver: receiver.clone(),
+                    event_type: "tool_receipt".into(),
+                }
+            } else {
+                BodyResult::Inline {
+                    value: serde_json::json!(match *label {
+                        "a" => "A",
+                        "b" => "B",
+                        value => value,
+                    }),
+                    intents: Default::default(),
+                }
             },
         );
     }
@@ -150,7 +165,7 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
     ))?;
     let worker =
         lash::durability::DurableProcessWorker::new(core.durable_process_worker_config()?)?;
-    let endpoint = super::super::process::bind(
+    let builder = super::super::process::bind(
         engine.endpoint_builder(worker)?,
         &args.restate.namespace,
         super::super::process::HarnessProcesses {
@@ -161,8 +176,8 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
             namespace: lash::restate::RestateNamespace::new(&args.restate.namespace)?,
             model: super::super::llm_profile_config()?,
         },
-    )?
-    .build();
+    )?;
+    let endpoint = receiver::bind(builder, &args.restate, core.clone())?.build();
     let listener = tokio::net::TcpListener::bind(args.bind).await?;
     let uri = format!("http://{}", listener.local_addr()?);
     let control = tokio::net::TcpListener::bind(args.control_bind).await?;
@@ -181,6 +196,8 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
     });
     let state = Arc::new(State {
         core,
+        engine: engine.clone(),
+        receiver,
         stores,
         args: args.clone(),
         deadline,
@@ -201,20 +218,20 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
             let (work, _) = observe_work(&state.args, run, deadline).await?;
             let path = state.args.directory.join("publication-request.json");
             request.capture(&path)?;
-            let barriers = FileBarriers::new(state.args.directory.join("barriers"), deadline)?;
+            let barriers = FileBarriers::new(state.args.barrier_directory.clone(), deadline)?;
             let cut = Barrier {
                 work: work.clone(),
                 kind: BarrierKind::PublicationRequest,
             };
             barriers.hold(&cut)?;
             barriers.enter(&cut, path.display().to_string()).await?;
-            let refusal = request.release().await?;
-            let path = state.args.directory.join("publication-refused.json");
-            super::super::write_atomically(&path, &serde_json::to_vec(&refusal)?)?;
+            let receipt = request.release_terminal().await?;
+            let path = state.args.directory.join("publication-committed.json");
+            super::super::write_atomically(&path, &serde_json::to_vec(&receipt)?)?;
             barriers.publish(&BarrierProof {
                 barrier: Barrier {
                     work,
-                    kind: BarrierKind::PublicationRefused,
+                    kind: BarrierKind::SideEffectAccepted,
                 },
                 artifact: path.display().to_string(),
                 journal_index: None,
@@ -280,15 +297,96 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
 async fn command_host(state: &State, command: HostCommand) -> Result<HostObservation> {
     let session_id = lash::SessionId::parse(&state.args.session)?;
     let session = state.core.session(session_id.clone());
+    if let HostCommand::Process { action, input } = &command {
+        let output = match action.as_str() {
+            "register-uri" => {
+                let uri = input
+                    .as_str()
+                    .context("registration URI must be a string")?;
+                state.engine.register_deployment(uri).await?;
+                serde_json::json!({"registered":uri,"generation":state.engine.build_generation()?})
+            }
+            "receiver-register" => {
+                match session
+                    .create(lash::SessionCreation::root(super::super::session_spec()))
+                    .await
+                {
+                    Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
+                    Err(error) => return Err(error.into()),
+                }
+                let receipt = receiver::register(&state.args.restate, &session_id).await?;
+                if let Some(previous) = state.receiver.get() {
+                    ensure!(*previous == receipt.process_id, "receiver identity changed");
+                } else {
+                    state
+                        .receiver
+                        .set(receipt.process_id.clone())
+                        .map_err(|_| anyhow::anyhow!("receiver concurrently bound"))?;
+                }
+                serde_json::to_value(receipt)?
+            }
+            "receiver-events" => serde_json::to_value(
+                crate::node::tools::receiver_events(
+                    &state.core,
+                    state.receiver.get().context("receiver not registered")?,
+                )
+                .await?,
+            )?,
+            "drain" | "drain-status" => {
+                use lash_core::ClockWallTime as _;
+                let generation = state.engine.build_generation()?.clone();
+                let now = lash_core::facade_support::SystemClock.timestamp_ms();
+                let drain = state.stores.generation_drain();
+                if action == "drain" {
+                    drain.mark_draining(&generation, now).await?;
+                }
+                let registry = lash::restate::RestateDeploymentRegistry::new(
+                    lash::restate::RestateAdminClient::new(state.args.restate.admin_url.clone()),
+                );
+                let status = lash_core::store::generation_drain::GenerationDrainStatus::collect(
+                    drain.as_ref(),
+                    state.stores.session_delete_ledger().as_ref(),
+                    |kind| state.stores.obligation_ledger(kind),
+                    &registry,
+                    &generation,
+                    now,
+                )
+                .await?;
+                serde_json::json!({"generation":generation,"drained":status.drained()})
+            }
+            _ => bail!("unsupported fleet setup command {action}"),
+        };
+        // Setup has no accepted input, logical Run or execution segment.
+        return Ok(HostObservation {
+            work: WorkIdentity {
+                ingress: String::new(),
+                run: String::new(),
+                segment: String::new(),
+                call: None,
+                ordinal: None,
+            },
+            output,
+        });
+    }
     let (run, output) = match command {
         HostCommand::Submit {
             session: requested,
             idempotency_key,
-            ..
+            input,
         } => {
             ensure!(
                 requested == state.args.session,
                 "submission names another fixture session"
+            );
+            let expected = match state.args.scenario.as_str() {
+                "S14" => "partial-result",
+                "S15" => "tool-cancel-race",
+                "S16" => "stale-publication",
+                _ => unreachable!(),
+            };
+            ensure!(
+                input == serde_json::json!({"scenario":expected}),
+                "submission differs from admitted fixture scenario"
             );
             match session
                 .create(lash::SessionCreation::root(super::super::session_spec()))

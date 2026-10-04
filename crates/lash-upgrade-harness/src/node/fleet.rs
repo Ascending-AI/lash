@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
 pub mod host;
+pub mod scenario;
 
 type CommitAnswer = std::result::Result<RuntimeCommitReceipt, StoreError>;
 
@@ -275,15 +276,6 @@ pub struct HeldPublication {
     answer: oneshot::Sender<CommitAnswer>,
 }
 
-/// Only this typed store refusal satisfies S16. Transport errors and a
-/// head-CAS loss cannot stand in for the superseded authority check.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StalePublicationRefusal {
-    pub session: SessionId,
-    pub fence_epoch: u64,
-    pub current_epoch: u64,
-}
-
 impl HeldPublication {
     pub fn commit(&self) -> &RuntimeCommit {
         &self.commit
@@ -315,44 +307,16 @@ impl HeldPublication {
             .context("held runtime publication has no shift fence")
     }
 
-    /// Dispatch the original request once, preserving its operation, state,
-    /// bindings and old fence. Its caller may already have disappeared.
-    pub async fn release(self) -> Result<StalePublicationRefusal> {
-        let fence = self.fence()?.clone();
+    /// Release the original in-flight terminal at its existing authority.
+    /// A quiet-point drain cannot supersede this terminal publication.
+    pub async fn release_terminal(self) -> Result<RuntimeCommitReceipt> {
         let result = self.store.commit_runtime_state(self.commit).await;
-        let refusal = match &result {
-            Err(StoreError::StaleShiftFence {
-                session_id,
-                fence_epoch,
-                current_epoch,
-            }) => {
-                ensure!(
-                    session_id == fence.session(),
-                    "refusal names another session"
-                );
-                ensure!(
-                    *fence_epoch == fence.epoch(),
-                    "refusal names another old fence"
-                );
-                ensure!(
-                    *current_epoch > *fence_epoch,
-                    "successor did not supersede the fence"
-                );
-                Ok(StalePublicationRefusal {
-                    session: session_id.clone(),
-                    fence_epoch: *fence_epoch,
-                    current_epoch: *current_epoch,
-                })
-            }
-            Err(error) => Err(anyhow::anyhow!(
-                "stale publication refused for another cause: {error}"
-            )),
-            Ok(_) => Err(anyhow::anyhow!("stale publication was accepted")),
-        };
-        // A lost observer does not withdraw the retained write. Return its
-        // exact typed answer when the original invocation is still waiting.
+        let receipt = result
+            .as_ref()
+            .map(Clone::clone)
+            .map_err(|error| anyhow::anyhow!("terminal publication: {error}"));
         let _ = self.answer.send(result);
-        refusal
+        receipt
     }
 }
 
