@@ -312,7 +312,8 @@ async fn drive_to_terminal(
     )
     .expect("the signal wait's key");
     let run = |context: Arc<ReplayableRecordingContext>,
-               handover: Option<lash_core::SegmentHandover>| {
+               handover: Option<lash_core::SegmentHandover>,
+               segment_ordinal: u64| {
         let worker = worker.clone();
         let registry = Arc::clone(&registry);
         let registration = registration.clone();
@@ -324,19 +325,24 @@ async fn drive_to_terminal(
                     .process_segment_drive()
                     .segment_effect_budget(budget),
             );
-            worker
-                .run_process_segment_with_scoped_effect_controller(
-                    process_id.clone(),
+            let runner = crate::process::RestateCoreProcessRunner::new(worker);
+            let started = SegmentStarted::for_test(
+                recorded_process_admission(registry.as_ref(), &process_id).await,
+                segment_ordinal,
+                Some(invocation(&process_id)),
+                runner.admit_plugins().await?,
+            );
+            runner
+                .run_process_segment(
+                    &started,
+                    process_id,
                     registration,
                     ProcessExecutionContext::default(),
-                    invocation(&process_id),
                     controller
-                        .process_scope_for_test(
-                            recorded_process_admission(registry.as_ref(), &process_id).await,
-                        )
-                        .expect("scope the segment"),
-                    tokio_util::sync::CancellationToken::new(),
+                        .process_segment_controller(&started)
+                        .expect("scope the admitted segment"),
                     handover,
+                    tokio_util::sync::CancellationToken::new(),
                 )
                 .await
         }
@@ -344,8 +350,9 @@ async fn drive_to_terminal(
     // One invocation as the engine sees it: its outcome, or the failure that
     // ended the attempt, inside a step or between steps.
     let run = |context: Arc<ReplayableRecordingContext>,
-               handover: Option<lash_core::SegmentHandover>| {
-        let invocation = run(Arc::clone(&context), handover);
+               handover: Option<lash_core::SegmentHandover>,
+               segment_ordinal: u64| {
+        let invocation = run(Arc::clone(&context), handover, segment_ordinal);
         async move {
             match context.attempt.run(Box::pin(invocation)).await {
                 Ok(Ok(outcome)) => Ok(outcome),
@@ -371,7 +378,13 @@ async fn drive_to_terminal(
                 key: signal_key.clone(),
                 resolution: Resolution::Ok(serde_json::json!({ "go": true })),
             });
-        let outcome = match Box::pin(run(Arc::clone(&context), handover.clone())).await {
+        let outcome = match Box::pin(run(
+            Arc::clone(&context),
+            handover.clone(),
+            boundaries as u64,
+        ))
+        .await
+        {
             Ok(outcome) => outcome,
             Err(crashed) => {
                 assert!(
@@ -380,9 +393,13 @@ async fn drive_to_terminal(
                 );
                 interrupted += 1;
                 retry(&context);
-                Box::pin(run(Arc::clone(&context), handover.clone()))
-                    .await
-                    .expect("the retried invocation runs on")
+                Box::pin(run(
+                    Arc::clone(&context),
+                    handover.clone(),
+                    boundaries as u64,
+                ))
+                .await
+                .expect("the retried invocation runs on")
             }
         };
         match outcome {
@@ -418,9 +435,13 @@ async fn drive_to_terminal(
                         interrupted += 1;
                         retry(&context);
                         let (output, prelude) = terminal(
-                            Box::pin(run(Arc::clone(&context), handover.clone()))
-                                .await
-                                .expect("the retried invocation replays its runner"),
+                            Box::pin(run(
+                                Arc::clone(&context),
+                                handover.clone(),
+                                boundaries as u64,
+                            ))
+                            .await
+                            .expect("the retried invocation replays its runner"),
                         );
                         break crate::process::complete_process_outcome(
                             &writes,

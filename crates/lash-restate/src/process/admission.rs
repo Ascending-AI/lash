@@ -337,9 +337,14 @@ impl SegmentStarted {
             admitted,
             segment_ordinal,
             started_at_ms: 0,
-            authority: authority.unwrap_or_else(|| {
-                ProcessExecutionWriteAuthority::invocation(process_id, "test-segment-execution")
-            }),
+            authority: authority
+                .unwrap_or_else(|| {
+                    ProcessExecutionWriteAuthority::invocation(process_id, "test-segment-execution")
+                })
+                .bind_segment(lash_core::tool_run::SegmentOrdinal(
+                    u32::try_from(segment_ordinal)
+                        .expect("a test segment fits its recorded ordinal"),
+                )),
             generation: None,
             build_generation: None,
             plugins: plugins.map(Box::new),
