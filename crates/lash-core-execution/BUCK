@@ -21,6 +21,7 @@ lash_rust_library(
     build_script = None,
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -76,6 +77,7 @@ lash_rust_unit_test(
     build_script = None,
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -107,6 +109,7 @@ lash_rust_binary(
     name = "process_event_schema_generator__bin",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -135,6 +138,7 @@ lash_rust_unit_test(
     name = "process_event_schema_generator__bin__unit_test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -160,6 +164,7 @@ lash_rust_integration_test(
     name = "effect_model__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -193,6 +198,7 @@ lash_rust_integration_test(
     name = "process_model__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -224,6 +230,7 @@ lash_rust_integration_test(
     name = "store_backed__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],

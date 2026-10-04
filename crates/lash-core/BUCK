@@ -21,6 +21,7 @@ lash_rust_library(
     build_script = None,
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -51,6 +52,7 @@ lash_rust_unit_test(
     build_script = None,
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -75,6 +77,7 @@ lash_rust_integration_test(
     name = "integration_boundary__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -105,6 +108,7 @@ lash_rust_integration_test(
     name = "panic_containment__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -132,6 +136,7 @@ lash_rust_integration_test(
     name = "restate_double__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -159,6 +164,7 @@ lash_rust_integration_test(
     name = "runtime_effect__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -197,6 +203,7 @@ lash_rust_integration_test(
     name = "runtime_lifecycle__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -235,6 +242,7 @@ lash_rust_integration_test(
     name = "runtime_observability__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -275,6 +283,7 @@ lash_rust_integration_test(
     name = "runtime_scenarios__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -317,6 +326,7 @@ lash_rust_integration_test(
     name = "runtime_turns__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -354,6 +364,7 @@ lash_rust_integration_test(
     name = "tool_execution_grant_layout__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -381,6 +392,7 @@ lash_rust_integration_test(
     name = "turn_event_schema__test",
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],

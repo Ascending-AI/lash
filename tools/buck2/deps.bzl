@@ -62,6 +62,20 @@ PACKAGE_DEPS = {
             "uuid": "//third-party/rust:p0440"
         }
     },
+    "e2e-consumer": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "anyhow": "//third-party/rust:p0011",
+            "axum": "//third-party/rust:p0021",
+            "lash": "//crates/lash:lash",
+            "opentelemetry_sdk": "//third-party/rust:p0236",
+            "reqwest": "//third-party/rust:p0296",
+            "serde": "//third-party/rust:p0331",
+            "serde_json": "//third-party/rust:p0338",
+            "tokio": "//third-party/rust:p0399"
+        }
+    },
     "integrator-contract": {
         "build": {},
         "dev": {},

@@ -21,6 +21,7 @@ lash_rust_library(
     build_script = None,
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
@@ -50,6 +51,7 @@ lash_rust_unit_test(
     build_script = None,
     crate_features = [
         "default",
+        "otel-trace",
         "perf-witness",
         "testing",
     ],
