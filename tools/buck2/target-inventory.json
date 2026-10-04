@@ -53626,11 +53626,15 @@
         {
           "build_label": "//crates/lash-upgrade-harness:e2e__test",
           "cargo": "e2e",
+          "cargo_only": "contains private native-Restate and prebuilt-host witnesses; select exact guard filters or run provisioned witnesses through kiln gate",
           "check_label": "//crates/lash-upgrade-harness:e2e__test[check]",
           "clippy_label": "//crates/lash-upgrade-harness:e2e__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-upgrade-harness:e2e__test",
-          "tags": []
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
         },
         {
           "build_label": "//crates/lash-upgrade-harness:phase_a__test",
@@ -57574,7 +57578,6 @@
     "//crates/lash-tool-support:lash-tool-support__unit_test",
     "//crates/lash-trace:test_batch",
     "//crates/lash-typescript:test_batch",
-    "//crates/lash-upgrade-harness:e2e__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -57712,7 +57715,6 @@
     "//crates/lash-tool-support:lash-tool-support__unit_test",
     "//crates/lash-trace:test_batch",
     "//crates/lash-typescript:test_batch",
-    "//crates/lash-upgrade-harness:e2e__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -57881,7 +57883,6 @@
     "//crates/lash-typescript:fuel_law__test",
     "//crates/lash-typescript:lash-typescript__unit_test",
     "//crates/lash-typescript:test262__test",
-    "//crates/lash-upgrade-harness:e2e__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -58243,7 +58244,6 @@
     "//crates/lash-typescript:test262_full__test",
     "//crates/lash-typescript:test262_ratchet__test",
     "//crates/lash-typescript:test_batch",
-    "//crates/lash-upgrade-harness:e2e__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",

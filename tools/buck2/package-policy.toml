@@ -57,6 +57,15 @@ tags = ["manual", "cargo-service-gate"]
 reason = "requires native Restate and SQL services; execute this label uncached through scripts/ci/with-service.sh"
 args = ["--ignored"]
 
+# H0 mixes cheap controller guards and cases requiring gate-owned native
+# Restate/process artifacts. Exact labels still run the cheap full-path filters.
+[[rule]]
+packages = ["lash-upgrade-harness"]
+kinds = ["test"]
+targets = ["e2e"]
+tags = ["manual", "cargo-service-gate"]
+reason = "contains private native-Restate and prebuilt-host witnesses; select exact guard filters or run provisioned witnesses through kiln gate"
+
 # The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
 # ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
 # Each shard's action has a server of its own, so shards run in parallel
