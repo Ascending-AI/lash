@@ -171,20 +171,6 @@ pub(crate) async fn unbound_recording_store_on(
     runtime_helpers::RecordingStore::over(crate::StoreSet::session_store_factory(backend))
 }
 
-/// The twin of [`unbound_recording_store`] on the Restate server double: a
-/// [`runtime_helpers::RecordingStore`] over a fresh, unbound store of the
-/// double's engine store set, storage only. The open reads through
-/// [`RestateTestBackend::engine_stores`] — the decorated set — so a
-/// `backend_with` layer on its session-store factory applies here too.
-#[cfg(test)]
-pub(crate) async fn double_unbound_recording_store(
-    double: &lash_restate_test::RestateTestBackend,
-) -> runtime_helpers::RecordingStore {
-    runtime_helpers::RecordingStore::over(crate::StoreSet::session_store_factory(
-        double.engine_stores().as_ref(),
-    ))
-}
-
 /// Marks resident state stale for downstream reload-race tests.
 #[cfg(any(test, feature = "testing"))]
 pub fn invalidate_resident_session_state_for_testing(runtime: &mut crate::LashRuntime) {

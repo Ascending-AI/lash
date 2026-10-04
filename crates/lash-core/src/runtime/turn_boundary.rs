@@ -3,8 +3,6 @@ use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendD
 use crate::TurnId;
 use crate::facade_support::AgentFrameReasonFacadeOps as _;
 use crate::facade_support::SessionGraphFacadeOps;
-#[cfg(test)]
-use crate::facade_support::SessionNodeProjection;
 use crate::runtime::turn_settlement::TurnIngressSettlement;
 use crate::session_model::SessionHistoryRecord;
 use crate::store::{GraphAppend, RuntimeCommit, StoreError};
