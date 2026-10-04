@@ -1867,6 +1867,29 @@ fn l09_capture_rebuilds_the_complete_acknowledged_run() {
         owner: opener(),
         segment: SegmentOrdinal(0),
     }];
+    let publication = StateResolution {
+        publisher: crate::EffectAddress::new(
+            ExecutionScope::turn("session-1", "turn-1"),
+            "decision:current-cell-final",
+        )
+        .unwrap(),
+        plugin: revision("state"),
+        origin: StateCommandOrigin::ToolAttempt {
+            call_id: committed.call_id.clone(),
+            attempt: attempt(1),
+        },
+        segment: SegmentOrdinal(0),
+        ordinal: PublicationOrdinal(1),
+        predecessor: None,
+        outcome: StateResolutionOutcome::Applied {
+            changes: vec![ResolvedStateChange::Put {
+                key: "count".into(),
+                value: json!(1),
+            }],
+        },
+    };
+    capture.entries[0].state.push(publication.clone());
+    capture.state.record(&publication);
     capture
         .check_capture(&Cut::request(capture.reason).observe(0))
         .unwrap();
@@ -1885,6 +1908,23 @@ fn l09_capture_rebuilds_the_complete_acknowledged_run() {
     assert_eq!(ledger.unacknowledged_local(), 0);
     assert_eq!(adopted.sources, vec![source]);
     assert_eq!(adopted.environment, capture.environment);
+    assert_eq!(adopted.state.receipts, capture.state.receipts);
+    assert_eq!(
+        adopted.state.step(&publication),
+        Ok(FrontierStep::AlreadyApplied),
+        "adoption retains the exact applied receipt across the publisher fence"
+    );
+    let mut changed_receipt = publication.clone();
+    changed_receipt.outcome = StateResolutionOutcome::Applied {
+        changes: vec![ResolvedStateChange::Put {
+            key: "count".into(),
+            value: json!(2),
+        }],
+    };
+    assert_eq!(
+        adopted.state.step(&changed_receipt),
+        Err(FrontierRefusal::ReceiptMismatch { found: 1 })
+    );
     assert_eq!(adopted.subscriptions[0].segment, SegmentOrdinal(1));
     let mut lost_capacity = capture.clone();
     lost_capacity.reserved_calls = 0;
