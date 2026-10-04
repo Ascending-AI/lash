@@ -24,14 +24,11 @@
 //!
 //! * observed peak in-flight equals n (the counterpart of the
 //!   `max_in_flight_tool_attempts` double in lash-core's runtime tests);
-//! * the activation shape — all n dispatches are observed before any
-//!   settlement is served — with the consumer's reply order asserted exactly;
+//! * the activation shape — all n starts are observed before any
+//!   answer is served — with the consumer's reply order asserted exactly;
 //! * a serial-versus-concurrent differential: the same width-n program run with
 //!   leaves that never rendezvous returns the identical answers, so the
-//!   rendezvous changes the schedule and nothing else; and
-//! * the negative control: the same law over a [`SerialGroupHost`], which lets
-//!   a group child start only once the one before it settled, fails, naming
-//!   the members that never started. A law that cannot fail proves nothing.
+//!   rendezvous changes the schedule and nothing else.
 //!
 //! The laws are parameterised over two axes. The *tier* arrives as an
 //! [`crate::EffectHost`] and a [`crate::ConformanceTurnRunner`], so every tier
@@ -1998,105 +1995,4 @@ pub async fn tool_group_reverse_dependency(
          input-last member `{last}` has started; log: {:?}",
         observed.events,
     );
-}
-
-/// A group host that lets a group child's tool attempt start only once the
-/// attempt before it settled: the forced-serial negative control's host. It
-/// layers the tier's own host, so everything else about the tier is
-/// unchanged.
-struct SerialGroupHost {
-    turn: tokio::sync::Semaphore,
-}
-
-impl SerialGroupHost {
-    fn over(host: Arc<dyn crate::EffectHost>) -> Arc<dyn crate::EffectHost> {
-        Arc::new(crate::testing::LayeredEffectHost::new(
-            host,
-            Arc::new(Self {
-                turn: tokio::sync::Semaphore::new(1),
-            }),
-        ))
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::testing::EffectLayer for SerialGroupHost {
-    async fn execute_effect(
-        &self,
-        inner: &dyn crate::RuntimeEffectController,
-        envelope: crate::RuntimeEffectEnvelope,
-        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        if !matches!(
-            envelope.command,
-            crate::RuntimeEffectCommand::ToolAttempt { .. }
-        ) {
-            return inner.execute_effect(envelope, local_executor).await;
-        }
-        let _one_at_a_time = self.turn.acquire().await;
-        inner.execute_effect(envelope, local_executor).await
-    }
-}
-
-/// The negative control: the barrier law over a [`SerialGroupHost`] must fail
-/// for every producer, naming the members that never started. Proves the
-/// barrier law can fail on this tier, so its passes mean something.
-///
-/// One serial host layers the tier's host for every producer: a host routes
-/// the group children it opens, so it must outlive every scenario it served.
-pub async fn forced_serial_host_fails_the_barrier(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-    producers: Vec<ToolBatchProducer>,
-) {
-    assert!(
-        !producers.is_empty(),
-        "a tier registers at least one product producer, or the law runs on nothing"
-    );
-    let serial_host = SerialGroupHost::over(effect_host);
-    for producer in producers {
-        let context = format!("{prefix}/{}", producer.label);
-        let serial = plan("forced_serial", &leaf_routes(8));
-        let observed = run_scenario(
-            prefix,
-            Arc::clone(&serial_host),
-            &stores,
-            &runner,
-            &producer,
-            &serial,
-            Schedule::NEGATIVE_CONTROL,
-            BTreeMap::new(),
-        )
-        .await;
-        let Err(failure) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            assert_activation_shape(&format!("{context} forced-serial"), &serial, &observed)
-        })) else {
-            panic!("the barrier law must fail over a host that runs group members one at a time");
-        };
-        let message = failure
-            .downcast_ref::<String>()
-            .cloned()
-            .or_else(|| {
-                failure
-                    .downcast_ref::<&str>()
-                    .map(|text| (*text).to_string())
-            })
-            .unwrap_or_default();
-        assert!(
-            !observed.never_started.is_empty(),
-            "{context}: a serial host leaves members unstarted; log: {:?}",
-            observed.events,
-        );
-        assert!(
-            message.contains("never started")
-                && observed
-                    .never_started
-                    .iter()
-                    .all(|member| message.contains(member.as_str())),
-            "{context}: the failure must name the members that never started ({:?}): {message}",
-            observed.never_started,
-        );
-    }
 }

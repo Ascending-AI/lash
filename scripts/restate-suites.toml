@@ -41,8 +41,6 @@ filters = [
   # FIG-4651: the live-fault park laws on a live server and on the double
   # over PostgreSQL.
   "tests::live_fault_park_on_the_double::",
-  "tests::batch_oracle::postgres_recorded_batch_boundaries_on_double",
-  "tests::batch_oracle::postgres_late_seat_cancellation_on_double",
 ]
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 # The admission-fence law is registered by name in its own suite (FIG-4395),

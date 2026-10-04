@@ -1,7 +1,7 @@
 //! `batch` is protocol sugar (ADR 0116 §2): never a tool, never executed.
 //!
 //! The driver expands each `batch` call of a response into slots of the
-//! step's one tool group, beside the response's native calls, and folds the
+//! Run's tool round, beside the response's native calls, and folds the
 //! slots' results back into one result per wrapper. Both directions are pure
 //! functions of the recorded response and the turn's admitted configuration,
 //! so a replay recomputes the identical plan and presentation.
@@ -85,7 +85,7 @@ fn batch_output_schema() -> Value {
 /// A response's dispatchable calls after expansion.
 #[derive(Debug, Default)]
 pub(crate) struct Expansion {
-    /// The flat executable slots of the step's one tool group.
+    /// The flat executable slots of the Run's tool round.
     pub(crate) calls: Vec<PendingToolCall>,
     /// How the slots fold back into the response's calls.
     pub(crate) plan: ToolExpansionPlan,
@@ -157,8 +157,7 @@ pub(crate) fn expand(calls: Vec<PendingToolCall>, max_members: NonZeroUsize) -> 
     expansion
 }
 
-/// Slot and member counts are bounded by the group's retained-children
-/// bound, far below `u32::MAX`.
+/// Slot and member counts are bounded by admission, far below `u32::MAX`.
 fn index_u32(index: usize) -> u32 {
     u32::try_from(index).unwrap_or(u32::MAX)
 }

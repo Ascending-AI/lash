@@ -157,6 +157,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// fences operation waits under their own Run for terminal retirement.
 /// Epoch 27 (FIG-4895) admits tool-free aggregate plans without a tool round
 /// and keeps generic timer decisions in the logical Run's journal.
+/// Epoch 30 (FIG-4894) routes standard rounds through recorded Run admission
+/// and replaces child-result waiting state with a logical aggregate cursor.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -170,14 +172,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 29;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 30;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 30;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 31;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

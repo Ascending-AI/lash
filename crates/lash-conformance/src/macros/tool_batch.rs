@@ -1,6 +1,6 @@
 /// Register the barrier laws (FIG-3400, ADR 0116 §7.1): every member of a
 /// turn step's tool group starts before any finishes, the reverse-dependency
-/// case, and the forced-serial negative control that must fail.
+/// case.
 ///
 /// The fixture hands back a guard, a session prefix, the tier's effect host,
 /// the store set under test, the product producers reachable on that tier and
@@ -16,17 +16,6 @@ macro_rules! tool_batch_parallelism_tests {
             (tool_group_members_start_before_any_finishes, "tool-group-members-start-before-any-finishes"));
         $crate::tool_batch_parallelism_tests!(@law [$(#[$attr])*] $fixture;
             (tool_group_reverse_dependency, "tool-group-reverse-dependency"));
-        $crate::tool_batch_parallelism_tests!(@tier [$(#[$attr])*] $fixture;
-            (forced_serial_host_fails_the_barrier, "forced-serial-host-fails-the-barrier"));
-    };
-    (@tier [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
-        $($attr)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-        async fn $law() {
-            let (_guard, prefix, host, stores, producers, runner) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, stores, runner, producers)
-                .await;
-        }
     };
     (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*
@@ -138,14 +127,6 @@ macro_rules! batch_sugar_tests {
             (standard_rounds_and_batches_use_the_run, "standard-rounds-and-batches-use-the-run"));
         $crate::batch_sugar_tests!(@law [$(#[$attr])*] $fixture;
             (batch_admission_and_identity_contract, "batch-admission-and-identity-contract"));
-        $crate::batch_sugar_tests!(@law [$(#[$attr])*] $fixture;
-            (batch_replay_preserves_fold_and_ranks, "batch-replay-preserves-fold-and-ranks"));
-        $crate::batch_sugar_tests!(@law [$(#[$attr])*] $fixture;
-            (batch_redrive_reuses_children, "batch-redrive-reuses-children"));
-        $crate::batch_sugar_tests!(@law [$(#[$attr])*] $fixture;
-            (batch_cancel_preserves_committed_drains, "batch-cancel-preserves-committed-drains"));
-        $crate::batch_sugar_tests!(@law [$(#[$attr])*] $fixture;
-            (batch_all_refused_opens_no_group, "batch-all-refused-opens-no-group"));
         $crate::batch_sugar_tests!(@law [$(#[$attr])*] $fixture;
             (batch_folds_to_one_transcript_call, "batch-folds-to-one-transcript-call"));
     };

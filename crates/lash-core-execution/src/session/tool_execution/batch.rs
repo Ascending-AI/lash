@@ -9,10 +9,7 @@
 
 use super::*;
 
-use super::group::{
-    GroupChildSettled, PreparedGroupChild, PreparedToolChildLeaf, ToolAggregateConsumer,
-    tool_call_limit_failure,
-};
+use super::group::{PreparedToolChildLeaf, ToolAggregateConsumer, tool_call_limit_failure};
 
 impl RuntimeExecutionContext<'_> {
     #[expect(
@@ -231,196 +228,83 @@ impl RuntimeExecutionContext<'_> {
             .collect()
     }
 
-    /// Executes a source-ordered tool batch for code-executor implementors and returns replies in
-    /// the same order even though individual calls may run concurrently.
-    ///
-    /// The batch opens as a durable effect group of `ToolInvocation` children
-    /// (ADR 0099 §3); replies stay input-ordered, but `settlement_order` is the
-    /// group's durable final-commit order, not source order (§5).
+    /// Executes one Run aggregate and returns replies in source order beside
+    /// their durable settlement order. Preparation and checks are recorded in
+    /// admission; no caller-side preparation or child dispatch precedes it.
     pub async fn call_tool_batch(&self, calls: Vec<ToolInvocation>) -> ToolBatchReplies {
         if calls.is_empty() {
             return ToolBatchReplies::default();
         }
-
         let batch_id = deterministic_tool_invocation_batch_id(&calls);
-        let mut replies = vec![None; calls.len()];
-        // A failed batch reports an empty settlement order by construction: downstream
-        // settlement-selecting aggregates treat the order as evidence of what settled.
-        // Replies already completed during preparation are preserved.
-        let fail_batch =
-            |reason: String, replies: &mut Vec<Option<ToolInvocationReply>>| -> ToolBatchReplies {
-                let error = serde_json::json!(format!("tool batch failed: {reason}"));
-                ToolBatchReplies {
-                    replies: replies
-                        .iter_mut()
-                        .map(|reply| {
-                            reply
-                                .take()
-                                .unwrap_or_else(|| ToolInvocationReply::error(error.clone()))
-                        })
-                        .collect(),
-                    settlement_order: Vec::new(),
-                }
-            };
-        let mut prepared_entries = Vec::new();
-        // A call that finishes while being prepared has already settled by the
-        // time the concurrent batch starts, so it leads the settlement order.
-        let mut settled_during_preparation = Vec::new();
-
-        let refused = self.admit_tool_round(&calls).err();
-        for (index, call) in calls.into_iter().enumerate() {
-            let refused = refused.as_ref().map(|refused| refused.refusal_for(index));
-            match self
-                .prepare_tool_leaf(&batch_id, index, call, refused)
-                .await
-            {
-                ToolLeafPreparation::Prepared(entry) => prepared_entries.push(*entry),
-                ToolLeafPreparation::Completed(reply) => {
-                    replies[index] = Some(*reply);
-                    settled_during_preparation.push(index);
-                }
-            }
-        }
-        let mut settlement_order = settled_during_preparation;
-
-        if !prepared_entries.is_empty() {
-            // ADR 0099: the batch opens as a durable effect group of
-            // `ToolInvocation` children and the consumer observes settlement
-            // rank — durable final-commit order — rather than a source-ordered
-            // launch vector (§5).
-            let group_invocation = self.tool_batch_invocation(&batch_id);
-            let prepared_leaves = match self.tool_child_leaves(&batch_id, prepared_entries) {
-                Ok(leaves) => leaves,
-                Err(error) => {
-                    let error = crate::RuntimeEffectControllerError::from(error);
-                    self.record_nested_effect_error(error.clone());
-                    return fail_batch(error.to_string(), &mut replies);
-                }
-            };
-            let leaves = prepared_leaves
-                .into_iter()
-                .map(|leaf| PreparedGroupChild::Tool(Box::new(leaf)))
-                .collect::<Vec<_>>();
-            let consumer = ToolAggregateConsumer::AllSettled;
-            let group_key = self.tool_child_group_key(&batch_id);
-            let handle = match self
-                .open_tool_child_group(
-                    group_invocation,
-                    group_key.clone(),
-                    &batch_id,
-                    &leaves,
-                    consumer.wake(),
-                    crate::GroupReopen::RetainedShape,
-                )
-                .await
-            {
-                Ok(handle) => handle,
-                // A live controller error here — the group row's claim
-                // faulted, or the formation boundary refused — recorded
-                // nothing durable. The replies keep this API's contract, but
-                // the error is also recorded so the enclosing cell aborts and
-                // the store diagnostic never commits as a tool result the
-                // tools did not produce (FIG-3528). A journaled error is a
-                // recorded `Failed` terminal replaying and stays on the reply
-                // surface.
-                Err(error) => {
-                    // A batch the session's recorded `max_tool_calls` refuses
-                    // is the program's failure (FIG-4546): each call it had
-                    // not already settled answers the typed refusal, and the
-                    // enclosing cell goes on to read it.
-                    if let Some(exceeded) = error.tool_call_limit_exceeded() {
-                        let refused = ToolInvocationReply::from_output(ToolCallOutput::failure(
-                            tool_call_limit_failure(exceeded),
-                        ));
-                        return ToolBatchReplies {
-                            replies: replies
-                                .iter_mut()
-                                .map(|reply| reply.take().unwrap_or_else(|| refused.clone()))
-                                .collect(),
-                            settlement_order: Vec::new(),
-                        };
-                    }
-                    if !error.journaled {
-                        self.record_nested_effect_error(error.clone());
-                    }
-                    return fail_batch(error.to_string(), &mut replies);
-                }
-            };
-            let mut settled = match self
-                .consume_tool_child_group(handle, &leaves, consumer)
-                .await
-            {
-                Ok(settled) => settled,
-                // Same split as the open: a live fault while consuming or
-                // incorporating settlements aborts the enclosing cell; a
-                // journaled error — a child's recorded `Failed` terminal
-                // surfacing through `settlement.outcome` — stays
-                // model-visible (FIG-3528).
-                Err(error) => {
-                    if !error.journaled {
-                        self.record_nested_effect_error(error.clone());
-                    }
-                    return fail_batch(error.to_string(), &mut replies);
-                }
-            };
-            // A cancelled consumer answers with its consumed prefix; every
-            // other reply is its member's durable final (ADR 0116 §2.6).
-            if settled.cancelled
-                && let Err(error) = self
-                    .present_cancelled_tool_group(&group_key, &leaves, &mut settled)
+        let call_count = calls.len();
+        let invocation = self.tool_batch_invocation(&batch_id);
+        let request = ToolAggregateRequest {
+            leaves: calls.into_iter().map(ToolAggregateLeaf::Tool).collect(),
+            consumer: ToolAggregateConsumer::AllSettled,
+            settled_value_after: None,
+            command: crate::CommandReplayKey::new(invocation.effect_replay_key()),
+        };
+        let poll = match self.admit_tool_run_aggregate(request).await {
+            Ok(cursor) => {
+                self.await_tool_run_aggregate(&cursor, ToolAggregateConsumer::AllSettled)
                     .await
-            {
+            }
+            Err(error) => Err(error),
+        };
+        let (replies, settlement_order) = match poll {
+            Ok(ToolRunAggregatePoll::Ready {
+                outcome: ToolAggregateOutcome::AllResults(replies),
+                settlement_order,
+            }) => (replies, settlement_order),
+            Err(error) => {
+                // Keep resource refusal model-visible. A live infrastructure
+                // fault also aborts the enclosing cell rather than committing
+                // a diagnostic as a tool-produced result (FIG-3528).
+                if let Some(exceeded) = error.tool_call_limit_exceeded() {
+                    return ToolBatchReplies {
+                        replies: vec![
+                            ToolInvocationReply::from_output(ToolCallOutput::failure(
+                                tool_call_limit_failure(exceeded)
+                            ),);
+                            call_count
+                        ],
+                        settlement_order: Vec::new(),
+                    };
+                }
                 if !error.journaled {
                     self.record_nested_effect_error(error.clone());
                 }
-                return fail_batch(error.to_string(), &mut replies);
+                return failed_batch(error.to_string(), call_count);
             }
-            // The group reports settlement in child positions; the caller
-            // counts in original call positions. Dropping an out-of-range
-            // position and back-filling the gap would turn any malformed order
-            // into a clean-looking input-order permutation, which is exactly
-            // the rejection selection this field exists to prevent — the
-            // defect would be repaired into invisibility instead of failing
-            // closed.
-            if let Err(reason) =
-                validate_batch_settlement_order(&settled.settlement_positions, leaves.len())
-            {
-                return fail_batch(reason, &mut replies);
-            }
-            settlement_order.extend(
-                settled
-                    .settlement_positions
-                    .iter()
-                    .filter_map(|position| leaves[*position].tool())
-                    .map(|leaf| leaf.input_index),
-            );
-            for (position, leaf) in leaves.iter().enumerate() {
-                let (Some(leaf), Some(GroupChildSettled::Tool(completed))) =
-                    (leaf.tool(), settled.settled[position].take())
-                else {
-                    return fail_batch(
-                        format!("tool-child group left position {position} unfilled"),
-                        &mut replies,
-                    );
-                };
-                replies[leaf.input_index] = Some(
-                    ToolInvocationReply::from_output(completed.completed.output)
-                        .with_record(completed.record),
+            Ok(_) => {
+                return failed_batch(
+                    "an awaited allSettled tool Run did not return every source slot".into(),
+                    call_count,
                 );
             }
+        };
+        if let Err(reason) = validate_batch_settlement_order(&settlement_order, call_count) {
+            return failed_batch(reason, call_count);
         }
-
-        #[expect(
-            clippy::expect_used,
-            reason = "the loop above writes every index of `replies` exactly once before it is drained here"
-        )]
+        if replies.len() != call_count {
+            return failed_batch(
+                "a tool Run returned the wrong source count".into(),
+                call_count,
+            );
+        }
         let replies = replies
             .into_iter()
-            .map(|reply| reply.expect("every batch reply slot should be filled"))
-            .collect::<Vec<_>>();
-        ToolBatchReplies {
-            replies,
-            settlement_order,
+            .map(|reply| match reply {
+                Some(ToolAggregateLeafReply::Tool(reply)) => Ok(*reply),
+                _ => Err("a tool Run left a source call unfilled"),
+            })
+            .collect::<Result<Vec<_>, _>>();
+        match replies {
+            Ok(replies) => ToolBatchReplies {
+                replies,
+                settlement_order,
+            },
+            Err(reason) => failed_batch(reason.into(), call_count),
         }
     }
 }
@@ -465,4 +349,17 @@ pub(super) enum ToolLeafPreparation {
     Prepared(Box<PreparedToolLeafEntry>),
     /// Settled during preparation: part of the immediate prefix.
     Completed(Box<ToolInvocationReply>),
+}
+
+/// Infrastructure/shape failure carries no settlement evidence.
+fn failed_batch(reason: String, call_count: usize) -> ToolBatchReplies {
+    ToolBatchReplies {
+        replies: vec![
+            ToolInvocationReply::error(serde_json::json!(format!(
+                "tool batch failed: {reason}"
+            ),));
+            call_count
+        ],
+        settlement_order: Vec::new(),
+    }
 }

@@ -1,12 +1,12 @@
 //! The `batch` sugar laws (ADR 0116 §7.2).
 //!
 //! `batch` is protocol sugar, not a tool: the standard driver expands each
-//! wrapper into the step's one tool group beside the response's native calls
+//! wrapper into the Run's round beside the response's native calls
 //! and folds the members' results back into one batch result. These laws execute
 //! real turns on a tier, through its [`crate::ConformanceTurnRunner`], and pin
 //! what that means where a tier can get it wrong: member admission and
-//! identity, the fold's stability across replay and a crash, cancellation,
-//! the fully refused wrapper, and the transcript the model and host see.
+//! identity, source-order folding, preparation refusal, and the transcript
+//! the model and host see. Run laws own replay, cancellation and protected drain.
 //!
 //! The registering crate hands in the standard protocol twice — with `batch`
 //! offered at its default maximum, and with it withheld — because this crate
@@ -14,7 +14,6 @@
 
 use crate::admit;
 use lash_core::testing::TestTurnExecution as _;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -48,28 +47,12 @@ struct Execution {
     call_id: crate::ToolCallId,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum GateEvent {
-    Started(String),
-    Answered(String),
-}
-
 /// What the law's tools share with the law.
 #[derive(Default)]
 struct Witness {
     executions: Mutex<Vec<Execution>>,
-    recorded: Arc<super::recorded_batch::RecordedBatch>,
-    observed_usage: Mutex<Vec<(crate::ToolCallId, crate::TokenUsage)>>,
-    spend: AtomicBool,
     /// Every tool name a before-tool hook saw.
     hooked: Mutex<Vec<String>>,
-    /// Gate members of the current run that must all start before any answers.
-    barrier: Mutex<Vec<String>>,
-    /// Gate members that park until [`Witness::release_held`].
-    held: Mutex<Vec<String>>,
-    released: AtomicBool,
-    gate_log: Mutex<Vec<GateEvent>>,
-    notify: tokio::sync::Notify,
 }
 
 impl Witness {
@@ -82,62 +65,6 @@ impl Witness {
             .iter()
             .filter(|execution| execution.tool == tool && execution.value == value)
             .count()
-    }
-
-    fn started(&self, value: &str) -> bool {
-        self.gate_log
-            .lock_recover()
-            .iter()
-            .any(|event| *event == GateEvent::Started(value.to_string()))
-    }
-
-    fn set_barrier(&self, members: &[&str]) {
-        *self.barrier.lock_recover() = members.iter().map(|member| member.to_string()).collect();
-        self.gate_log.lock_recover().clear();
-    }
-
-    fn hold(&self, members: &[&str]) {
-        *self.held.lock_recover() = members.iter().map(|member| member.to_string()).collect();
-        self.released.store(false, Ordering::SeqCst);
-    }
-
-    fn release_held(&self) {
-        self.released.store(true, Ordering::SeqCst);
-        self.notify.notify_waiters();
-    }
-
-    fn gate_log(&self) -> Vec<GateEvent> {
-        self.gate_log.lock_recover().clone()
-    }
-
-    async fn gate(&self, value: &str) {
-        self.gate_log
-            .lock_recover()
-            .push(GateEvent::Started(value.to_string()));
-        self.notify.notify_waiters();
-        loop {
-            let notified = self.notify.notified();
-            let held = self
-                .held
-                .lock_recover()
-                .iter()
-                .any(|member| member == value)
-                && !self.released.load(Ordering::SeqCst);
-            let barrier = self.barrier.lock_recover().clone();
-            let log = self.gate_log.lock_recover().clone();
-            let waiting = barrier.iter().any(|member| {
-                !log.iter()
-                    .any(|event| *event == GateEvent::Started(member.clone()))
-            }) && barrier.iter().any(|member| member == value);
-            if !held && !waiting {
-                break;
-            }
-            notified.await;
-        }
-        self.gate_log
-            .lock_recover()
-            .push(GateEvent::Answered(value.to_string()));
-        self.notify.notify_waiters();
     }
 }
 
@@ -165,10 +92,9 @@ fn sugar_tool(name: &str) -> crate::ToolDefinition {
     .expect("valid declared tool schemas")
 }
 
-const TOOLS: [&str; 3] = ["echo", "gate", "guarded"];
+const TOOLS: [&str; 2] = ["echo", "guarded"];
 
-/// `echo` answers at once, `gate` answers once the law's barrier and holds
-/// let it, and `guarded` is always denied by the law's before-tool hook.
+/// `echo` answers at once and `guarded` is denied by the before-tool check.
 struct SugarTools {
     witness: Arc<Witness>,
 }
@@ -188,10 +114,6 @@ impl crate::ToolProvider for SugarTools {
             .then(|| Arc::new(sugar_tool(name).contract()))
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "conformance fixture requires successful managed usage"
-    )]
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let value = call
             .args
@@ -205,24 +127,6 @@ impl crate::ToolProvider for SugarTools {
             attempt: call.context.attempt_number(),
             call_id: call.context.call_id().clone(),
         });
-        if self.witness.spend.load(Ordering::SeqCst) {
-            let completion = call
-                .context
-                .direct_completions()
-                .complete(
-                    crate::DirectRequest::text("batch member spend"),
-                    "batch-member",
-                )
-                .await
-                .expect("the law's managed completion answers");
-            self.witness
-                .observed_usage
-                .lock_recover()
-                .push((call.context.call_id().clone(), completion.usage));
-        }
-        if call.name() == "gate" {
-            self.witness.gate(&value).await;
-        }
         crate::ToolOutcome::ok(serde_json::json!({ "tool": call.name(), "value": value })).into()
     }
 }
@@ -271,17 +175,6 @@ fn scripted_model(
     crate::testing::TestProvider::builder()
         .kind("stub")
         .complete(move |request| {
-            if request.messages.iter().flat_map(|message| message.blocks.iter())
-                .any(|block| matches!(block, crate::llm::types::LlmContentBlock::Text {text, ..} if text.as_ref() == "batch member spend")) {
-                return std::future::ready(Ok(crate::LlmResponse {
-                    usage: crate::llm::types::LlmUsage {
-                        input_tokens: 41,
-                        output_tokens: 7,
-                        ..Default::default()
-                    },
-                    ..text("batch spend recorded")
-                }));
-            }
             let step = request
                 .messages
                 .iter()
@@ -442,9 +335,6 @@ impl SugarTurn {
         )
         .await
         .expect("build the batch sugar conformance runtime");
-        let scope =
-            crate::testing::LayeredEffectHost::layer_scoped(scope, self.witness.recorded.layer())
-                .expect("observe the law turn groups");
         let scope = match &self.layer {
             Some(layer) => {
                 crate::testing::LayeredEffectHost::layer_scoped(scope, Arc::clone(layer))
@@ -500,10 +390,9 @@ impl SugarTurn {
             .unwrap_or_else(|| {
                 panic!(
                     "the batch sugar turn of `{}` did not settle within {TURN_BUDGET:?}; \
-                     member executions: {:?}; gate log: {:?}",
+                     member executions: {:?}",
                     self.session_id,
                     self.witness.executions(),
-                    self.witness.gate_log(),
                 )
             })
             .unwrap_or_else(|error| {
@@ -839,8 +728,7 @@ pub async fn batch_admission_and_identity_contract(
     );
 }
 
-/// The distinct groups a turn opened, by group key: a Restate replay re-runs
-/// the turn's handler and passes its recorded opens through the layer again.
+/// The forbidden legacy group opens observed by the L21 route witness.
 #[derive(Default)]
 struct GroupOpens {
     opened: Mutex<std::collections::BTreeSet<String>>,
@@ -949,63 +837,6 @@ impl crate::testing::EffectLayer for GroupOpens {
     }
 }
 
-/// A response whose only call is a fully refused wrapper opens no group and
-/// answers the folded rows. The same wrapper with one admitted member opens
-/// one, so the count is the turn's own.
-pub async fn batch_all_refused_opens_no_group(
-    prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-    factories: BatchSugarFactories,
-) {
-    for (name, tool_calls, groups) in [
-        (
-            "all-refused",
-            serde_json::json!([
-                { "tool": "batch", "parameters": {} },
-                { "tool": "batch", "parameters": {} },
-            ]),
-            0,
-        ),
-        (
-            "one-admitted",
-            serde_json::json!([
-                { "tool": "batch", "parameters": {} },
-                member("echo", serde_json::json!("admitted")),
-            ]),
-            1,
-        ),
-    ] {
-        let context = format!("{prefix}/batch-{name}");
-        let opens = Arc::new(GroupOpens::default());
-        let mut law = SugarTurn::new(
-            prefix,
-            name,
-            &host,
-            &stores,
-            &factories.enabled,
-            vec![response(vec![wrapper("w", tool_calls)])],
-        );
-        law.layer = Some(Arc::clone(&opens) as Arc<dyn crate::testing::EffectLayer>);
-        let turn = law.run(&runner).await;
-        assert_finished(&context, &turn);
-        assert_eq!(
-            opens.opened.lock_recover().len(),
-            groups,
-            "{context}: the step opens a group only for admitted members"
-        );
-        let wrapper = record(&turn, "w");
-        assert_eq!(
-            wrapper.len(),
-            1,
-            "{context}: the wrapper answers its folded rows"
-        );
-        assert_eq!(rows(wrapper[0]).len(), 2);
-        assert_eq!(rows(wrapper[0])[0], (0, "batch".to_string(), false));
-    }
-}
-
 /// The transcript and the host's records show one call and one result per
 /// wrapper, under the provider's call id and replay metadata, and no member
 /// call.
@@ -1087,697 +918,4 @@ pub async fn batch_folds_to_one_transcript_call(
         "{context}: rows in member order"
     );
     assert_no_member_is_a_call(&context, &turn);
-}
-
-/// The wrapper's folded result as the transcript and the host's record hold
-/// it, and the member executions behind it.
-#[derive(Debug, PartialEq)]
-struct Fold {
-    presented: String,
-    rows: Vec<(u64, String, bool)>,
-}
-
-fn fold_of(turn: &crate::AssembledTurn, call_id: &str) -> Fold {
-    let presented = transcript_results(turn)
-        .into_iter()
-        .find(|(id, _, _)| id == call_id)
-        .map(|(_, _, content)| content)
-        .unwrap_or_default();
-    Fold {
-        presented,
-        rows: record(turn, call_id)
-            .first()
-            .map(|record| rows(record))
-            .unwrap_or_default(),
-    }
-}
-
-/// The child replay keys the tier journaled for `scope`, with the session
-/// named generically, when the runner can read them.
-async fn child_keys(
-    runner: &Arc<dyn crate::ConformanceTurnRunner>,
-    law: &SugarTurn,
-) -> Option<Vec<String>> {
-    let scope = crate::ExecutionScope::turn(&law.session_id, &law.turn_id);
-    let session = law.session_id.to_string();
-    let turn = law.turn_id.to_string();
-    runner.recorded_replay_keys(&scope).await.map(|keys| {
-        let mut keys = keys
-            .into_iter()
-            .filter(|key| key.contains(":child:"))
-            .map(|key| key.replace(&turn, "{turn}").replace(&session, "{session}"))
-            .collect::<Vec<_>>();
-        keys.sort();
-        keys
-    })
-}
-
-/// A cold replay and a perturbed-schedule replay of one `batch` produce the
-/// identical child keys, rows and presentation, and incorporate each
-/// settlement once.
-///
-/// The reference run settles its members in input order. The perturbed run
-/// settles them in reverse. The cold run crashes after the group settled,
-/// inside the next model call, and its recovery replays the recorded group:
-/// no member runs again.
-pub async fn batch_replay_preserves_fold_and_ranks(
-    prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-    factories: BatchSugarFactories,
-) {
-    let context = format!("{prefix}/batch-replay");
-    let names = ["r0", "r1", "r2", "r3"];
-    let script = || vec![response(vec![wrapper("w", members("gate", &names))])];
-
-    let reference = SugarTurn::new(
-        prefix,
-        "replay-reference",
-        &host,
-        &stores,
-        &factories.enabled,
-        script(),
-    );
-    reference.witness.set_barrier(&names);
-    let reference_turn = reference.run(&runner).await;
-    assert_finished(&context, &reference_turn);
-    let reference_fold = fold_of(&reference_turn, "w");
-    assert_eq!(reference_fold.rows.len(), 4);
-
-    // Perturbed: every member starts, then they settle last to first.
-    let perturbed = SugarTurn::new(
-        prefix,
-        "replay-perturbed",
-        &host,
-        &stores,
-        &factories.enabled,
-        script(),
-    );
-    perturbed.witness.set_barrier(&names);
-    perturbed.witness.hold(&names[..3]);
-    let release = {
-        let witness = Arc::clone(&perturbed.witness);
-        crate::task::spawn(async move {
-            // Let the last member answer, then each held one, last first.
-            for member in names[..3].iter().rev() {
-                let answered = |witness: &Witness, value: &str| {
-                    witness
-                        .gate_log()
-                        .contains(&GateEvent::Answered(value.to_string()))
-                };
-                let next = names[names.iter().position(|name| name == member).unwrap_or(0) + 1];
-                while !answered(&witness, next) {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                let mut held = witness.held.lock_recover();
-                held.retain(|name| name != member);
-                drop(held);
-                witness.notify.notify_waiters();
-            }
-        })
-    };
-    let perturbed_turn = perturbed.run(&runner).await;
-    let _ = release.await;
-    assert_finished(&context, &perturbed_turn);
-    let answered = perturbed
-        .witness
-        .gate_log()
-        .into_iter()
-        .filter_map(|event| match event {
-            GateEvent::Answered(value) => Some(value),
-            GateEvent::Started(_) => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        answered,
-        vec!["r3", "r2", "r1", "r0"],
-        "{context}: the schedule was perturbed"
-    );
-    assert_eq!(
-        fold_of(&perturbed_turn, "w"),
-        reference_fold,
-        "{context}: a perturbed schedule folds the identical rows and presentation"
-    );
-
-    // Cold: crash once the group settled, inside the next model call, then
-    // recover the turn from what the tier recorded.
-    let mut cold = SugarTurn::new(
-        prefix,
-        "replay-cold",
-        &host,
-        &stores,
-        &factories.enabled,
-        script(),
-    );
-    cold.witness.set_barrier(&names);
-    let crash = crate::ConformanceCrash::new();
-    cold.on_call = {
-        let crash = crash.clone();
-        Arc::new(move |step| {
-            if step == 1 {
-                crash.fire();
-            }
-        })
-    };
-    let (turns, _ignored) = tokio::sync::mpsc::unbounded_channel();
-    runner
-        .run_turn_until_crash(cold.admitted(), cold.attempt(turns), crash)
-        .await;
-    for name in names {
-        assert_eq!(
-            cold.witness.executed("gate", name),
-            1,
-            "{context}: `{name}` ran before the crash"
-        );
-    }
-    cold.on_call = Arc::new(|_| {});
-    let cold_turn = cold.run(&runner).await;
-    assert_finished(&context, &cold_turn);
-    for name in names {
-        assert_eq!(
-            cold.witness.executed("gate", name),
-            1,
-            "{context}: the recovery incorporates `{name}`'s recorded settlement once"
-        );
-    }
-    assert_eq!(
-        fold_of(&cold_turn, "w"),
-        reference_fold,
-        "{context}: a cold replay folds the identical rows and presentation"
-    );
-
-    // Child keys, where the tier can read its journal.
-    let keys = [
-        child_keys(&runner, &reference).await,
-        child_keys(&runner, &perturbed).await,
-        child_keys(&runner, &cold).await,
-    ];
-    if let [Some(reference), Some(perturbed), Some(cold)] = keys {
-        assert_eq!(perturbed, reference, "{context}: identical child keys");
-        assert_eq!(cold, reference, "{context}: identical child keys");
-    }
-}
-
-/// A crash after one member's final and before the fold: the recovery reuses
-/// the settled member, incorporates each unfinished member once — settled in
-/// the child invocation that outlived the crash, or run again under a fresh
-/// attempt — and a following barrier batch still overlaps, so cached replies
-/// cannot mask serialization.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance fixture requires its durable boundary witness"
-)]
-pub async fn batch_redrive_reuses_children(
-    prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-    factories: BatchSugarFactories,
-) {
-    let context = format!("{prefix}/batch-redrive");
-    let script = vec![
-        response(vec![wrapper(
-            "w",
-            serde_json::json!([
-                member("echo", serde_json::json!("settled")),
-                member("gate", serde_json::json!("open-a")),
-                member("gate", serde_json::json!("open-b")),
-            ]),
-        )]),
-        response(vec![wrapper(
-            "after",
-            members("gate", &["after-a", "after-b", "after-c"]),
-        )]),
-    ];
-    let mut law = SugarTurn::new(
-        prefix,
-        "redrive",
-        &host,
-        &stores,
-        &factories.enabled,
-        script,
-    );
-    // The unfinished members park until the crash; the settled one answers.
-    law.witness.hold(&["open-a", "open-b"]);
-    let crash = crate::ConformanceCrash::new();
-    let fire = {
-        let witness = Arc::clone(&law.witness);
-        let host = Arc::clone(&host);
-        let admitted = law.admitted();
-        let crash = crash.clone();
-        crate::task::spawn(async move {
-            while !(witness.executed("echo", "settled") == 1
-                && witness.started("open-a")
-                && witness.started("open-b"))
-            {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            let call_id = witness
-                .executions()
-                .into_iter()
-                .find(|execution| execution.value == "settled")
-                .expect("the selected member executed")
-                .call_id;
-            witness
-                .recorded
-                .final_for(host.as_ref(), admitted, &call_id, TURN_BUDGET)
-                .await;
-            crash.fire();
-        })
-    };
-    let (turns, _ignored) = tokio::sync::mpsc::unbounded_channel();
-    tokio::time::timeout(
-        TURN_BUDGET,
-        runner.run_turn_until_crash(law.admitted(), law.attempt(turns), crash),
-    )
-    .await
-    .expect("the recorded-final crash completes within its watchdog");
-    fire.await
-        .expect("the recorded-final crash trigger succeeds");
-
-    // Recovery. The unfinished members' child invocations outlive the
-    // opener's execution: released now, each settles in its own invocation
-    // or runs again under a fresh attempt, and the opener incorporates it
-    // once either way.
-    law.witness.hold(&[]);
-    law.witness.release_held();
-    let following = Arc::clone(&law.witness);
-    law.on_call = Arc::new(move |index| {
-        if index == 1 {
-            following.set_barrier(&["after-a", "after-b", "after-c"]);
-        }
-    });
-    let turn = law.run(&runner).await;
-    assert_finished(&context, &turn);
-    assert_eq!(
-        law.witness.executed("echo", "settled"),
-        1,
-        "{context}: the recovery reuses the member that settled before the crash: {:?} {:?}",
-        law.witness.executions(),
-        law.witness.gate_log()
-    );
-    for member in ["open-a", "open-b"] {
-        let runs = law
-            .witness
-            .executions()
-            .iter()
-            .filter(|execution| execution.value == member)
-            .map(|execution| execution.attempt)
-            .collect::<Vec<_>>();
-        assert!(
-            (1..=2).contains(&runs.len()),
-            "{context}: `{member}` settles in its surviving invocation or runs once more: {runs:?}"
-        );
-    }
-    let after = law.witness.gate_log();
-    let first_answer = after
-        .iter()
-        .position(
-            |event| matches!(event, GateEvent::Answered(value) if value.starts_with("after-")),
-        )
-        .unwrap_or(after.len());
-    let started_first = after[..first_answer]
-        .iter()
-        .filter(|event| matches!(event, GateEvent::Started(value) if value.starts_with("after-")))
-        .count();
-    assert_eq!(
-        started_first, 3,
-        "{context}: the following batch still overlaps, so no cached reply masks \
-         serialization: {after:?}"
-    );
-    assert_eq!(rows(record(&turn, "w")[0]).len(), 3);
-    assert!(rows(record(&turn, "w")[0]).iter().all(|(_, _, ok)| *ok));
-}
-
-/// A cancel after every member started: the member whose final committed
-/// keeps its row, the undecided members settle cancelled and their rows say
-/// so, and settlements arriving after the cancel change no row and run
-/// nothing twice.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance fixture requires its durable boundary witness"
-)]
-pub async fn batch_cancel_preserves_committed_drains(
-    prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-    factories: BatchSugarFactories,
-) {
-    let context = format!("{prefix}/batch-cancel");
-    let law = SugarTurn::new(
-        prefix,
-        "cancel",
-        &host,
-        &stores,
-        &factories.enabled,
-        vec![crate::LlmResponse {
-            usage: crate::llm::types::LlmUsage {
-                input_tokens: 19,
-                output_tokens: 5,
-                ..Default::default()
-            },
-            ..response(vec![wrapper(
-                "w",
-                serde_json::json!([
-                    member("echo", serde_json::json!("committed")),
-                    member("gate", serde_json::json!("undecided-a")),
-                    member("gate", serde_json::json!("undecided-b")),
-                ]),
-            )])
-        }],
-    );
-    law.witness.spend.store(true, Ordering::SeqCst);
-    law.witness.hold(&["undecided-a", "undecided-b"]);
-    let store = crate::conformance::law_session_store(stores.as_ref(), &law.session_id).await;
-    let (turns, mut ran) = tokio::sync::mpsc::unbounded_channel();
-    let running = {
-        let runner = Arc::clone(&runner);
-        let admitted = law.admitted();
-        let attempt = law.attempt(turns);
-        crate::task::spawn(async move { runner.run_turn(admitted, attempt).await })
-    };
-    tokio::time::timeout(TURN_BUDGET, async {
-        while !(law.witness.executed("echo", "committed") == 1
-            && law.witness.started("undecided-a")
-            && law.witness.started("undecided-b"))
-        {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("all cancellation members start within the watchdog");
-    let committed = law
-        .witness
-        .executions()
-        .into_iter()
-        .find(|execution| execution.value == "committed")
-        .expect("the committed member executed")
-        .call_id;
-    law.witness
-        .recorded
-        .final_for(host.as_ref(), law.admitted(), &committed, TURN_BUDGET)
-        .await;
-    let driver =
-        crate::TurnWorkDriver::for_session(Arc::clone(&host), law.session_id.clone(), store);
-    driver
-        .request_cancel(crate::TurnCancelRequest::new(
-            crate::TurnAddress::new(law.session_id.clone(), law.turn_id.clone()),
-            "cancel-batch",
-            None,
-        ))
-        .await
-        .unwrap_or_else(|error| panic!("{context}: request the cancel: {error}"));
-    tokio::time::timeout(TURN_BUDGET, running)
-        .await
-        .unwrap_or_else(|_| panic!("{context}: the cancelled runner completes within its watchdog"))
-        .unwrap_or_else(|error| {
-            panic!("{context}: the cancelled runner completes successfully: {error}")
-        });
-    let mut turn = None;
-    while let Ok(next) = ran.try_recv() {
-        turn = next;
-    }
-    let turn = turn
-        .unwrap_or_else(|| panic!("{context}: the cancelled turn assembles"))
-        .unwrap_or_else(|error| panic!("{context}: the cancelled turn assembles: {error}"));
-    let before = durable_cancel_snapshot(&law).await;
-    let observed_usage = law.witness.observed_usage.lock_recover().clone();
-    assert!(
-        !observed_usage.is_empty(),
-        "{context}: the fixture captured member usage"
-    );
-    law.witness.release_held();
-    tokio::time::timeout(
-        TURN_BUDGET,
-        runner.await_group_quiescence(&law.witness.recorded.group_keys()),
-    )
-    .await
-    .unwrap_or_else(|_| panic!("{context}: late settlements reach quiescence within the watchdog"));
-    assert_eq!(
-        durable_cancel_snapshot(&law).await,
-        before,
-        "{context}: late settlements preserve durable finals and transcript"
-    );
-    assert_eq!(
-        *law.witness.observed_usage.lock_recover(),
-        observed_usage,
-        "{context}: late settlements double no captured usage"
-    );
-
-    assert!(
-        matches!(
-            turn.outcome,
-            crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. })
-        ),
-        "{context}: the turn stops cancelled: {:?}",
-        turn.outcome
-    );
-    assert_eq!(
-        law.witness.executed("echo", "committed"),
-        1,
-        "{context}: nothing runs twice"
-    );
-    assert!(law.witness.executed("gate", "undecided-a") <= 1);
-    assert!(law.witness.executed("gate", "undecided-b") <= 1);
-    let wrapper = record(&turn, "w");
-    {
-        let wrapper = wrapper.first().unwrap_or_else(|| {
-            panic!(
-                "{context}: the cancelled step still answers its wrapper: {:?}",
-                turn.tool_calls
-            )
-        });
-        let rows = rows(wrapper);
-        assert_eq!(
-            rows,
-            vec![
-                (0, "echo".to_string(), true),
-                (1, "gate".to_string(), false),
-                (2, "gate".to_string(), false),
-            ],
-            "{context}: the committed row stands and the undecided rows say cancelled"
-        );
-        let undecided = &wrapper.output.value_for_projection()["results"][1]["error"];
-        assert!(
-            undecided.to_string().to_lowercase().contains("cancel"),
-            "{context}: an undecided row says it was cancelled: {undecided}"
-        );
-        assert_rows_match_durable_finals(&context, &law, &rows).await;
-    }
-    assert_no_member_is_a_call(&context, &turn);
-}
-
-/// Every assembled row says what its member's durable final says: a row is
-/// successful exactly when the member recorded a successful final.
-async fn assert_rows_match_durable_finals(
-    context: &str,
-    law: &SugarTurn,
-    rows: &[(u64, String, bool)],
-) {
-    let durable = law
-        .witness
-        .recorded
-        .member_successes(law.host.as_ref(), law.admitted())
-        .await;
-    assert_eq!(
-        rows.iter()
-            .map(|(_, _, success)| *success)
-            .collect::<Vec<_>>(),
-        durable,
-        "{context}: every assembled row matches its member's durable final"
-    );
-}
-
-/// Holds the committed member between its §4 commit and its seat: its rank
-/// is reserved, and its successful final is not yet published. Observes the
-/// opener's close under `Cancel`, the point after which a cancelled consumer
-/// assembles its rows.
-#[derive(Default)]
-struct HeldCommittedSeat {
-    /// The committed member reached its presentation, after its commit.
-    entered: tokio_util::sync::CancellationToken,
-    /// The law lets the committed member present and seat.
-    released: tokio_util::sync::CancellationToken,
-    /// The opener closed the group under `Cancel`.
-    cancel_closed: tokio_util::sync::CancellationToken,
-}
-
-#[async_trait::async_trait]
-impl crate::testing::EffectLayer for HeldCommittedSeat {
-    async fn execute_effect(
-        &self,
-        inner: &dyn crate::RuntimeEffectController,
-        envelope: crate::RuntimeEffectEnvelope,
-        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        if matches!(&envelope.command, crate::RuntimeEffectCommand::PresentToolResult { tool_name, args, .. }
-            if tool_name == "echo" && args["value"] == "committed")
-        {
-            self.entered.cancel();
-            self.released.cancelled().await;
-        }
-        inner.execute_effect(envelope, local_executor).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        inner: &dyn crate::RuntimeEffectController,
-        handle: crate::EffectGroupHandle,
-        disposition: crate::LoserPolicy,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        let cancel = disposition == crate::LoserPolicy::Cancel;
-        let closed = inner.close_effect_group(handle, disposition).await;
-        if cancel && closed.is_ok() {
-            self.cancel_closed.cancel();
-        }
-        closed
-    }
-}
-
-/// A member that committed before the cancel but seats after it is presented
-/// by its durable final (FIG-4364).
-///
-/// The committed member is held between its commit and its seat, so the
-/// opener's rank wait can only end by losing to the turn's cancellation: the
-/// ordering is fixed, not sampled. The cancel closes the group, deciding the
-/// two held gates; only then is the committed member released to seat its
-/// success. Its row must say what its durable final says — the member ran
-/// and succeeded — and each gate's row says cancelled, as its final does.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn batch_cancel_presents_a_committed_member_seated_after_the_cancel(
-    prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-    factories: BatchSugarFactories,
-) {
-    let context = format!("{prefix}/batch-cancel-late-seat");
-    let held = Arc::new(HeldCommittedSeat::default());
-    // Children present on controllers the host lends, and the opener closes
-    // on the controller the runner lends: the one layer sees both.
-    let host: Arc<dyn crate::EffectHost> = Arc::new(crate::testing::LayeredEffectHost::new(
-        host,
-        Arc::clone(&held) as Arc<dyn crate::testing::EffectLayer>,
-    ));
-    let mut law = SugarTurn::new(
-        prefix,
-        "cancel-late-seat",
-        &host,
-        &stores,
-        &factories.enabled,
-        vec![response(vec![wrapper(
-            "w",
-            serde_json::json!([
-                member("echo", serde_json::json!("committed")),
-                member("gate", serde_json::json!("undecided-a")),
-                member("gate", serde_json::json!("undecided-b")),
-            ]),
-        )])],
-    );
-    law.layer = Some(Arc::clone(&held) as Arc<dyn crate::testing::EffectLayer>);
-    law.witness.hold(&["undecided-a", "undecided-b"]);
-    let store = crate::conformance::law_session_store(stores.as_ref(), &law.session_id).await;
-    let (turns, mut ran) = tokio::sync::mpsc::unbounded_channel();
-    let running = {
-        let runner = Arc::clone(&runner);
-        let admitted = law.admitted();
-        let attempt = law.attempt(turns);
-        crate::task::spawn(async move { runner.run_turn(admitted, attempt).await })
-    };
-    tokio::time::timeout(TURN_BUDGET, async {
-        held.entered.cancelled().await;
-        while !(law.witness.started("undecided-a") && law.witness.started("undecided-b")) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| {
-        panic!("{context}: the committed member holds before its seat while the gates run")
-    });
-    let driver =
-        crate::TurnWorkDriver::for_session(Arc::clone(&host), law.session_id.clone(), store);
-    driver
-        .request_cancel(crate::TurnCancelRequest::new(
-            crate::TurnAddress::new(law.session_id.clone(), law.turn_id.clone()),
-            "cancel-batch-late-seat",
-            None,
-        ))
-        .await
-        .unwrap_or_else(|error| panic!("{context}: request the cancel: {error}"));
-    tokio::time::timeout(TURN_BUDGET, held.cancel_closed.cancelled())
-        .await
-        .unwrap_or_else(|_| panic!("{context}: the cancelled opener closes its group"));
-    held.released.cancel();
-    tokio::time::timeout(TURN_BUDGET, running)
-        .await
-        .unwrap_or_else(|_| panic!("{context}: the cancelled runner completes within its watchdog"))
-        .unwrap_or_else(|error| {
-            panic!("{context}: the cancelled runner completes successfully: {error}")
-        });
-    let mut turn = None;
-    while let Ok(next) = ran.try_recv() {
-        turn = next;
-    }
-    let turn = turn
-        .unwrap_or_else(|| panic!("{context}: the cancelled turn assembles"))
-        .unwrap_or_else(|error| panic!("{context}: the cancelled turn assembles: {error}"));
-    law.witness.release_held();
-    tokio::time::timeout(
-        TURN_BUDGET,
-        runner.await_group_quiescence(&law.witness.recorded.group_keys()),
-    )
-    .await
-    .unwrap_or_else(|_| panic!("{context}: late settlements reach quiescence within the watchdog"));
-
-    assert!(
-        matches!(
-            turn.outcome,
-            crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. })
-        ),
-        "{context}: the turn stops cancelled: {:?}",
-        turn.outcome
-    );
-    assert_eq!(
-        law.witness.executed("echo", "committed"),
-        1,
-        "{context}: nothing runs twice"
-    );
-    let wrapper = record(&turn, "w");
-    let wrapper = wrapper
-        .first()
-        .expect("the cancelled step still answers its wrapper");
-    let rows = rows(wrapper);
-    assert_eq!(
-        rows,
-        vec![
-            (0, "echo".to_string(), true),
-            (1, "gate".to_string(), false),
-            (2, "gate".to_string(), false),
-        ],
-        "{context}: the member that seated after the cancel keeps its committed row"
-    );
-    assert_rows_match_durable_finals(&context, &law, &rows).await;
-    assert_no_member_is_a_call(&context, &turn);
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance fixture rereads its persisted evidence"
-)]
-async fn durable_cancel_snapshot(law: &SugarTurn) -> serde_json::Value {
-    let store = crate::conformance::law_session_store(law.stores.as_ref(), &law.session_id).await;
-    let read = store
-        .load_session_window(&law.session_id, crate::store::WindowSelector::Current)
-        .await
-        .expect("reread the durable transcript")
-        .expect("the cancelled session has a head");
-    serde_json::json!({
-        "finals": law.witness.recorded.finals(law.host.as_ref(), law.admitted()).await,
-        "transcript": read.window.nodes,
-    })
 }

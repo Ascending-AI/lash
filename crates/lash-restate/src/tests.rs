@@ -268,7 +268,6 @@ mod effect_group_follow_up_laws;
 mod effect_group_generation_routing;
 mod effect_group_notification_index;
 mod effect_group_notification_ownership;
-mod effect_group_notification_windows;
 mod effect_group_rank_reservation;
 pub(crate) mod effect_group_routing_miss;
 mod effect_group_sdk_preconditions;
@@ -1504,7 +1503,6 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
 }
 
 mod attachment_attach_redrive;
-mod batch_oracle;
 mod cancellation_and_effects;
 mod cancelled_turn_withheld_input_on_the_double;
 mod commit_retry_store;
