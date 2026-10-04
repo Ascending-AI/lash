@@ -86,7 +86,11 @@ pub(super) async fn a_boundary_policy_change_between_attempts_replays_the_record
         "run",
         admitted_invocation_body(process_id.as_str(), &input, &admission)
             .expect("splice the admission"),
-        vec![serde_json::json!(true), serde_json::Value::Null],
+        vec![
+            serde_json::json!(true),
+            serde_json::Value::Null,
+            serde_json::to_value(ResolveOutcome::Accepted).expect("terminal publication ACK"),
+        ],
     )
     .await
     .expect("the redrive runs its segment");
