@@ -264,9 +264,11 @@ async fn s30() -> Result<()> {
         let cancelled = host.command(HostCommand::Submit { session: "consumer-cancel".into(),
             idempotency_key: "consumer-cancel-run".into(), input: json!("hold:cancel") }).await?;
         host.body_entered("hold:cancel").await?;
-        host.command(HostCommand::Cancel { run: cancelled.work.ingress.clone() }).await?;
-        // The body cooperatively wakes on cancel; its late answer cannot
-        // change the recorded cancellation decision or create another owner.
+        let cancellation = host.command(HostCommand::Cancel { run: cancelled.work.ingress.clone() }).await?;
+        ensure!(cancellation.output["receipt"].as_str().is_some_and(|receipt| receipt.starts_with("Requested")),"cancel-before-terminal did not record its chosen decision: {cancellation:?}");
+        // Deliver the held body after the cancellation is recorded. Its late
+        // answer cannot change that decision or create another owner.
+        host.release("hold:cancel").await?;
         let terminal = host.command(HostCommand::Attach { run: cancelled.work.ingress.clone() }).await?;
         let terminal = decode(&terminal.output)?;
         ensure!(terminal.status() == lash::remote::turn_result::RemoteTurnStatus::Cancelled, "cancel-before-terminal failed: {terminal:?}");
@@ -296,6 +298,12 @@ async fn s30() -> Result<()> {
         anyhow::Ok(())
     }.await;
     let cleanup = host.stop().await;
+    std::fs::write(
+        root.join("s30-transcript.json"),
+        serde_json::to_vec_pretty(
+            &json!({"observations":host.transcript()?,"scenario_error":scenario.as_ref().err().map(ToString::to_string)}),
+        )?,
+    )?;
     // Cleanup runs before propagating any oracle error, preserving the
     // first failure alongside cleanup evidence.
     std::fs::create_dir_all(&root)?;

@@ -111,7 +111,10 @@ def main():
             previous_error = ""
             for record in records:
                 if record["type"] == "exec_code_completed":
-                    error = " ".join((record.get("error") or "").split())
+                    raw_error = record.get("error") or ""
+                    if not isinstance(raw_error, str):
+                        raw_error = json.dumps(raw_error, sort_keys=True)
+                    error = " ".join(raw_error.split())
                     assert not error or error != previous_error, error
                     previous_error = error
             page.screenshot(path=str(root / "03-weather-answer.png"), full_page=True)

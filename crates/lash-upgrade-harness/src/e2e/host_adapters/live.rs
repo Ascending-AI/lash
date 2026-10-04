@@ -515,12 +515,12 @@ fn no_identical_error_loop(trace: &[Value]) -> Result<()> {
         .iter()
         .filter(|record| record["type"] == "exec_code_completed")
     {
-        let error = record["error"]
-            .as_str()
-            .unwrap_or_default()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let raw_error = match &record["error"] {
+            Value::Null => String::new(),
+            Value::String(error) => error.clone(),
+            error => serde_json::to_string(error)?,
+        };
+        let error = raw_error.split_whitespace().collect::<Vec<_>>().join(" ");
         ensure!(
             error.is_empty() || error != previous,
             "repeated identical execution error: {error}"

@@ -416,8 +416,15 @@ impl HostAdapter for AgentServiceHost {
                         )?
                         .json(&body)
                         .send()
-                        .await?
-                        .error_for_status()?;
+                        .await?;
+                    let status = response.status();
+                    if !status.is_success() {
+                        let bytes = response.bytes().await?;
+                        bail!(
+                            "agent-service Submit: {status} {}",
+                            String::from_utf8_lossy(&bytes)
+                        );
+                    }
                     work.ingress = response
                         .headers()
                         .get("x-lash-input-id")
