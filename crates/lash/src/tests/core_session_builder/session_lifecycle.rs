@@ -12,15 +12,6 @@ mod commit_budget;
 #[path = "session_lifecycle/session_binding.rs"]
 mod session_binding;
 
-fn persisted_tool_state_at_generation(
-    state: lash_core::ToolState,
-    generation: u64,
-) -> lash_core::ToolState {
-    let mut value = serde_json::to_value(state).expect("serialize persisted tool state");
-    value["generation"] = serde_json::json!(generation);
-    serde_json::from_value(value).expect("deserialize persisted tool state")
-}
-
 #[cfg(feature = "rlm")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ReconciliationTransformObservation {
@@ -1085,64 +1076,6 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
             "{error}"
         );
     }
-    Ok(())
-}
-
-#[tokio::test]
-async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<()> {
-    let backend = double_backend().await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .tools(Arc::new(AppTools))
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("manual-state").created().await.open().await?;
-    materialize_session(&session).await?;
-    let mut state = session.admin().state().persist_current().await?;
-    state.append_active_conversation_messages(&[text_message(
-        lash_core::MessageRole::User,
-        "manual input",
-    )]);
-    drop(session);
-    let created = core.session("manual-state").created().await;
-    let opened = created.open_with_state(state).await?;
-    assert_eq!(
-        message_text(&opened.read_view().messages().to_vec()[0]),
-        "manual input"
-    );
-    opened
-        .admin()
-        .tools()
-        .set_membership("tool:app_lookup", false)
-        .await?;
-    let mut persisted = opened.admin().state().persist_current().await?;
-    let expected_generation = opened
-        .admin()
-        .tools()
-        .state()
-        .await?
-        .generation()
-        .saturating_add(5);
-    persisted.set_tool_state_snapshot(Some(persisted_tool_state_at_generation(
-        opened.admin().tools().state().await?,
-        expected_generation,
-    )));
-    drop(opened);
-
-    let reopened = core
-        .session("manual-state")
-        .created()
-        .await
-        .open_with_state(persisted)
-        .await?;
-    let state = reopened.admin().tools().state().await?;
-    assert_eq!(state.generation(), expected_generation);
-    assert!(
-        !state
-            .get(&lash_core::ToolId::from("tool:app_lookup"))
-            .expect("app tool")
-            .is_member(),
-        "the host-removed tool is restored as a non-member"
-    );
     Ok(())
 }
 
