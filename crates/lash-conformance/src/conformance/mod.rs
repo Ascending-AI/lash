@@ -87,6 +87,7 @@ mod queued_input_runs;
 pub mod registration_macro_support;
 mod release_stamp;
 mod retention;
+mod run_admission_fixture;
 mod run_answers_its_rows;
 mod run_control;
 mod run_executor;

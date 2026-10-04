@@ -172,7 +172,7 @@ macro_rules! shift_admission_tests {
     (a_parked_session_is_asked_to_work_only_through_its_ingress_obligation, "s7b-19"),
     (a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles, "l2-1"),
     (every_order_of_a_send_and_a_redrives_settle_admits_nothing_ahead_of_the_redrive, "l2-1b"),
-    (a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_admitted, "l2-2"),
+    (a_lost_resume_ack_is_reconciled_before_queued_work_is_admitted, "l2-2"),
     (a_failing_child_cancel_never_wedges_its_runs_cancel_or_fork, "s8c-1"),
     (a_delivery_whose_claim_was_retaken_never_settles_its_intent, "s8c-2"),
     (an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session, "s8c-3"),

@@ -17,13 +17,15 @@ mod intent_ledger_fault;
 mod interleavings;
 mod lost_run;
 mod ownership;
-mod physical_turn;
+physical_turn;
+mod root_admission;
 pub use intent_ledger_fault::*;
 pub use interleavings::*;
 pub use lost_run::*;
 pub use ownership::*;
-pub use physical_turn::a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit;
+use physical_turn::a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit;
 pub(super) use physical_turn::run_final_commit;
+pub use root_admission::a_lost_resume_ack_is_reconciled_before_queued_work_is_admitted;
 
 struct Control {
     fail: AtomicBool,
@@ -1511,7 +1513,7 @@ pub async fn a_diverged_run_parks_once_holds_its_admitted_rows_blocks_admission_
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let f = Fixture::new(prefix, "diverged-restore", &host, &stores).await;
+    let f = Fixture::new_for_execution(prefix, "diverged-restore", &host, &stores, &runner).await;
     let held = f
         .parts
         .store
@@ -1929,114 +1931,6 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
         f.park().await.is_none(),
         "the run's commit cleared its park"
     );
-}
-
-/// D15: a redrive acknowledgement lost after the engine resumed never
-/// wedges the session — reconcile's redrive arm settles the intent within
-/// a tick — after which the queued send is admitted.
-pub async fn a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_admitted(
-    prefix: &str,
-    host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    let mut f = Fixture::new(prefix, "lost-redrive-ack", &host, &stores).await;
-    let send = f
-        .parts
-        .enqueue("queued send", Some("queued-send-run"))
-        .await;
-    let intent = f.verb(RunVerb::Redrive).await.expect("redrive");
-    // The engine resumed the run but its reply was lost: the intent stays
-    // open, retryable.
-    let (work, close) = f.control(false, false);
-    work.0.lose_resume_reply.store(true, Ordering::SeqCst);
-    assert!(matches!(
-        f.apply(&work, &close, &intent).await,
-        ControlIntentState::Pending
-    ));
-    assert!(f.owed(intent.id).await);
-    // The queued send's shift meets the unsettled redrive: its refusal is
-    // the typed retryable one in process, and an invocation the server
-    // keeps retrying on Restate. The probe holds that retry's re-decision
-    // at the park read until the law's reconcile lands.
-    let script = Script::new();
-    let held = hold_the_second_park_probe(&mut f, &script);
-    let mut racing = spawn_shift(&f, &runner, "racing");
-    // The racing shift evaluated the parked run.
-    script.called(StoreOp::load_turn_park, 1).await;
-    assert_eq!(f.parts.calls(), 0);
-    assert!(f.parts.applications().await.is_empty());
-    let redecided = tokio::time::timeout(std::time::Duration::from_millis(400), held.reached(1))
-        .await
-        .is_ok();
-    if redecided {
-        assert_eq!(
-            f.parts.calls(),
-            0,
-            "a re-decision ran the run ahead of its redrive"
-        );
-        assert!(
-            f.parts.applications().await.is_empty(),
-            "a re-decision interleaved a run with the unsettled redrive"
-        );
-    }
-    let answered = if racing.is_finished() {
-        Some((&mut racing).await.expect("the racing shift ran"))
-    } else {
-        None
-    };
-    match &answered {
-        Some(Err(ShiftAbort::Retry(refusal))) => assert_eq!(
-            refusal.code,
-            crate::RuntimeErrorCode::SessionRedriveUnsettled,
-            "the queued send is refused retryably while the redrive is \
-             unsettled: {refusal:?}"
-        ),
-        Some(Ok(landed)) => assert!(
-            !f.owed(intent.id).await,
-            "the queued send landed while the redrive was unsettled: {landed:?}"
-        ),
-        Some(Err(abort)) => {
-            panic!("the refusal is retryable, never a failed turn: {abort:?}")
-        }
-        None => {}
-    }
-    // The intent's obligation relay settles the lost intent within a tick.
-    let report = f.reconcile(&work, &close).await;
-    assert!(report.failures.is_empty(), "{:?}", report.failures);
-    assert_eq!(Fixture::intent_pass(&report).delivered, 1);
-    assert!(
-        matches!(
-            f.intent_state(intent.id).await,
-            ControlIntentState::Acknowledged { .. }
-        ),
-        "the relay settled the lost acknowledgement"
-    );
-    held.open_all();
-    // After the tick the queued send is admitted: the held input executes
-    // the run once and the send lands behind it. On Restate the racing
-    // invocation's retry admits it; in process the shift answers on the
-    // next request.
-    let raced = match answered {
-        Some(raced) => raced,
-        None => racing.await.expect("the racing shift ran"),
-    };
-    match raced {
-        Ok(admitted) => assert_eq!(admitted.stop, ShiftStop::Idle),
-        Err(ShiftAbort::Retry(_)) => {
-            let admitted = shift(&f, &runner, "after-tick").await;
-            assert_eq!(admitted.stop, ShiftStop::Idle);
-        }
-        Err(abort) => panic!("the settled shift ended on a refusal: {abort:?}"),
-    }
-    assert_eq!(
-        f.parts.applications().await,
-        vec![
-            (f.input.clone(), f.run.clone()),
-            (send, TurnId::from("queued-send-run"))
-        ]
-    );
-    assert_eq!(f.parts.calls(), 2);
 }
 
 /// A clock that stands still until a law moves it.

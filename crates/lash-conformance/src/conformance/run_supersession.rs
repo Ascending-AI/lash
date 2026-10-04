@@ -324,13 +324,6 @@ pub async fn inconsistent_divergence_still_parks(
     .await;
     let run = TurnId::fixture(format!("inconsistent-{head:?}-run").to_lowercase());
     let input = parts.enqueue("ask", Some(run.as_str())).await;
-    // An earlier execution recorded the run's admission on `base`.
-    let fence = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
-        &parts.store,
-        &parts.session_id,
-        "inconsistent-first-execution",
-    )
-    .await;
     // The head a shift reads live: the store's, or the initial state's for a
     // session that committed nothing yet.
     let state = parts.initial_state();
@@ -369,28 +362,14 @@ pub async fn inconsistent_divergence_still_parks(
             ..live.clone()
         },
     };
-    parts
-        .store
-        .admit_run(&lash_core::store::AdmitRunRequest {
-            unsealed_epoch: None,
-            fence,
-            run: run.clone(),
-            head: lash_core::store::AdmittedHead::Input(input.clone()),
-            max_inputs: 1,
-            policy: lash_core::testing::queued_work_admission_policy(1),
-            base,
-            turn_index: state.turn_index as u64 + 1,
-            admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance-law"),
-            executor: lash_core::store::RunExecutor::run(&lash_core::store::AdmissionId::new(
-                "fixture#0",
-            )),
-            plugins: Default::default(),
-            turn_cancellation: None,
-            trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),
-        })
-        .await
-        .expect("record the run's admission")
-        .expect("the run's admission reaches its head");
+    let admission = super::run_admission_fixture::admit_on_base(
+        &parts,
+        &runner,
+        "inconsistent-first-execution",
+        base,
+    )
+    .await;
+    let run = admission.run().clone();
 
     let parked = shift(&runner, &parts, "inconsistent-shift").await;
     match parked {
