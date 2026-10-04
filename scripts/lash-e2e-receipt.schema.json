@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lash E2E counted receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_sha",
+    "manifest_sha256",
+    "tier",
+    "cases",
+    "counts",
+    "groups",
+    "audits",
+    "gates"
+  ],
+  "properties": {
+    "source_sha": {
+      "$ref": "#/$defs/commit"
+    },
+    "manifest_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "tier": {
+      "enum": [
+        "smoke",
+        "full",
+        "release",
+        "live"
+      ]
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/case"
+      }
+    },
+    "counts": {
+      "$ref": "#/$defs/counts"
+    },
+    "groups": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/counts"
+      }
+    },
+    "audits": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/audit"
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/artifact"
+      }
+    }
+  },
+  "$defs": {
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selected",
+        "executed",
+        "passed",
+        "failed",
+        "not_run"
+      ],
+      "properties": {
+        "selected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "executed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_run": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "status",
+        "executed",
+        "artifacts",
+        "quarantine"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "not_run"
+          ]
+        },
+        "executed": {
+          "type": "boolean"
+        },
+        "artifacts": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/artifact"
+          }
+        },
+        "quarantine": {
+          "type": "null"
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "receipt"
+      ],
+      "properties": {
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "receipt": {
+          "$ref": "#/$defs/artifact"
+        }
+      }
+    }
+  }
+}

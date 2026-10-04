@@ -1,0 +1,3957 @@
+{
+  "scenarios": [
+    {
+      "id": "S01",
+      "title": "singleton returns through one owner",
+      "owner": "H2",
+      "rules": [
+        "L02",
+        "L14"
+      ],
+      "risks": [
+        "R1",
+        "R7"
+      ],
+      "dependencies": "Base, F01",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_memory",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "smoke",
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_memory",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Agent-service Standard, one echo tool, real Restate/SQLite.",
+      "fault": "None; replay leg suspends.",
+      "observable": "One original call identity, independently decoded A/X/D/V facts in owning Run, one reply; no second body on replay.",
+      "arc_guards": []
+    },
+    {
+      "id": "S02",
+      "title": "durable X survives host SIGKILL",
+      "owner": "H2",
+      "rules": [
+        "L02"
+      ],
+      "risks": [
+        "R1"
+      ],
+      "dependencies": "Base, F01; PG in F/R",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "smoke",
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "File SQLite/PG host; two tools A/B, A durable, B held.",
+      "fault": "Kill host, reopen same store and restart same admitted deployment.",
+      "observable": "A body ledger remains one; B may redeliver with same ID/ordinal; one terminal and exact combined output.",
+      "arc_guards": []
+    },
+    {
+      "id": "S03",
+      "title": "ambiguous side effect dedups externally",
+      "owner": "H1",
+      "rules": [
+        "L02",
+        "L22"
+      ],
+      "risks": [
+        "R1"
+      ],
+      "dependencies": "Base, F01, ACK barrier",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Tool sends a keyed write to persistent HTTP effect fixture.",
+      "fault": "Kill after external acceptance before X ACK.",
+      "observable": "At least two observed body deliveries with identical ID/ordinal; one external mutation and one Run terminal.",
+      "arc_guards": []
+    },
+    {
+      "id": "S04",
+      "title": "proposal is not durable publication",
+      "owner": "H1",
+      "rules": [
+        "L02",
+        "L19"
+      ],
+      "risks": [
+        "R1",
+        "R4"
+      ],
+      "dependencies": "Base, P58, ACK barrier",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Plugin-command result held after X/D proposal, before applicable ACK.",
+      "fault": "Drop ACK stream and kill host.",
+      "observable": "No speculative namespace/output visible; cold recovery accepts one recorded resolution and publishes once; unfinished body redelivery retains identity.",
+      "arc_guards": []
+    },
+    {
+      "id": "S05",
+      "title": "opposite-order parallel results replay",
+      "owner": "H2",
+      "rules": [
+        "L01",
+        "L05"
+      ],
+      "risks": [
+        "R1",
+        "R6"
+      ],
+      "dependencies": "Base, F01",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Standard batch A/B/C; each body reaches barrier.",
+      "fault": "Complete C/A/B, kill after A durable.",
+      "observable": "Three independent attempt receipts; all-started evidence before completion; replay preserves recorded selection and source-order batch output.",
+      "arc_guards": []
+    },
+    {
+      "id": "S06",
+      "title": "reported retries retain schedule",
+      "owner": "H1",
+      "rules": [
+        "L17"
+      ],
+      "risks": [
+        "R1"
+      ],
+      "dependencies": "Base, C02, F01",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "A/B each fail once with typed retryable result; controllable real backoff.",
+      "fault": "Kill mid-backoff; reverse ready order on recovery.",
+      "observable": "Journal reconstructs same dynamic command prefix, ordinal advances only on reported retry, durable attempts do not repeat.",
+      "arc_guards": []
+    },
+    {
+      "id": "S07",
+      "title": "cancellation during backoff starts nothing new",
+      "owner": "H1",
+      "rules": [
+        "L03",
+        "L17"
+      ],
+      "risks": [
+        "R1",
+        "R5"
+      ],
+      "dependencies": "Base, C02, F01",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Same reported retry fixture.",
+      "fault": "Cancel owning Run while timer pending, then restart.",
+      "observable": "Cancel terminal; no next-ordinal body or declaration; settled issued handles and no active owner leak.",
+      "arc_guards": []
+    },
+    {
+      "id": "S08",
+      "title": "pre-final cancel prevents declarations",
+      "owner": "H2",
+      "rules": [
+        "L03"
+      ],
+      "risks": [
+        "R1",
+        "R5"
+      ],
+      "dependencies": "Base, C03, F01",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Tool held before D; declared keyed external intent.",
+      "fault": "Deliver cancel, confirm recorded cancel, then release result.",
+      "observable": "One cancel decision; zero declared mutation; one cancelled terminal and no extra admission.",
+      "arc_guards": []
+    },
+    {
+      "id": "S09",
+      "title": "post-final cancel drains protected work",
+      "owner": "H2",
+      "rules": [
+        "L04"
+      ],
+      "risks": [
+        "R1"
+      ],
+      "dependencies": "Base, C03, F01",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "D final durable; declaration blocked, then presentation.",
+      "fault": "Cancel and kill at D\u2192intent and intent\u2192V cuts.",
+      "observable": "Exact final retained; keyed intent once; presentation/incorporation once in order; cancellation cannot abandon committed work.",
+      "arc_guards": []
+    },
+    {
+      "id": "S10",
+      "title": "empty middle rank cannot bypass protected drain",
+      "owner": "H2",
+      "rules": [
+        "L18"
+      ],
+      "risks": [
+        "R1",
+        "R2"
+      ],
+      "dependencies": "Base, C03, F02",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Rank1 blocked intent, rank2 intent-free, rank3 intent; unrelated program effect.",
+      "fault": "Crash after rank2 seats; cancel after rank3 final.",
+      "observable": "Rank3 never issues until rank1 seats; unrelated effect progresses; recovery completes each owed declaration once.",
+      "arc_guards": []
+    },
+    {
+      "id": "S11",
+      "title": "winner progresses while loser stays live",
+      "owner": "H2",
+      "rules": [
+        "L06",
+        "L16"
+      ],
+      "risks": [
+        "R2"
+      ],
+      "dependencies": "Base, B00/B01, F02",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H2 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "RLM race winner + held inline loser; effect after race.",
+      "fault": "Request handover while loser executing.",
+      "observable": "Later program effect observed; loser not cancelled merely by winning; no successful cut/Closing before local ACK; transfer carries its durable result.",
+      "arc_guards": []
+    },
+    {
+      "id": "S12",
+      "title": "Deferred survives removal of N",
+      "owner": "H3",
+      "rules": [
+        "L07",
+        "L09",
+        "L11"
+      ],
+      "risks": [
+        "R2",
+        "R5"
+      ],
+      "dependencies": "Base, B01/B02/B03/B04, F02; Final for no-child claim",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Pending source in turn and process, N+1 adopts transfer.",
+      "fault": "Drain and non-forcibly retire N while source unresolved; resolve afterward.",
+      "observable": "No old deployment needed; same source/call seals once, wakes N+1 and returns exact value; no old reads/waits.",
+      "arc_guards": []
+    },
+    {
+      "id": "S13",
+      "title": "drain refuses genuine old work and query failure",
+      "owner": "H3",
+      "rules": [
+        "L11",
+        "L21"
+      ],
+      "risks": [
+        "R2"
+      ],
+      "dependencies": "Base, B03; Z02 for final query path",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Real invocation remains pinned to N; N+1 present.",
+      "fault": "Attempt retirement/finalize; separately sever admin query.",
+      "observable": "Typed refusal, N retained, no \u201cdrained\u201d from query failure; after terminal/drain, removal succeeds.",
+      "arc_guards": [
+        {
+          "ticket": "FIG-4900",
+          "commit": null
+        }
+      ]
+    },
+    {
+      "id": "S14",
+      "title": "Restate leader loss retains accepted work",
+      "owner": "H4",
+      "rules": [
+        "L02",
+        "L03"
+      ],
+      "risks": [
+        "R3",
+        "R1"
+      ],
+      "dependencies": "Base, cluster core, F01",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 3,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H4 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Three-node local cluster, two Lash workers, PG, acknowledged input plus unfinished tool.",
+      "fault": "Kill observed leader of active partition, restart on same data.",
+      "observable": "Leader epoch/recovery observed; accepted input attaches to one Run terminal; durable X reused, unfinished X same identity; all nodes converge.",
+      "arc_guards": []
+    },
+    {
+      "id": "S15",
+      "title": "minority partition cannot create a second winner",
+      "owner": "H4",
+      "rules": [
+        "L03",
+        "L19"
+      ],
+      "risks": [
+        "R3",
+        "R5"
+      ],
+      "dependencies": "Base, cluster core + link proxies, F01",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 3,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H4 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Three-node cluster + shared PG; same Run visible to clients.",
+      "fault": "Partition one node bidirectionally from peers during tool/cancel race; heal.",
+      "observable": "Majority settles; no conflicting terminal or new effect identity from minority; journals/head/receipts converge after heal.",
+      "arc_guards": []
+    },
+    {
+      "id": "S16",
+      "title": "stale PostgreSQL host cannot publish",
+      "owner": "H4",
+      "rules": [
+        "L09",
+        "L19"
+      ],
+      "risks": [
+        "R3",
+        "R4"
+      ],
+      "dependencies": "Base, PG, B01/P58",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H4 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H4 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Two hosts share session/store; old execution held at publication.",
+      "fault": "Kill/disconnect old host, successor takes fence, then release stale request.",
+      "observable": "Old fenced commit/publication refuses; one admitted Run/head, exact state frontier, no duplicate queued/input binding.",
+      "arc_guards": []
+    },
+    {
+      "id": "S17",
+      "title": "operation Run is recoverably explicit",
+      "owner": "H3",
+      "rules": [
+        "L08",
+        "L14"
+      ],
+      "risks": [
+        "R7"
+      ],
+      "dependencies": "Base, O01/O02",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_memory",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "smoke"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "External/agent-service plugin task issues a tool and returns completion.",
+      "fault": "Drop caller's handle, then reattach by recorded Run ID.",
+      "observable": "Durable admission answers separately; operation completes/Closes only after issued work settles; follow/result match stored terminal.",
+      "arc_guards": []
+    },
+    {
+      "id": "S18",
+      "title": "cancel wakes suspended process await",
+      "owner": "H3",
+      "rules": [
+        "L07",
+        "L08"
+      ],
+      "risks": [
+        "R5",
+        "R7"
+      ],
+      "dependencies": "Base, D05/D06; Z0A for final wait contract",
+      "cases": [
+        {
+          "variant": "process-await-cancel",
+          "store": "sqlite_memory",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "smoke",
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Workbench process await or durable sleep; wait for actual Restate suspended status.",
+      "fault": "Cancel via public host control.",
+      "observable": "Terminal cancellation and late SSE evidence appear without waiting for application timer; child policy discharged and no attach invocation leak.",
+      "arc_guards": [
+        {
+          "ticket": "FIG-4897",
+          "commit": null
+        }
+      ]
+    },
+    {
+      "id": "S19",
+      "title": "isolated process is admitted before any body",
+      "owner": "H3",
+      "rules": [
+        "L08"
+      ],
+      "risks": [
+        "R1",
+        "R5"
+      ],
+      "dependencies": "Base, D03/D04, F01",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Isolated tool bound to physical worker; external PID marker.",
+      "fault": "Kill at start admission\u2192launch and registration\u2192send.",
+      "observable": "Same StartKey/process recovered; ordinary-body marker absent; exactly one admitted process identity; unsupported boundary refuses before launch.",
+      "arc_guards": []
+    },
+    {
+      "id": "S20",
+      "title": "isolated cancellation terminates and reaps",
+      "owner": "H3",
+      "rules": [
+        "L08"
+      ],
+      "risks": [
+        "R5"
+      ],
+      "dependencies": "Base, D04/D06, physical worker adapter",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Real isolated worker with retained consumer hold.",
+      "fault": "Cancel after start; kill coordinator after worker death before discharge ACK.",
+      "observable": "Worker actually gone/reaped; recorded termination receipt recoverable; hold released only after termination, never by cancel-request alone.",
+      "arc_guards": []
+    },
+    {
+      "id": "S21",
+      "title": "source resolution beats subscription and stays immutable",
+      "owner": "H3",
+      "rules": [
+        "L07",
+        "L12"
+      ],
+      "risks": [
+        "R5",
+        "R2"
+      ],
+      "dependencies": "Base, D01/D02/B03",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Resolve before subscribe; second variant resolves during transfer.",
+      "fault": "Competing duplicate/wrong-owner completions and Run cancel.",
+      "observable": "One immutable Resolved/Cancelled seal; wrong authority typed-refuses; post-cancel completion does not publish/revive; protected resolved final drains.",
+      "arc_guards": []
+    },
+    {
+      "id": "S22",
+      "title": "Run park redrive needs no old catalogue",
+      "owner": "H3",
+      "rules": [
+        "L20"
+      ],
+      "risks": [
+        "R5",
+        "R3"
+      ],
+      "dependencies": "Base, P01/O02, Final",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Turn/process/operation owners; park before and after persisted commit on file SQLite/PG.",
+      "fault": "Kill host; resolve while parked; race redrive and cancel.",
+      "observable": "Same admitted call/continuation/holds; one terminal; no RunChild/sidecar/group-catalog lookup in final binaries.",
+      "arc_guards": [
+        {
+          "ticket": "FIG-4896",
+          "commit": null
+        },
+        {
+          "ticket": "FIG-4897",
+          "commit": null
+        },
+        {
+          "ticket": "FIG-4898",
+          "commit": null
+        },
+        {
+          "ticket": "FIG-4899",
+          "commit": null
+        },
+        {
+          "ticket": "FIG-4900",
+          "commit": null
+        }
+      ]
+    },
+    {
+      "id": "S23",
+      "title": "cancelled continuation never enters a fresh Run",
+      "owner": "H3",
+      "rules": [
+        "L10"
+      ],
+      "risks": [
+        "R2",
+        "R5"
+      ],
+      "dependencies": "Base, B01/B02/O02, F02",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Capture old turn/process then admit successor; identical new input.",
+      "fault": "Cancel at capture\u2192adoption and post-adoption cuts.",
+      "observable": "Old owner terminal/continuation cleared; new Run has new owner and no inherited old effects/state; material ownership remains fenced.",
+      "arc_guards": []
+    },
+    {
+      "id": "S24",
+      "title": "plugin state transitions across binary upgrade",
+      "owner": "H5",
+      "rules": [
+        "L12",
+        "L19"
+      ],
+      "risks": [
+        "R4"
+      ],
+      "dependencies": "Base, P55/P57/P58; materialized default/synthetic-next pair in R",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "N writes state/config; N+1 compatible registration; pending tool uses admitted revision.",
+      "fault": "Redeploy with changed noncommutative reducer/hook; rollback before finalize.",
+      "observable": "Recorded resolutions/frontier remain exact, completed hooks/reducers not rerun; old callback retained or typed revision refusal before fresh body.",
+      "arc_guards": []
+    },
+    {
+      "id": "S25",
+      "title": "concurrent durable state survives cold reopen",
+      "owner": "H5",
+      "rules": [
+        "L19"
+      ],
+      "risks": [
+        "R4",
+        "R3"
+      ],
+      "dependencies": "Base, P58/B01/B02; materialized default/synthetic-next pair in R",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "A unrecorded candidate held, B durable; same-key, disjoint-key and namespace variants.",
+      "fault": "SIGKILL; cancel A; restart under N+1 and replay latest checkpoint twice.",
+      "observable": "B exact once, A absent; no body/reducer/converter re-execution for completed facts; stale predecessor publish refuses.",
+      "arc_guards": []
+    },
+    {
+      "id": "S26",
+      "title": "streaming retries produce one logical answer",
+      "owner": "H1",
+      "rules": [
+        "L14",
+        "L17"
+      ],
+      "risks": [
+        "R6",
+        "R8"
+      ],
+      "dependencies": "Base, recorded HTTP provider adapter",
+      "cases": [
+        {
+          "variant": "recorded-429-retry",
+          "store": "sqlite_memory",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "smoke",
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "recorded-429-retry",
+          "store": "sqlite_memory",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "partial-stream-reset",
+          "store": "sqlite_memory",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "partial-stream-reset",
+          "store": "sqlite_memory",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "observer-reconnect",
+          "store": "sqlite_memory",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "observer-reconnect",
+          "store": "sqlite_memory",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Workbench/agent-service production provider HTTP client; recorded SSE frames + usage.",
+      "fault": "429 once, reset after partial stream, client observer disconnect/reconnect.",
+      "observable": "Actual HTTP retry request observed; typed terminal policy, one committed assistant/reply, original logical receipts and usage agree across transcript/SSE/store.",
+      "arc_guards": []
+    },
+    {
+      "id": "S27",
+      "title": "provider authentication failure permits next Run",
+      "owner": "H1",
+      "rules": [],
+      "risks": [
+        "R6",
+        "R7"
+      ],
+      "dependencies": "Base, recorded HTTP provider adapter",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H1 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Same production HTTP provider fixture.",
+      "fault": "Return recorded 401; submit fresh valid request afterward.",
+      "observable": "First Run Failed with provider classification, not Cancelled; next Run answers; no stuck active turn/phantom retry.",
+      "arc_guards": []
+    },
+    {
+      "id": "S28",
+      "title": "MCP attach/detach and attachments survive reconnect",
+      "owner": "H6",
+      "rules": [
+        "L07",
+        "L12"
+      ],
+      "risks": [
+        "R6",
+        "R7"
+      ],
+      "dependencies": "Base, D05, F03; Z03 final external audit",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Slack HTTP/stdio MCP fixtures, binary attachment; file backend plus PG/Garage variant.",
+      "fault": "Kill/reconnect peer during admitted call, detach after catalog refresh.",
+      "observable": "Admitted revision completes or typed-refuses; subsequent catalog stops offering detached tool; exact attachment bytes/reference retained once; host sampling/elicitation results agree.",
+      "arc_guards": []
+    },
+    {
+      "id": "S29",
+      "title": "browser/API/store agree after real host kill",
+      "owner": "H6",
+      "rules": [
+        "L14"
+      ],
+      "risks": [
+        "R7",
+        "R8"
+      ],
+      "dependencies": "Base, browser adapters, F02/F03",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Slack/workbench deterministic transcript and known tool output.",
+      "fault": "Kill bot/workbench at entered provider barrier, restart preserving identities; late browser reconnect.",
+      "observable": "DOM projection equals committed API/store answer; one attributed reply and terminal trace; no duplicated child/thread input; teardown closed.",
+      "arc_guards": []
+    },
+    {
+      "id": "S30",
+      "title": "external consumer accept/follow/cancel contract executes",
+      "owner": "H6",
+      "rules": [
+        "L03",
+        "L08",
+        "L21"
+      ],
+      "risks": [
+        "R7"
+      ],
+      "dependencies": "Base, O02; Z03 final API audit",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_memory",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "smoke",
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_memory",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Small consumer with only public `lash`; real host transport, one task/tool.",
+      "fault": "Drop first follower; reattach; race cancel with terminal.",
+      "observable": "One public terminal/result, cancellation obeys chosen decision, no private crate imports or live handle leaks.",
+      "arc_guards": []
+    },
+    {
+      "id": "S31",
+      "title": "process handover transfers continuation and holds",
+      "owner": "H3",
+      "rules": [
+        "L09",
+        "L13",
+        "L16"
+      ],
+      "risks": [
+        "R2",
+        "R5"
+      ],
+      "dependencies": "Base, B02/B03/B04, F02",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "RLM process with pending source, held loser, state, retained material and declared start.",
+      "fault": "Journal-budget cut; SIGKILL after successor publication before predecessor discharge.",
+      "observable": "One successor under process fence; exact VM/Run facts and obligations, no Closing from physical exit, no duplicate start or premature reclaim.",
+      "arc_guards": []
+    },
+    {
+      "id": "S32",
+      "title": "missing retained material refuses without body replay",
+      "owner": "H3",
+      "rules": [
+        "L12",
+        "L13"
+      ],
+      "risks": [
+        "R2",
+        "R4"
+      ],
+      "dependencies": "Base, A02/B04",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H3 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Transfer real retained result to successor; ensure owner-qualified reference published.",
+      "fault": "Corrupt/remove artifact or release final dependency, then cold follow.",
+      "observable": "Typed retained-result refusal; zero body restart/new identity; required bytes stay readable before last dependency ends.",
+      "arc_guards": []
+    },
+    {
+      "id": "S33",
+      "title": "rollback/finalize/wire floors obey deployed binaries",
+      "owner": "H5",
+      "rules": [
+        "L21"
+      ],
+      "risks": [
+        "R4",
+        "R7"
+      ],
+      "dependencies": "Base, existing Phase A; Z03/Z04; actual pair in R",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker",
+            "synthetic_next_host",
+            "synthetic_next_vm_worker",
+            "operator",
+            "synthetic_next_operator"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H5 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Existing Phase A choreography plus external remote client.",
+      "fault": "Reverse mid-drain; hold finalize; offer incompatible wire; retry after upgrade.",
+      "observable": "Expected typed floors/refusals, no writes on refused call, supported direction streams exact output; old journals kept on own lanes until genuine work drained.",
+      "arc_guards": []
+    },
+    {
+      "id": "S34",
+      "title": "OTel delivery describes logical calls and actual attempts",
+      "owner": "H7",
+      "rules": [
+        "L14"
+      ],
+      "risks": [
+        "R8"
+      ],
+      "dependencies": "Base, R01, OTLP receiver/exporter fixture",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H7 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "replay",
+          "channel": "standard",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H7 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Real host installs adapter and OTLP exporter; local receiver plus JSONL trace.",
+      "fault": "Exporter disconnect during retry/handover, reconnect, orderly host shutdown.",
+      "observable": "Exported logical accepted/terminal once, attempt spans only for executed bodies, IDs link across handover; acknowledged export drained on shutdown; dropped telemetry reported, not mistaken for business failure.",
+      "arc_guards": []
+    },
+    {
+      "id": "S35",
+      "title": "three live RLM workspace cases meet exact oracles",
+      "owner": "H6",
+      "rules": [
+        "L05",
+        "L14"
+      ],
+      "risks": [
+        "R6",
+        "R7"
+      ],
+      "dependencies": "Base, F02, Docker sandbox, live credentials",
+      "cases": [
+        {
+          "variant": "file-edit-bugfix",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "live"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "missing-helper-file",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "live"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "config-contract-edit",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "rlm",
+          "tiers": [
+            "live"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Existing rlm-smoke copied case workspaces, real provider and jailed exec.",
+      "fault": "No injected failure; actual model/tool interactions.",
+      "observable": "All three case scripts pass, recorded served model/usage, typed terminal, no repeated identical-error loop; each workspace row counted independently.",
+      "arc_guards": []
+    },
+    {
+      "id": "S36",
+      "title": "live agents and weather pass grounded host acceptance",
+      "owner": "H6",
+      "rules": [],
+      "risks": [
+        "R6",
+        "R7",
+        "R8"
+      ],
+      "dependencies": "Base, F02/F03, browser, live credentials/search",
+      "cases": [
+        {
+          "variant": "slack-nonce-swap",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "live"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        },
+        {
+          "variant": "workbench-weather",
+          "store": "sqlite_file",
+          "leg": "live",
+          "channel": "standard",
+          "tiers": [
+            "live"
+          ],
+          "server_nodes": 1,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "journal",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "held",
+          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "registration": null
+        }
+      ],
+      "setup": "Slack nonce swap plus workbench weather, each separate session/row.",
+      "fault": "No injected failure; real model + real search/MCP.",
+      "observable": "Exact peer nonces + DOM agree; weather facts backed by captured live source and DOM/API/store/trace; caps obeyed and rows counted separately.",
+      "arc_guards": []
+    }
+  ],
+  "server": {
+    "version": "1.7.13",
+    "archive_sha256": "5429b216b68f3fa52b7f0e6627a2c2a86fc0c75d19b1e152cd2e7dcd8bab4c82",
+    "executable_sha256": null,
+    "protocol": "V7"
+  },
+  "controller": null,
+  "release_audits": {
+    "F04": "FIG-4896",
+    "Z0A": "FIG-4897",
+    "Z0P": "FIG-4898",
+    "Z01": "FIG-4899",
+    "Z02": "FIG-4900",
+    "Z03": "FIG-4901",
+    "Z04": "FIG-4902",
+    "Z05": "FIG-4903"
+  },
+  "release_gates": [
+    "phase_a",
+    "facade",
+    "schema"
+  ]
+}
