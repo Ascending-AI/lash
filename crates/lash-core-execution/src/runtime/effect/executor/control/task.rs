@@ -1,8 +1,9 @@
 //! Proxying an effect controller across an owned channel: the task request
 //! enum, the task-side controller and the driver loop.
 //!
-//! Split out of `control.rs` verbatim to keep every file in this module under
-//! the production file-size budget; no item, signature or path changed.
+//! Native Run steps stay borrowed by their caller. The owner journals an
+//! owned relay and requests the step only when the journal needs execution;
+//! a served record never invokes the borrowed step.
 
 use super::*;
 
@@ -11,6 +12,39 @@ use std::task::Poll;
 type EffectControllerTaskFuture<'run> = Pin<Box<dyn Future<Output = ()> + Send + 'run>>;
 
 pub enum EffectControllerTaskRequest {
+    RecordRun {
+        name: String,
+        step: RunRecordStep<'static>,
+        schedule: bool,
+        response:
+            oneshot::Sender<Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError>>,
+    },
+    StartRunAttempt {
+        name: String,
+        step: crate::tool_dispatch::RunAttemptStep<'static>,
+        response:
+            oneshot::Sender<Result<crate::tool_run::RunAttemptEntry, RuntimeEffectControllerError>>,
+    },
+    StartRunRetry {
+        backoff_ms: u64,
+        response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
+    },
+    ArmRunSource {
+        descriptor: Box<crate::tool_run::SourceDescriptor>,
+        response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
+    },
+    AwaitRunSources {
+        subscriptions: Vec<crate::tool_run::SourceSubscription>,
+        cancel: TurnCancelWait,
+        response: oneshot::Sender<
+            Result<(usize, crate::tool_run::SourceSeal), RuntimeEffectControllerError>,
+        >,
+    },
+    CancelRunSource {
+        descriptor: Box<crate::tool_run::SourceDescriptor>,
+        response:
+            oneshot::Sender<Result<crate::tool_run::SourceSeal, RuntimeEffectControllerError>>,
+    },
     Execute {
         scope: ExecutionScope,
         envelope: Box<RuntimeEffectEnvelope>,
@@ -92,6 +126,58 @@ impl EffectControllerTaskRequest {
         controller: &'run dyn RuntimeEffectController,
     ) -> EffectControllerTaskFuture<'run> {
         match self {
+            Self::RecordRun {
+                name,
+                step,
+                schedule,
+                response,
+            } => Box::pin(async move {
+                let result = if schedule {
+                    controller.record_run_schedule(name, step).await
+                } else {
+                    controller.record_run_record(name, step).await
+                };
+                let _ = response.send(result);
+            }),
+            Self::StartRunAttempt {
+                name,
+                step,
+                response,
+            } => {
+                // Register in request order, before polling any response.
+                let attempt = controller.start_run_attempt(name, step);
+                Box::pin(async move {
+                    let _ = response.send(attempt.await);
+                })
+            }
+            Self::StartRunRetry {
+                backoff_ms,
+                response,
+            } => {
+                let timer = controller.start_run_retry(backoff_ms);
+                Box::pin(async move {
+                    let _ = response.send(timer.await);
+                })
+            }
+            Self::ArmRunSource {
+                descriptor,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(controller.arm_run_source(*descriptor).await);
+            }),
+            Self::AwaitRunSources {
+                subscriptions,
+                cancel,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(controller.await_run_sources(subscriptions, cancel).await);
+            }),
+            Self::CancelRunSource {
+                descriptor,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(controller.cancel_run_source(*descriptor).await);
+            }),
             Self::Execute {
                 scope,
                 envelope,
@@ -220,6 +306,56 @@ pub(in crate::runtime::effect::executor) struct RemoteLocalExecutionRequest {
         oneshot::Sender<Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>,
 }
 
+type NativeRunStep<'step, T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send + 'step>>;
+type NativeRunExecution<T> = oneshot::Receiver<oneshot::Sender<Result<T, String>>>;
+
+fn native_run_task_closed(message: &str) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(RuntimeErrorCode::RuntimeEffectControllerTaskClosed, message)
+}
+
+/// The owned journal closure contains no caller borrow. Only executing it
+/// requests the borrowed body; replay drops it and serves the recorded answer.
+fn native_run_step<T: Send + 'static>() -> (NativeRunStep<'static, T>, NativeRunExecution<T>) {
+    let (execute_tx, execute_rx) = oneshot::channel();
+    let step = Box::pin(async move {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        execute_tx
+            .send(reply_tx)
+            .map_err(|_| "native Run step caller was dropped".to_owned())?;
+        reply_rx
+            .await
+            .map_err(|_| "native Run step response was dropped".to_owned())?
+    });
+    (step, execute_rx)
+}
+
+async fn native_run_response<T>(
+    response: oneshot::Receiver<Result<T, RuntimeEffectControllerError>>,
+) -> Result<T, RuntimeEffectControllerError> {
+    response
+        .await
+        .map_err(|_| native_run_task_closed("native Run controller response was dropped"))?
+}
+
+async fn finish_native_run_step<T: Send + 'static>(
+    step: NativeRunStep<'_, T>,
+    execute: NativeRunExecution<T>,
+    mut response: oneshot::Receiver<Result<T, RuntimeEffectControllerError>>,
+) -> Result<T, RuntimeEffectControllerError> {
+    let execute = tokio::select! {
+        result = &mut response => {
+            return result.map_err(|_| native_run_task_closed("native Run controller response was dropped"))?;
+        }
+        execute = execute => execute,
+    };
+    if let Ok(reply) = execute {
+        let _ = reply.send(step.await);
+    }
+    // A replay closes `execute` without asking for the body. Its recorded
+    // response can arrive later; a closed body channel is not a task fault.
+    native_run_response(response).await
+}
+
 #[derive(Clone)]
 pub struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
@@ -235,6 +371,27 @@ pub struct EffectTaskController {
 pub type EffectControllerTaskRequests = mpsc::UnboundedReceiver<EffectControllerTaskRequest>;
 
 impl EffectTaskController {
+    async fn record_native_run(
+        &self,
+        name: String,
+        step: RunRecordStep<'_>,
+        schedule: bool,
+    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        let (remote, execute) = native_run_step();
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::RecordRun {
+                name,
+                step: remote,
+                schedule,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                native_run_task_closed("native Run controller task is no longer running")
+            })?;
+        finish_native_run_step(step, execute, response_rx).await
+    }
+
     pub fn scoped(
         controller: &dyn RuntimeEffectController,
         admitted: AdmittedScope,
@@ -376,6 +533,117 @@ impl AwaitEventResolver for EffectTaskController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for EffectTaskController {
+    async fn record_run_record(
+        &self,
+        name: String,
+        step: RunRecordStep<'_>,
+    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        self.record_native_run(name, step, false).await
+    }
+
+    async fn record_run_schedule(
+        &self,
+        name: String,
+        step: RunRecordStep<'_>,
+    ) -> Result<crate::tool_run::RunJournalEntry, RuntimeEffectControllerError> {
+        self.record_native_run(name, step, true).await
+    }
+
+    fn start_run_attempt<'run>(
+        &'run self,
+        name: String,
+        step: crate::tool_dispatch::RunAttemptStep<'run>,
+    ) -> crate::tool_dispatch::RunAttemptHandle<'run> {
+        let (remote, execute) = native_run_step();
+        let (response_tx, response_rx) = oneshot::channel();
+        // Queue now: callers can register all X commands before awaiting one.
+        if self
+            .requests
+            .send(EffectControllerTaskRequest::StartRunAttempt {
+                name,
+                step: remote,
+                response: response_tx,
+            })
+            .is_err()
+        {
+            return Box::pin(async {
+                Err(native_run_task_closed(
+                    "native Run controller task is no longer running",
+                ))
+            });
+        }
+        Box::pin(finish_native_run_step(step, execute, response_rx))
+    }
+
+    fn start_run_retry(&self, backoff_ms: u64) -> crate::tool_dispatch::RunRetryTimer<'_> {
+        let (response_tx, response_rx) = oneshot::channel();
+        if self
+            .requests
+            .send(EffectControllerTaskRequest::StartRunRetry {
+                backoff_ms,
+                response: response_tx,
+            })
+            .is_err()
+        {
+            return Box::pin(async {
+                Err(native_run_task_closed(
+                    "native Run controller task is no longer running",
+                ))
+            });
+        }
+        Box::pin(native_run_response(response_rx))
+    }
+
+    async fn arm_run_source(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::ArmRunSource {
+                descriptor: Box::new(descriptor),
+                response: response_tx,
+            })
+            .map_err(|_| {
+                native_run_task_closed("native Run controller task is no longer running")
+            })?;
+        native_run_response(response_rx).await
+    }
+
+    async fn await_run_sources(
+        &self,
+        subscriptions: Vec<crate::tool_run::SourceSubscription>,
+        cancel: TurnCancelWait,
+    ) -> Result<(usize, crate::tool_run::SourceSeal), RuntimeEffectControllerError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::AwaitRunSources {
+                subscriptions,
+                cancel,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                native_run_task_closed("native Run controller task is no longer running")
+            })?;
+        native_run_response(response_rx).await
+    }
+
+    async fn cancel_run_source(
+        &self,
+        descriptor: crate::tool_run::SourceDescriptor,
+    ) -> Result<crate::tool_run::SourceSeal, RuntimeEffectControllerError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::CancelRunSource {
+                descriptor: Box::new(descriptor),
+                response: response_tx,
+            })
+            .map_err(|_| {
+                native_run_task_closed("native Run controller task is no longer running")
+            })?;
+        native_run_response(response_rx).await
+    }
+
     fn owns_commit_backpressure(&self) -> bool {
         self.owns_commit_backpressure
     }

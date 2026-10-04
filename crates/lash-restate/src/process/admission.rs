@@ -161,6 +161,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// and replaces child-result waiting state with a logical aggregate cursor.
 /// Epoch 31 (FIG-4940) detaches sealed process sources and retains the
 /// physical executor's cancellation authority in atomic Run admission.
+/// Epoch 32 (FIG-4941) journals operation tools through native Run records,
+/// attempts, schedules, retry timers and source seals on their operation owner.
 ///
 /// Epoch 32 (FIG-4944) publishes native turn plugins before resolving the
 /// Run configuration that records their protocol driver and renderer.

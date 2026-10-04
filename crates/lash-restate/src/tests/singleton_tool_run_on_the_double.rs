@@ -32,6 +32,159 @@ use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use lash_sansio::ToolIntentKind;
 
+/// Q2/K3: a public plugin task owns its tool's A/X/D/V in its operation Run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn public_plugin_task_records_its_tool_in_the_operation_run() {
+    use lash_core::facade_support::{PluginOperation, PluginTask, SessionParam};
+    struct Task;
+    impl PluginOperation for Task {
+        const NAME: &'static str = "probe.task";
+        const DESCRIPTION: &'static str = "Operation Run tool law";
+        const SESSION_PARAM: SessionParam = SessionParam::Required;
+        type Args = String;
+        type Output = String;
+        type Error = String;
+        const ERROR_TYPE: &'static str = "probe.task";
+        const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+        fn error_class(_: &String) -> lash_sansio::PluginFailureClass {
+            lash_sansio::PluginFailureClass::Terminal
+        }
+    }
+    impl PluginTask for Task {}
+    let probe = Probe::new(Probe::done(), CancelAt::Never);
+    let task_probe = probe.clone();
+    let spec = lash_core::facade_support::PluginSpec::new().with_plugin_task_typed::<Task, _, _>(
+        move |ctx, label| {
+            let probe = task_probe.clone();
+            async move {
+                let mut call = call(&label);
+                let lash_core::ExecutionScope::SessionOperation {
+                    session_id,
+                    operation_id,
+                } = ctx.scoped_effect_controller.execution_scope()
+                else {
+                    panic!("operation scope")
+                };
+                call.owner =
+                    EffectOpener::session_operation(session_id.clone(), operation_id.clone());
+                // Admission, decision and presentation borrow their call and handlers.
+                let result =
+                    run_singleton_tool(&ctx.scoped_effect_controller, &call, probe.as_ref())
+                        .await
+                        .map_err(|error| error.to_string())?;
+                assert!(matches!(result.terminal, SingletonTerminal::Final { .. }));
+                Ok(lash_core::plugin::PluginOperationOutcome::new(
+                    PRESENTATION.to_owned(),
+                ))
+            }
+        },
+    );
+    let backend = lash_restate_test::backend(
+        0x4941,
+        ServerConfig {
+            protocol: lash_restate_test::protocol::ProtocolVersion::V7,
+            ..ServerConfig::default()
+        }
+        .always_replay(true),
+    )
+    .await
+    .unwrap();
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("operation-tool-law")
+        .complete(|_| async {
+            Ok::<_, lash_core::llm::transport::LlmTransportError>(
+                lash_core::llm::types::LlmResponse::default(),
+            )
+        })
+        .build()
+        .into_handle();
+    let core = lash::LashCore::standard_builder(backend.lash_backend())
+        .serve_test_llm_profile(
+            provider,
+            lash_core::testing::test_llm_profile_metadata("mock-model"),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial(PLUGIN),
+            spec,
+        )))
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "operation-tool-law",
+            "owner",
+        ))
+        .unwrap();
+    core.session("operation-tool-law")
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
+        .await
+        .unwrap();
+    let session = core.session("operation-tool-law").open().await.unwrap();
+    let task = session
+        .plugin_operations()
+        .start_task::<Task>("singleton".into(), "singleton")
+        .await
+        .unwrap();
+    let run = task.run().clone();
+    let result = tokio::time::timeout(Duration::from_secs(5), task.result())
+        .await
+        .expect("the operation settles its tool")
+        .expect("native operation tool call succeeds");
+    assert_eq!(result.output, serde_json::json!(PRESENTATION));
+    assert_eq!(probe.executions(), 1, "replay serves the accepted attempt");
+    assert_eq!(
+        probe.prepares.load(Ordering::SeqCst),
+        1,
+        "replay serves admission"
+    );
+    let key = crate::recorded_turn_invocation_key(
+        backend.stores().session_store_factory().as_ref(),
+        &lash_core::SessionId::from("operation-tool-law"),
+        &run,
+    )
+    .await
+    .unwrap()
+    .expect("the operation has a physical executor");
+    let journals: Vec<_> = backend
+        .server()
+        .invocations()
+        .into_iter()
+        .filter_map(|invocation| {
+            let names: Vec<_> = backend
+                .server()
+                .journal(&invocation.id)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|entry| entry.name)
+                .filter(|name| name.starts_with("lash:run:"))
+                .collect();
+            (!names.is_empty()).then_some((invocation.target, names))
+        })
+        .collect();
+    assert_eq!(
+        journals.len(),
+        1,
+        "one operation journal owns the entire call"
+    );
+    let journal = journals
+        .iter()
+        .find(|(target, _)| target.ends_with(&format!("/{key}/run")))
+        .expect("the journal belongs to the public task Run");
+    assert!(
+        journal.0.starts_with("LashTurn"),
+        "operation Run uses the turn service: {journal:?}"
+    );
+    for name in ["admit", "attempt", "decide", "present"] {
+        assert!(
+            journal.1.iter().any(|entry| entry.contains(name)),
+            "missing {name}: {journal:?}"
+        );
+    }
+}
+
 const PLUGIN: &str = "fig4877-tools";
 const OUTPUT: &str = "fig4877 done";
 const PRESENTATION: &str = "fig4877 presented";
