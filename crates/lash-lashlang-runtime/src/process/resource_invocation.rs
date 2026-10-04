@@ -1,18 +1,23 @@
 use super::{LashlangHostError, LashlangProcessHost, resolve_lashlang_module_operation};
 use lashlang::ExecutionHostError;
 
+/// The attribution of one prepared operation, retained through settlement.
+pub(super) struct PreparedResourceCall {
+    pub(super) host_operation: String,
+    pub(super) call_site: lashlang::LashlangExecutionCallSite,
+    pub(super) operand_index: Option<usize>,
+    pub(super) journal_key: String,
+}
+
 pub(super) enum PreparedResourceInvocation {
     Trigger {
         operation: lashlang::TriggerHostOperation,
         payload: serde_json::Value,
-        effect_id: String,
-        host_operation: String,
-        call_site: Option<lashlang::LashlangExecutionCallSite>,
+        call: PreparedResourceCall,
     },
     Tool {
         invocation: lash_core::facade_support::ToolInvocation,
-        host_operation: String,
-        call_site: Option<lashlang::LashlangExecutionCallSite>,
+        call: PreparedResourceCall,
     },
 }
 
@@ -23,13 +28,17 @@ impl LashlangProcessHost<'_> {
     /// under (FIG-3586); the call site is trace and summary metadata only.
     pub(super) fn prepare_resource_invocation(
         &self,
-        operation: String,
-        receiver: lashlang::Value,
-        args: Vec<lashlang::Value>,
-        call_site: Option<lashlang::LashlangExecutionCallSite>,
+        operation: lashlang::ResourceOperation,
         call_id: lash_core::ToolCallId,
         journal_key: String,
+        operand_index: Option<usize>,
     ) -> Result<PreparedResourceInvocation, ExecutionHostError> {
+        let lashlang::ResourceOperation {
+            operation,
+            receiver,
+            args,
+            call_site,
+        } = operation;
         let receiver = match &receiver {
             lashlang::Value::Resource(receiver) => receiver,
             _ => {
@@ -57,9 +66,12 @@ impl LashlangProcessHost<'_> {
             return Ok(PreparedResourceInvocation::Trigger {
                 operation,
                 payload,
-                effect_id: journal_key,
-                host_operation,
-                call_site,
+                call: PreparedResourceCall {
+                    host_operation,
+                    call_site: site.clone(),
+                    operand_index,
+                    journal_key,
+                },
             });
         }
         let tool_id = lash_core::ToolId::from(host_operation.as_str());
@@ -74,19 +86,21 @@ impl LashlangProcessHost<'_> {
             })?;
         let mut invocation =
             lash_core::facade_support::ToolInvocation::new(call_id, manifest.id.clone(), payload);
-        if let Some(call_site) = &call_site {
-            invocation = invocation.with_issuing_language_node_id(call_site.site.node_id.clone());
-            if let Some(hook) = self
-                .lashlang_execution_trace
-                .tool_child_execution_trace_hook(call_site.clone())
-            {
-                invocation = invocation.with_child_execution_trace_hook(hook);
-            }
+        invocation = invocation.with_issuing_language_node_id(site.site.node_id.clone());
+        if let Some(hook) = self
+            .lashlang_execution_trace
+            .tool_child_execution_trace_hook(site.clone())
+        {
+            invocation = invocation.with_child_execution_trace_hook(hook);
         }
         Ok(PreparedResourceInvocation::Tool {
             invocation,
-            host_operation,
-            call_site,
+            call: PreparedResourceCall {
+                host_operation,
+                call_site: site.clone(),
+                operand_index,
+                journal_key,
+            },
         })
     }
 }

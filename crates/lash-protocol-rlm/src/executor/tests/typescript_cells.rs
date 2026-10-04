@@ -1059,3 +1059,234 @@ fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
         }
     });
 }
+
+/// L21/F02: scalar and aggregate calls record attempts in their opener,
+/// without opening a tool child or group service invocation.
+#[test]
+fn l21_scalar_and_aggregate_record_attempts_in_the_opener() {
+    block_on(async {
+        let double =
+            crate::testing::kernel_double(SEED + 1863, lash_restate_test::ServerConfig::default())
+                .await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell handler");
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            crate::testing::double_ports(&double, &handler),
+            Arc::new(EchoToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
+        );
+        let response = execute_code_with_test_render(
+            &mut RlmExecutionState::for_engine("typescript"),
+            context,
+            ExecRequest {
+                code: r#"
+                const scalar = await echo.say({ text: "scalar" });
+                const pending = echo.say({ text: "batch" });
+                const values = await Promise.all([pending, pending, "immediate"]);
+                finish({ scalar, values });
+            "#
+                .into(),
+            },
+            crate::testing::sqlite_memory_artifact_store().await,
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            None,
+            lashlang::ExecutionBounds::unbounded(),
+            crate::plugin::RlmChannel::Cell,
+        )
+        .await;
+        handler.close().await.expect("close the cell handler");
+        assert_eq!(response.error, None, "{response:?}");
+        assert_eq!(
+            response.terminal_finish,
+            Some(serde_json::json!({
+                "scalar": "scalar", "values": ["batch", "batch", "immediate"]
+            }))
+        );
+        assert_eq!(response.calls.len(), 2, "duplicate aliases run one body");
+        let invocations = double.server().invocations();
+        assert!(
+            invocations.iter().all(|invocation| {
+                !invocation.target.contains("EffectGroup")
+                    && !invocation.target.contains("ToolChild")
+            }),
+            "calls stay in the opener: {invocations:?}"
+        );
+        let attempts: Vec<_> = invocations
+            .iter()
+            .flat_map(|invocation| double.server().journal(&invocation.id).unwrap_or_default())
+            .filter_map(|entry| entry.name)
+            .filter(|name| name.starts_with("lash:run:") && name.ends_with(":attempt:1"))
+            .collect();
+        assert_eq!(
+            attempts.len(),
+            2,
+            "one recorded attempt per logical call: {attempts:?}"
+        );
+    });
+}
+
+fn resource_pairing_site() -> lashlang::LashlangExecutionCallSite {
+    let kind = lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND;
+    lashlang::LashlangExecutionCallSite {
+        site: lashlang::LashlangExecutionSite {
+            node_id: "fixed-resource-site".into(),
+            node_kind: kind,
+            label: "echo.say".into(),
+            branch: None,
+            workflow_site: lash_sansio::WorkflowExecutionSite::new("main", [0], kind, "echo.say"),
+        },
+        occurrence: 7,
+    }
+}
+
+/// L05/F02: a refused middle operand cannot renumber the surviving calls.
+#[test]
+fn l05_middle_preparation_failure_keeps_survivor_source_pairing() {
+    block_on(async {
+        let double =
+            crate::testing::kernel_double(SEED + 1864, lash_restate_test::ServerConfig::default())
+                .await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open handler");
+        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]);
+        let mut environment = lash_lashlang_runtime::lashlang_host_environment_from_tool_catalog(
+            &catalog,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )
+        .expect("tool environment");
+        let module = environment
+            .resources
+            .resolve_module_path(&["echo"])
+            .expect("echo module");
+        for operation in ["left", "right"] {
+            environment
+                .resources
+                .add_module_operation_contract(
+                    ["echo"],
+                    module.resource_type.as_str(),
+                    operation,
+                    "tool:echo",
+                    &lashlang::OperationContract::new(
+                        serde_json::json!({"type": "object"}),
+                        serde_json::json!({}),
+                    ),
+                )
+                .expect("source aliases");
+        }
+        let receiver = FlowValue::Resource(lashlang::ResourceHandle::new(
+            module.resource_type.as_str(),
+            module.alias.as_str(),
+        ));
+        let ctx = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            crate::testing::double_ports(&double, &handler),
+            Arc::new(EchoToolProvider),
+            catalog,
+        );
+        let cell = Arc::new(crate::executor::cell_run::CellRun::open(&ctx));
+        let identities = cell
+            .as_ref()
+            .as_ref()
+            .expect("cell opener")
+            .identities()
+            .clone();
+        let host = HostBridge::new(HostBridgeConfig {
+            ctx,
+            cell,
+            prints: Arc::default(),
+            lashlang_execution_trace: None,
+            host_environment: environment,
+            deferred_execution_grants: BTreeMap::new(),
+            cell_bindings: Default::default(),
+            artifact_store: crate::testing::sqlite_memory_artifact_store().await,
+            workers: Default::default(),
+            ledgers: Default::default(),
+        });
+        let operation = |name: &str, text: &str| {
+            lashlang::ResourceOperationBatchLeaf::Operation(lashlang::ResourceOperation {
+                receiver: receiver.clone(),
+                operation: name.into(),
+                args: vec![lashlang::from_json(serde_json::json!({"text": text}))],
+                call_site: Some(resource_pairing_site()),
+            })
+        };
+        host.perform(AbilityOp::ResourceOperation(Box::new(
+            lashlang::ResourceOperation {
+                receiver: receiver.clone(),
+                operation: "say".into(),
+                args: vec![lashlang::from_json(serde_json::json!({"text": "scalar"}))],
+                call_site: Some(resource_pairing_site()),
+            },
+        )))
+        .await
+        .expect("scalar outcome");
+        let result = host
+            .perform(AbilityOp::ResourceOperationBatch(
+                lashlang::ResourceOperationBatch {
+                    leaves: vec![
+                        operation("left", "left"),
+                        operation("missing", "bad"),
+                        operation("right", "right"),
+                    ],
+                    consumer: lashlang::AggregateConsumer::AllSettled,
+                    settled_value_after: None,
+                },
+            ))
+            .await
+            .expect("batch host outcome");
+        let AbilityOutcome::ResourceOperationBatch(
+            lashlang::ResourceOperationBatchOutcome::AllResults(results),
+        ) = result
+        else {
+            panic!("all three operands keep their slots: {result:?}");
+        };
+        assert_eq!(results.len(), 3);
+        assert!(matches!(
+            &results[1],
+            lashlang::ResourceOperationOutcome::Error(_)
+        ));
+        let collected = host.into_collected();
+        assert_eq!(collected.calls.len(), 3);
+        let ids: Vec<_> = collected
+            .calls
+            .iter()
+            .map(|call| {
+                call.host_record
+                    .as_ref()
+                    .expect("host record")
+                    .call_id
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "tc_77896c431d91c4e01fe0f47aaa15872641b7340298f2c11777243daddf6a066a",
+                "tc_ae7efeed5a5107680422707c834a9c7e69b8df9d4ece9bf5d142f3cb36ae37e2",
+                "tc_040a9cd44508dd7d7965e8a2cd77871154deb66daaa8ea5940c45f3f1f0829af",
+            ]
+        );
+        assert_eq!(
+            collected.calls[0]
+                .host_record
+                .as_ref()
+                .expect("scalar")
+                .call_id,
+            identities.call_id(0)
+        );
+        for (call, (source, leaf)) in collected.calls[1..].iter().zip([("left", 0), ("right", 2)]) {
+            assert_eq!(call.operation, format!("{}.{source}", module.alias));
+            let record = call.host_record.as_ref().expect("survivor host record");
+            assert_eq!(record.call_id, identities.child_call_id(1, leaf));
+            assert_eq!(record.args["text"], source);
+        }
+        handler.close().await.expect("close handler");
+    });
+}

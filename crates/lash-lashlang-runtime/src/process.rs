@@ -999,12 +999,15 @@ impl LashlangProcessHost<'_> {
         }
         let call_id = self.identities.call_id(command.ordinal);
         let prepared = match self.prepare_resource_invocation(
-            operation,
-            receiver,
-            args,
-            call_site,
+            lashlang::ResourceOperation {
+                operation,
+                receiver,
+                args,
+                call_site,
+            },
             call_id,
             command.key.as_str().to_string(),
+            None,
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -1016,9 +1019,7 @@ impl LashlangProcessHost<'_> {
             PreparedResourceInvocation::Trigger {
                 operation,
                 payload,
-                effect_id,
-                host_operation,
-                call_site,
+                call,
             } => {
                 let in_flight = commands.enter(command, crate::CommandShape::Value).await?;
                 let result = self
@@ -1026,22 +1027,18 @@ impl LashlangProcessHost<'_> {
                         &in_flight.ctx,
                         operation,
                         payload,
-                        effect_id,
-                        &host_operation,
-                        call_site.as_ref(),
+                        call.journal_key,
+                        &call.host_operation,
+                        Some(&call.call_site),
                     )
                     .await;
                 commands.finish(&in_flight)?;
                 result
             }
-            PreparedResourceInvocation::Tool {
-                invocation,
-                host_operation,
-                call_site,
-            } => {
+            PreparedResourceInvocation::Tool { invocation, call } => {
                 // The call's journal rows live under its command key; that is
                 // the replay key its summary and its failures name.
-                let replay_key = command.key.as_str().to_string();
+                let replay_key = call.journal_key;
                 let in_flight = commands
                     .enter(command, crate::CommandShape::ToolCall)
                     .await?;
@@ -1052,9 +1049,7 @@ impl LashlangProcessHost<'_> {
                 )
                 .await;
                 commands.finish(&in_flight)?;
-                if let Some(call_site) = &call_site {
-                    self.record_tool_reply(call_site, &host_operation, &replay_key, &reply);
-                }
+                self.record_tool_reply(&call.call_site, &call.host_operation, &replay_key, &reply);
                 protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
             }
         }

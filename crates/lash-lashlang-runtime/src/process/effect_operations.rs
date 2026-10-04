@@ -285,20 +285,8 @@ impl LashlangProcessHost<'_> {
                 lash_core::CommandReplayKey::child_suffix(leaf)
             )
         };
-        let call_sites = leaves
-            .iter()
-            .map(|leaf| match leaf {
-                lashlang::ResourceOperationBatchLeaf::Operation(operation) => {
-                    operation.call_site.clone()
-                }
-                lashlang::ResourceOperationBatchLeaf::Timer(sleep) => sleep.call_site.clone(),
-            })
-            .collect::<Vec<_>>();
         let mut bridge_leaves = Vec::with_capacity(leaves.len());
-        let mut outcome_metadata: Vec<
-            Option<(String, Option<lashlang::LashlangExecutionCallSite>, String)>,
-        > = vec![None; leaves.len()];
-        let mut dispatched = Vec::new();
+        let mut dispatched = BTreeMap::new();
         for (index, leaf) in leaves.into_iter().enumerate() {
             let operation = match leaf {
                 lashlang::ResourceOperationBatchLeaf::Operation(operation) => operation,
@@ -335,40 +323,36 @@ impl LashlangProcessHost<'_> {
                 continue;
             }
             match self.prepare_resource_invocation(
-                operation.operation,
-                operation.receiver,
-                operation.args,
-                operation.call_site,
+                operation,
                 self.identities
                     .child_call_id(in_flight.command.ordinal, index),
                 leaf_key(index),
+                Some(index),
             ) {
                 Ok(PreparedResourceInvocation::Trigger {
                     operation,
                     payload,
-                    effect_id,
-                    host_operation,
-                    call_site,
+                    call,
                 }) => {
                     let result = self
                         .trigger_operation(
                             &in_flight.ctx,
                             operation,
                             payload,
-                            effect_id,
-                            &host_operation,
-                            call_site.as_ref(),
+                            call.journal_key,
+                            &call.host_operation,
+                            Some(&call.call_site),
                         )
                         .await;
                     bridge_leaves.push(crate::BridgeAggregateLeaf::Settled(result));
                 }
-                Ok(PreparedResourceInvocation::Tool {
-                    invocation,
-                    host_operation,
-                    call_site,
-                }) => {
-                    outcome_metadata[index] = Some((host_operation, call_site, leaf_key(index)));
-                    dispatched.push(index);
+                Ok(PreparedResourceInvocation::Tool { invocation, call }) => {
+                    let operand = call.operand_index.ok_or_else(|| {
+                        ExecutionHostError::new(
+                            "a batch call was prepared without its operand index",
+                        )
+                    })?;
+                    dispatched.insert(operand, call);
                     bridge_leaves.push(crate::BridgeAggregateLeaf::Tool(invocation));
                 }
                 Err(error) => bridge_leaves.push(crate::BridgeAggregateLeaf::Settled(Err(error))),
@@ -376,16 +360,14 @@ impl LashlangProcessHost<'_> {
         }
 
         if dispatched.len() > 1 {
-            for (position, index) in dispatched.iter().copied().enumerate() {
-                if let Some(Some(call_site)) = call_sites.get(index) {
-                    self.lashlang_execution_trace.emit_waiting(
-                        call_site,
-                        TraceNodeAwaited::ToolBatch {
-                            batch_id: in_flight.command.key.as_str().to_string(),
-                            position,
-                        },
-                    );
-                }
+            for (position, call) in dispatched.values().enumerate() {
+                self.lashlang_execution_trace.emit_waiting(
+                    &call.call_site,
+                    TraceNodeAwaited::ToolBatch {
+                        batch_id: in_flight.command.key.as_str().to_string(),
+                        position,
+                    },
+                );
             }
         }
         // The replies the answer carries, in the order it read them, for the
@@ -398,28 +380,31 @@ impl LashlangProcessHost<'_> {
             settled_value_after,
             bridge_leaves,
             |leaf, reply| {
-                let Some((_, _, replay_key)) = &outcome_metadata[leaf] else {
+                let Some(call) = dispatched.get(&leaf) else {
                     return Err(ExecutionHostError::new(format!(
                         "aggregate leaf {leaf} was answered with a tool reply it never dispatched"
                     )));
                 };
                 read.push((leaf, reply.clone()));
-                protocol_tool_reply_to_lashlang_value(reply, replay_key, &self.cancellation)
+                protocol_tool_reply_to_lashlang_value(reply, &call.journal_key, &self.cancellation)
             },
         )
         .await;
         commands.finish(&in_flight)?;
         for (leaf, tool_reply) in &read {
-            if let Some((host_operation, Some(call_site), replay_key)) = &outcome_metadata[*leaf] {
-                self.record_tool_reply(call_site, host_operation, replay_key, tool_reply);
+            if let Some(call) = dispatched.get(leaf) {
+                self.record_tool_reply(
+                    &call.call_site,
+                    &call.host_operation,
+                    &call.journal_key,
+                    tool_reply,
+                );
             }
         }
         if !self.cancellation.is_cancelled() && dispatched.len() > 1 {
-            for index in dispatched.iter().copied() {
-                if let Some(Some(call_site)) = call_sites.get(index) {
-                    self.lashlang_execution_trace
-                        .emit_resumed(call_site, TraceNodeWaitResolution::Resumed);
-                }
+            for call in dispatched.values() {
+                self.lashlang_execution_trace
+                    .emit_resumed(&call.call_site, TraceNodeWaitResolution::Resumed);
             }
         }
         reply
