@@ -215,7 +215,7 @@
             "role": "tool",
             "name": "h1_effect",
             "tool_call_id": "provider-s03",
-            "content": "{\n  \"accepted\": {\n    \"label\": \"A\",\n    \"value\": \"value-A\"\n  }\n}"
+            "content": "{\"accepted\": {\"label\": \"A\", \"value\": \"value-A\"}}"
           }
         ],
         "tools": [

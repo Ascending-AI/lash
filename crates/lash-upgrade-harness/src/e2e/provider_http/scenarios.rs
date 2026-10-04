@@ -53,7 +53,11 @@ impl ProviderScenario {
         CaseSpec {
             id: self.id().into(),
             rules: rules.into_iter().map(str::to_owned).collect(),
-            host: HostKind::UpgradeNode,
+            host: if matches!(self, Self::S26 | Self::S27) {
+                HostKind::AgentService
+            } else {
+                HostKind::UpgradeNode
+            },
             store: StoreKind::SqliteFile,
             channel: Channel::Standard,
             provider: ProviderKind::RecordedHttp,
@@ -84,7 +88,7 @@ pub const SCENARIOS: [ProviderScenario; 6] = [
 /// durable session read. No in-flight runtime snapshot substitutes for it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProviderStoreObservation {
-    pub assistant_messages: usize,
+    pub assistant_replies: usize,
     pub input_applications: usize,
     pub unfinished: bool,
     pub pending_inputs: usize,
@@ -159,7 +163,7 @@ impl ProviderCaseEvidence {
                 );
                 self.one_final(&events, &first.call_id)?;
                 ensure!(
-                    self.after.input_applications == 1 && self.after.assistant_messages == 1,
+                    self.after.input_applications == 1 && self.after.assistant_replies == 1,
                     "Run settled or published twice"
                 );
             }
@@ -189,13 +193,13 @@ impl ProviderCaseEvidence {
                 );
                 ensure!(
                     self.before.namespace_total.unwrap_or(0) == 0
-                        && self.before.assistant_messages == 0
+                        && self.before.assistant_replies == 0
                         && self.before.input_applications == 0,
                     "proposal published speculative state/output"
                 );
                 ensure!(
                     self.after.namespace_total == Some(1)
-                        && self.after.assistant_messages == 1
+                        && self.after.assistant_replies == 1
                         && self.after.input_applications == 1,
                     "cold resolution did not publish once"
                 );
@@ -222,8 +226,31 @@ impl ProviderCaseEvidence {
                 );
             }
             ProviderScenario::S06 => {
+                self.kill_at(BarrierKind::RetryBackoffEntered)?;
                 self.retry_schedule(&events)?;
                 self.preserved_prefix()?;
+                let ready = self
+                    .evidence
+                    .barriers
+                    .iter()
+                    .filter(|proof| {
+                        proof.barrier.kind == BarrierKind::XDurable
+                            && proof.barrier.work.ordinal == Some(2)
+                    })
+                    .map(|proof| {
+                        self.bodies
+                            .iter()
+                            .find(|body| {
+                                Some(body.delivery.call_id.as_str())
+                                    == proof.barrier.work.call.as_deref()
+                            })
+                            .map(|body| body.label.as_str())
+                    })
+                    .collect::<Vec<_>>();
+                ensure!(
+                    ready == vec![Some("B"), Some("A")],
+                    "recovery did not independently observe reverse B/A durable readiness"
+                );
                 ensure!(
                     self.evidence
                         .faults
@@ -232,12 +259,23 @@ impl ProviderCaseEvidence {
                     "backoff host was not killed"
                 );
                 ensure!(
-                    self.after.input_applications == 1 && self.after.assistant_messages == 1,
+                    self.after.input_applications == 1 && self.after.assistant_replies == 1,
                     "retry Run did not settle once"
                 );
             }
             ProviderScenario::S07 => {
+                self.kill_at(BarrierKind::RetryBackoffEntered)?;
                 self.preserved_prefix()?;
+                let terminal = self
+                    .evidence
+                    .outputs
+                    .last()
+                    .ok_or_else(|| anyhow::anyhow!("cancellation lacks public terminal"))?;
+                let terminal: lash::TurnOutput = serde_json::from_value(terminal.output.clone())?;
+                ensure!(
+                    terminal.result.outcome.cancellation().is_some(),
+                    "pending backoff lost typed cancellation"
+                );
                 ensure!(
                     self.evidence
                         .faults
@@ -279,23 +317,14 @@ impl ProviderCaseEvidence {
                     "issued handles did not settle once"
                 );
                 ensure!(
-                    self.after.input_applications == 1 && self.after.assistant_messages == 0,
+                    self.after.input_applications == 1 && self.after.assistant_replies == 0,
                     "cancellation published an answer"
                 );
             }
             ProviderScenario::S26 | ProviderScenario::S27 => {
-                ensure!(
-                    self.after.assistant_messages == 1,
-                    "provider failure/reconnect duplicated the committed answer"
-                );
-                ensure!(
-                    self.after.input_tokens == 11 && self.after.output_tokens == 2,
-                    "committed usage differs from wire usage"
-                );
-                ensure!(
-                    self.http.expected == 2,
-                    "provider failure/retry selected the wrong occurrence count"
-                );
+                anyhow::bail!(
+                    "product-host S26/S27 evidence is deferred by the arc scope hold; cheap production-provider witnesses are separate"
+                )
             }
         }
         Ok(())

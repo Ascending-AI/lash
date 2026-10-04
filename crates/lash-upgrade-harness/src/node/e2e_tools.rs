@@ -131,6 +131,7 @@ impl ToolFixtureArgs {
         file.sync_all()?;
         if let Some(endpoint) = &self.callback_url {
             let body = crate::e2e::control::callback::ToolDelivery {
+                owner: call.context.owner().clone(),
                 label: label.into(),
                 call_id: delivery.call_id.clone(),
                 ordinal: delivery.attempt,

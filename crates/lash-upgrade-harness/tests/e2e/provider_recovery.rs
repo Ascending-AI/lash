@@ -11,7 +11,7 @@ use lash_upgrade_harness::e2e::{
         Barrier, BarrierKind, BarrierProof, Control, CoreControl, FileBarriers, WorkIdentity,
         callback::BodyCallbacks, transport::V7Proxy,
     },
-    evidence::{Evidence, RestateEvidenceReader},
+    evidence::{CaseReceipt, Evidence, RestateEvidenceReader, Verdict},
     host::{HostAdapter, HostCommand},
     provider_http::{
         RecordedHttpFixture, TransportEvent,
@@ -217,6 +217,12 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
                 barriers.release(&Barrier {work:b_work.clone(),kind:BarrierKind::BodyEntered})?;
                 let cut=barriers.await_proof(&backoff).await?;
                 evidence.barriers.push(durable(&restate,scenario,&barrier_dir,deadline,&Barrier {work:b_work,kind:BarrierKind::RetryScheduleDurable}).await?);
+                let sleep=loop {
+                    if let Some(sleep)=view.durable_sleep(&cut,&base.segment,7).await? {break sleep;}
+                    ensure!(Instant::now()<deadline,"actual pending retry Sleep never became durable");
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                };
+                write(&lease.directory.join("pending-sleep.json"),&sleep)?;
                 prefix=view.journal(&base,&base.segment,7).await?;
                 if scenario==ProviderScenario::S07 {
                     let cancel=host.command(HostCommand::Cancel {run:base.run.clone()}).await?;
@@ -228,8 +234,9 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
                         barriers.hold(&Barrier {work:second,kind:BarrierKind::BodyEntered})?;
                     }
                 }
+                let closed=proxy.as_ref().context("no proxy")?.disconnect(deadline).await?;
+                write(&lease.directory.join("retry-connection-cut.json"),&serde_json::json!({"closed_streams":closed,"proof":cut}))?;
                 evidence.faults.push(host.kill(&cut)?);evidence.barriers.push(cut);
-                proxy.as_ref().context("no proxy")?.disconnect(deadline).await?;
                 barriers.release(&backoff)?;
             }
             _ => anyhow::bail!("unsupported provider recovery scenario"),
@@ -273,8 +280,22 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
         &lease.directory.join("cleanup.json"),
         &serde_json::json!({"host":host_cleanup.as_ref().map_err(ToString::to_string),"proxy":proxy_cleanup.as_ref().map_err(ToString::to_string),"callback":callback_cleanup.as_ref().map_err(ToString::to_string),"cluster":cluster_cleanup.as_ref().map_err(ToString::to_string)}),
     )?;
-    let mut proof = proof?;
-    proof.http = http?;
+    let http = http?;
+    write(&lease.directory.join("http.json"), &http)?;
+    let mut proof = match proof {
+        Ok(proof) => proof,
+        Err(error) => {
+            CaseReceipt {
+                evidence,
+                verdict: Verdict::Failed {
+                    reason: format!("{error:#}"),
+                },
+            }
+            .write(&lease.directory)?;
+            return Err(error);
+        }
+    };
+    proof.http = http;
     for (resource, result) in [
         ("h1-provider-node", host_cleanup),
         ("private-restate-cluster", cluster_cleanup),
@@ -328,7 +349,20 @@ async fn recovery(scenario: ProviderScenario, transcript: &[u8]) -> Result<()> {
                     .into(),
         });
     write(&lease.directory.join("evidence.json"), &proof)?;
-    proof.verify()?;
+    let verification = proof.verify();
+    let verdict = match &verification {
+        Ok(()) => Verdict::Passed,
+        Err(error) => Verdict::Failed {
+            reason: format!("{error:#}"),
+        },
+    };
+    let counts = CaseReceipt {
+        evidence: proof.evidence.clone(),
+        verdict,
+    }
+    .write(&lease.directory)?;
+    verification?;
+    counts.reconcile()?;
     println!(
         "{} selected=1 executed=1 passed=1 failed=0 not_run=0",
         scenario.id()

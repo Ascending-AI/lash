@@ -215,7 +215,7 @@
             "role": "tool",
             "name": "h1_state",
             "tool_call_id": "provider-s04",
-            "content": "{\n  \"label\": \"A\",\n  \"value\": \"value-A\"\n}"
+            "content": "{\"label\": \"A\", \"value\": \"value-A\"}"
           }
         ],
         "tools": [

@@ -238,30 +238,14 @@ async fn command(
                 .await?
                 .ok_or_else(|| anyhow!("input has no admitted Run"))?;
             let store = stores.session_store_factory();
-            let key = lash_restate::recorded_turn_invocation_key(store.as_ref(), &id, &run)
-                .await?
-                .ok_or_else(|| anyhow!("Run has no recorded executor invocation"))?;
             let view =
                 crate::restate_view::RestateView::new(&restate.admin_url, &restate.namespace)?;
-            #[derive(Deserialize)]
-            struct Row {
-                id: String,
-                pinned_service_protocol_version: Option<u32>,
-            }
-            let service = view.service_name("LashTurn").replace('\'', "''");
-            let rows: Vec<Row> = view.query(&format!("SELECT id, pinned_service_protocol_version FROM sys_invocation WHERE target_service_name LIKE '{service}%' AND target_service_key = '{}' AND target_handler_name = 'run'", key.replace('\'', "''"))).await?;
-            ensure!(
-                rows.len() == 1 && rows[0].pinned_service_protocol_version == Some(7),
-                "Run must own one actual negotiated V7 invocation"
-            );
-            let work = crate::e2e::control::WorkIdentity {
-                ingress: accepted.input_id().to_string(),
-                run: run.to_string(),
-                segment: rows[0].id.clone(),
-                call: None,
-                ordinal: None,
-            };
-            Ok(serde_json::json!({ "work": work, "invocation": rows[0].id, "protocol": 7 }))
+            let mut reader =
+                crate::e2e::evidence::RestateEvidenceReader::new("H1-address".into(), view, 7);
+            let work = reader
+                .bind_public_run(store.as_ref(), &id, &run, accepted.input_id().to_string())
+                .await?;
+            Ok(serde_json::json!({ "work": work, "invocation": work.segment, "protocol": 7 }))
         }
         ProviderHostCommand::Snapshot { .. } => {
             let view = session
@@ -281,10 +265,13 @@ async fn command(
                 .and_then(serde_json::Value::as_u64);
             let applications = session.turn_input_applications().await?;
             let observation = crate::e2e::provider_http::scenarios::ProviderStoreObservation {
-                assistant_messages: view
+                assistant_replies: view
                     .messages()
                     .iter()
-                    .filter(|message| message.role == lash::messages::MessageRole::Assistant)
+                    .filter(|message| {
+                        message.role == lash::messages::MessageRole::Assistant
+                            && message.reply_marker.is_some()
+                    })
                     .count(),
                 input_applications: applications.len(),
                 unfinished: session.unfinished_run().await?.is_some(),
