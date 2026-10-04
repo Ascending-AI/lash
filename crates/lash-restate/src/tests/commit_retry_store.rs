@@ -1,5 +1,4 @@
-//! A pass-through store over the shared in-memory recovery store that counts
-//! shift seals, for the laws that probe a commit retry.
+//! A pass-through store that counts shift seals for commit replay laws.
 
 use super::*;
 
@@ -17,8 +16,7 @@ impl CommitRetryStore {
     }
 }
 
-// Pass-through wrapper over the shared in-memory recovery store: it hides the
-// persisted head from the retrying turn and counts shift seals; every other
+// Retain the real admitted base while counting live shift seals. Every other
 // operation delegates to `inner`.
 #[async_trait::async_trait]
 impl lash_core::store::RuntimeStoreDecorator for CommitRetryStore {
@@ -26,21 +24,6 @@ impl lash_core::store::RuntimeStoreDecorator for CommitRetryStore {
 
     fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
-    }
-
-    async fn load_session_window(
-        &self,
-        _session_id: &SessionId,
-        _selector: lash_core::store::WindowSelector,
-    ) -> Result<Option<lash_core::store::SessionWindowRead>, lash_core::StoreError> {
-        Ok(None)
-    }
-
-    async fn load_session_head_meta(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Option<lash_core::store::SessionHeadMeta>, lash_core::StoreError> {
-        Ok(None)
     }
 
     async fn seal_shift_epoch(
