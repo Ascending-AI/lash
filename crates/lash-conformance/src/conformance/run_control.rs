@@ -13,12 +13,10 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-mod child_park;
 mod intent_ledger_fault;
 mod interleavings;
 mod lost_run;
 mod ownership;
-pub use child_park::*;
 pub use intent_ledger_fault::*;
 pub use interleavings::*;
 pub use lost_run::*;
@@ -35,8 +33,6 @@ struct Control {
     cancel_on_resume: Mutex<Option<(Arc<dyn crate::DeploymentStore>, RunIntentRequest)>>,
     /// Sessions whose every release waits at a gate the law opens.
     release_gates: Mutex<Vec<(SessionId, Arc<Gate>)>>,
-    /// The child handles each resume was handed, in order.
-    resumed_children: Mutex<Vec<Vec<EnginePark>>>,
     events: Arc<Mutex<Vec<&'static str>>>,
 }
 #[async_trait::async_trait]
@@ -45,12 +41,7 @@ impl SessionControlEngine for Control {
         &self,
         _: &RunRef,
         _: Option<&EnginePark>,
-        children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
-        self.resumed_children
-            .lock()
-            .expect("resumed children")
-            .push(children.to_vec());
         let cancellation = self.cancel_on_resume.lock().expect("resume hook").take();
         if let Some((factory, request)) = cancellation {
             factory
@@ -397,7 +388,6 @@ impl Fixture {
                     lose_resume_reply: AtomicBool::new(false),
                     cancel_on_resume: Mutex::new(None),
                     release_gates: Mutex::new(Vec::new()),
-                    resumed_children: Mutex::new(Vec::new()),
                     events: events.clone(),
                 }),
                 AtomicUsize::new(0),

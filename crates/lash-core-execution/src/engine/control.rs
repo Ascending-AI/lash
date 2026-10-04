@@ -303,15 +303,13 @@ pub trait SessionControlEngine: Send + Sync {
 
     /// O4 redrive: resume the invocation holding the Run's park over its
     /// original journal, then resume the session's paused admission.
-    /// `children` is the retained legacy sidecar until its stored codec is
-    /// removed; Run-owned recovery ignores it. Other owners are untouched.
+    /// Other owners are untouched.
     /// An engine holding none answers [`EngineAck::NothingHeld`], and the
     /// caller schedules a shift instead.
     async fn resume_run(
         &self,
         target: &RunRef,
         engine: Option<&EnginePark>,
-        children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal>;
 
     /// Resume a process through the engine's existing process control path.
@@ -378,7 +376,6 @@ impl SessionControlEngine for NoEngineControl {
         &self,
         _target: &RunRef,
         _engine: Option<&EnginePark>,
-        _children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
         Ok(EngineAck::NothingHeld)
     }
@@ -437,13 +434,6 @@ pub enum ParkTarget {
     /// is parked on the run the session's next admission names (ADR 0109
     /// §3), and only that park's operator verb resumes it.
     Shift { session: SessionId },
-    /// Work a session's logical run waits on, stopped in an execution of
-    /// its own (a tool attempt's child, FIG-4607). The run's own execution
-    /// is not stopped: it waits for the child. The child is parked on the
-    /// run, whose park records the child's engine handle beside those of
-    /// the run's other stopped children (FIG-4630), and the park's redrive
-    /// resumes exactly the recorded ones.
-    RunChild { session: SessionId, run: TurnId },
 }
 
 /// What [`ParkRecoveryWriter::record_engine_park`] did.
@@ -508,8 +498,7 @@ pub trait ParkRecoveryWriter: Send + Sync {
     }
     /// Park `target` for `reason`, carrying the engine's `engine` handle. A
     /// [`ParkTarget::Shift`] park stores no handle: the engine finds a
-    /// stopped shift by its session. A [`ParkTarget::RunChild`] park records
-    /// the handle as one of the run's stopped children.
+    /// stopped shift by its session.
     /// `execution` re-reads the stalled execution when a redrive may have
     /// resumed it since the engine listed it.
     async fn record_engine_park(

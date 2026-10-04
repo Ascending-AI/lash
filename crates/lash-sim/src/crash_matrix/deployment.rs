@@ -651,9 +651,8 @@ impl lash_core::engine::SessionControlEngine for CrashControl {
         &self,
         target: &lash_core::engine::RunRef,
         engine: Option<&lash_core::store::EnginePark>,
-        children: &[lash_core::store::EnginePark],
     ) -> Result<lash_core::engine::EngineAck, lash_core::engine::EngineRefusal> {
-        let ack = self.inner.resume_run(target, engine, children).await?;
+        let ack = self.inner.resume_run(target, engine).await?;
         self.faults.record(crate::invariants::Fact::Resume {
             session: target.session.to_string(),
             run: target.run.to_string(),

@@ -54,16 +54,8 @@ impl std::fmt::Display for ControlIntentId {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ControlIntentKind {
-    /// Resume the parked run's execution under the same fence, and the
-    /// stopped work `children` names: the handles its park recorded when the
-    /// redrive was requested (FIG-4630). The engine half resumes exactly
-    /// these.
-    Redrive {
-        run: TurnId,
-        park: ParkId,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        children: Vec<EnginePark>,
-    },
+    /// Resume the parked run's execution under the same fence.
+    Redrive { run: TurnId, park: ParkId },
     /// End the parked run `Cancelled`.
     Cancel { run: TurnId, park: ParkId },
     /// End the parked run and execute its held inputs under `new_run`.
@@ -735,7 +727,6 @@ mod tests {
             kind: ControlIntentKind::Redrive {
                 run: TurnId::from("r"),
                 park: super::super::ParkId::from_feed_sequence(3),
-                children: Vec::new(),
             },
             ..intent(state)
         }
@@ -753,7 +744,6 @@ mod tests {
             last_refused_ms: 1,
             attempts: 1,
             engine: None,
-            children: Vec::new(),
             resume_intent: resume_intent.map(ControlIntentId::from_sequence),
             build_generation: None,
         }

@@ -184,7 +184,7 @@ impl ControlIntentRelay {
                 )
                 .await
             }
-            ControlIntentKind::Redrive { run, children, .. } => {
+            ControlIntentKind::Redrive { run, .. } => {
                 let target = RunRef {
                     session: intent.session_id.clone(),
                     run: run.clone(),
@@ -194,9 +194,7 @@ impl ControlIntentRelay {
                 // accepted before the intent settles, so a lost ask is this
                 // attempt's failure.
                 if matches!(
-                    engine
-                        .resume_run(&target, intent.engine.as_ref(), children)
-                        .await?,
+                    engine.resume_run(&target, intent.engine.as_ref()).await?,
                     EngineAck::NothingHeld
                 ) {
                     self.work

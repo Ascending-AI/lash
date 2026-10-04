@@ -42,7 +42,6 @@ pub(crate) fn decode_turn_park_row(row: &sqlx::postgres::PgRow) -> Result<TurnPa
     let engine_ref: Option<String> = row.try_get(8).map_err(store_sqlx_error)?;
     let resume_intent: Option<i64> = row.try_get(9).map_err(store_sqlx_error)?;
     let build_generation: Option<String> = row.try_get(10).map_err(store_sqlx_error)?;
-    let child_engine_refs: Option<String> = row.try_get(11).map_err(store_sqlx_error)?;
     TurnPark::decode(
         SessionId::parse(session_id)?,
         run.try_into()?,
@@ -53,7 +52,6 @@ pub(crate) fn decode_turn_park_row(row: &sqlx::postgres::PgRow) -> Result<TurnPa
         stored_u64("last_refused_ms", last_refused_ms)?,
         u32::try_from(attempts).unwrap_or(u32::MAX),
         engine_ref,
-        child_engine_refs.as_deref(),
         resume_intent
             .map(|intent| stored_u64("resume_intent", intent))
             .transpose()?,
@@ -80,32 +78,6 @@ pub(crate) async fn turn_park_for_update(
     .as_ref()
     .map(decode_turn_park_row)
     .transpose()
-}
-
-/// Add the child handle `write` reports to the ones `park` records, inside
-/// `tx`.
-async fn record_child_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    park: &mut TurnPark,
-    write: &TurnParkWrite,
-) -> Result<(), StoreError> {
-    let Some(child) = write.child().filter(|child| !park.children.contains(child)) else {
-        return Ok(());
-    };
-    park.children.push(child.clone());
-    sqlx::query(
-        crate::turn_ingress::turn_ingress_sql()
-            .turn_parks
-            .set_children
-            .sql(),
-    )
-    .bind(park.session_id.as_str())
-    .bind(park.turn_id.as_str())
-    .bind(TurnPark::encode_children(&park.children)?)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    Ok(())
 }
 
 /// Record `write` inside `tx`: refuse a run with terminal evidence (P2),
@@ -177,7 +149,6 @@ pub(crate) async fn record_turn_park_tx(
             let head = StoredTurnParkHead {
                 run: park.turn_id.clone(),
                 engine: park.engine.clone(),
-                children: park.children.clone(),
                 redrive: park.resume_intent.map(|intent| StoredParkRedrive {
                     intent,
                     open: redrive
@@ -202,10 +173,6 @@ pub(crate) async fn record_turn_park_tx(
                 .await
                 .map_err(store_sqlx_error)?;
             park.engine = write.engine().cloned();
-            return Ok(lash_core_execution::store::StoreTransition::unchanged(park));
-        }
-        (TurnParkWriteDecision::AttachChild, Some(mut park)) => {
-            record_child_tx(tx, &mut park, write).await?;
             return Ok(lash_core_execution::store::StoreTransition::unchanged(park));
         }
         (TurnParkWriteDecision::Repark, Some(mut park)) => {
@@ -250,7 +217,6 @@ pub(crate) async fn record_turn_park_tx(
             if write.build_generation.is_some() {
                 park.build_generation = write.build_generation.clone();
             }
-            record_child_tx(tx, &mut park, write).await?;
             return Ok(lash_core_execution::store::StoreTransition::changed(park));
         }
         (TurnParkWriteDecision::Supersede, Some(superseded)) => {
@@ -288,7 +254,6 @@ pub(crate) async fn record_turn_park_tx(
             )));
         }
     }
-    let children: Vec<_> = write.child().cloned().into_iter().collect();
     let park_id = log_turn_parked_tx(
         tx,
         session_id,
@@ -310,7 +275,6 @@ pub(crate) async fn record_turn_park_tx(
         .bind(park_executable_generation.as_deref())
         .bind(engine_ref.as_deref())
         .bind(park_build_generation.as_deref())
-        .bind(TurnPark::encode_children(&children)?)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -324,7 +288,6 @@ pub(crate) async fn record_turn_park_tx(
             last_refused_ms: write.at_ms,
             attempts: 1,
             engine: write.engine().cloned(),
-            children,
             resume_intent: None,
             build_generation: write.build_generation.clone(),
         },

@@ -678,7 +678,6 @@ table lash_turn_park_events
   primary-key (seq)
 table lash_turn_parks
   column attempts bigint not-null
-  column child_engine_refs text nullable
   column engine_ref text nullable
   column last_refused_ms bigint not-null
   column park_build_generation text nullable

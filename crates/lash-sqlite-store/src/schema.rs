@@ -351,8 +351,7 @@ CREATE TABLE IF NOT EXISTS turn_parks (
     park_executable_generation TEXT,
     engine_ref TEXT,
     resume_intent INTEGER,
-    park_build_generation TEXT,
-    child_engine_refs TEXT
+    park_build_generation TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_turn_parks_since
     ON turn_parks(since_ms, session_id);

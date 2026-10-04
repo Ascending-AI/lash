@@ -805,10 +805,8 @@ impl SessionControlEngine for RestateSessionControl {
         &self,
         target: &RunRef,
         handle: Option<&EnginePark>,
-        _children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
         // The invocation owns every local X handle and replays its journal.
-        // The retained child sidecar has no role in Run-owned recovery.
         // Resume the session's shift only through this operator verb.
         let status = self.invocation(target, handle).await?;
         let run = match status {

@@ -481,11 +481,6 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// and trigger registration (FIG-4057, changed in place under the version
 /// freeze): a catalog whose kind CHECK predates them rejects both kinds, so
 /// recreate it.
-/// Version 99 also lets a turn park record the engine's handles on stopped
-/// work its run waits on (FIG-4630, changed in place under the version
-/// freeze): `turn_parks` gains `child_engine_refs`. A database written before
-/// it has the old shape; recreate it.
-///
 /// version_guard(
 ///     roots(
 ///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope,

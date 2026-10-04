@@ -623,11 +623,6 @@ async fn acquire_runtime_connection(
 // (FIG-4814, changed in place likewise). A catalog provisioned before the
 // change fails the open-time shape check and is recreated.
 //
-// Version 141 also lets a turn park record the engine's handles on stopped
-// work its run waits on (FIG-4630, changed in place under the version
-// freeze): `lash_turn_parks` gains `child_engine_refs`. A catalog provisioned
-// before the change fails the open-time shape check and is recreated.
-//
 // Version 141 also admits process-definition and trigger registration in the
 // tool-intent submission ledger's kind constraint (FIG-4057, changed in place
 // under the version freeze). A catalog provisioned before the change rejects

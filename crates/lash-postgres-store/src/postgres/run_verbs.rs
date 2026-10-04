@@ -47,7 +47,6 @@ pub(crate) async fn open_run_intent_tx(
         RunVerb::Redrive => ControlIntentKind::Redrive {
             run: request.run.clone(),
             park: request.park,
-            children: plan.park.children.clone(),
         },
         RunVerb::Cancel => ControlIntentKind::Cancel {
             run: request.run.clone(),

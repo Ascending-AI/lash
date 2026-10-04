@@ -106,16 +106,8 @@ pub enum TurnParkOrigin {
     Reconcile {
         /// The engine's handle on the stopped execution, when it is the
         /// run's own: the handle a redrive resumes and a cancel releases.
-        /// `None` when the stopped work is what the run waits on (a child,
-        /// or its session's shift).
+        /// `None` when the stopped work is its session's shift.
         engine: Option<EnginePark>,
-        /// The engine's handle on stopped work the run waits on, when that
-        /// is what stopped (a paused group child, FIG-4630): the park
-        /// records it beside the children it already names, and a redrive
-        /// resumes exactly the recorded ones. Never set with `engine`; a
-        /// stopped shift carries neither, since the engine finds a shift by
-        /// its session.
-        child: Option<EnginePark>,
         /// The settled redrive the stored park named when the writer read
         /// it, after which the writer confirmed with the engine that the
         /// work is still stopped. The work then stopped again after that
@@ -156,28 +148,6 @@ impl TurnParkWrite {
         Self {
             origin: TurnParkOrigin::Reconcile {
                 engine,
-                child: None,
-                after_redrive,
-            },
-            ..Self::refusal(session_id, run, reason, at_ms)
-        }
-    }
-
-    /// The park the engine's reconcile writes for `run` because `child`,
-    /// work the run waits on, stopped (see [`TurnParkOrigin::Reconcile`]).
-    #[must_use]
-    pub fn reconcile_child(
-        session_id: SessionId,
-        run: TurnId,
-        reason: ParkReason,
-        at_ms: u64,
-        child: EnginePark,
-        after_redrive: Option<super::ControlIntentId>,
-    ) -> Self {
-        Self {
-            origin: TurnParkOrigin::Reconcile {
-                engine: None,
-                child: Some(child),
                 after_redrive,
             },
             ..Self::refusal(session_id, run, reason, at_ms)
@@ -192,15 +162,6 @@ impl TurnParkWrite {
             TurnParkOrigin::Reconcile { engine, .. } => engine.as_ref(),
         }
     }
-
-    /// The handle of the stopped child the write reports, if any.
-    #[must_use]
-    pub fn child(&self) -> Option<&EnginePark> {
-        match &self.origin {
-            TurnParkOrigin::Refusal => None,
-            TurnParkOrigin::Reconcile { child, .. } => child.as_ref(),
-        }
-    }
 }
 
 /// The stored park a [`TurnParkWrite`] is decided against: the session's
@@ -211,8 +172,6 @@ pub struct StoredTurnParkHead {
     pub run: TurnId,
     /// The engine handle the stored park carries.
     pub engine: Option<EnginePark>,
-    /// The handles of stopped work the stored park records.
-    pub children: Vec<EnginePark>,
     /// The redrive the stored park's `resume_intent` names, if any.
     pub redrive: Option<StoredParkRedrive>,
 }
@@ -248,16 +207,8 @@ pub enum TurnParkWriteDecision {
     /// a park without a handle: keep its reason and attempts, store the
     /// handle (P4, `AttachedToExisting`).
     AttachEngine,
-    /// Work the run waits on stopped and the run already holds a park that
-    /// does not record it, with no redrive requested since: keep the park as
-    /// it is and add the write's child handle to the ones it records
-    /// (FIG-4630).
-    AttachChild,
-    /// Nothing to write: the park already carries this handle and no
-    /// redrive ran since, the run is already parked and already records
-    /// the stopped child (or the stopped work is its session's shift), a
-    /// redrive is still on its way to resuming it, or the engine's listing
-    /// may predate a redrive's resume.
+    /// Nothing to write: the park already carries this handle, its shift
+    /// stopped behind it, or a redrive owns the stopped execution.
     Unchanged,
 }
 
@@ -273,14 +224,13 @@ pub fn decide_turn_park_write(
     if stored.run != write.turn_id {
         return TurnParkWriteDecision::Supersede;
     }
-    let (engine, child, after_redrive) = match &write.origin {
+    let (engine, after_redrive) = match &write.origin {
         // The execution itself refused again.
         TurnParkOrigin::Refusal => return TurnParkWriteDecision::Repark,
         TurnParkOrigin::Reconcile {
             engine,
-            child,
             after_redrive,
-        } => (engine, child, after_redrive),
+        } => (engine, after_redrive),
     };
     if let Some(redrive) = stored.redrive {
         // A redrive owns the stopped work until it resumes it; once it did,
@@ -288,22 +238,10 @@ pub fn decide_turn_park_write(
         // again re-parks: an engine listing read before the resume is stale
         // and must not re-park the running run. A writer that read the park
         // before this redrive was requested names no redrive, or another.
-        // A redrive resumes the children its park recorded when it was
-        // requested, so a child that stopped since waits for it to settle.
         return if !redrive.open && *after_redrive == Some(redrive.intent) {
             TurnParkWriteDecision::Repark
         } else {
             TurnParkWriteDecision::Unchanged
-        };
-    }
-    if let Some(child) = child {
-        // The run is parked and no redrive ran since: a stopped child the
-        // park does not record yet adds its handle and nothing else, however
-        // many writers found it at once.
-        return if stored.children.contains(child) {
-            TurnParkWriteDecision::Unchanged
-        } else {
-            TurnParkWriteDecision::AttachChild
         };
     }
     match (stored.engine.as_ref(), engine) {
@@ -368,13 +306,6 @@ pub struct TurnPark {
     /// one: what a redrive resumes and a cancel or fork releases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<EnginePark>,
-    /// The engine's handles on stopped work the run waits on (paused group
-    /// children, FIG-4630), as reconcile recorded each: a redrive resumes
-    /// exactly the ones recorded when it is requested. The set only grows
-    /// while the park lives; a handle whose work has since moved on is
-    /// skipped by the engine.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<EnginePark>,
     /// The redrive requested since this park last refused, if any. A re-park
     /// of the same run clears it (P3), so an operator can redrive again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1247,23 +1178,6 @@ pub struct TurnParkQuery {
 }
 
 impl TurnPark {
-    /// The stored form of a park's child handles: a JSON array, and `None`
-    /// (SQL `NULL`) when it records none.
-    ///
-    /// # Errors
-    /// When the handles do not encode.
-    pub fn encode_children(children: &[EnginePark]) -> Result<Option<String>, crate::StoreError> {
-        if children.is_empty() {
-            return Ok(None);
-        }
-        serde_json::to_string(children).map(Some).map_err(|error| {
-            crate::StoreError::RecordEncodingFailed {
-                record_kind: "TurnPark".to_string(),
-                message: error.to_string(),
-            }
-        })
-    }
-
     /// Decode a stored park row, checking that the stored `reason_code`
     /// agrees with the decoded reason's [`ParkReason::code`].
     ///
@@ -1281,21 +1195,9 @@ impl TurnPark {
         last_refused_ms: u64,
         attempts: u32,
         engine_ref: Option<String>,
-        child_engine_refs: Option<&str>,
         resume_intent: Option<u64>,
         build_generation: Option<&str>,
     ) -> Result<Self, crate::StoreError> {
-        let children = child_engine_refs
-            .map(serde_json::from_str::<Vec<EnginePark>>)
-            .transpose()
-            .map_err(|error| crate::StoreError::StoredDataCorrupt {
-                record_kind: "TurnPark",
-                message: format!(
-                    "stored turn park child handles for session `{session_id}` are unreadable: \
-                     {error}"
-                ),
-            })?
-            .unwrap_or_default();
         let reason: ParkReason = serde_json::from_str(reason_json).map_err(|error| {
             crate::StoreError::StoredDataCorrupt {
                 record_kind: "TurnPark",
@@ -1336,7 +1238,6 @@ impl TurnPark {
             last_refused_ms,
             attempts,
             engine: engine_ref.map(EnginePark::new),
-            children,
             resume_intent: resume_intent.map(super::ControlIntentId::from_sequence),
             build_generation,
         })

@@ -510,10 +510,6 @@ async fn owner_law(file: bool) {
             );
             let park = world.driver.store.load_turn_park().await.unwrap().unwrap();
             assert_eq!(park.engine.as_ref().unwrap().as_str(), paused.id);
-            assert!(
-                park.children.is_empty(),
-                "L20 parks the invocation owner, with no child dependency"
-            );
             assert_eq!(probe.executions_of(&calls[0].0.call_id), 1);
             assert_eq!(probe.executions_of(&calls[1].0.call_id), 1);
             assert!(

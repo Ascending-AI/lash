@@ -572,9 +572,8 @@ impl SessionControlEngine for LostResumeReply {
         &self,
         target: &RunRef,
         engine: Option<&EnginePark>,
-        children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
-        self.inner.resume_run(target, engine, children).await?;
+        self.inner.resume_run(target, engine).await?;
         Err(EngineRefusal::retryable(
             lash_core::RuntimeErrorCode::EngineControlRequest,
             "lost reply after the engine resumed",
@@ -605,7 +604,6 @@ impl SessionControlEngine for ReplyOnly {
         &self,
         _: &RunRef,
         _: Option<&EnginePark>,
-        _: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
         Ok(EngineAck::Resumed)
     }
@@ -959,9 +957,8 @@ impl SessionControlEngine for InterruptedRelease {
         &self,
         target: &RunRef,
         engine: Option<&EnginePark>,
-        children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
-        self.inner.resume_run(target, engine, children).await
+        self.inner.resume_run(target, engine).await
     }
     async fn release_run(
         &self,
@@ -1143,7 +1140,6 @@ async fn crash_gaps(server: HarnessServer) {
                             run: f.shifts.run.clone(),
                         },
                         park.engine.as_ref(),
-                        &[],
                     )
                     .await
                     .expect("status read"),
@@ -1391,7 +1387,7 @@ async fn mismatched_handle(server: HarnessServer) {
     let control = f.work.control();
     for refusal in [
         control
-            .resume_run(&other, Some(&handle), &[])
+            .resume_run(&other, Some(&handle))
             .await
             .expect_err("a resume under another session's handle"),
         control
@@ -1437,7 +1433,7 @@ async fn mismatched_handle(server: HarnessServer) {
     };
     assert_eq!(
         control
-            .resume_run(&own, Some(&handle), &[])
+            .resume_run(&own, Some(&handle))
             .await
             .expect("a resume under the run's own session"),
         EngineAck::Resumed
@@ -1596,9 +1592,8 @@ impl SessionControlEngine for SlowControlRpc {
         &self,
         target: &RunRef,
         handle: Option<&EnginePark>,
-        children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
-        self.inner.resume_run(target, handle, children).await
+        self.inner.resume_run(target, handle).await
     }
     async fn release_run(
         &self,
