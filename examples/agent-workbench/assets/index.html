@@ -5130,6 +5130,7 @@
       const turnAnchors = new Map();
       for (const row of state.transcript) {
         if (row.suppressed) continue;
+        clearEmpty();
         const start = timeline.children.length;
         const content = row.content;
         const provenance = row.provenance;

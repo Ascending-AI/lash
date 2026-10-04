@@ -19,11 +19,13 @@ function element(container, payload) {
 // they received. Expected values are taken directly from the supplied records.
 export function verifyTranscriptSurface(surface, asset, rows) {
   const target = { children: [] };
+  const empty = element(target, null);
   const observed = [];
   const record = (kind, value) => { observed.push({ kind, value }); return element(target, { kind, value }); };
   const owner = { turnId: 'live-turn', pendingTools: [] };
   const context = {
     timeline: target, messagesEl: target,
+    clearEmpty: () => { if (target.children.includes(empty)) empty.remove(); },
     isCurrentView: () => true,
     document: { createElement: () => ({ children: [], appendChild(child) { this.children.push(child); } }) },
     appendReasoning: text => record('reasoning', text),
@@ -34,7 +36,7 @@ export function verifyTranscriptSurface(surface, asset, rows) {
   };
   const messageIds = [];
   if (surface === 'workbench') {
-    context.renderMessage = message => { messageIds.push(message.id); return record('message', {text:message.text, attachments:message.attachments}); };
+    context.renderMessage = message => { context.clearEmpty(); messageIds.push(message.id); return record('message', {text:message.text, attachments:message.attachments}); };
   }
   let ownedInput = null;
   let code;
