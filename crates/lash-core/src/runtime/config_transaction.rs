@@ -62,18 +62,19 @@ impl LashRuntime {
     /// Every config registration of this session's installed plugins, and
     /// the core owner's.
     pub fn config_registry(&self) -> Result<Arc<crate::ConfigRegistry>, RuntimeError> {
-        let session = self.session.as_ref().ok_or_else(|| {
-            RuntimeError::new(
-                RuntimeErrorCode::SessionCommandRun,
-                "config commands need the runtime's plugin session",
-            )
-        })?;
-        session.plugins().host().config_registry().map_err(|error| {
-            RuntimeError::new(
-                RuntimeErrorCode::SessionCommandRun,
-                format!("the installed plugins' config registration is invalid: {error}"),
-            )
-        })
+        // Registrations belong to the installed composition. Submission must
+        // work before a command Run publishes the session's native view and
+        // constructs its capabilities.
+        self.services
+            .plugins
+            .host()
+            .config_registry()
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::SessionCommandRun,
+                    format!("the installed plugins' config registration is invalid: {error}"),
+                )
+            })
     }
 
     /// The catalog of every config command this session admits, generated
