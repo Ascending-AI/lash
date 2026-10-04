@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
-use lash_core_store::tool_run::{CallDecision, RunEvent, RunJournalEntry};
+use lash_core_store::tool_run::{CallDecision, RunEvent, RunJournalEntry, RunLedger};
 use lash_upgrade_harness::e2e::Step;
 use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease, CaseSpec, Channel, StoreKind};
 use lash_upgrade_harness::e2e::cluster::{ClusterControl, ClusterReceipt, LeaderReceipt};
@@ -75,7 +75,11 @@ pub trait FleetFixture: Send {
         label: &'a str,
         kind: BarrierKind,
     ) -> Step<'a, Barrier>;
-    fn capture<'a>(&'a mut self, work: &'a WorkIdentity) -> Step<'a, Evidence>;
+    fn capture<'a>(
+        &'a mut self,
+        work: &'a WorkIdentity,
+        excluded_node: Option<u32>,
+    ) -> Step<'a, Evidence>;
     fn partition_for<'a>(&'a mut self, work: &'a WorkIdentity) -> Step<'a, u32>;
     fn await_leader<'a>(&'a mut self, previous: &'a LeaderReceipt) -> Step<'a, LeaderReceipt>;
     fn snapshot<'a>(&'a mut self, work: &'a WorkIdentity) -> Step<'a, FleetSnapshot>;
@@ -83,10 +87,115 @@ pub trait FleetFixture: Send {
     fn finish(&mut self) -> Step<'_, Vec<lash_upgrade_harness::e2e::control::CleanupReceipt>>;
 }
 
+#[derive(serde::Serialize)]
 pub struct FleetProof {
     pub before: Evidence,
     pub after: Evidence,
     pub store: FleetSnapshot,
+}
+
+/// Each selected fleet scenario owns its teardown even when a fault/oracle
+/// fails. A failed cleanup or fixture background task fails the scenario;
+/// journal artifacts are written before the processes are stopped.
+pub async fn execute(
+    scenario: Scenario,
+    lease: &mut CaseLease,
+    cluster: &mut dyn ClusterControl,
+    control: &mut dyn Control,
+    fixture: &mut dyn FleetFixture,
+) -> Result<FleetProof> {
+    let mut result = match scenario {
+        Scenario::LeaderLoss => {
+            s14_leader_loss_retains_accepted_work(lease, cluster, control, fixture).await
+        }
+        Scenario::MinorityPartition => {
+            s15_minority_partition_cannot_create_another_winner(lease, cluster, control, fixture)
+                .await
+        }
+        Scenario::StalePublication => {
+            s16_stale_postgres_host_cannot_publish(lease, control, fixture).await
+        }
+    };
+    let retained = match &result {
+        Ok(proof) => serde_json::to_vec_pretty(proof),
+        Err(error) => {
+            serde_json::to_vec_pretty(&serde_json::json!({ "failure": format!("{error:#}") }))
+        }
+    }
+    .map_err(anyhow::Error::from)
+    .and_then(|bytes| {
+        let path = lease.directory.join("fleet-proof.json");
+        std::fs::write(&path, bytes).with_context(|| format!("retain {}", path.display()))
+    });
+    // Capture available failed-invocation facts before reaping. Failure to
+    // collect is retained as a failure too, never converted into an empty proof.
+    let failed_capture = if result.is_err() {
+        match fixture.primary().transcript() {
+            Ok(observations) => match observations.first() {
+                Some(observation) => match fixture.capture(&observation.work, None).await {
+                    Ok(evidence) => serde_json::to_vec_pretty(&evidence)
+                        .map_err(anyhow::Error::from)
+                        .and_then(|bytes| {
+                            std::fs::write(
+                                lease.directory.join("fleet-failure-evidence.json"),
+                                bytes,
+                            )
+                            .map_err(anyhow::Error::from)
+                        }),
+                    Err(error) => Err(error),
+                },
+                None => Ok(()), // Boot can fail before any input is accepted.
+            },
+            Err(error) => Err(error),
+        }
+    } else {
+        Ok(())
+    };
+    let fixture_cleanup = fixture.finish().await;
+    let cluster_cleanup = cluster.finish().await;
+    let mut cleanup_errors = Vec::new();
+    for receipts in [fixture_cleanup, cluster_cleanup] {
+        match receipts {
+            Ok(receipts) => {
+                for receipt in receipts {
+                    if !receipt.closed {
+                        cleanup_errors.push(format!("{}: {}", receipt.resource, receipt.detail));
+                    }
+                    lease.cleanup.push(receipt);
+                }
+            }
+            Err(error) => cleanup_errors.push(format!("{error:#}")),
+        }
+    }
+    if let Ok(proof) = &mut result {
+        proof.after.cleanup.extend(lease.cleanup.clone());
+    }
+    let cleanup_artifact = serde_json::to_vec_pretty(&serde_json::json!({
+        "receipts": &lease.cleanup,
+        "errors": &cleanup_errors,
+    }))
+    .map_err(anyhow::Error::from)
+    .and_then(|bytes| {
+        std::fs::write(lease.directory.join("fleet-cleanup.json"), bytes)
+            .map_err(anyhow::Error::from)
+    });
+    if let Err(error) = cleanup_artifact {
+        cleanup_errors.push(format!("{error:#}"));
+    }
+    let primary_failure = result
+        .as_ref()
+        .err()
+        .map(|error| format!("{error:#}"))
+        .unwrap_or_default();
+    for error in [retained.err(), failed_capture.err()].into_iter().flatten() {
+        cleanup_errors.push(format!("{error:#}"));
+    }
+    ensure!(
+        cleanup_errors.is_empty(),
+        "{primary_failure}; fleet retention/cleanup failed: {}",
+        cleanup_errors.join("; ")
+    );
+    result
 }
 
 fn submit(lease: &CaseLease, scenario: &str) -> HostCommand {
@@ -160,7 +269,7 @@ pub async fn s14_leader_loss_retains_accepted_work(
     let held = control.await_barrier(&b).await?;
     assert_barrier(&durable, BarrierKind::XDurable, work, true)?;
     assert_barrier(&held, BarrierKind::BodyEntered, work, false)?;
-    let before = fixture.capture(work).await?;
+    let before = fixture.capture(work, None).await?;
     let partition = fixture.partition_for(work).await?;
     let leader = cluster
         .leaders()
@@ -203,7 +312,7 @@ pub async fn s14_leader_loss_retains_accepted_work(
     assert_same_owner(work, &answer.work)?;
     let converged = cluster.converge().await?;
     assert_live_cluster(&converged, 3)?;
-    let after = fixture.capture(work).await?;
+    let after = fixture.capture(work, None).await?;
     assert_cluster_journals(&converged, &after, work)?;
     assert_partial_recovery(&before, &after, &durable, &held)?;
     ensure!(
@@ -212,6 +321,11 @@ pub async fn s14_leader_loss_retains_accepted_work(
     );
     let store = fixture.snapshot(work).await?;
     store.assert_one_settlement()?;
+    store.assert_frontier()?;
+    ensure!(
+        store.inputs[0].id == work.ingress && store.run.as_str() == work.run,
+        "store settlement belongs to another accepted input or Run"
+    );
     Ok(FleetProof {
         before,
         after,
@@ -238,7 +352,7 @@ pub async fn s15_minority_partition_cannot_create_another_winner(
     let body = fixture.barrier(work, "A", BarrierKind::BodyEntered).await?;
     let held = control.await_barrier(&body).await?;
     assert_barrier(&held, BarrierKind::BodyEntered, work, false)?;
-    let before = fixture.capture(work).await?;
+    let before = fixture.capture(work, None).await?;
     let partition = fixture.partition_for(work).await?;
     let minority = cluster
         .leaders()
@@ -271,9 +385,14 @@ pub async fn s15_minority_partition_cannot_create_another_winner(
         })
         .await?;
     assert_same_owner(work, &answer.work)?;
-    let settled = fixture.capture(work).await?;
+    let settled = fixture.capture(work, Some(minority.node)).await?;
     let store = fixture.snapshot(work).await?;
     store.assert_one_settlement()?;
+    store.assert_frontier()?;
+    ensure!(
+        store.inputs[0].id == work.ingress && store.run.as_str() == work.run,
+        "store settlement belongs to another accepted input or Run"
+    );
     for node in &initial.nodes {
         if node.node != minority.node {
             cluster.heal(minority.node, node.node).await?;
@@ -282,9 +401,13 @@ pub async fn s15_minority_partition_cannot_create_another_winner(
     }
     let healed = cluster.converge().await?;
     assert_live_cluster(&healed, 3)?;
-    let after = fixture.capture(work).await?;
+    let after = fixture.capture(work, None).await?;
     assert_cluster_journals(&healed, &after, work)?;
-    assert_decisions_unchanged(&settled, &after, work)?;
+    ensure!(
+        decisions(&settled, work)? == decisions(&after, work)?,
+        "healed minority added or changed a final/cancel decision"
+    );
+    assert_admissions_unchanged(&settled, &after, work)?;
     ensure!(
         store == fixture.snapshot(work).await?,
         "minority changed the settled head/state after heal"
@@ -317,7 +440,7 @@ pub async fn s16_stale_postgres_host_cannot_publish(
         .await?;
     let held = control.await_barrier(&publication).await?;
     assert_barrier(&held, BarrierKind::BeforeAck, work, false)?;
-    let before = fixture.capture(work).await?;
+    let before = fixture.capture(work, None).await?;
     let fault = control
         .inject(
             Fault::DropConnection {
@@ -344,6 +467,15 @@ pub async fn s16_stale_postgres_host_cannot_publish(
     assert_same_owner(work, &answer.work)?;
     let published = fixture.snapshot(work).await?;
     published.assert_one_settlement()?;
+    published.assert_frontier()?;
+    ensure!(
+        published.inputs[0].id == work.ingress && published.run.as_str() == work.run,
+        "successor settled another accepted input or Run"
+    );
+    ensure!(
+        published.plugin_component.is_some(),
+        "successor publication has no plugin frontier witness"
+    );
     control.tool(ToolControl::Release(publication)).await?;
     let refused = fixture.stale_refusal().await?;
     ensure!(
@@ -354,7 +486,7 @@ pub async fn s16_stale_postgres_host_cannot_publish(
         refused.fence_epoch < refused.current_epoch,
         "stale authority was not superseded"
     );
-    let after = fixture.capture(work).await?;
+    let after = fixture.capture(work, None).await?;
     let store = fixture.snapshot(work).await?;
     ensure!(
         store == published,
@@ -418,9 +550,18 @@ fn run_entries<'a>(
         })
         .collect();
     ensure!(!facts.is_empty(), "node {admin} has no decoded Run records");
-    facts.sort_by_key(|(fact, _)| (fact.invocation.as_str(), fact.index));
+    facts.sort_by_key(|(_, entry)| (entry.record.segment, entry.record.first));
     let mut slots = BTreeSet::new();
-    for (fact, _) in &facts {
+    let owner = facts
+        .iter()
+        .flat_map(|(_, entry)| &entry.record.events)
+        .find_map(|event| match event {
+            RunEvent::Admitted { round } => Some(round.owner.clone()),
+            _ => None,
+        })
+        .context("Run journal has no original admission owner")?;
+    let mut ledger = RunLedger::new(owner);
+    for (fact, entry) in &facts {
         ensure!(
             fact.protocol == 7,
             "journal was not decoded from negotiated V7"
@@ -429,6 +570,15 @@ fn run_entries<'a>(
             slots.insert((&fact.invocation, fact.index)),
             "same journal slot was counted twice"
         );
+        ledger
+            .append(entry.record.segment, &entry.record)
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "node {admin} has an invalid Run record at {}:{}: {error}",
+                    fact.invocation,
+                    fact.index
+                )
+            })?;
     }
     Ok(facts.into_iter().map(|(_, entry)| entry).collect())
 }
@@ -555,6 +705,7 @@ fn assert_partial_recovery(
     let work = &held.barrier.work;
     assert_decisions_unchanged(before, after, work)?;
     let final_decisions = decisions(after, work)?;
+    assert_admissions_unchanged(before, after, work)?;
     ensure!(
         final_decisions.len() == 2
             && final_decisions
@@ -568,6 +719,40 @@ fn assert_partial_recovery(
             "recovery minted a new call identity"
         );
     }
+    Ok(())
+}
+
+fn assert_admissions_unchanged(
+    before: &Evidence,
+    after: &Evidence,
+    work: &WorkIdentity,
+) -> Result<()> {
+    let admin = before
+        .journals
+        .iter()
+        .find(|fact| fact.work.run == work.run)
+        .context("missing pre-fault admission journal")?
+        .admin_url
+        .as_str();
+    let admissions = |entries: Vec<&RunJournalEntry>| {
+        entries
+            .into_iter()
+            .flat_map(|entry| &entry.record.events)
+            .filter_map(|event| match event {
+                RunEvent::Admitted { round } => Some(round.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let original = admissions(run_entries(before, work, admin)?);
+    ensure!(
+        !original.is_empty(),
+        "pre-fault work has no admitted executable binding"
+    );
+    ensure!(
+        admissions(run_entries(after, work, admin)?) == original,
+        "recovery minted or changed an admitted executable binding"
+    );
     Ok(())
 }
 

@@ -37,6 +37,7 @@ pub struct FleetSnapshot {
     pub head_revision: u64,
     pub checkpoint: Option<lash_core::store::BlobRef>,
     pub plugin_component: Option<Vec<u8>>,
+    pub frontier: Option<lash_core::PluginNamespaceState>,
     pub admissions: usize,
     pub unfinished_runs: usize,
     pub terminal: lash_core::store::RunTerminalCause,
@@ -45,7 +46,31 @@ pub struct FleetSnapshot {
     pub bound_inputs: usize,
     pub bound_batches: usize,
     pub open_batches: usize,
-    pub commits: Vec<String>,
+    pub head: serde_json::Value,
+    pub admission: serde_json::Value,
+    pub input_bindings: Vec<(String, String)>,
+    pub inputs: Vec<FleetInputReceipt>,
+    pub commits: Vec<FleetCommitReceipt>,
+}
+
+/// Persisted business receipts, excluding the independently changing relay
+/// lease columns. Equality pins both identities and committed material.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FleetInputReceipt {
+    pub id: String,
+    pub source_key: Option<String>,
+    pub ingress: serde_json::Value,
+    pub input: serde_json::Value,
+    pub digest: String,
+    pub state: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FleetCommitReceipt {
+    pub turn: String,
+    pub hash: String,
+    pub result: serde_json::Value,
+    pub outcome: Option<String>,
 }
 
 impl FleetSnapshot {
@@ -63,7 +88,7 @@ impl FleetSnapshot {
             .execute(&mut *tx)
             .await?;
         let head = sqlx::query(
-            "SELECT meta.shift_epoch, head.head_revision, head.checkpoint_ref
+            "SELECT meta.shift_epoch, head.head_revision, head.checkpoint_ref, head.head_json
              FROM lash_session_meta meta JOIN lash_session_head head USING (session_id)
              WHERE meta.session_id = $1",
         )
@@ -71,7 +96,7 @@ impl FleetSnapshot {
         .fetch_one(&mut *tx)
         .await?;
         let terminal = sqlx::query(
-            "SELECT terminal_cause_json, terminal_head_revision FROM lash_session_runs
+            "SELECT terminal_cause_json, terminal_head_revision, admission_json FROM lash_session_runs
              WHERE session_id = $1 AND run = $2 AND terminal_kind IS NOT NULL",
         )
         .bind(session.as_str())
@@ -95,12 +120,51 @@ impl FleetSnapshot {
         .bind(session.as_str())
         .fetch_one(&mut *tx)
         .await?;
-        let commits = sqlx::query_scalar::<_, String>(
-            "SELECT turn_id FROM lash_runtime_turn_commits WHERE session_id = $1 ORDER BY turn_id",
+        let input_bindings = sqlx::query_as::<_, (String, String)>(
+            "SELECT input_id, run FROM lash_session_run_inputs WHERE session_id = $1
+             ORDER BY input_id",
         )
         .bind(session.as_str())
         .fetch_all(&mut *tx)
         .await?;
+        let input_rows = sqlx::query(
+            "SELECT input_id, source_key, ingress_json, input_json, submission_digest, state
+             FROM lash_pending_turn_inputs WHERE session_id = $1 ORDER BY input_id",
+        )
+        .bind(session.as_str())
+        .fetch_all(&mut *tx)
+        .await?;
+        let inputs = input_rows
+            .iter()
+            .map(|row| {
+                Ok(FleetInputReceipt {
+                    id: row.try_get("input_id")?,
+                    source_key: row.try_get("source_key")?,
+                    ingress: serde_json::from_str(&row.try_get::<String, _>("ingress_json")?)?,
+                    input: serde_json::from_str(&row.try_get::<String, _>("input_json")?)?,
+                    digest: row.try_get("submission_digest")?,
+                    state: row.try_get("state")?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let commit_rows = sqlx::query(
+            "SELECT turn_id, turn_commit_hash, result_json, outcome_code
+             FROM lash_runtime_turn_commits WHERE session_id = $1 ORDER BY turn_id",
+        )
+        .bind(session.as_str())
+        .fetch_all(&mut *tx)
+        .await?;
+        let commits = commit_rows
+            .iter()
+            .map(|row| {
+                Ok(FleetCommitReceipt {
+                    turn: row.try_get("turn_id")?,
+                    hash: row.try_get("turn_commit_hash")?,
+                    result: serde_json::from_str(&row.try_get::<String, _>("result_json")?)?,
+                    outcome: row.try_get("outcome_code")?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         tx.commit().await?;
 
         let read = store
@@ -117,17 +181,25 @@ impl FleetSnapshot {
             read.checkpoint_ref.as_ref().map(ToString::to_string) == checkpoint_text,
             "checkpoint moved during fleet snapshot"
         );
+        let checkpoint = read.checkpoint_ref.clone();
+        let plugin_component = read.checkpoint.as_ref().and_then(|checkpoint| {
+            checkpoint
+                .component_body(lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
+                .map(<[u8]>::to_vec)
+        });
+        let state = lash_core::store::window_state(read, store.fleet_format())?.state;
+        let frontier = state
+            .plugin_state()
+            .and_then(|plugins| plugins.plugins.get(FRONTIER_PLUGIN))
+            .cloned();
         Ok(Self {
             session: session.clone(),
             run: run.clone(),
             shift_epoch: u64::try_from(head.try_get::<i64, _>("shift_epoch")?)?,
             head_revision,
-            checkpoint: read.checkpoint_ref,
-            plugin_component: read.checkpoint.as_ref().and_then(|checkpoint| {
-                checkpoint
-                    .component_body(lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
-                    .map(<[u8]>::to_vec)
-            }),
+            checkpoint,
+            plugin_component,
+            frontier,
             admissions: usize::try_from(counts.try_get::<i64, _>("admissions")?)?,
             unfinished_runs: usize::try_from(counts.try_get::<i64, _>("unfinished")?)?,
             terminal: serde_json::from_str(&terminal.try_get::<String, _>("terminal_cause_json")?)?,
@@ -138,6 +210,14 @@ impl FleetSnapshot {
             bound_inputs: usize::try_from(counts.try_get::<i64, _>("bound_inputs")?)?,
             bound_batches: usize::try_from(counts.try_get::<i64, _>("bound_batches")?)?,
             open_batches: usize::try_from(counts.try_get::<i64, _>("open_batches")?)?,
+            head: serde_json::from_str(&head.try_get::<String, _>("head_json")?)?,
+            admission: serde_json::to_value(
+                serde_json::from_str::<lash_core::store::RunAdmission>(
+                    &terminal.try_get::<String, _>("admission_json")?,
+                )?,
+            )?,
+            input_bindings,
+            inputs,
             commits,
         })
     }
@@ -149,7 +229,18 @@ impl FleetSnapshot {
             self.admissions
         );
         ensure!(self.unfinished_runs == 0, "unfinished Run remains");
-        ensure!(self.input_rows == 1, "input was duplicated or lost");
+        ensure!(
+            self.input_rows == 1 && self.inputs.len() == 1,
+            "input was duplicated or lost"
+        );
+        ensure!(
+            self.input_bindings == vec![(self.inputs[0].id.clone(), self.run.to_string())],
+            "accepted input does not retain its original Run binding"
+        );
+        ensure!(
+            matches!(self.inputs[0].state.as_str(), "completed" | "cancelled"),
+            "accepted input has no terminal tombstone"
+        );
         ensure!(
             self.bound_inputs == 0 && self.bound_batches == 0,
             "terminal retained ingress bindings"
@@ -165,7 +256,7 @@ impl FleetSnapshot {
         ensure!(
             self.commits
                 .iter()
-                .filter(|key| key.as_str() == turn.as_str())
+                .filter(|receipt| receipt.turn == turn.as_str())
                 .count()
                 == 1,
             "expected one commit for the Run's terminal physical turn"
@@ -194,6 +285,25 @@ pub struct StalePublicationRefusal {
 impl HeldPublication {
     pub fn commit(&self) -> &RuntimeCommit {
         &self.commit
+    }
+
+    /// Preserve the original request and its nonserialized store instructions
+    /// before disconnect. This artifact is observation only; release uses the
+    /// retained typed request, never a reconstructed JSON commit.
+    pub fn capture(&self, path: &std::path::Path) -> Result<()> {
+        let terminal = self
+            .commit
+            .run_terminal
+            .as_deref()
+            .context("held publication has no logical Run terminal")?;
+        let receipt = serde_json::json!({
+            "request": &self.commit,
+            "fence": self.fence()?,
+            "terminal": terminal,
+            "ingress_settlement": &self.commit.ingress,
+            "park_run": &self.commit.park_run,
+        });
+        super::write_atomically(path, &serde_json::to_vec_pretty(&receipt)?)
     }
 
     pub fn fence(&self) -> Result<&ShiftFence> {
@@ -284,6 +394,7 @@ impl RuntimeStoreDecorator for PublicationCutStore {
 
     async fn commit_runtime_state(&self, commit: RuntimeCommit) -> CommitAnswer {
         if commit.session_id == self.session
+            && commit.run_terminal.is_some()
             && commit.outcome.is_some()
             && commit.shift_fence.is_some()
             && self.armed.swap(false, Ordering::SeqCst)
@@ -307,5 +418,105 @@ impl RuntimeStoreDecorator for PublicationCutStore {
         } else {
             self.inner.commit_runtime_state(commit).await
         }
+    }
+}
+
+/// Each real fleet host installs the same callback binding. Ordered digit
+/// reductions make a duplicate publication visible as 7272 rather than 72.
+pub const FRONTIER_PLUGIN: &str = "fleet-frontier";
+
+#[derive(Clone)]
+pub struct FleetFrontier;
+
+#[lash::async_trait]
+impl lash_core::plugin::PluginFactory for FleetFrontier {
+    fn id(&self) -> &'static str {
+        FRONTIER_PLUGIN
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(FRONTIER_PLUGIN)
+    }
+
+    fn build(
+        &self,
+        _: &lash_core::plugin::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
+    {
+        Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash_core::plugin::SessionPlugin for FleetFrontier {
+    fn id(&self) -> &'static str {
+        FRONTIER_PLUGIN
+    }
+
+    fn register(
+        &self,
+        registrar: &mut lash_core::plugin::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        registrar.state_reducer(
+            "append-digit",
+            Arc::new(|reduction| {
+                let current = match reduction.current {
+                    Some(value) => value
+                        .as_u64()
+                        .ok_or_else(|| frontier_refusal("fleet frontier is not an integer"))?,
+                    None => 0,
+                };
+                let digit = reduction
+                    .input
+                    .as_u64()
+                    .filter(|digit| *digit < 10)
+                    .ok_or_else(|| frontier_refusal("invalid fleet frontier digit"))?;
+                let next = current
+                    .checked_mul(10)
+                    .and_then(|value| value.checked_add(digit))
+                    .ok_or_else(|| frontier_refusal("fleet frontier overflow"))?;
+                Ok(Some(serde_json::json!(next)))
+            }),
+        )?;
+        registrar.turn().after(
+            lash_core::hook_key!("fleet-frontier"),
+            Arc::new(|_| {
+                Box::pin(async {
+                    Ok(lash_core::plugin::AfterTurnContributions {
+                        state: lash_core::plugin::StateCommands::new()
+                            .apply("digits", "append-digit", serde_json::json!(7))
+                            .apply("digits", "append-digit", serde_json::json!(2)),
+                        ..Default::default()
+                    })
+                })
+            }),
+        )?;
+        Ok(())
+    }
+}
+
+impl FleetSnapshot {
+    pub fn assert_frontier(&self) -> Result<()> {
+        let frontier = self
+            .frontier
+            .as_ref()
+            .context("fleet plugin namespace was not published")?;
+        ensure!(
+            frontier.values.get("digits") == Some(&serde_json::json!(72)),
+            "fleet reducer was omitted, reordered or published twice"
+        );
+        ensure!(
+            frontier.publication.receipts.len() == 2
+                && frontier.publication.applied.map(|ordinal| ordinal.0) == Some(2),
+            "fleet namespace has another publication frontier"
+        );
+        Ok(())
+    }
+}
+
+fn frontier_refusal(message: &str) -> lash_core_store::tool_run::HookCause {
+    lash_core_store::tool_run::HookCause {
+        error_type: "fleet-frontier".into(),
+        error_version: std::num::NonZeroU32::MIN,
+        payload: serde_json::json!({ "reason": message }),
     }
 }
