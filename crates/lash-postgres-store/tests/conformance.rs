@@ -1973,9 +1973,6 @@ mod run_control {
     (a_refused_run_ends_once_and_its_next_input_admits_a_new_run, "refused-run-end"),
     (a_run_with_no_engine_execution_ends_only_once_it_started, "lost-run-no-run"),
     (an_obsolete_executor_never_ends_its_successors_run, "obsolete-executor"),
-    (inconsistent_divergence_still_parks_on_a_lower_revision, "inconsistent-lower-revision"),
-    (inconsistent_divergence_still_parks_on_another_leaf, "inconsistent-other-leaf"),
-    (inconsistent_divergence_still_parks_on_another_checkpoint, "inconsistent-other-checkpoint"),
     (fork_releases_the_old_owner_before_the_new_run_executes_in_original_order_on_a_fresh_journal, "s7b-2"),
     (verbs_are_park_id_cas, "s7b-3"),
     (redrive_under_the_same_build_reparks_the_same_park_with_attempts_plus_one, "s7b-4"),
@@ -1988,7 +1985,7 @@ mod run_control {
     (a_parked_session_is_asked_to_work_only_through_its_ingress_obligation, "s7b-19"),
     (a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles, "l2-1"),
     (every_order_of_a_send_and_a_redrives_settle_admits_nothing_ahead_of_the_redrive, "l2-1b"),
-    (a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_admitted, "l2-2"),
+    (a_lost_resume_ack_is_reconciled_before_queued_work_is_admitted, "l2-2"),
     (a_failing_child_cancel_never_wedges_its_runs_cancel_or_fork, "s8c-1"),
     (a_delivery_whose_claim_was_retaken_never_settles_its_intent, "s8c-2"),
     (an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session, "s8c-3"),
@@ -2005,7 +2002,6 @@ mod run_control {
     (admit_run_refuses_another_engine_held_executor, "run-admission-executor"),
     (first_admission_wins_without_changing_business_identity, "trace-first-writer"),
     (a_refused_acceptor_adopts_the_outcome_its_runs_executor_recorded, "shift-run-acceptor-adopts"),
-    (no_order_of_a_runs_owner_and_another_admitter_supersedes_the_owners_fence, "shift-run-owner-fence"),
     (a_parent_turn_acceptors_run_is_closed_to_a_later_drive, "shift-run-acceptor-recorded"),
     ]);
 

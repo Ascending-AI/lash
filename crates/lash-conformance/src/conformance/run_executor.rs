@@ -16,7 +16,7 @@
 //! ask as the engine's admission and run of the run.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::engine::{AdmitVerdict, RunOutcome};
 use lash_core::store::{ObligationKind, RunExecutor, RunTerminalKind};
@@ -56,8 +56,6 @@ struct AdmissionGate {
     decisions: AtomicUsize,
     held: tokio::sync::Notify,
     resumed: tokio::sync::watch::Sender<bool>,
-    redecided: AtomicBool,
-    redecided_wake: tokio::sync::Notify,
     settled: tokio::sync::watch::Sender<bool>,
 }
 
@@ -69,8 +67,6 @@ impl AdmissionGate {
             decisions: AtomicUsize::new(0),
             held: tokio::sync::Notify::new(),
             resumed: tokio::sync::watch::channel(false).0,
-            redecided: AtomicBool::new(false),
-            redecided_wake: tokio::sync::Notify::new(),
             settled: tokio::sync::watch::channel(false).0,
         })
     }
@@ -83,19 +79,6 @@ impl AdmissionGate {
     /// Let every held re-decision read.
     fn settle(&self) {
         self.settled.send_replace(true);
-    }
-
-    /// Resolves once a resumed acceptor's admission is decided again.
-    async fn redecided(&self) {
-        loop {
-            let wake = self.redecided_wake.notified();
-            tokio::pin!(wake);
-            wake.as_mut().enable();
-            if self.redecided.load(Ordering::SeqCst) {
-                return;
-            }
-            wake.await;
-        }
     }
 }
 
@@ -128,8 +111,6 @@ impl crate::store::RuntimeStoreDecorator for AdmissionGate {
             && !*self.settled.borrow()
             && self.decisions.fetch_add(1, Ordering::SeqCst) > 0
         {
-            self.redecided.store(true, Ordering::SeqCst);
-            self.redecided_wake.notify_waiters();
             let _ = self.settled.subscribe().wait_for(|settled| *settled).await;
         }
         self.inner.unfinished_run(session_id).await

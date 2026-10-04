@@ -17,13 +17,13 @@ mod intent_ledger_fault;
 mod interleavings;
 mod lost_run;
 mod ownership;
-physical_turn;
+mod physical_turn;
 mod root_admission;
 pub use intent_ledger_fault::*;
 pub use interleavings::*;
 pub use lost_run::*;
 pub use ownership::*;
-use physical_turn::a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit;
+pub use physical_turn::a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit;
 pub(super) use physical_turn::run_final_commit;
 pub use root_admission::a_lost_resume_ack_is_reconciled_before_queued_work_is_admitted;
 
