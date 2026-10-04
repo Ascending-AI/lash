@@ -846,6 +846,95 @@ struct GroupOpens {
     opened: Mutex<std::collections::BTreeSet<String>>,
 }
 
+/// L05/L21: singleton rounds and expanded batches preserve their logical
+/// calls and source slots while executing in the opener's Run, without a
+/// ToolInvocation child group.
+pub async fn standard_rounds_and_batches_use_the_run(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    factories: BatchSugarFactories,
+) {
+    let opens = Arc::new(GroupOpens::default());
+    let mut law = SugarTurn::new(
+        prefix,
+        "run-route",
+        &host,
+        &stores,
+        &factories.enabled,
+        vec![
+            response(vec![native("scalar", "echo", "scalar")]),
+            response(vec![
+                native("native", "echo", "native"),
+                wrapper(
+                    "batch",
+                    serde_json::json!([
+                        member("echo", serde_json::json!("first")),
+                        member("echo", serde_json::json!(5)),
+                        member("guarded", serde_json::json!("denied")),
+                        member("echo", serde_json::json!("twin")),
+                        member("echo", serde_json::json!("twin")),
+                    ]),
+                ),
+            ]),
+        ],
+    );
+    law.layer = Some(Arc::clone(&opens) as Arc<dyn crate::testing::EffectLayer>);
+    let turn = law.run(&runner).await;
+    let context = format!("{prefix}/standard-run-route");
+    assert_finished(&context, &turn);
+    for value in ["scalar", "native", "first"] {
+        assert_eq!(law.witness.executed("echo", value), 1, "{context}: {value}");
+    }
+    assert_eq!(law.witness.executed("echo", "twin"), 2);
+    assert_eq!(law.witness.executed("guarded", "denied"), 0);
+    let executions = law.witness.executions();
+    let identities = executions
+        .iter()
+        .map(|execution| &execution.call_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        identities.len(),
+        5,
+        "{context}: equal operands remain distinct calls"
+    );
+    let batch = record(&turn, "batch");
+    assert_eq!(batch.len(), 1);
+    for (value, members) in [("first", vec![0]), ("twin", vec![3, 4])] {
+        let actual = executions
+            .iter()
+            .filter(|execution| execution.value == value)
+            .map(|execution| execution.call_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected = members
+            .into_iter()
+            .map(|member| batch[0].call_id.child(member))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            actual, expected,
+            "{context}: leaf identity uses its original member index"
+        );
+    }
+    assert_eq!(
+        rows(batch[0]),
+        vec![
+            (0, "echo".to_string(), true),
+            (1, "echo".to_string(), false),
+            (2, "guarded".to_string(), false),
+            (3, "echo".to_string(), true),
+            (4, "echo".to_string(), true),
+        ],
+        "{context}: preparation failures retain their original source slots"
+    );
+    assert_no_member_is_a_call(&context, &turn);
+    assert_eq!(
+        opens.opened.lock_recover().len(),
+        0,
+        "{context}: singleton and batch attempts belong to the Run, never child groups"
+    );
+}
+
 #[async_trait::async_trait]
 impl crate::testing::EffectLayer for GroupOpens {
     async fn open_effect_group(

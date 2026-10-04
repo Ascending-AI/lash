@@ -135,6 +135,8 @@ macro_rules! tool_call_limit_process_tests {
 macro_rules! batch_sugar_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::batch_sugar_tests!(@law [$(#[$attr])*] $fixture;
+            (standard_rounds_and_batches_use_the_run, "standard-rounds-and-batches-use-the-run"));
+        $crate::batch_sugar_tests!(@law [$(#[$attr])*] $fixture;
             (batch_admission_and_identity_contract, "batch-admission-and-identity-contract"));
         $crate::batch_sugar_tests!(@law [$(#[$attr])*] $fixture;
             (batch_replay_preserves_fold_and_ranks, "batch-replay-preserves-fold-and-ranks"));
