@@ -932,18 +932,18 @@ impl TestRuntime {
             .unwrap_or_else(|refusal| {
                 panic!("the installed owners refuse their defaults: {refusal}")
             });
+        if let Some(session_id) = self.session_id {
+            initial_state.session_id = session_id;
+        }
         let plugin_session = plugin_host
             .build_session(PluginSessionRequest::creation(
-                "root",
+                initial_state.session_id.clone(),
                 crate::plugin::SessionAuthorityContext {
                     plugin_config: initial_state.admitted_plugin_config(),
                     ..Default::default()
                 },
             ))
             .expect("plugins");
-        if let Some(session_id) = self.session_id {
-            initial_state.session_id = session_id.clone();
-        }
         let mut policy = standard_test_policy();
         policy.attachment_acceptance = self.attachment_acceptance.clone();
         initial_state.policy.attachment_acceptance = self.attachment_acceptance;
