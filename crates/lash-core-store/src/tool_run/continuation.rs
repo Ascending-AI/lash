@@ -123,7 +123,9 @@ pub struct RunTransfer {
 }
 
 /// Why a transfer cannot be captured or adopted.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error, schemars::JsonSchema,
+)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ContinuationRefusal {
     #[error("the captured Run records were refused: {cause}")]

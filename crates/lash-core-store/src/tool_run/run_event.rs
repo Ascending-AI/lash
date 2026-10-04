@@ -40,7 +40,19 @@ use crate::process_identity::StartKey;
 
 /// The ordinal of an attempt of one logical call, from 1. A crash
 /// redelivery keeps it; only a reported retry advances it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct AttemptOrdinal(NonZeroU32);
 
@@ -142,7 +154,19 @@ pub enum CallDecision {
 }
 
 /// The lifecycle of a logical Run, at its owner.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RunLifecycle {
     Live,
@@ -303,7 +327,9 @@ pub struct RunAttemptEntry {
 }
 
 /// Why the fold refused a record.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error, schemars::JsonSchema,
+)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunEventRefusal {
     #[error("aggregate {key} has an invalid or changed operand mapping")]
