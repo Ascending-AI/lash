@@ -18,6 +18,10 @@ pub enum RuntimeErrorCause {
     SourceRefused {
         refusal: Box<crate::tool_run::SourceRefusal>,
     },
+    /// A physical boundary or successor refused the logical Run's transfer.
+    RunContinuationRefused {
+        refusal: Box<crate::tool_run::ContinuationRefusal>,
+    },
     /// Recorded material could not be read. This cause grants no body retry.
     MaterialRefused {
         refusal: Box<crate::tool_run::MaterialRefusal>,

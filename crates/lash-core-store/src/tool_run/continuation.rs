@@ -132,6 +132,14 @@ pub enum ContinuationRefusal {
     Records { cause: RunEventRefusal },
     #[error("the captured event frontier differs from its acknowledged records")]
     EventFrontier,
+    #[error("the captured capacity differs from the Run's acknowledged calls")]
+    CapacityFrontier { expected: u32, found: u32 },
+    #[error("the captured segment frontier does not name its writer")]
+    SegmentFrontier,
+    #[error("the process continuation has no admitted segment authority")]
+    MissingSegmentAuthority,
+    #[error("the Run's environment differs from its admitted process environment")]
+    ForeignEnvironment,
     #[error("the capture still owes a local attempt acknowledgement")]
     UnacknowledgedAttempt,
     #[error("the source descriptors do not belong to this Run")]
@@ -150,6 +158,19 @@ pub enum ContinuationRefusal {
     OwnerTerminal,
     #[error("segment {found} is not the successor of segment {from}")]
     NotSuccessor { from: u32, found: u32 },
+}
+
+impl From<ContinuationRefusal> for crate::runtime_error::RuntimeEffectControllerError {
+    fn from(refusal: ContinuationRefusal) -> Self {
+        let mut error = Self::new(
+            crate::RuntimeErrorCode::ExecutionStateCaptureFailed,
+            refusal.to_string(),
+        );
+        error.cause = Some(crate::RuntimeErrorCause::RunContinuationRefused {
+            refusal: Box::new(refusal),
+        });
+        error
+    }
 }
 
 impl RunTransfer {
@@ -213,6 +234,20 @@ impl RunTransfer {
         let ledger = self.ledger()?;
         if ledger.unacknowledged_local() != 0 {
             return Err(ContinuationRefusal::UnacknowledgedAttempt);
+        }
+        if self.state.owner_segment != self.from
+            || self
+                .entries
+                .iter()
+                .any(|entry| entry.record.segment > self.from)
+        {
+            return Err(ContinuationRefusal::SegmentFrontier);
+        }
+        if self.reserved_calls != ledger.reserved_calls() {
+            return Err(ContinuationRefusal::CapacityFrontier {
+                expected: ledger.reserved_calls(),
+                found: self.reserved_calls,
+            });
         }
         Ok(())
     }

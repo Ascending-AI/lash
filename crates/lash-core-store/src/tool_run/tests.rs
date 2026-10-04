@@ -1278,12 +1278,36 @@ fn leased_bundle(holder: MaterialHolder) -> RetainedBundle {
 
 fn transfer() -> RunTransfer {
     let call_id = ToolCallId::fixture("deferred");
+    let mut member = call("deferred");
+    member.declaration = ToolDeclaration::deferring();
+    let events = vec![
+        RunEvent::Admitted {
+            round: round(vec![member]),
+        },
+        RunEvent::AttemptRecorded {
+            call_id: call_id.clone(),
+            attempt: AttemptOrdinal::FIRST,
+            result: AttemptResult::Deferred {
+                source: source_key(&call_id),
+            },
+        },
+    ];
+    let entries = vec![RunJournalEntry {
+        record: RunRecord {
+            segment: SegmentOrdinal(0),
+            first: RunEventOrdinal(0),
+            events,
+            trace: None,
+        },
+        materials: Vec::new(),
+        state: Vec::new(),
+    }];
     RunTransfer {
         owner: opener(),
         reason: lash_sansio::BoundaryReason::HandOver,
         from: SegmentOrdinal(0),
-        events: RunEventOrdinal(0),
-        entries: Vec::new(),
+        events: RunEventOrdinal(2),
+        entries,
         attempts: Vec::new(),
         material_aliases: Vec::new(),
         sources: Vec::new(),
@@ -1862,6 +1886,21 @@ fn l09_capture_rebuilds_the_complete_acknowledged_run() {
     assert_eq!(adopted.sources, vec![source]);
     assert_eq!(adopted.environment, capture.environment);
     assert_eq!(adopted.subscriptions[0].segment, SegmentOrdinal(1));
+    let mut lost_capacity = capture.clone();
+    lost_capacity.reserved_calls = 0;
+    assert_eq!(
+        lost_capacity.check_capture(&Cut::request(capture.reason).observe(0)),
+        Err(ContinuationRefusal::CapacityFrontier {
+            expected: 2,
+            found: 0,
+        })
+    );
+    let mut foreign_segment = capture.clone();
+    foreign_segment.state.owner_segment = SegmentOrdinal(1);
+    assert_eq!(
+        foreign_segment.check_capture(&Cut::request(capture.reason).observe(0)),
+        Err(ContinuationRefusal::SegmentFrontier)
+    );
     let mut unfinished = capture.clone();
     unfinished.entries[0].record.events.pop();
     unfinished.events.0 -= 1;

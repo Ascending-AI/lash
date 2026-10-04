@@ -22,6 +22,10 @@ impl RuntimeErrorCause {
             | Self::PluginExecution { .. }
             | Self::PluginStatePublicationFenced { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
+            Self::RunContinuationRefused { refusal } => !matches!(
+                refusal.as_ref(),
+                crate::tool_run::ContinuationRefusal::NotQuiescent
+            ),
             Self::SourceRefused { .. }
             | Self::MaterialRefused { .. }
             | Self::ProviderFailure { .. }
