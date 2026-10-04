@@ -10,10 +10,12 @@ use lash_core_execution::{
     SessionCommitStore, SessionCreationHead, SessionRelation, SessionStoreCreateRequest,
     StoreError,
 };
-use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck};
+use lash_postgres_store::{
+    PostgresStorage, PostgresStoreConfig, SchemaCheck, testing::IsolatedDatabase,
+};
 use sqlx::postgres::PgPoolOptions;
 
-use crate::support::{SharedDatabaseLock, database_url};
+use crate::support::database_url;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_commit_waits_for_delete_then_refuses_missing_component_when_configured() {
@@ -54,11 +56,10 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         eprintln!("skipping Postgres commit-vs-delete law: database URL is not set");
         return;
     };
-    let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect(database.url())
         .await
         .expect("connect Postgres commit-vs-delete fixture");
-    reset(&storage).await;
     let factory = storage.session_store_factory();
 
     factory
@@ -151,7 +152,7 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
                 Ok(())
             })
         })
-        .connect(&database_url)
+        .connect(database.url())
         .await
         .expect("connect tagged commit pool");
     let commit_storage = PostgresStorage::from_pool_with(
@@ -232,34 +233,6 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         (_, other) => panic!("the losing commit returned the wrong typed error: {other}"),
     }
     commit_pool.close().await;
-}
-
-async fn reset(storage: &PostgresStorage) {
-    let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT tablename FROM pg_tables
-         WHERE schemaname = 'public'
-           AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity', 'lash_fleet_format')
-         ORDER BY tablename",
-    )
-    .fetch_all(storage.pool())
-    .await
-    .expect("list lash tables for commit-vs-delete reset");
-    sqlx::query(&format!(
-        "TRUNCATE {} RESTART IDENTITY CASCADE",
-        tables.join(", ")
-    ))
-    .execute(storage.pool())
-    .await
-    .expect("reset commit-vs-delete fixture");
-    sqlx::query(
-        "INSERT INTO lash_process_change_clock (singleton, current_seq)
-         VALUES (TRUE, 0)
-         ON CONFLICT (singleton) DO UPDATE SET current_seq = EXCLUDED.current_seq",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("reset process change clock");
 }
 
 fn request(session_id: &SessionId) -> SessionStoreCreateRequest {

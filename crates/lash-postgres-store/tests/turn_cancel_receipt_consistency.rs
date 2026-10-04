@@ -7,48 +7,18 @@ use lash_core_execution::{
     TurnInputIngress, TurnInputStore,
     facade_support::{TurnAddress, TurnCancelRequest},
 };
-use lash_postgres_store::PostgresStorage;
+use lash_postgres_store::{PostgresStorage, testing::IsolatedDatabase};
 use lash_sansio::{SessionId, TurnId};
 
-use crate::support::{SharedDatabaseLock, database_url};
+use crate::support::database_url;
 
-async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
+async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
     let url = database_url()?;
-    let database_lock = SharedDatabaseLock::acquire(&url).await;
-    let storage = PostgresStorage::connect(&url)
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = PostgresStorage::connect(database.url())
         .await
         .expect("connect Postgres cancellation receipt fixture");
-    reset(&storage).await;
-    Some((database_lock, storage))
-}
-
-async fn reset(storage: &PostgresStorage) {
-    let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT tablename FROM pg_tables
-         WHERE schemaname = 'public'
-           AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity', 'lash_fleet_format')
-         ORDER BY tablename",
-    )
-    .fetch_all(storage.pool())
-    .await
-    .expect("list cancellation receipt fixture tables");
-    assert!(!tables.is_empty(), "lash_* schema tables must exist");
-    sqlx::query(&format!(
-        "TRUNCATE {} RESTART IDENTITY CASCADE",
-        tables.join(", ")
-    ))
-    .execute(storage.pool())
-    .await
-    .expect("reset cancellation receipt fixture tables");
-    sqlx::query(
-        "INSERT INTO lash_process_change_clock (singleton, current_seq)
-         VALUES (TRUE, 0)
-         ON CONFLICT (singleton) DO UPDATE SET current_seq = EXCLUDED.current_seq",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("reset cancellation receipt process change clock");
+    Some((database, storage))
 }
 
 async fn seed_cancelled_inputs(
@@ -137,7 +107,7 @@ async fn seed_cancelled_inputs(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_turn_cancel_receipt_survives_vacuum_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database, storage)) = storage().await else {
         eprintln!("skipping Postgres cancellation receipt vacuum check: database URL is not set");
         return;
     };

@@ -6,51 +6,18 @@
 //! at its line budget.
 
 use lash_core_execution::SessionCatalogStore;
-use lash_postgres_store::PostgresStorage;
+use lash_postgres_store::{PostgresStorage, testing::IsolatedDatabase};
 use lash_sansio::SessionId;
 
-use crate::support::{SharedDatabaseLock, database_url};
+use crate::support::database_url;
 
-async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
+async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
     let url = database_url()?;
-    let database_lock = SharedDatabaseLock::acquire(&url).await;
-    let storage = PostgresStorage::connect(&url)
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = PostgresStorage::connect(database.url())
         .await
         .expect("connect postgres");
-    Some((database_lock, storage))
-}
-
-/// Truncate every `lash_*` fixture table, derived from the live catalog so a new
-/// table cannot silently bleed state in. `lash_schema_versions` holds the
-/// component version gate, not fixture rows.
-async fn reset(storage: &PostgresStorage) {
-    let pool = storage.pool();
-    let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT tablename FROM pg_tables
-         WHERE schemaname = 'public'
-           AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity', 'lash_fleet_format')
-         ORDER BY tablename",
-    )
-    .fetch_all(pool)
-    .await
-    .expect("list lash_* tables");
-    assert!(!tables.is_empty(), "lash_* schema tables must exist");
-    sqlx::query(&format!(
-        "TRUNCATE {} RESTART IDENTITY CASCADE",
-        tables.join(", ")
-    ))
-    .execute(pool)
-    .await
-    .expect("reset postgres tables");
-    sqlx::query(
-        "INSERT INTO lash_process_change_clock (singleton, current_seq)
-         VALUES (TRUE, 0)
-         ON CONFLICT (singleton) DO UPDATE SET current_seq = EXCLUDED.current_seq",
-    )
-    .execute(pool)
-    .await
-    .expect("reset postgres process change clock");
+    Some((database, storage))
 }
 
 /// Both orphaning flows for tombstoned graph nodes, on the Postgres backend:
@@ -63,14 +30,13 @@ async fn reset(storage: &PostgresStorage) {
 /// handle can still vacuum its own session and would mask the leak.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres orphaned-tombstone reclaim conformance: \
              LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
-    reset(&storage).await;
     let pool = storage.pool().clone();
     let factory = storage.session_store_factory();
     let policy = lash_core_execution::SessionPolicy::new(

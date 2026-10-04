@@ -335,25 +335,10 @@ async fn direct_session_store_defers_missing_identity_validation() {
         eprintln!("skipping direct-session-store contract: database URL is not set");
         return;
     };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect(database.url())
         .await
         .expect("connect direct-session-store contract storage");
-    let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT tablename FROM pg_tables
-         WHERE schemaname = 'public'
-           AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity', 'lash_fleet_format')
-         ORDER BY tablename",
-    )
-    .fetch_all(storage.pool())
-    .await
-    .expect("list Lash tables for direct-constructor test reset");
-    let truncate = format!("TRUNCATE {} RESTART IDENTITY CASCADE", tables.join(", "));
-    sqlx::query(&truncate)
-        .execute(storage.pool())
-        .await
-        .expect("reset direct-constructor test tables");
     let missing = SessionId::from("missing");
     let store = storage.store();
 
@@ -371,6 +356,21 @@ async fn direct_session_store_defers_missing_identity_validation() {
             .expect("admit missing direct-constructor session"),
         lash_core_execution::SessionAdmission::Created
     );
+    // FIG-4951: fixture setup must preserve the seeded feed clock. A missing
+    // row refuses allocation just like an exhausted sequence, poisoning every
+    // subsequent commit that shares this database.
+    let mut tx = storage
+        .pool()
+        .begin()
+        .await
+        .expect("begin fixture clock probe");
+    assert_eq!(
+        crate::session_factory::next_turn_change_sequence(&mut tx)
+            .await
+            .expect("the direct-constructor fixture retains a usable turn clock"),
+        1
+    );
+    tx.rollback().await.expect("roll back fixture clock probe");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -10,61 +10,27 @@ use lash_core_execution::{
     DeploymentStore, ProcessExecutionEnvStore, ProcessLifecycle as _, ProcessRegistrar as _,
     ProcessRegistry, ProcessRetention as _,
 };
-use lash_postgres_store::PostgresStorage;
+use lash_postgres_store::{PostgresStorage, testing::IsolatedDatabase};
 
-use crate::support::{SharedDatabaseLock, database_url};
+use crate::support::database_url;
 
 #[path = "blob_probe.rs"]
 mod blob_probe;
 
-async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
+async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
     let url = database_url()?;
-    let database_lock = SharedDatabaseLock::acquire(&url).await;
-    let storage = PostgresStorage::connect(&url)
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = PostgresStorage::connect(database.url())
         .await
         .expect("connect postgres");
-    Some((database_lock, storage))
-}
-
-/// Truncate every `lash_*` fixture table, derived from the live catalog so a new
-/// table cannot silently bleed state in. `lash_schema_versions` holds the
-/// component version gate, not fixture rows.
-async fn reset(storage: &PostgresStorage) {
-    let pool = storage.pool();
-    let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT tablename FROM pg_tables
-         WHERE schemaname = 'public'
-           AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity', 'lash_fleet_format')
-         ORDER BY tablename",
-    )
-    .fetch_all(pool)
-    .await
-    .expect("list lash_* tables");
-    assert!(!tables.is_empty(), "lash_* schema tables must exist");
-    sqlx::query(&format!(
-        "TRUNCATE {} RESTART IDENTITY CASCADE",
-        tables.join(", ")
-    ))
-    .execute(pool)
-    .await
-    .expect("reset postgres tables");
-    sqlx::query(
-        "INSERT INTO lash_process_change_clock (singleton, current_seq)
-         VALUES (TRUE, 0)
-         ON CONFLICT (singleton) DO UPDATE SET current_seq = EXCLUDED.current_seq",
-    )
-    .execute(pool)
-    .await
-    .expect("reset postgres process change clock");
+    Some((database, storage))
 }
 
 lash_conformance::process_prune_reclaim_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some((database, storage)) = storage().await else {
         eprintln!("skipping Postgres process-prune blob reclaim law: database URL is not set");
         return;
     };
-    reset(&storage).await;
     let storage = Arc::new(storage);
     let factory = Arc::new(storage.store()) as Arc<dyn DeploymentStore>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
@@ -72,15 +38,14 @@ lash_conformance::process_prune_reclaim_tests!({
         storage,
         "fail_process_prune_blob_delete",
     ));
-    (database_lock, "postgres", factory, registry, probe)
+    (database, "postgres", factory, registry, probe)
 });
 
 lash_conformance::process_start_staging_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some((database, storage)) = storage().await else {
         eprintln!("skipping Postgres refused-start staging law: database URL is not set");
         return;
     };
-    reset(&storage).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
         Arc::new(storage.lashlang_artifact_store()),
@@ -90,15 +55,14 @@ lash_conformance::process_start_staging_tests!({
         storage.artifact_cleanup(),
         Arc::new(lash_core_execution::facade_support::SystemClock),
     );
-    (database_lock, registry, ports)
+    (database, registry, ports)
 });
 
 lash_conformance::process_definition_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some((database, storage)) = storage().await else {
         eprintln!("skipping Postgres process-definition laws: database URL is not set");
         return;
     };
-    reset(&storage).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
         Arc::new(storage.lashlang_artifact_store()),
@@ -108,27 +72,25 @@ lash_conformance::process_definition_tests!({
         storage.artifact_cleanup(),
         Arc::new(lash_core_execution::facade_support::SystemClock),
     );
-    (database_lock, registry, ports)
+    (database, registry, ports)
 });
 
 lash_conformance::process_prune_start_staging_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some((database, storage)) = storage().await else {
         eprintln!("skipping Postgres prune and late-transfer law: database URL is not set");
         return;
     };
-    reset(&storage).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessExecutionEnvStore>;
-    (database_lock, registry, env_store)
+    (database, registry, env_store)
 });
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database, storage)) = storage().await else {
         eprintln!("skipping Postgres process cleanup recovery: database URL is not set");
         return;
     };
-    reset(&storage).await;
     let registry = storage.process_registry();
     let registered = registry
         .register_process(
