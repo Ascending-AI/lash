@@ -6,6 +6,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::effect_group_conformance::LiveConformanceHarness;
+
 /// The store tier a harness's endpoint and a law's runtime run over.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum HarnessStoreTier {

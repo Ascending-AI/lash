@@ -197,7 +197,7 @@ Conformance rows name the law template; its removed registration mounts are list
 
 Removed catalogues: `effect_group_host_tests`, `effect_group_close_race_tests`, `effect_group_cancelled_child_terminal_tests`, `effect_host_await_event_tests`, `tool_child_invocation_tests`, `tool_child_committed_recovery_tests`, `tool_child_live_fault_tests`, `tool_child_unroutable_tests`, `tool_child_turn_cancel_tests`, `tool_batch_group_tests`, `tool_batch_crash_redrive_tests`, and `cell_binding_drift_tests`. Their implementation helpers and all mounts disappear in the same landing. The `turn_runner_tests`, `tool_call_identity_tests` and crash-matrix catalogues lose only retired cases.
 
-The deleted `lash-internal-restate-test/tool_child_drift` target loses its BUCK inventory, aggregate membership , three orphan size records, 118 retired law weights and 2 orphan compile evidence entries. Surviving timings, budgets and build rules are unchanged.
+The deleted `lash-internal-restate-test/tool_child_drift` target loses its BUCK inventory, aggregate membership, three orphan size records, 118 retired law weights and 2 orphan compile evidence entries. Surviving timings, budgets and build rules are unchanged.
 
 ## Coordinated definition closures
 
@@ -207,6 +207,7 @@ The deleted `lash-internal-restate-test/tool_child_drift` target loses its BUCK 
 | Z0P | `llm_profiles/parked_group.rs`, `a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_park` and six tier wrappers | [R22](#r22) (L12), [R34](#r34) (L12), [R19](#r19) (L02,L03,L07,L20). Keep independent direct-completion binding laws; delete paused EffectGroupDispatch/RunChild assertions. |
 | Z0A | `attachment_attach_redrive.rs`; Attach branches in crash-window attachment delivery/recovery; `wait_handoff_generations::l10_shared_wait`; all-service live recovery | [R33](#r33) (L02,L07), [R15](#r15) (L09), [R35](#r35) (L11), [R37](#r37) (L02,L12). ProcessAttach transport is retired; no transport port. Independent process-start acquisition tests survive. |
 | Z0A | `segment_generation_handoff` separate Attach arm/assertions | [R15](#r15) (L09), [R35](#r35) (L11), [R38](#r38) (L21). Keep independently current l1/l6 process lifecycle assertions. |
+| Z0A | `process_await_redrive::{a_process_await_arms_its_attach_then_reads_the_terminal_it_resolved,a_redriven_process_await_serves_its_recorded_guard_after_the_child_is_pruned,a_revoked_session_unwinds_a_process_await_without_cancelling_the_process,a_turn_stop_over_a_process_await_replays_its_recorded_cancel_after_the_process_ended,a_turn_stop_over_an_ended_process_reads_its_terminal_without_a_cancel}`; `turn_cancel_modes::deferred_wake_during_a_parked_process_await_never_cancels_the_process` | [R33](#r33) (L02,L07), [R35](#r35) (L11), [R36](#r36) (L03,L07), [R37](#r37) (L02,L12). Z0A deletes six ProcessAttach framing fixtures, dead endpoint/helpers and six catalog rows; retain independent `after_step_during_a_parked_process_await_lets_the_process_finish`. |
 | Z04 | `replay_corpus/service_journals.rs` | Corpus membership and old service-family replay are transport fixtures owned by Z04; no semantic adapter or resurrection of removed Attach workload. |
 
 ## Complete F04 file map
