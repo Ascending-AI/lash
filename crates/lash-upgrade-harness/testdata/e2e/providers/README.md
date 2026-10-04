@@ -41,3 +41,36 @@ its JSONL deliveries and mutation count never substitute for those journals.
 These lane fixtures are authored development inputs. Z04 owns recapturing
 journal and release fixture shapes after the tool cutovers. Product-host S26/S27
 acceptance is deferred; the cheap production-client witnesses are separate.
+
+Run each named witness once, by its full test path. The production-client, cancellation
+and strict-ledger witnesses use `h1_providers` on SQLite and the in-process
+Restate server double:
+
+```sh
+. ./env.sh
+kiln test //crates/lash-upgrade-harness:h1_providers__test \
+  --test_arg=s27_authentication_failure_permits_the_next_run --test_arg=--exact
+```
+
+The three existing recovery procedures require private native Restate and
+prebuilt owned-node artifacts. `h1_recovery` is a manual service target, excluded
+from broad developer selection. Build the artifacts, then name one procedure:
+
+```sh
+. ./env.sh
+kiln build //crates/lash-upgrade-harness:h1_recovery__test__rust_test \
+  //crates/lash-upgrade-harness:lash-upgrade-node__bin \
+  --materializations final --build-report .buck2/h1-build-report.json
+kiln gate lash fig-4932 -- python3 \
+  crates/lash-upgrade-harness/tests/e2e/run_provider_recovery.py \
+  --report .buck2/h1-build-report.json \
+  --test s03_ambiguous_acceptance_survives_host_sigkill
+```
+
+The other full paths are
+`s06_reported_retries_preserve_backoff_and_reverse_ready_order` and
+`s07_cancellation_during_backoff_survives_cold_restart`. The runner refuses zero
+selection. It retains binary/source identities, HTTP and body deliveries,
+actual journal observations, store reads, cleanup receipts, and strict JSON/JUnit
+counts under the printed private artifact directory. Missing infrastructure or
+incomplete evidence fails the procedure.
