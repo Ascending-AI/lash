@@ -9,22 +9,13 @@ use std::sync::atomic::AtomicBool;
 
 #[derive(Default)]
 pub(super) struct LifecycleGate {
-    pin: AtomicBool,
-    pin_reached: AtomicBool,
-    pin_reads: AtomicUsize,
     closing_reads: AtomicUsize,
-    pin_open: Notify,
     close: AtomicBool,
     close_reached: AtomicBool,
     close_open: Notify,
 }
 
 impl LifecycleGate {
-    fn release_pin(&self) {
-        self.pin.store(false, Ordering::SeqCst);
-        self.pin_open.notify_waiters();
-    }
-
     fn release_close(&self) {
         self.close.store(false, Ordering::SeqCst);
         self.close_open.notify_waiters();
@@ -44,23 +35,6 @@ impl RuntimeStoreDecorator for GatedCatalog {
         self.inner.as_ref()
     }
 
-    async fn authorize_turn_cancel_closure(
-        &self,
-        fence: &lash_core::store::ShiftFence,
-        authorization: &lash_core::TurnCancelClosureAuthorization,
-    ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, StoreError> {
-        let answer = self
-            .inner
-            .authorize_turn_cancel_closure(fence, authorization)
-            .await?;
-        let open = self.gate.pin_open.notified();
-        if self.gate.pin.load(Ordering::SeqCst) {
-            self.gate.pin_reached.store(true, Ordering::SeqCst);
-            open.await;
-        }
-        Ok(answer)
-    }
-
     async fn lookup_session(
         &self,
         session: &lash::SessionId,
@@ -70,17 +44,6 @@ impl RuntimeStoreDecorator for GatedCatalog {
             self.gate.closing_reads.fetch_add(1, Ordering::SeqCst);
         }
         Ok(lookup)
-    }
-
-    async fn pending_turn_cancel_closure_pins(
-        &self,
-        session: &lash::SessionId,
-    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
-        let pins = self.inner.pending_turn_cancel_closure_pins(session).await?;
-        if !pins.is_empty() {
-            self.gate.pin_reads.fetch_add(1, Ordering::SeqCst);
-        }
-        Ok(pins)
     }
 }
 
@@ -181,16 +144,6 @@ pub(super) fn gated_backend(
         .into_backend()
 }
 
-fn deletion_attempts(world: &World) -> usize {
-    world
-        .backend
-        .server()
-        .invocations()
-        .iter()
-        .filter(|run| run.target.starts_with("LashTestHandlerHost/"))
-        .count()
-}
-
 fn print_journals(world: &World, phase: &str) {
     let server = world.backend.server();
     eprintln!("delete phase {phase}; store clock {}", server.now_ms());
@@ -206,7 +159,7 @@ fn print_journals(world: &World, phase: &str) {
     }
 }
 
-async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
+async fn delete_after_answer(stores: Stores, replay: bool) {
     let gate = Arc::new(LifecycleGate::default());
     let Some(world) = world_over_gated(
         ServerConfig::default().always_replay(replay),
@@ -227,9 +180,7 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
-    if !pinned {
-        gate.close.store(true, Ordering::SeqCst);
-    }
+    gate.close.store(true, Ordering::SeqCst);
     world.barrier.release.notify_one();
     let answer = handle.outcome().await.expect("answer");
     assert_eq!(answer.status(), lash::TurnStatus::Answered);
@@ -239,27 +190,11 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
         run: run.clone(),
     }
     .id();
-    if pinned {
-        // The previous answer is durable. A subsequent turn's exact closure
-        // authorization legitimately pins the same session until its commit.
-        gate.pin.store(true, Ordering::SeqCst);
-        let _next = world
-            .session
-            .send(lash::TurnInput::text("closure still finishing"))
-            .await
-            .expect("accept successor");
-        world.barrier.release.notify_one();
-        wait_until("the successor pins its closure", || {
-            gate.pin_reached.load(Ordering::SeqCst)
-        })
-        .await;
-    } else {
-        run_execution_completed(&world, &run).await;
-        wait_until("the answered run owes its close", || {
-            gate.close_reached.load(Ordering::SeqCst)
-        })
-        .await;
-    }
+    run_execution_completed(&world, &run).await;
+    wait_until("the answered run owes its close", || {
+        gate.close_reached.load(Ordering::SeqCst)
+    })
+    .await;
     let deleting = tokio::spawn({
         let core = world.core.clone();
         let backend = world.backend.clone();
@@ -270,48 +205,33 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
             .await;
         }
     });
-    if pinned {
-        wait_until("the waiter reads the retained pin", || {
-            gate.pin_reads.load(Ordering::SeqCst) >= 5
+    wait_until("the delete closes the session", || {
+        world.backend.server().invocations().iter().any(|executed| {
+            executed.target.starts_with("LashTestHandlerHost/") && executed.status == "completed"
         })
-        .await;
-        print_journals(&world, "pinned");
-        assert_eq!(
-            deletion_attempts(&world),
-            1,
-            "a retained pin is awaited without repeating delete"
-        );
-        gate.release_pin();
-    } else {
-        wait_until("the delete closes the session", || {
-            world.backend.server().invocations().iter().any(|executed| {
-                executed.target.starts_with("LashTestHandlerHost/")
-                    && executed.status == "completed"
-            })
-        })
-        .await;
-        let reads = gate.closing_reads.load(Ordering::SeqCst);
-        wait_until("the waiter observes closing or returns", || {
-            deleting.is_finished() || gate.closing_reads.load(Ordering::SeqCst) >= reads + 5
-        })
-        .await;
-        print_journals(&world, "closing");
-        assert!(
-            !deleting.is_finished(),
-            "Closing is awaited through the finalizer, not treated as completed deletion"
-        );
-        assert_eq!(
-            world
-                .backend
-                .lash_backend()
-                .obligation_ledger(ObligationKind::ScopeClose)
-                .state(&scope_close)
-                .await
-                .expect("scope-close state"),
-            Some(ObligationState::Due)
-        );
-        gate.release_close();
-    }
+    })
+    .await;
+    let reads = gate.closing_reads.load(Ordering::SeqCst);
+    wait_until("the waiter observes closing or returns", || {
+        deleting.is_finished() || gate.closing_reads.load(Ordering::SeqCst) >= reads + 5
+    })
+    .await;
+    print_journals(&world, "closing");
+    assert!(
+        !deleting.is_finished(),
+        "Closing is awaited through the finalizer, not treated as completed deletion"
+    );
+    assert_eq!(
+        world
+            .backend
+            .lash_backend()
+            .obligation_ledger(ObligationKind::ScopeClose)
+            .state(&scope_close)
+            .await
+            .expect("scope-close state"),
+        Some(ObligationState::Due)
+    );
+    gate.release_close();
     finish_cleanup(&world, &scope_close).await;
     tokio::time::timeout(Duration::from_secs(60), deleting)
         .await
@@ -332,30 +252,22 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
 }
 
 macro_rules! laws {
-    ($($(#[$attr:meta])* $name:ident, $store:ident, $replay:expr, $pinned:expr;)*) => {$ (
+    ($($(#[$attr:meta])* $name:ident, $store:ident, $replay:expr;)*) => {$ (
         $(#[$attr])*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $name() { delete_after_answer(Stores::$store, $replay, $pinned).await; }
+        async fn $name() { delete_after_answer(Stores::$store, $replay).await; }
     )*};
 }
 
 laws! {
-    a_pinned_delete_waits_for_its_closure_on_sqlite_memory, SqliteMemory, false, true;
-    a_pinned_delete_waits_for_its_closure_on_sqlite_memory_replaying, SqliteMemory, true, true;
-    a_pinned_delete_waits_for_its_closure_on_sqlite_file, SqliteFile, false, true;
-    a_pinned_delete_waits_for_its_closure_on_sqlite_file_replaying, SqliteFile, true, true;
+    a_closing_delete_waits_for_its_scope_close_on_sqlite_memory, SqliteMemory, false;
+    a_closing_delete_waits_for_its_scope_close_on_sqlite_memory_replaying, SqliteMemory, true;
+    a_closing_delete_waits_for_its_scope_close_on_sqlite_file, SqliteFile, false;
+    a_closing_delete_waits_for_its_scope_close_on_sqlite_file_replaying, SqliteFile, true;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    a_pinned_delete_waits_for_its_closure_on_postgres, Postgres, false, true;
+    a_closing_delete_waits_for_its_scope_close_on_postgres, Postgres, false;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    a_pinned_delete_waits_for_its_closure_on_postgres_replaying, Postgres, true, true;
-    a_closing_delete_waits_for_its_scope_close_on_sqlite_memory, SqliteMemory, false, false;
-    a_closing_delete_waits_for_its_scope_close_on_sqlite_memory_replaying, SqliteMemory, true, false;
-    a_closing_delete_waits_for_its_scope_close_on_sqlite_file, SqliteFile, false, false;
-    a_closing_delete_waits_for_its_scope_close_on_sqlite_file_replaying, SqliteFile, true, false;
-    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    a_closing_delete_waits_for_its_scope_close_on_postgres, Postgres, false, false;
-    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    a_closing_delete_waits_for_its_scope_close_on_postgres_replaying, Postgres, true, false;
+    a_closing_delete_waits_for_its_scope_close_on_postgres_replaying, Postgres, true;
 }
 
 /// The next finalizer delivery after cleanup settles. No repeated close, and
@@ -419,7 +331,7 @@ pub(super) async fn finish_session_cleanup(world: &World, session_id: &str) {
     eprintln!("finalizer after cleanup {pass:?}");
 }
 
-async fn live_delete_after_answer(pinned: bool) {
+async fn live_delete_after_answer() {
     let gate = Arc::new(LifecycleGate::default());
     let world = live_world_gated("delete-after-answer", Some(Arc::clone(&gate))).await;
     let handle = world
@@ -431,32 +343,16 @@ async fn live_delete_after_answer(pinned: bool) {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
-    if !pinned {
-        gate.close.store(true, Ordering::SeqCst);
-    }
+    gate.close.store(true, Ordering::SeqCst);
     world.barrier.release.notify_one();
     assert_eq!(
         handle.outcome().await.expect("answer").status(),
         lash::TurnStatus::Answered
     );
-    if pinned {
-        gate.pin.store(true, Ordering::SeqCst);
-        let _next = world
-            ._session
-            .send(lash::TurnInput::text("closure still finishing"))
-            .await
-            .expect("accept successor");
-        world.barrier.release.notify_one();
-        wait_until("the closure is pinned", || {
-            gate.pin_reached.load(Ordering::SeqCst)
-        })
-        .await;
-    } else {
-        wait_until("the run owes its close", || {
-            gate.close_reached.load(Ordering::SeqCst)
-        })
-        .await;
-    }
+    wait_until("the run owes its close", || {
+        gate.close_reached.load(Ordering::SeqCst)
+    })
+    .await;
     let deleting = tokio::spawn({
         let core = world._core.clone();
         let backend = world.backend.clone();
@@ -471,35 +367,16 @@ async fn live_delete_after_answer(pinned: bool) {
             .await;
         }
     });
-    if pinned {
-        wait_until("the waiter observes retained closure", || {
-            gate.pin_reads.load(Ordering::SeqCst) >= 5
-        })
-        .await;
-        let attempts = world
-            .backend
-            .invocations()
-            .await
-            .expect("invocations")
-            .iter()
-            .filter(|run| {
-                run.target.starts_with("LashTestHandlerHost/") && run.target.contains(&world.key)
-            })
-            .count();
-        assert_eq!(attempts, 1, "wait for the pin without repeating delete");
-        gate.release_pin();
-    } else {
-        let reads = gate.closing_reads.load(Ordering::SeqCst);
-        wait_until("the waiter observes retained close", || {
-            gate.closing_reads.load(Ordering::SeqCst) >= reads + 5 || deleting.is_finished()
-        })
-        .await;
-        assert!(
-            !deleting.is_finished(),
-            "Closing is awaited through its physical delete"
-        );
-        gate.release_close();
-    }
+    let reads = gate.closing_reads.load(Ordering::SeqCst);
+    wait_until("the waiter observes retained close", || {
+        gate.closing_reads.load(Ordering::SeqCst) >= reads + 5 || deleting.is_finished()
+    })
+    .await;
+    assert!(
+        !deleting.is_finished(),
+        "Closing is awaited through its physical delete"
+    );
+    gate.release_close();
     tokio::time::timeout(Duration::from_secs(60), deleting)
         .await
         .expect("deletion completes after cleanup")
@@ -529,14 +406,8 @@ async fn live_delete_after_answer(pinned: bool) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs a live restate-server: the host-send-wait suite runs it"]
-async fn live_restate_a_pinned_delete_waits_for_its_closure() {
-    live_delete_after_answer(true).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs a live restate-server: the host-send-wait suite runs it"]
 async fn live_restate_a_closing_delete_waits_for_its_scope_close() {
-    live_delete_after_answer(false).await;
+    live_delete_after_answer().await;
 }
 
 async fn deletion_wait_reports_state_and_stalls(stores: Stores, replay: bool) {
