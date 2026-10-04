@@ -58,10 +58,10 @@ enum Work {
     /// An input-headed run: its first attempt journals its admission
     /// (`shift-admit`) and dies before its plugin transition.
     Input,
-    /// A command run applying a queued session command: its first attempt
+    /// A native command admission applying a queued session command: its first attempt
     /// journals its first read of the command lane (`session-command-run:0`),
     /// applies the command off the journal, and dies before its next read.
-    Command,
+    NativeCommand,
     /// A follow-on recovery run: its first attempt journals its seal and
     /// dies while the server stores the step after it, its recovery
     /// decision (`shift-follow-on`), with no result recorded.
@@ -333,7 +333,7 @@ fn core_over(
         .complete(move |request| async move {
             Ok(match work {
                 Work::FollowOn => follow_on_model_reply(&request),
-                Work::Input | Work::Command => {
+                Work::Input | Work::NativeCommand => {
                     text_response(&format!("echo: {}", last_user_text(&request)))
                 }
             })
@@ -431,7 +431,7 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
             }),
             vec!["shift-admit:", "plugin-transition:"],
         ),
-        Work::Command => (
+        Work::NativeCommand => (
             lash_restate_test::CrashRule::new(lash_restate_test::CrashPoint::BeforeRun {
                 name: "lash:session-command-run:1".to_owned(),
             }),
@@ -476,7 +476,7 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
         }))
     );
 
-    if work == Work::Command {
+    if work == Work::NativeCommand {
         Box::pin(
             session
                 .admin()
@@ -503,7 +503,7 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
                     lash_core::TurnInputIngress::NextTurn,
                     TurnInput::text(match work {
                         Work::FollowOn => "hand this off, then delete me mid-recovery",
-                        Work::Input | Work::Command => "delete me mid-run",
+                        Work::Input | Work::NativeCommand => "delete me mid-run",
                     }),
                 )
                 .with_source_key(run.as_str()),
@@ -560,10 +560,11 @@ async fn a_run_replayed_after_its_session_was_deleted_ends_typed(
         !matches!(&executed.last_failure, Some((570, _))),
         "the replay followed its journal: {evidence}"
     );
-    for step in ["shift-run-start:", "shift-seal:"]
-        .into_iter()
-        .chain(steps.iter().copied())
-    {
+    let admission_steps = match work {
+        Work::NativeCommand => ["shift-run-start:", "shift-admission:"],
+        Work::Input | Work::FollowOn => ["shift-run-start:", "shift-seal:"],
+    };
+    for step in admission_steps.into_iter().chain(steps.iter().copied()) {
         assert!(
             names.iter().any(|name| name.contains(step)),
             "the replay issued the recorded steps and the one after them, \
@@ -767,22 +768,22 @@ deleted_session_run_replay_laws! {
     input_postgres_always_replay_held_open: Work::Input, Storage::Postgres, true, Shift::HeldOpen;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     input_postgres_always_replay_closed: Work::Input, Storage::Postgres, true, Shift::Closed;
-    command_sqlite_memory_held_open: Work::Command, Storage::SqliteMemory, false, Shift::HeldOpen;
-    command_sqlite_memory_closed: Work::Command, Storage::SqliteMemory, false, Shift::Closed;
-    command_sqlite_memory_always_replay_held_open: Work::Command, Storage::SqliteMemory, true, Shift::HeldOpen;
-    command_sqlite_memory_always_replay_closed: Work::Command, Storage::SqliteMemory, true, Shift::Closed;
-    command_sqlite_file_held_open: Work::Command, Storage::SqliteFile, false, Shift::HeldOpen;
-    command_sqlite_file_closed: Work::Command, Storage::SqliteFile, false, Shift::Closed;
-    command_sqlite_file_always_replay_held_open: Work::Command, Storage::SqliteFile, true, Shift::HeldOpen;
-    command_sqlite_file_always_replay_closed: Work::Command, Storage::SqliteFile, true, Shift::Closed;
+    recorded_command_retirement_sqlite_memory_held_open: Work::NativeCommand, Storage::SqliteMemory, false, Shift::HeldOpen;
+    recorded_command_retirement_sqlite_memory_closed: Work::NativeCommand, Storage::SqliteMemory, false, Shift::Closed;
+    recorded_command_retirement_sqlite_memory_always_replay_held_open: Work::NativeCommand, Storage::SqliteMemory, true, Shift::HeldOpen;
+    recorded_command_retirement_sqlite_memory_always_replay_closed: Work::NativeCommand, Storage::SqliteMemory, true, Shift::Closed;
+    recorded_command_retirement_sqlite_file_held_open: Work::NativeCommand, Storage::SqliteFile, false, Shift::HeldOpen;
+    recorded_command_retirement_sqlite_file_closed: Work::NativeCommand, Storage::SqliteFile, false, Shift::Closed;
+    recorded_command_retirement_sqlite_file_always_replay_held_open: Work::NativeCommand, Storage::SqliteFile, true, Shift::HeldOpen;
+    recorded_command_retirement_sqlite_file_always_replay_closed: Work::NativeCommand, Storage::SqliteFile, true, Shift::Closed;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    command_postgres_held_open: Work::Command, Storage::Postgres, false, Shift::HeldOpen;
+    recorded_command_retirement_postgres_held_open: Work::NativeCommand, Storage::Postgres, false, Shift::HeldOpen;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    command_postgres_closed: Work::Command, Storage::Postgres, false, Shift::Closed;
+    recorded_command_retirement_postgres_closed: Work::NativeCommand, Storage::Postgres, false, Shift::Closed;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    command_postgres_always_replay_held_open: Work::Command, Storage::Postgres, true, Shift::HeldOpen;
+    recorded_command_retirement_postgres_always_replay_held_open: Work::NativeCommand, Storage::Postgres, true, Shift::HeldOpen;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    command_postgres_always_replay_closed: Work::Command, Storage::Postgres, true, Shift::Closed;
+    recorded_command_retirement_postgres_always_replay_closed: Work::NativeCommand, Storage::Postgres, true, Shift::Closed;
     follow_on_sqlite_memory_held_open: Work::FollowOn, Storage::SqliteMemory, false, Shift::HeldOpen;
     follow_on_sqlite_memory_closed: Work::FollowOn, Storage::SqliteMemory, false, Shift::Closed;
     follow_on_sqlite_memory_always_replay_held_open: Work::FollowOn, Storage::SqliteMemory, true, Shift::HeldOpen;
