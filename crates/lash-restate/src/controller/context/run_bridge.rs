@@ -131,6 +131,11 @@ impl<T> Owner<T> {
             {
                 body = None;
                 self.complete(value);
+                // Submit the completed body before yielding to another owner.
+                // Otherwise a sibling can register its next command before
+                // this run proposes X, leaving an await of an unrecorded X
+                // ahead of that command on replay.
+                return result.as_mut().poll(cx);
             }
             Poll::Pending
         })
