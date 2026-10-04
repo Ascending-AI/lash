@@ -90,8 +90,9 @@ impl<'run> RuntimeTurnDriver<'run> {
     /// its terminal checkpoint already ended its groups there; this pass then
     /// finds nothing left.
     ///
-    /// A loop that aborts — a live fault or a park, the causes that record
-    /// nothing (FIG-3575) — closes nothing. Closing under `Cancel` would
+    /// A loop that aborts without a recorded cancellation — a live fault or
+    /// a park, the causes that record nothing (FIG-3575) — closes nothing.
+    /// Closing under `Cancel` would
     /// cancel-decide a child whose run the fault interrupted, and the redrive
     /// would then serve that child's cancellation as its recorded outcome: the
     /// live fault turned into an outcome after all. The groups stay live, and
@@ -104,8 +105,12 @@ impl<'run> RuntimeTurnDriver<'run> {
         if result.is_ok() && self.segment.taken.is_some() {
             return result;
         }
+        // A recorded cancellation is a logical exit even if its completed
+        // cell's response handoff failed. Close while the Run owner is live;
+        // the cancellation finisher runs after this borrowed owner returns.
         if let Err(error) = &result
             && error.turn_failure_cause().aborts_invocation()
+            && self.turn_cancel.is_none()
         {
             return result;
         }

@@ -167,6 +167,9 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// Epoch 32 (FIG-4944) publishes native turn plugins before resolving the
 /// Run configuration that records their protocol driver and renderer.
 ///
+/// Epoch 32 (FIG-4946) closes a Run after a completed cell response handoff
+/// abort when the turn has already recorded cancellation.
+///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
 ///     items(ADMIT_STEP, START_STEP),
