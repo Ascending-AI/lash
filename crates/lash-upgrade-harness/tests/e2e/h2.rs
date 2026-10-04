@@ -573,26 +573,87 @@ pub async fn run(row: Row) -> Result<()> {
         Row::InlineLoser => super::cancel::live_loser(&mut scenario, &spec, false).await,
         Row::DeferredLoser => super::cancel::live_loser(&mut scenario, &spec, true).await,
     };
+    let mut errors = Vec::new();
+    let mut evidence = match result {
+        Ok(evidence) => evidence,
+        Err(error) => {
+            errors.push(format!("{error:#}"));
+            let mut evidence = match scenario.read().await {
+                Ok(evidence) => evidence,
+                Err(error) => {
+                    errors.push(format!("failure snapshot: {error:#}"));
+                    Evidence::empty(row.slug().into())
+                }
+            };
+            evidence.barriers.extend(scenario.proofs.clone());
+            evidence.faults.extend(scenario.faults.clone());
+            evidence
+        }
+    };
+    drop(scenario);
+    evidence.artifacts = shared.artifacts.clone();
     let host_cleanup = host.stop().await;
     let callback_cleanup = shared.callbacks.lock().await.finish().await;
     let proxy_cleanup = shared.proxy.lock().await.finish().await;
     let cluster_cleanup = cluster.finish().await;
+    for (resource, cleanup) in [
+        ("host", host_cleanup),
+        (
+            "body-callback",
+            callback_cleanup.map(|()| {
+                vec![CleanupReceipt {
+                    resource: format!("listener:{}", base + 12),
+                    closed: true,
+                    detail: "callback tasks joined and listener refused connection".into(),
+                }]
+            }),
+        ),
+        (
+            "protocol-proxy",
+            proxy_cleanup.map(|()| {
+                vec![CleanupReceipt {
+                    resource: format!("listener:{}", base + 13),
+                    closed: true,
+                    detail: "proxy tasks joined and listener refused connection".into(),
+                }]
+            }),
+        ),
+        ("cluster", cluster_cleanup),
+    ] {
+        match cleanup {
+            Ok(receipts) => evidence.cleanup.extend(receipts),
+            Err(error) => {
+                errors.push(format!("{resource} cleanup: {error:#}"));
+                evidence.cleanup.push(CleanupReceipt {
+                    resource: resource.into(),
+                    closed: false,
+                    detail: format!("{error:#}"),
+                });
+            }
+        }
+    }
+    if evidence.cleanup.is_empty() || evidence.cleanup.iter().any(|r| !r.closed) {
+        errors.push("case leaked owned resources".into());
+    }
+    super::write(&lease.directory.join("evidence.json"), &evidence)?;
+    use lash_upgrade_harness::e2e::evidence::{CaseReceipt, Verdict};
+    let error = (!errors.is_empty()).then(|| errors.join("; "));
+    let verdict = error
+        .as_ref()
+        .map_or(Verdict::Passed, |reason| Verdict::Failed {
+            reason: reason.clone(),
+        });
+    let counts = CaseReceipt { evidence, verdict }.write(&lease.directory)?;
     super::write(
         &lease.directory.join("result.json"),
-        &json!({"scenario":row.id(),"variant":row.slug(),"selected":1,
-        "executed":1,"passed":usize::from(result.is_ok()),"failed":usize::from(result.is_err()),"not_run":0,
-        "error":result.as_ref().err().map(|e|format!("{e:#}"))}),
+        &json!({"scenario":row.id(),"variant":row.slug(),"selected":counts.selected,
+        "executed":counts.executed,"passed":counts.passed,"failed":counts.failed,"not_run":counts.not_run,
+        "error":error}),
     )?;
-    let mut evidence = result?;
-    evidence.cleanup.extend(host_cleanup?);
-    callback_cleanup?;
-    proxy_cleanup?;
-    evidence.cleanup.extend(cluster_cleanup?);
-    ensure!(
-        evidence.cleanup.iter().all(|r| r.closed),
-        "case leaked owned resources"
-    );
-    super::write(&lease.directory.join("evidence.json"), &evidence)?;
+    if let Some(error) = error {
+        bail!("{error}");
+    }
+    counts.reconcile()?;
     println!(
         "H2 {} selected=1 executed=1 passed=1 failed=0 not_run=0",
         row.slug()

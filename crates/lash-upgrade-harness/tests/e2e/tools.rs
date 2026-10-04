@@ -304,14 +304,7 @@ impl Scenario<'_> {
             Ok::<_, anyhow::Error>(evidence)
         }
         .await;
-        let cleanup = self.host.stop().await?;
-        ensure!(
-            !cleanup.is_empty() && cleanup.iter().all(|receipt| receipt.closed),
-            "host teardown leaked an owned resource"
-        );
-        let mut evidence = result?;
-        evidence.cleanup.extend(cleanup);
-        Ok(evidence)
+        result
     }
 }
 

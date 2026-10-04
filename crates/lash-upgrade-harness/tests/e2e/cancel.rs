@@ -252,7 +252,7 @@ pub async fn empty_middle_rank(scenario: &mut Scenario<'_>, spec: &CaseSpec) -> 
         .host
         .command(HostCommand::Process {
             action: "await-tool-bodies".into(),
-            input: serde_json::json!({"labels":["rank_one","rank_two","rank_three"]}),
+            input: serde_json::json!({"run":scenario.work()?.run,"labels":["rank_one","rank_two","rank_three"]}),
         })
         .await?;
     let initial = scenario.read().await?;
@@ -358,7 +358,7 @@ pub async fn live_loser(
         .host
         .command(HostCommand::Process {
             action: "await-tool-bodies".into(),
-            input: serde_json::json!({"labels":["winner","loser"]}),
+            input: serde_json::json!({"run":scenario.work()?.run,"labels":["winner","loser"]}),
         })
         .await?;
     let initial = scenario.read().await?;
@@ -374,7 +374,7 @@ pub async fn live_loser(
         .host
         .command(HostCommand::Process {
             action: "await-tool-bodies".into(),
-            input: serde_json::json!({"labels":["after"]}),
+            input: serde_json::json!({"run":scenario.work()?.run,"labels":["after"]}),
         })
         .await?;
     let progressed = scenario.read().await?;
