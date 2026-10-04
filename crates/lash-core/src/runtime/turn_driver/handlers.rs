@@ -428,7 +428,10 @@ impl RuntimeTurnDriver<'_> {
         let round = match Box::pin(self.invoke_turn_tool_calls_effect(machine, id, calls, event_tx))
             .await
         {
-            Ok(round) => round,
+            Ok(super::tools::ToolRoundAdmission::Admitted(round)) => round,
+            Ok(super::tools::ToolRoundAdmission::Refused(results)) => {
+                return self.deliver_tool_results(machine, id, results);
+            }
             Err(err) => {
                 Self::fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());

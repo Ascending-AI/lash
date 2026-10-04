@@ -1,11 +1,8 @@
 //! The tool-batch surface of [`RuntimeExecutionContext`].
 //!
-//! One source-ordered batch is prepared, opened as a durable effect group of
-//! tool children (ADR 0099 §3), and its settlements are returned in caller
-//! order beside the order the group settled them in (§5). It lives beside the
-//! rest of tool execution rather than inside it because it is the one tenant
-//! with its own settlement rules — and because the two together outgrew the
-//! file-size budget.
+//! One source-ordered batch is admitted and consumed by the logical owner's
+//! Run. Its replies remain in caller order beside the durable settlement
+//! order used by settlement-selecting consumers.
 
 use super::*;
 
@@ -261,13 +258,11 @@ impl RuntimeExecutionContext<'_> {
                 // fault also aborts the enclosing cell rather than committing
                 // a diagnostic as a tool-produced result (FIG-3528).
                 if let Some(exceeded) = error.tool_call_limit_exceeded() {
+                    let refused = ToolInvocationReply::from_output(ToolCallOutput::failure(
+                        tool_call_limit_failure(exceeded),
+                    ));
                     return ToolBatchReplies {
-                        replies: vec![
-                            ToolInvocationReply::from_output(ToolCallOutput::failure(
-                                tool_call_limit_failure(exceeded)
-                            ),);
-                            call_count
-                        ],
+                        replies: vec![refused; call_count],
                         settlement_order: Vec::new(),
                     };
                 }
@@ -353,13 +348,10 @@ pub(super) enum ToolLeafPreparation {
 
 /// Infrastructure/shape failure carries no settlement evidence.
 fn failed_batch(reason: String, call_count: usize) -> ToolBatchReplies {
+    let reply =
+        ToolInvocationReply::error(serde_json::json!(format!("tool batch failed: {reason}")));
     ToolBatchReplies {
-        replies: vec![
-            ToolInvocationReply::error(serde_json::json!(format!(
-                "tool batch failed: {reason}"
-            ),));
-            call_count
-        ],
+        replies: vec![reply; call_count],
         settlement_order: Vec::new(),
     }
 }
