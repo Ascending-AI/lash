@@ -880,6 +880,16 @@ impl<'a> RunCoordinator<'a> {
         }
     }
 
+    /// Bind the process environment before its first cut, including a cut
+    /// before any tool admission has supplied a prepared call's environment.
+    pub(crate) fn with_admitted_environment(
+        mut self,
+        environment: Option<crate::ProcessExecutionEnvRef>,
+    ) -> Self {
+        self.environment = environment;
+        self
+    }
+
     /// The records the Run holds, in journal order.
     #[must_use]
     pub fn records(&self) -> &[RunRecord] {

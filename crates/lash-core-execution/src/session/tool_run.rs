@@ -204,6 +204,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 .run
                 .as_ref()
                 .and_then(|transfer| transfer.environment.clone())
+                .or_else(|| self.inherited_process_execution_env_ref())
             {
                 self.process_env_store
                     .acquire_process_execution_env(&claim, &environment)
@@ -217,7 +218,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             let handlers = Arc::new(ProductionToolHandlers::new(
                 self.clone(),
                 materials.clone(),
-                environment,
+                environment.clone(),
             ));
             let mut run = state
                 .adopt_run(
@@ -229,7 +230,8 @@ impl<'run> RuntimeExecutionContext<'run> {
                     self.dispatch.clock.as_ref(),
                 )
                 .await
-                .map_err(SingletonRunError::into_controller_error)?;
+                .map_err(SingletonRunError::into_controller_error)?
+                .with_admitted_environment(environment);
             let (send, mut receive) = channel();
             let mut context = self.clone();
             context.tool_run = Some(ToolRunChannel(send));

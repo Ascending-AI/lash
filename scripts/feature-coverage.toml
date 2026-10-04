@@ -596,9 +596,9 @@ commands = [
   ["cargo", "check", "-p", "slack-clone", "--all-targets", "--no-default-features", "--features", "live-e2e", "--locked"],
 ]
 
-# FIG-4848's predecessor journal must refuse before the merged admission decodes.
+# Root admission and pre-tool process cuts refuse predecessor journals before decoding.
 [[lane]]
 name = "turn-admission-synthetic-next"
 commands = [
-  ["cargo", "test", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "restate,testing,synthetic-next", "--locked", "formats::tests::plugin_transition_generation::atomic_root_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane", "--", "--exact"],
+  ["cargo", "test", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "restate,testing,synthetic-next", "--locked", "formats::tests::plugin_transition_generation::atomic_root_admission_refuses_a_predecessor_before_decoding_and_keeps_its_drain_lane", "formats::tests::plugin_transition_generation::process_run_environment_refuses_predecessor_journals_and_keeps_their_drain_lane", "--", "--exact"],
 ]
