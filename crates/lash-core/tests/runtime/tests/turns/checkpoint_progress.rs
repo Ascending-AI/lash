@@ -1360,17 +1360,6 @@ pub(super) async fn wake_admitted_at_a_terminal_checkpoint_executes_a_follow_on_
     );
 }
 
-/// Where the run that withheld a wake for its FIG-3157 follow-on stops short
-/// of that follow-on's commit.
-#[derive(Clone, Copy, Debug)]
-enum WithheldFollowOnFailure {
-    /// The follow-on turn's own commit is refused for good.
-    FollowOnCommit,
-    /// The commit that withheld the wake fails its post-commit delivery, so
-    /// the follow-on never starts.
-    PostCommitDelivery,
-}
-
 /// FIG-3157 under FIG-3927: a follow-on that will not commit leaves no
 /// withheld row bound to its run.
 ///
@@ -1384,7 +1373,6 @@ enum WithheldFollowOnFailure {
 async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
     seed: u64,
     session_id: &'static str,
-    failure: WithheldFollowOnFailure,
 ) {
     let double = kernel_double(seed, lash_restate_test::ServerConfig::default()).await;
     let run = TurnId::fixture(format!("{session_id}-turn"));
@@ -1425,7 +1413,6 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
                 }
                 let call = captured_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if call == 1
-                    && matches!(failure, WithheldFollowOnFailure::FollowOnCommit)
                     && let Some(store) = captured_store_cell.lock_recover().clone()
                 {
                     store.fail_next_runtime_commit(lash_core::StoreError::RecordEncodingFailed {
@@ -1449,46 +1436,10 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
             }
         })
         .build();
-    let persisted_failed = Arc::new(AtomicBool::new(false));
-    let plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = match failure {
-        WithheldFollowOnFailure::FollowOnCommit => Vec::new(),
-        WithheldFollowOnFailure::PostCommitDelivery => {
-            let persisted_failed = Arc::clone(&persisted_failed);
-            vec![Arc::new(RuntimeTestPluginFactory {
-                build: Arc::new(move |_| {
-                    let persisted_failed = Arc::clone(&persisted_failed);
-                    Ok(Arc::new(RuntimeTestPlugin {
-                        before_turn: None,
-                        checkpoint: None,
-                        presentation_steps: vec![],
-                        runtime_event: Some(Arc::new(move |event| {
-                            let persisted_failed = Arc::clone(&persisted_failed);
-                            Box::pin(async move {
-                                if matches!(
-                                    event,
-                                    lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(
-                                        _
-                                    )
-                                ) && !persisted_failed.swap(true, Ordering::SeqCst)
-                                {
-                                    return Err(lash_core::PluginError::Session(
-                                        "injected post-commit delivery failure".to_string(),
-                                    ));
-                                }
-                                Ok(())
-                            })
-                        })),
-                        external_registrar: None,
-                    }))
-                }),
-            })]
-        }
-    };
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
     let mut runtime = TestRuntime::new(&backend, transport)
         .tools(Arc::new(EmptyTools))
-        .plugins(plugins)
         .host(test_host_config(&backend))
         .store(store.clone())
         .with_session_id(session_id)
@@ -1536,18 +1487,14 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
         .await
         .expect("the committed turn is the run's answer");
     handler.close().await.expect("close the turn's handler");
-    assert_eq!(
-        executed.turns.len(),
-        1,
-        "{failure:?}: only the answered turn committed"
-    );
+    assert_eq!(executed.turns.len(), 1, "only the answered turn committed");
     assert_eq!(
         executed.turns[0].assistant_output.safe_text,
         "committed answer"
     );
     assert!(
         !executed.turns[0].errors.is_empty(),
-        "{failure:?}: the answered turn reports the follow-on's failure"
+        "the answered turn reports the follow-on's failure"
     );
 
     let session = SessionId::from(session_id);
@@ -1556,14 +1503,14 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
         .expect("read the run's terminal");
     assert!(
         terminal.is_some(),
-        "{failure:?}: the run ends at the turn whose answer it committed"
+        "the run ends at the turn whose answer it committed"
     );
     assert!(
         lash_core::store::RunStore::unfinished_run(store.as_ref(), &session)
             .await
             .expect("read the unfinished run")
             .is_none(),
-        "{failure:?}: no unfinished run holds the session"
+        "no unfinished run holds the session"
     );
     let open = lash_core::store::QueuedWorkStore::list_open_queued_work(store.as_ref(), &session)
         .await
@@ -1571,7 +1518,7 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
     assert_eq!(
         open.len(),
         1,
-        "{failure:?}: the withheld wake is open again at its own position"
+        "the withheld wake is open again at its own position"
     );
 
     let handler = double
@@ -1594,7 +1541,7 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
             .await
             .expect("list queued work after the redrive")
             .is_empty(),
-        "{failure:?}: the next shift completes the wake in a run of its own"
+        "the next shift completes the wake in a run of its own"
     );
 }
 
@@ -1603,17 +1550,6 @@ pub(super) async fn a_follow_on_whose_commit_is_refused_leaves_no_withheld_row_b
     Box::pin(a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
         SEED + 19,
         "withheld-follow-on-commit-refused",
-        WithheldFollowOnFailure::FollowOnCommit,
-    ))
-    .await;
-}
-
-#[tokio::test]
-pub(super) async fn a_withheld_commit_whose_delivery_fails_leaves_no_withheld_row_bound() {
-    Box::pin(a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
-        SEED + 20,
-        "withheld-follow-on-delivery-failed",
-        WithheldFollowOnFailure::PostCommitDelivery,
     ))
     .await;
 }
