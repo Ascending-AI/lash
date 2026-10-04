@@ -54,7 +54,7 @@ impl ProviderScenario {
             id: self.id().into(),
             rules: rules.into_iter().map(str::to_owned).collect(),
             host: if matches!(self, Self::S26 | Self::S27) {
-                HostKind::AgentService
+                HostKind::Workbench
             } else {
                 HostKind::UpgradeNode
             },

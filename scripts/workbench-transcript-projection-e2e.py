@@ -39,7 +39,7 @@ def settled(base: str, minimum_replies: int) -> dict:
     raise AssertionError("deterministic turn never quiesced")
 
 
-def assert_three_layers(page, state: dict, database: Path, artifact: Path) -> None:
+def assert_three_layers(page, state: dict, database: Path, artifact: Path, *, navigation_wait: str = "networkidle") -> None:
     rows = state["transcript"]
     session_id = state["settings"]["session_id"]
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
@@ -68,7 +68,7 @@ def assert_three_layers(page, state: dict, database: Path, artifact: Path) -> No
         return dom
 
     before = scrape_dom()
-    page.reload(wait_until="networkidle")
+    page.reload(wait_until=navigation_wait)
     after = scrape_dom()
     assert after == before, "reload changed canonical identity, provenance, content or source order"
     artifact.write_text(json.dumps({"api":state,"sql":nodes,"dom_before":before,"dom_after":after}, indent=2) + "\n")

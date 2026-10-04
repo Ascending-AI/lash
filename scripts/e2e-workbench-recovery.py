@@ -120,15 +120,18 @@ def browser(args):
         pages = [chrome.new_page() for _ in range(2)]
         try:
             for page in pages:
-                page.goto(url, wait_until="networkidle")
+                page.goto(url, wait_until="domcontentloaded")
                 expect(page.locator("#prompt")).to_be_visible()
-                page.evaluate("""() => {
-                    window.s29Replies = [];
-                    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {
-                        if (n.nodeType === 1 && n.matches?.('.message.assistant'))
-                            window.s29Replies.push(n.textContent);
-                    }))).observe(document.querySelector('#timeline'), {childList:true});
-                }""")
+                expect(page.locator("#sessionId")).to_have_text(session)
+                page.evaluate("""answer => {
+                    window.s29ReplyCounts = [];
+                    new MutationObserver(() => window.s29ReplyCounts.push(
+                        [...document.querySelectorAll('#timeline .message.assistant')]
+                            .filter(node => node.textContent.includes(answer)).length
+                    )).observe(document.querySelector('#timeline'), {
+                        childList:true, subtree:true, characterData:true
+                    });
+                }""", ANSWER)
             page = pages[0]
             page.locator("#prompt").fill(QUESTION)
             with page.expect_response(lambda response: urllib.parse.urlsplit(response.url).path == "/api/turn" and response.request.method == "POST") as accepted_response:
@@ -171,13 +174,24 @@ def browser(args):
             assert len(reply) == 1 and reply[0]["content"]["text"] == ANSWER, reply
             assert reply[0]["provenance"]["is_turn_reply"]
             assert reply[0]["provenance"]["turn_id"] == work["admitted_run"], "recovery changed owning Run"
+            write(directory / "s29-recovered.json", {
+                "api": final, "store": store(session), "trace": trace(session),
+                "restart": restarted,
+                "provider_requests": json.loads((directory / "provider-requests.json").read_text()),
+            })
             for index, observer in enumerate(pages):
                 expect(observer.locator("#timeline .message.assistant")).to_have_count(1, timeout=90000)
-                assert sum(ANSWER in text for text in observer.evaluate("window.s29Replies")) == 1, "live observer duplicated recovered reply"
-                projection.assert_three_layers(observer, final, database, directory / f"s29-observer-{index}.json")
+                counts = observer.evaluate("window.s29ReplyCounts")
+                assert counts and max(counts) == 1, "live observer duplicated or lost recovered reply"
+                write(directory / f"s29-live-dom-{index}.json", {
+                    "reply_counts": counts,
+                    "nodes": observer.locator("#timeline > *").evaluate_all(
+                        "nodes => nodes.map(node => ({id:node.dataset.transcriptRowId, turn:node.dataset.turnId, text:node.textContent, class:node.className}))"),
+                })
+                projection.assert_three_layers(observer, final, database, directory / f"s29-observer-{index}.json", navigation_wait="domcontentloaded")
             late = chrome.new_page()
-            late.goto(url, wait_until="networkidle")
-            projection.assert_three_layers(late, state(), database, directory / "s29-late-browser.json")
+            late.goto(url, wait_until="domcontentloaded")
+            projection.assert_three_layers(late, state(), database, directory / "s29-late-browser.json", navigation_wait="domcontentloaded")
             after = store(session)
             meta = after["session_meta"][0]
             assert meta["shift_epoch"] > before_meta["shift_epoch"] or (
