@@ -427,7 +427,7 @@ pub(super) async fn replay_divergence_mid_turn_fails_the_attempt_retryably_and_c
         "rendered failure omitted the typed divergence code: {rendered}"
     );
     assert!(
-        rendered.contains("divergent_paths=[command.request.model]")
+        rendered.contains("divergent_paths=[command.request.model.model.metadata.wire_model]")
             && rendered.contains("effect_kind=llm_call"),
         "rendered failure omitted the divergence summary: {rendered}"
     );
