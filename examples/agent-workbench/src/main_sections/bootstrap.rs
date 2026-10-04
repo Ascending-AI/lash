@@ -236,6 +236,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .set(context_window_tokens)
         .map_err(|_| anyhow!("agent-workbench context window was initialized more than once"))?;
 
+    #[cfg(feature = "e2e-tools")]
     let protocol = crate::session_protocol::selected()?;
     #[cfg(feature = "e2e-tools")]
     let tool_fixture = crate::e2e_tools::Fixture::from_env("AGENT_WORKBENCH_TOOL_FIXTURE")?;
