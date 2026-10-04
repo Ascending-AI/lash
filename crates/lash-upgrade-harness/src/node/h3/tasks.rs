@@ -1,0 +1,211 @@
+//! Native operation fixtures for suspended cancellation and Deferred ownership.
+use super::*;
+use lash_core::facade_support::{PluginOperation, PluginSpec, PluginTask, SessionParam};
+use lash_core::plugin::{PluginOperationOutcome, PluginTaskContext};
+use lash_core::tool_dispatch::{
+    RunCoordinator, SingletonBodyOutcome, SingletonToolCall, SingletonToolHandlers,
+};
+use lash_core::tool_run::{
+    AggregateConsumer, AggregateLeaf, AggregatePlan, SegmentOrdinal, ToolDeclaration,
+};
+use std::sync::Arc;
+
+pub(super) const DEFERRED: &str = "e2e.h3.deferred";
+pub(super) const SLEEP: &str = "e2e.h3.sleep";
+
+pub(super) fn register(spec: PluginSpec, clock: Arc<dyn lash_core::Clock>) -> PluginSpec {
+    spec.with_plugin_task_typed::<Deferred, _, _>(|ctx, label| async move {
+        let call = call(&ctx, &label, ToolDeclaration::deferring())?;
+        let token = ctx.cancellation_token.clone();
+        let handlers = Pending(Echo {
+            output: label,
+            cancelled: Arc::new(move || token.is_cancelled()),
+        });
+        let mut run = RunCoordinator::open(
+            &ctx.scoped_effect_controller,
+            call.owner.clone(),
+            call.segment,
+            call.available.clone(),
+        );
+        run.decide(&call, &handlers)
+            .await
+            .map_err(|error| error.to_string())?;
+        run.await_deferred()
+            .await
+            .map_err(|error| error.to_string())?;
+        let terminals = run.drain().await.map_err(|error| error.to_string())?;
+        run.close().await.map_err(|error| error.to_string())?;
+        let output = terminals
+            .into_iter()
+            .find_map(|(_, terminal)| match terminal {
+                lash_core::tool_dispatch::SingletonTerminal::Final { capture, .. } => {
+                    capture.output().map(str::to_owned)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| "H3 Deferred completed without its retained result".to_owned())?;
+        let output: String = serde_json::from_str(&output).map_err(|error| error.to_string())?;
+        Ok(PluginOperationOutcome::new(output))
+    })
+    .with_plugin_task_typed::<Sleep, _, _>(move |ctx, duration| {
+        let clock = clock.clone();
+        async move {
+            let call = call(&ctx, "sleep", ToolDeclaration::default())?;
+            let mut run = RunCoordinator::open(
+                &ctx.scoped_effect_controller,
+                call.owner,
+                call.segment,
+                call.available,
+            );
+            let plan = AggregatePlan {
+                key: "s18-application-timer".into(),
+                leaves: vec![AggregateLeaf::Timer {
+                    duration_ms: duration,
+                }],
+                operands: vec![0],
+            };
+            run.admit_aggregate(&plan, clock.as_ref())
+                .await
+                .map_err(|error| error.to_string())?;
+            run.consume_aggregate(&plan.key, AggregateConsumer::All)
+                .await
+                .map_err(|error| error.to_string())?;
+            run.close().await.map_err(|error| error.to_string())?;
+            Ok(PluginOperationOutcome::new("timer-elapsed".to_owned()))
+        }
+    })
+}
+
+fn call(
+    ctx: &PluginTaskContext,
+    label: &str,
+    declaration: ToolDeclaration,
+) -> Result<SingletonToolCall, String> {
+    let lash_core::ExecutionScope::SessionOperation {
+        session_id,
+        operation_id,
+    } = ctx.scoped_effect_controller.execution_scope()
+    else {
+        return Err("H3 fixture was not admitted as an operation Run".into());
+    };
+    let revision = PluginRevision::new(PLUGIN, BehaviorRevision::ONE);
+    let callback = PluginCallbackIdentity {
+        owner: revision.clone(),
+        key: format!("tool:{label}"),
+    };
+    Ok(SingletonToolCall {
+        owner: lash_core::EffectOpener::session_operation(session_id.clone(), operation_id.clone()),
+        segment: SegmentOrdinal(0),
+        call_id: lash_core::ToolCallId::derive(
+            "",
+            lash_core::ToolCallRoot::host_submission(operation_id)
+                .map_err(|error| error.to_string())?,
+            &[],
+        ),
+        tool_name: format!("h3.{label}"),
+        arguments: serde_json::Value::Null,
+        declaration,
+        binding: AdmittedBinding {
+            executable: callback.clone(),
+            preparation: callback,
+            presentation: PresentationBinding {
+                presenter: None,
+                steps: Vec::new(),
+            },
+        },
+        available: vec![revision],
+        cancel: ExternalCancelPolicy::Ignore,
+        environment: None,
+    })
+}
+
+struct Deferred;
+struct Sleep;
+macro_rules! task {
+    ($ty:ty, $name:expr, $args:ty) => {
+        impl PluginOperation for $ty {
+            const NAME: &'static str = $name;
+            const DESCRIPTION: &'static str = "H3 native Run fixture";
+            const SESSION_PARAM: SessionParam = SessionParam::Required;
+            type Args = $args;
+            type Output = String;
+            type Error = String;
+            const ERROR_TYPE: &'static str = $name;
+            const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+            fn error_class(_: &String) -> lash_core::plugin::PluginFailureClass {
+                lash_core::plugin::PluginFailureClass::Terminal
+            }
+        }
+        impl PluginTask for $ty {}
+    };
+}
+task!(Deferred, DEFERRED, String);
+task!(Sleep, SLEEP, u64);
+
+struct Pending(Echo);
+#[lash_core::async_trait]
+impl SingletonToolHandlers for Pending {
+    async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
+        self.0.prepare(call).await
+    }
+    async fn before_checks(
+        &self,
+        call: &SingletonToolCall,
+        request: &SingletonPreparedRequest,
+    ) -> Result<Vec<AttributedVerdict<BeforeCheckReply>>, String> {
+        self.0.before_checks(call, request).await
+    }
+    async fn execute(&self, attempt: SingletonAttempt<'_>) -> Result<SingletonBodyOutcome, String> {
+        Ok(SingletonBodyOutcome::Deferred {
+            source: attempt
+                .completion_key
+                .cloned()
+                .ok_or_else(|| "Run did not arm H3's completion source".to_owned())?,
+        })
+    }
+    async fn after_checks(
+        &self,
+        call: &lash_core::ToolCallId,
+        capture: &SingletonCapture,
+    ) -> Result<Vec<AttributedVerdict<AfterCheckVerdict>>, String> {
+        self.0.after_checks(call, capture).await
+    }
+    fn run_cancel_requested(&self) -> bool {
+        self.0.run_cancel_requested()
+    }
+    async fn realize_declarations(
+        &self,
+        call: &lash_core::ToolCallId,
+        intents: &[lash_core::ToolIntentKind],
+    ) -> Result<(), String> {
+        self.0.realize_declarations(call, intents).await
+    }
+    async fn present(
+        &self,
+        call: &lash_core::ToolCallId,
+        capture: &SingletonCapture,
+    ) -> Result<String, SingletonPresentationError> {
+        self.0.present(call, capture).await
+    }
+    fn emit_stream(
+        &self,
+        call: &lash_core::ToolCallId,
+        stream: &lash_core::runtime::AttemptStream,
+    ) {
+        self.0.emit_stream(call, stream);
+    }
+    async fn launch_start(
+        &self,
+        obligation: &DeclaredStartObligation,
+    ) -> Result<lash_core::ProcessId, String> {
+        self.0.launch_start(obligation).await
+    }
+    async fn discharge_start(
+        &self,
+        obligation: &DeclaredStartObligation,
+        process: &lash_core::ProcessId,
+        cancel: bool,
+    ) -> Result<(), String> {
+        self.0.discharge_start(obligation, process, cancel).await
+    }
+}

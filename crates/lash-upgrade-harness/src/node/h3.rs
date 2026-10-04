@@ -23,6 +23,8 @@ use super::{RestateArgs, StoreArgs};
 const PLUGIN: &str = "e2e-h3";
 const TASK: &str = "e2e.h3.operation";
 
+mod tasks;
+
 /// Node controls deliberately preserve the public Run vocabulary.
 #[derive(Debug, Args)]
 pub struct H3Args {
@@ -40,15 +42,38 @@ pub struct H3Args {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum H3Command {
-    Operation { key: String, output: String },
-    Follow { run: lash_core::TurnId },
-    Cancel { run: lash_core::TurnId },
-    Snapshot { run: lash_core::TurnId },
+    Operation {
+        key: String,
+        output: String,
+    },
+    Deferred {
+        key: String,
+    },
+    Sleep {
+        key: String,
+        duration_ms: u64,
+    },
+    Resolve {
+        source: lash_core::AwaitEventKey,
+        value: serde_json::Value,
+    },
+    Follow {
+        run: lash_core::TurnId,
+    },
+    Cancel {
+        run: lash_core::TurnId,
+    },
+    Snapshot {
+        run: lash_core::TurnId,
+    },
 }
 
 /// Register the fixture on both the submitter and the serving node. Its
 /// revision is identical across the candidate/synthetic successor pair.
-pub(super) fn plugin(namespace: &str) -> Arc<StaticPluginFactory> {
+pub(super) fn plugin(
+    namespace: &str,
+    clock: Arc<dyn lash_core::Clock>,
+) -> Arc<StaticPluginFactory> {
     let namespace = namespace.to_owned();
     let spec = lash_core::facade_support::PluginSpec::new()
         .with_plugin_task_typed::<Operation, _, _>(move |ctx, output| {
@@ -111,6 +136,7 @@ pub(super) fn plugin(namespace: &str) -> Arc<StaticPluginFactory> {
                 Ok(lash_core::plugin::PluginOperationOutcome::new(output))
             }
         });
+    let spec = tasks::register(spec, clock);
     Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial(PLUGIN),
         spec,
@@ -207,8 +233,12 @@ impl SingletonToolHandlers for Echo {
 pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
     let command: H3Command = serde_json::from_str(&args.command)?;
     let stores = super::open_stores(&args.store).await?;
+    let snapshots = stores.session_store_factory();
     let engine = super::engine(stores, &args.restate)?;
-    let core = super::core(lash::Backend::new(engine), &super::ProviderArgs::default())?;
+    let core = super::core(
+        lash::Backend::new(engine.clone()),
+        &super::ProviderArgs::default(),
+    )?;
     let session_id = lash::SessionId::fixture(args.session.clone());
     match core
         .session(session_id.clone())
@@ -218,7 +248,7 @@ pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
         Err(error) => return Err(anyhow!(error)),
     }
-    let session = core.session(session_id).open().await?;
+    let session = core.session(session_id.clone()).open().await?;
     match command {
         H3Command::Operation { key, output } => {
             let handle = session
@@ -228,6 +258,32 @@ pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
             let run = handle.run().clone();
             drop(handle);
             Ok(serde_json::json!({"run": run, "admitted": true}))
+        }
+        H3Command::Deferred { key } => {
+            let handle = session
+                .plugin_operations()
+                .start_task_raw(tasks::DEFERRED, serde_json::json!(key), key)
+                .await?;
+            let run = handle.run().clone();
+            drop(handle);
+            Ok(serde_json::json!({"run": run, "admitted": true}))
+        }
+        H3Command::Sleep { key, duration_ms } => {
+            let handle = session
+                .plugin_operations()
+                .start_task_raw(tasks::SLEEP, serde_json::json!(duration_ms), key)
+                .await?;
+            let run = handle.run().clone();
+            drop(handle);
+            Ok(serde_json::json!({"run": run, "admitted": true}))
+        }
+        H3Command::Resolve { source, value } => {
+            use lash_core::AwaitEventResolver as _;
+            let outcome = engine
+                .restate_effect_host()
+                .resolve_await_event(&source, lash_core::Resolution::Ok(value))
+                .await?;
+            Ok(serde_json::to_value(outcome)?)
         }
         H3Command::Follow { run } => {
             let result = session.run(run.clone()).result().await?;
@@ -245,7 +301,15 @@ pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
             {
                 bail!("snapshot belongs to a different unfinished Run");
             }
-            Ok(serde_json::json!({"run": run, "unfinished": unfinished.is_some()}))
+            Ok(serde_json::json!({
+                "run": run,
+                "session": session_id,
+                "store_source": "deployment_store.session_head.pending_follow_on_json",
+                "unfinished": unfinished.is_some(),
+                "terminal": snapshots.run_terminal(&session_id, &run).await?,
+                "continuation": snapshots.load_pending_follow_on(&session_id).await?,
+                "park": snapshots.load_turn_park(&session_id).await?,
+            }))
         }
     }
 }
@@ -253,6 +317,17 @@ pub(super) async fn run(args: H3Args) -> Result<serde_json::Value> {
 /// Cheapest execution tier for the same operation fixture served by the node.
 pub async fn double_fixture(
     seed: u64,
+) -> Result<(
+    lash::LashCore,
+    lash_restate_test::RestateTestBackend<dyn lash::StoreSet>,
+)> {
+    double_fixture_replay(seed, false).await
+}
+
+/// Suspends at each uncompleted durable await, preserving real journal replay.
+pub async fn double_fixture_replay(
+    seed: u64,
+    always_replay: bool,
 ) -> Result<(
     lash::LashCore,
     lash_restate_test::RestateTestBackend<dyn lash::StoreSet>,
@@ -272,6 +347,8 @@ pub async fn double_fixture(
         seed,
         lash_restate_test::ServerConfig {
             build_generation: generation,
+            protocol: lash_restate_test::ProtocolVersion::V7,
+            always_replay,
             ..Default::default()
         },
         lash_restate_test::DeploymentHooks::default(),

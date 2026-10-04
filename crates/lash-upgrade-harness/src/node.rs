@@ -553,6 +553,7 @@ fn recovery_lease() -> lash::RecoveryLeaseConfig {
 /// calls the provider; the node that executes a turn does, and records and
 /// holds each call as `observed` asks.
 fn core_builder(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCoreBuilder> {
+    let h3 = h3::plugin("", backend.clock());
     let build = BuildLabel::current();
     // The generation exists once this core is built: it folds in the core's
     // plugins. The provider reads it when a turn calls it.
@@ -603,7 +604,7 @@ fn core_builder(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash:
             artifacts,
             worker_recovery,
         )))
-        .plugin(h3::plugin(""))
+        .plugin(h3)
         .recovery_lease(recovery_lease())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)))
