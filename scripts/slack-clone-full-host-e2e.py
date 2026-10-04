@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -267,27 +268,72 @@ class Journey:
             result = [record for record in result if self.trace_session(record) == session]
         return result
 
-    def traces_for_turn(self, turn_id: str, kind: str | None = None) -> list[dict[str, Any]]:
-        records = [
-            record
-            for record in self.traces()
-            if (record.get("context") or record.get("event", {}).get("context") or {}).get(
-                "turn_id"
-            )
-            == turn_id
-        ]
-        if kind is not None:
-            records = [record for record in records if self.trace_type(record) == kind]
-        return records
+    def tool_receipts_for_turn(self, source: str, *, terminal: bool) -> list[dict[str, Any]]:
+        session = self.session_snapshot()
+        applications = [application for commit in session["turns"]
+                        for application in json.loads(commit["result_json"]).get("turn_input_applications", [])
+                        if application["source_key"] == source or application["turn_id"] == source]
+        runs = {application["turn_id"] for application in applications}
+        if len(runs) != 1:
+            raise AssertionError(f"tool source has no unique actual Run: {source}, {applications}")
+        run = next(iter(runs))
+        rows = self.sql(self.session_db, "SELECT session_id, executor_json FROM session_runs WHERE run = ?", (run,))
+        if len(rows) != 1:
+            raise AssertionError(f"tool Run has no unique retained executor: {run}, {rows}")
+        owner_session = rows[0]["session_id"]
+        native = self.controller({"action": "tool-journal", "source": source, "run": run,
+                                  "session": owner_session, "executor": json.loads(rows[0]["executor_json"])})
+        if native.get("work", {}).get("run") != run or native.get("invocation", {}).get("pinned_service_protocol_version") != 7:
+            raise AssertionError(f"tool evidence has another original owner/protocol: {native}")
+        path = self.args.artifact_dir / ("tool-run-" + hashlib.sha256(run.encode()).hexdigest() + ".json")
+        path.write_text(json.dumps(native, indent=2) + "\n")
+        stored = self.sql(self.session_db,
+                          "SELECT request_json, completion_json FROM tool_call_receipts WHERE session_id = ? ORDER BY requested_at_ms, request_key",
+                          (owner_session,))
+        receipts = []
+        for stored_row in stored:
+            request = json.loads(stored_row["request_json"])
+            owner = request["owner"]
+            if owner.get("turn_id", owner.get("run")) != run:
+                continue
+            if owner.get("session_id") != owner_session or owner.get("kind") not in ("turn", "run"):
+                raise AssertionError(f"tool request has another owner: {request}")
+            call_id = request["payload"]["call_id"]
+            completion = json.loads(stored_row["completion_json"]) if stored_row["completion_json"] else None
+            observed = [record for record in self.traces() if self.trace_type(record) == "tool_receipt" and record.get("call_id") == call_id]
+            starts = [record for record in observed if record.get("terminal") is None]
+            terminals = [record for record in observed if record.get("terminal") is not None]
+            outcomes = [outcome for outcome in native["outcomes"] if outcome["call_id"] == call_id]
+            if len(starts) != 1 or starts[0].get("name") != request["payload"]["tool_name"]:
+                raise AssertionError(f"tool has no unique canonical accepted receipt: {request}, {observed}")
+            if terminal:
+                if completion is None or completion["owner"] != owner or completion["request_key"] != request["request_key"] or completion["payload_digest"] != request["payload_digest"]:
+                    raise AssertionError(f"tool completion changed the admission: {request}, {completion}")
+                if len(terminals) != 1 or terminals[0].get("terminal") != "final" or len(outcomes) != 1:
+                    raise AssertionError(f"tool has no unique final and native outcome: {observed}, {outcomes}")
+                result = completion["result"]
+                reference = result.get("presentation")
+                material = native["materials"].get(reference["digest"]) if reference else None
+                if result.get("event") != "presented" or result.get("call_id") != call_id or material is None or material["reference"] != reference:
+                    raise AssertionError(f"tool final has no matching retained presentation: {completion}")
+                opener = reference["owner"].get("opener", {})
+                if opener.get("session_id") != owner_session or opener.get("turn_id", opener.get("run")) != run:
+                    raise AssertionError(f"tool presentation belongs to another original owner: {reference}")
+                output = outcomes[0]["output"]
+                presentation = json.loads(material["payload"]["text"])
+                receipts.append({"call_id": call_id, "request": request, "completion": completion,
+                                 "output": output, "presentation": presentation, "traces": observed})
+            else:
+                receipts.append({"call_id": call_id, "request": request, "trace": starts[0]})
+        return receipts
 
     @staticmethod
-    def trace_tool_name(record: dict[str, Any]) -> str | None:
-        return record.get("name") or record.get("event", {}).get("name")
+    def receipt_tool_name(receipt: dict[str, Any]) -> str:
+        return receipt["request"]["payload"]["tool_name"]
 
     @staticmethod
-    def trace_tool_succeeded(record: dict[str, Any]) -> bool:
-        output = record.get("output") or record.get("event", {}).get("output") or {}
-        return output.get("outcome", {}).get("status") == "success"
+    def receipt_tool_succeeded(receipt: dict[str, Any]) -> bool:
+        return receipt["output"]["outcome"]["status"] == "success"
 
     def history(self, thread_ts: str | None = None) -> list[dict[str, Any]]:
         query = {"channel": self.channel}
@@ -487,7 +533,7 @@ class Journey:
             json.loads(node["node_json"]).get("event", {}).get("Conversation", {})
             for node in session["nodes"]
         ]
-        user_conversations = [conversation for conversation in conversations if conversation.get("role") == "User"]
+        user_conversations = [conversation for conversation in conversations if conversation.get("role") == "User" and conversation.get("origin", {}).get("kind") == "turn_input"]
         committed_once = (
             len(applications) == 2
             and {application["input_id"] for application in applications} == input_ids
@@ -504,14 +550,14 @@ class Journey:
         correct_reply = self.dom_rows(self.pages["ada"])[-1]["text"] == expected_reply
         self.gate("03-mention", "bot", "mention replied, twin ignored, one atomic batch completed distinct context and mention admissions in one committed conversation with the correct reply", row["reply_ts"] is not None and twin_ok and admissions_ok and fold_bound and committed_once and correct_reply, "03-mention-four-layers.json")
         mention_turn = applications[0]["turn_id"]
-        starts = self.traces_for_turn(mention_turn, "tool_call_started")
-        completions = self.traces_for_turn(mention_turn, "tool_call_completed")
+        starts = self.tool_receipts_for_turn(mention_turn, terminal=False)
+        completions = self.tool_receipts_for_turn(mention_turn, terminal=True)
         tool_pair_ok = (
             len(starts) == len(completions) == 1
-            and self.trace_tool_name(starts[0]) == "list_channels"
-            and self.trace_tool_name(completions[0]) == "list_channels"
+            and self.receipt_tool_name(starts[0]) == "list_channels"
+            and self.receipt_tool_name(completions[0]) == "list_channels"
             and starts[0].get("call_id") == completions[0].get("call_id")
-            and self.trace_tool_succeeded(completions[0])
+            and self.receipt_tool_succeeded(completions[0])
         )
         self.gate("03-mention", "trace", "one event-correlated channel turn and one successful list_channels start/completion pair completed", len(self.turn_traces(f"channel:{self.channel}")) == 1 and tool_pair_ok, "03-mention-four-layers.json")
         self.screenshot("03-mention")
@@ -854,10 +900,10 @@ class Journey:
         )
         self.gate("06-mcp-depth", "bot", "one durable turn commits four typed host-owned MCP results", expected_results and all(tool in committed for tool in tools), "06-mcp-depth-four-layers.json")
         mcp_turn = f"mention:{row['channel_id']}:{row['message_ts']}"
-        starts = self.traces_for_turn(mcp_turn, "tool_call_started")
-        completions = self.traces_for_turn(mcp_turn, "tool_call_completed")
-        started_names = [self.trace_tool_name(record) for record in starts]
-        completed_names = [self.trace_tool_name(record) for record in completions]
+        starts = self.tool_receipts_for_turn(mcp_turn, terminal=False)
+        completions = self.tool_receipts_for_turn(mcp_turn, terminal=True)
+        started_names = [self.receipt_tool_name(record) for record in starts]
+        completed_names = [self.receipt_tool_name(record) for record in completions]
         paired = {record.get("call_id") for record in starts} == {
             record.get("call_id") for record in completions
         }
@@ -866,7 +912,7 @@ class Journey:
             started_names == list(tools)
             and completed_names == list(tools)
             and paired
-            and all(self.trace_tool_succeeded(record) for record in completions)
+            and all(self.receipt_tool_succeeded(record) for record in completions)
             and url_log in self.bot_log.read_text(encoding="utf-8", errors="replace")
         )
         self.gate("06-mcp-depth", "trace", "four ordered event-scoped start/success pairs and the URL completion notification occur inside one new turn", len(self.turn_traces()) == before_turns + 1 and exact_attempts, "06-mcp-depth-four-layers.json + bot log")
@@ -991,10 +1037,10 @@ class Journey:
         self.gate("08-mcp-attach", "platform", "the platform stores both mentions and both attributed replies", len(self.history()) == before_main + 4 and len(self.platform_rows()) == before_total + 4 and all(any(row["event_id"] in (r["metadata_json"] or "") for r in self.platform_rows()) for row in (attach_row, detached_row)), "08-mcp-attach-four-layers.json")
         self.gate("08-mcp-attach", "bot", "the operator attaches a connected server, its binary content is committed as one stored attachment reference whose exact bytes reach the host attachment store, and detaching leaves only the server the bot booted with", attached.get("connected") is True and badge_tool in (attached.get("tools") or []) and reference.get("source") == "stored" and reference.get("attachment_ref", {}).get("byte_len") == len(badge_bytes) and reference.get("attachment_ref", {}).get("media_type") == "application/octet-stream" and stored == [badge_bytes] and detached_ok and [view["name"] for view in after_detach["servers"]] == ["slack_clone"], "08-mcp-attach-four-layers.json")
         attach_turn = f"mention:{attach_row['channel_id']}:{attach_row['message_ts']}"
-        completions = self.traces_for_turn(attach_turn, "tool_call_completed")
+        completions = self.tool_receipts_for_turn(attach_turn, terminal=True)
         offered_after_attach = [self.offered_tools(r) for r in self.provider_requests_for("FIG1341-MCP-ATTACH", without=("FIG1341-MCP-DETACHED",))]
         offered_after_detach = [self.offered_tools(r) for r in self.provider_requests_for("FIG1341-MCP-DETACHED")]
-        self.gate("08-mcp-attach", "trace", "the attached tool succeeds inside one new turn while it is offered, and the catalog stops offering it after detach", len(self.turn_traces()) == before_turns + 2 and [self.trace_tool_name(record) for record in completions] == [badge_tool] and all(self.trace_tool_succeeded(record) for record in completions) and bool(offered_after_attach) and all(badge_tool in offered for offered in offered_after_attach) and bool(offered_after_detach) and not any(badge_tool in offered for offered in offered_after_detach), "08-mcp-attach-four-layers.json + provider-requests.jsonl")
+        self.gate("08-mcp-attach", "trace", "the attached tool succeeds inside one new turn while it is offered, and the catalog stops offering it after detach", len(self.turn_traces()) == before_turns + 2 and [self.receipt_tool_name(record) for record in completions] == [badge_tool] and all(self.receipt_tool_succeeded(record) for record in completions) and bool(offered_after_attach) and all(badge_tool in offered for offered in offered_after_attach) and bool(offered_after_detach) and not any(badge_tool in offered for offered in offered_after_detach), "08-mcp-attach-four-layers.json + provider-requests.jsonl")
         self.screenshot("08-mcp-attach")
         self.write_extract("08-mcp-attach")
 
@@ -1019,7 +1065,7 @@ class Journey:
             expect(page.locator("#stream .msg.is-bot")).to_have_count(before_bots + 1, timeout=45_000)
         row = self.wait_ledger("FIG4937-MCP-RECONNECT", "replied")
         turn = f"mention:{row['channel_id']}:{row['message_ts']}"
-        completions = self.traces_for_turn(turn, "tool_call_completed")
+        completions = self.tool_receipts_for_turn(turn, terminal=True)
         # The interrupted admission may complete or fail typed. Neither
         # result is inferred from the provider's canned assistant message.
         failures = []
@@ -1028,7 +1074,7 @@ class Journey:
             outcome = output.get("outcome", {})
             if outcome.get("status") != "success":
                 failures.append(outcome.get("payload"))
-        self.gate("08-peer-reconnect", "trace", "one admitted badge call resolves or retains a typed transport failure", len(completions) == 1 and self.trace_tool_name(completions[0]) == badge_tool and (self.trace_tool_succeeded(completions[0]) or (len(failures) == 1 and isinstance(failures[0], dict) and bool(failures[0].get("cause")))), "08-peer-reconnect-four-layers.json")
+        self.gate("08-peer-reconnect", "trace", "one admitted badge call resolves or retains a typed transport failure", len(completions) == 1 and self.receipt_tool_name(completions[0]) == badge_tool and (self.receipt_tool_succeeded(completions[0]) or (len(failures) == 1 and isinstance(failures[0], dict) and bool(failures[0].get("cause")))), "08-peer-reconnect-four-layers.json")
         # Detach the failed session; the existing exact attachment oracle
         # then attaches the recovered endpoint and independently checks its
         # bytes, sampling/elicitation, catalog and attribution.
