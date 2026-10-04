@@ -403,43 +403,6 @@ fn stalled_delivery_listing_and_rearm_use_the_owning_ledger() {
         sent.outcome().await.unwrap();
     });
 }
-#[test]
-fn usage_pages_export_real_calls_and_reconciliation_keeps_unknown_amounts_explicit() {
-    run_async_test_on_stack_budget("operator-usage", || async {
-        let h = OperatorHarness::new(false, false).await;
-        h.send("usage-one").await;
-        h.send("usage-two").await;
-        let facts = h
-            .ok("GET", &h.session_path("/usage/facts?limit=1"), None)
-            .await;
-        assert_eq!(facts["facts"].as_array().unwrap().len(), 1);
-        assert!(!facts["next"].is_null());
-        let after = serde_json::to_string(&facts["next"]).unwrap();
-        let next = h
-            .ok(
-                "GET",
-                &h.session_path(&format!(
-                    "/usage/facts?limit=1&after={}",
-                    percent_encoding::utf8_percent_encode(
-                        &after,
-                        percent_encoding::NON_ALPHANUMERIC
-                    )
-                )),
-                None,
-            )
-            .await;
-        assert_ne!(next["facts"][0], facts["facts"][0]);
-        let meters = h
-            .ok("GET", &h.session_path("/usage/meters?limit=1"), None)
-            .await;
-        assert_eq!(meters["runs"].as_array().unwrap().len(), 1);
-        let reconciliation = h
-            .ok("POST", &h.session_path("/usage/reconcile"), None)
-            .await;
-        assert!(reconciliation.get("unresolved").is_some());
-    });
-}
-
 async fn apply_config(h: &OperatorHarness, revision: u64, id: &str, commands: Value) -> Value {
     let submitted = h
         .ok(
@@ -644,9 +607,6 @@ fn every_operator_route_checks_deployment_authorization_before_work() {
                 "/api/admin/obligations/rearm".into(),
                 Some(json!({"kind":"ingress","id":"missing"})),
             ),
-            ("GET", h.session_path("/usage/facts"), None),
-            ("GET", h.session_path("/usage/meters"), None),
-            ("POST", h.session_path("/usage/reconcile"), None),
             ("GET", h.session_path("/config"), None),
             (
                 "POST",

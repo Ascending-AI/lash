@@ -399,7 +399,7 @@ test("provider failure settles to the same durable row for sender and observer",
       scrollToEnd() {},
       renderIngressReceipt() {},
       setBusy() {},
-      refreshUsage() {},
+      refreshTerminalState() {},
     };
     vm.runInNewContext(
       `${markedSource("WORKBENCH_MESSAGE_RENDER", "WORKBENCH_MESSAGE_RENDER")}
@@ -450,263 +450,6 @@ test("provider failure settles to the same durable row for sender and observer",
     }],
   });
   assert.deepEqual(observer, sender);
-});
-
-test("second-turn streaming usage stays session-monotonic and equals settlement", () => {
-  const usageTotal = { textContent: "", title: "" };
-  const usageBreakdown = { textContent: "", title: "" };
-  const usageContext = { Intl, Map, Number, usageTotal, usageBreakdown };
-  vm.runInNewContext(
-    `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
-     ${markedSource("WORKBENCH_USAGE_PROJECTION", "WORKBENCH_USAGE_PROJECTION")}
-     const readings = [];
-     const record = () => readings.push({
-       total: usageTotal.textContent,
-       breakdown: usageBreakdown.textContent,
-       detail: usageBreakdown.title,
-       ledger: usageTotal.title
-     });
-     renderUsage({ entry_count: 2, usage: {
-       input_tokens: 40,
-       cache_read_input_tokens: 10,
-       cache_write_input_tokens: 5,
-       output_tokens: 20,
-       reasoning_output_tokens: 2,
-       total_tokens: 75
-     }});
-     record();
-     renderStreamingUsage({
-       input_tokens: 4,
-       cache_read_input_tokens: 3,
-       cache_write_input_tokens: 2,
-       output_tokens: 1,
-       reasoning_output_tokens: 1
-     }, "turn-b");
-     record();
-     renderStreamingUsage({
-       input_tokens: 7,
-       cache_read_input_tokens: 4,
-       cache_write_input_tokens: 3,
-       output_tokens: 6,
-       reasoning_output_tokens: 4
-     }, "turn-b");
-     record();
-     markStreamingUsageSettled("turn-b");
-     renderUsage({ entry_count: 3, usage: {
-       input_tokens: 47,
-       cache_read_input_tokens: 14,
-       cache_write_input_tokens: 8,
-       output_tokens: 26,
-       reasoning_output_tokens: 6,
-       total_tokens: 95
-     }});
-     record();
-     this.readings = readings;`,
-    usageContext,
-  );
-
-  assert.deepEqual(JSON.parse(JSON.stringify(usageContext.readings)), [
-    {
-      total: "75 total",
-      breakdown: "55 in · 20 out",
-      detail: "uncached input 40 · cache read 10 · cache write 5 · reasoning output 2",
-      ledger: "2 source/model ledger entries",
-    },
-    {
-      total: "85 total",
-      breakdown: "64 in · 21 out",
-      detail: "uncached input 44 · cache read 13 · cache write 7 · reasoning output 3",
-      ledger: "2 settled source/model ledger entries · live turn usage included",
-    },
-    {
-      total: "95 total",
-      breakdown: "69 in · 26 out",
-      detail: "uncached input 47 · cache read 14 · cache write 8 · reasoning output 6",
-      ledger: "2 settled source/model ledger entries · live turn usage included",
-    },
-    {
-      total: "95 total",
-      breakdown: "69 in · 26 out",
-      detail: "uncached input 47 · cache read 14 · cache write 8 · reasoning output 6",
-      ledger: "3 source/model ledger entries",
-    },
-  ]);
-});
-
-function runTerminalUsageProjection(body) {
-  const usageTotal = { textContent: "", title: "" };
-  const usageBreakdown = { textContent: "", title: "" };
-  const usageContext = {
-    Intl,
-    Map,
-    Number,
-    Set,
-    usageTotal,
-    usageBreakdown,
-    projectionState: createWorkbenchProjectionState(),
-    renderedProductEvents: new Set(),
-    pendingTools: [],
-    assistantDraft: null,
-    assistantDraftTurnId: null,
-    assistantDraftText: "",
-    assistantDraftChunks: [],
-    reasoningChunks: [],
-    pendingCodeBlock: null,
-    reasoning: null,
-    clearRetryStatus() {},
-    appendTool() {},
-    renderMessage() {},
-    renderIngressReceipt() {},
-    setBusy() {},
-  };
-  vm.runInNewContext(
-    `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
-     ${markedSource("WORKBENCH_USAGE_PROJECTION", "WORKBENCH_USAGE_PROJECTION")}
-     ${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
-     ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
-     ${body}`,
-    usageContext,
-  );
-  return {
-    total: usageTotal.textContent,
-    breakdown: usageBreakdown.textContent,
-    ledger: usageTotal.title,
-  };
-}
-
-test("Done then authoritative usage refresh rejects delayed same-turn usage", () => {
-  assert.deepEqual(runTerminalUsageProjection(`
-    function refreshUsage() {
-      renderUsage({ entry_count: 3, usage: {
-        input_tokens: 47,
-        cache_read_input_tokens: 14,
-        cache_write_input_tokens: 8,
-        output_tokens: 26,
-        reasoning_output_tokens: 6
-      }});
-    }
-    renderUsage({ entry_count: 2, usage: {
-      input_tokens: 40,
-      cache_read_input_tokens: 10,
-      cache_write_input_tokens: 5,
-      output_tokens: 20,
-      reasoning_output_tokens: 2
-    }});
-    renderStreamingUsage({
-      input_tokens: 7,
-      cache_read_input_tokens: 4,
-      cache_write_input_tokens: 3,
-      output_tokens: 6,
-      reasoning_output_tokens: 4
-    }, "turn-a");
-    applyProductEvent({
-      event_id: "turn-a-done",
-      sequence: 1,
-      type: "done",
-      turn_id: "turn-a"
-    });
-    renderStreamingUsage({
-      input_tokens: 7,
-      cache_read_input_tokens: 4,
-      cache_write_input_tokens: 3,
-      output_tokens: 6,
-      reasoning_output_tokens: 4
-    }, "turn-a");
-  `), {
-    total: "95 total",
-    breakdown: "69 in · 26 out",
-    ledger: "3 source/model ledger entries",
-  });
-});
-
-test("Done before first usage rejects that turn's delayed first observation", () => {
-  assert.deepEqual(runTerminalUsageProjection(`
-    function refreshUsage() {
-      renderUsage({ entry_count: 2, usage: {
-        input_tokens: 40,
-        cache_read_input_tokens: 10,
-        cache_write_input_tokens: 5,
-        output_tokens: 20,
-        reasoning_output_tokens: 2
-      }});
-    }
-    renderUsage({ entry_count: 2, usage: {
-      input_tokens: 40,
-      cache_read_input_tokens: 10,
-      cache_write_input_tokens: 5,
-      output_tokens: 20,
-      reasoning_output_tokens: 2
-    }});
-    applyProductEvent({
-      event_id: "turn-a-done-before-usage",
-      sequence: 1,
-      type: "done",
-      turn_id: "turn-a"
-    });
-    renderStreamingUsage({
-      input_tokens: 7,
-      cache_read_input_tokens: 4,
-      cache_write_input_tokens: 3,
-      output_tokens: 6,
-      reasoning_output_tokens: 4
-    }, "turn-a");
-  `), {
-    total: "75 total",
-    breakdown: "55 in · 20 out",
-    ledger: "2 source/model ledger entries",
-  });
-});
-
-test("settling one turn preserves another turn's live usage overlay", () => {
-  assert.deepEqual(runTerminalUsageProjection(`
-    function refreshUsage() {
-      renderUsage({ entry_count: 3, usage: {
-        input_tokens: 47,
-        cache_read_input_tokens: 14,
-        cache_write_input_tokens: 8,
-        output_tokens: 26,
-        reasoning_output_tokens: 6
-      }});
-    }
-    renderUsage({ entry_count: 2, usage: {
-      input_tokens: 40,
-      cache_read_input_tokens: 10,
-      cache_write_input_tokens: 5,
-      output_tokens: 20,
-      reasoning_output_tokens: 2
-    }});
-    renderStreamingUsage({
-      input_tokens: 7,
-      cache_read_input_tokens: 4,
-      cache_write_input_tokens: 3,
-      output_tokens: 6,
-      reasoning_output_tokens: 4
-    }, "turn-a");
-    renderStreamingUsage({
-      input_tokens: 4,
-      cache_read_input_tokens: 3,
-      cache_write_input_tokens: 2,
-      output_tokens: 1,
-      reasoning_output_tokens: 1
-    }, "turn-b");
-    applyProductEvent({
-      event_id: "turn-a-done-with-b-live",
-      sequence: 1,
-      type: "done",
-      turn_id: "turn-a"
-    });
-    renderStreamingUsage({
-      input_tokens: 7,
-      cache_read_input_tokens: 4,
-      cache_write_input_tokens: 3,
-      output_tokens: 6,
-      reasoning_output_tokens: 4
-    }, "turn-a");
-  `), {
-    total: "105 total",
-    breakdown: "78 in · 27 out",
-    ledger: "3 settled source/model ledger entries · live turn usage included",
-  });
 });
 
 test("retry reset retracts only superseded partial text and renders retry status", () => {
@@ -847,7 +590,7 @@ test("retry status ownership survives another turn's delayed Done", () => {
     renderMessage() {},
     renderIngressReceipt() {},
     setBusy() {},
-    refreshUsage() {},
+    refreshTerminalState() {},
   };
   const retryA = { ...turnEvents.retry, reason: "turn A retry" };
   const retryB = { ...turnEvents.retry, reason: "turn B retry" };
@@ -957,7 +700,7 @@ test("delayed same-turn retry status after Done is ignored without affecting ano
     renderMessage() {},
     renderIngressReceipt() {},
     setBusy() {},
-    refreshUsage() {},
+    refreshTerminalState() {},
   };
   const retryA = { ...turnEvents.retry, reason: "late turn A retry" };
   const retryB = { ...turnEvents.retry, reason: "turn B remains active" };
@@ -1915,7 +1658,7 @@ test("every tab refetches authoritative busy state for product-lane turn boundar
       executionScorecardState: new Map(),
       executionScorecard: {},
       finishTransientRows() {},
-      refreshUsage(turnId) { calls.push(`refresh:${turnId ?? "none"}`); },
+      refreshTerminalState(turnId) { calls.push(`refresh:${turnId ?? "none"}`); },
       recoverFromState() {},
       refreshBusyState() { calls.push("refresh"); },
       setBusy(value) { calls.push(`busy:${value}`); },
@@ -3550,7 +3293,7 @@ test("a Done product event behaviorally retracts the provisional draft", () => {
     setBusy(value) {
       busy = value;
     },
-    refreshUsage(turnId) {
+    refreshTerminalState(turnId) {
       assert.equal(turnId, "cancel-turn");
       refreshes += 1;
     },
@@ -3617,7 +3360,7 @@ test("turn A Done does not retract turn B provisional prose", () => {
     renderMessage() {},
     renderIngressReceipt() {},
     setBusy() {},
-    refreshUsage() {},
+    refreshTerminalState() {},
   };
   vm.runInNewContext(
     `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
@@ -3675,7 +3418,7 @@ function doneReducerContext(outcome) {
     renderMessage() {},
     renderIngressReceipt() {},
     setBusy() {},
-    refreshUsage() {},
+    refreshTerminalState() {},
     recoverFromState(message) {
       recoveries.push(message);
     },
