@@ -184,6 +184,7 @@ fn the_singleton_route_is_four_records_and_its_codec_is_pinned() {
             RunEvent::Presented {
                 call_id: id.clone(),
                 presentation: None,
+                failure: None,
             },
             RunEvent::Incorporated {
                 call_id: id.clone(),
@@ -851,6 +852,7 @@ fn protected_drain_is_transitive_across_intent_free_ranks() {
         log.push(RunEvent::Presented {
             call_id: ids[0].clone(),
             presentation: None,
+            failure: None,
         }),
         Err(RunEventRefusal::BoundaryOrder {
             call_id: ids[0].clone()

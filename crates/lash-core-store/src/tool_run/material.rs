@@ -56,6 +56,8 @@ pub enum MaterialOwner {
 pub enum MaterialRole {
     /// The final prepared request admission recorded (A).
     PreparedRequest,
+    /// One read-only namespace image shared by all admissions at its frontier.
+    PluginStateSnapshot,
     /// One attempt's output and captures (X), or a cached success a
     /// before-check supplied in its place.
     AttemptOutput,

@@ -2987,6 +2987,11 @@
           "type": "string"
         },
         {
+          "const": "plugin_state_snapshot",
+          "description": "One read-only namespace image shared by all admissions at its frontier.",
+          "type": "string"
+        },
+        {
           "const": "attempt_output",
           "description": "One attempt's output and captures (X), or a cached success a\nbefore-check supplied in its place.",
           "type": "string"

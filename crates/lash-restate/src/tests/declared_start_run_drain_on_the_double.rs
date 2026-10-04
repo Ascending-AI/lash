@@ -348,7 +348,7 @@ impl SingletonToolHandlers for Starter {
         &self,
         call_id: &ToolCallId,
         _capture: &SingletonCapture,
-    ) -> Result<String, String> {
+    ) -> Result<String, lash_core::tool_dispatch::SingletonPresentationError> {
         assert_eq!(
             self.launches.lock().unwrap().is_empty(),
             self.discharges.lock().unwrap().is_empty(),

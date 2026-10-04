@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use super::admission::{RecordedRetryPolicy, RoundAdmission};
 pub use super::aggregate::{AggregateConsumer, AggregateLeaf, AggregatePlan};
 use super::material::{MaterialEntry, MaterialRef};
-use super::tool_hooks::{AfterCheckVerdict, BeforeSelection, CheckRecord};
+use super::tool_hooks::{AfterCheckVerdict, BeforeSelection, CheckRecord, HookCause};
 use crate::ProcessId;
 use crate::await_event_identity::AwaitEventKey;
 use crate::effect_opener::EffectOpener;
@@ -237,6 +237,9 @@ pub enum RunEvent {
         call_id: ToolCallId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         presentation: Option<MaterialRef>,
+        /// The original declared cause, retained when presentation used fallback.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<HookCause>,
     },
     /// The consumer took the call's value.
     Consumed {

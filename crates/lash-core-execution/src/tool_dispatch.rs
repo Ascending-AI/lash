@@ -32,9 +32,9 @@ pub use run_coordinator::{
 pub use singleton_run::{
     BeforeCheckReply, IsolatedProcessDescriptor, RecordedIsolatedStart, RunAttemptHandle,
     RunAttemptStep, RunRetryTimer, SingletonAttempt, SingletonBodyOutcome, SingletonCapture,
-    SingletonDrift, SingletonPreparedRequest, SingletonRunError, SingletonRunOutcome,
-    SingletonStart, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
-    run_singleton_tool,
+    SingletonDrift, SingletonPreparedRequest, SingletonPresentationError, SingletonRunError,
+    SingletonRunOutcome, SingletonStart, SingletonTerminal, SingletonToolCall,
+    SingletonToolHandlers, run_singleton_tool,
 };
 
 pub(crate) use atomic_attempt::AtomicToolAttempt;

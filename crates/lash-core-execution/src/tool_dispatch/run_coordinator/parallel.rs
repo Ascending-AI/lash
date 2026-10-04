@@ -98,6 +98,7 @@ fn captured(
         owner: owner.clone(),
         available: available.to_vec(),
         entries: BTreeMap::new(),
+        snapshots: BTreeMap::new(),
     };
     materials.admit(entry.materials.clone())?;
     materials.decode(output).map(Some)

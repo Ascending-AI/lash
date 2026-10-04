@@ -178,9 +178,9 @@ mod tests {
             );
         }
     }
-    // D06 replaces terminal waiter calls with short subscriptions and publication.
-    // Its predecessor retains FIG-4920's deleted-session command transition.
-    // The immediate predecessor remains addressable by its drain lane.
+    // FIG-4926 replaces inline admission snapshots and changes V acceptance.
+    // Pin the predecessor rather than deriving it from the current epoch: an
+    // omitted lane move must fail this witness. Both lanes remain addressable.
     #[tokio::test]
     async fn l21_a_predecessor_run_journal_parks_before_decode_and_keeps_its_lane() {
         use lash_core::engine::BuildGeneration;
@@ -188,7 +188,11 @@ mod tests {
             let bytes = epoch.to_be_bytes();
             BuildGeneration::from_digest([b'r', b'u', bytes[0], bytes[1], bytes[2], bytes[3]])
         };
-        let old = generation(crate::JOURNAL_LOGIC_EPOCH - 1);
+        #[cfg(not(feature = "synthetic-next"))]
+        const PREDECESSOR_EPOCH: u32 = 18;
+        #[cfg(feature = "synthetic-next")]
+        const PREDECESSOR_EPOCH: u32 = 19;
+        let old = generation(PREDECESSOR_EPOCH);
         let new = generation(crate::JOURNAL_LOGIC_EPOCH);
         let old_lane = crate::services::DEFAULT_NAMESPACE
             .generation(crate::LashService::TurnDriver, old.clone())

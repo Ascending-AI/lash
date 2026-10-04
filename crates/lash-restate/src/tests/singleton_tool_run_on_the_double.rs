@@ -602,10 +602,12 @@ async fn grouped_isolated_and_deferred_receipts_survive_prefix_restoration() {
                     vec![RunEvent::Presented {
                         call_id: b.clone(),
                         presentation: None,
+                        failure: None,
                     }],
                     vec![RunEvent::Presented {
                         call_id: c.clone(),
                         presentation: None,
+                        failure: None,
                     }],
                 ];
                 let mut ledger = RunLedger::new(owner);
@@ -890,7 +892,7 @@ impl SingletonToolHandlers for Probe {
         &self,
         call_id: &ToolCallId,
         capture: &SingletonCapture,
-    ) -> Result<String, String> {
+    ) -> Result<String, lash_core::tool_dispatch::SingletonPresentationError> {
         self.presentations.fetch_add(1, Ordering::SeqCst);
         let declared = match capture {
             SingletonCapture::Isolated { .. } => {

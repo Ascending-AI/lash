@@ -52,9 +52,9 @@ use lash_sansio::ToolCallId;
 use lash_sansio::ToolIntentKind;
 
 use super::singleton_run::{
-    BeforeCheckReply, RecordedIsolatedStart, SingletonAttempt, SingletonBodyOutcome,
-    SingletonCapture, SingletonDrift, SingletonPreparedRequest, SingletonRunError, SingletonStart,
-    SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
+    BeforeCheckReply, RecordedIsolatedStart, RecordedPreparedRequest, SingletonAttempt,
+    SingletonBodyOutcome, SingletonCapture, SingletonDrift, SingletonPreparedRequest,
+    SingletonRunError, SingletonStart, SingletonTerminal, SingletonToolCall, SingletonToolHandlers,
 };
 use crate::runtime::effect::{AttemptStreamRecorder, ScopedEffectController};
 use crate::runtime::process::{
@@ -80,6 +80,7 @@ struct Materials {
     owner: MaterialOwner,
     available: Vec<PluginRevision>,
     entries: BTreeMap<MaterialRef, Option<MaterialPayload>>,
+    snapshots: BTreeMap<MaterialRef, std::sync::Arc<crate::plugin::PluginNamespaceState>>,
 }
 
 /// Canonical material `owner` owns, journal-local to its Run, and the entry
@@ -135,6 +136,29 @@ impl Materials {
             }
             .into()),
         }
+    }
+
+    fn snapshot(
+        &mut self,
+        reference: &MaterialRef,
+    ) -> Result<std::sync::Arc<crate::plugin::PluginNamespaceState>, RuntimeEffectControllerError>
+    {
+        if reference.role != MaterialRole::PluginStateSnapshot {
+            return Err(MaterialRefusal::RoleMismatch {
+                reference: Box::new(reference.clone()),
+                expected: MaterialRole::PluginStateSnapshot,
+                found: reference.role,
+            }
+            .into());
+        }
+        self.read(reference)?;
+        if let Some(snapshot) = self.snapshots.get(reference) {
+            return Ok(std::sync::Arc::clone(snapshot));
+        }
+        let snapshot = std::sync::Arc::new(self.decode(reference)?);
+        self.snapshots
+            .insert(reference.clone(), std::sync::Arc::clone(&snapshot));
+        Ok(snapshot)
     }
 
     fn decode<T: serde::de::DeserializeOwned>(
@@ -224,7 +248,8 @@ fn record_name(call_id: &ToolCallId, step: &str) -> String {
 }
 
 /// Admission's typed refusal of the call itself, checked before the
-/// admission record is written so that no refused call is ever recorded.
+/// admission record is written, inside its step. Served replay never validates
+/// the live declaration or selects a replacement route.
 fn admit_live(
     call: &SingletonToolCall,
     handlers: &dyn SingletonToolHandlers,
@@ -321,6 +346,10 @@ async fn prepare_admitted_call(
     call: &SingletonToolCall,
     handlers: &dyn SingletonToolHandlers,
     live_start: Option<IsolatedToolStart>,
+    snapshot: Option<(
+        MaterialRef,
+        std::sync::Arc<crate::plugin::PluginNamespaceState>,
+    )>,
     retry: crate::tool_run::RecordedRetryPolicy,
 ) -> Result<(AdmittedCall, Vec<MaterialEntry>), String> {
     let mut minted = Vec::new();
@@ -358,18 +387,21 @@ async fn prepare_admitted_call(
     let request = SingletonPreparedRequest {
         arguments: call.arguments.clone(),
         prepared: handlers.prepare(call).await?,
-        state_snapshot: handlers.plugin_session().map(|plugins| {
-            plugins
-                .export_state()
-                .plugins
-                .get(&call.binding.executable.owner.plugin)
-                .cloned()
-                .unwrap_or_default()
-        }),
+        state_snapshot: snapshot
+            .as_ref()
+            .map(|(_, namespace)| std::sync::Arc::clone(namespace)),
         isolation,
     };
-    let (request_ref, request_entry) =
-        mint(owner, MaterialRole::PreparedRequest, encode(&request)?)?;
+    let (request_ref, request_entry) = mint(
+        owner,
+        MaterialRole::PreparedRequest,
+        encode(&RecordedPreparedRequest {
+            arguments: request.arguments.clone(),
+            prepared: request.prepared.clone(),
+            state_snapshot: snapshot.map(|(reference, _)| reference),
+            isolation: request.isolation.clone(),
+        })?,
+    )?;
     minted.push(request_entry);
     let mut checks = Vec::new();
     for reply in handlers.before_checks(call, &request).await {
@@ -393,7 +425,7 @@ async fn prepare_admitted_call(
 }
 
 fn validate_admitted_call(
-    journal: &RunJournal<'_>,
+    journal: &mut RunJournal<'_>,
     call: &SingletonToolCall,
     handlers: &dyn SingletonToolHandlers,
     member: AdmittedCall,
@@ -412,7 +444,17 @@ fn validate_admitted_call(
             drift: SingletonDrift::ToolName,
         });
     }
-    let request: SingletonPreparedRequest = journal.materials.decode(&member.request)?;
+    let recorded: RecordedPreparedRequest = journal.materials.decode(&member.request)?;
+    let request = SingletonPreparedRequest {
+        arguments: recorded.arguments,
+        prepared: recorded.prepared,
+        state_snapshot: recorded
+            .state_snapshot
+            .as_ref()
+            .map(|reference| journal.materials.snapshot(reference))
+            .transpose()?,
+        isolation: recorded.isolation,
+    };
     if request.arguments != call.arguments {
         return Err(SingletonRunError::Drift {
             call_id: call.call_id.clone(),
@@ -660,6 +702,7 @@ impl<'a> RunCoordinator<'a> {
                     owner: MaterialOwner::Run { opener: owner },
                     available,
                     entries: BTreeMap::new(),
+                    snapshots: BTreeMap::new(),
                 },
                 records: Vec::new(),
                 entries: Vec::new(),
@@ -839,8 +882,7 @@ impl<'a> RunCoordinator<'a> {
             return Ok(Vec::new());
         }
         let mut ids = std::collections::BTreeSet::new();
-        let mut starts = Vec::with_capacity(calls.len());
-        for (index, call) in calls.iter().enumerate() {
+        for call in calls {
             if !ids.insert(&call.call_id) {
                 return Err(AdmissionRefusal::DuplicateCall {
                     call_id: call.call_id.clone(),
@@ -861,7 +903,6 @@ impl<'a> RunCoordinator<'a> {
                 }
                 .into());
             }
-            starts.push(admit_live(call, handlers, index)?);
         }
         let name = aggregate.map_or_else(
             || record_name(&calls[0].call_id, "admit"),
@@ -871,15 +912,74 @@ impl<'a> RunCoordinator<'a> {
         let first = journal.record(Vec::new());
         let owner = journal.materials.owner.clone();
         let journal_owner = journal.owner.clone();
+        let known_material = journal
+            .materials
+            .entries
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut live_refusal = None;
+        let refusal = &mut live_refusal;
         let admit = Box::pin(async move {
+            let starts = calls
+                .iter()
+                .enumerate()
+                .map(|(index, call)| admit_live(call, handlers, index))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| {
+                    let message = error.to_string();
+                    *refusal = Some(error);
+                    message
+                })?;
             let mut members = Vec::with_capacity(calls.len());
             let mut materials = Vec::new();
+            let state = handlers
+                .plugin_session()
+                .map(|plugins| plugins.export_state());
+            let mut snapshots = BTreeMap::new();
             for (call, start) in calls.iter().zip(starts) {
+                let revision = &call.binding.executable.owner;
+                let snapshot = if let Some(state) = &state {
+                    let key = (revision.plugin.clone(), revision.behavior_revision.get());
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        snapshots.entry(key.clone())
+                    {
+                        let namespace = std::sync::Arc::new(
+                            state
+                                .plugins
+                                .get(&revision.plugin)
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                        let payload = MaterialPayload::new(
+                            owner.clone(),
+                            MaterialRole::PluginStateSnapshot,
+                            Some(revision.clone()),
+                            encode(namespace.as_ref())?,
+                        );
+                        let reference = payload
+                            .reference(MaterialLocation::JournalLocal)
+                            .map_err(|error| error.to_string())?;
+                        materials.push(MaterialEntry::Available {
+                            reference: reference.clone(),
+                            payload: Box::new(payload),
+                        });
+                        entry.insert((reference, namespace));
+                    }
+                    snapshots.get(&key).cloned()
+                } else {
+                    None
+                };
                 let (member, minted) =
-                    prepare_admitted_call(&owner, call, handlers, start, retry.clone()).await?;
+                    prepare_admitted_call(&owner, call, handlers, start, snapshot, retry.clone())
+                        .await?;
                 members.push(member);
                 materials.extend(minted);
             }
+            materials.retain(|entry| match entry {
+                MaterialEntry::Available { reference, .. }
+                | MaterialEntry::Retired { reference } => !known_material.contains(reference),
+            });
             let operands = (0..members.len())
                 .map(u32::try_from)
                 .collect::<Result<Vec<_>, _>>()
@@ -903,7 +1003,10 @@ impl<'a> RunCoordinator<'a> {
                 state: Vec::new(),
             })
         });
-        let admitted = journal.append(name, admit).await?;
+        let admitted = match journal.append(name, admit).await {
+            Ok(record) => record,
+            Err(error) => return Err(live_refusal.unwrap_or(error)),
+        };
         let Some(RunEvent::Admitted { round }) = admitted.events.first() else {
             return Err(RunEventRefusal::AggregateShape {
                 key: aggregate.map_or_else(String::new, |(plan, _)| plan.key.clone()),

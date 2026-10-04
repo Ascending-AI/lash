@@ -40,8 +40,10 @@ a separate recorded timer wake registers the next ordinal. Served replay
 reconstructs this command prefix before awaiting an older unfinished X.
 The independent Done path costs one A and one X/D/V per member.
 
-Body requests carry the owning plugin namespace's admission snapshot,
-including its applied frontier. Reported retries keep that snapshot.
+Admission pins a material reference to the owning plugin namespace at its
+recorded generation. The Run retains one canonical image per namespace
+frontier; body requests share a read-only view of that image. Crash replay
+and reported retries resolve the recorded reference and keep that snapshot.
 Successful X captures hold declared state commands as data. Only the
 selected successful final reduces them, records the P58 resolutions with
 D, and publishes after D is durable. Failed or cancelled candidates
@@ -276,9 +278,12 @@ attempt's capture (X): `SingletonAttempt::stream` is an
 `AttemptStreamRecorder` observation sink, and the capture carries the
 `AttemptStream` it records, with deltas of a block coalesced, shared call
 fields stored once and the bytes capped by `ATTEMPT_STREAM_BYTE_BUDGET` under
-a typed `AttemptStreamTruncation`. The Run emits it when it presents the call
-(`SingletonToolHandlers::emit_stream`); a replay that serves the presentation
-emits nothing again. The tool-child settlement still carries the same
+a typed `AttemptStreamTruncation`. The Run emits it after the presentation record is durably accepted
+(`SingletonToolHandlers::emit_stream`); an unacknowledged proposal emits
+nothing, and a replay that serves the presentation emits nothing again.
+A declared presentation refusal records the original result as fallback
+alongside its typed `HookCause`; an invocation fault leaves V uncommitted
+for engine recovery. A lost V acknowledgement may omit the observation. The tool-child settlement still carries the same
 representation until FIG-4899 removes that transport.
 
 **Declared starts (K5, FIG-4884).** A final may declare one process start.

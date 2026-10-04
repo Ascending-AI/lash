@@ -145,7 +145,11 @@ impl SingletonToolHandlers for Probe {
         panic!("inline MCP declares no Lash effects")
     }
 
-    async fn present(&self, _: &ToolCallId, capture: &SingletonCapture) -> Result<String, String> {
+    async fn present(
+        &self,
+        _: &ToolCallId,
+        capture: &SingletonCapture,
+    ) -> Result<String, lash_core::tool_dispatch::SingletonPresentationError> {
         self.presentations.fetch_add(1, Ordering::SeqCst);
         self.cancel.store(true, Ordering::SeqCst);
         Ok(capture.output().unwrap().to_string())

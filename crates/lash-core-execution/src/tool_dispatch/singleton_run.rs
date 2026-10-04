@@ -106,15 +106,23 @@ pub struct SingletonToolCall {
 /// The prepared request admission records (A): the request as issued and the
 /// payload preparation made of it, after argument transforms and before any
 /// check.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SingletonPreparedRequest {
     pub arguments: serde_json::Value,
     pub prepared: serde_json::Value,
     /// The plugin namespace at admission, fixed across crash redelivery.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state_snapshot: Option<crate::plugin::PluginNamespaceState>,
+    pub state_snapshot: Option<Arc<crate::plugin::PluginNamespaceState>>,
     /// The recorded process route, never an ordinary body or Deferred source.
+    pub isolation: Option<RecordedIsolatedStart>,
+}
+
+/// Admission retains references; callbacks receive the hydrated read-only request.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RecordedPreparedRequest {
+    pub arguments: serde_json::Value,
+    pub prepared: serde_json::Value,
+    pub state_snapshot: Option<MaterialRef>,
     pub isolation: Option<RecordedIsolatedStart>,
 }
 
@@ -305,6 +313,15 @@ pub enum BeforeCheckReply {
     AbortRun { cause: HookCause },
 }
 
+/// Presentation separates a declared refusal from an invocation fault. The
+/// former records fallback text with its original cause; the latter retries
+/// the uncommitted V boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SingletonPresentationError {
+    Refused { cause: HookCause },
+    Fault { message: String },
+}
+
 /// The callbacks a singleton's records run. Each runs inside the step of the
 /// record that owns its answer and never on a replay that serves the record.
 /// An `Err` is a fault: the record stays unjournaled and its step runs again.
@@ -375,16 +392,18 @@ pub trait SingletonToolHandlers: Send + Sync {
         intents: &[ToolIntentKind],
     ) -> Result<(), String>;
 
-    /// The model-facing presentation of a final result (V).
+    /// The model-facing presentation of a final result (V). A declared
+    /// refusal records the original result as fallback, with its typed cause.
+    /// An invocation fault leaves V uncommitted for engine recovery.
     async fn present(
         &self,
         call_id: &ToolCallId,
         capture: &SingletonCapture,
-    ) -> Result<String, String>;
+    ) -> Result<String, SingletonPresentationError>;
 
-    /// Emit the stream a decided call's attempt captured to the host, once
-    /// its declarations settled and before its presentation (V). A replay
-    /// that serves the presentation emits nothing again.
+    /// Emit the captured stream after V has been durably accepted. A replay
+    /// that serves V emits nothing. A lost acknowledgement may omit this
+    /// observation; it never permits an unaccepted proposal to publish it.
     fn emit_stream(&self, call_id: &ToolCallId, stream: &AttemptStream);
 
     /// Register a final's declared start under its key (K5): the

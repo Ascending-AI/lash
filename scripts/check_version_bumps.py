@@ -3497,7 +3497,7 @@ def worktree_problems(repo: Path, surfaces: Iterable[Surface]) -> list[str]:
 
 
 def guarded_path_patterns(repo: Path) -> frozenset[str]:
-    """Every path a change to a registered surface can touch, as the working
+    """Journal owners and every path a registered surface can touch, as the working
     tree declares it: the registry, each constant's file, each guard's paths
     (globs included) and each catalog's file. CI selects the gate, the
     rolling-upgrade gate and the release-journal replay with it."""
@@ -3505,7 +3505,7 @@ def guarded_path_patterns(repo: Path) -> frozenset[str]:
     registry = view.content(REGISTRY)
     if registry is None:
         raise CheckError(f"cannot read {REGISTRY}")
-    patterns = {REGISTRY, UPCASTER_REGISTRY}
+    patterns = {REGISTRY, UPCASTER_REGISTRY, *JOURNAL_LOGIC_PATHS}
     from discover_version_surfaces import surfaces as discover_surfaces
     for surface in discover_surfaces(view):
         patterns.add(surface.constant_path)
@@ -3531,11 +3531,71 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+JOURNAL_LOGIC_SOURCE = "crates/lash-restate/src/process/admission.rs"
+JOURNAL_LOGIC_PATHS = (
+    "crates/lash-restate/src/*.rs",
+    "crates/lash-core/src/runtime/*.rs",
+    "crates/lash-core-execution/src/runtime/*.rs",
+    "crates/lash-core-store/src/tool_run/*.rs",
+    "crates/lash-core-execution/src/tool_dispatch.rs",
+    "crates/lash-core-execution/src/tool_dispatch/*.rs",
+    "crates/lash-core-execution/src/plugin/transition.rs",
+    "crates/lash-core-execution/src/plugin/state/publication.rs",
+)
+
+
+def journal_logic_source(text: str) -> str:
+    """Compare executable tokens, excluding file-local test modules."""
+    ranges = []
+    for start, end in rust_outer_attribute_ranges(text):
+        if strip_rust_trivia(text[start:end]) == "#[cfg(test)]" and (
+                not ranges or start >= ranges[-1][1]):
+            ranges.append((start, rust_item_end(text, end)))
+    for start, end in reversed(ranges):
+        text = text[:start] + text[end:]
+    return strip_rust_trivia(text)
+
+
+def journal_lane_refusal(base: TreeView, head: TreeView) -> str | None:
+    """Handler logic needs both generation lanes, even during format freeze.
+
+    This is conservative over the journal owners: executable edits to their
+    command construction or its execution helpers require a new epoch. Source
+    text is not a substitute for replay proof of the resulting generation.
+    """
+    old = base.content(JOURNAL_LOGIC_SOURCE)
+    if old is None:
+        return None
+    paths = sorted(set(base.matching_paths(JOURNAL_LOGIC_PATHS)) |
+                   set(head.matching_paths(JOURNAL_LOGIC_PATHS)))
+    paths = [path for path in paths if not any(
+        part == "tests" or part == "testing" or part.endswith("_tests.rs") or
+        part in ("tests.rs", "testing.rs") for part in Path(path).parts)]
+    base.preload(paths)
+    head.preload(paths)
+    changed = [path for path in paths if journal_logic_source(base.content(path) or "") !=
+               journal_logic_source(head.content(path) or "")]
+    if not changed:
+        return None
+    pattern = r"pub const JOURNAL_LOGIC_EPOCH: u32 = (\d+);"
+    before = tuple(map(int, re.findall(pattern, old)))
+    after = tuple(map(int, re.findall(pattern, head.content(JOURNAL_LOGIC_SOURCE) or "")))
+    if (len(before) == len(after) == 2 and after[0] > before[0] and
+            after[1] > before[1] and after[1] == after[0] + 1):
+        return None
+    return ("journal logic changed: move JOURNAL_LOGIC_EPOCH and its synthetic-next "
+            f"counterpart together; base {before}, head {after}; changed " + ", ".join(changed))
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         base = resolve_revision(args.repo, args.base)
         head = resolve_revision(args.repo, args.head)
+        lane_refusal = journal_lane_refusal(RevisionView(args.repo, base), RevisionView(args.repo, head))
+        if lane_refusal:
+            print(lane_refusal, file=sys.stderr)
+            return 1
         result = check_surfaces(args.repo, base, head, strict=args.strict)
     except CheckError as error:
         print(f"version-bump check error: {error}", file=sys.stderr)

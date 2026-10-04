@@ -102,7 +102,11 @@ impl SingletonToolHandlers for Probe {
     ) -> Result<(), String> {
         Err("no start declared".to_owned())
     }
-    async fn present(&self, _: &crate::ToolCallId, _: &SingletonCapture) -> Result<String, String> {
+    async fn present(
+        &self,
+        _: &crate::ToolCallId,
+        _: &SingletonCapture,
+    ) -> Result<String, crate::tool_dispatch::SingletonPresentationError> {
         self.presentations.fetch_add(1, Ordering::SeqCst);
         if matches!(self.held, Hold::Presentation) {
             self.hold().await;

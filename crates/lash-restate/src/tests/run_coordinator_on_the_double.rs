@@ -148,6 +148,7 @@ struct Probe {
     replay_delay: Option<Duration>,
     cancel_at_gate: bool,
     plugin_host: Option<Arc<lash_core::plugin::PluginHost>>,
+    state_seed: Option<lash_core::plugin::PluginState>,
     plugins: Mutex<Option<Arc<lash_core::plugin::PluginSession>>>,
     executions: Mutex<Vec<(ToolCallId, AttemptOrdinal)>>,
     /// The exactly-once fence of declared intents, keyed by call and kind.
@@ -162,6 +163,8 @@ struct Probe {
     faulted: AtomicBool,
     seen: Mutex<Vec<Seen>>,
     presentations: Mutex<Vec<ToolCallId>>,
+    presentation_failure: bool,
+    declaration_drift_on_replay: bool,
     emitted: Mutex<Vec<(ToolCallId, AttemptStream)>>,
 }
 
@@ -193,6 +196,7 @@ impl Probe {
             replay_delay: None,
             cancel_at_gate: false,
             plugin_host: None,
+            state_seed: None,
             plugins: Mutex::new(None),
             executions: Mutex::new(Vec::new()),
             realized: Mutex::new(Vec::new()),
@@ -203,6 +207,8 @@ impl Probe {
             faulted: AtomicBool::new(false),
             seen: Mutex::new(Vec::new()),
             presentations: Mutex::new(Vec::new()),
+            presentation_failure: false,
+            declaration_drift_on_replay: false,
             emitted: Mutex::new(Vec::new()),
         }
     }
@@ -309,6 +315,12 @@ impl SingletonToolHandlers for Probe {
                 }
                 wake.await;
             }
+        }
+        if let Some(seed) = &self.state_seed {
+            assert_eq!(
+                attempt.request.state_snapshot.as_ref().unwrap().values,
+                seed.plugins[PLUGIN].values
+            );
         }
         let call_id = attempt.call_id;
         Ok(match &self.kinds[call_id] {
@@ -452,7 +464,7 @@ impl SingletonToolHandlers for Probe {
         &self,
         call_id: &ToolCallId,
         capture: &SingletonCapture,
-    ) -> Result<String, String> {
+    ) -> Result<String, lash_core::tool_dispatch::SingletonPresentationError> {
         let declared = match capture {
             SingletonCapture::Done { intents, .. } => intents.clone(),
             _ => Vec::new(),
@@ -466,6 +478,17 @@ impl SingletonToolHandlers for Probe {
         }
         drop(realized);
         self.presentations.lock().unwrap().push(call_id.clone());
+        if self.presentation_failure {
+            return Err(
+                lash_core::tool_dispatch::SingletonPresentationError::Refused {
+                    cause: lash_core::tool_run::HookCause {
+                        error_type: "fig4926.presentation_refused".into(),
+                        error_version: std::num::NonZeroU32::MIN,
+                        payload: serde_json::json!({"reason": "deterministic presentation refusal"}),
+                    },
+                },
+            );
+        }
         Ok(format!("fig4880 presented {call_id}"))
     }
 
@@ -763,9 +786,17 @@ async fn drive(
             let finished = Arc::clone(&finished);
             let terminals = Arc::clone(&terminals);
             Box::pin(async move {
-                if probe.handler_attempts.fetch_add(1, Ordering::SeqCst) > 0
-                    && let Some(delay) = probe.replay_delay
-                {
+                let replay = probe.handler_attempts.fetch_add(1, Ordering::SeqCst) > 0;
+                let calls = if replay && probe.declaration_drift_on_replay {
+                    let mut changed = (*calls).clone();
+                    for (call, _) in &mut changed {
+                        call.declaration.isolated = true;
+                    }
+                    Arc::new(changed)
+                } else {
+                    calls
+                };
+                if replay && let Some(delay) = probe.replay_delay {
                     tokio::time::sleep(delay).await;
                 }
                 // Independent whole/crashed executions use the same injected
@@ -782,6 +813,9 @@ async fn drive(
                             Default::default(),
                         ))
                         .unwrap();
+                    if let Some(seed) = &probe.state_seed {
+                        session.hydrate_state(seed).unwrap();
+                    }
                     *probe.plugins.lock().unwrap() = Some(session);
                 }
                 let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
@@ -2194,3 +2228,166 @@ async fn a_deferred_run_waits_for_retained_results_and_replays_its_protected_fin
     );
 }
 mod aggregate;
+
+#[tokio::test]
+async fn l12_recorded_admission_ignores_live_isolation_drift() {
+    let calls = Arc::new(vec![(
+        call("catalog-drift", &Kind::IntentFree),
+        Kind::IntentFree,
+    )]);
+    let mut probe = Probe::new(&calls);
+    probe.declaration_drift_on_replay = true;
+    let probe = Arc::new(probe);
+    let driven = drive(
+        492601,
+        vec![CrashPoint::BeforeRun {
+            name: name(&calls[0].0.call_id, "decide"),
+        }],
+        Arc::clone(&calls),
+        Arc::new(vec![Step::Decide(0), Step::Drain]),
+        Arc::clone(&probe),
+    )
+    .await;
+    assert_eq!(driven.records().len(), 4);
+    assert_eq!(probe.executions_of(&calls[0].0.call_id), 1);
+}
+
+#[tokio::test]
+async fn l04_stream_publishes_only_after_presentation_acceptance() {
+    for withheld in [false, true] {
+        let kind = Kind::IntentFree;
+        let calls = Arc::new(vec![(call("stream-acceptance", &kind), kind)]);
+        let mut probe = Probe::new(&calls);
+        probe
+            .streams
+            .insert(calls[0].0.call_id.clone(), vec![delta("captured")]);
+        let probe = Arc::new(probe);
+        let program = if withheld {
+            vec![Step::Cancel, Step::Decide(0), Step::Drain]
+        } else {
+            vec![Step::Decide(0), Step::Drain]
+        };
+        let driven = drive(
+            492608,
+            vec![CrashPoint::BeforeRunResult {
+                name: Some(name(&calls[0].0.call_id, "present")),
+            }],
+            Arc::clone(&calls),
+            Arc::new(program),
+            Arc::clone(&probe),
+        )
+        .await;
+        driven.records();
+        assert_eq!(
+            probe.emitted.lock().unwrap().len(),
+            1,
+            "an unaccepted V never publishes its stream, including withheld calls"
+        );
+        assert_eq!(probe.executions_of(&calls[0].0.call_id), 1);
+    }
+}
+
+#[tokio::test]
+async fn l04_presentation_refusal_records_fallback_and_finishes_drain() {
+    let kind = Kind::Declares(vec![ToolIntentKind::EmitTrigger]);
+    let calls = Arc::new(vec![(call("presentation-fallback", &kind), kind)]);
+    let mut probe = Probe::new(&calls);
+    probe.presentation_failure = true;
+    let probe = Arc::new(probe);
+    let driven = drive(
+        492609,
+        vec![CrashPoint::BeforeFrame {
+            ty: MessageType::OutputCommand,
+        }],
+        Arc::clone(&calls),
+        Arc::new(vec![Step::Decide(0), Step::Drain]),
+        Arc::clone(&probe),
+    )
+    .await;
+    let records = driven.records();
+    assert!(records.iter().flat_map(|record| &record.events).any(|event|
+        matches!(event, RunEvent::Incorporated { call_id } if *call_id == calls[0].0.call_id)));
+    assert_eq!(
+        probe.presentations.lock().unwrap().len(),
+        1,
+        "a recorded fallback never repeats the failed presenter"
+    );
+    assert_eq!(probe.realized.lock().unwrap().len(), 1);
+    assert!(records.iter().flat_map(|record| &record.events).any(|event|
+        matches!(event, RunEvent::Presented { failure: Some(cause), .. }
+            if cause.error_type == "fig4926.presentation_refused" && cause.payload["reason"] == "deterministic presentation refusal")));
+    let terminals = driven.terminals.lock().unwrap();
+    assert!(
+        matches!(&terminals[&calls[0].0.call_id], SingletonTerminal::Final { presentation, capture, .. }
+        if Some(presentation.as_str()) == capture.output())
+    );
+}
+
+#[tokio::test]
+async fn l15_admission_owns_one_namespace_image_for_a_wide_round() {
+    let calls = Arc::new(
+        (0..16)
+            .map(|i| {
+                (
+                    call(&format!("snapshot-{i}"), &Kind::IntentFree),
+                    Kind::IntentFree,
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
+    let mut factories = lash_core::testing::test_standard_protocol_factories();
+    factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+        lash_core::plugin::PluginDeclaration::initial(PLUGIN),
+        lash_core::plugin::PluginSpec::new(),
+    )));
+    let mut probe = Probe::new(&calls);
+    probe.plugin_host = Some(Arc::new(lash_core::plugin::PluginHost::new(factories)));
+    let mut namespace = lash_core::plugin::PluginNamespaceState::default();
+    for index in 0..4 {
+        namespace.values.insert(
+            format!("payload-{index}"),
+            serde_json::json!("x".repeat(31 * 1024)),
+        );
+    }
+    probe.state_seed = Some(lash_core::plugin::PluginState {
+        plugins: BTreeMap::from([(PLUGIN.into(), namespace)]),
+    });
+    let driven = drive(
+        492607,
+        Vec::new(),
+        calls,
+        Arc::new(vec![Step::Concurrent, Step::Drain]),
+        Arc::new(probe),
+    )
+    .await;
+    driven.records();
+    let admissions: Vec<_> = driven
+        .backend
+        .server()
+        .invocations()
+        .iter()
+        .flat_map(|view| driven.backend.server().journal(&view.id).unwrap())
+        .filter_map(|entry| {
+            let bytes = entry.run_completion()?.ok()?;
+            let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+            let record: RunRecord = serde_json::from_value(value.get("record")?.clone()).ok()?;
+            record
+                .events
+                .iter()
+                .any(|event| matches!(event, RunEvent::Admitted { .. }))
+                .then_some(bytes)
+        })
+        .collect();
+    assert_eq!(admissions.len(), 1);
+    let text = String::from_utf8(admissions[0].to_vec()).unwrap();
+    assert!(
+        text.len() < 160 * 1024,
+        "the admission byte cost contains one image and bounded references, got {}",
+        text.len()
+    );
+    assert_eq!(
+        text.matches("generation").count(),
+        1,
+        "sixteen members reference one canonical namespace image"
+    );
+}

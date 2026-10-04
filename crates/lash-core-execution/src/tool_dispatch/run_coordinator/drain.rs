@@ -1,7 +1,8 @@
 //! Protected declarations, declared starts and presentation in rank order.
 
 use super::*;
-use crate::tool_dispatch::singleton_run::IsolatedProcessDescriptor;
+use crate::tool_dispatch::singleton_run::{IsolatedProcessDescriptor, SingletonPresentationError};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 impl<'a> RunCoordinator<'a> {
     /// Drain every decided call in rank order: a final's declarations once
@@ -69,16 +70,14 @@ impl<'a> RunCoordinator<'a> {
         else {
             // V: a withheld call is presented by its decision and
             // incorporated; the stream its body emitted is still the host's.
-            let present = journal.record(presented(&call_id, None, consume));
-            let emitted = capture;
-            let step_call = call_id.clone();
+            let present = journal.record(presented(&call_id, None, consume, None));
+            let fresh = AtomicBool::new(false);
+            let executed = &fresh;
             journal
                 .append(
                     record_name(&call_id, "present"),
                     Box::pin(async move {
-                        if let Some(stream) = emitted.as_ref().and_then(SingletonCapture::stream) {
-                            handlers.emit_stream(&step_call, stream);
-                        }
+                        executed.store(true, Ordering::Relaxed);
                         Ok(RunJournalEntry {
                             state: Vec::new(),
                             record: present,
@@ -87,6 +86,11 @@ impl<'a> RunCoordinator<'a> {
                     }),
                 )
                 .await?;
+            if fresh.load(Ordering::Relaxed)
+                && let Some(stream) = capture.as_ref().and_then(SingletonCapture::stream)
+            {
+                handlers.emit_stream(&call_id, stream);
+            }
             self.presented.insert(
                 call_id,
                 PresentedCall {
@@ -169,18 +173,27 @@ impl<'a> RunCoordinator<'a> {
             }
             _ => None,
         };
+        let fresh = AtomicBool::new(false);
+        let executed = &fresh;
         let present = Box::pin(async move {
             if declares && !final_capture.intents().is_empty() {
                 handlers
                     .realize_declarations(&step_call, final_capture.intents())
                     .await?;
             }
-            if let Some(stream) = final_capture.stream() {
-                handlers.emit_stream(&step_call, stream);
-            }
-            let text = match descriptor {
-                Some(descriptor) => encode(&descriptor)?,
-                None => handlers.present(&step_call, &final_capture).await?,
+            let (text, failure) = match descriptor {
+                Some(descriptor) => (encode(&descriptor)?, None),
+                None => match handlers.present(&step_call, &final_capture).await {
+                    Ok(text) => (text, None),
+                    Err(SingletonPresentationError::Refused { cause }) => {
+                        let fallback = match final_capture.output() {
+                            Some(output) => output.to_owned(),
+                            None => encode(&final_capture)?,
+                        };
+                        (fallback, Some(cause))
+                    }
+                    Err(SingletonPresentationError::Fault { message }) => return Err(message),
+                },
             };
             let mut owned = Vec::new();
             let presentation = if final_capture.output() == Some(text.as_str()) {
@@ -191,7 +204,8 @@ impl<'a> RunCoordinator<'a> {
                 Some(reference)
             };
             let mut events = settle;
-            events.extend(presented(&step_call, presentation, consume));
+            events.extend(presented(&step_call, presentation, consume, failure));
+            executed.store(true, Ordering::Relaxed);
             Ok(RunJournalEntry {
                 state: Vec::new(),
                 record: RunRecord {
@@ -227,6 +241,11 @@ impl<'a> RunCoordinator<'a> {
                 .map(str::to_owned)
                 .ok_or_else(|| boundary(&call_id))?,
         };
+        if fresh.load(Ordering::Relaxed)
+            && let Some(stream) = capture.stream()
+        {
+            handlers.emit_stream(&call_id, stream);
+        }
         Ok(SingletonTerminal::Final {
             source: source.clone(),
             capture,
@@ -240,10 +259,12 @@ fn presented(
     call_id: &ToolCallId,
     presentation: Option<MaterialRef>,
     consume: bool,
+    failure: Option<crate::tool_run::HookCause>,
 ) -> Vec<RunEvent> {
     let mut events = vec![RunEvent::Presented {
         call_id: call_id.clone(),
         presentation,
+        failure,
     }];
     if consume {
         events.push(RunEvent::Consumed {
