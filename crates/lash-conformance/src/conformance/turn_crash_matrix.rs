@@ -66,7 +66,6 @@ mod error_return;
 mod expectations;
 mod recovery;
 mod reference_turn;
-mod run_end_crash_cells;
 mod seam_controllers;
 
 use recovery::run_crash_matrix_case;
@@ -88,9 +87,6 @@ use expectations::{
     validate_outcome_table,
 };
 use pretty_assertions::assert_eq;
-pub use run_end_crash_cells::{
-    run_end_commit_crash_after_write_replays_once, run_end_commit_crash_before_write_replays_once,
-};
 pub(crate) use seam_controllers::{LawSeamHost, SeamLayer};
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
@@ -880,16 +876,13 @@ async fn try_build_runtime_over_host(
     trace_tool: TraceTool,
     lease_timings: crate::LeaseTimings,
 ) -> Result<crate::LashRuntime, crate::SessionError> {
-    try_build_runtime_over_host_with_delivery_failure(
+    try_build_runtime_over_host_with_tools(
         stores,
         store,
         control,
         effect_host,
         identity,
-        ReferenceRuntimeTools {
-            trace_tool,
-            fail_post_commit_delivery: false,
-        },
+        ReferenceRuntimeTools { trace_tool },
         lease_timings,
     )
     .await
@@ -897,10 +890,9 @@ async fn try_build_runtime_over_host(
 
 struct ReferenceRuntimeTools {
     trace_tool: TraceTool,
-    fail_post_commit_delivery: bool,
 }
 
-async fn try_build_runtime_over_host_with_delivery_failure(
+async fn try_build_runtime_over_host_with_tools(
     stores: Arc<dyn crate::StoreSet>,
     store: Arc<dyn RuntimeStore>,
     control: SeamControl,
@@ -925,25 +917,7 @@ async fn try_build_runtime_over_host_with_delivery_failure(
         lash_core::plugin::PluginDeclaration::initial("turn_crash_trace_tool"),
         PluginSpec::new().with_tool_provider(Arc::new(trace_tool)),
     )));
-    if tools.fail_post_commit_delivery {
-        plugin_factories.push(Arc::new(StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("turn_crash_post_commit_failure"),
-            PluginSpec::new().with_runtime_event(
-                crate::hook_key!("post-commit-failure"),
-                Arc::new(|event| {
-                    Box::pin(async move {
-                        if matches!(event, crate::plugin::PluginLifecycleEvent::TurnPersisted(_)) {
-                            Err(crate::PluginError::Session(
-                                "injected post-commit delivery failure".to_string(),
-                            ))
-                        } else {
-                            Ok(())
-                        }
-                    })
-                }),
-            ),
-        )));
-    }
+
     Box::pin(
         crate::LashRuntime::builder(
             host,

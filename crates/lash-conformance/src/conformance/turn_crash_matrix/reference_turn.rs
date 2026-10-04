@@ -29,7 +29,6 @@ pub(super) struct ReferenceTurn {
     pub(super) seam: SeamLayer,
     pub(super) trace_tool: TraceTool,
     pub(super) lease_timings: crate::LeaseTimings,
-    pub(super) fail_post_commit_delivery: bool,
     pub(super) before_shift: BeforeShift,
     /// The active-turn inputs the seam store steers into the run once it is
     /// admitted: the reference input, then any the scenario adds.
@@ -65,7 +64,6 @@ impl ReferenceTurn {
                 ..TraceTool::default()
             },
             lease_timings,
-            fail_post_commit_delivery: false,
             before_shift: Arc::new(|_| {}),
             steer: vec![reference_steer(identity)],
             reports: None,
@@ -86,11 +84,6 @@ impl ReferenceTurn {
         steer: impl IntoIterator<Item = PendingTurnInputDraft>,
     ) -> Self {
         self.steer.extend(steer);
-        self
-    }
-
-    pub(super) fn fail_post_commit_delivery(mut self) -> Self {
-        self.fail_post_commit_delivery = true;
         self
     }
 
@@ -122,7 +115,7 @@ impl ReferenceTurn {
                     turn.steer.clone(),
                 );
                 turn.host.route_to(&turn.seam);
-                let mut runtime = Box::pin(try_build_runtime_over_host_with_delivery_failure(
+                let mut runtime = Box::pin(try_build_runtime_over_host_with_tools(
                     Arc::clone(&turn.stores),
                     store,
                     turn.seam.control.clone(),
@@ -130,7 +123,6 @@ impl ReferenceTurn {
                     &turn.identity,
                     ReferenceRuntimeTools {
                         trace_tool: turn.trace_tool.clone(),
-                        fail_post_commit_delivery: turn.fail_post_commit_delivery,
                     },
                     turn.lease_timings,
                 ))

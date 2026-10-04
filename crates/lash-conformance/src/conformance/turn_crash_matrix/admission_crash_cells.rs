@@ -40,7 +40,6 @@ pub(super) async fn crash_then_redrive(
     point: TurnCrashPoint,
     before_redrive: Option<PendingTurnInputDraft>,
     steer: &[PendingTurnInputDraft],
-    fail_post_commit_delivery: bool,
 ) -> (
     reference_turn::DrainReport,
     Vec<TurnSeamOperation>,
@@ -50,7 +49,7 @@ pub(super) async fn crash_then_redrive(
     let executions = Arc::new(AtomicUsize::new(0));
     let control = SeamControl::default();
     let crash = crash_at_armed_point(&control);
-    let mut crashing = ReferenceTurn::new(
+    let crashing = ReferenceTurn::new(
         law.stores,
         (law.make)(scenario),
         law.host,
@@ -60,9 +59,6 @@ pub(super) async fn crash_then_redrive(
         crashed_turn_timings(),
     )
     .steering(steer.iter().cloned());
-    if fail_post_commit_delivery {
-        crashing = crashing.fail_post_commit_delivery();
-    }
     let crashing = crashing
         .before_shift(move |control| control.arm(point.clone()))
         .attempt();
@@ -81,7 +77,7 @@ pub(super) async fn crash_then_redrive(
     });
 
     let successor_control = SeamControl::default();
-    let mut successor = ReferenceTurn::new(
+    let successor = ReferenceTurn::new(
         law.stores,
         (law.make)(scenario),
         law.host,
@@ -91,9 +87,6 @@ pub(super) async fn crash_then_redrive(
         nominal_recovery_timings(),
     )
     .steering(steer.iter().cloned());
-    if fail_post_commit_delivery {
-        successor = successor.fail_post_commit_delivery();
-    }
     let (successor, redriven) = successor.before_shift(SeamControl::clear).reporting();
     let writer = (law.make)(scenario);
     let pending_write = Arc::new(std::sync::Mutex::new(before_redrive));
@@ -197,7 +190,6 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
         },
         None,
         &[],
-        false,
     ))
     .await;
     let turn = report
@@ -337,7 +329,6 @@ pub async fn a_checkpoint_admission_crashed_before_its_record_redelivers_its_row
         },
         Some(newcomer),
         &[],
-        false,
     ))
     .await;
     report
