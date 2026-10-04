@@ -17,6 +17,7 @@ use crate::node::tools::{BodyResult, BodyStep, FixtureProtocol, ToolBodies, Tool
 use crate::node::{RestateArgs, ServeReady, StoreArgs};
 use crate::restate_view::RestateView;
 
+mod body_identity;
 mod control;
 mod receiver;
 
@@ -96,15 +97,26 @@ pub async fn serve(args: FleetServeArgs) -> Result<()> {
     )?;
     let callback_args = args.clone();
     let callback_stores = stores.clone();
+    let body_identity_lock = Arc::new(tokio::sync::Mutex::new(()));
     let callback = Arc::new(move |delivery: ToolDelivery| -> BodyStep {
         let args = callback_args.clone();
         let stores = callback_stores.clone();
+        let identity_lock = body_identity_lock.clone();
         Box::pin(async move {
             let run = delivery
                 .logical_run
                 .as_ref()
                 .context("body has no logical Run")?;
-            let (mut work, _) = observe_work(&args, stores.as_ref(), run, deadline).await?;
+            let mut work = {
+                let _capture = identity_lock.lock().await;
+                body_identity::capture(
+                    &args.barrier_directory.join("body-owner.json"),
+                    &args.session,
+                    run,
+                    observe_work(&args, stores.as_ref(), run, deadline),
+                )
+                .await?
+            };
             work.call = Some(delivery.call_id.to_string());
             work.ordinal = Some(delivery.ordinal);
             let barrier = Barrier {

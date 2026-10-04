@@ -261,15 +261,17 @@ impl LocalCluster {
             .build()?;
         let mut last_error = String::new();
         loop {
-            let observed: Result<(Vec<LeaderReceipt>,serde_json::Value)> = async {
+            let observed: Result<(Vec<LeaderReceipt>,serde_json::Value,Vec<super::metadata::NodeId>)> = async {
                 let mut expected = None;
                 let mut views = Vec::new();
+                let mut scanner_peers = Vec::new();
                 let mut node_version = None;
                 for node in &self.nodes {
                     let peer = self.control_peer(&node.receipt)?;
                     let ident: super::metadata::Ident = super::metadata::unary(&peer,"restate.node_ctl_svc.NodeCtlSvc/GetIdent").await?;
                     ensure!(ident.status==1 && ident.node_id.as_ref().is_some_and(|id| id.id==node.receipt.node),"owned node identity is not ready");
                     ensure!(ident.cluster_name==self.namespace(),"node joined another cluster");
+                    scanner_peers.push(ident.node_id.clone().context("ready scanner peer lacks identity")?);
                     ensure!(ident.advertised_addresses.iter().any(|address| reqwest::Url::parse(&address.address).ok()==reqwest::Url::parse(&node.receipt.peer_address).ok()),"advertised peer does not use owned link proxy: {:?}",ident.advertised_addresses);
                     if let Some(version) = node_version { ensure!(version==ident.nodes_config_version,"membership versions disagree"); } else { node_version=Some(ident.nodes_config_version); }
                     let response: super::metadata::ConfigurationResponse = super::metadata::unary(&peer,"restate.cluster_ctrl.ClusterCtrlSvc/GetClusterConfiguration").await?;
@@ -287,10 +289,25 @@ impl LocalCluster {
                     ensure!(health.pointer("/metadata_cluster_health/members").and_then(serde_json::Value::as_array).is_some_and(|members| members.len()==self.nodes.len()),"metadata quorum has not joined every node");
                     views.push(json!({"identity":ident,"configuration":config,"state":state,"health":health}));
                 }
-                Ok((expected.context("leaders absent")?,json!({"node_views":views,"peer_identity":"/proc/net/tcp + /proc/<owned-pid>/fd","server_version":self.server_version})))
+                Ok((expected.context("leaders absent")?,json!({"node_views":views,"peer_identity":"/proc/net/tcp + /proc/<owned-pid>/fd","server_version":self.server_version}),scanner_peers))
             }.await;
             match observed {
-                Ok((leaders, provisioning)) => {
+                Ok((leaders, mut provisioning, scanner_peers)) => {
+                    // Metadata convergence cannot authorize a scanner while
+                    // its querying incarnation is still Dead after healing.
+                    let logs: Vec<_> = self
+                        .nodes
+                        .iter()
+                        .map(|node| (node.receipt.node, node.log.clone()))
+                        .collect();
+                    let mut scanner_readiness = Vec::new();
+                    for peer in scanner_peers {
+                        scanner_readiness.push(
+                            super::scanner::await_readiness(peer, logs.clone(), self.deadline)
+                                .await?,
+                        );
+                    }
+                    provisioning["scanner_readiness"] = serde_json::to_value(scanner_readiness)?;
                     self.provisioning = provisioning;
                     return Ok(ClusterReceipt {
                         binary: self.binary.clone().context("cluster binary missing")?,
@@ -473,6 +490,31 @@ default-provider = "replicated"
         Box::pin(async move {
             self.start(id)?;
             self.ready().await?;
+            let node = self.node_mut(id)?.receipt.clone();
+            let ident: super::metadata::Ident = super::metadata::unary(
+                &self.control_peer(&node)?,
+                "restate.node_ctl_svc.NodeCtlSvc/GetIdent",
+            )
+            .await?;
+            let peer = ident
+                .node_id
+                .context("restarted scanner peer has no identity")?;
+            ensure!(peer.id == id, "restarted scanner peer identity differs");
+            let readiness = super::scanner::await_readiness(
+                peer,
+                self.nodes
+                    .iter()
+                    .map(|node| (node.receipt.node, node.log.clone()))
+                    .collect(),
+                self.deadline,
+            )
+            .await?;
+            std::fs::write(
+                self.node_mut(id)?
+                    .config
+                    .with_file_name("scanner-readiness.json"),
+                serde_json::to_vec_pretty(&readiness)?,
+            )?;
             Ok(self.node_mut(id)?.receipt.clone())
         })
     }
@@ -492,6 +534,9 @@ default-provider = "replicated"
         Box::pin(async move {
             let mut receipts = Vec::new();
             let mut failures = Vec::new();
+            if let Err(error) = self.links.finish().await {
+                failures.push(error.to_string());
+            }
             for node in &mut self.nodes {
                 if let Some(mut process) = node.process.take() {
                     match process.kill_and_reap() {
@@ -504,9 +549,6 @@ default-provider = "replicated"
                     closed: true,
                     detail: "process reaped; durable data and logs retained".into(),
                 });
-            }
-            if let Err(error) = self.links.finish().await {
-                failures.push(error.to_string());
             }
             receipts.push(CleanupReceipt {
                 resource: "peer-proxies".into(),

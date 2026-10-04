@@ -48,3 +48,4 @@ mod runtime;
 pub use runtime::LocalCluster;
 
 mod metadata;
+mod scanner;

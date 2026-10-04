@@ -78,9 +78,13 @@ impl PeerLinks {
                         let state = state.clone();
                         let processes = processes.clone();
                         let change = change.subscribe();
-                        let stop = stop.clone();
+                        let mut stop = stop.clone();
                         connections.spawn(async move {
-                            let from = identify(peer, proxy, &processes).await?;
+                            let from = tokio::select! {
+                                biased;
+                                _ = stop.changed() => return Ok(()),
+                                from = identify(peer, proxy, &processes) => from?,
+                            };
                             forward(client, upstream, from, target, connection_id, state, change, stop).await
                         });
                     }
