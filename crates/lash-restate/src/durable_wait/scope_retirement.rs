@@ -25,10 +25,11 @@ use super::{
 pub(super) async fn revoke_index(
     ctx: &ObjectContext<'_>,
     object: object_state::AdmittedObject,
-    namespace: &crate::RestateNamespace,
-    admin: Option<&crate::RestateAdminClient>,
+    registry: &super::LashDurableWaitRegistryImpl,
     only_if_quiescent: bool,
 ) -> HandlerResult<bool> {
+    let namespace = &registry.namespace;
+    let admin = registry.admin.as_ref();
     let mut metadata = load_durable_wait_index_metadata(ctx, object.writer).await?;
     let waits: Vec<_> = load_indexed_waits(ctx)
         .await?
@@ -57,20 +58,21 @@ pub(super) async fn revoke_index(
     }
     // An unsealed Deferred source keeps a quiescence-proved or process
     // retirement open; an unconditional revocation seals it `Cancelled`.
-    let open_sources = load_sources(ctx, &keys, |armed| armed.seal.is_none()).await?;
+    let sources = load_sources(ctx, &keys, |_| true).await?;
+    let has_open_sources = sources.iter().any(|(_, source)| source.seal.is_none());
     if (only_if_quiescent
         && (!waits.is_empty()
             || !metadata.awakeables.is_empty()
             || !metadata.process_sources.is_empty()
             || !metadata.process_receivers.is_empty()
-            || !open_sources.is_empty()))
-        || (process_scope && !open_sources.is_empty())
+            || has_open_sources))
+        || (process_scope && has_open_sources)
         || ((only_if_quiescent || process_scope)
             && !scope_effects_and_groups_are_quiescent(ctx, namespace).await?)
     {
         return Ok(false);
     }
-    retire_sources(namespace, ctx, object.writer, open_sources).await?;
+    retire_sources(registry, ctx, object.writer, sources).await?;
     super::process_terminal::detach(namespace, ctx, &mut metadata, |_| true);
     let awakeables = std::mem::take(&mut metadata.awakeables);
     metadata.revoked = true;

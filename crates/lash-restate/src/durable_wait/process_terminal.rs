@@ -5,7 +5,7 @@ use super::*;
 use crate::controller::RestateControllerContext as _;
 use lash_core::ProcessAwaitOutput;
 use lash_core::runtime::attachment_delivery::{
-    DeliveryAcquisition, acquire_delivered_attachments, source_gone_output,
+    DeliveryAcquisition, acquire_under, delivered_attachment_ids, source_gone_output,
 };
 use lash_core::tool_run::{
     MaterialBundle, MaterialHolder, MaterialOwner, MaterialPayload, MaterialRole, RetainedBundle,
@@ -141,6 +141,18 @@ pub(super) async fn attach(
     {
         return Ok(Reply::at(wire, false));
     }
+    match source_seal::arm_descriptor(
+        registry,
+        &ctx,
+        object.writer,
+        subscription.descriptor.clone(),
+    )
+    .await?
+    {
+        RestateSourceArmReply::Armed { seal: None } => {}
+        RestateSourceArmReply::Armed { seal: Some(_) } => return Ok(Reply::at(wire, false)),
+        RestateSourceArmReply::Refused { refusal: cause } => return Err(refusal(cause).into()),
+    }
     store_indexed_wait(&ctx, object.writer, &subscription.receiver, &address, None);
     if let Some(existing) = metadata
         .process_sources
@@ -158,17 +170,6 @@ pub(super) async fn attach(
             object.writer,
             metadata,
         );
-    }
-    match source_seal::arm_descriptor(
-        registry,
-        &ctx,
-        object.writer,
-        subscription.descriptor.clone(),
-    )
-    .await?
-    {
-        RestateSourceArmReply::Armed { .. } => {}
-        RestateSourceArmReply::Refused { refusal: cause } => return Err(refusal(cause).into()),
     }
     Ok(Reply::at(wire, true))
 }
@@ -299,15 +300,23 @@ pub(super) async fn deliver(
         return Ok(Reply::at(wire, ()));
     }
     let attachments = Arc::clone(&registry.attachments);
-    let receiver = subscription.receiver.scope.clone();
+    let holder = MaterialHolder::Source {
+        source: subscription.receiver.clone(),
+    };
+    let claim = lash_core::ReferrerClaim::unguarded(holder.referrer())
+        .map_err(|_| refusal(SourceRefusal::WrongOwner))?;
     let output = delivery.output.clone();
     let Json(acquisition) = ctx
         .run_json_or_retry_send::<DeliveryAcquisition, _>(
             "process-terminal-acquire".into(),
             async move {
-                acquire_delivered_attachments(attachments.as_ref(), &receiver, &output)
-                    .await
-                    .map_err(|error| error.to_string())
+                acquire_under(
+                    attachments.as_ref(),
+                    &claim,
+                    &delivered_attachment_ids(&output),
+                )
+                .await
+                .map_err(|error| error.to_string())
             },
         )
         .await?;

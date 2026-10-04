@@ -40,7 +40,7 @@ fn owes_published_terminal(
 pub(super) async fn retire_run(
     ctx: ObjectContext<'_>,
     object: object_state::AdmittedObject,
-    namespace: &crate::RestateNamespace,
+    registry: &LashDurableWaitRegistryImpl,
     request: RestateDurableWaitRunRequest,
 ) -> HandlerResult<()> {
     if request.session_id.as_str() != ctx.key()
@@ -58,6 +58,7 @@ pub(super) async fn retire_run(
         ))
         .into());
     }
+    let namespace = &registry.namespace;
     let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
     let keys = ctx.get_keys().await?;
     for wait in load_indexed_waits_in(&ctx, &keys)
@@ -100,7 +101,7 @@ pub(super) async fn retire_run(
         .iter()
         .map(|(address, _)| source_seal::source_state_key(address))
         .collect();
-    source_seal::retire_sources(namespace, &ctx, object.writer, sources).await?;
+    source_seal::retire_sources(registry, &ctx, object.writer, sources).await?;
     for state_key in cleared {
         ctx.clear(&state_key);
     }

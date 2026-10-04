@@ -144,6 +144,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// Run receipts under the successor segment before any new publication.
 /// Epoch 22 (FIG-4739) publishes the complete turn-opener transfer with its
 /// material leases and restores it before successor turn work.
+/// Epoch 23 (FIG-4891) uses short event observers, races source waits against
+/// segment handover and holds process results through their logical sources.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -157,14 +159,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 22;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 23;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 23;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 24;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

@@ -19,8 +19,8 @@ use lash_core::{
 };
 use restate_sdk::context::macro_support::SealedDurableFuture;
 use restate_sdk::context::{
-    CallFuture as _, Context as RestateContext, ContextAwakeables, ContextClient, ObjectContext,
-    RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+    Context as RestateContext, ContextAwakeables, ContextClient, ObjectContext, RunRetryPolicy,
+    SharedObjectContext, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, TerminalError};
 use restate_sdk::serde::Json;
@@ -34,11 +34,10 @@ use crate::durable_wait::process_terminal::RestateProcessTerminalRequest;
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitEffectRequest,
     RestateDurableWaitGroupChildMembershipRequest, RestateDurableWaitGroupRequest,
-    RestateDurableWaitIndexRequest, RestateDurableWaitResolveRefusal,
-    RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse, RestateTurnCancelGate,
-    RestateTurnCancelRaceOutcome, RestateTurnCancelWake, RestateTurnGatePeek,
-    durable_wait_index_object_key, register_turn_cancel_gate,
-    restate_await_event_key_for_authority, retire_turn_cancel_gate,
+    RestateDurableWaitIndexRequest, RestateDurableWaitResolveRequest,
+    RestateDurableWaitResolveResponse, RestateTurnCancelGate, RestateTurnCancelRaceOutcome,
+    RestateTurnCancelWake, RestateTurnGatePeek, durable_wait_index_object_key,
+    register_turn_cancel_gate, restate_await_event_key_for_authority, retire_turn_cancel_gate,
 };
 use crate::effect_group::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse,
@@ -64,6 +63,8 @@ mod tool_completion;
 mod segment_wait;
 #[macro_use]
 mod source_wait;
+#[macro_use]
+mod event_wait;
 mod contract;
 pub use contract::RestateControllerContext;
 mod wake;
@@ -72,7 +73,6 @@ pub use child_cancel::GroupChildCancelArm;
 pub use child_cancel::GroupChildCancelRace;
 use child_cancel::race_group_child_cancel;
 use gate_race::{TurnGateRace, race_turn_cancel_gate, race_turn_gate};
-use segment_wait::race_signal_wait;
 pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome, TurnSleepOutcome, TurnWaitOutcome};
 #[cfg(test)]
 pub(crate) use wake::guard_restate_context_future;
@@ -131,20 +131,6 @@ fn erase_gate_wait<'run, T>(
     wait: impl GateWaitFuture<Output = Result<T, TerminalError>> + Send + 'run,
 ) -> GateWait<'run, T> {
     Box::pin(wait)
-}
-
-/// Retire the exact shared-handler read, preserving its workflow's logical
-/// event. The cancellation and output attachment are both journaled, so the
-/// caller cannot commit a handover before this subscription has returned.
-async fn retire_wait_subscription(
-    subscription: restate_sdk::context::InvocationHandle,
-) -> Result<(), TerminalError> {
-    subscription.cancel();
-    match subscription.attach::<Reply<Resolution>>().await {
-        Ok(_) => Ok(()),
-        Err(error) if is_engine_cancellation(&error) => Ok(()),
-        Err(error) => Err(error),
-    }
 }
 
 /// This is the SDK's `select!` without its consuming semantics: the macro
@@ -474,236 +460,7 @@ macro_rules! impl_restate_controller_context {
                     })
                 }
 
-                fn await_event<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    request: RestateDurableWaitAwaitRequest,
-                    replay_key: String,
-                    _cancellation: tokio_util::sync::CancellationToken,
-                ) -> crate::JournaledFuture<'run, Resolution>
-                where
-                    'ctx: 'run,
-                {
-                    Box::pin(async move {
-                        let address = RestateDurableWaitAddress::for_key(&request.key);
-                        let start = namespace.durable_wait_workflow(self,
-                                address.workflow_key.clone(),
-                            )
-                            .await_resolution(request.clone().into())
-                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
-                        let call = start.call();
-                        restate_sdk::select! {
-                            result = call => {
-                                Ok(result?.into_body())
-                            },
-                            on_cancel => {
-                                let resolve_request = namespace.durable_wait_registry(self,
-                                        durable_wait_index_object_key(&address),
-                                    )
-                                    .resolve(RestateDurableWaitResolveRequest {
-                                        key: request.key,
-                                        resolution: Resolution::Cancelled,
-                                    })
-                                    .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                                let response = resolve_request.call().await?.into_body();
-                                // A cancel-decided child's key refuses the
-                                // release (ADR 0099 §4): the waiter was
-                                // cancelled either way.
-                                Ok(match response {
-                                    RestateDurableWaitResolveResponse::Outcome(ResolveOutcome::AlreadyResolved {
-                                        terminal,
-                                    }) => terminal,
-                                    RestateDurableWaitResolveResponse::Outcome(_)
-                                    | RestateDurableWaitResolveResponse::Refused(RestateDurableWaitResolveRefusal::CancelDecided) => {
-                                        Resolution::Cancelled
-                                    }
-                                })
-                            }
-                        }
-                    })
-                }
-
-                fn await_event_or_turn_cancel<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    request: RestateDurableWaitAwaitRequest,
-                    replay_key: String,
-                    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-                    process_cancel: ProcessCancelRace,
-                ) -> TurnCancelRaceFuture<'run, Resolution>
-                where
-                    'ctx: 'run,
-                {
-                    Box::pin(async move {
-                        let Some(turn_cancel) = turn_cancel else {
-                            if process_cancel == ProcessCancelRace::NotRaced {
-                                return self
-                                    .await_event(
-                                        namespace,
-                                        request,
-                                        replay_key,
-                                        tokio_util::sync::CancellationToken::new(),
-                                    )
-                                    .await
-                                    .map(RestateTurnCancelRaceOutcome::Completed);
-                            };
-                            // The event wait's CallCommand, then the promise's.
-                            let event_address = RestateDurableWaitAddress::for_key(&request.key);
-                            let event_key = request.key.clone();
-                            let event = namespace.durable_wait_workflow(self,
-                                    event_address.workflow_key.clone(),
-                                )
-                                .await_resolution(request.into())
-                                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
-                            let event = erase_gate_wait(event.call());
-                            let Some(promise) =
-                                process_cancel_promise!($promises, $context, 'run, self)
-                            else {
-                                return Err(TerminalError::new(
-                                    "a process cancel race needs a workflow promise surface",
-                                ));
-                            };
-                            return match race_process_cancel(promise, event).await? {
-                                RestateTurnCancelRaceOutcome::ProcessCancelled => {
-                                    // Release the losing event wait, as a
-                                    // turn-gate loser is released: nobody is
-                                    // left to resolve it.
-                                    let resolve = namespace.durable_wait_registry(self,
-                                            durable_wait_index_object_key(&event_address),
-                                        )
-                                        .resolve(RestateDurableWaitResolveRequest {
-                                            key: event_key,
-                                            resolution: Resolution::Cancelled,
-                                        })
-                                        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                                    resolve.call().await?;
-                                    Ok(RestateTurnCancelRaceOutcome::ProcessCancelled)
-                                }
-                                outcome => Ok(outcome.map(Reply::into_body)),
-                            };
-                        };
-
-                        let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
-                        else {
-                            return Err(TerminalError::new(
-                                "turn cancellation gate is missing its session id",
-                            ));
-                        };
-                        let event_address = RestateDurableWaitAddress::for_key(&request.key);
-                        let event_key = request.key.clone();
-                        // Same journal geometry as process await: the guarded
-                        // wait's CallCommand is emitted first, then the gate's
-                        // awakeable, then the registration.
-                        let event = namespace.durable_wait_workflow(self,
-                                event_address.workflow_key.clone(),
-                            )
-                            .await_resolution(request.into())
-                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
-                        let event = erase_gate_wait(event.call());
-                        match race_turn_cancel_gate(
-                            self,
-                            namespace,
-                            &SessionId::from(session_id),
-                            turn_cancel,
-                            || gate_awakeable(self),
-                            move || event,
-                        )
-                        .await?
-                        {
-                            RestateTurnCancelRaceOutcome::Completed(reply) => {
-                                Ok(RestateTurnCancelRaceOutcome::Completed(reply.into_body()))
-                            }
-                            RestateTurnCancelRaceOutcome::TurnCancelled => {
-                                // Release the losing event wait. The retired
-                                // nested workflow did this from its own journal;
-                                // on the gate it is the waiter's job, or the
-                                // event workflow stays parked with nobody left
-                                // to resolve it.
-                                let resolve = namespace.durable_wait_registry(self,
-                                        durable_wait_index_object_key(&event_address),
-                                    )
-                                    .resolve(RestateDurableWaitResolveRequest {
-                                        key: event_key,
-                                        resolution: Resolution::Cancelled,
-                                    })
-                                    .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                                resolve.call().await?;
-                                Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
-                            }
-                            outcome @ (RestateTurnCancelRaceOutcome::SessionRevoked { .. }
-                            | RestateTurnCancelRaceOutcome::ProcessCancelled) => {
-                                Ok(outcome.map(Reply::into_body))
-                            }
-                        }
-                    })
-                }
-
-                fn await_event_or_turn_end<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    request: RestateDurableWaitAwaitRequest,
-                    replay_key: String,
-                    turn_cancel: RestateDurableWaitAwaitRequest,
-                    generation: lash_core::engine::BuildGeneration,
-                ) -> TurnCancelRaceFuture<'run, TurnWaitOutcome>
-                where
-                    'ctx: 'run,
-                {
-                    Box::pin(async move {
-                        let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
-                        else {
-                            return Err(TerminalError::new(
-                                "turn cancellation gate is missing its session id",
-                            ));
-                        };
-                        let event_address = RestateDurableWaitAddress::for_key(&request.key);
-                        let event_key = request.key.clone();
-                        // The journal geometry of every gated await: the
-                        // guarded wait's CallCommand, then the gate's
-                        // awakeable, then the registration.
-                        let event = namespace.durable_wait_workflow(self,
-                                event_address.workflow_key.clone(),
-                            )
-                            .await_resolution(request.into())
-                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
-                        let event = event.call();
-                        let subscription = event.invocation_handle().await?;
-                        let event = erase_gate_wait(event);
-                        let outcome = match race_turn_gate(
-                            self,
-                            namespace,
-                            &SessionId::from(session_id),
-                            turn_cancel,
-                            Some(generation),
-                            || gate_awakeable(self),
-                            move || event,
-                        )
-                        .await?
-                        {
-                            TurnGateRace::HandedOver => {
-                                retire_wait_subscription(subscription).await?;
-                                return Ok(RestateTurnCancelRaceOutcome::Completed(
-                                    TurnWaitOutcome::HandedOver,
-                                ));
-                            }
-                            TurnGateRace::Ended(outcome) => outcome,
-                        };
-                        if matches!(outcome, RestateTurnCancelRaceOutcome::TurnCancelled) {
-                            // Release the losing event wait: on the gate it
-                            // is the waiter's job.
-                            let resolve = namespace.durable_wait_registry(self,
-                                    durable_wait_index_object_key(&event_address),
-                                )
-                                .resolve(RestateDurableWaitResolveRequest {
-                                    key: event_key,
-                                    resolution: Resolution::Cancelled,
-                                })
-                                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                            resolve.call().await?;
-                        }
-                        Ok(outcome.map(|reply| TurnWaitOutcome::Resolved(reply.into_body())))
-                    })
-                }
+                event_wait_methods!($context, $promises, 'ctx);
 
                 run_source_methods!($context, $promises, 'ctx);
 
@@ -728,6 +485,9 @@ macro_rules! impl_restate_controller_context {
                         };
                         Some(promise)
                     } else { None };
+                    let hand_over = if turn_cancel.is_none() && generation.is_some() && process_cancel == ProcessCancelRace::Raced {
+                        process_hand_over_promise!($promises, $context, 'run, context)
+                    } else { None };
                     use restate_sdk::context::DurableFuture;
                     let awakeables = tool_completion::WaitAwakeables {
                         completion: Box::new(move |position| {
@@ -743,7 +503,7 @@ macro_rules! impl_restate_controller_context {
                         }),
                         gate: Box::new(move || gate_awakeable(context)),
                     };
-                    Box::pin(tool_completion::wait(context, namespace, tool_completion::WaitRequest { waits, dispatch, turn_cancel, generation }, awakeables, promise))
+                    Box::pin(tool_completion::wait(context, namespace, tool_completion::WaitRequest { waits, dispatch, turn_cancel, generation }, awakeables, promise, hand_over))
                 }
 
                 process_signal_wait_method!($promises, $context, 'ctx);

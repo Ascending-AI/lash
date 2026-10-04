@@ -104,28 +104,32 @@ fn first_completed(
     }
 }
 
-/// Race a process segment's signal wait against the segment's cancel
-/// promise and its hand-over promise (FIG-3673, FIG-3799).
-///
-/// Journal order is the contract: the event's call, then the cancel
-/// promise's, then the hand-over promise's. A cancel promise holding the
-/// segment's own `SegmentFinished` retirement is not a cancel, and a
-/// hand-over naming another generation is not this segment's: each drops
-/// out and the rest race on. The logical event stays open on a hand-over;
-/// the caller retires its physical read before publishing the boundary.
-pub(super) async fn race_signal_wait<'run>(
-    event: GateWait<'run, crate::compat::Reply<Resolution>>,
-    cancel: GateWait<'run, String>,
-    hand_over: GateWait<'run, String>,
-    generation: &lash_core::engine::BuildGeneration,
-) -> Result<RestateTurnCancelRaceOutcome<SignalWaitOutcome>, TerminalError> {
-    let mut cancel = Some(cancel);
-    let mut hand_over = Some(hand_over);
+/// The owner controls raced by a segment's removable observers.
+#[derive(Default)]
+pub(super) struct WaitControl<'run> {
+    pub turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+    pub generation: Option<lash_core::engine::BuildGeneration>,
+    pub process_cancel: Option<GateWait<'run, String>>,
+    pub process_hand_over: Option<GateWait<'run, String>>,
+}
+
+/// A segment races its short subscriptions against cancellation and its
+/// generation's drain wake. Retirement and another generation's wake drop out.
+pub(super) async fn race_segment_wait<'run, T>(
+    mut events: Vec<GateWait<'run, T>>,
+    mut cancel: Option<GateWait<'run, String>>,
+    mut hand_over: Option<GateWait<'run, String>>,
+    generation: Option<&lash_core::engine::BuildGeneration>,
+) -> Result<super::TurnGateRace<T>, TerminalError> {
+    if events.is_empty() {
+        return Err(TerminalError::new("a segment race needs an event"));
+    }
     loop {
-        // The handles are taken synchronously: no borrow of the futures is
-        // held across the await.
         let race = {
-            let mut waits: Vec<&dyn SealedDurableFuture> = vec![&*event];
+            let mut waits: Vec<&dyn SealedDurableFuture> = events
+                .iter()
+                .map(|event| &**event as &dyn SealedDurableFuture)
+                .collect();
             if let Some(cancel) = &cancel {
                 waits.push(&**cancel);
             }
@@ -135,42 +139,33 @@ pub(super) async fn race_signal_wait<'run>(
             first_completed(&waits)
         };
         let winner = race.await?;
-        // Index 0 is the event; the promises follow in journal order among
-        // the ones still racing.
-        let promise = match winner {
-            0 => break,
-            1 if cancel.is_some() => SignalWaitPromise::Cancel,
-            _ => SignalWaitPromise::HandOver,
-        };
-        match promise {
-            SignalWaitPromise::Cancel => {
-                if let Some(cancel) = cancel.take()
-                    && crate::process::process_cancel_promise_verdict(Some(cancel.await?))
-                {
-                    return Ok(RestateTurnCancelRaceOutcome::ProcessCancelled);
-                }
+        if winner < events.len() {
+            return Ok(super::TurnGateRace::Ended(
+                RestateTurnCancelRaceOutcome::Completed(events.remove(winner).await?),
+            ));
+        }
+        if winner == events.len() && cancel.is_some() {
+            let payload = cancel
+                .take()
+                .ok_or_else(|| TerminalError::new("invalid cancel race branch"))?
+                .await?;
+            if crate::process::process_cancel_promise_verdict(Some(payload)) {
+                return Ok(super::TurnGateRace::Ended(
+                    RestateTurnCancelRaceOutcome::ProcessCancelled,
+                ));
             }
-            SignalWaitPromise::HandOver => {
-                if let Some(hand_over) = hand_over.take()
-                    && crate::process::process_hand_over_verdict(&hand_over.await?, generation)
-                {
-                    return Ok(RestateTurnCancelRaceOutcome::Completed(
-                        SignalWaitOutcome::HandedOver,
-                    ));
-                }
+        } else {
+            let payload = hand_over
+                .take()
+                .ok_or_else(|| TerminalError::new("invalid segment race branch"))?
+                .await?;
+            if generation.is_some_and(|generation| {
+                crate::process::process_hand_over_verdict(&payload, generation)
+            }) {
+                return Ok(super::TurnGateRace::HandedOver);
             }
         }
     }
-    let resolution = event.await?.into_body();
-    Ok(RestateTurnCancelRaceOutcome::Completed(
-        SignalWaitOutcome::Resolved(resolution),
-    ))
-}
-
-/// Which of a signal wait's promises won a round of its race.
-enum SignalWaitPromise {
-    Cancel,
-    HandOver,
 }
 
 /// `await_signal_or_segment_end` on a context without the hand-over promise
@@ -260,12 +255,11 @@ macro_rules! process_hand_over_promise {
 }
 
 /// `await_signal_or_segment_end` on a context with a workflow promise
-/// surface (FIG-3799): the event wait's CallCommand, then the cancel
-/// promise's, then the hand-over promise's, raced by [`race_signal_wait`].
+/// surface: a short event subscription races the cancel and hand-over promises.
 /// The wait hands over only to a wake naming `generation`, the generation
 /// that admitted the segment. A cancel releases the losing event wait, as
 /// the cancel race always has: nobody is left to resolve it. A hand-over
-/// leaves the logical event open and retires the predecessor's read.
+/// leaves the logical event open and acknowledges its exact unsubscribe.
 macro_rules! process_signal_wait_method {
     ($promises:ident, $context:ident, $ctx_lifetime:lifetime) => {
         fn await_signal_or_segment_end<'run>(
@@ -291,41 +285,20 @@ macro_rules! process_signal_wait_body {
         $request:ident, $replay_key:ident, $generation:ident
     ) => {
         async move {
-            let context = $ctx;
-            let event_address = RestateDurableWaitAddress::for_key(&$request.key);
-            let event = $namespace
-                .durable_wait_workflow(context, event_address.workflow_key.clone())
-                .await_resolution($request.clone().into())
-                .header(LASH_REPLAY_KEY_HEADER.to_string(), $replay_key.clone());
-            let event = event.call();
-            let subscription = event.invocation_handle().await?;
-            let event = erase_gate_wait(event);
+            let context: &$run $context<$run> = $ctx;
             let (Some(cancel), Some(hand_over)) = (
                 process_cancel_promise!($promises, $context, $run, context),
                 process_hand_over_promise!($promises, $context, $run, context),
             ) else {
-                return Err(TerminalError::new(
-                    "a process signal wait needs a workflow promise surface",
-                ));
+                return Err(TerminalError::new("a process signal wait needs a workflow promise surface"));
             };
-            let outcome = race_signal_wait(event, cancel, hand_over, &$generation).await?;
-            if matches!(
-                outcome,
-                RestateTurnCancelRaceOutcome::Completed(SignalWaitOutcome::HandedOver)
-            ) {
-                retire_wait_subscription(subscription).await?;
+            match event_wait::wait(context, $namespace, $request, $replay_key,
+                segment_wait::WaitControl { generation: Some($generation), process_cancel: Some(cancel),
+                    process_hand_over: Some(hand_over), ..Default::default() },
+                event_wait::awakeables(context)).await? {
+                TurnGateRace::HandedOver => Ok(RestateTurnCancelRaceOutcome::Completed(SignalWaitOutcome::HandedOver)),
+                TurnGateRace::Ended(outcome) => Ok(outcome.map(SignalWaitOutcome::Resolved)),
             }
-            if matches!(outcome, RestateTurnCancelRaceOutcome::ProcessCancelled) {
-                let resolve = $namespace
-                    .durable_wait_registry(context, durable_wait_index_object_key(&event_address))
-                    .resolve(RestateDurableWaitResolveRequest {
-                        key: $request.key,
-                        resolution: Resolution::Cancelled,
-                    })
-                    .header(LASH_REPLAY_KEY_HEADER.to_string(), $replay_key);
-                resolve.call().await?;
-            }
-            Ok(outcome)
         }
     };
 }

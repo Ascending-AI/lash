@@ -306,6 +306,26 @@ pub(super) async fn seal_descriptor(
             seal_and_wake(&registry.namespace, ctx, writer, &address, armed, seal).await?
         }
     };
+    if matches!(
+        &outcome,
+        SealOutcome::Sealed {
+            seal: SourceSeal::Cancelled
+        } | SealOutcome::AlreadySealed {
+            seal: SourceSeal::Cancelled
+        }
+    ) {
+        let mut metadata = load_durable_wait_index_metadata(ctx, writer).await?;
+        if super::process_terminal::detach(&registry.namespace, ctx, &mut metadata, |key| {
+            key == &request.source
+        }) {
+            object_state::set_stamped(
+                ctx,
+                super::DURABLE_WAIT_INDEX_METADATA_KEY,
+                writer,
+                metadata,
+            );
+        }
+    }
     Ok(RestateSourceSealReply::Outcome { outcome })
 }
 
@@ -376,17 +396,22 @@ pub(super) async fn load_sources(
 
 /// Retire `sources`: an unsealed one is sealed `Cancelled` for its owning
 /// Run, and its subscribers wake with the seal the workflow holds. The row
-/// itself is the caller's to clear.
+/// and its material and attachment leases end behind the holder fence. The
+/// row itself is the caller's to clear.
 pub(super) async fn retire_sources(
-    namespace: &crate::RestateNamespace,
+    registry: &LashDurableWaitRegistryImpl,
     ctx: &ObjectContext<'_>,
     writer: object_state::StoredValueWriter,
     sources: Vec<(RestateDurableWaitAddress, IndexedSource)>,
 ) -> Result<(), TerminalError> {
+    use crate::controller::RestateControllerContext as _;
     for (address, armed) in sources {
+        let holder = lash_core::tool_run::MaterialHolder::Source {
+            source: armed.descriptor.source.clone(),
+        };
         if armed.seal.is_none() {
             seal_and_wake(
-                namespace,
+                &registry.namespace,
                 ctx,
                 writer,
                 &address,
@@ -395,6 +420,25 @@ pub(super) async fn retire_sources(
             )
             .await?;
         }
+        let materials = registry.materials.clone();
+        let attachments = registry.attachments.clone();
+        ctx.run_json_or_retry_send::<(), _>(
+            format!("source-retire:{}", address.workflow_key),
+            async move {
+                if let Some(materials) = materials {
+                    materials
+                        .release_material(&holder)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
+                attachments
+                    .end_attachment_referrer(&holder.referrer())
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok(())
+            },
+        )
+        .await?;
     }
     Ok(())
 }

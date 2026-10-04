@@ -69,105 +69,80 @@ pub(super) async fn wait<'run, C: ContextClient<'run>>(
     context: &'run C,
     namespace: &'run crate::RestateNamespace,
     subscriptions: Vec<SourceSubscription>,
-    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-    generation: Option<lash_core::engine::BuildGeneration>,
-    process_cancel: Option<GateWait<'run, String>>,
+    control: segment_wait::WaitControl<'run>,
     awakeables: Awakeables<'run>,
 ) -> Result<RestateTurnCancelRaceOutcome<(usize, SourceSeal)>, TerminalError> {
+    let segment_wait::WaitControl {
+        turn_cancel,
+        generation,
+        process_cancel,
+        process_hand_over,
+    } = control;
     let mut observers = Vec::new();
-    let mut events = Vec::new();
-    let mut sealed = None;
-    for (position, subscription) in subscriptions.into_iter().enumerate() {
-        let address = RestateDurableWaitAddress::for_key(&subscription.source);
-        let (awakeable_id, event) = (awakeables.source)(position);
-        let request = RestateSourceSubscribeRequest {
-            subscription,
-            awakeable_id,
-        };
-        match namespace
-            .durable_wait_registry(context, address.index_key())
-            .subscribe_source(request.clone())
-            .call()
-            .await?
-            .into_body()
-        {
-            RestateSourceSubscribeReply::Subscribed => {
-                observers.push(request);
-                events.push(event);
+    let outcome = async {
+        let mut events = Vec::new();
+        let mut sealed = None;
+        for (position, subscription) in subscriptions.into_iter().enumerate() {
+            let address = RestateDurableWaitAddress::for_key(&subscription.source);
+            let (awakeable_id, event) = (awakeables.source)(position);
+            let request = RestateSourceSubscribeRequest {
+                subscription,
+                awakeable_id,
+            };
+            observers.push(request.clone());
+            match namespace
+                .durable_wait_registry(context, address.index_key())
+                .subscribe_source(request.clone())
+                .call()
+                .await?
+                .into_body()
+            {
+                RestateSourceSubscribeReply::Subscribed => {
+                    events.push(event);
+                }
+                RestateSourceSubscribeReply::Sealed { seal } => {
+                    sealed = Some((position, seal));
+                    break;
+                }
+                RestateSourceSubscribeReply::Refused { refusal } => {
+                    return Err(TerminalError::new(
+                        lash_core::RuntimeEffectControllerError::from(refusal).to_record(),
+                    ));
+                }
             }
-            RestateSourceSubscribeReply::Sealed { seal } => {
-                sealed = Some((position, seal));
-                break;
-            }
-            RestateSourceSubscribeReply::Refused { refusal } => {
-                return Err(TerminalError::new(
-                    lash_core::RuntimeEffectControllerError::from(refusal).to_record(),
-                ));
-            }
+        }
+        if let Some(seal) = sealed {
+            Ok(TurnGateRace::Ended(
+                RestateTurnCancelRaceOutcome::Completed(seal),
+            ))
+        } else if let Some(turn_cancel) = turn_cancel {
+            let session = turn_cancel
+                .key
+                .scope
+                .session_id()
+                .cloned()
+                .ok_or_else(|| TerminalError::new("a Run source wait has no session"))?;
+            gate_race::race_turn_gate_many(
+                context,
+                namespace,
+                &session,
+                turn_cancel,
+                generation,
+                || (awakeables.gate)(),
+                move || events,
+            )
+            .await
+        } else {
+            segment_wait::race_segment_wait(
+                events,
+                process_cancel,
+                process_hand_over,
+                generation.as_ref(),
+            )
+            .await
         }
     }
-    let outcome = if let Some(seal) = sealed {
-        Ok(TurnGateRace::Ended(
-            RestateTurnCancelRaceOutcome::Completed(seal),
-        ))
-    } else if let Some(turn_cancel) = turn_cancel {
-        let session = turn_cancel
-            .key
-            .scope
-            .session_id()
-            .cloned()
-            .ok_or_else(|| TerminalError::new("a Run source wait has no session"))?;
-        gate_race::race_turn_gate_many(
-            context,
-            namespace,
-            &session,
-            turn_cancel,
-            generation,
-            || (awakeables.gate)(),
-            move || events,
-        )
-        .await
-    } else {
-        let first = events
-            .first()
-            .ok_or_else(|| TerminalError::new("a Run source wait is empty"))?;
-        let inner = first.inner_context();
-        let mut handles = events
-            .iter()
-            .map(|event| event.handle())
-            .collect::<Vec<_>>();
-        if let Some(promise) = &process_cancel {
-            handles.push(promise.handle());
-        }
-        let selected = inner.select(handles).await?;
-        if selected == events.len() {
-            let payload = process_cancel
-                .ok_or_else(|| TerminalError::new("invalid source branch"))?
-                .await?;
-            if crate::process::process_cancel_promise_verdict(Some(payload)) {
-                Ok(TurnGateRace::Ended(
-                    RestateTurnCancelRaceOutcome::ProcessCancelled,
-                ))
-            } else {
-                let selected = inner
-                    .select(events.iter().map(|event| event.handle()).collect())
-                    .await?;
-                if selected >= events.len() {
-                    return Err(TerminalError::new("invalid source branch"));
-                }
-                Ok(TurnGateRace::Ended(
-                    RestateTurnCancelRaceOutcome::Completed(events.remove(selected).await?),
-                ))
-            }
-        } else {
-            if selected >= events.len() {
-                return Err(TerminalError::new("invalid source branch"));
-            }
-            Ok(TurnGateRace::Ended(
-                RestateTurnCancelRaceOutcome::Completed(events.remove(selected).await?),
-            ))
-        }
-    };
+    .await;
     for observer in observers {
         let address = RestateDurableWaitAddress::for_key(&observer.subscription.source);
         namespace
@@ -216,9 +191,11 @@ macro_rules! run_source_methods {
                         };
                         Some(promise)
                     } else { None };
+                    let hand_over = if turn_cancel.is_none() && generation.is_some() && process_cancel == ProcessCancelRace::Raced {
+                        process_hand_over_promise!($promises, $context, 'run, context)
+                    } else { None };
                     use restate_sdk::context::DurableFuture;
-                    Box::pin(source_wait::wait(context, namespace, subscriptions, turn_cancel, generation,
-                        promise, source_wait::Awakeables {
+                    Box::pin(source_wait::wait(context, namespace, subscriptions, segment_wait::WaitControl { turn_cancel, generation, process_cancel: promise, process_hand_over: hand_over }, source_wait::Awakeables {
                             source: Box::new(move |position| {
                                 let (id, wait) = context.awakeable::<Json<lash_core::tool_run::SourceSeal>>();
                                 (id, erase_gate_wait(wait.map_ok(move |Json(seal)| (position, seal))))

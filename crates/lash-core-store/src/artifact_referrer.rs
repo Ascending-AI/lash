@@ -216,7 +216,12 @@ impl ArtifactReferrerKind {
     pub const fn holds_attachments(self) -> bool {
         matches!(
             self,
-            Self::Session | Self::Upload | Self::Execution | Self::StartInput | Self::ProcessRecord
+            Self::Session
+                | Self::Upload
+                | Self::Execution
+                | Self::StartInput
+                | Self::ProcessRecord
+                | Self::Source
         )
     }
 }
