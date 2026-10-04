@@ -17,6 +17,127 @@ const DISCONNECT: &[u8] =
     include_bytes!("../../testdata/e2e/providers/s26-partial-disconnect.json");
 const AUTH: &[u8] = include_bytes!("../../testdata/e2e/providers/s27-auth-next-run.json");
 
+/// L03/R5, found by S07: a real public Immediate cancellation must reach
+/// production retry decisions, rather than only a test handler's cancel flag.
+#[tokio::test]
+async fn l03_public_cancel_during_registered_backoff_starts_no_next_body() -> Result<()> {
+    use lash_core_store::tool_run::{RunEvent, RunJournalEntry};
+    use lash_upgrade_harness::node::e2e_tools::{BodyDelivery, ToolFixtureArgs};
+
+    let dir = tempfile::tempdir()?;
+    let fixture = start(
+        include_bytes!("../../testdata/e2e/providers/s07-tools.json"),
+        dir.path(),
+    )
+    .await?;
+    let double = lash_restate_test::backend(
+        0x493207,
+        lash_restate_test::ServerConfig::default().time(lash_restate_test::TimeMode::Manual),
+    )
+    .await?;
+    let body_path = dir.path().join("bodies.jsonl");
+    let core = e2e_provider::core_with_tools(
+        double.lash_backend(),
+        &fixture.base_url(),
+        ProviderReliability::default(),
+        ToolFixtureArgs {
+            effect_url: format!("{}/effect", fixture.base_url()),
+            bodies: body_path.clone(),
+            backoff_ms: 30_000,
+            callback_url: None,
+        },
+    )?;
+    let proof: Result<()> = tokio::time::timeout(WAIT, async {
+        let session = e2e_provider::session(&core, "s07-cheap-cancel").await?;
+        let accepted = session
+            .send(lash::TurnInput::text("s07 input"))
+            .id("s07-input")
+            .await?;
+        let input = accepted.input_id().clone();
+        let follower = tokio::spawn(async move { accepted.output().await });
+        // Observe the actual acknowledged records and pending server sleeps.
+        // Virtual time cannot move until the public cancellation is accepted.
+        let wake_at = loop {
+            let registrations = double
+                .server()
+                .invocations()
+                .into_iter()
+                .flat_map(|invocation| {
+                    double
+                        .server()
+                        .journal(&invocation.id)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(|entry| entry.run_completion().and_then(Result::ok))
+                        .filter_map(|bytes| {
+                            serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+                        })
+                        .filter(|value| {
+                            value["effect_journal_version"] == lash_restate::EFFECT_JOURNAL_VERSION
+                                && value.get("record").is_some()
+                        })
+                        .filter_map(|mut value| {
+                            let object = value.as_object_mut()?;
+                            object.remove("effect_journal_version");
+                            object.remove("build_generation");
+                            serde_json::from_value::<RunJournalEntry>(value).ok()
+                        })
+                        .flat_map(|entry| entry.record.events)
+                        .filter(|event| matches!(event, RunEvent::RetryTimerRegistered { .. }))
+                })
+                .count();
+            let sleeps = double
+                .server()
+                .timers()
+                .into_iter()
+                .filter(|timer| timer.kind == "sleep")
+                .collect::<Vec<_>>();
+            if registrations == 2 && sleeps.len() == 2 {
+                break sleeps.iter().map(|timer| timer.fire_at_ms).max().unwrap();
+            }
+            ensure!(
+                !follower.is_finished(),
+                "turn ended before registered backoff"
+            );
+            tokio::task::yield_now().await;
+        };
+        let cancel = session.attach(input).cancel().await?;
+        ensure!(
+            matches!(cancel, lash::CancelReceipt::Requested { .. }),
+            "cancel did not reach the active Run: {cancel:?}"
+        );
+        if let lash::CancelReceipt::Requested { receipt, .. } = &cancel {
+            record("s07-cheap-cancel", receipt)?;
+        }
+        // SDK deadlines include wall time before the sleep was registered;
+        // moving 30 seconds from startup can leave both actual sleeps pending.
+        double.server().advance_to(wake_at);
+        let output = follower.await??;
+        record("s07-cheap-output", &output)?;
+        let bodies = std::fs::read_to_string(&body_path)?
+            .lines()
+            .map(serde_json::from_str::<BodyDelivery>)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        record("s07-cheap-bodies", &bodies)?;
+        ensure!(
+            bodies.len() == 2 && bodies.iter().all(|body| body.delivery.attempt == 1),
+            "Immediate cancellation started another retry body: {bodies:?}"
+        );
+        ensure!(
+            output.result.outcome.cancellation().is_some(),
+            "public cancellation lost its typed outcome"
+        );
+        Ok(())
+    })
+    .await
+    .unwrap_or_else(|error| Err(error.into()));
+    let receipt = fixture.finish().await?;
+    record("s07-cheap-http", &receipt)?;
+    receipt.verify()?;
+    core.shutdown().await?;
+    proof
+}
+
 async fn start(bytes: &[u8], dir: &std::path::Path) -> Result<RecordedHttpFixture> {
     RecordedHttpFixture::start(
         ([127, 0, 0, 1], 0).into(),
