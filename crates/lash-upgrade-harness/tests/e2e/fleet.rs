@@ -263,9 +263,9 @@ pub async fn s14_leader_loss_retains_accepted_work(
         .command(submit(lease, "partial-result"))
         .await?;
     let work = &accepted.work;
-    let a = fixture.barrier(work, "A", BarrierKind::XDurable).await?;
+    let a = fixture.barrier(work, "a", BarrierKind::XDurable).await?;
     let durable = control.await_barrier(&a).await?;
-    let b = fixture.barrier(work, "B", BarrierKind::BodyEntered).await?;
+    let b = fixture.barrier(work, "b", BarrierKind::BodyEntered).await?;
     let held = control.await_barrier(&b).await?;
     assert_barrier(&durable, BarrierKind::XDurable, work, true)?;
     assert_barrier(&held, BarrierKind::BodyEntered, work, false)?;
@@ -316,7 +316,7 @@ pub async fn s14_leader_loss_retains_accepted_work(
     assert_cluster_journals(&converged, &after, work)?;
     assert_partial_recovery(&before, &after, &durable, &held)?;
     ensure!(
-        answer.output == serde_json::json!({"A":"A", "B":"B"}),
+        answer.output == serde_json::json!({"status":"Answered", "reply":"A|B"}),
         "recovered output is not exact A/B output"
     );
     let store = fixture.snapshot(work).await?;
@@ -349,7 +349,9 @@ pub async fn s15_minority_partition_cannot_create_another_winner(
         .command(submit(lease, "tool-cancel-race"))
         .await?;
     let work = &accepted.work;
-    let body = fixture.barrier(work, "A", BarrierKind::BodyEntered).await?;
+    let body = fixture
+        .barrier(work, "intent", BarrierKind::BodyEntered)
+        .await?;
     let held = control.await_barrier(&body).await?;
     assert_barrier(&held, BarrierKind::BodyEntered, work, false)?;
     let before = fixture.capture(work, None).await?;
@@ -433,13 +435,11 @@ pub async fn s16_stale_postgres_host_cannot_publish(
         .command(submit(lease, "stale-publication"))
         .await?;
     let work = &accepted.work;
-    // PublicationHeld is requested from H0. Until its pin lands, the
-    // fixture represents this precise host-side cut using BeforeAck.
     let publication = fixture
-        .barrier(work, "publication", BarrierKind::BeforeAck)
+        .barrier(work, "publication", BarrierKind::PublicationRequest)
         .await?;
     let held = control.await_barrier(&publication).await?;
-    assert_barrier(&held, BarrierKind::BeforeAck, work, false)?;
+    assert_barrier(&held, BarrierKind::PublicationRequest, work, false)?;
     let before = fixture.capture(work, None).await?;
     let fault = control
         .inject(
@@ -454,10 +454,10 @@ pub async fn s16_stale_postgres_host_cannot_publish(
         "disconnect missed publication cut"
     );
     let successor = fixture
-        .barrier(work, "successor", BarrierKind::SuccessorAdmitted)
+        .barrier(work, "successor", BarrierKind::SuccessorFence)
         .await?;
     let admitted = control.await_barrier(&successor).await?;
-    assert_barrier(&admitted, BarrierKind::SuccessorAdmitted, work, true)?;
+    assert_barrier(&admitted, BarrierKind::SuccessorFence, work, true)?;
     let answer = fixture
         .follower()
         .command(HostCommand::Attach {
@@ -689,9 +689,12 @@ fn assert_partial_recovery(
         .journals
         .iter()
         .find(|fact| {
-            fact.work.call.as_ref() == Some(a) && Some(fact.index) == durable.journal_index
+            Some(fact.index) == durable.journal_index
+                && fact.invocation == durable.barrier.work.segment
+                && matches!(&fact.decoded, Some(DecodedRecord::Attempt(attempt))
+                if attempt.call_id.as_str() == a && attempt.attempt.get() == 1)
         })
-        .context("A has no pre-fault X fact")?;
+        .context("A has no independent pre-fault typed X receipt")?;
     ensure!(
         after
             .journals
@@ -706,6 +709,7 @@ fn assert_partial_recovery(
     assert_decisions_unchanged(before, after, work)?;
     let final_decisions = decisions(after, work)?;
     assert_admissions_unchanged(before, after, work)?;
+    assert_partial_deliveries(after, a, b, work)?;
     ensure!(
         final_decisions.len() == 2
             && final_decisions
@@ -717,6 +721,53 @@ fn assert_partial_recovery(
         ensure!(
             id.as_str() == a || id.as_str() == b,
             "recovery minted a new call identity"
+        );
+    }
+    Ok(())
+}
+
+fn assert_partial_deliveries(
+    evidence: &Evidence,
+    a: &str,
+    b: &str,
+    work: &WorkIdentity,
+) -> Result<()> {
+    let deliveries = evidence
+        .effects
+        .iter()
+        .filter(|effect| effect.get("label").is_some())
+        .map(|effect| {
+            serde_json::from_value::<lash_upgrade_harness::node::tools::ToolDelivery>(
+                effect.clone(),
+            )
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    ensure!(
+        deliveries
+            .iter()
+            .filter(|delivery| delivery.label == "a")
+            .count()
+            == 1,
+        "durable A body did not execute exactly once"
+    );
+    ensure!(
+        deliveries.iter().any(|delivery| delivery.label == "b"),
+        "unfinished B body has no delivery witness"
+    );
+    for delivery in &deliveries {
+        let expected = match delivery.label.as_str() {
+            "a" => a,
+            "b" => b,
+            label => anyhow::bail!("recovery delivered an unadmitted body {label}"),
+        };
+        ensure!(
+            delivery.call_id.as_str() == expected
+                && delivery.ordinal == 1
+                && delivery
+                    .logical_run
+                    .as_ref()
+                    .is_some_and(|run| run.as_str() == work.run),
+            "recovery changed body call ID, attempt ordinal or logical Run"
         );
     }
     Ok(())

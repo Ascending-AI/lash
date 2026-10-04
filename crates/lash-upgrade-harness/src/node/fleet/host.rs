@@ -1,0 +1,433 @@
+//! Separate fleet worker processes with the public send/attach/cancel facade.
+use std::collections::BTreeMap;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result, bail, ensure};
+use clap::Args;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::task::JoinSet;
+
+use crate::e2e::case::Channel;
+use crate::e2e::control::{Barrier, BarrierKind, BarrierProof, FileBarriers, WorkIdentity};
+use crate::e2e::host::{HostCommand, HostObservation};
+use crate::node::tools::{BodyResult, BodyStep, FixtureProtocol, ToolBodies, ToolDelivery};
+use crate::node::{RestateArgs, ServeReady, StoreArgs};
+use crate::restate_view::RestateView;
+
+#[derive(Clone, Debug, Args)]
+pub struct FleetServeArgs {
+    #[command(flatten)]
+    pub store: StoreArgs,
+    #[command(flatten)]
+    pub restate: RestateArgs,
+    #[arg(long)]
+    pub scenario: String,
+    #[arg(long)]
+    pub session: String,
+    #[arg(long)]
+    pub directory: PathBuf,
+    #[arg(long)]
+    pub bind: SocketAddr,
+    #[arg(long)]
+    pub control_bind: SocketAddr,
+    #[arg(long)]
+    pub ready_file: PathBuf,
+    #[arg(long)]
+    pub publication_cut: bool,
+    #[arg(long, default_value_t = 180)]
+    pub timeout_secs: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct FleetReady {
+    pub serving: ServeReady,
+    pub control: String,
+}
+
+struct State {
+    core: lash::LashCore,
+    stores: Arc<dyn lash::StoreSet>,
+    args: FleetServeArgs,
+    deadline: Instant,
+}
+
+pub async fn serve(args: FleetServeArgs) -> Result<()> {
+    ensure!(
+        matches!(args.scenario.as_str(), "S14" | "S15" | "S16"),
+        "unknown fleet scenario"
+    );
+    std::fs::create_dir_all(&args.directory)?;
+    let deadline = Instant::now() + Duration::from_secs(args.timeout_secs);
+    let session = lash::SessionId::parse(&args.session)?;
+    let stores = super::super::open_stores(&args.store).await?;
+    let (stores, held) = if args.publication_cut {
+        let (stores, held) = super::intercept_publication(stores, session.clone());
+        (stores, Some(held))
+    } else {
+        (stores, None)
+    };
+    let engine = super::super::engine(stores.clone(), &args.restate)?;
+    let backend = lash::Backend::new(engine.clone());
+    let labels: &[&str] = if args.scenario == "S15" {
+        &["intent"]
+    } else {
+        &["a", "b"]
+    };
+    let scripted = if args.scenario == "S15" { "S08" } else { "S02" };
+    let provider = crate::node::tools::scripted_provider(
+        scripted,
+        labels,
+        FixtureProtocol::Standard,
+        &args.directory.join("provider.jsonl"),
+    )?;
+    let profiles = lash::LlmProfileRegistry::new().register(
+        super::super::PROFILE_KEY,
+        lash::RegisteredLlmProfile::new(super::super::model()?, provider),
+    )?;
+    let callback_args = args.clone();
+    let callback = Arc::new(move |delivery: ToolDelivery| -> BodyStep {
+        let args = callback_args.clone();
+        Box::pin(async move {
+            let run = delivery
+                .logical_run
+                .as_ref()
+                .context("body has no logical Run")?;
+            let (mut work, _) = observe_work(&args, run, deadline).await?;
+            work.call = Some(delivery.call_id.to_string());
+            work.ordinal = Some(delivery.ordinal);
+            let barrier = Barrier {
+                work,
+                kind: BarrierKind::BodyEntered,
+            };
+            let barriers = FileBarriers::new(args.directory.join("barriers"), deadline)?;
+            if (args.scenario == "S14" && delivery.label == "b") || args.scenario == "S15" {
+                barriers.hold(&barrier)?;
+            }
+            let artifact = args
+                .directory
+                .join(format!("body-{}.json", delivery.call_id));
+            super::super::write_atomically(&artifact, &serde_json::to_vec(&delivery)?)?;
+            barriers
+                .enter(&barrier, artifact.display().to_string())
+                .await
+        })
+    });
+    let mut plan = BTreeMap::new();
+    for label in labels {
+        plan.insert(
+            (*label).to_owned(),
+            BodyResult::Inline {
+                value: serde_json::json!(match *label {
+                    "a" => "A",
+                    "b" => "B",
+                    value => value,
+                }),
+                intents: Default::default(),
+            },
+        );
+    }
+    let tools =
+        ToolBodies::open(&args.directory.join("deliveries.jsonl"), plan, callback)?.provider()?;
+    let artifacts = lashlang::LashlangArtifacts::of_backend(&backend);
+    let core = crate::node::tools::builder(
+        backend.clone(),
+        &Channel::Standard,
+        Arc::new(profiles),
+        tools,
+    )
+    .plugin(Arc::new(super::FleetFrontier))
+    .plugin(Arc::new(super::super::process::ProcessEnginePlugin(
+        artifacts.clone(),
+        backend.worker_recovery(),
+    )))
+    .recovery_lease(super::super::recovery_lease())
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "fleet-host",
+        format!("{}", std::process::id()),
+    ))?;
+    let worker =
+        lash::durability::DurableProcessWorker::new(core.durable_process_worker_config()?)?;
+    let endpoint = super::super::process::bind(
+        engine.endpoint_builder(worker)?,
+        &args.restate.namespace,
+        super::super::process::HarnessProcesses {
+            core: core.clone(),
+            artifacts,
+            build_generation: engine.build_generation()?.clone(),
+            authority: lash::restate::RestateAuthorityId::new(&args.restate.authority)?,
+            namespace: lash::restate::RestateNamespace::new(&args.restate.namespace)?,
+            model: super::super::llm_profile_config()?,
+        },
+    )?
+    .build();
+    let listener = tokio::net::TcpListener::bind(args.bind).await?;
+    let uri = format!("http://{}", listener.local_addr()?);
+    let control = tokio::net::TcpListener::bind(args.control_bind).await?;
+    let control_address = control.local_addr()?.to_string();
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let endpoint_task = tokio::spawn(async move {
+        lash::restate::serve_endpoint(
+            listener,
+            endpoint,
+            lash::restate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
+            async move {
+                let _ = stopped.await;
+            },
+        )
+        .await;
+    });
+    let state = Arc::new(State {
+        core,
+        stores,
+        args: args.clone(),
+        deadline,
+    });
+    let publication = held.map(|mut held| {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let request = held
+                .recv()
+                .await
+                .context("publication cut closed without a request")?;
+            let run = &request
+                .commit()
+                .run_terminal
+                .as_deref()
+                .context("missing held terminal")?
+                .run;
+            let (work, _) = observe_work(&state.args, run, deadline).await?;
+            let path = state.args.directory.join("publication-request.json");
+            request.capture(&path)?;
+            let barriers = FileBarriers::new(state.args.directory.join("barriers"), deadline)?;
+            let cut = Barrier {
+                work: work.clone(),
+                kind: BarrierKind::PublicationRequest,
+            };
+            barriers.hold(&cut)?;
+            barriers.enter(&cut, path.display().to_string()).await?;
+            let refusal = request.release().await?;
+            let path = state.args.directory.join("publication-refused.json");
+            super::super::write_atomically(&path, &serde_json::to_vec(&refusal)?)?;
+            barriers.publish(&BarrierProof {
+                barrier: Barrier {
+                    work,
+                    kind: BarrierKind::PublicationRefused,
+                },
+                artifact: path.display().to_string(),
+                journal_index: None,
+            })?;
+            Ok::<_, anyhow::Error>(())
+        })
+    });
+    let ready = FleetReady {
+        serving: ServeReady {
+            build: crate::identity::BuildLabel::current(),
+            generation: engine.build_generation()?.to_string(),
+            uri,
+        },
+        control: control_address,
+    };
+    super::super::write_atomically(&args.ready_file, &serde_json::to_vec(&ready)?)?;
+    let mut commands = JoinSet::new();
+    let result: Result<()> = async {
+        loop {
+            tokio::select! {
+                shutdown = super::super::shutdown_signal() => { shutdown?; break; },
+                Some(completed) = commands.join_next(), if !commands.is_empty() => { completed??; },
+                accepted = control.accept() => {
+                    let (socket, _) = accepted?;
+                    let state = state.clone();
+                    commands.spawn(async move {
+                        let (input, mut output) = socket.into_split();
+                        let mut line = String::new();
+                        BufReader::new(input).read_line(&mut line).await?;
+                        ensure!(line.len() < 1024*1024, "fleet control request exceeds limit");
+                        let command = serde_json::from_str(&line)?;
+                        let answer = command_host(&state, command).await.map_err(|error| format!("{error:#}"));
+                        let mut bytes = serde_json::to_vec(&answer)?;
+                        bytes.push(b'\n');
+                        output.write_all(&bytes).await?;
+                        output.shutdown().await?;
+                        Ok::<_,anyhow::Error>(())
+                    });
+                }
+            }
+        }
+        Ok(())
+    }.await;
+    drop(control);
+    commands.abort_all();
+    while let Some(result) = commands.join_next().await {
+        if let Err(error) = result
+            && !error.is_cancelled()
+        {
+            return Err(error.into());
+        }
+    }
+    let _ = stop.send(());
+    endpoint_task.await.context("fleet endpoint panicked")?;
+    if let Some(publication) = publication {
+        publication
+            .await
+            .context("publication controller panicked")??;
+    }
+    result
+}
+
+async fn command_host(state: &State, command: HostCommand) -> Result<HostObservation> {
+    let session_id = lash::SessionId::parse(&state.args.session)?;
+    let session = state.core.session(session_id.clone());
+    let (run, output) = match command {
+        HostCommand::Submit {
+            session: requested,
+            idempotency_key,
+            ..
+        } => {
+            ensure!(
+                requested == state.args.session,
+                "submission names another fixture session"
+            );
+            match session
+                .create(lash::SessionCreation::root(super::super::session_spec()))
+                .await
+            {
+                Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
+                Err(error) => return Err(error.into()),
+            }
+            let scenario = if state.args.scenario == "S15" {
+                "S08"
+            } else {
+                "S02"
+            };
+            let session = state.core.session(session_id.clone()).durable().await?;
+            let handle = session
+                .send(lash::TurnInput::text(scenario))
+                .id(lash::TurnId::parse(idempotency_key)?)
+                .into_future()
+                .await?;
+            let receipt = handle.receipt().clone();
+            let run = loop {
+                if let Some(run) = state
+                    .stores
+                    .session_store_factory()
+                    .run_of_input(&session_id, &receipt.input_id)
+                    .await?
+                {
+                    break run;
+                }
+                ensure!(
+                    Instant::now() < state.deadline,
+                    "accepted input never acquired a Run binding"
+                );
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            };
+            (run, serde_json::to_value(receipt)?)
+        }
+        HostCommand::Attach { run } => {
+            let run = lash::TurnId::parse(run)?;
+            let session = state.core.session(session_id.clone()).durable().await?;
+            let outcome = session.run(run.clone()).outcome().await?;
+            (
+                run,
+                serde_json::json!({"status":format!("{:?}",outcome.status()),
+                "reply":outcome.output().and_then(|output| output.assistant_message())}),
+            )
+        }
+        HostCommand::Cancel { run } => {
+            let run = lash::TurnId::parse(run)?;
+            let session = state.core.session(session_id.clone()).durable().await?;
+            let receipt = session.cancel(lash::CancelTarget::Run(run.clone())).await?;
+            let output = match receipt {
+                lash::CancelReceipt::Requested {
+                    run: target,
+                    receipt,
+                } => {
+                    ensure!(target == run, "cancel receipt names another Run");
+                    serde_json::json!({"kind":"requested", "receipt":receipt})
+                }
+                lash::CancelReceipt::AlreadySettled { run: target } => {
+                    ensure!(target == run, "cancel receipt names another Run");
+                    serde_json::json!({"kind":"already_settled"})
+                }
+                other => bail!("unexpected fleet cancel outcome: {other:?}"),
+            };
+            (run, output)
+        }
+        other => bail!("unsupported fleet public command: {other:?}"),
+    };
+    let (work, protocol) = observe_work(&state.args, &run, state.deadline).await?;
+    let path = state.args.directory.join("accepted-work.json");
+    super::super::write_atomically(
+        &path,
+        &serde_json::to_vec(&serde_json::json!({"work":&work,"protocol":protocol}))?,
+    )?;
+    Ok(HostObservation { work, output })
+}
+
+async fn observe_work(
+    args: &FleetServeArgs,
+    run: &lash::TurnId,
+    deadline: Instant,
+) -> Result<(WorkIdentity, u32)> {
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    struct Invocation {
+        id: String,
+        pinned_service_protocol_version: Option<u32>,
+    }
+    let session = lash::SessionId::parse(&args.session)?;
+    let url = match &args.store.store {
+        crate::node::StoreSpec::Postgres(url) => url,
+        _ => bail!("fleet requires PostgreSQL"),
+    };
+    let pool = sqlx::PgPool::connect(url).await?;
+    let view = RestateView::new(&args.restate.admin_url, &args.restate.namespace)?;
+    loop {
+        let admission_json: Option<String> = sqlx::query_scalar("SELECT admission_json FROM lash_session_runs WHERE session_id=$1 AND run=$2 AND admission_json IS NOT NULL")
+            .bind(session.as_str()).bind(run.as_str()).fetch_optional(&pool).await?;
+        if let Some(admission_json) = admission_json {
+            let admission: lash_core::store::RunAdmission = serde_json::from_str(&admission_json)?;
+            let lash_core::store::RunExecutor::Run { admission } = admission.executor else {
+                bail!("fleet Run has no real engine executor");
+            };
+            let key = admission.as_str().replace('\'', "''");
+            let prefix = view.service_name("LashTurn").replace('\'', "''");
+            let rows: Vec<Invocation> = view.query(&format!("SELECT id, pinned_service_protocol_version FROM sys_invocation WHERE target_service_name LIKE '{prefix}%' AND target_service_key = '{key}' AND target_handler_name = 'run'")).await?;
+            if rows.len() == 1 {
+                let protocol = rows[0]
+                    .pinned_service_protocol_version
+                    .context("accepted invocation has no negotiated protocol")?;
+                ensure!(protocol == 7, "fleet requires actual negotiated V7");
+                let inputs: Vec<String> = sqlx::query_scalar("SELECT input_id FROM lash_session_run_inputs WHERE session_id=$1 AND run=$2 ORDER BY input_id")
+                    .bind(session.as_str()).bind(run.as_str()).fetch_all(&pool).await?;
+                pool.close().await;
+                ensure!(
+                    inputs.len() == 1,
+                    "fleet Run must bind exactly one accepted input"
+                );
+                return Ok((
+                    WorkIdentity {
+                        ingress: inputs[0].clone(),
+                        run: run.to_string(),
+                        segment: rows[0].id.clone(),
+                        call: None,
+                        ordinal: None,
+                    },
+                    protocol,
+                ));
+            }
+            ensure!(
+                rows.len() <= 1,
+                "accepted Run has conflicting engine invocations"
+            );
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "actual ingress/Run/segment binding never became observable"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}

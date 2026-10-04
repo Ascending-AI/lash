@@ -11,6 +11,8 @@ use lash_core::{DeploymentStore, SessionId, StoreError, StoreSet};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
+pub mod host;
+
 type CommitAnswer = std::result::Result<RuntimeCommitReceipt, StoreError>;
 
 /// Install the cut before constructing the Restate engine, so its executing

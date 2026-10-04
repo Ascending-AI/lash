@@ -75,6 +75,8 @@ pub enum Command {
     SqliteUpgrade(SqliteUpgradeArgs),
     /// Serve a Restate deployment over a store until killed.
     Serve(ServeArgs),
+    /// Serve H4 controlled tools through the public fleet transport.
+    FleetServe(fleet::host::FleetServeArgs),
     /// Send one input to a session and wait for its turn to settle.
     Turn(TurnArgs),
     /// Call one of lash's own handlers directly.
@@ -313,6 +315,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Probe(args) => print(&probe(args).await?),
         Command::SqliteUpgrade(args) => print(&sqlite_upgrade(args).await?),
         Command::Serve(args) => serve(args).await,
+        Command::FleetServe(args) => fleet::host::serve(args).await,
         Command::Turn(args) => print(&turn(args).await?),
         Command::Call(args) => print(&objects::call(args).await?),
         Command::Sweep(args) => objects::sweep(args).await.map(drop),

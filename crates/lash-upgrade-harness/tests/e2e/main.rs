@@ -1,5 +1,6 @@
 //! H0 witnesses: R1 faults need actual work/journal provenance; R3 requires
 //! real process and peer loss, retained data, observed leaders and cleanup.
+mod fleet;
 mod plugin_upgrade;
 use anyhow::{Context, Result, ensure};
 use lash_upgrade_harness::e2e::control::process::{
