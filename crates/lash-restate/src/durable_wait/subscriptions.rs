@@ -226,6 +226,17 @@ pub(super) async fn resolve(
     {
         return Ok(Reply::at(wire, response));
     }
+    if matches!(
+        request.key.wait,
+        AwaitEventWaitIdentity::ToolCompletion { .. }
+    ) {
+        return Ok(Reply::at(
+            wire,
+            RestateDurableWaitResolveResponse::Refused(RestateDurableWaitResolveRefusal::Source {
+                refusal: lash_core::tool_run::SourceRefusal::NotArmed,
+            }),
+        ));
+    }
     let state_key = durable_wait_index_state_key(&address);
     if let Some(terminal) =
         object_state::get_stamped::<IndexedWait>(&ctx, &state_key, &DURABLE_WAIT_REGISTRY_FORMATS)

@@ -99,8 +99,8 @@ pub(super) async fn retire_run(
     }
 
     // The closed run's Deferred sources end with it: an unsealed one is
-    // sealed `Cancelled`, its subscribers wake, and every row goes. A late
-    // write then finds no armed source and revives nothing.
+    // sealed `Cancelled`, its subscribers wake, and every body row goes.
+    // Only its identity and terminal-kind fence survives for late writes.
     let sources = source_seal::load_sources(&ctx, &keys, |armed| {
         belongs_to_closed_run(&armed.descriptor.source, &request.session_id, &request.run)
     })

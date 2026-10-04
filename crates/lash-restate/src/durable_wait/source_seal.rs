@@ -143,6 +143,44 @@ pub(super) fn source_state_key(address: &RestateDurableWaitAddress) -> String {
     format!("{DURABLE_WAIT_INDEX_SOURCE_PREFIX}{}", address.workflow_key)
 }
 
+/// L13 retains identity and terminal kind after releasing the source's body.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetiredSource {
+    source: AwaitEventKey,
+    terminal: RetiredSourceTerminal,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RetiredSourceTerminal {
+    Resolved,
+    Cancelled,
+}
+
+fn retired_source_key(address: &RestateDurableWaitAddress) -> String {
+    format!("wait-index/v2/source-retired/{}", address.workflow_key)
+}
+
+async fn source_is_retired(
+    ctx: &ObjectContext<'_>,
+    address: &RestateDurableWaitAddress,
+    source: &AwaitEventKey,
+) -> Result<bool, TerminalError> {
+    let fence = object_state::get_stamped::<RetiredSource>(
+        ctx,
+        &retired_source_key(address),
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+    )
+    .await?;
+    match fence {
+        Some(fence) if fence.source != *source => Err(TerminalError::new(
+            "retired source identity does not match its address",
+        )),
+        fence => Ok(fence.is_some()),
+    }
+}
+
 async fn load_source(
     ctx: &ObjectContext<'_>,
     address: &RestateDurableWaitAddress,
@@ -177,6 +215,9 @@ pub(super) async fn arm_descriptor(
     let address = derive_durable_wait_index_address(ctx.key(), &descriptor.source)?;
     let refused = |refusal| Ok(RestateSourceArmReply::Refused { refusal });
     if load_durable_wait_index_metadata(ctx, writer).await?.revoked {
+        return refused(SourceRefusal::Retired);
+    }
+    if source_is_retired(ctx, &address, &descriptor.source).await? {
         return refused(SourceRefusal::Retired);
     }
     if let Some(armed) = load_source(ctx, &address).await? {
@@ -218,6 +259,11 @@ pub(super) async fn resolve_completion(
     use lash_core::{Resolution, ResolveOutcome};
     let address = derive_durable_wait_index_address(ctx.key(), key)?;
     let Some(armed) = load_source(ctx, &address).await? else {
+        if source_is_retired(ctx, &address, key).await? {
+            return Ok(Some(Response::Refused(Refused::Source {
+                refusal: SourceRefusal::Retired,
+            })));
+        }
         return Ok(None);
     };
     let refused = |refusal| Some(Response::Refused(Refused::Source { refusal }));
@@ -403,6 +449,9 @@ pub(super) async fn subscribe_source(
         return refused(SourceRefusal::Retired);
     }
     let Some(mut armed) = load_source(&ctx, &address).await? else {
+        if source_is_retired(&ctx, &address, &request.subscription.source).await? {
+            return refused(SourceRefusal::Retired);
+        }
         return refused(SourceRefusal::NotArmed);
     };
     if armed.descriptor.owner != request.subscription.owner {
@@ -475,6 +524,9 @@ pub(super) async fn seal_descriptor(
         return refused(SourceRefusal::Retired);
     }
     let Some(armed) = load_source(ctx, &address).await? else {
+        if source_is_retired(ctx, &address, &request.source).await? {
+            return refused(SourceRefusal::Retired);
+        }
         return refused(SourceRefusal::NotArmed);
     };
     if armed.descriptor.source != request.source {
@@ -584,20 +636,33 @@ pub(super) async fn retire_sources(
 ) -> Result<(), TerminalError> {
     use crate::controller::RestateControllerContext as _;
     for (address, armed) in sources {
+        let source = armed.descriptor.source.clone();
         let holder = lash_core::tool_run::MaterialHolder::Source {
-            source: armed.descriptor.source.clone(),
+            source: source.clone(),
         };
-        if armed.seal.is_none() {
-            seal_and_wake(
-                &registry.namespace,
-                ctx,
-                writer,
-                &address,
-                armed,
-                SourceSeal::Cancelled,
-            )
-            .await?;
-        }
+        let seal = match armed.seal.clone() {
+            Some(seal) => seal,
+            None => {
+                let (SealOutcome::Sealed { seal } | SealOutcome::AlreadySealed { seal }) =
+                    seal_and_wake(
+                        &registry.namespace,
+                        ctx,
+                        writer,
+                        &address,
+                        armed,
+                        SourceSeal::Cancelled,
+                    )
+                    .await?;
+                seal
+            }
+        };
+        let fence = RetiredSource {
+            source,
+            terminal: match seal {
+                SourceSeal::Resolved { .. } => RetiredSourceTerminal::Resolved,
+                SourceSeal::Cancelled => RetiredSourceTerminal::Cancelled,
+            },
+        };
         let materials = registry.materials.clone();
         let attachments = registry.attachments.clone();
         ctx.run_json_or_retry_send::<(), _>(
@@ -617,6 +682,7 @@ pub(super) async fn retire_sources(
             },
         )
         .await?;
+        object_state::set_stamped(ctx, &retired_source_key(&address), writer, fence);
     }
     Ok(())
 }

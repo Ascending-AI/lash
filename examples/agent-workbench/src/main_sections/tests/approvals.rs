@@ -508,16 +508,69 @@ try {
         1,
         "redrive must reuse the journaled provider response"
     );
+    // L13: retirement keeps identity, releases material, and refuses any
+    // duplicate without creating another promise or result body.
+    let index = double.namespace().service_name("LashDurableWaitIndex");
+    let before = double.server().object_state(&index, &session_id);
+    let invocations = double.server().invocations();
+    let refusal = core
+        .completions()
+        .resolve(key.clone(), resolution.clone())
+        .await
+        .expect_err("a retired completion refuses a duplicate");
+    let lash::EmbedError::Runtime(error) = refusal else {
+        panic!("retirement keeps its runtime cause: {refusal:?}");
+    };
+    let Some(lash::runtime::RuntimeErrorCause::SourceRefused { refusal }) = error.cause else {
+        panic!("retirement keeps its typed source refusal: {error:?}");
+    };
     assert_eq!(
-        core.completions()
-            .resolve(key, resolution.clone())
-            .await
-            .unwrap(),
-        lash::ResolveOutcome::AlreadyResolved {
-            terminal: resolution.clone()
-        },
-        "redrive retains the exact typed terminal resolution"
+        serde_json::to_value(refusal).unwrap(),
+        json!({"refusal": "retired"})
     );
+    assert_eq!(double.server().object_state(&index, &session_id), before);
+    assert!(
+        before
+            .keys()
+            .all(|key| !key.starts_with("wait-index/v2/source/"))
+    );
+    let fences: Vec<_> = before
+        .iter()
+        .filter(|(key, _)| key.starts_with("wait-index/v2/source-retired/"))
+        .map(|(_, row)| serde_json::from_slice::<serde_json::Value>(row).unwrap()["body"].clone())
+        .collect();
+    assert!(
+        fences
+            .iter()
+            .any(|fence| fence["source"] == serde_json::to_value(&key).unwrap())
+    );
+    assert!(
+        fences
+            .iter()
+            .all(|fence| fence.as_object().unwrap().len() == 2)
+    );
+    for call in double.server().invocations().into_iter().filter(|call| {
+        call.target.contains("LashDurableWait")
+            && !invocations.iter().any(|before| before.id == call.id)
+    }) {
+        assert!(
+            call.target.contains("LashDurableWaitIndex") && call.target.ends_with("/resolve"),
+            "refusal starts no workflow promise: {call:?}"
+        );
+        for entry in double.server().journal(&call.id).unwrap() {
+            assert!(
+                !matches!(
+                    format!("{:?}", entry.ty).as_str(),
+                    "CallCommand"
+                        | "OneWayCallCommand"
+                        | "RunCommand"
+                        | "CompletePromiseCommand"
+                        | "SetStateCommand"
+                ),
+                "refusal publishes no promise or body: {entry:?}"
+            );
+        }
+    }
     let value = output.final_value().cloned();
     match resolution {
         lash::Resolution::Ok(expected) => {

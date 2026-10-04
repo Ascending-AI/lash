@@ -445,7 +445,55 @@ async fn retirement_seals_or_waits_for_open_sources_and_later_writes_refuse() {
         world
             .seal(&open, SealWriter::External, resolved(&open, "late"))
             .await,
-        refused(SourceRefusal::NotArmed)
+        refused(SourceRefusal::Retired)
+    );
+
+    assert_eq!(
+        world.arm(&open).await,
+        RestateSourceArmReply::Refused {
+            refusal: SourceRefusal::Retired
+        },
+        "the retired identity cannot be re-armed"
+    );
+
+    // Recover the index at the crash cut after the workflow held the
+    // winning result but before the index mirrored it. Retirement must use
+    // that winning seal, even though the recovered row is still unsealed.
+    let world = World::new(0x4883_0007).await;
+    let source = world.source("result-before-mirror");
+    world.arm(&source).await;
+    let unsealed = world
+        .engine
+        .server()
+        .object_state(INDEX, world.session.as_str());
+    let result = resolved(&source, "result-before-mirror");
+    world.seal(&source, SealWriter::External, result).await;
+    world
+        .engine
+        .server()
+        .set_object_state(INDEX, world.session.as_str(), unsealed);
+    world
+        .call::<_, ()>(
+            "retire_run",
+            crate::durable_wait::RestateDurableWaitRunRequest {
+                session_id: world.session.clone(),
+                run: world.run.clone(),
+                committed_turn: None,
+            },
+        )
+        .await;
+    let state = world
+        .engine
+        .server()
+        .object_state(INDEX, world.session.as_str());
+    let fence_key = format!(
+        "wait-index/v2/source-retired/{}",
+        RestateDurableWaitAddress::for_key(&source.source).workflow_key
+    );
+    let fence: serde_json::Value = serde_json::from_slice(&state[&fence_key]).unwrap();
+    assert_eq!(
+        fence["body"]["terminal"], "resolved",
+        "retirement retains the winning terminal kind after an unmirrored result"
     );
 
     let world = World::new(0x4883_0006).await;
