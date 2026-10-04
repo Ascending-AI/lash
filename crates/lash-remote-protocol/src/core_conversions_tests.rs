@@ -564,6 +564,39 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     ));
 }
 
+#[test]
+fn settled_report_keeps_authoritative_model_records_when_live_activities_are_absent() {
+    let session = lash_sansio::SessionId::fixture("reattached-consumer");
+    let mut turn = lash_core::testing::mock_assembled_turn(&session, "settled answer");
+    turn.llm_calls.push(synthetic_terminal_call_record(
+        "recorded-call",
+        lash_core::AttemptOutcome::Failed,
+        lash_core::ProviderFailureKind::Validation,
+        "InvalidParameter",
+        false,
+    ));
+    let report = RemoteTurnReport::from_core(
+        session,
+        lash_sansio::TurnId::fixture("admitted-run"),
+        turn,
+        [],
+    );
+    assert!(
+        report.validate().is_ok(),
+        "reattached settled report must remain transportable: {:?}",
+        report.validate()
+    );
+    assert_eq!(report.llm_calls.len(), 1);
+    assert_eq!(
+        report
+            .activities
+            .iter()
+            .filter(|activity| matches!(activity.event, RemoteTurnEvent::ModelCallRecorded { .. }))
+            .count(),
+        1
+    );
+}
+
 fn synthetic_terminal_call_record(
     call_id: &str,
     outcome: lash_core::AttemptOutcome,

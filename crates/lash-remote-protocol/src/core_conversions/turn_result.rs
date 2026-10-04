@@ -62,7 +62,36 @@ impl RemoteTurnReport {
             failure_evidence: _,
             errors,
         } = turn;
-        let activities = activities.into_iter().collect::<Vec<_>>();
+        let mut activities = activities.into_iter().collect::<Vec<_>>();
+        let llm_calls = llm_calls
+            .into_iter()
+            .map(RemoteLlmCallRecord::from)
+            .collect::<Vec<_>>();
+        // A reattached follower can miss live activities while retaining the
+        // settled report's sealed model-call ledger. Project those records
+        // into the report's activity vocabulary under their actual call
+        // identity. Existing records (including conflicts) remain untouched
+        // so validation still catches a contradictory report.
+        let mut sequence = activities
+            .iter()
+            .map(|activity| activity.sequence)
+            .max()
+            .map_or(0, |sequence| sequence.saturating_add(1));
+        for record in &llm_calls {
+            if activities.iter().any(|activity| matches!(&activity.event,
+                RemoteTurnEvent::ModelCallRecorded { record: observed } if observed.call_id == record.call_id)) {
+                continue;
+            }
+            activities.push(RemoteTurnActivity {
+                sequence,
+                id: record.call_id.clone(),
+                correlation_id: record.call_id.clone(),
+                event: RemoteTurnEvent::ModelCallRecorded {
+                    record: record.clone(),
+                },
+            });
+            sequence = sequence.saturating_add(1);
+        }
         let outcome = RemoteTurnOutcome::from(outcome);
         Self {
             session_id: session_id.into(),
@@ -77,7 +106,7 @@ impl RemoteTurnReport {
                 .into_iter()
                 .map(RemoteToolCallRecord::from)
                 .collect(),
-            llm_calls: llm_calls.into_iter().map(Into::into).collect(),
+            llm_calls,
             issues: errors.into_iter().map(Into::into).collect(),
             activities,
             metadata: HashMap::new(),
