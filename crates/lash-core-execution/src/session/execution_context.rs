@@ -368,7 +368,9 @@ impl<'run> RuntimeExecutionContext<'run> {
         facts: String,
         producer: serde_json::Value,
     ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError> {
-        let invocation = self.language_runtime_invocation(&key);
+        // A redrive may carry different turn metadata. The cell address and
+        // causal parent identify its seal, just as they identify its outputs.
+        let invocation = self.deferred_resolution_invocation(&key);
         self.dispatch
             .effect_controller
             .execute_effect(
