@@ -235,16 +235,12 @@ impl<'run> RuntimeExecutionContext<'run> {
             context.tool_run = Some(ToolRunChannel(send));
             let future = program(context);
             tokio::pin!(future);
-            let mut cut = false;
             let mut closed = false;
             loop {
-                let event = if cut {
-                    select(future.as_mut(), Box::pin(receive.recv())).await
-                } else {
-                    run.beside(select(future.as_mut(), Box::pin(receive.recv())))
-                        .await
-                        .map_err(SingletonRunError::into_controller_error)?
-                };
+                // The VM worker can enqueue its next request asynchronously.
+                // Do not await X while waiting for that request: replay must
+                // register its command prefix before awaiting an older X.
+                let event = select(future.as_mut(), Box::pin(receive.recv())).await;
                 match event {
                     Either::Left((output, _)) => return Ok(output),
                     Either::Right((
@@ -266,7 +262,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                                 *attribution,
                             )
                             .await;
-                        cut |= run.invocation_failed();
                         let _ = reply.send(result);
                     }
                     Either::Right((
@@ -282,7 +277,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                         let result = handlers
                             .consume_aggregate(&mut run, cursor, consumer, wait, host_control)
                             .await;
-                        cut |= run.invocation_failed();
                         let _ = reply.send(result);
                     }
                     Either::Right((Some(Request::Capture { reason, reply }), _)) => {
@@ -290,8 +284,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                             Some(materials) => state.capture_run(&mut run, reason, materials).await,
                             None => Err(ContinuationRefusal::UnretainedMaterial.into()),
                         };
-                        cut = result.is_ok();
-                        cut |= run.invocation_failed();
                         let _ = reply.send(result);
                     }
                     Either::Right((Some(Request::Close(reply)), _)) => {
@@ -300,7 +292,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                         if result.is_ok() {
                             state.finish_run();
                         }
-                        cut |= run.invocation_failed();
                         let _ = reply.send(result);
                     }
                     Either::Right((None, _)) => return Err(owner_gone()),

@@ -828,10 +828,6 @@ impl<'a> RunCoordinator<'a> {
     pub(crate) fn contains_call(&self, id: &ToolCallId) -> bool {
         self.journal.ledger.has_call(id)
     }
-    pub(crate) fn invocation_failed(&self) -> bool {
-        self.faulted
-    }
-
     pub(crate) fn owner(&self) -> &EffectOpener {
         &self.journal.owner
     }
