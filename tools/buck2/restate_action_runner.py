@@ -87,6 +87,7 @@ def main(argv: list[str]) -> int:
     # A remote action must never build or download undeclared inputs.
     if not os.environ.get("LASH_VM_WORKER"):
         raise ValueError("the suite action is missing its declared VM worker")
+    os.environ["LASH_VM_WORKER"] = str((runner.ROOT / os.environ["LASH_VM_WORKER"]).resolve())
     marker = command.index("--lash-libtest-args")
     if marker != 1:
         raise ValueError("a Restate suite expects one native test binary before its selectors")
