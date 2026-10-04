@@ -1017,7 +1017,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.process_execution.as_ref().map(|exec| &exec.process_id)
     }
 
-    pub(super) fn process_event_context(&self) -> Option<&RuntimeExecutionProcessEventContext> {
+    pub(crate) fn process_event_context(&self) -> Option<&RuntimeExecutionProcessEventContext> {
         self.process_execution
             .as_ref()
             .and_then(|exec| exec.event_context.as_ref())

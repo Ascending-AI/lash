@@ -412,12 +412,28 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .with_tool_attempt_parent_invocation(invocation.clone())
             .with_effect_attempt(Some(effect_attempt.clone()));
         let dispatch = Arc::new(dispatch);
-        let mut context = crate::ToolContext::from_dispatch(dispatch.clone(), &prepared.call)
+        let mut builder = crate::ToolContext::from_dispatch(dispatch.clone(), &prepared.call)
             .runtime_execution_context(
                 self.context
                     .clone()
                     .with_execution_env_spec(dispatch.execution_env_spec.clone()),
             )
+            .enclosing_process(self.context.process_id().cloned());
+        if let Some(process_id) = self.context.process_id()
+            && let Some(events) = self.context.process_event_context()
+        {
+            builder = builder.inside_process(crate::ProcessToolCallWiring::new(
+                process_id.clone(),
+                events.execution_write_authority.clone(),
+                events.process_work.clone(),
+                events.store.clone(),
+                events.session_store_factory.clone(),
+                Arc::clone(&events.queued_work),
+                events.process_wake_delivery_policy,
+                Arc::clone(&events.clock),
+            ));
+        }
+        let mut context = builder
             .build()
             .with_attempt_dispatch(dispatch.clone(), invocation);
         context.install_prederived_completion_key(attempt.completion_key.cloned());

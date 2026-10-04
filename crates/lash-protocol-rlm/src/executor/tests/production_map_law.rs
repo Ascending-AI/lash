@@ -533,12 +533,17 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
             .expect("list processes");
         for record in listed {
             if finished.insert(record.id.clone()) {
-                tokio::time::timeout(
+                let terminal = tokio::time::timeout(
                     std::time::Duration::from_secs(30),
                     table.await_terminal(&record.id),
                 )
                 .await
                 .unwrap_or_else(|_| panic!("process `{}` reaches its end", record.id));
+                assert!(
+                    matches!(&terminal, lash_core::ProcessAwaitOutput::Settled { output } if output.is_success()),
+                    "process `{}` succeeds before its execution map is checked: {terminal:?}",
+                    record.id,
+                );
             }
         }
     }
