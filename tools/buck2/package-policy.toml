@@ -33,6 +33,13 @@
 # --- Test partition policy ---------------------------------------------------
 
 [[rule]]
+packages = ["lash-upgrade-harness"]
+kinds = ["test"]
+targets = ["h1_recovery"]
+tags = ["manual"]
+reason = "requires private native Restate and owned node artifacts; run each full-path witness through tests/e2e/run_provider_recovery.py in a Kiln service gate"
+
+[[rule]]
 packages = ["lash-internal-s3-store"]
 kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["manual", "cargo-service-gate"]

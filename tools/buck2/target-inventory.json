@@ -54115,11 +54115,14 @@
         {
           "build_label": "//crates/lash-upgrade-harness:h1_recovery__test",
           "cargo": "h1_recovery",
+          "cargo_only": "requires private native Restate and owned node artifacts; run each full-path witness through tests/e2e/run_provider_recovery.py in a Kiln service gate",
           "check_label": "//crates/lash-upgrade-harness:h1_recovery__test[check]",
           "clippy_label": "//crates/lash-upgrade-harness:h1_recovery__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-upgrade-harness:h1_recovery__test",
-          "tags": []
+          "tags": [
+            "manual"
+          ]
         },
         {
           "build_label": "//crates/lash-upgrade-harness:phase_a__test",
@@ -58160,7 +58163,6 @@
     "//crates/lash-upgrade-harness:e2e_hosts__test",
     "//crates/lash-upgrade-harness:e2e_telemetry__test",
     "//crates/lash-upgrade-harness:h1_providers__test",
-    "//crates/lash-upgrade-harness:h1_recovery__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -58302,7 +58304,6 @@
     "//crates/lash-upgrade-harness:e2e_hosts__test",
     "//crates/lash-upgrade-harness:e2e_telemetry__test",
     "//crates/lash-upgrade-harness:h1_providers__test",
-    "//crates/lash-upgrade-harness:h1_recovery__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -58476,7 +58477,6 @@
     "//crates/lash-upgrade-harness:e2e_hosts__test",
     "//crates/lash-upgrade-harness:e2e_telemetry__test",
     "//crates/lash-upgrade-harness:h1_providers__test",
-    "//crates/lash-upgrade-harness:h1_recovery__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -58845,7 +58845,6 @@
     "//crates/lash-upgrade-harness:e2e_hosts__test",
     "//crates/lash-upgrade-harness:e2e_telemetry__test",
     "//crates/lash-upgrade-harness:h1_providers__test",
-    "//crates/lash-upgrade-harness:h1_recovery__test",
     "//crates/lash-upgrade-harness:lash-e2e-proxy__bin__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
