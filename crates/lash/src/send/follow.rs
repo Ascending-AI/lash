@@ -968,7 +968,21 @@ async fn finish_settled(
             }
             report
         }
-        None => durable_report(ctx, outcome, acceptance).await?,
+        None => {
+            let mut report = durable_report(ctx, outcome, acceptance).await?;
+            // The terminal is durable even when another follower consumed the
+            // live report. Preserve the sealed calls this follower actually
+            // observed beside their activities; unavailable history stays a
+            // reported gap. Retain duplicates and contradictions for validation.
+            report.llm_calls = activities
+                .iter()
+                .filter_map(|activity| match &activity.event {
+                    TurnEvent::ModelCallRecorded { record } => Some(record.clone()),
+                    _ => None,
+                })
+                .collect();
+            report
+        }
     };
     Ok(SendOutcome::Settled {
         run,

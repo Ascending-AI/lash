@@ -155,6 +155,8 @@ pub struct TurnReport {
     /// complete lash-side model attribution surface: a turn has no single
     /// producing model, so lash exposes the per-call ledger and the host
     /// composes any higher-level view from it (ADR 0033).
+    /// A durable follower retains only the sealed calls it observed; its gaps
+    /// identify unavailable history.
     #[serde(default)]
     pub llm_calls: Vec<LlmCallRecord>,
     /// Bounded, non-transcript evidence from charge-safety-refused
@@ -204,9 +206,9 @@ pub enum ReportSource {
     /// Rebuilt from the session's durable state because the turn ran in
     /// another process (or its live report was no longer held): the outcome,
     /// the session state after it and the acceptance are the store's; the
-    /// per-turn ledgers (usage, calls, tool records, execution metrics) are
-    /// empty here and are read from the session's usage report and
-    /// observation instead.
+    /// usage, tool records and execution metrics are read from the session's
+    /// usage report and observation instead. Model calls retain the sealed
+    /// records this follower observed, with unavailable history reported as gaps.
     Durable,
 }
 

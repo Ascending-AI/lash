@@ -124,21 +124,43 @@ async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<
         .await?;
 
     let handle = session
-        .send(TurnInput::text("report me"))
+        .send(TurnInput::text(HELD))
         .id("durable-report-run")
         .await?;
     let input_id = handle.input_id().clone();
+    provider_called(&fixture, 1).await;
+    // Subscribe while the provider is held, then let the first follower take
+    // the live report. The second follower retains the sealed call activity
+    // while rebuilding its terminal report from durable state.
+    let follower = session.attach(input_id.clone());
+    fixture.release.notify_one();
     let live = handle.output().await?;
     assert_eq!(live.result.source, crate::ReportSource::Live);
     assert_eq!(live.status(), crate::TurnStatus::Answered);
 
-    // The first handle took the live report; a handle attached afterwards
-    // finds none and reads the store.
-    let durable = session.attach(input_id.clone()).output().await?;
+    let durable = follower.output().await?;
     assert_eq!(durable.result.source, crate::ReportSource::Durable);
     assert_eq!(durable.status(), crate::TurnStatus::Answered);
     assert_eq!(durable.result.outcome, live.result.outcome);
-    assert_eq!(durable.assistant_message(), Some("echo: report me"));
+    assert_eq!(
+        durable.assistant_message(),
+        Some("echo: held until released")
+    );
+    assert!(
+        durable
+            .activities
+            .iter()
+            .any(|activity| matches!(activity.event, crate::TurnEvent::ModelCallRecorded { .. }))
+    );
+    durable
+        .result
+        .to_remote(
+            &session.session_id(),
+            &"durable-report-run".parse()?,
+            &durable.activities,
+        )
+        .validate()
+        .expect("observed sealed calls remain transportable in a durable report");
     assert_eq!(
         durable.result.state.turn_index,
         live.result.state.turn_index
