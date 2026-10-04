@@ -1132,6 +1132,43 @@ fn transition_request(
     }
 }
 
+/// L19: a transition's journaled outcome retains numeric publication receipt
+/// keys through the engine's internally tagged JSON outcome decoder.
+#[test]
+fn a_journaled_transition_retains_the_completed_state_frontier() {
+    let host = crate::PluginHost::empty();
+    let mut namespace = PluginNamespaceState::default();
+    namespace.publication.applied = Some(crate::tool_run::PublicationOrdinal(1));
+    namespace.publication.receipts.insert(
+        crate::tool_run::PublicationOrdinal(1),
+        crate::BlobRef::for_content(b"completed resolution"),
+    );
+    let base = PluginState {
+        plugins: [("retained".into(), namespace)].into(),
+    };
+    let record = host.transition_plugins(
+        transition_request("frontier-reopen", &host),
+        &base,
+        &crate::PluginConfig::default(),
+    );
+    let outcome = crate::RuntimeEffectOutcome::TransitionPlugins {
+        record: Box::new(record),
+    };
+    let journal = serde_json::to_value(&outcome).unwrap();
+    let served: crate::RuntimeEffectOutcome = serde_json::from_value(journal.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&served).unwrap(), journal);
+    let crate::RuntimeEffectOutcome::TransitionPlugins { record } = served else {
+        panic!("transition outcome");
+    };
+    assert_eq!(
+        record.candidate().unwrap().0.plugins["retained"],
+        base.plugins["retained"]
+    );
+    let binary: crate::RuntimeEffectOutcome =
+        rmp_serde::from_slice(&rmp_serde::to_vec_named(&outcome).unwrap()).unwrap();
+    assert_eq!(serde_json::to_value(binary).unwrap(), journal);
+}
+
 #[tokio::test]
 async fn pure_initialization_precedes_read_only_registration_and_readiness() {
     #[derive(Clone)]
