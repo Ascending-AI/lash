@@ -1,7 +1,7 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
-reads = 103
-outputs = 142
+reads = 102
+outputs = 141
 
 [[surfaces]]
 name = "workbench"
@@ -251,7 +251,6 @@ row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", 
 "examples/agent-workbench/src/main_sections/tests/session_resume.rs#committed_transcript_and_provider_history_survive_web_process_reconstruction_inner" = { reads = 2, outputs = 0, kind = "evidence-read", reason = "committed_transcript_and_provider_history_survive_web_process_reconstruction_inner inspects recorded state for a law assertion." }
 "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs#store_maintenance_reclaims_only_unreferenced_attachments_inner" = { reads = 0, outputs = 1, kind = "output-read", reason = "store_maintenance_reclaims_only_unreferenced_attachments_inner asserts the typed program result independently of rendered rows." }
 "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs#assert_plugin_provider_execution" = { reads = 0, outputs = 1, kind = "output-read", reason = "assert_plugin_provider_execution asserts the typed program result independently of rendered rows." }
-"examples/agent-workbench/src/main_sections/tests/tool_catalog.rs#assert_live_tool_provider_execution_and_removal" = { reads = 0, outputs = 1, kind = "output-read", reason = "assert_live_tool_provider_execution_and_removal asserts the typed program result independently of rendered rows." }
 "examples/agent-workbench/src/main_sections/tests.rs#parallel_inbox_lists_complete_in_durable_workbench_turn_inner" = { reads = 0, outputs = 1, kind = "output-read", reason = "parallel_inbox_lists_complete_in_durable_workbench_turn_inner asserts the typed program result independently of rendered rows." }
 "examples/agent-workbench/src/main_sections/tests.rs#register_test_trigger" = { reads = 0, outputs = 1, kind = "output-read", reason = "register_test_trigger asserts the typed program result independently of rendered rows." }
 "examples/agent-workbench/src/restate/tests.rs#turn_control_binding_routes_foreground_turns_through_the_configured_host" = { reads = 0, outputs = 1, kind = "output-read", reason = "turn_control_binding_routes_foreground_turns_through_the_configured_host asserts the typed program result independently of rendered rows." }

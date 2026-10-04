@@ -171,8 +171,7 @@ mod multi_session_tests;
 #[path = "tests/tool_catalog.rs"]
 mod tool_catalog_tests;
 pub(crate) use tool_catalog_tests::{
-    assert_live_tool_provider_execution_and_removal, assert_plugin_provider_execution,
-    assert_tool_catalog_contract, catalog_lifecycle_provider,
+    assert_plugin_provider_execution, assert_tool_catalog_contract, catalog_lifecycle_provider,
 };
 #[cfg(test)]
 #[path = "tests/approvals.rs"]
@@ -968,6 +967,9 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let mail_world = mail::MailWorld::new();
     mail_world.add_account("test").expect("add test");
+    mail_world
+        .add_account("live")
+        .expect("add second installed account");
     let provider = catalog_lifecycle_provider();
     let model = test_llm_profile();
     let session_id = WorkbenchSessions::fresh().current();
@@ -985,6 +987,15 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
         .await
         .expect("open session");
 
+    let commands = session.admin().commands();
+    let receipt = commands
+        .refresh_tool_catalog("inbox catalog inspection", "inbox-catalog")
+        .await
+        .expect("submit catalog publication");
+    assert!(matches!(
+        commands.settle(receipt).await.expect("publish catalog"),
+        lash::SessionCommandSettlement::Durable(_)
+    ));
     let tool_names = session
         .admin()
         .tools()
@@ -1001,16 +1012,16 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
     assert_tool_catalog_contract(&session).await;
     tokio::time::timeout(
         Duration::from_secs(5),
-        assert_plugin_provider_execution(&session, &mail_world),
+        assert_plugin_provider_execution(&session, &mail_world, "test"),
     )
     .await
     .expect("plugin-provider turn should complete");
     tokio::time::timeout(
         Duration::from_secs(20),
-        assert_live_tool_provider_execution_and_removal(&session),
+        assert_plugin_provider_execution(&session, &mail_world, "live"),
     )
     .await
-    .expect("live-provider lifecycle should complete");
+    .expect("the second installed account turn should complete");
     let _ = std::fs::remove_dir_all(data_dir);
 }
 

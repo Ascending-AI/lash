@@ -1,7 +1,7 @@
 use crate::support::{
     Arc, CancellationToken, EmbedError, InputItem, LashCore, LashRuntime, PluginMessage, Result,
     RuntimeHandle, RuntimeSessionState, ScopedEffectController, SessionError, SessionStateService,
-    ToolManifest, ToolProvider, ToolRestoreReport, ToolSourceHandle, ToolState, TurnInput,
+    ToolManifest, ToolRestoreReport, ToolSourceHandle, ToolState, TurnInput,
 };
 use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
 use lash_sansio::ProcessId;
@@ -768,15 +768,6 @@ impl SessionAdmin {
         Ok(self.tool_state().await?.tool_manifests())
     }
 
-    async fn add_tool_provider(&self, provider: Arc<dyn ToolProvider>) -> Result<ToolSourceHandle> {
-        let tool_registry = self.tool_registry().await?;
-        let handle = tool_registry
-            .add_tool_provider(provider)
-            .map_err(EmbedError::from)?;
-        self.refresh_tool_catalog().await?;
-        Ok(handle)
-    }
-
     async fn remove_tool_source(&self, handle: &ToolSourceHandle) -> Result<u64> {
         let tool_registry = self.tool_registry().await?;
         tool_registry
@@ -916,21 +907,6 @@ impl ToolAdmin {
                 name: name.to_string(),
             })?;
         crate::tool_catalog::resolve_catalog_contract(&registry, name)
-    }
-
-    /// Subsequent contract resolution and execution through this session see
-    /// the provider immediately. The core-altitude [`LashCore::tool_catalog`](crate::LashCore::tool_catalog)
-    /// view is unchanged: live provider mutation belongs to the session.
-    ///
-    /// This is the host-facing route for session hosts that discover tool
-    /// providers after opening a session, such as MCP or tenant-specific tool
-    /// hosts. It keeps the registry implementation behind the facade as
-    /// required by [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    ///
-    /// The returned handle belongs only to this open session. It is not a
-    /// durable identifier, and using it with another session is unchecked.
-    pub async fn add_provider(&self, provider: Arc<dyn ToolProvider>) -> Result<ToolSourceHandle> {
-        self.control.add_tool_provider(provider).await
     }
 
     /// Contract resolution for turns composed after this method returns no
