@@ -1502,8 +1502,6 @@
     "tests::process_await_redrive::restate_session_cancel_sweep_excludes_turn_control_addresses": 1,
     "tests::process_cancel_race::a_cancel_committed_after_the_timer_won_does_not_rewrite_the_replayed_wake": 553,
     "tests::process_cancel_race::a_process_sleep_that_lost_to_the_cancel_promise_replays_cancelled": 590,
-    "tests::process_cancel_race_sdk::a_process_event_wait_race_takes_the_first_recorded_completion": 2,
-    "tests::process_cancel_race_sdk::a_process_rank_wait_race_takes_the_first_recorded_completion": 2,
     "tests::process_cancel_steps::a_cancel_in_the_handover_gap_is_forwarded_after_the_successor_hands_over": 56,
     "tests::process_cancel_steps::a_redriven_cancel_forwards_to_its_recorded_route": 51,
     "tests::process_cancel_steps::a_retired_cancel_request_is_refused_before_any_command": 248,
