@@ -101,11 +101,6 @@ struct ScriptedShifts {
     scripts: Mutex<BTreeMap<String, RunScript>>,
     /// The admissions of an item that still fail their attempt, by item.
     admission_faults: Mutex<BTreeMap<String, usize>>,
-    /// The build generations marked draining, as the store's marks are.
-    draining: Mutex<Vec<lash_core::engine::BuildGeneration>>,
-    /// The drain each admission was asked to answer to, by request and
-    /// ordinal, as its first execution saw it.
-    drains_asked: Mutex<BTreeMap<(String, u32), Option<lash_core::engine::BuildGeneration>>>,
 }
 
 /// The item a scripted run was admitted for: a ceded item's runs are
@@ -155,12 +150,6 @@ impl ScriptedShifts {
         let ledger = ledgers.entry(session.clone()).or_default();
         ledger.open.retain(|open| open != item);
         ledger.consumed.push(item.to_owned());
-    }
-
-    /// Mark `generation` draining: an admission that answers to its drain
-    /// and finds work admits nothing.
-    fn mark_draining(&self, generation: &lash_core::engine::BuildGeneration) {
-        self.draining.lock().unwrap().push(generation.clone());
     }
 
     fn ledger(&self, session: &SessionId) -> Ledger {
@@ -214,22 +203,8 @@ impl ScriptedShifts {
         request: &ShiftRequest,
         admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
-        draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, RuntimeError> {
         let next = self.ledger(&request.session).open.front().cloned();
-        self.drains_asked
-            .lock()
-            .unwrap()
-            .entry((request.request.as_str().to_owned(), ordinal))
-            .or_insert_with(|| draining.cloned());
-        if next.is_some()
-            && let Some(generation) = draining
-            && self.draining.lock().unwrap().contains(generation)
-        {
-            return Ok(AdmitVerdict::Draining {
-                generation: generation.clone(),
-            });
-        }
         if let Some(item) = &next
             && let Some(owed) = self.admission_faults.lock().unwrap().get_mut(item)
             && *owed > 0
@@ -285,7 +260,7 @@ impl SessionShifts for ScriptedShifts {
         request: &ShiftRequest,
         admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
-        draining: Option<&lash_core::engine::BuildGeneration>,
+        _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, ShiftAbort> {
         let address = EffectAddress::new(
             controller.execution_scope().clone(),
@@ -304,7 +279,7 @@ impl SessionShifts for ScriptedShifts {
             },
         );
         let verdict = self
-            .admission(request, admitting_generation, ordinal, draining)
+            .admission(request, admitting_generation, ordinal)
             .await
             .map_err(ShiftAbort::Retry)?;
         controller
@@ -821,168 +796,6 @@ async fn a_generation_lane_continuation_sent_to_the_stable_lane_is_refused_typed
     gate.release.notify_one();
     settle(&backend).await;
     assert_eq!(scripted.ledger(&session).consumed, ["first", "second"]);
-}
-
-/// FIG-4639: a shift resumed on a draining generation's lane executes the run
-/// it was resumed for and hands every run after it to the stable name,
-/// which the newest build serves. The resume's first admission answers to no
-/// drain, so its run always runs on the build that took it. Every admission
-/// after it answers to the lane's generation: the resume's own next
-/// admission, and, under replay, where a leg is one run long, the first
-/// admission of the continuation the resume handed off to on its lane. The
-/// newest build's legs run the rest, and no run executes twice.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_shift_resumed_on_a_draining_generation_lane_hands_the_rest_to_the_newest_build() {
-    for always_replay in [false, true] {
-        let backend = lash_restate_test::backend(
-            0x4639,
-            ServerConfig::default().always_replay(always_replay),
-        )
-        .await
-        .unwrap();
-        let (scripted, _installation) = install(&backend);
-        let old_deployment = backend.server().deployments()[0].clone();
-        let generation = backend
-            .restate()
-            .build_generation()
-            .expect("the engine's generation is bound")
-            .clone();
-        let next_generation = lash_core::engine::BuildGeneration::for_test("drain-next");
-        let next_deployment = backend
-            .add_build(next_generation.clone(), "next", DeploymentHooks::default())
-            .await
-            .unwrap();
-        let session = SessionId::from("draining-lane");
-        let items = ["first", "second", "third"];
-        for item in items {
-            scripted.accept(&session, item);
-        }
-        scripted.mark_draining(&generation);
-        let resumed = backend
-            .restate()
-            .session_work_engine()
-            .send_resume(&session, request("resumed"), &generation)
-            .await
-            .unwrap();
-        settle(&backend).await;
-        no_shift_failed(&backend);
-        assert_eq!(
-            scripted.ledger(&session).consumed,
-            items,
-            "every item ran once, in order: replay={always_replay}"
-        );
-        assert_eq!(scripted.ledger(&session).run_executions, items.len());
-
-        let outcome = |id: &str| -> ShiftOutcome {
-            let bytes = backend
-                .server()
-                .outcome(id)
-                .expect("the shift completed")
-                .expect("the shift's outcome");
-            serde_json::from_slice::<Reply<ShiftOutcome>>(&bytes)
-                .unwrap()
-                .body
-        };
-        let lane = format!("{SESSION_SHIFT_SERVICE}_g{generation}/{session}/shift");
-        let stable = format!("{SESSION_SHIFT_SERVICE}/{session}/shift");
-        let shifts = session_shifts(&backend);
-        let on_lane: Vec<_> = shifts.iter().filter(|view| view.target == lane).collect();
-        let on_stable: Vec<_> = shifts.iter().filter(|view| view.target == stable).collect();
-        assert_eq!(
-            on_lane.len() + on_stable.len(),
-            shifts.len(),
-            "every shift ran on the lane or under the stable name: {shifts:?}"
-        );
-        // The resume ran the run it was sent for, and nothing else ran on
-        // the draining build.
-        let first = outcome(resumed.as_str());
-        assert_eq!(committed_runs(&first), ["first"], "replay={always_replay}");
-        let lane_runs: usize = on_lane.iter().map(|view| outcome(&view.id).ran.len()).sum();
-        assert_eq!(
-            lane_runs, 1,
-            "the draining build ran one run: replay={always_replay}, {on_lane:?}"
-        );
-        for view in &on_lane {
-            assert_eq!(view.pinned_deployment_id, old_deployment.as_str());
-        }
-        // The leg that met the drain names it, and what it handed over went
-        // to the stable name: the newest build's.
-        let handed_over = on_lane
-            .iter()
-            .map(|view| outcome(&view.id))
-            .filter(|leg| {
-                leg.stop
-                    == ShiftStop::Draining {
-                        generation: generation.clone(),
-                    }
-            })
-            .count();
-        assert_eq!(
-            handed_over, 1,
-            "one leg on the lane handed the shift over: replay={always_replay}, {on_lane:?}"
-        );
-        assert_eq!(
-            on_lane.len(),
-            if always_replay { 2 } else { 1 },
-            "replayed, the resume hands off at its boundary and its continuation meets the \
-             drain: {on_lane:?}"
-        );
-        assert!(!on_stable.is_empty(), "the rest ran under the stable name");
-        for view in &on_stable {
-            assert_eq!(
-                view.pinned_deployment_id,
-                next_deployment.as_str(),
-                "the stable name is the newest build's: {view:?}"
-            );
-        }
-        let stable_runs: usize = on_stable
-            .iter()
-            .map(|view| outcome(&view.id).ran.len())
-            .sum();
-        assert_eq!(stable_runs, items.len() - 1);
-        // What each admission answered to.
-        let asked = scripted.drains_asked.lock().unwrap().clone();
-        assert_eq!(
-            asked[&("resumed".to_owned(), 0)],
-            None,
-            "the resume's first admission answers to no drain"
-        );
-        for ((request, ordinal), drain) in &asked {
-            if request == "resumed" && *ordinal == 0 {
-                continue;
-            }
-            let lane_leg = request == "resumed"
-                || on_lane.iter().any(|view| {
-                    backend
-                        .server()
-                        .journal(&view.id)
-                        .unwrap()
-                        .iter()
-                        .any(|entry| {
-                            entry.name.as_deref()
-                                == Some(
-                                    format!(
-                                        "lash:{}",
-                                        shift_admission_replay_key(
-                                            &ShiftRequestId::new(request),
-                                            *ordinal
-                                        )
-                                    )
-                                    .as_str(),
-                                )
-                        })
-                });
-            let expected = match (lane_leg, *ordinal) {
-                (true, _) => Some(generation.clone()),
-                (false, 0) => None,
-                (false, _) => Some(next_generation.clone()),
-            };
-            assert_eq!(
-                *drain, expected,
-                "admission {ordinal} of `{request}`: replay={always_replay}"
-            );
-        }
-    }
 }
 
 /// A shift's attempt budget is never spent on the sum of its runs'

@@ -672,33 +672,16 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
     };
     assert_eq!(again.terminal(), Some(terminal));
 
-    let run = world
-        .backend
-        .server()
-        .invocations()
-        .into_iter()
-        .find_map(|view| {
-            view.target
-                .strip_prefix(&format!(
-                    "{TURN_DRIVER_SERVICE}/{}:{}",
-                    session_id.as_str().len(),
-                    session_id.as_str()
-                ))
-                .and_then(|rest| rest.strip_suffix("/run"))
-                .map(str::to_owned)
-        })
-        .expect("the running run has its LashTurn");
-    world
-        .backend
-        .restate()
-        .turn_work_driver()
-        .request_cancel(lash::TurnCancelRequest::new(
-            lash::TurnAddress::new(session_id.clone(), lash_core::TurnId::fixture(run.clone())),
-            "withdraw-cancel-stop",
-            Some("user".to_owned()),
-        ))
+    let cancelled = session
+        .cancel(lash::CancelTarget::Input(running.input_id.clone()))
+        .request_id("withdraw-cancel-stop")
+        .origin("user")
         .await
         .expect("request the running turn's cancel");
+    assert!(
+        matches!(cancelled, lash::CancelReceipt::Requested { .. }),
+        "the admitted input addresses its running Run: {cancelled:?}"
+    );
     world.gate.release.notify_one();
 
     let outcome = attach(&world.backend, &session_id, request_of(&running.input_id)).await;
