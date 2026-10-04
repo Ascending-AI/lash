@@ -22,6 +22,7 @@ pub(crate) struct ProductionToolHandlers<'run> {
     environment: Option<crate::ProcessExecutionEnvRef>,
     calls: Mutex<BTreeMap<crate::ToolCallId, CallInput>>,
     prepared: Mutex<BTreeMap<crate::ToolCallId, Prepared>>,
+    pending: Mutex<BTreeMap<crate::ToolCallId, crate::PendingCompletion>>,
     contributions: Mutex<BTreeMap<crate::ToolCallId, Vec<CheckContribution>>>,
     declarations: Mutex<BTreeMap<crate::ToolCallId, Vec<crate::ToolIntentExecutionOutcome>>>,
 }
@@ -92,6 +93,7 @@ impl<'run> ProductionToolHandlers<'run> {
             environment,
             calls: Mutex::default(),
             prepared: Mutex::default(),
+            pending: Mutex::default(),
             contributions: Mutex::default(),
             declarations: Mutex::default(),
         }
@@ -236,13 +238,22 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         Some(&self.context.dispatch().process_engines)
     }
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String> {
-        let input = self
+        let mut input = self
             .calls
             .lock_recover()
             .get(&call.call_id)
             .cloned()
             .ok_or("an admitted call has no preparation binding")?;
-        let dispatch = self.dispatch(&input);
+        let mut dispatch = self.dispatch(&input);
+        dispatch.tools = dispatch
+            .plugins
+            .resolve_context_tool_bindings(&[input.binding.preparation.clone()])
+            .map_err(|error| {
+                self.context
+                    .record_nested_effect_error(error.clone().into());
+                error.to_string()
+            })?
+            .remove(0);
         let mut pending =
             input
                 .pending
@@ -255,6 +266,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     args: call.arguments.clone(),
                     replay: None,
                 });
+        input.pending = None;
         let original_args = pending.args.clone();
         let hook = super::hooks::hook_context(
             &dispatch,
@@ -366,14 +378,18 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 .into();
         dispatch.parent_invocation = Some(invocation.clone());
         dispatch.observation_call_key = None;
+        let effect_attempt = crate::EffectAttempt::default();
         dispatch.direct_completions = dispatch
             .direct_completions
-            .with_tool_attempt_parent_invocation(invocation.clone());
+            .with_tool_attempt_parent_invocation(invocation.clone())
+            .with_effect_attempt(Some(effect_attempt.clone()));
         let dispatch = Arc::new(dispatch);
         let mut context = crate::ToolContext::from_dispatch(dispatch.clone(), &prepared.call)
             .build()
             .with_attempt_dispatch(dispatch.clone(), invocation);
         context.install_prederived_completion_key(attempt.completion_key.cloned());
+        context = context.with_prepared_payload(prepared.call.prepared_payload.clone());
+        let completion_context = context.clone();
         if let Some(grant) = &prepared.input.grant {
             context = context
                 .with_tool_execution_binding(grant.execution_binding.clone())
@@ -385,7 +401,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 prepared.input.definition.manifest.clone(),
             )),
         };
-        let outcome = retry::execute_leaf_tool_attempt(
+        let body = retry::execute_leaf_tool_attempt(
             &dispatch,
             &authority,
             &prepared.call,
@@ -395,18 +411,127 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 crate::ToolRetryPolicy::Never => 1,
                 crate::ToolRetryPolicy::Safe { max_attempts, .. } => max_attempts,
             },
+        );
+        let outcome = match futures_util::future::select(
+            Box::pin(body),
+            Box::pin(effect_attempt.attempt_faulted()),
         )
-        .await;
+        .await
+        {
+            futures_util::future::Either::Left((outcome, _)) => outcome,
+            futures_util::future::Either::Right((error, _)) => {
+                self.context.record_nested_effect_error(error.clone());
+                return Err(error.to_string());
+            }
+        };
+        if let Some(error) = effect_attempt.attempt_fault() {
+            self.context.record_nested_effect_error(error.clone());
+            return Err(error.to_string());
+        }
+
         match outcome {
             crate::ToolAttemptOutcome::HostFailed(error) => {
                 self.context.record_nested_effect_error(*error.clone());
                 Err(error.to_string())
             }
-            crate::ToolAttemptOutcome::Pending(pending) => Ok(SingletonBodyOutcome::Pending {
-                completion: Box::new(pending),
-            }),
+            crate::ToolAttemptOutcome::Pending(pending) => {
+                let refusal = prepared
+                    .input
+                    .definition
+                    .manifest
+                    .declaration
+                    .admits(OutcomeShape::Deferred)
+                    .and_then(|()| {
+                        if matches!(
+                            pending.resolved_by,
+                            Some(crate::PendingResolver::DeclaredStart(_))
+                        ) {
+                            prepared.input.definition.manifest.declaration.admits(
+                                OutcomeShape::Done {
+                                    intents: &[crate::ToolIntentKind::StartProcess],
+                                },
+                            )
+                        } else {
+                            Ok(())
+                        }
+                    })
+                    .err();
+                if let Some(refusal) = refusal {
+                    let failure = crate::ToolFailure::runtime(
+                        crate::ToolFailureClass::Internal,
+                        "tool_outcome_not_declared",
+                        refusal.to_string(),
+                    )
+                    .with_cause(crate::ToolFailureCause::Declaration { refusal });
+                    let capture = self
+                        .capture_output(
+                            prepared,
+                            ToolCallOutput::failure(failure),
+                            crate::plugin::ToolHookOccurrence::Attempt {
+                                attempt: attempt.attempt,
+                            },
+                            ToolIntents::default(),
+                            dispatch.checkpoint_messages.drain(),
+                            dispatch.trigger_outcomes.drain(),
+                        )
+                        .await?;
+                    Ok(SingletonBodyOutcome::Failed {
+                        output: encode(&capture)?,
+                    })
+                } else if completion_context.take_completion_key().is_none() {
+                    let capture = self
+                        .capture_output(
+                            prepared,
+                            ToolCallOutput::failure(crate::ToolFailure::runtime(
+                                crate::ToolFailureClass::Internal,
+                                "pending_tool_missing_completion_key",
+                                "tool returned Pending without obtaining its completion key",
+                            )),
+                            crate::plugin::ToolHookOccurrence::Attempt {
+                                attempt: attempt.attempt,
+                            },
+                            ToolIntents::default(),
+                            dispatch.checkpoint_messages.drain(),
+                            dispatch.trigger_outcomes.drain(),
+                        )
+                        .await?;
+                    Ok(SingletonBodyOutcome::Failed {
+                        output: encode(&capture)?,
+                    })
+                } else {
+                    Ok(SingletonBodyOutcome::Pending {
+                        completion: Box::new(pending),
+                    })
+                }
+            }
             crate::ToolAttemptOutcome::Done { result, intents } => {
-                let (output, commands) = result.into_parts();
+                let (mut output, mut commands) = result.into_parts();
+                let mut intents = intents;
+                if let Err(refusal) =
+                    prepared
+                        .input
+                        .definition
+                        .manifest
+                        .declaration
+                        .admits(OutcomeShape::Done {
+                            intents: &intents
+                                .intents
+                                .iter()
+                                .map(crate::ToolIntent::kind)
+                                .collect::<Vec<_>>(),
+                        })
+                {
+                    output = ToolCallOutput::failure(
+                        crate::ToolFailure::runtime(
+                            crate::ToolFailureClass::Internal,
+                            "tool_outcome_not_declared",
+                            refusal.to_string(),
+                        )
+                        .with_cause(crate::ToolFailureCause::Declaration { refusal }),
+                    );
+                    commands = Default::default();
+                    intents = Default::default();
+                }
                 let captured = self
                     .capture_output(
                         prepared,
@@ -450,6 +575,9 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         source: &SourceDescriptor,
         completion: &crate::PendingCompletion,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.pending
+            .lock_recover()
+            .insert(source.call_id.clone(), completion.clone());
         if let Some(announcement) = &completion.announcement {
             self.context
                 .append_process_events(vec![announcement.clone().into_append_request()])
@@ -568,9 +696,31 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     }
     async fn cancel_call(
         &self,
-        _call_id: &crate::ToolCallId,
+        call_id: &crate::ToolCallId,
         _source: Option<&crate::AwaitEventKey>,
     ) -> Result<(), String> {
+        let pending = self.pending.lock_recover().get(call_id).cloned();
+        if let Some(crate::PendingCompletion {
+            on_cancel: crate::CancelHint::CancelExternalWork,
+            resolved_by: Some(crate::PendingResolver::ProcessTerminal { process_id }),
+            ..
+        }) = pending
+        {
+            self.context
+                .dispatch()
+                .processes
+                .cancel(
+                    &self.context.dispatch().owner.runtime_owner(),
+                    &process_id,
+                    self.context.process_scope(None),
+                )
+                .await
+                .map_err(|error| {
+                    self.context
+                        .record_nested_effect_error(error.clone().into());
+                    error.to_string()
+                })?;
+        }
         Ok(())
     }
     async fn realize_declarations(
@@ -614,28 +764,24 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     }
     fn emit_stream(
         &self,
-        _call_id: &crate::ToolCallId,
+        call_id: &crate::ToolCallId,
         stream: &crate::runtime::effect::AttemptStream,
     ) {
         let (events, _) = stream.decode(&serde_json::Value::Null);
+        let mut cursor = self
+            .context
+            .dispatch()
+            .observation_cursor(&format!("run:{call_id}:stream"));
         for event in events {
             match event {
-                crate::runtime::effect::DecodedStreamEvent::Session(event) => self
-                    .context
-                    .dispatch()
-                    .observation_cursor("run:stream")
-                    .observe(
-                        self.context.dispatch().observer.as_ref(),
-                        crate::engine::ObservedEvent::Session(event),
-                    ),
-                crate::runtime::effect::DecodedStreamEvent::Activity(event) => self
-                    .context
-                    .dispatch()
-                    .observation_cursor("run:stream")
-                    .observe(
-                        self.context.dispatch().observer.as_ref(),
-                        crate::engine::ObservedEvent::RecordedActivity(event),
-                    ),
+                crate::runtime::effect::DecodedStreamEvent::Session(event) => cursor.observe(
+                    self.context.dispatch().observer.as_ref(),
+                    crate::engine::ObservedEvent::RecordedSession(event),
+                ),
+                crate::runtime::effect::DecodedStreamEvent::Activity(event) => cursor.observe(
+                    self.context.dispatch().observer.as_ref(),
+                    crate::engine::ObservedEvent::RecordedActivity(event),
+                ),
             }
         }
     }

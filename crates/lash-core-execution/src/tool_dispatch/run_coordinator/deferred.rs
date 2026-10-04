@@ -243,6 +243,23 @@ impl<'a> RunCoordinator<'a> {
 
     /// Accept one source seal so an aggregate can observe its winner while
     /// the owning Run keeps every other source live.
+    pub(crate) async fn await_empty_aggregate(&self) -> Result<(), SingletonRunError> {
+        let cancel = self
+            .journal
+            .scoped
+            .turn_cancel_wait(tokio_util::sync::CancellationToken::new());
+        self.journal
+            .scoped
+            .controller()
+            .await_run_sources(Vec::new(), cancel)
+            .await?;
+        Err(crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
+            "an empty aggregate has no source terminal",
+        )
+        .into())
+    }
+
     pub async fn await_one_deferred(&mut self) -> Result<(), SingletonRunError> {
         use crate::tool_run::SourceSubscription;
         self.drain_starts().await?;

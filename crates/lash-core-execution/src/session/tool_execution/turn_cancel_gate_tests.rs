@@ -10,7 +10,6 @@ use crate::SessionId;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Captures the wait shape each completion wait asks the host for.
 #[derive(Default)]
@@ -96,36 +95,6 @@ impl crate::RuntimeEffectController for AwaitShapeRecorder {
         crate::RuntimeEffectControllerError,
     > {
         Ok(crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped)
-    }
-}
-
-struct ScalarRetryTool {
-    definition: crate::ToolDefinition,
-    attempts: AtomicUsize,
-}
-
-#[async_trait::async_trait]
-impl crate::ToolProvider for ScalarRetryTool {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        vec![self.definition.manifest()]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
-    }
-
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-            crate::ToolOutcome::retryable_failure(
-                crate::ToolFailureClass::External,
-                "retryable",
-                "retry witness failure",
-                Some(1),
-            )
-            .into()
-        } else {
-            crate::ToolOutcome::ok(serde_json::json!({"ok": true})).into()
-        }
     }
 }
 

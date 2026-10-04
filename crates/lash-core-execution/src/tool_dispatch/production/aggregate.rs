@@ -6,6 +6,42 @@ use crate::session::tool_execution::{
     ToolAggregateLeaf, ToolAggregateLeafReply, ToolInvocationReply,
 };
 
+#[derive(Clone, Serialize, Deserialize)]
+struct RefusedInput {
+    pending: crate::sansio::PendingToolCall,
+    failure: crate::ToolFailure,
+}
+
+fn refused_reply(input: &serde_json::Value) -> Result<ToolAggregateLeafReply, SingletonRunError> {
+    let RefusedInput { pending, failure } =
+        serde_json::from_value(input.clone()).map_err(|error| {
+            crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RecordEncodingFailed,
+                error.to_string(),
+            )
+        })?;
+    let output = ToolCallOutput::failure(failure);
+    let record = ToolCallRecord {
+        call_id: pending.call_id.clone(),
+        provider_call_id: pending.provider_call_id.clone(),
+        tool: pending.tool_name.clone(),
+        args: pending.args.clone(),
+        output: output.clone(),
+    };
+    let mut reply = ToolInvocationReply::from_output(output.clone()).with_record(record);
+    reply.completed = Some(Box::new(crate::sansio::CompletedToolCall {
+        call_id: pending.call_id,
+        provider_call_id: pending.provider_call_id,
+        tool_name: pending.tool_name.clone(),
+        args: pending.args,
+        model_return: crate::ModelToolReturn::from_output(pending.tool_name, &output),
+        output,
+        intent_outcomes: Vec::new(),
+        replay: pending.replay,
+    }));
+    Ok(ToolAggregateLeafReply::Tool(Box::new(reply)))
+}
+
 impl<'run> ProductionToolHandlers<'run> {
     pub(crate) async fn admit_aggregate<'owner>(
         self: &Arc<Self>,
@@ -23,11 +59,38 @@ impl<'run> ProductionToolHandlers<'run> {
             command,
         } = request;
         let key = self.context.command_group_key(&command);
+        if self.context.process_id().is_some() {
+            let requested = leaves
+                .iter()
+                .filter_map(|leaf| match leaf {
+                    ToolAggregateLeaf::Tool(invocation) if !run.contains_call(&invocation.id) => {
+                        Some(&invocation.id)
+                    }
+                    _ => None,
+                })
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
+            let counted = run.held_call_count();
+            let limit = self.context.max_tool_calls();
+            if counted.saturating_add(requested) > limit.get() {
+                let exceeded = crate::ToolCallLimitExceeded {
+                    scope: crate::ToolCallLimitScope::Process,
+                    limit,
+                    counted,
+                    requested,
+                };
+                *self.context.tool_call_limit_refusal.lock_recover() = Some(exceeded);
+                return Err(
+                    crate::RuntimeEffectControllerError::max_tool_calls_exceeded(exceeded).into(),
+                );
+            }
+        }
         let mut plan = AggregatePlan {
             key: key.clone(),
             leaves: Vec::new(),
             operands: Vec::new(),
         };
+        let recorded_plan = run.aggregate_plan(&key).ok();
         let mut calls = Vec::new();
         let mut positions = Vec::new();
         let mut invocations = BTreeMap::new();
@@ -76,13 +139,74 @@ impl<'run> ProductionToolHandlers<'run> {
                                     manifest: entry.manifest.clone(),
                                     contract: entry.contract.as_ref().clone(),
                                 })
+                        });
+                    let pending = invocation.pending.as_deref().cloned().unwrap_or_else(|| {
+                        crate::sansio::PendingToolCall {
+                            call_id: invocation.id.clone(),
+                            provider_call_id: None,
+                            tool_name: invocation.tool_id.to_string(),
+                            args: invocation.args.clone(),
+                            replay: None,
+                        }
+                    });
+                    let refused = recorded_plan
+                        .as_ref()
+                        .and_then(|plan| {
+                            plan.operands
+                                .get(positions.len())
+                                .and_then(|leaf| plan.leaves.get(*leaf as usize))
                         })
-                        .ok_or_else(|| {
-                            crate::RuntimeEffectControllerError::new(
-                                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                                format!("tool `{}` is unavailable", invocation.tool_id),
-                            )
-                        })?;
+                        .filter(|leaf| matches!(leaf, AggregateLeaf::Refused { .. }));
+                    if definition.is_none() || refused.is_some() {
+                        let input = match refused {
+                            Some(AggregateLeaf::Refused { input }) => {
+                                let recorded: RefusedInput = serde_json::from_value(input.clone())
+                                    .map_err(|error| {
+                                        crate::RuntimeEffectControllerError::new(
+                                            crate::RuntimeErrorCode::RecordEncodingFailed,
+                                            error.to_string(),
+                                        )
+                                    })?;
+                                if serde_json::to_value(&recorded.pending).map_err(|error| {
+                                    crate::RuntimeEffectControllerError::new(
+                                        crate::RuntimeErrorCode::RecordEncodingFailed,
+                                        error.to_string(),
+                                    )
+                                })? != serde_json::to_value(&pending).map_err(|error| {
+                                    crate::RuntimeEffectControllerError::new(
+                                        crate::RuntimeErrorCode::RecordEncodingFailed,
+                                        error.to_string(),
+                                    )
+                                })? {
+                                    return Err(crate::tool_run::RunEventRefusal::AggregateShape {
+                                        key,
+                                    }
+                                    .into());
+                                }
+                                input.clone()
+                            }
+                            _ => serde_json::to_value(RefusedInput {
+                                pending,
+                                failure: crate::ToolFailure::runtime(
+                                    crate::ToolFailureClass::InvalidRequest,
+                                    "tool_unavailable",
+                                    "Tool is unavailable in this session",
+                                ),
+                            })
+                            .map_err(|error| {
+                                crate::RuntimeEffectControllerError::new(
+                                    crate::RuntimeErrorCode::RecordEncodingFailed,
+                                    error.to_string(),
+                                )
+                            })?,
+                        };
+                        plan.leaves.push(AggregateLeaf::Refused { input });
+                        positions.push(Some(position));
+                        continue;
+                    }
+                    let Some(definition) = definition else {
+                        unreachable!("the unavailable source was recorded above")
+                    };
                     let source = invocation
                         .execution_grant
                         .as_deref()
@@ -145,7 +269,29 @@ impl<'run> ProductionToolHandlers<'run> {
             plan.leaves.push(AggregateLeaf::Settled { fulfilled: true });
             positions.push(None);
         }
-        plan.operands = (0..plan.leaves.len()).map(|index| index as u32).collect();
+        let mut unique = Vec::new();
+        let mut seen = BTreeMap::new();
+        for leaf in std::mem::take(&mut plan.leaves) {
+            let alias = match &leaf {
+                AggregateLeaf::Call { call_id } => seen.get(call_id).copied(),
+                _ => None,
+            };
+            let index = match alias {
+                Some(index) => index,
+                None => {
+                    let index = unique.len() as u32;
+                    if let AggregateLeaf::Call { call_id } = &leaf {
+                        seen.insert(call_id.clone(), index);
+                    }
+                    unique.push(leaf);
+                    index
+                }
+            };
+            plan.operands.push(index);
+        }
+        plan.leaves = unique;
+        let mut admitted = std::collections::BTreeSet::new();
+        calls.retain(|call| admitted.insert(call.call_id.clone()));
         run.start_aggregate(
             &plan,
             &calls,
@@ -179,7 +325,7 @@ impl<'run> ProductionToolHandlers<'run> {
             ..
         } = cursor;
         let plan = run.aggregate_plan(&key)?;
-        if positions.len() != plan.leaves.len() || invocations.iter().any(|(position, id)| !positions.iter().enumerate().any(|(operand, slot)| slot == &Some(*position) && matches!(&plan.leaves[operand], AggregateLeaf::Call { call_id } if call_id == id))) { return Err(crate::tool_run::RunEventRefusal::AggregateShape { key }.into()); }
+        if positions.len() != plan.operands.len() || invocations.iter().any(|(position, id)| !positions.iter().enumerate().any(|(operand, slot)| slot == &Some(*position) && matches!(&plan.leaves[plan.operands[operand] as usize], AggregateLeaf::Call { call_id } if call_id == id))) { return Err(crate::tool_run::RunEventRefusal::AggregateShape { key }.into()); }
         let mode = match consumer {
             ToolAggregateConsumer::All => AggregateConsumer::All,
             ToolAggregateConsumer::AllSettled => AggregateConsumer::AllSettled,
@@ -201,7 +347,7 @@ impl<'run> ProductionToolHandlers<'run> {
                 return Ok(ToolRunAggregatePoll::Pending);
             }
             if plan.leaves.is_empty() {
-                std::future::pending::<()>().await;
+                run.await_empty_aggregate().await?;
             }
             run.await_one_deferred().await?;
         };
@@ -212,8 +358,11 @@ impl<'run> ProductionToolHandlers<'run> {
                 return Ok(None);
             };
             let Some(call_id) = invocations.get(&position) else {
-                return Ok(matches!(plan.leaves[operand], AggregateLeaf::Timer { .. })
-                    .then_some(ToolAggregateLeafReply::Timer));
+                return match &plan.leaves[plan.operands[operand] as usize] {
+                    AggregateLeaf::Refused { input } => refused_reply(input).map(Some),
+                    AggregateLeaf::Timer { .. } => Ok(Some(ToolAggregateLeafReply::Timer)),
+                    _ => Ok(None),
+                };
             };
             let terminal = terminal.ok_or_else(|| {
                 crate::RuntimeEffectControllerError::new(
@@ -273,7 +422,7 @@ impl<'run> ProductionToolHandlers<'run> {
                         output: record.output,
                         model_return: presented.presentation.model_return,
                         intent_outcomes: presented.intent_outcomes,
-                        replay: prepared.input.pending.and_then(|pending| pending.replay),
+                        replay: prepared.call.replay,
                     }));
                     reply
                 }
@@ -303,6 +452,34 @@ impl<'run> ProductionToolHandlers<'run> {
                                 },
                             )?,
                         ),
+                        Some("plugin_abort") => {
+                            let (callback, cause) =
+                                run.withheld_verdict(call_id).ok_or_else(|| {
+                                    crate::RuntimeEffectControllerError::new(
+                                        crate::RuntimeErrorCode::EffectReplayDivergence,
+                                        "the abort has no recorded cause",
+                                    )
+                                })?;
+                            let abort: crate::plugin::PluginAbort =
+                                serde_json::from_value(cause.payload).map_err(|error| {
+                                    crate::RuntimeEffectControllerError::new(
+                                        crate::RuntimeErrorCode::RecordEncodingFailed,
+                                        error.to_string(),
+                                    )
+                                })?;
+                            let mut failure = crate::ToolFailure::runtime(
+                                crate::ToolFailureClass::Execution,
+                                abort.code.clone(),
+                                abort.message.clone(),
+                            );
+                            failure.source = crate::ToolFailureSource::Plugin;
+                            ToolCallOutput::failure(failure).with_control(
+                                crate::ToolControl::AbortRun {
+                                    code: abort.failure_code(&callback.owner.plugin),
+                                    message: abort.message,
+                                },
+                            )
+                        }
                         _ => match decision {
                             CallDecision::Cancelled => {
                                 ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
@@ -347,7 +524,7 @@ impl<'run> ProductionToolHandlers<'run> {
                         args: record.args,
                         output: record.output,
                         intent_outcomes: Vec::new(),
-                        replay: prepared.input.pending.and_then(|pending| pending.replay),
+                        replay: prepared.call.replay,
                     }));
                     reply
                 }

@@ -1303,3 +1303,172 @@ fn l05_middle_preparation_failure_keeps_survivor_source_pairing() {
             .expect("logical owner");
     });
 }
+
+/// L05: an unavailable source is one recorded refusal beside valid siblings.
+#[test]
+fn l05_unavailable_member_keeps_native_completion_and_source_slots() {
+    block_on(async {
+        use lash_core::facade_support::{
+            ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome,
+            ToolAggregateRequest, ToolInvocation,
+        };
+        let double =
+            crate::testing::kernel_double(SEED + 1865, lash_restate_test::ServerConfig::default())
+                .await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open handler");
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            crate::testing::double_ports(&double, &handler),
+            Arc::new(EchoToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
+        );
+        context
+            .drive_tool_run(None, |context| async move {
+                let invocation = |index: usize, tool: &str| {
+                    ToolInvocation::from_pending(
+                        lash_sansio::PendingToolCall {
+                            call_id: lash_core::ToolCallId::fixture(&format!("source-{index}")),
+                            provider_call_id: Some(format!("provider-{index}")),
+                            tool_name: tool.into(),
+                            args: serde_json::json!({"text": index}),
+                            replay: None,
+                        },
+                        tool.into(),
+                    )
+                };
+                let outcome = context
+                    .call_tool_aggregate(ToolAggregateRequest {
+                        leaves: vec![
+                            ToolAggregateLeaf::Tool(invocation(0, "tool:echo")),
+                            ToolAggregateLeaf::Tool(invocation(1, "ghost")),
+                            ToolAggregateLeaf::Tool(invocation(2, "tool:echo")),
+                        ],
+                        consumer: ToolAggregateConsumer::AllSettled,
+                        settled_value_after: None,
+                        command: lash_core::CommandReplayKey::new("unavailable-member"),
+                    })
+                    .await;
+                let ToolAggregateOutcome::AllResults(results) = outcome else {
+                    panic!("each source must keep its completion");
+                };
+                assert_eq!(results.len(), 3);
+                for (index, result) in results.into_iter().enumerate() {
+                    let Some(ToolAggregateLeafReply::Tool(reply)) = result else {
+                        panic!("a tool source needs a reply");
+                    };
+                    let completed = reply.completed.expect("native completion");
+                    assert_eq!(
+                        completed.provider_call_id,
+                        Some(format!("provider-{index}"))
+                    );
+                    assert_eq!(completed.args["text"], index);
+                    match completed.output.outcome {
+                        lash_core::ToolCallOutcome::Failure(failure) if index == 1 => {
+                            assert_eq!(failure.code, "tool_unavailable")
+                        }
+                        lash_core::ToolCallOutcome::Success(value) if index != 1 => {
+                            assert_eq!(value, serde_json::json!(index))
+                        }
+                        other => panic!("wrong source {index}: {other:?}"),
+                    }
+                }
+                context
+                    .close_opener_groups()
+                    .await
+                    .expect("logical closing");
+            })
+            .await
+            .expect("owned program");
+        handler.close().await.expect("close handler");
+    });
+}
+
+struct GatedEchoToolProvider {
+    started: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+    completed: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for GatedEchoToolProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        EchoToolProvider.tool_manifests()
+    }
+    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+        EchoToolProvider.resolve_manifest_by_id(id)
+    }
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        EchoToolProvider.resolve_contract(name)
+    }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        match call.args["text"].as_str() {
+            Some("slow") => {
+                self.started.notify_one();
+                self.release.notified().await;
+            }
+            Some("fast") => self.started.notified().await,
+            _ => (),
+        }
+        self.completed.fetch_add(1, Ordering::SeqCst);
+        EchoToolProvider.execute(call).await
+    }
+}
+
+/// L06: a race loser stays live while a later cell performs its own effect.
+#[test]
+fn l06_race_loser_stays_owned_across_cells_until_logical_closing() {
+    block_on(async {
+        let double =
+            crate::testing::kernel_double(SEED + 1866, lash_restate_test::ServerConfig::default())
+                .await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open handler");
+        let release = Arc::new(tokio::sync::Notify::new());
+        let completed = Arc::new(AtomicUsize::new(0));
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            crate::testing::double_ports(&double, &handler),
+            Arc::new(GatedEchoToolProvider {
+                started: Arc::new(tokio::sync::Notify::new()),
+                release: release.clone(),
+                completed: completed.clone(),
+            }),
+            lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
+        );
+        context.drive_tool_run(None, |context| async move {
+            let mut state = RlmExecutionState::for_engine("typescript");
+            for (code, expected) in [(r#"const slow = echo.say({text: "slow"}); const fast = echo.say({text: "fast"}); print(await Promise.race([slow, fast]));"#, None), (r#"finish(await echo.say({text: "next"}));"#, Some(serde_json::json!("next")))] {
+                let response = execute_code_with_test_render(&mut state, context.clone(), ExecRequest { code: code.into() }, crate::testing::sqlite_memory_artifact_store().await, LashlangSurface::default(), None, RlmProjectedBindings::default(), None, lashlang::ExecutionBounds::unbounded(), crate::plugin::RlmChannel::Cell).await;
+                assert_eq!(response.error, None, "{response:?}");
+                assert_eq!(response.terminal_finish, expected);
+            }
+            assert_eq!(completed.load(Ordering::SeqCst), 2, "later program effect runs while loser is unfinished");
+            release.notify_one();
+            context.close_opener_groups().await.expect("close logical owner");
+            assert_eq!(completed.load(Ordering::SeqCst), 3, "closing drains the retained loser");
+        }).await.expect("owned program");
+        handler.close().await.expect("close handler");
+        let invocations = double.server().invocations();
+        assert!(
+            invocations
+                .iter()
+                .all(|invocation| !invocation.target.contains("EffectGroup")
+                    && !invocation.target.contains("ToolChild"))
+        );
+        let frames: Vec<_> = invocations
+            .iter()
+            .flat_map(|invocation| double.server().journal(&invocation.id).unwrap_or_default())
+            .filter_map(|entry| entry.name)
+            .collect();
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|name| name.starts_with("lash:run:") && name.ends_with(":attempt:1"))
+                .count(),
+            3
+        );
+    });
+}

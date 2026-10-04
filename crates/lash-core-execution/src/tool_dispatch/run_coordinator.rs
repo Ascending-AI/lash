@@ -706,6 +706,12 @@ pub struct RunCoordinator<'a> {
 }
 
 impl<'a> RunCoordinator<'a> {
+    pub(crate) fn held_call_count(&self) -> usize {
+        self.handlers
+            .keys()
+            .filter(|id| !self.presented.contains_key(*id))
+            .count()
+    }
     pub(crate) fn prepared_value(
         &self,
         id: &ToolCallId,
@@ -731,7 +737,13 @@ impl<'a> RunCoordinator<'a> {
             .transpose()
             .map_err(Into::into)
     }
-    pub(crate) fn withheld_cause(&self, id: &ToolCallId) -> Option<crate::tool_run::HookCause> {
+    pub(crate) fn withheld_verdict(
+        &self,
+        id: &ToolCallId,
+    ) -> Option<(
+        crate::plugin::PluginCallbackIdentity,
+        crate::tool_run::HookCause,
+    )> {
         self.journal
             .records
             .iter()
@@ -745,7 +757,9 @@ impl<'a> RunCoordinator<'a> {
                 } if call_id == id => checks.winner().and_then(|reply| match &reply.verdict {
                     AfterCheckVerdict::Deny { cause }
                     | AfterCheckVerdict::Cancel { cause }
-                    | AfterCheckVerdict::AbortRun { cause } => Some(cause.clone()),
+                    | AfterCheckVerdict::AbortRun { cause } => {
+                        Some((reply.callback.clone(), cause.clone()))
+                    }
                     AfterCheckVerdict::Allow => None,
                 }),
                 RunEvent::Admitted { round } => round
@@ -756,11 +770,16 @@ impl<'a> RunCoordinator<'a> {
                     .and_then(|reply| match &reply.verdict {
                         BeforeCheckVerdict::Deny { cause }
                         | BeforeCheckVerdict::Cancel { cause }
-                        | BeforeCheckVerdict::AbortRun { cause } => Some(cause.clone()),
+                        | BeforeCheckVerdict::AbortRun { cause } => {
+                            Some((reply.callback.clone(), cause.clone()))
+                        }
                         _ => None,
                     }),
                 _ => None,
             })
+    }
+    pub(crate) fn withheld_cause(&self, id: &ToolCallId) -> Option<crate::tool_run::HookCause> {
+        self.withheld_verdict(id).map(|(_, cause)| cause)
     }
     pub(crate) fn contains_call(&self, id: &ToolCallId) -> bool {
         self.journal.ledger.has_call(id)

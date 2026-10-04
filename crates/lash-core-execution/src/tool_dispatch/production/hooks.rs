@@ -24,12 +24,26 @@ pub(super) fn context(
 impl ProductionToolHandlers<'_> {
     pub(super) async fn check_before(
         &self,
-        _call: &SingletonToolCall,
+        call: &SingletonToolCall,
         request: &SingletonPreparedRequest,
     ) -> Vec<AttributedVerdict<BeforeCheckReply>> {
         let prepared: Prepared = match serde_json::from_value(request.prepared.clone()) {
             Ok(prepared) => prepared,
-            Err(_) => return Vec::new(),
+            Err(error) => {
+                return vec![AttributedVerdict {
+                    callback: call.binding.preparation.clone(),
+                    verdict: BeforeCheckReply::Deny {
+                        cause: cause(
+                            "tool_failure",
+                            &crate::ToolFailure::runtime(
+                                crate::ToolFailureClass::Internal,
+                                "prepared_request_unreadable",
+                                error.to_string(),
+                            ),
+                        ),
+                    },
+                }];
+            }
         };
         let host = prepared.input.binding.preparation.clone();
         if let Some(failure) = &prepared.failure {

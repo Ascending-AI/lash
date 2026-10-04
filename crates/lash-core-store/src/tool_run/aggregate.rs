@@ -13,9 +13,20 @@ use super::RunEventRefusal;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "leaf", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AggregateLeaf {
-    Call { call_id: ToolCallId },
-    Timer { duration_ms: u64 },
-    Settled { fulfilled: bool },
+    Call {
+        call_id: ToolCallId,
+    },
+    Timer {
+        duration_ms: u64,
+    },
+    Settled {
+        fulfilled: bool,
+    },
+    /// A source request refused before an executable can be bound. Its
+    /// canonical admission input stays in this plan; no body is owed.
+    Refused {
+        input: serde_json::Value,
+    },
 }
 
 /// The source positions and unique operations admitted by an aggregate.

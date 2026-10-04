@@ -573,9 +573,14 @@ impl<'a> RunCoordinator<'a> {
                 .ok_or_else(|| RunEventRefusal::AggregateShape {
                     key: plan.key.clone(),
                 })?;
-            if let AggregateLeaf::Settled { fulfilled } = leaf {
+            let immediate = match leaf {
+                AggregateLeaf::Settled { fulfilled } => Some(*fulfilled),
+                AggregateLeaf::Refused { .. } => Some(false),
+                _ => None,
+            };
+            if let Some(fulfilled) = immediate {
                 settlements[index] = Some(Settlement {
-                    fulfilled: *fulfilled,
+                    fulfilled,
                     order: (false, position as u64),
                     rank: None,
                 });

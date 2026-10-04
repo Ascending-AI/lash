@@ -29,7 +29,7 @@ pub(crate) use super::group::ToolAggregateConsumer;
 
 /// One unique leaf of an aggregate, in first-appearance order.
 pub enum ToolAggregateLeaf {
-    /// A tool call to admit as a group child.
+    /// A logical call to admit in the owning Run.
     Tool(ToolInvocation),
     /// A timer from an unawaited `sleep(ms)`. Its deadline is recorded once,
     /// when the aggregate admits it (§11 clause 4).
@@ -47,12 +47,9 @@ pub struct ToolAggregateRequest {
     /// operand in source order. That operand decides the aggregate unless an
     /// earlier prefix leaf does.
     pub settled_value_after: Option<usize>,
-    /// The aggregate's replay address (FIG-3586): the command key the
-    /// issuing language runtime minted from the aggregate's issue ordinal. It
-    /// is the group key and the group invocation's replay key, so every row
-    /// the aggregate writes — the group, its children, its tool children's
-    /// attempts, the timers' admission sample — lives under it. The leaves'
-    /// content is never key material; it is checked at the group head.
+    /// The language runtime's replay address for this aggregate admission.
+    /// The Run records its source mapping and timer admission under this key;
+    /// each logical call retains its independently derived identity.
     pub command: crate::CommandReplayKey,
 }
 
@@ -130,10 +127,16 @@ impl RuntimeExecutionContext<'_> {
         let calls = request
             .leaves
             .iter()
-            .filter(|leaf| matches!(leaf, ToolAggregateLeaf::Tool(_)))
-            .count();
-        self.reserve_tool_calls(&self.command_group_key(&request.command), calls)
-            .await?;
+            .filter_map(|leaf| match leaf {
+                ToolAggregateLeaf::Tool(invocation) => Some(&invocation.id),
+                _ => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        if self.process_id().is_none() {
+            self.reserve_tool_calls(&self.command_group_key(&request.command), calls)
+                .await?;
+        }
         self.tool_run
             .as_ref()
             .ok_or_else(|| {
@@ -189,7 +192,27 @@ impl RuntimeExecutionContext<'_> {
             Err(error) => return self.aggregate_host_control(error),
         };
         match self.await_tool_run_aggregate(&cursor, consumer).await {
-            Ok(ToolRunAggregatePoll::Ready { outcome, .. }) => outcome,
+            Ok(ToolRunAggregatePoll::Ready { outcome, .. }) => {
+                if let ToolAggregateOutcome::AllResults(results) = &outcome {
+                    for result in results.iter().flatten() {
+                        if let ToolAggregateLeafReply::Tool(reply) = result
+                            && (matches!(
+                                reply.output.outcome,
+                                crate::ToolCallOutcome::Cancelled(_)
+                            ) || matches!(
+                                reply.output.control,
+                                Some(crate::ToolControl::AbortRun { .. })
+                            ))
+                        {
+                            return ToolAggregateOutcome::HostControl(
+                                serde_json::to_string(&reply.output)
+                                    .unwrap_or_else(|error| error.to_string()),
+                            );
+                        }
+                    }
+                }
+                outcome
+            }
             Ok(ToolRunAggregatePoll::Pending) => {
                 unreachable!("the combined entry waits for its result")
             }
