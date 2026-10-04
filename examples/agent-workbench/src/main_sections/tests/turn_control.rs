@@ -423,13 +423,24 @@ async fn turn_cancel_test_state_with_ingress(
     admin_url: String,
     restate_ingress_url: String,
 ) -> AppState {
-    let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
-        double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete_error("turn cancellation routing test should not call the provider")
         .build()
         .into_handle();
+    turn_cancel_test_state_with_provider(double, data_dir, admin_url, restate_ingress_url, provider)
+        .await
+}
+
+async fn turn_cancel_test_state_with_provider(
+    double: &lash_restate_test::RestateTestBackend,
+    data_dir: &std::path::Path,
+    admin_url: String,
+    restate_ingress_url: String,
+    provider: lash::provider::ProviderHandle,
+) -> AppState {
+    let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
+        double.stores().session_store_factory();
     let model = lash::LlmProfileMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
@@ -475,6 +486,64 @@ async fn turn_cancel_test_state_with_ingress(
         .ensure_current_session()
         .await
         .expect("create the workbench's current session");
+    state
+}
+
+/// Keep the real Run admitted while the terminal-attachment seam expires.
+async fn admitted_turn_cancel_test_state(
+    double: &lash_restate_test::RestateTestBackend,
+    data_dir: &std::path::Path,
+    admin_url: String,
+    turn_id: &'static str,
+) -> AppState {
+    let started = Arc::new(tokio::sync::Notify::new());
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-test")
+        .complete({
+            let started = Arc::clone(&started);
+            move |_| {
+                let started = Arc::clone(&started);
+                async move {
+                    started.notify_one();
+                    std::future::pending().await
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let state = turn_cancel_test_state_with_provider(
+        double,
+        data_dir,
+        admin_url,
+        double.connection().ingress_url().to_owned(),
+        provider,
+    )
+    .await;
+    let session_id = state.current_session_id();
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
+        .open()
+        .await
+        .expect("open the real turn session");
+    let _turn = session
+        .send(lash::TurnInput::text("hold the admitted turn"))
+        .id(TurnId::from(turn_id))
+        .await
+        .expect("admit the real turn");
+    tokio::time::timeout(Duration::from_secs(10), started.notified())
+        .await
+        .expect("the admitted Run reaches its provider");
+    assert!(
+        lash::restate::recorded_turn_invocation_key(
+            state.core.backend().session_store_factory().as_ref(),
+            &session_id,
+            &TurnId::from(turn_id),
+        )
+        .await
+        .expect("read the admitted invocation")
+        .is_some(),
+        "the liveness fixture owns a real Run admission"
+    );
     state
 }
 
@@ -616,7 +685,7 @@ async fn live_restate_turn_timeout_retains_routing_as_pending_inner() {
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let admin_url = spawn_restate_admin_with_workflow_status(Some("suspended")).await;
     let double = crate::tests::test_double_backend(0).await;
-    let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
+    let state = admitted_turn_cancel_test_state(&double, &data_dir, admin_url, "live-turn").await;
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);
     state.track_turn(&session_id, &TurnId::from("live-turn"));
@@ -1343,7 +1412,8 @@ async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep_inner() {
     // check keeps the route: this is the retained branch, not the pruned one.
     let admin_url = spawn_restate_admin_with_workflow_status(Some("running")).await;
     let double = crate::tests::test_double_backend(0).await;
-    let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;
+    let state =
+        admitted_turn_cancel_test_state(&double, &data_dir, admin_url, "retained-route-turn").await;
     let session_id = state.current_session_id();
     let turn_id = TurnId::from("retained-route-turn");
     state.track_turn_prompt(
