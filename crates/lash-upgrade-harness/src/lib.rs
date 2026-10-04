@@ -18,6 +18,7 @@
 //! choreography in `tests/rolling/`. The Phase A legs in `tests/phase_a/`
 //! each wait for the lane that builds what they prove.
 
+pub mod e2e;
 pub mod harness;
 pub mod identity;
 pub mod node;
