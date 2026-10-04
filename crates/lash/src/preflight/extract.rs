@@ -724,16 +724,19 @@ mod tests {
             "../../../lashlang/tests/fixtures/module-artifact-old.json"
         ))
         .expect("frozen fixture should be JSON");
+        let artifact =
+            lashlang::ModuleArtifact::from_program(lashlang::testing::ast_builders::module(
+                Vec::new(),
+                vec![lashlang::testing::ast_builders::null()],
+            ))
+            .expect("current artifact");
+        let mut envelope: serde_json::Value =
+            serde_json::from_slice(&artifact.to_store_bytes().expect("current envelope"))
+                .expect("envelope JSON");
+        envelope["artifact"] = raw;
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,
-            DurablePayload::Json(
-                serde_json::json!({
-                    "family": lashlang::LASHLANG_SEMANTIC_HASH_VERSION,
-                    "encoding": 1,
-                    "artifact": raw,
-                })
-                .to_string(),
-            ),
+            DurablePayload::Json(envelope.to_string()),
         ))
         .await;
         let detail = extractions
