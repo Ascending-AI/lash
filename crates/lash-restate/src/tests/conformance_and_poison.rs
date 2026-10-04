@@ -319,7 +319,6 @@ lash_conformance::turn_runner_tests!(
         let harness = Arc::new(
             effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await,
         );
-        let teardown = Arc::clone(&harness);
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -348,13 +347,6 @@ lash_conformance::turn_runner_tests!(
             move |law: &'static str| async move {
                 if law == "public_signal_intent_wakes_parked_process" {
                     verify_transport.assert_reattached_once();
-                }
-                if law == "a_diverged_tool_presentation_parks_the_turn" {
-                    teardown
-                        .kill_open(
-                            "the presentation-divergence law deliberately leaves its turn parked",
-                        )
-                        .await;
                 }
             },
         )

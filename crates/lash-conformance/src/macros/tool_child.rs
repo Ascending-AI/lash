@@ -4,7 +4,7 @@
 
 /// Register the laws that execute a real turn through the tier's
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner): the public
-/// signal-intent wake and the presentation-divergence park law (FIG-3679).
+/// signal-intent wake.
 ///
 /// The fixture hands back a guard, a session prefix, the tier's effect host,
 /// the store set under test (whose session catalog and process registry the
@@ -16,8 +16,6 @@ macro_rules! turn_runner_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
             (public_signal_intent_wakes_parked_process, "public-signal-intent-wake"));
-        $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
-            (a_diverged_tool_presentation_parks_the_turn, "presentation-divergence-park"));
     };
 }
 

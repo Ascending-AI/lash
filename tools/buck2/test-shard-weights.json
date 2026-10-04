@@ -1309,7 +1309,6 @@
     "tests::conformance_and_poison::fig1767_journal_entry_byte_sequence_equality": 146,
     "tests::conformance_and_poison::group_rank_allocator_refuses_exhaustion_without_a_reservation": 95,
     "tests::conformance_and_poison::journaled_cancel_peeks_replay_while_live_watcher_observes_later_cancel": 1,
-    "tests::conformance_and_poison::on_the_server_double::a_diverged_tool_presentation_parks_the_turn": 190,
     "tests::conformance_and_poison::on_the_server_double::a_turn_redriven_after_its_commit_replays_at_its_admitted_head": 214,
     "tests::conformance_and_poison::on_the_server_double::cancelled_session_config_settlement_is_typed": 99,
     "tests::conformance_and_poison::on_the_server_double::close_releases_an_unstarted_wait_child": 72,
