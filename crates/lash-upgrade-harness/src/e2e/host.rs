@@ -9,8 +9,6 @@ use serde::{Deserialize, Serialize};
 pub enum HostKind {
     UpgradeNode,
     Workbench,
-    AgentService,
-    Slack,
     ExternalConsumer,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]

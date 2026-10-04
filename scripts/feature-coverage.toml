@@ -581,23 +581,12 @@ commands = [
 [[lane]]
 name = "host-features"
 features = [
-  "agent-service/e2e-tools:on",
-  "agent-service/e2e-tools:off",
   "agent-workbench/provider-wire-fixtures:on",
   "agent-workbench/provider-wire-fixtures:off",
-  "slack-clone/e2e:on",
-  "slack-clone/e2e:off",
-  "slack-clone/live-e2e:on",
-  "slack-clone/live-e2e:off",
 ]
 commands = [
-  ["cargo", "check", "-p", "agent-service", "--all-targets", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "agent-service", "--all-targets", "--no-default-features", "--features", "e2e-tools", "--locked"],
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--features", "provider-wire-fixtures", "--locked"],
-  ["cargo", "check", "-p", "slack-clone", "--all-targets", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "slack-clone", "--all-targets", "--no-default-features", "--features", "e2e", "--locked"],
-  ["cargo", "check", "-p", "slack-clone", "--all-targets", "--no-default-features", "--features", "live-e2e", "--locked"],
 ]
 
 # Root admission and pre-tool process cuts refuse predecessor journals before decoding.

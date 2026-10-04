@@ -26,7 +26,7 @@ name: CI
 # request whose diff can move a Rust build also compiles and lints the feature
 # lanes: a lane break is caused by an API
 # change anywhere upstream, which the diff's own path set cannot see — #2285
-# changed a public engine API and broke the slack-clone live-E2E variant
+# changed a public engine API and broke the product live-E2E variant
 # while touching no feature-gated file. The lane TESTS still join a pull
 # request only when the diff touches feature-gated code (`feature_lanes`; see
 # the selection rule in scripts/ci_plan.py). The merge group runs the full
@@ -1265,8 +1265,7 @@ jobs:
       # and a trailing `-D warnings`, in the order Cargo emits them. See
       # `tools/buck2/rust_rules.bzl`.
       #
-      # `//:feature_lane_clippy` — the slack-clone `e2e` variant and the other
-      # feature-lane units — rides the `feature-lanes` job's own compile
+      # `//:feature_lane_clippy` lints feature-lane units and rides the `feature-lanes` job's own compile
       # invocation, which runs on every trusted event whose diff can move a
       # Rust build, pull requests included.
       - name: Clippy (workspace, all targets, shared cache)
@@ -1315,18 +1314,6 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
-
-      # `slack-clone`'s `e2e` feature is outside the resolved default workspace
-      # graph, so it used to have no Buck2 label and this 106 s Cargo compile
-      # ran on every event. It has one now: `//:feature_lane_clippy` lints the
-      # feature-lane variants of the same targets inside the `feature-lanes`
-      # job's compile invocation on every trusted Rust event. `slack-clone`
-      # declares no `default` feature, so the lane's `--no-default-features
-      # --features e2e` resolution is the resolution this command used.
-      # Untrusted events receive no cache credentials and keep the Cargo path.
-      - name: Clippy (slack-clone e2e feature)
-        if: needs.plan.outputs.buck2_trusted != 'true'
-        run: cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
 
       - name: Check Restate handler panic boundary
         run: python3 scripts/check-restate-handler-panics.py
@@ -2222,20 +2209,12 @@ jobs:
       RUN_FUNCTIONAL_E2E: >-
         ${{ (github.event_name == 'workflow_dispatch' && matrix.name != 'agent-workbench')
         || (github.event_name == 'pull_request'
-        && (matrix.name == 'agent-service' || matrix.name == 'agent-workbench' || matrix.name == 'agent-workbench-transcript')) }}
+        && (matrix.name == 'agent-workbench' || matrix.name == 'agent-workbench-transcript')) }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: agent-service
-            recipe: agent-service-restate-e2e
-            node: false
-            artifact: none
-            browser: false
-            buck2: false
-            restate: true
-            runner: ubuntu-24.04
           - name: agent-workbench
             recipe: agent-workbench-restate-e2e
             node: false
@@ -2257,14 +2236,6 @@ jobs:
             node: true
             artifact: none
             browser: false
-            buck2: false
-            restate: false
-            runner: ubuntu-24.04
-          - name: slack-clone-full-host
-            recipe: slack-clone-full-host-e2e
-            node: false
-            artifact: none
-            browser: true
             buck2: false
             restate: false
             runner: ubuntu-24.04
@@ -2358,7 +2329,6 @@ jobs:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
           LASH_EFFECT_GROUP_ARTIFACT_DIR: target/functional-e2e-artifacts/effect-group-conformance
           AGENT_WORKBENCH_E2E_ARTIFACT_DIR: target/functional-e2e-artifacts/agent-workbench
-          LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: |
           set -euo pipefail
           just ${{ matrix.recipe }}
@@ -2376,13 +2346,6 @@ jobs:
           path: target/functional-e2e-artifacts/${{ matrix.artifact }}
           if-no-files-found: warn
 
-      - name: Upload slack-clone full-host E2E failure artifacts
-        if: failure() && env.RUN_FUNCTIONAL_E2E == 'true' && matrix.browser
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: slack-clone-full-host-e2e-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/slack-clone-full-host-e2e
-          if-no-files-found: warn
 
   functional-e2e-process-operations:
     name: Functional E2E (${{ matrix.name }})
@@ -2473,7 +2436,6 @@ jobs:
       - name: Run functional E2E
         env:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
-          LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: just ${{ matrix.recipe }}
 
       - name: Remove client credentials

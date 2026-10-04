@@ -761,14 +761,6 @@ async fn canonical_rows_survive_every_registered_production_renderer() {
         .arg("--test")
         .arg(script)
         .env(
-            "LASH_TRANSCRIPT_SERVICE_ASSET",
-            include_str!("../../../../agent-service/src/ui.rs"),
-        )
-        .env(
-            "LASH_TRANSCRIPT_SLACK_ASSET",
-            include_str!("../../../../slack-clone/assets/index.html"),
-        )
-        .env(
             "LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT",
             serde_json::to_string(&rows).expect("serialize committed canonical rows"),
         )

@@ -368,7 +368,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         # The matrix is the source of truth for the coverage split; a cited
         # job or step that no longer exists keeps reading as coverage while
         # nothing checks it. Matrix expressions are expanded so a per-leg
-        # citation such as `Functional E2E (agent-service)` resolves.
+        # citation such as `Functional E2E (agent-workbench)` resolves.
         cited = cited_ci_names((ROOT / "runbooks" / "RULES.md").read_text())
         missing = sorted(cited - workflow_ci_names())
         self.assertEqual(

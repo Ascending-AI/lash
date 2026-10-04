@@ -17,11 +17,10 @@ pub const RLM_ROWS: [&str; 3] = [
     "missing-helper-file",
     "config-contract-edit",
 ];
-pub const LIVE_ROWS: [&str; 5] = [
+pub const LIVE_ROWS: [&str; 4] = [
     "S35/file-edit-bugfix",
     "S35/missing-helper-file",
     "S35/config-contract-edit",
-    "S36/slack-nonce",
     "S36/workbench-weather",
 ];
 
@@ -77,124 +76,6 @@ pub struct LiveConfig {
 }
 
 impl LiveConfig {
-    pub async fn slack_nonce(
-        &self,
-        platform: &ArtifactIdentity,
-        agent: &ArtifactIdentity,
-        max_spend_usd: f64,
-        lease: &mut CaseLease,
-    ) -> Result<LiveReceipt> {
-        ensure!(
-            std::env::var("OPENROUTER_API_KEY").is_ok_and(|key| !key.trim().is_empty()),
-            "nonce row requires a credential"
-        );
-        ensure!(
-            max_spend_usd.is_finite() && max_spend_usd > 0.0,
-            "nonce spend cap must be positive and finite"
-        );
-        let environment = BTreeMap::from([
-            (
-                "SLACK_CLONE_ADDR".into(),
-                format!("127.0.0.1:{}", self.port),
-            ),
-            (
-                "SLACK_CLONE_DATA_DIR".into(),
-                lease.directory.join("platform").display().to_string(),
-            ),
-        ]);
-        let mut platform_child = HostProcess::spawn(
-            platform,
-            lease,
-            "nonce-platform",
-            environment,
-            vec![self.port],
-        )
-        .await?;
-        let result = async {
-            let http = reqwest::Client::builder()
-                .timeout(Duration::from_secs(3))
-                .no_proxy()
-                .build()?;
-            ready(
-                &mut platform_child,
-                &http,
-                &format!("http://127.0.0.1:{}/healthz", self.port),
-                "slack-clone-platform",
-                lease.deadline,
-            )
-            .await?;
-            let environment = BTreeMap::from([
-                ("RESTATE_INGRESS_URL".into(), self.ingress.clone()),
-                ("RESTATE_ADMIN_URL".into(), self.admin.clone()),
-                ("RESTATE_AUTHORITY_ID".into(), lease.authority.clone()),
-                ("LASH_E2E_LIVE_NAMESPACE".into(), lease.namespace.clone()),
-                (
-                    "LASH_E2E_LIVE_ENDPOINT_ADDR".into(),
-                    format!("127.0.0.1:{}", self.port + 1),
-                ),
-                (
-                    "LASH_LIVE_E2E_MAX_SPEND_USD".into(),
-                    max_spend_usd.to_string(),
-                ),
-            ]);
-            let args = vec![
-                "--base-url".into(),
-                format!("http://127.0.0.1:{}", self.port),
-                "--artifact-dir".into(),
-                lease.directory.join("acceptance").display().to_string(),
-            ];
-            let mut child = HostProcess::spawn_with_args(
-                agent,
-                lease,
-                "nonce-agents",
-                environment,
-                (self.port + 1..self.port + 7).collect(),
-                &args,
-            )
-            .await?;
-            let ran = child.finish(lease.deadline).await;
-            let cleanup = child
-                .stop(Instant::now() + Duration::from_secs(20), None)
-                .await;
-            if let Ok(receipts) = &cleanup {
-                lease.cleanup.extend(receipts.clone());
-            }
-            ran?;
-            cleanup?;
-            let report: Value = serde_json::from_slice(&std::fs::read(
-                lease.directory.join("acceptance/run-summary.json"),
-            )?)?;
-            ensure!(
-                report["passed"] == true && report["passed_attempt"].is_number(),
-                "nonce/tool/DOM exact oracle failed: {report}"
-            );
-            ensure!(
-                report["spend"]["exceeded"] == false
-                    && report["spend"]["records"]
-                        .as_array()
-                        .is_some_and(|records| !records.is_empty()),
-                "nonce row lacks capped real usage"
-            );
-            anyhow::Ok(report)
-        }
-        .await;
-        let cleanup = platform_child
-            .stop(Instant::now() + Duration::from_secs(20), None)
-            .await;
-        persist_cleanup(lease, &cleanup)?;
-        let evidence = result?;
-        cleanup?;
-        let receipt = LiveReceipt {
-            row: "S36/slack-nonce".into(),
-            selected: 1,
-            executed: 1,
-            verdict: LiveVerdict::Passed,
-            evidence,
-        };
-        write_receipt(lease, &receipt)?;
-        Ok(receipt)
-    }
-
     fn environment(&self, lease: &CaseLease) -> Result<BTreeMap<String, String>> {
         ensure!(
             std::env::var("OPENROUTER_API_KEY").is_ok_and(|key| !key.trim().is_empty()),

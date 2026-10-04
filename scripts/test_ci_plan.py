@@ -121,7 +121,6 @@ class ClassifyTests(unittest.TestCase):
             ("crates/lash-core/src/runtime/turn_loop.rs", "false", "true"),
             ("crates/lash-restate/src/turn_handler.rs", "false", "true"),
             ("crates/lash-restate/src/session_shifts.rs", "false", "true"),
-            ("examples/agent-service/src/main.rs", "false", "true"),
             ("crates/lash-core/src/session/mod.rs", "false", "false"),
             ("crates/lash-restate/src/lib.rs", "false", "false"),
         )
@@ -412,7 +411,7 @@ class PathClassifierTests(unittest.TestCase):
             "AGENTS.md",
             "README.md",
             "schemas/host/README.md",
-            "runbooks/agent-service-branching/README.md",
+            "runbooks/workbench-weather/README.md",
             "docs/agents/pr-style.md",
         ):
             with self.subTest(path=path):
@@ -872,7 +871,7 @@ class GateScopeTests(unittest.TestCase):
 
     def test_a_crate_change_runs_compile_only(self) -> None:
         for path in ("crates/lash-core/src/runtime/turn_loop.rs", "crates/lash/README.md",
-                     "examples/slack-clone/ui/index.html"):
+                     "examples/toolbench/ui/index.html"):
             with self.subTest(path=path):
                 scope = self.scope(path)
                 self.assertEqual("rust-only", scope.classification)
@@ -1750,7 +1749,6 @@ class RestateSuiteSelectionTests(unittest.TestCase):
             # The facade crate owns the public-process-command suite
             # (//crates/lash:integration__test), so it is a suite owner.
             "crates/lash/tests/integration/public_process_command_replay.rs",
-            "examples/agent-service/src/main.rs",
             "examples/agent-workbench/src/main.rs",
             "runbooks/process-operations/docker-compose.yml",
             # A shared crate's manifest can change the suites' build.
@@ -1773,7 +1771,7 @@ class RestateSuiteSelectionTests(unittest.TestCase):
             # merge group's full board still cover it.
             "crates/lashlang/src/lib.rs",
             "crates/lash-sim/src/lib.rs",
-            "examples/slack-clone/src/bot.rs",
+            "examples/toolbench/src/main.rs",
         ):
             with self.subTest(path=path):
                 self.assertEqual("false", self.plan(path)["restate_suites"])
@@ -1832,7 +1830,6 @@ class RestateSuiteSelectionTests(unittest.TestCase):
         legs = job["strategy"]["matrix"]["include"]
         self.assertEqual(
             {
-                "agent-service",
                 "agent-workbench",
             },
             {leg["name"] for leg in legs if leg["restate"]},
@@ -2979,8 +2976,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
         self.assertNotIn("pull_request", consumer["if"])
         self.assertEqual(["process-operations"],
                          [leg["name"] for leg in consumer["strategy"]["matrix"]["include"]])
-        self.assertEqual({"agent-service", "agent-workbench", "agent-workbench-transcript", "workflow-graph-roundtrip",
-                          "slack-clone-full-host"},
+        self.assertEqual({"agent-workbench", "agent-workbench-transcript", "workflow-graph-roundtrip"},
                          {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
         transcript = next(leg for leg in other["strategy"]["matrix"]["include"]
                           if leg["name"] == "agent-workbench-transcript")
@@ -3164,7 +3160,7 @@ class FeatureLanesTests(unittest.TestCase):
 
     #1979 merged a `lash-remote-protocol` variant that did not compile while
     `feature-lanes` ran on workflow_dispatch alone (FIG-3572), and #2285
-    broke the slack-clone live-E2E variant through a public engine API
+    broke the product live-E2E variant through a public engine API
     change whose diff touched no feature-gated file: a lane break comes from
     anywhere upstream, so the pull-request compile cannot wait on a path
     rule. `feature_lanes` gates only the lane TEST steps on a pull request --

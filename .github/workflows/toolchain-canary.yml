@@ -84,7 +84,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       # The same battery the pinned lint job runs on pull requests: format,
-      # workspace clippy, and the slack-clone e2e feature resolution. Output is
+      # workspace clippy. Output is
       # teed so the report step can name the offending lints.
       - name: Lint battery
         run: |
@@ -93,7 +93,6 @@ jobs:
             cargo fmt --all --check
             # shellcheck disable=SC2086
             cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
-            cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
           } 2>&1 | tee canary.log
 
       - name: File drift issue on failure

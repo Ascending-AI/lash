@@ -195,15 +195,12 @@ offsets are stable:
 - `+0..+9` attachment/usage workbench PostgreSQL, selected by the workbench
   port's last decimal digit;
 - `+10` push/confidence PostgreSQL, `+11` push S3, `+12` mutation PostgreSQL;
-- `+20..+23` agent-service Restate and endpoint;
 - `+30..+34` agent-workbench Restate, endpoint, and PostgreSQL;
-- `+35..+37` slack-clone full-host platform, bot, and HTTP MCP server;
 - `+35..+39` effect-group-conformance Restate (admin, ingress, node, two
-  endpoints); it shares `+35..+37` with slack-clone and is serialized by the
+  endpoints); it is serialized by the
   checkout lock;
 - `+40` distributed-worker S3;
 - `+41`, `+43..+46` process-operations S3, Restate, and PostgreSQL;
-- `+48` slack-clone live-model platform.
 
 Explicit existing environment overrides such as `LASH_PUSH_GATE_PORT_BASE`,
 `LASH_PUSH_GATE_POSTGRES_PORT`, `LASH_CONFIDENCE_OUT_DIR`, and each recipe's

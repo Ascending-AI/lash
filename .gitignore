@@ -52,12 +52,9 @@ Thumbs.db
 /.agents/lash/
 /.example-runs/
 /.lash/
-/.agent-service/
 /.agent-workbench/
 /.workflow-graph/
-/.slack-clone/
 /.openrouter-chat-ui/
-/.agent-service.schema*-backup-*/
 /.agent-workbench.schema*-backup-*/
 /.claude/
 /CLAUDE.md

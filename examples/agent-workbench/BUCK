@@ -62,8 +62,6 @@ lash_rust_unit_test(
     exec_properties = sized_exec_properties("agent-workbench", "agent_workbench", "//examples/agent-workbench:agent-workbench__unit_test"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
-        "//examples/agent-service:package_files",
-        "//examples/slack-clone:package_files",
     ],
     extra_data = [
         "native//:node",
@@ -205,8 +203,6 @@ lash_rust_feature_test(
     extra_compile_data = [
         "//examples:shared_rust_sources",
         "//crates/lash-sim:package_files",
-        "//examples/agent-service:package_files",
-        "//examples/slack-clone:package_files",
     ],
     extra_data = [
         "native//:node",
@@ -237,8 +233,6 @@ lash_rust_feature_test(
     exec_properties = sized_exec_properties("agent-workbench", "agent_workbench", "//examples/agent-workbench:agent-workbench__unit_test__fv_dda0367a"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
-        "//examples/agent-service:package_files",
-        "//examples/slack-clone:package_files",
     ],
     extra_data = [
         "native//:node",

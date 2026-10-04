@@ -32,15 +32,6 @@ checkout on the box shares, so one lane's cold build stalled every other
 stack's boot and teardown. A build proves nothing about ownership; it belongs
 outside the locks, and `check_build_precedes_launcher_locks` keeps it there.
 
-Known limit, accepted rather than fixed: the `testing`-feature check reads the
-`[dependencies]`/`[build-dependencies]` tables only, so it is blind to routes
-through a host's own feature table. `examples/slack-clone`'s `e2e` feature
-forwards to `lash/testing`, and `scripts/slack-clone-dev.sh` turns it on for the
-`scripted-v1` provider — an operator who combines that flag with the judged
-profile by hand gets a judged-profile host that still carries `testing`. Closing
-it means resolving each host's feature graph transitively, which is `cargo
-tree`'s job, not a text gate's; the scripted gate that uses `e2e` sets the `dev`
-profile, so no judged row reaches the combination today.
 """
 
 from __future__ import annotations
@@ -59,9 +50,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 # from the runbook tree: adding a judged host is a deliberate act, and the
 # reviewer should see the geometry claim land in this list.
 JUDGED_HOSTS = (
-    "agent-service",
     "agent-workbench",
-    "slack-clone",
     "workflow-graph-roundtrip",
 )
 
@@ -206,10 +195,7 @@ def check_artifact_dirs(failures: list[str]) -> None:
             )
 
 
-# A profile override belongs to a whole gate run, not to one command. The
-# scripted slack-clone gate boots the host once and then restarts it from its
-# Python driver; a `VAR=value cmd` prefix reaches only the first of those, and
-# the second silently rebuilds under the other profile mid-gate.
+# A profile override belongs to a whole gate run and must reach every child.
 PROFILE_ASSIGNMENT = re.compile(r"^(?P<lead>[^\n#]*?)(?P<var>\w*CARGO_PROFILE)=", re.MULTILINE)
 
 

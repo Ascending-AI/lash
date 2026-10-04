@@ -76,39 +76,6 @@ rlm-smoke-e2e:
 example-core-shutdown-e2e:
   bash "{{repo}}/scripts/example-core-shutdown-e2e.sh"
 
-# The slack-clone example is three processes: the platform on `port`, the bot on
-# `port + 1`, and the runtime-attachable HTTP MCP server on `port + 2`. `up`
-# starts them and waits for the bot to register for events.
-slack-clone port='3040':
-  ./scripts/slack-clone-dev.sh up --port "{{port}}"
-
-slack-clone-up port='3040':
-  ./scripts/slack-clone-dev.sh up --port "{{port}}"
-
-slack-clone-restart port='3040':
-  ./scripts/slack-clone-dev.sh restart --port "{{port}}"
-
-slack-clone-status port='3040':
-  ./scripts/slack-clone-dev.sh status --port "{{port}}"
-
-slack-clone-logs port='3040':
-  ./scripts/slack-clone-dev.sh logs --port "{{port}}"
-
-slack-clone-logs-follow port='3040':
-  ./scripts/slack-clone-dev.sh logs --port "{{port}}" --follow
-
-slack-clone-down port='3040':
-  ./scripts/slack-clone-dev.sh down --port "{{port}}"
-
-slack-clone-platform-foreground port='3040':
-  ./scripts/slack-clone-dev.sh platform-foreground --port "{{port}}"
-
-slack-clone-full-host-e2e:
-  bash "{{repo}}/scripts/slack-clone-full-host-e2e.sh"
-
-slack-clone-live-model-e2e *args:
-  bash "{{repo}}/scripts/slack-clone-live-model-e2e.sh" {{args}}
-
 workflow-graph-roundtrip port='3031':
   #!/usr/bin/env bash
   set -euo pipefail
@@ -145,73 +112,6 @@ loadtest-ledger mode='generate':
   ledger_generator="$(python3 tools/buck2/outputs.py --report .buck2/ledger-build.json \
     --label //runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin --single)"
   python3 scripts/generate_loadtest_ledger.py --generator "$ledger_generator" "${ledger_args[@]}"
-
-agent-service-restate-e2e:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  source "{{repo}}/scripts/worktree-gate-env.sh"
-  lash_gate_acquire agent-service-restate-e2e
-  image="${AGENT_SERVICE_RESTATE_IMAGE:-restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b}"
-  container="${AGENT_SERVICE_RESTATE_CONTAINER:-lash-agent-service-restate-${LASH_GATE_WORKTREE_SLUG}}"
-  admin_port="${RESTATE_ADMIN_PORT:-$((LASH_E2E_PORT_BASE + 20))}"
-  ingress_port="${RESTATE_INGRESS_PORT:-$((LASH_E2E_PORT_BASE + 21))}"
-  node_port="${RESTATE_NODE_PORT:-$((LASH_E2E_PORT_BASE + 22))}"
-  endpoint_bind="${AGENT_SERVICE_E2E_ENDPOINT_BIND:-127.0.0.1:$((LASH_E2E_PORT_BASE + 23))}"
-  endpoint_url="${AGENT_SERVICE_E2E_ENDPOINT_URL:-http://127.0.0.1:$((LASH_E2E_PORT_BASE + 23))}"
-  admin_url="${RESTATE_ADMIN_URL:-http://127.0.0.1:$admin_port}"
-  ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$ingress_port}"
-  run_token="$(date +%s)-$$"
-
-  cargo build --locked -p lash-internal-vm-worker --bin lash-vm-worker --features testing
-  worker="${CARGO_TARGET_DIR:-{{repo}}/target}/debug/lash-vm-worker"
-  export LASH_VM_WORKER="$(cd "$(dirname "$worker")" && pwd)/lash-vm-worker"
-
-  cleanup() {
-    docker rm -f "$container" >/dev/null 2>&1 || true
-    lash_gate_cleanup
-  }
-  trap cleanup EXIT
-
-  bash "{{repo}}/scripts/docker-pull-with-retry.sh" "$image"
-
-  docker run -d --name "$container" --label "$LASH_GATE_LABEL" --network host \
-    -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
-    -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
-    -e RESTATE_BIND_PORT="$node_port" \
-    "$image" >/dev/null
-
-  deadline=$((SECONDS + 60))
-  until (echo >"/dev/tcp/127.0.0.1/$admin_port") >/dev/null 2>&1; do
-    if (( SECONDS >= deadline )); then
-      docker logs "$container" >&2 || true
-      echo "Restate admin port $admin_port did not become ready" >&2
-      exit 1
-    fi
-    sleep 1
-  done
-  until (echo >"/dev/tcp/127.0.0.1/$ingress_port") >/dev/null 2>&1; do
-    if (( SECONDS >= deadline )); then
-      docker logs "$container" >&2 || true
-      echo "Restate ingress port $ingress_port did not become ready" >&2
-      exit 1
-    fi
-    sleep 1
-  done
-
-  # The Restate durability path refuses to run without a trust-domain id, and
-  # the effect-group workflow reads it per request: without it the handler
-  # answers 500 `RESTATE_AUTHORITY_ID is required`. The id is fresh per run
-  # because the Restate container above is created and removed per run, so
-  # there is no durable state from a previous run for a stable id to keep
-  # continuity with; it stays one value for the whole run, which is what the
-  # host and the durable controller have to agree on.
-  RESTATE_INGRESS_URL="$ingress_url" \
-  RESTATE_ADMIN_URL="$admin_url" \
-  RESTATE_AUTHORITY_ID="${RESTATE_AUTHORITY_ID:-agent-service-e2e:${LASH_GATE_WORKTREE_SLUG}:${run_token}}" \
-  AGENT_SERVICE_E2E_ENDPOINT_BIND="$endpoint_bind" \
-  AGENT_SERVICE_E2E_ENDPOINT_URL="$endpoint_url" \
-  cargo test -p agent-service \
-    live_restate_ingress_runs_agent_turn_and_process_workflow_end_to_end -- --ignored --nocapture
 
 agent-workbench-restate-e2e:
   bash "{{repo}}/scripts/agent-workbench-restate-e2e.sh"

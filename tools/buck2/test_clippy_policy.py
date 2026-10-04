@@ -58,7 +58,7 @@ class ClippyPolicyTests(unittest.TestCase):
         self.assertIn('"--deny=clippy::unwrap_used"', rendered)
         self.assertIn('"--warn=clippy::large_futures"', rendered)
         self.assertIn('"crates/lash-core"', rendered)
-        self.assertIn('"examples/agent-service"', rendered)
+        self.assertIn('"examples/agent-workbench"', rendered)
         self.assertIn('clippy_toml = spec[1]', rendered)
         self.assertNotIn("toml_merge_tool", rendered)
         provider = (ROOT / "tools/buck2/clippy_configuration.bzl").read_text(

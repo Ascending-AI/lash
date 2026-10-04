@@ -63,9 +63,7 @@ not observe is a FAIL of that gate, never a skip. Do not credit the companion's 
    deterministic host (Agent Workbench with its deterministic mock mail world and process
    engine). Protocol-standard `batch` is judged there too: the FIG-1293 `protocol-batch`
    row below is authored against the Agent Workbench RLM profile, and that table — the one
-   carrying executable detail — is the judged host. (An earlier wording named `slack-clone`,
-   where the standard protocol is native; only one host can be the judged one, and it is the
-   Workbench.) Each tool must succeed through its leaf-intent or
+   carrying executable detail — is the judged host. Each tool must succeed through its leaf-intent or
    process-replay shape on Restate exactly as it does on in-memory and PostgreSQL. Any
    FIG-1127 ordinal-tier refusal from those public tools is a regression. A tool body holds
    only the sealed `AttemptContext`, which has no journal-capable route (ADR 0116).

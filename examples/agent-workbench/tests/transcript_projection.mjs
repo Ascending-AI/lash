@@ -12,8 +12,6 @@ assert.ok(durableToolTranscript, "canonical records must come from the Rust comm
 test("all registered production surfaces preserve canonical records", () => {
   const assets = {
     workbench: html,
-    service: process.env.LASH_TRANSCRIPT_SERVICE_ASSET,
-    slack: process.env.LASH_TRANSCRIPT_SLACK_ASSET,
   };
   assert.deepEqual(Object.keys(assets).sort(), [...SURFACES].sort());
   for (const [surface, asset] of Object.entries(assets)) {

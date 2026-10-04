@@ -184,11 +184,6 @@
       "Cargo.toml"
     ]
   },
-  "examples/slack-clone": {
-    "compile_data": [
-      "assets/index.html"
-    ]
-  },
   "crates/lash-perf": {
     "compile_data": [
       "workloads/*.json"

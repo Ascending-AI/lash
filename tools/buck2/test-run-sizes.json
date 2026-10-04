@@ -1911,22 +1911,6 @@
     "peak_bytes": 24383488,
     "samples": 17
   },
-  "//examples/agent-service:agent-service__unit_test": {
-    "cpu_count": 2,
-    "memory_kb": 262144,
-    "p95_cores": 1.56,
-    "p99_peak_bytes": 116932608,
-    "peak_bytes": 167133184,
-    "samples": 211
-  },
-  "//examples/agent-service:fresh_boot__test": {
-    "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 1.02,
-    "p99_peak_bytes": 29646848,
-    "peak_bytes": 124948480,
-    "samples": 164
-  },
   "//examples/agent-workbench:agent-workbench__unit_test": {
     "cpu_count": 3,
     "memory_kb": 1572864,
@@ -1942,22 +1926,6 @@
     "p99_peak_bytes": 16961536,
     "peak_bytes": 18702336,
     "samples": 145
-  },
-  "//examples/slack-clone:mcp__test": {
-    "cpu_count": 2,
-    "memory_kb": 262144,
-    "p95_cores": 1.57,
-    "p99_peak_bytes": 200830976,
-    "peak_bytes": 205852672,
-    "samples": 165
-  },
-  "//examples/slack-clone:slack-clone__unit_test": {
-    "cpu_count": 3,
-    "memory_kb": 524288,
-    "p95_cores": 3.02,
-    "p99_peak_bytes": 360443904,
-    "peak_bytes": 423624704,
-    "samples": 212
   },
   "//examples/toolbench:toolbench__unit_test": {
     "cpu_count": 2,

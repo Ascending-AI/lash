@@ -1020,8 +1020,6 @@ lash_workspace_sources(
 filegroup(
     name = "workspace_test_scripts",
     srcs = [
-        "scripts/slack-clone-full-host-e2e.py",
-        "scripts/slack-clone-live-model-ui.py",
     ],
     copy = False,
     visibility = ["PUBLIC"],

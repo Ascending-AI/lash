@@ -173,39 +173,7 @@ run_agent_workbench_port_cases() {
   printf '%s\n' 'agent-workbench port derivation cases passed'
 }
 
-run_slack_clone_cases() {
-  local state_root="$test_tmp/slack-clone"
-  local run_dir="$state_root/run"
-  local address="127.0.0.1:3040"
-  local pid_file="$run_dir/platform-127.0.0.1_3040.pid"
-  local output="$test_tmp/slack-clone.log"
-  mkdir -p "$run_dir"
-
-  spawn_owned_sleep
-  printf '%s %s\n' "$SPAWNED_PID" "$SPAWNED_START" > "$pid_file"
-  SLACK_CLONE_STATE_DIR="$state_root" \
-    bash "$repo_root/scripts/slack-clone-dev.sh" down --addr "$address" \
-    > "$output" 2>&1
-  [[ ! -e "$pid_file" ]] || fail "slack-clone happy-path PID file survived down"
-  assert_identity_gone "$SPAWNED_PID" "$SPAWNED_START"
-  grep -Fq "stopping platform (process $SPAWNED_PID)" "$output" \
-    || fail "slack-clone happy path did not report the stopped PID"
-
-  spawn_owned_sleep
-  printf '%s %s\n' "$SPAWNED_PID" "$((SPAWNED_START + 1))" > "$pid_file"
-  SLACK_CLONE_STATE_DIR="$state_root" \
-    bash "$repo_root/scripts/slack-clone-dev.sh" down --addr "$address" \
-    >> "$output" 2>&1
-  [[ ! -e "$pid_file" ]] || fail "slack-clone mismatched PID file was not removed"
-  assert_identity_alive "$SPAWNED_PID" "$SPAWNED_START"
-  grep -Fq "removing stale or mismatched platform PID file $pid_file" "$output" \
-    || fail "slack-clone mismatched PID file removal was not reported"
-
-  printf '%s\n' 'slack-clone identity cases:'
-  sed -n '/stopping platform/p;/removing stale or mismatched platform PID file/p' "$output"
-}
 
 run_agent_workbench_cases
 run_agent_workbench_port_cases
-run_slack_clone_cases
 printf '%s\n' 'dev script process identity checks passed'

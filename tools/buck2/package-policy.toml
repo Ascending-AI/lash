@@ -207,11 +207,6 @@ kinds = ["lib", "unit-test"]
 compile_data = ["//examples:shared_rust_sources"]
 
 [[rule]]
-packages = ["slack-clone"]
-kinds = ["lib", "unit-test"]
-compile_data = ["//examples:shared_rust_sources"]
-
-[[rule]]
 packages = ["lash-perf"]
 kinds = ["lib"]
 compile_data = ["//:perf_guard_budgets", "//:perf_duration_level_shifts"]
@@ -221,10 +216,6 @@ packages = ["lash-internal-sansio"]
 kinds = ["unit-test"]
 compile_data = ["//:workspace_rust_sources"]
 
-[[rule]]
-packages = ["slack-clone"]
-kinds = ["unit-test"]
-compile_data = ["//:workspace_test_scripts"]
 
 # This instrumentation binary shares process-global counters.
 [[rule]]
@@ -287,7 +278,7 @@ targets = ["append_cost", "dialect_cost"]
 serial = true
 
 [[rule]]
-packages = ["agent-service", "agent-workbench", "slack-clone", "toolbench", "workflow-graph-roundtrip", "rlm-smoke-host"]
+packages = ["agent-workbench", "toolbench", "workflow-graph-roundtrip", "rlm-smoke-host"]
 kinds = ["bin", "test", "example", "bench"]
 compile_data = ["//examples:shared_rust_sources"]
 
@@ -431,29 +422,13 @@ compile_data = ["//:workspace_rust_sources"]
 [[rule]]
 packages = ["agent-workbench"]
 kinds = ["bin-unit-test"]
-compile_data = ["//examples/agent-service:package_files", "//examples/slack-clone:package_files"]
 data = ["native//:node"]
 env = { LASH_WORKBENCH_TEST_NODE = "$(location native//:node)" }
-
-# The agent-service unit gate exercises its embedded browser controller in Node.
-[[rule]]
-packages = ["agent-service"]
-kinds = ["bin-unit-test"]
-data = ["native//:node"]
-env = { LASH_AGENT_SERVICE_TEST_NODE = "$(location native//:node)" }
-
-# Slack's asynchronous view fixture executes the production browser script.
-[[rule]]
-packages = ["slack-clone"]
-kinds = ["unit-test"]
-data = ["native//:node", "//examples/slack-clone:package_files"]
-env = { LASH_SLACK_TEST_NODE = "$(location native//:node)" }
 
 # --- Test-run requests --------------------------------------------------------
 
 # A test run's request comes from its measured row in test-run-sizes.json.
-# These are the per-package exceptions, keyed `package/crate` like the rows of
-# action-sizes.json, plus per-label pins in `[test_runs.pinned]` below.
+# Per-package exceptions are keyed package/crate; label pins follow below.
 [test_runs]
 # Timing-sensitive suites keep four cores whatever they measure. Below that the
 # harness's and the runtime's own threads contend and time-sensitive cases fail

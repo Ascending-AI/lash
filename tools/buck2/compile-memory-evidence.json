@@ -1,17 +1,5 @@
 {
   "clippy": {
-    "agent-service/agent_service": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 248029184,
-      "samples": 33
-    },
-    "agent-service/fresh_boot": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 25882624,
-      "samples": 3
-    },
     "agent-workbench/agent_workbench": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1128,42 +1116,6 @@
       "p99_anon_peak_bytes": 98418688,
       "samples": 28
     },
-    "slack-clone/mcp": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 117108736,
-      "samples": 17
-    },
-    "slack-clone/slack_clone": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 373731328,
-      "samples": 42
-    },
-    "slack-clone/slack_clone_bot": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 40558592,
-      "samples": 8
-    },
-    "slack-clone/slack_clone_mcp_http_server": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 46260224,
-      "samples": 8
-    },
-    "slack-clone/slack_clone_mcp_server": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 48386048,
-      "samples": 9
-    },
-    "slack-clone/slack_clone_platform": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 31809536,
-      "samples": 2
-    },
     "toolbench/toolbench": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1214,18 +1166,6 @@
     }
   },
   "crates": {
-    "agent-service/agent_service": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 1338580992,
-      "samples": 54
-    },
-    "agent-service/fresh_boot": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 46592000,
-      "samples": 4
-    },
     "agent-workbench/agent_workbench": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -2347,48 +2287,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 1129299968,
       "samples": 26
-    },
-    "slack-clone/mcp": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 850972672,
-      "samples": 20
-    },
-    "slack-clone/slack_clone": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 1371635712,
-      "samples": 103
-    },
-    "slack-clone/slack_clone_bot": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 750215168,
-      "samples": 9
-    },
-    "slack-clone/slack_clone_live_e2e": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 38748160,
-      "samples": 2
-    },
-    "slack-clone/slack_clone_mcp_http_server": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 571629568,
-      "samples": 9
-    },
-    "slack-clone/slack_clone_mcp_server": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 650735616,
-      "samples": 35
-    },
-    "slack-clone/slack_clone_platform": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 588443648,
-      "samples": 11
     },
     "toolbench/toolbench": {
       "legacy_peak_bytes": 0,

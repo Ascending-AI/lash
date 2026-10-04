@@ -105,103 +105,13 @@ class JudgedBuildGeometryTests(unittest.TestCase):
             any("enables the `testing` feature" in f for f in failures), failures
         )
 
-    def test_shared_launcher_defaulting_away_from_judged_fails(self) -> None:
-        script = self.root / "scripts" / "slack-clone-dev.sh"
-        script.write_text(
-            script.read_text(encoding="utf-8").replace(
-                'cargo_profile="${SLACK_CLONE_CARGO_PROFILE:-judged}"',
-                'cargo_profile="${SLACK_CLONE_CARGO_PROFILE:-dev}"',
-            ),
-            encoding="utf-8",
-        )
-        failures = self.run_gate()
-        self.assertTrue(any("without `--profile judged`" in f for f in failures), failures)
-
-    def test_boot_without_the_judged_profile_fails(self) -> None:
-        script = self.root / "scripts" / "slack-clone-dev.sh"
-        invocation = 'cargo build -p slack-clone --locked --profile "$cargo_profile"'
-        self.assertIn(invocation, script.read_text(encoding="utf-8"))
-        script.write_text(
-            script.read_text(encoding="utf-8").replace(
-                invocation,
-                "cargo build -p slack-clone --locked",
-                1,
-            ),
-            encoding="utf-8",
-        )
-        failures = self.run_gate()
-        self.assertTrue(any("without `--profile judged`" in f for f in failures), failures)
 
 
-    def test_profile_pasted_into_the_artifact_path_fails(self) -> None:
-        # The exact defect this check exists for: `--profile dev` puts artifacts
-        # in `target/debug`, so a launcher that pastes the profile name straight
-        # into the path boots `target/dev/<bin>`, which never exists.
-        script = self.root / "scripts" / "slack-clone-dev.sh"
-        text = script.read_text(encoding="utf-8")
-        text = text.replace(
-            '"$(profile_artifact_dir)"', '"$cargo_profile"'
-        ).replace("    dev) printf 'debug' ;;\n", "")
-        script.write_text(text, encoding="utf-8")
-        failures = self.run_gate()
-        self.assertTrue(
-            any("never maps `dev` to" in f for f in failures), failures
-        )
-
-    def test_literal_dev_artifact_directory_fails(self) -> None:
-        script = self.root / "scripts" / "slack-clone-dev.sh"
-        source = '"${CARGO_TARGET_DIR:-$repo_root/target}" "$(profile_artifact_dir)" "$1"'
-        replacement = '"${CARGO_TARGET_DIR:-$repo_root/target}/dev/%s" "$1"'
-        self.assertIn(source, script.read_text(encoding="utf-8"))
-        script.write_text(
-            script.read_text(encoding="utf-8").replace(
-                source,
-                replacement,
-                1,
-            ),
-            encoding="utf-8",
-        )
-        failures = self.run_gate()
-        self.assertTrue(
-            any("cargo writes the `dev` profile" in f for f in failures), failures
-        )
-
-    def test_undeclared_artifact_directory_fails(self) -> None:
-        script = self.root / "scripts" / "slack-clone-dev.sh"
-        source = '"${CARGO_TARGET_DIR:-$repo_root/target}" "$(profile_artifact_dir)" "$1"'
-        replacement = '"${CARGO_TARGET_DIR:-$repo_root/target}/shipping/%s" "$1"'
-        self.assertIn(source, script.read_text(encoding="utf-8"))
-        script.write_text(
-            script.read_text(encoding="utf-8").replace(
-                source,
-                replacement,
-                1,
-            ),
-            encoding="utf-8",
-        )
-        failures = self.run_gate()
-        self.assertTrue(
-            any("not a cargo artifact directory" in f for f in failures), failures
-        )
 
 
-    def test_profile_override_scoped_to_one_command_fails(self) -> None:
-        # A `VAR=value cmd` prefix reaches the boot command only; the Python
-        # driver's mid-gate restart then rebuilds under the other profile.
-        script = self.root / "scripts" / "slack-clone-full-host-e2e.sh"
-        text = script.read_text(encoding="utf-8")
-        text = text.replace(
-            "export SLACK_CLONE_CARGO_PROFILE=dev",
-            "",
-        ).replace(
-            'bash "$repo/scripts/slack-clone-dev.sh" up --port "$port"',
-            'SLACK_CLONE_CARGO_PROFILE=dev bash "$repo/scripts/slack-clone-dev.sh" up --port "$port"',
-        )
-        script.write_text(text, encoding="utf-8")
-        failures = self.run_gate()
-        self.assertTrue(
-            any("without `export`" in f for f in failures), failures
-        )
+
+
+
 
     def test_buck2_judged_config_without_debug_assertions_fails(self) -> None:
         # The defect this exists for: rustc turns debug assertions ON at

@@ -1,6 +1,6 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
-reads = 102
+reads = 98
 outputs = 141
 
 [[surfaces]]
@@ -12,23 +12,7 @@ end = "// END WORKBENCH_SETTLED_TRANSCRIPT"
 harness = "examples/agent-workbench/tests/transcript_projection_harness.mjs"
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 
-[[surfaces]]
-name = "service"
-asset = "examples/agent-service/src/ui.rs"
-sources = ["examples/agent-service/src/routes.rs", "examples/agent-service/src/db.rs"]
-begin = "// transcript-renderer:start"
-end = "// transcript-renderer:end"
-harness = "examples/agent-workbench/tests/transcript_projection_harness.mjs"
-row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 
-[[surfaces]]
-name = "slack"
-asset = "examples/slack-clone/assets/index.html"
-sources = ["examples/slack-clone/src/bot/channel.rs", "examples/slack-clone/src/bot/threads.rs"]
-begin = "// transcript-renderer:start"
-end = "// transcript-renderer:end"
-harness = "examples/agent-workbench/tests/transcript_projection_harness.mjs"
-row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 
 [sites]
 "crates/lash-upgrade-harness/tests/e2e/telemetry.rs#send" = { reads = 0, outputs = 1, kind = "output-read", reason = "S34's socket witness verifies telemetry loss cannot change a Run's programmatic answer; this is no transcript renderer." }
@@ -256,10 +240,6 @@ row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", 
 "examples/agent-workbench/src/restate/tests.rs#turn_control_binding_routes_foreground_turns_through_the_configured_host" = { reads = 0, outputs = 1, kind = "output-read", reason = "turn_control_binding_routes_foreground_turns_through_the_configured_host asserts the typed program result independently of rendered rows." }
 "examples/agent-workbench/src/restate.rs#record_turn_output_for_profile" = { reads = 0, outputs = 2, kind = "output-read", reason = "Programmatic final/tool value telemetry; the message writer consumes transcript.reply." }
 "examples/agent-workbench/src/valid_empty_completion.rs#run_fixture" = { reads = 0, outputs = 1, kind = "output-read", reason = "run_fixture exposes programmatic execution results or provider data, not a transcript renderer." }
-"examples/slack-clone/src/live_e2e.rs#run_attempt" = { reads = 2, outputs = 0, kind = "evidence-read", reason = "run_attempt inspects recorded state for non-transcript evidence or execution context." }
-"examples/slack-clone/src/tests/bot_events.rs#channel_session_text" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "channel_session_text inspects recorded state for a law assertion." }
-"examples/slack-clone/src/tests/support.rs#bot_messages" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "bot_messages inspects recorded state for a law assertion." }
-"examples/slack-clone/tests/mcp.rs#transcript_text" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "transcript_text inspects recorded state for a law assertion." }
 "examples/toolbench/src/runtime.rs#run_task_with_shutdown_witness" = { reads = 0, outputs = 1, kind = "output-read", reason = "run_task_with_shutdown_witness exposes programmatic execution results or provider data, not a transcript renderer." }
 "examples/agent-workbench/src/main_sections/tests/continue_as_projection.rs#canonical_transcript_scenario_survives_a_frame_switch" = { reads = 0, outputs = 1, kind = "output-read", reason = "Asserts the frame-switch program result independently of canonical source and rendered rows." }
 

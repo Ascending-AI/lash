@@ -244,14 +244,6 @@ run_workflow_graph_integration() {
 }
 
 run_e2e_suite() {
-  step "Restate e2e: agent-service"
-  RESTATE_ADMIN_PORT="${RESTATE_ADMIN_PORT:-$((port_base + 20))}" \
-  RESTATE_INGRESS_PORT="${RESTATE_INGRESS_PORT:-$((port_base + 21))}" \
-  RESTATE_NODE_PORT="${RESTATE_NODE_PORT:-$((port_base + 22))}" \
-  AGENT_SERVICE_E2E_ENDPOINT_BIND="${AGENT_SERVICE_E2E_ENDPOINT_BIND:-127.0.0.1:$((port_base + 23))}" \
-  AGENT_SERVICE_E2E_ENDPOINT_URL="${AGENT_SERVICE_E2E_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 23))}" \
-    just agent-service-restate-e2e
-
   # Both suites pick free loopback ports per shard (scripts/ci/restate_suite.py).
   step "Restate e2e: agent-workbench"
   just agent-workbench-restate-e2e
@@ -389,7 +381,7 @@ run_s3_conformance() {
 #
 #   scripts/ci-stack-budget.sh, scripts/confidence-gate.sh fast shards,
 #   scripts/profile_runtime.py, scripts/profile_lashlang.py,
-#   cargo clippy -p slack-clone --features e2e, the Postgres 14/18 majors,
+#   the Postgres 14/18 majors,
 #   the browser E2E leg, and the package feature checks
 #     Breadth this gate trades for wall-clock. Each resolves a feature graph
 #     or a container stack of its own — a `-p` build is a different

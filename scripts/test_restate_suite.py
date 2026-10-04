@@ -332,23 +332,6 @@ filters = ["tests::"]
 
 
 class StageBinariesTests(unittest.TestCase):
-    def test_cargo_agent_service_supplies_a_testing_helper(self) -> None:
-        # `just --show` wants the binary, which the repository-gates job does
-        # not install; the recipe is text in the justfile, so the contract
-        # reads it there. A recipe's body runs until the first line that
-        # starts in column zero.
-        justfile = (ROOT / "justfile").read_text(encoding="utf-8")
-        recipe = "\n".join(
-            itertools.takewhile(
-                lambda line: not line or line[0].isspace(),
-                justfile.split("\nagent-service-restate-e2e:\n", 1)[1].splitlines(),
-            )
-        )
-        build = "cargo build --locked -p lash-internal-vm-worker --bin lash-vm-worker --features testing"
-        self.assertIn(build, recipe)
-        self.assertIn('export LASH_VM_WORKER="$(cd "$(dirname "$worker")" && pwd)/lash-vm-worker"', recipe)
-        self.assertLess(recipe.index(build), recipe.index("cargo test -p agent-service"))
-        self.assertNotIn("kiln", recipe)
 
     def test_cargo_segment_artifacts_include_the_vm_worker(self) -> None:
         import yaml

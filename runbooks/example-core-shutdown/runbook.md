@@ -29,8 +29,6 @@ The required scorecard rows are:
 
 | Row | Required evidence |
 | --- | --- |
-| `agent-service-signal` | SIGTERM stops Axum intake, the process exits after its empty trace flush returns, and exactly one `agent-service` factory marker is durable. |
-| `agent-service-bind-error` | A post-build bind failure remains the primary error and still produces exactly one factory marker. |
 | `workbench-signal-active-streams` | Active `/api/events` and `/api/observations` responses close on host shutdown, Axum completes, and exactly one Workbench marker is durable. |
 | `workbench-valid-empty-nested` | The token-free fixture returns only after its nested core produced exactly one marker. |
 | `workbench-bind-error` | A post-build bind failure remains the primary error and still produces exactly one factory marker. |
@@ -39,11 +37,7 @@ The Workbench signal closes its host-owned HTTP producer streams so Axum can
 complete draining. It does not cancel an active turn or introduce a durable-turn
 policy.
 
-Agent-service emits no trace record until a turn runs. These token-free rows
-therefore require that its trace path remains absent and that the final
-`shutdown complete` line is reached after the source-ordered flush succeeds;
-they do not mislabel an empty sink as a persisted trace artifact. Workbench
-emits a startup trace, so its rows require the trace file itself.
+Workbench emits a startup trace, so its rows require the trace file itself.
 
 The owned Restate listener uses Restate SDK 0.11 `serve_with_cancel`. That API
 stops listener intake and applies its fixed ten-second connection grace before
@@ -62,28 +56,23 @@ cargo check --workspace --all-targets --locked \
   --features agent-workbench/provider-wire-fixtures
 ```
 
-Run the focused finite-owner and cleanup-result tests and require four executed
-tests and four passes:
+Run the focused finite-owner and cleanup-result tests and require three executed
+tests and three passes:
 
 ```sh
 . ./env.sh
 cargo nextest run --workspace --all-targets --locked \
-  --features slack-clone/live-e2e \
-  -E 'test(smoke_stream_timeout_drains_full_channel_before_factory_shutdown) | test(wall_limit_retains_core_and_awaits_installed_factory_shutdown) | test(cleanup_failure_preserves_primary_failed_turn_evidence) | test(cleanup_failure_marks_successful_turn_failed)'
+  -E 'test(wall_limit_retains_core_and_awaits_installed_factory_shutdown) | test(cleanup_failure_preserves_primary_failed_turn_evidence) | test(cleanup_failure_marks_successful_turn_failed)'
 ```
 
-The Slack test fills the real bounded activity channel, triggers the smoke
-timeout, drains after existing process-local cancellation, joins the real
-send handle's activity stream, and then lets an installed shutdown factory run. The toolbench
-test takes its real zero-wall-limit owner path and observes an installed
-factory's awaited shutdown. Both providers remain local; do not execute the
-paid live-model harness for this deterministic runbook.
+The toolbench test takes its real zero-wall-limit owner path and observes an installed
+factory's awaited shutdown. The provider remains local; this is a deterministic runbook.
 
 ## Mutation control
 
 Once per contract change, record the source checksum, deliberately remove the
-`core.shutdown().await` call from the agent-service drain, and rerun the
-agent-service bind-error case. Require the command to fail because the marker
+`core.shutdown().await` call from the workbench drain, and rerun the
+workbench bind-error case. Require the command to fail because the marker
 is absent. Restore the exact source, verify the checksum matches, and retain
 the red log and patch. Never publish the mutated tree.
 

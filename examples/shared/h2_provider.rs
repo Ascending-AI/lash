@@ -46,8 +46,8 @@ pub fn scripted_provider(
             .open(ledger_path)?,
     ));
     Ok(lash::testing::TestProvider::builder()
-        .kind("agent-service-h2")
-        .serialize_config(|| serde_json::json!({"fixture":"agent-service-h2"}))
+        .kind("h2-fixture")
+        .serialize_config(|| serde_json::json!({"fixture":"h2-fixture"}))
         .options(ProviderOptions {
             reliability: ProviderReliability::disabled(),
             ..Default::default()

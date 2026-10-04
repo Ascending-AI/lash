@@ -32,7 +32,7 @@
 #
 # Example:
 #   scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store
-#   scripts/ci/with-service.sh restate -- cargo run -p agent-service
+#   scripts/ci/with-service.sh restate -- cargo run -p agent-workbench
 set -euo pipefail
 
 readonly PROGRAM="scripts/ci/with-service.sh"
@@ -227,10 +227,6 @@ NOT covered by scripts/ci/with-service.sh -- run each of these yourself:
       why: shell E2E drivers over release binaries rather than any Cargo or Buck2
            test label
       run: just restate-postgres-workers-e2e
-  * slack-clone e2e feature
-      why: the e2e feature is outside the resolved default workspace graph, so it
-           has no Buck2 label
-      run: cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
   * Functional E2E process operations
       why: a compose runbook that stands up its own S3 service beside Restate and PostgreSQL
       run: bash scripts/process-operations-e2e.sh

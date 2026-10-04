@@ -1,22 +1,4 @@
 {
-  "agent-service/agent_service": {
-    "target": {
-      "cpu_count": 1,
-      "memory_kb": 3145728,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    },
-    "test": {
-      "cpu_count": 1,
-      "memory_kb": 3145728,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    }
-  },
   "agent-workbench/agent_workbench": {
     "target": {
       "cpu_count": 1,
@@ -1021,78 +1003,6 @@
     "test": {
       "cpu_count": 1,
       "memory_kb": 2883584,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    }
-  },
-  "slack-clone/mcp": {
-    "target": {
-      "cpu_count": 1,
-      "memory_kb": 2621440,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    },
-    "test": {
-      "cpu_count": 1,
-      "memory_kb": 2621440,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    }
-  },
-  "slack-clone/slack_clone": {
-    "target": {
-      "cpu_count": 1,
-      "memory_kb": 2883584,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    },
-    "test": {
-      "cpu_count": 1,
-      "memory_kb": 2883584,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    }
-  },
-  "slack-clone/slack_clone_bot": {
-    "target": {
-      "cpu_count": 1,
-      "memory_kb": 2359296,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    },
-    "test": {
-      "cpu_count": 1,
-      "memory_kb": 2359296,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    }
-  },
-  "slack-clone/slack_clone_mcp_server": {
-    "target": {
-      "cpu_count": 1,
-      "memory_kb": 2097152,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    },
-    "test": {
-      "cpu_count": 1,
-      "memory_kb": 2097152,
       "p95_cores": 0.0,
       "p99_peak_bytes": 0,
       "peak_bytes": 0,

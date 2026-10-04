@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
-export const SURFACES = ['workbench', 'service', 'slack'];
+export const SURFACES = ['workbench'];
 
 function block(asset, begin, end) {
   assert.equal(asset.split(begin).length, 2, `missing production marker ${begin}`);
@@ -45,29 +45,12 @@ export function verifyTranscriptSurface(surface, asset, rows) {
       attachments:input.content.attachments.map(attachment => ({attachment_id:attachment.id, retrieve_url:`/api/attachments/${encodeURIComponent(attachment.id)}`})),
       provenance:{kind:'turn_input', turn_id:input.provenance.turn_id}} : null;
     code += `\nrenderStateTranscript({transcript: ${JSON.stringify(rows)}, product_events:{events:${JSON.stringify(ownedInput ? [{message:ownedInput}] : [])}}});`;
-  } else if (surface === 'service') {
-    code = block(asset, '// transcript-renderer:start', '// transcript-renderer:end');
-    context.owner = owner;
-    code += `\nfor (const row of ${JSON.stringify(rows)}) appendTranscriptRow(row, owner);`;
-  } else if (surface === 'slack') {
-    code = block(asset, '// transcript-renderer:start', '// transcript-renderer:end');
-    context.target = target;
-    context.renderMessage = message => record('message', { text: message.text });
-    code += `\nfor (const row of ${JSON.stringify(rows)}) renderTranscriptRow(row, {ts: row.row_id}, target, new Set(), null, false);`;
   } else throw new Error(`unregistered surface ${surface}`);
   vm.runInNewContext(code, context);
   const expected = [];
   const expectedIds = [];
   for (const row of rows.filter(row => !row.suppressed)) {
     const content = row.content;
-    if (surface === 'slack') {
-      expected.push({ kind:'message', value:{ text:[content.text, ...content.reasoning, content.code, content.output, content.error,
-        ...content.tools.map(tool => `${tool.operation}: ${tool.status}`),
-        content.tools_omitted ? `${content.tools_omitted} tool calls omitted` : null,
-        ...content.attachments.map(attachment => attachment.id)].filter(Boolean).join('\n') } });
-      expectedIds.push(row.row_id);
-      continue;
-    }
     for (const text of content.reasoning) { expected.push({kind:'reasoning', value:text}); expectedIds.push(row.row_id); }
     if (row.kind === 'code_block') {
       expected.push({kind:'code', value:{language:content.language, code:content.code, output:content.output, success:content.success, error:content.error, attachments:content.attachments, tools:content.tools, tools_omitted:content.tools_omitted}});
@@ -84,15 +67,6 @@ export function verifyTranscriptSurface(surface, asset, rows) {
   assert.deepEqual(target.children.map(node => node.dataset.transcriptRowId), expectedIds, `${surface}: rows were dropped, duplicated or reordered`);
   assert.deepEqual(target.children.map(node => node.dataset.turnId), expectedIds.map(id => rows.find(row => row.row_id === id).provenance.turn_id || ''), `${surface}: typed provenance changed`);
   if (ownedInput) assert.equal(messageIds.filter(id => id === ownedInput.id).length, 1, 'UI input correlation must preserve its own identity once');
-  if (surface === 'service') {
-    const live = element(target, {preview:true}); live.dataset.provisionalTurnId = 'live-turn';
-    const unrelated = element(target, {preview:true}); unrelated.dataset.provisionalTurnId = 'other-turn';
-    owner.previewRetired = false;
-    context.owner = owner;
-    vm.runInNewContext(`${block(asset, '// transcript-renderer:start', '// transcript-renderer:end')}\nretireTurnPreview(owner, 'live-turn');`, context);
-    assert.ok(!target.children.includes(live), 'settled turn left provisional output');
-    assert.ok(target.children.includes(unrelated), 'settlement removed another turn');
-  }
   return {surface, visible: rows.filter(row => !row.suppressed).length, pieces: expected.length};
 }
 

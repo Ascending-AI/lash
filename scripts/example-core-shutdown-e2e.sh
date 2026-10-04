@@ -162,87 +162,6 @@ assert_count() {
   fi
 }
 
-run_agent_service_signal() {
-  local dir="$artifact_root/agent-service-signal"
-  mkdir -p "$dir/data"
-  local port restate_port marker log trace runner app count
-  port="$(free_port)"
-  restate_port="$(free_port)"
-  marker="$dir/shutdown.marker"
-  log="$dir/host.log"
-  trace="$dir/trace.jsonl"
-  env OPENROUTER_API_KEY=deterministic-no-network \
-    AGENT_SERVICE_ADDR="127.0.0.1:$port" \
-    AGENT_SERVICE_RESTATE_ADDR="127.0.0.1:$restate_port" \
-    RESTATE_AUTHORITY_ID="example-core-shutdown-agent-service-signal-$port" \
-    AGENT_SERVICE_DATA_DIR="$dir/data" \
-    AGENT_SERVICE_TRACE="$trace" \
-    LASH_HOST_SHUTDOWN_MARKER="$marker" \
-    cargo run -p agent-service --profile judged --locked >"$log" 2>&1 &
-  runner=$!
-  owned_pids+=("$runner")
-  wait_http "http://127.0.0.1:$port/" "$runner" "$log"
-  app="$(app_descendant "$runner" /judged/agent-service)"
-  kill -TERM "$app"
-  wait_reaped "$runner" agent-service-signal
-  assert_count "$wait_status" 0 agent-service-signal-exit
-  if kill -0 "$app" 2>/dev/null; then
-    echo "agent-service app child remained live after cargo runner exit" >&2
-    return 1
-  fi
-  count="$(marker_count "$marker" agent-service)"
-  assert_count "$count" 1 agent-service-signal-marker
-  grep -q 'agent-service shutdown complete' "$log"
-  test ! -e "$trace"
-  printf 'agent-service-signal\t%s\tempty-flush-returned\tyes\tSIGTERM graceful shutdown\n' "$count" >>"$scorecard"
-}
-
-run_agent_service_bind_error() {
-  local dir="$artifact_root/agent-service-bind-error"
-  mkdir -p "$dir/data"
-  local port restate_port marker log trace holder runner count
-  port="$(free_port)"
-  restate_port="$(free_port)"
-  marker="$dir/shutdown.marker"
-  log="$dir/host.log"
-  trace="$dir/trace.jsonl"
-  python3 - "$port" >"$dir/listener.log" 2>&1 <<'PY' &
-import socket, sys, time
-s = socket.socket()
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(("127.0.0.1", int(sys.argv[1])))
-s.listen()
-print("ready", flush=True)
-time.sleep(120)
-PY
-  holder=$!
-  owned_pids+=("$holder")
-  wait_listener_ready "$holder" "$dir/listener.log"
-  env OPENROUTER_API_KEY=deterministic-no-network \
-    AGENT_SERVICE_ADDR="127.0.0.1:$port" \
-    AGENT_SERVICE_RESTATE_ADDR="127.0.0.1:$restate_port" \
-    RESTATE_AUTHORITY_ID="example-core-shutdown-agent-service-bind-error-$port" \
-    AGENT_SERVICE_DATA_DIR="$dir/data" \
-    AGENT_SERVICE_TRACE="$trace" \
-    LASH_HOST_SHUTDOWN_MARKER="$marker" \
-    cargo run -p agent-service --profile judged --locked >"$log" 2>&1 &
-  runner=$!
-  owned_pids+=("$runner")
-  wait_log_pattern "$runner" "$log" 'agent-service listening on'
-  wait_reaped "$runner" agent-service-bind-error
-  if [[ "$wait_status" == 0 ]]; then
-    echo "agent-service bind-error command unexpectedly succeeded" >&2
-    return 1
-  fi
-  kill -TERM "$holder"
-  wait_reaped "$holder" agent-service-bind-holder
-  count="$(marker_count "$marker" agent-service)"
-  assert_count "$count" 1 agent-service-bind-error-marker
-  grep -q 'Address already in use' "$log"
-  test ! -e "$trace"
-  printf 'agent-service-bind-error\t%s\tempty-flush-returned\tyes\tprimary bind error retained\n' "$count" >>"$scorecard"
-}
-
 run_workbench_signal_with_streams_and_fixture() {
   local dir="$artifact_root/workbench-signal-streams"
   mkdir -p "$dir/data"
@@ -350,8 +269,6 @@ PY
   printf 'workbench-bind-error\t%s\tpresent\tyes\tprimary bind error retained\n' "$count" >>"$scorecard"
 }
 
-run_agent_service_signal
-run_agent_service_bind_error
 run_workbench_signal_with_streams_and_fixture
 run_workbench_bind_error
 

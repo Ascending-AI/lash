@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one materialized H6 paid row, or record all five as NotRun.
+"""Run one materialized H6 paid row, or record all four as NotRun.
 
 Invoke inside a private Kiln gate with its prebuilt e2e_hosts binary and host
 artifact identities. Budget configuration belongs to the operator; the host
@@ -15,7 +15,6 @@ SELECTORS = {
     "S35/file-edit-bugfix": "s35_file_edit_bugfix",
     "S35/missing-helper-file": "s35_missing_helper_file",
     "S35/config-contract-edit": "s35_config_contract_edit",
-    "S36/slack-nonce": "s36_slack_nonce",
     "S36/workbench-weather": "s36_workbench_weather",
 }
 
@@ -32,7 +31,7 @@ def main():
                  "verdict": "NotRun", "reason": "OPENROUTER_API_KEY is absent"}
                 for row in SELECTORS]
         (args.directory / "live-rows.json").write_text(json.dumps(rows, indent=2) + "\n")
-        print(json.dumps({"selected": 5, "executed": 0, "verdict": "NotRun"}))
+        print(json.dumps({"selected": len(SELECTORS), "executed": 0, "verdict": "NotRun"}))
         return 78
     if args.row is None or args.test_bin is None:
         parser.error("funded execution requires --row and --test-bin")

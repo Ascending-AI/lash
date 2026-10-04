@@ -52,7 +52,7 @@ impl ProtocolReplyTracker {
 ///
 /// `run` awaits the loop through this rather than `impl Future` because the
 /// registration the driver holds makes `run`'s state one subtree deeper, and
-/// a caller that spawns a whole queued-work drain (slack-clone's webhook
+/// a caller that spawns a whole queued-work drain (a product webhook
 /// does) hits the trait solver's recursion limit proving the composite
 /// future `Send`. A `Pin<Box<dyn ..>>` field is a leaf in that proof, so the
 /// effect loop's interior no longer rides on every outer frame.

@@ -249,7 +249,7 @@ while IFS=: read -r file line source; do
   [[ -n "$file" ]] || continue
   case "$file" in
     crates/lash-restate/* | crates/lash-restate-test/* | \
-      examples/agent-service/* | examples/agent-workbench/* | \
+      examples/agent-workbench/* | \
       runbooks/restate-postgres-workers/*)
       continue
       ;;

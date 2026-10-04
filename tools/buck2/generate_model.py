@@ -1890,12 +1890,8 @@ SERVICE_JOB_TAGS = frozenset({"cargo-service-gate", "hermetic-postgres"})
 # The Cargo clippy invocations the Lint job ran on a runner because the feature
 # resolution they lint is outside the default workspace graph. Each is matched
 # against a lane command by (package, default features, requested features,
-# target selector); the variants of the matching command make up the Buck2
-# clippy aggregate that replaces the step. `slack-clone` declares no default
-# feature, so the lane's `--no-default-features --features e2e` and the Cargo
-# step's `--features e2e` are the same resolution.
+# target selector); matching variants form the aggregate.
 FEATURE_LANE_CLIPPY_SCOPES = (
-    ("slack-clone", ("e2e",), "--all-targets"),
 )
 
 # Test-count floors the retired `Runtime feature boundary` matrix carried. The

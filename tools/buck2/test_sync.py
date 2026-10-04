@@ -1254,10 +1254,6 @@ def check_direct_buck_generator() -> None:
         for path in ROOT.rglob("BUCK")
     )
     assert "$(rootpath " not in generated_graph
-    assert (
-        '"CARGO_BIN_EXE_slack-clone-mcp-server": '
-        '"$(location :slack-clone-mcp-server__bin)"'
-    ) in generated_graph
 
 
 def check_schema_source_inputs() -> None:

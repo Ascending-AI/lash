@@ -1,5 +1,6 @@
 //! H6: R7/L03/L08/L21 through a separate external consumer process and
 //! its real HTTP contract, with the controller owning its lifetime.
+mod workbench_browser;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -7,7 +8,6 @@ use anyhow::{Context as _, Result, ensure};
 use lash_upgrade_harness::e2e::case::{ArtifactIdentity, CaseLease};
 use lash_upgrade_harness::e2e::host::{HostAdapter as _, HostCommand};
 use lash_upgrade_harness::e2e::host_adapters::consumer::ConsumerHost;
-use lash_upgrade_harness::e2e::host_adapters::slack::SlackHost;
 use serde_json::json;
 
 fn required(name: &str) -> Result<String> {
@@ -30,7 +30,6 @@ macro_rules! paid_row {
 paid_row!(s35_file_edit_bugfix, "S35/file-edit-bugfix");
 paid_row!(s35_missing_helper_file, "S35/missing-helper-file");
 paid_row!(s35_config_contract_edit, "S35/config-contract-edit");
-paid_row!(s36_slack_nonce, "S36/slack-nonce");
 paid_row!(s36_workbench_weather, "S36/workbench-weather");
 
 async fn live_row(row: &str) -> Result<()> {
@@ -65,16 +64,6 @@ async fn live_row(row: &str) -> Result<()> {
         python: required("LASH_E2E_PYTHON")?.into(),
     };
     let receipt = match row {
-        "S36/slack-nonce" => {
-            config
-                .slack_nonce(
-                    &artifact("SLACK_PLATFORM", "slack-platform")?,
-                    &artifact("SLACK_LIVE", "slack-live")?,
-                    required("LASH_LIVE_E2E_MAX_SPEND_USD")?.parse()?,
-                    &mut lease,
-                )
-                .await?
-        }
         "S36/workbench-weather" => {
             config
                 .weather(&artifact("WORKBENCH", "workbench")?, &mut lease)
@@ -109,75 +98,6 @@ fn artifact(prefix: &str, role: &str) -> Result<ArtifactIdentity> {
         candidate_sha: required("LASH_E2E_CANDIDATE_SHA")?,
         generation: required("LASH_E2E_HOST_GENERATION")?,
     })
-}
-
-#[test]
-#[ignore = "prebuilt Slack hosts, Playwright and private real Restate supplied by the E2E controller"]
-fn s28_slack_mcp_peer_restart() -> Result<()> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_stack_size(8 * 1024 * 1024)
-        .build()?
-        .block_on(slack("S28"))
-}
-
-#[test]
-#[ignore = "prebuilt Slack hosts, Playwright and private real Restate supplied by the E2E controller"]
-fn s29_slack_bot_kill_after_acceptance() -> Result<()> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_stack_size(8 * 1024 * 1024)
-        .build()?
-        .block_on(slack("S29"))
-}
-
-async fn slack(scenario: &str) -> Result<()> {
-    let gate = required("KILN_GATE_ID")?;
-    let root = PathBuf::from(required("LASH_E2E_HOST_ARTIFACTS")?);
-    let port: u16 = required("LASH_E2E_HOST_PORT")?.parse()?;
-    let mut lease = CaseLease {
-        gate_id: gate.clone(),
-        namespace: format!("h6-{gate}"),
-        authority: format!("h6-{gate}"),
-        directory: root.clone(),
-        postgres_url: None,
-        ports: (port..port + 4).collect(),
-        deadline: Instant::now() + Duration::from_secs(360),
-        processes: Vec::new(),
-        cleanup: Vec::new(),
-    };
-    let mut host = SlackHost::new(
-        artifact("SLACK_PLATFORM", "slack-platform")?,
-        artifact("SLACK_MCP", "slack-http-mcp")?,
-        artifact("SLACK_STDIO_MCP", "slack-stdio-mcp")?,
-        required("RESTATE_INGRESS_URL")?,
-        required("RESTATE_ADMIN_URL")?,
-        port,
-        required("LASH_E2E_REPO")?.into(),
-        required("LASH_E2E_PYTHON")?.into(),
-    )?;
-    let result = async {
-        let ready = host
-            .boot(&artifact("SLACK_BOT", "slack-bot")?, &mut lease)
-            .await?;
-        let score = host.oracle(scenario).await?;
-        std::fs::write(
-            root.join("host-evidence.json"),
-            serde_json::to_vec_pretty(&json!({
-                "scenario":scenario,"selected":1,"executed":1,"ready":ready,
-                "scorecard":score,"transcript":host.transcript()?
-            }))?,
-        )?;
-        anyhow::Ok(())
-    }
-    .await;
-    let cleanup = host.stop().await;
-    result?;
-    ensure!(
-        cleanup?.iter().all(|receipt| receipt.closed),
-        "Slack lifetime was not closed"
-    );
-    Ok(())
 }
 
 #[test]
@@ -320,4 +240,14 @@ async fn s30() -> Result<()> {
         "consumer lifetime was not closed"
     );
     Ok(())
+}
+
+#[test]
+#[ignore = "prebuilt workbench, Playwright and private Restate supplied by the E2E controller"]
+fn s29_workbench_kill_after_acceptance() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(workbench_browser::run())
 }

@@ -292,7 +292,7 @@ GATED_JOBS = {
 # event whose diff can move a Rust build, pull requests included: a lane
 # break is caused by an API change anywhere upstream, which the diff's own
 # path set can never see. #1979 merged a variant that did not compile while
-# the lane graph was dispatch-only, and #2285 broke the slack-clone live-E2E
+# the lane graph was dispatch-only, and #2285 broke the product live-E2E
 # variant from a public engine API change while `feature-lanes` was still
 # path-gated on the PR board. On a pull request the `feature_lanes` family
 # output gates only the lane TEST steps (`_is_feature_gate_path` holds that
@@ -410,7 +410,7 @@ WORKERS_E2E_JOBS = {
 }
 
 # The functional-e2e legs that host live Restate suites. Host PRs run the
-# agent-service and agent-workbench legs; dispatches run the full matrix.
+# agent-workbench legs; dispatches run the full matrix.
 RESTATE_SUITE_JOBS = frozenset(
     {"functional-e2e", "functional-e2e-process-operations"}
 )
@@ -1060,7 +1060,7 @@ def restate_suite_dirs(root: str | None = None) -> frozenset[str]:
 
 
 # Packages whose whole tree a live Restate suite mounts or expands: the
-# agent-service endpoint (`agent-service-restate-e2e` cargo-tests it beside a
+# workbench endpoint (`agent-workbench-restate-e2e` tests it beside a
 # Restate container), the runbooks whose binaries and scenarios the workers
 # and process-operations legs drive, and the conformance law catalogue the
 # effect-group suite's `conformance_and_poison` cases are built from — a law
@@ -1068,7 +1068,6 @@ def restate_suite_dirs(root: str | None = None) -> frozenset[str]:
 RESTATE_SUITE_PACKAGES = frozenset(
     {
         "crates/lash-conformance",
-        "examples/agent-service",
         "runbooks/process-operations",
         "runbooks/restate-postgres-workers",
     }

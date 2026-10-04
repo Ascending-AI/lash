@@ -70,10 +70,11 @@
           "registration": null
         }
       ],
-      "setup": "Agent-service Standard, one echo tool, real Restate/SQLite.",
+      "setup": "Workbench Standard, one echo tool, real Restate/SQLite.",
       "fault": "None; replay leg suspends.",
       "observable": "One original call identity, independently decoded A/X/D/V facts in owning Run, one reply; no second body on replay.",
-      "arc_guards": []
+      "arc_guards": [],
+      "host": "workbench"
     },
     {
       "id": "S02",
@@ -1761,10 +1762,11 @@
           "registration": null
         }
       ],
-      "setup": "External/agent-service plugin task issues a tool and returns completion.",
+      "setup": "Workbench plugin task issues a tool and returns completion; node::h3::double_fixture proves admission and follow on the server double.",
       "fault": "Drop caller's handle, then reattach by recorded Run ID.",
       "observable": "Durable admission answers separately; operation completes/Closes only after issued work settles; follow/result match stored terminal.",
-      "arc_guards": []
+      "arc_guards": [],
+      "host": "workbench"
     },
     {
       "id": "S18",
@@ -2939,10 +2941,11 @@
           "registration": null
         }
       ],
-      "setup": "Workbench/agent-service production provider HTTP client; recorded SSE frames + usage.",
+      "setup": "Workbench production provider HTTP client; recorded SSE frames + usage.",
       "fault": "429 once, reset after partial stream, client observer disconnect/reconnect.",
       "observable": "Actual HTTP retry request observed; typed terminal policy, one committed assistant/reply, original logical receipts and usage agree across transcript/SSE/store.",
-      "arc_guards": []
+      "arc_guards": [],
+      "host": "workbench"
     },
     {
       "id": "S27",
@@ -3013,7 +3016,8 @@
       "setup": "Same production HTTP provider fixture.",
       "fault": "Return recorded 401; submit fresh valid request afterward.",
       "observable": "First Run Failed with provider classification, not Cancelled; next Run answers; no stuck active turn/phantom retry.",
-      "arc_guards": []
+      "arc_guards": [],
+      "host": "workbench"
     },
     {
       "id": "S28",
@@ -3053,7 +3057,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "FIG-4968 owns the workbench MCP fixture and S28 runtime registration.",
           "registration": null
         },
         {
@@ -3080,7 +3084,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "FIG-4968 owns the workbench MCP fixture and S28 runtime registration.",
           "registration": null
         },
         {
@@ -3107,7 +3111,7 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "FIG-4968 owns the workbench MCP fixture and S28 runtime registration.",
           "registration": null
         },
         {
@@ -3134,14 +3138,15 @@
             "provenance"
           ],
           "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
+          "hold_reason": "FIG-4968 owns the workbench MCP fixture and S28 runtime registration.",
           "registration": null
         }
       ],
-      "setup": "Slack HTTP/stdio MCP fixtures, binary attachment; file backend plus PG/Garage variant.",
+      "setup": "Workbench HTTP/stdio MCP fixtures, binary attachment; file backend plus PG/Garage variant.",
       "fault": "Kill/reconnect peer during admitted call, detach after catalog refresh.",
       "observable": "Admitted revision completes or typed-refuses; subsequent catalog stops offering detached tool; exact attachment bytes/reference retained once; host sampling/elicitation results agree.",
-      "arc_guards": []
+      "arc_guards": [],
+      "host": "workbench"
     },
     {
       "id": "S29",
@@ -3211,10 +3216,11 @@
           "registration": null
         }
       ],
-      "setup": "Slack/workbench deterministic transcript and known tool output.",
-      "fault": "Kill bot/workbench at entered provider barrier, restart preserving identities; late browser reconnect.",
+      "setup": "Workbench deterministic transcript and known tool output.",
+      "fault": "Kill workbench at entered provider barrier, restart preserving identities; late browser reconnect.",
       "observable": "DOM projection equals committed API/store answer; one attributed reply and terminal trace; no duplicated child/thread input; teardown closed.",
-      "arc_guards": []
+      "arc_guards": [],
+      "host": "workbench"
     },
     {
       "id": "S30",
@@ -3863,7 +3869,7 @@
     },
     {
       "id": "S36",
-      "title": "live agents and weather pass grounded host acceptance",
+      "title": "live weather passes grounded host acceptance",
       "owner": "H6",
       "rules": [],
       "risks": [
@@ -3873,32 +3879,6 @@
       ],
       "dependencies": "Base, F02/F03, browser, live credentials/search",
       "cases": [
-        {
-          "variant": "slack-nonce-swap",
-          "store": "sqlite_file",
-          "leg": "live",
-          "channel": "standard",
-          "tiers": [
-            "live"
-          ],
-          "server_nodes": 1,
-          "binaries": [
-            "host",
-            "vm_worker"
-          ],
-          "artifacts": [
-            "journal",
-            "store",
-            "host",
-            "trace",
-            "cleanup",
-            "junit",
-            "provenance"
-          ],
-          "state": "held",
-          "hold_reason": "Inactive H8 machinery: H6 real-host runtime registration not yet pinned. Product arc guards are listed separately.",
-          "registration": null
-        },
         {
           "variant": "workbench-weather",
           "store": "sqlite_file",
@@ -3926,10 +3906,11 @@
           "registration": null
         }
       ],
-      "setup": "Slack nonce swap plus workbench weather, each separate session/row.",
+      "setup": "Workbench weather, real model and real search/MCP.",
       "fault": "No injected failure; real model + real search/MCP.",
-      "observable": "Exact peer nonces + DOM agree; weather facts backed by captured live source and DOM/API/store/trace; caps obeyed and rows counted separately.",
-      "arc_guards": []
+      "observable": "Weather facts backed by captured live source and DOM/API/store/trace; caps obeyed and row counted separately.",
+      "arc_guards": [],
+      "host": "workbench"
     }
   ],
   "server": {

@@ -60,7 +60,6 @@ POOL_BUDGETS = [
 HELPER_BUDGET = (1, 524288)
 
 COMPILE_REQUESTS = {
-    "agent-service/agent_service": {"cpu_count": 1, "memory_kb": 2359296},
     "agent-workbench/agent_workbench": {"cpu_count": 1, "memory_kb": 2883584},
     "lash-internal-conformance/lash_conformance": {"cpu_count": 1, "memory_kb": 4194304},
     "lash-internal-core-execution/lash_core_execution": {"cpu_count": 1, "memory_kb": 2883584},
@@ -120,8 +119,6 @@ COMPILE_REQUESTS = {
     "lash-upgrade-harness/phase_a": {"cpu_count": 1, "memory_kb": 1835008},
     "lashctl/lashctl": {"cpu_count": 1, "memory_kb": 1835008},
     "rlm-smoke-host/rlm_smoke_host": {"cpu_count": 1, "memory_kb": 2097152},
-    "slack-clone/slack_clone": {"cpu_count": 1, "memory_kb": 2359296},
-    "slack-clone/slack_clone_bot": {"cpu_count": 1, "memory_kb": 1835008},
     "toolbench/toolbench": {"cpu_count": 1, "memory_kb": 2097152},
     "workflow-graph-roundtrip/workflow_graph_roundtrip": {"cpu_count": 1, "memory_kb": 1835008},
 }
@@ -147,7 +144,6 @@ TEST_COMPILE_REQUESTS = {
 # configuration) of a crate asks for, per kind of target, where that
 # is more than its dev request.
 OPTIMIZED_COMPILE_REQUESTS = {
-    "agent-service/agent_service": {"target": {"cpu_count": 1, "memory_kb": 3145728}, "test": {"cpu_count": 1, "memory_kb": 3145728}},
     "agent-workbench/agent_workbench": {"target": {"cpu_count": 1, "memory_kb": 4194304}, "test": {"cpu_count": 1, "memory_kb": 4194304}},
     "lash-internal-conformance/lash_conformance": {"target": {"cpu_count": 2, "memory_kb": 5242880}},
     "lash-internal-core-execution/lash_core_execution": {"target": {"cpu_count": 1, "memory_kb": 3407872}},
@@ -209,17 +205,11 @@ OPTIMIZED_COMPILE_REQUESTS = {
     "lash-upgrade-harness/lash_upgrade_node": {"target": {"cpu_count": 1, "memory_kb": 2359296}, "test": {"cpu_count": 1, "memory_kb": 2359296}},
     "lash-upgrade-harness/phase_a": {"target": {"cpu_count": 1, "memory_kb": 2359296}, "test": {"cpu_count": 1, "memory_kb": 2359296}},
     "rlm-smoke-host/rlm_smoke_host": {"target": {"cpu_count": 1, "memory_kb": 2883584}, "test": {"cpu_count": 1, "memory_kb": 2883584}},
-    "slack-clone/mcp": {"target": {"cpu_count": 1, "memory_kb": 2621440}, "test": {"cpu_count": 1, "memory_kb": 2621440}},
-    "slack-clone/slack_clone": {"target": {"cpu_count": 1, "memory_kb": 2883584}, "test": {"cpu_count": 1, "memory_kb": 2883584}},
-    "slack-clone/slack_clone_bot": {"target": {"cpu_count": 1, "memory_kb": 2359296}, "test": {"cpu_count": 1, "memory_kb": 2359296}},
-    "slack-clone/slack_clone_mcp_server": {"target": {"cpu_count": 1, "memory_kb": 2097152}, "test": {"cpu_count": 1, "memory_kb": 2097152}},
     "toolbench/toolbench": {"target": {"cpu_count": 1, "memory_kb": 2621440}, "test": {"cpu_count": 1, "memory_kb": 2621440}},
 }
 
 # What a crate's Clippy twin asks for, where it was measured.
 CLIPPY_REQUESTS = {
-    "agent-service/agent_service": {"cpu_count": 1, "memory_kb": 1048576},
-    "agent-service/fresh_boot": {"cpu_count": 1, "memory_kb": 524288},
     "agent-workbench/agent_workbench": {"cpu_count": 1, "memory_kb": 1310720},
     "integrator-contract/integrator_contract": {"cpu_count": 1, "memory_kb": 524288},
     "lash-internal-conformance/lash_conformance": {"cpu_count": 1, "memory_kb": 3407872},
@@ -400,12 +390,6 @@ CLIPPY_REQUESTS = {
     "lashctl/lashctl": {"cpu_count": 1, "memory_kb": 524288},
     "lashctl/operator_json_contract": {"cpu_count": 1, "memory_kb": 524288},
     "rlm-smoke-host/rlm_smoke_host": {"cpu_count": 1, "memory_kb": 524288},
-    "slack-clone/mcp": {"cpu_count": 1, "memory_kb": 524288},
-    "slack-clone/slack_clone": {"cpu_count": 1, "memory_kb": 786432},
-    "slack-clone/slack_clone_bot": {"cpu_count": 1, "memory_kb": 524288},
-    "slack-clone/slack_clone_mcp_http_server": {"cpu_count": 1, "memory_kb": 524288},
-    "slack-clone/slack_clone_mcp_server": {"cpu_count": 1, "memory_kb": 524288},
-    "slack-clone/slack_clone_platform": {"cpu_count": 1, "memory_kb": 524288},
     "toolbench/toolbench": {"cpu_count": 1, "memory_kb": 1048576},
     "transcript-contract/transcript_contract": {"cpu_count": 1, "memory_kb": 524288},
     "workflow-graph-roundtrip/authoring": {"cpu_count": 1, "memory_kb": 524288},
@@ -1093,26 +1077,11 @@ TEST_RUN_REQUESTS = {
     "//crates/lashlang:stack_budget__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lashlang:workflow_schema_generator__bin__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/transcript-contract:transcript-contract__unit_test": {"cpu_count": 1, "memory_kb": 262144},
-    "//examples/agent-service:agent-service__unit_test": {"cpu_count": 2, "memory_kb": 262144},
-    "//examples/agent-service:agent-service__unit_test__fv_51251a60": {"cpu_count": 2, "memory_kb": 262144},
-    "//examples/agent-service:agent-service__unit_test__fv_f94b565c": {"cpu_count": 2, "memory_kb": 262144},
-    "//examples/agent-service:fresh_boot__test": {"cpu_count": 1, "memory_kb": 262144},
-    "//examples/agent-service:fresh_boot__test__fv_51251a60": {"cpu_count": 1, "memory_kb": 262144},
-    "//examples/agent-service:fresh_boot__test__fv_f94b565c": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/agent-workbench:agent-workbench__unit_test": {"cpu_count": 3, "memory_kb": 1572864},
     "//examples/agent-workbench:agent-workbench__unit_test__fv_3a66b03d": {"cpu_count": 3, "memory_kb": 1572864},
     "//examples/agent-workbench:agent-workbench__unit_test__fv_dda0367a": {"cpu_count": 3, "memory_kb": 1572864},
     "//examples/e2e-consumer:e2e-consumer__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/integrator-contract:integrator-contract__unit_test": {"cpu_count": 1, "memory_kb": 262144},
-    "//examples/slack-clone:mcp__test": {"cpu_count": 2, "memory_kb": 262144},
-    "//examples/slack-clone:mcp__test__fv_36f755ff": {"cpu_count": 2, "memory_kb": 262144},
-    "//examples/slack-clone:mcp__test__fv_c0e3dd1b": {"cpu_count": 2, "memory_kb": 262144},
-    "//examples/slack-clone:mcp__test__fv_ce6d62a5": {"cpu_count": 2, "memory_kb": 262144},
-    "//examples/slack-clone:slack-clone-live-e2e__bin__unit_test__fv_c0e3dd1b": {"cpu_count": 2, "memory_kb": 524288},
-    "//examples/slack-clone:slack-clone__unit_test": {"cpu_count": 3, "memory_kb": 524288},
-    "//examples/slack-clone:slack-clone__unit_test__fv_36f755ff": {"cpu_count": 3, "memory_kb": 524288},
-    "//examples/slack-clone:slack-clone__unit_test__fv_c0e3dd1b": {"cpu_count": 3, "memory_kb": 524288},
-    "//examples/slack-clone:slack-clone__unit_test__fv_ce6d62a5": {"cpu_count": 3, "memory_kb": 524288},
     "//examples/toolbench:toolbench__unit_test": {"cpu_count": 2, "memory_kb": 786432},
     "//examples/workflow-graph-roundtrip:authoring__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//examples/workflow-graph-roundtrip:durable_run__test": {"cpu_count": 2, "memory_kb": 524288},

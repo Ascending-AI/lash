@@ -1,12 +1,4 @@
 {
-  "agent-service/agent_service": {
-    "cpu_count": 1,
-    "memory_kb": 2359296,
-    "p95_cores": 1.29,
-    "p99_peak_bytes": 1338580992,
-    "peak_bytes": 1338580992,
-    "samples": 54
-  },
   "agent-workbench/agent_workbench": {
     "cpu_count": 1,
     "memory_kb": 2883584,
@@ -478,22 +470,6 @@
     "p99_peak_bytes": 1129299968,
     "peak_bytes": 1129299968,
     "samples": 26
-  },
-  "slack-clone/slack_clone": {
-    "cpu_count": 1,
-    "memory_kb": 2359296,
-    "p95_cores": 1.37,
-    "p99_peak_bytes": 1371635712,
-    "peak_bytes": 1536299008,
-    "samples": 103
-  },
-  "slack-clone/slack_clone_bot": {
-    "cpu_count": 1,
-    "memory_kb": 1835008,
-    "p95_cores": 1.32,
-    "p99_peak_bytes": 1287024640,
-    "peak_bytes": 1704644608,
-    "samples": 112
   },
   "toolbench/toolbench": {
     "cpu_count": 1,

@@ -27,9 +27,7 @@ judged. **Manual judged** is the semantic browser or artifact-judgment runbook l
 
 | Example | Deterministic CI coverage | Full-host CI coverage | Manual judged coverage |
 | --- | --- | --- | --- |
-| `agent-service` | `Test Buck2 partition tail` runs its unit and `fresh_boot` tests on trusted non-PR events; `Test Buck2 partition` covers them through its affected selection when a trusted pull request touches the package, and `Test Cargo workspace partition` runs them on untrusted pull requests. | `Functional E2E (agent-service)` runs `agent-service-restate-e2e`, including the Restate ingress, process-workflow, and effect-group HTTP live tests; it is not a browser journey. | [`agent-service-branching`](agent-service-branching/runbook.md), [`agent-service-effect-groups`](agent-service-effect-groups/runbook.md), and [`tictactoe-full-game`](tictactoe-full-game/runbook.md). The deterministic, operator-only [`agent-service-effect-group-retirement`](agent-service-effect-group-retirement/runbook.md) rehearsal is inventoried separately and is never a judged browser row. |
 | `agent-workbench` | `Test Buck2 partition tail` runs its unit tests on trusted non-PR events; `Test Buck2 partition` covers them through its affected selection when a trusted pull request touches the package, and `Test Cargo workspace partition` runs them on untrusted pull requests. `Feature lanes (${{ matrix.shard }}/4)` compiles its feature variants and runs their tests. | `Functional E2E (agent-workbench)` runs `agent-workbench-restate-e2e` with Restate and Postgres live tests; it is not a browser journey. | [`workbench-process-lifecycle`](workbench-process-lifecycle/runbook.md), [`workbench-session-resume`](workbench-session-resume/runbook.md), and [`workbench-deferred-tools`](workbench-deferred-tools/runbook.md), plus the other `workbench-*` runbooks. The deterministic, operator-only [`workbench-attachment-reclamation`](workbench-attachment-reclamation/runbook.md) rehearsal of the condemn/vacuum/reclaim levers is inventoried separately and is never a judged browser row: the workbench renders no affordance for either lever, so `curl` against the admin route is the operator surface. |
-| `slack-clone` | `Test Buck2 partition tail` runs its unit and `mcp` tests on trusted non-PR events; `Test Buck2 partition` covers them through its affected selection when a trusted pull request touches the package, and `Test Cargo workspace partition` runs them on untrusted pull requests. `Feature lanes (${{ matrix.shard }}/4)` compiles its feature variants and runs their tests. | `Functional E2E (slack-clone-full-host)` is token-free and deterministic. The separate `Slack-clone live-model acceptance` workflow is dispatch-only and uses exact nonce/tool/UI oracles around real OpenRouter turns. | [`slack-clone-bot`](slack-clone-bot/runbook.md), whose Phase 3M carries MCP client depth and runtime integration attach/detach. |
 | `rlm-smoke` | `Test Buck2 partition` runs `rlm-smoke`'s unit tests on trusted events (the package sits in the core suite) and `Test Cargo workspace partition` covers untrusted pull requests; the focused tests prove path, symlink, and command jail refusals. | `just rlm-smoke-e2e` runs the three separately funded matrix rows `rlm-smoke-file-edit-bugfix`, `rlm-smoke-missing-helper-file` and `rlm-smoke-config-contract-edit` against exact shell oracles after live OpenRouter turns; this one line describes the gate, the three matrix rows are the inventory. It is a local/manual paid gate, not per-PR CI. | None. These are scripted deterministic-oracle rows, never judged browser rows. |
 | `toolbench` | `Test Buck2 partition tail` runs its unit tests on trusted non-PR events; `Test Buck2 partition` covers them through its affected selection when a trusted pull request touches the package, and `Test Cargo workspace partition` runs them on untrusted pull requests. | None. The benchmark is an operator-run paid pass against real OpenRouter models; CI does not fund it. | None. It is a self-scoring measurement harness: its `results-file` task rows are the evidence, not a judged browser journey. |
 | `workflow-graph-roundtrip` | `Test Buck2 partition tail` runs its unit tests on trusted non-PR events; `Test Buck2 partition` covers them through its affected selection when a trusted pull request touches the package, and `Test Cargo workspace partition` runs them on untrusted pull requests. The frontend-asset integration tests are Cargo-owned and run inside `workflow-graph-integration-verify`; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
@@ -153,8 +151,7 @@ state produce the observed result. When those surfaces disagree, the run is void
 
 ## The browser surface (example apps)
 
-Scenarios shift an **example web app** (`examples/agent-service`,
-`examples/agent-workbench`, `examples/slack-clone`, or
+Scenarios shift an **example web app** (`examples/agent-workbench` or
 `examples/workflow-graph-roundtrip`). There is no scripted driver for these judged
 surfaces — browser automation is the driver. Use
 whatever your harness provides: a browser MCP/plugin, Playwright, or similar. If nothing
@@ -213,7 +210,7 @@ harness gap → Abort; do not add an ad hoc stub. A deterministic provider is va
 environment selector, expected exact output, and dev-only startup warning.
 
 **Boot and teardown are part of the run.** Phase 0 boots the example (`cargo run -p
-agent-service --profile judged`, `just agent-workbench <port>`) and gates on its readiness
+agent-workbench --profile judged`, `just agent-workbench <port>`) and gates on its readiness
 signal (`/healthz`, the listening line). Boot via `cargo run` / the `just` recipe / the
 launcher script **only** — never launch a `target/*/…` or `buck-out/…` path directly:
 this repo redirects Cargo builds through `CARGO_TARGET_DIR` and writes the judged and the
@@ -243,7 +240,7 @@ shift running rows in parallel should expect this and not treat it as an Abort.
 **The judged build geometry is the shipping one.** Every judged host is built with no
 `testing` feature on any host dependency and `debug-assertions`/`overflow-checks`
 compiled out. The `just` recipes and the `scripts/*-dev.sh` launchers already ask for
-that geometry; the one host you boot by hand (`agent-service`) needs `--profile judged`
+that geometry; the one host you boot by hand (`agent-workbench`) needs `--profile judged`
 typed, and a row booted without it is invalid evidence — rerun it.
 
 The geometry has two spellings, because `agent-workbench` is no longer built by Cargo.
@@ -274,15 +271,9 @@ So a panic in a judged host is now a finding, not background noise. `panicked at
 host log is an Abort/RCA — it is a genuine crash in shipping code, not a development
 self-check firing.
 
-The split runs along the two layers this file opens with, not along the launcher.
-`scripts/slack-clone-dev.sh` boots both the judged browser row and the scripted
-`slack-clone-full-host` gate, so it takes its profile from `SLACK_CLONE_CARGO_PROFILE`
-and defaults to `judged`; only the scripted gate sets `dev`, because deterministic
-evidence wants its debug assertions armed. `scripts/check_judged_build_geometry.py`
-holds all of this — the profile's settings, the absence of `testing` on any host's
-runtime dependencies, the `--profile judged` on every judged boot command, the two rustc
-flags that say the same thing to Buck2, and the rule that the workbench build happens
-before any launcher lock.
+`scripts/check_judged_build_geometry.py` checks the shipping profile settings,
+the absence of `testing` on host runtime dependencies, the judged boot profile,
+its Buck2 rustc flags, and builds before workbench launcher locks.
 
 ## Agent Workbench lifecycle constraint (FIG-1164)
 
