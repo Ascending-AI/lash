@@ -427,7 +427,7 @@
       "type": "object"
     },
     "GroupWakePolicy": {
-      "description": "Wake rule recorded in a durable effect group's identity.\n\n`Promise.all` and `Promise.allSettled` both use [`All`](Self::All): the\ncaller's early exit on rejection is not a host wake rule. The wire shape\nhas no default, so a missing rule cannot be replayed under a guess.",
+      "description": "Aggregate wake rule. Run-owned aggregates preserve these semantics;\nthe rule does not require a durable group dispatcher.\n\n`Promise.all` and `Promise.allSettled` both use [`All`](Self::All): the\ncaller's early exit on rejection is not a host wake rule. The wire shape\nhas no default, so a missing rule cannot be replayed under a guess.",
       "oneOf": [
         {
           "const": "first",

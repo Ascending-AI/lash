@@ -1,8 +1,7 @@
 //! The recorded step of a sequential callback slot (K10, FIG-4878).
 //!
 //! Before-turn and after-turn callbacks run inside one recorded step per
-//! turn, and the result checks of a call whose attempt body does not carry
-//! them run before one of their own. The step records the slot's decisions
+//! turn. The step records the slot's decisions
 //! with the resolutions of the state commands its callbacks returned; replay
 //! serves both and runs no callback or reducer. A callback's failure is the
 //! step's recorded answer, and publishes none of the slot's commands.
@@ -11,7 +10,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use super::{PluginError, PluginSession, RecordedTurnContribution, ToolHookOccurrence};
+use super::{PluginError, PluginSession, RecordedTurnContribution};
 use crate::{RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectOutcome};
 
 /// Which sequential callback slot a [`RuntimeEffectCommand::PluginCallbacks`]
@@ -23,13 +22,6 @@ pub enum RecordedCallbackPhase {
     BeforeTurn,
     /// A turn's after-turn callbacks.
     AfterTurn,
-    /// The state commands of one call's result checks at `occurrence`, when
-    /// no attempt body carries them: a cached success, or a Deferred
-    /// completion.
-    ToolResultChecks {
-        call_id: crate::ToolCallId,
-        occurrence: ToolHookOccurrence,
-    },
 }
 
 /// The callbacks a step runs, to their decisions.

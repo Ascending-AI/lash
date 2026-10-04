@@ -128,13 +128,6 @@ pub(crate) fn propose(
     }
 }
 
-/// Whether a recorded body of `plugins` runs on this task to carry what its
-/// callbacks propose.
-pub(crate) fn records_state(plugins: &crate::PluginSession) -> bool {
-    SINK.try_with(|sink| Arc::ptr_eq(&sink.lock_recover().state, &plugins.state))
-        .unwrap_or(false)
-}
-
 /// [`propose`] every proposal, in order.
 pub(crate) fn propose_all(
     plugins: &crate::PluginSession,

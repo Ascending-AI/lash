@@ -271,6 +271,17 @@ async fn an_environment_prelude_refuses_a_predecessor_before_decoding_and_keeps_
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn state_only_result_checks_refuse_predecessor_journals_and_keep_their_drain_lane() {
+    let predecessor_epoch = if cfg!(feature = "synthetic-next") {
+        17
+    } else {
+        16
+    };
+    predecessor_journal_keeps_its_lane(predecessor_epoch, PredecessorShape::ResultCheckCommands)
+        .await;
+}
+
 fn admission_envelope() -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
@@ -331,6 +342,7 @@ enum PredecessorShape {
     AdmittedHead,
     RunInvocation,
     EnvironmentPrelude,
+    ResultCheckCommands,
 }
 
 async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: PredecessorShape) {
@@ -356,6 +368,20 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
             ),
             RuntimeEffectCommand::SyncExecutionEnvironment,
         ),
+        PredecessorShape::ResultCheckCommands => RuntimeEffectEnvelope::new(
+            RuntimeEffectInvocation::new(
+                EffectAddress::new(
+                    lash_core::ExecutionScope::turn(SESSION, RUN),
+                    "plugin-state:c1:cached",
+                )
+                .unwrap(),
+                RuntimeAttribution::for_session(SESSION),
+                "result checks",
+            ),
+            RuntimeEffectCommand::PluginCallbacks {
+                phase: lash_core::plugin::RecordedCallbackPhase::BeforeTurn,
+            },
+        ),
         _ => transition(),
     };
     let mut old_envelope: serde_json::Value =
@@ -369,11 +395,29 @@ async fn predecessor_journal_keeps_its_lane(predecessor_epoch: u32, shape: Prede
         .expect_err("the Part 1 head has no Part 2 kind tag");
         assert!(decode.to_string().contains("kind"), "{decode}");
     }
+    if matches!(shape, PredecessorShape::ResultCheckCommands) {
+        old_envelope["command"]["phase"] = serde_json::json!({
+            "phase": "tool_result_checks",
+            "call_id": lash_core::ToolCallId::fixture("c1"),
+            "occurrence": lash_core::plugin::ToolHookOccurrence::Cached,
+        });
+        let refusal =
+            serde_json::from_value::<lash_core::RuntimeEffectEnvelope>(old_envelope.clone())
+                .expect_err("the result-check state-only phase is removed");
+        assert!(
+            refusal.to_string().contains("tool_result_checks"),
+            "{refusal}"
+        );
+    }
     let old_json = serde_json::to_string(&old_envelope).unwrap();
     let mut hasher = Blake3DomainHasher::new("lash-runtime-effect-envelope/v3");
     hasher.update(old_json.as_bytes());
     let old_hash = hasher.finalize_hex();
     let outcome = match shape {
+        PredecessorShape::ResultCheckCommands => serde_json::json!({
+            "type": "plugin_callbacks",
+            "result": {"Ok": []},
+        }),
         PredecessorShape::AdmittedHead => predecessor_admission_outcome(),
         PredecessorShape::EnvironmentPrelude => {
             let outcome = serde_json::json!({

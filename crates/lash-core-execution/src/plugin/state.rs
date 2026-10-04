@@ -17,9 +17,7 @@ pub use lash_core_store::tool_run::{
     StateResolutionOutcome,
 };
 pub use publication::{EffectPublication, PluginStateEffect, StateReducer, StateReduction};
-pub(crate) use publication::{
-    Proposal, collect_proposals, propose, propose_all, record_effect, records_state,
-};
+pub(crate) use publication::{Proposal, collect_proposals, propose, propose_all, record_effect};
 
 use lash_core_store::plugin_state::{
     PLUGIN_STATE_NAMESPACE_LIMIT, PLUGIN_STATE_VALUE_LIMIT, validate_state_key,

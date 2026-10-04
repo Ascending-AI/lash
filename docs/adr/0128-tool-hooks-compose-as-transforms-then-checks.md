@@ -131,6 +131,12 @@ result decisions belongs to call admission and the resolved result decision
 result-check callbacks belong to the durable command publisher (FIG-4878).
 Recorded replay invokes no completed hook or reducer.
 
+A route without a recorded result decision refuses command-bearing result
+checks as `tool_result_check_state_unrecorded`, with the proposing plugin in
+`ToolFailureCause::PluginStateUnrecorded`. It records no separate state-only
+step. Cached and Deferred results publish commands through the Run
+coordinator's D record.
+
 ## Consequences
 
 - A check always sees the arguments that execute and the result that is

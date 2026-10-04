@@ -120,6 +120,171 @@ fn cached(value: &str) -> BeforeToolDecision {
     )))
 }
 
+/// FIG-4922, Q5.7/8: a result check without a recorded decision cannot
+/// publish state before settlement. A crash at that point must leave no
+/// state-only journal entry that a later cache miss or denial would skip.
+#[tokio::test]
+async fn result_checks_without_a_decision_record_publish_no_state_before_settlement() {
+    for occurrence in [
+        ToolHookOccurrence::Cached,
+        ToolHookOccurrence::DeferredCompletion {
+            attempt: crate::tool_run::AttemptOrdinal::FIRST,
+        },
+    ] {
+        for verdict in [
+            AfterToolDecision::Allow,
+            AfterToolDecision::Deny(denial("denied")),
+        ] {
+            let tools = CountingTools::default();
+            let reducers = Arc::new(AtomicUsize::new(0));
+            let reductions = Arc::clone(&reducers);
+            let admitted = Arc::new(std::sync::Mutex::new(None));
+            let read_view = Arc::clone(&admitted);
+            let hit = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let cache_hit = Arc::clone(&hit);
+            let plugins = session(
+                &tools,
+                vec![plugin(
+                    "cache",
+                    PluginSpec::new()
+                        .with_tool_args_check(
+                            hook_key!("lookup"),
+                            Arc::new(move |input| {
+                                *read_view.lock_recover() = Some(input.prepared.clone());
+                                let hit = cache_hit.load(Ordering::SeqCst);
+                                Box::pin(async move {
+                                    Ok(if hit && occurrence == ToolHookOccurrence::Cached {
+                                        cached("cached")
+                                    } else {
+                                        BeforeToolDecision::Allow
+                                    })
+                                })
+                            }),
+                        )
+                        .with_tool_result_check(
+                            hook_key!("cache-store"),
+                            Arc::new(move |_| {
+                                let verdict = verdict.clone();
+                                Box::pin(async move {
+                                    Ok(AfterToolContributions {
+                                        verdict,
+                                        state: crate::StateCommands::new().apply(
+                                            "value",
+                                            "store",
+                                            json!("cached"),
+                                        ),
+                                        ..Default::default()
+                                    })
+                                })
+                            }),
+                        )
+                        .with_state_reducer(
+                            "store",
+                            Arc::new(move |input| {
+                                reductions.fetch_add(1, Ordering::SeqCst);
+                                Ok(Some(input.input.clone()))
+                            }),
+                        ),
+                )],
+            );
+            let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+            let context = exact_dispatch_context_with_plugins(
+                crate::support::double_dispatch_ports(&double, &handler),
+                Arc::clone(&plugins),
+            )
+            .await;
+            let before = serde_json::to_value(plugins.export_state()).unwrap();
+            let pending = crate::sansio::PendingToolCall {
+                call_id: crate::ToolCallId::fixture("c1"),
+                provider_call_id: None,
+                tool_name: "beta".into(),
+                args: json!({"value": "x"}),
+                replay: None,
+            };
+            let retry = pending.clone();
+            let output = if occurrence == ToolHookOccurrence::Cached {
+                let ToolPreparationOutcome::Completed(outcome) =
+                    prepare_tool_call_with_context(&context, pending).await
+                else {
+                    panic!("the cache completes preparation");
+                };
+                outcome.record.output
+            } else {
+                assert!(matches!(
+                    prepare_tool_call_with_context(&context, pending).await,
+                    ToolPreparationOutcome::Prepared(_)
+                ));
+                let prepared = admitted.lock_recover().clone().unwrap();
+                finalize_tool_result_with_execution_context(
+                    &context,
+                    &prepared,
+                    occurrence,
+                    ToolOutcome::ok(json!("resolved")),
+                )
+                .await
+                .into_done_output()
+                .unwrap()
+            };
+            // Stop before the caller's settlement. No durable decision
+            // exists yet, even if a result check allowed this candidate.
+            assert_eq!(
+                serde_json::to_value(plugins.export_state()).unwrap(),
+                before,
+                "{occurrence:?} published commands before its decision was recorded"
+            );
+            assert!(
+                !output.is_success(),
+                "command-bearing checks require a decision record"
+            );
+            let ToolCallOutcome::Failure(failure) = output.outcome else {
+                panic!("unrecorded commands fail the result");
+            };
+            assert_eq!(failure.code, "tool_result_check_state_unrecorded");
+            assert_eq!(failure.source, crate::ToolFailureSource::Plugin);
+            assert_eq!(
+                failure.cause.as_deref(),
+                Some(&crate::ToolFailureCause::PluginStateUnrecorded {
+                    plugin: "cache".into(),
+                })
+            );
+            let restored: crate::ToolFailure =
+                serde_json::from_value(serde_json::to_value(&failure).unwrap()).unwrap();
+            assert_eq!(
+                restored.cause, failure.cause,
+                "the host receives a typed refusal"
+            );
+            assert_eq!(reducers.load(Ordering::SeqCst), 0);
+            assert_eq!(tools.executions.load(Ordering::SeqCst), 0);
+            hit.store(false, Ordering::SeqCst);
+            assert!(
+                matches!(
+                    prepare_tool_call_with_context(&context, retry).await,
+                    ToolPreparationOutcome::Prepared(_)
+                ),
+                "a repeated preparation that misses the cache leaves no command to replay"
+            );
+            assert!(
+                double.server().invocations().iter().all(|invocation| {
+                    double
+                        .server()
+                        .journal(&invocation.id)
+                        .unwrap()
+                        .iter()
+                        .all(|entry| {
+                            !entry
+                                .name
+                                .as_deref()
+                                .is_some_and(|name| name.contains("plugin-state:"))
+                        })
+                }),
+                "no state-only command can be left for a replay that misses the cache"
+            );
+            drop(context);
+            handler.close().await.expect("close the dispatch handler");
+        }
+    }
+}
+
 /// Every order of `items`.
 fn permutations<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
     if items.len() <= 1 {

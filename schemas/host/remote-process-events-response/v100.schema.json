@@ -2187,6 +2187,23 @@
     "ToolFailureCause": {
       "oneOf": [
         {
+          "description": "A result check proposed state commands outside the recorded body\nthat owns its decision. No command was reduced or published.",
+          "properties": {
+            "kind": {
+              "const": "plugin_state_unrecorded",
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "plugin"
+          ],
+          "type": "object"
+        },
+        {
           "properties": {
             "kind": {
               "const": "tool_schema_admission",

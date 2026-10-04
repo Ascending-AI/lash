@@ -40,7 +40,7 @@ pub(crate) mod state;
 pub use recorded_callbacks::{PluginCallbackBody, RecordedCallbackPhase, record_plugin_callbacks};
 pub use state::EffectPublication;
 use state::PluginStateRegistry;
-pub(crate) use state::{Proposal, collect_proposals, propose, propose_all, records_state};
+pub(crate) use state::{Proposal, collect_proposals, propose, propose_all};
 mod tool_catalog;
 mod tool_hooks;
 mod trigger_registry;
