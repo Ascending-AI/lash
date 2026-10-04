@@ -98,6 +98,7 @@ struct Shared {
     namespace: String,
     store_root: PathBuf,
     chat: Mutex<Option<String>>,
+    artifacts: Vec<ArtifactIdentity>,
 }
 impl Shared {
     async fn journals(&self, work: &WorkIdentity) -> Result<Evidence> {
@@ -117,14 +118,17 @@ impl Shared {
             "actual admitted turn invocation is absent"
         );
         let mut evidence = Evidence::empty(self.row.slug().into());
+        evidence.artifacts = self.artifacts.clone();
         for row in rows {
             ensure!(
                 row.pinned_service_protocol_version == Some(7),
                 "actual segment is not V7"
             );
+            let mut segment = work.clone();
+            segment.segment = row.id.clone();
             evidence
                 .journals
-                .extend(self.view.journal(work, &row.id, 7).await?);
+                .extend(self.view.journal(&segment, &row.id, 7).await?);
         }
         for delivery in deliveries(&self.delivery)? {
             evidence
@@ -188,20 +192,25 @@ impl Shared {
         Ok(())
     }
     async fn bind(&self, work: WorkIdentity, chat: &str) -> Result<WorkIdentity> {
+        use lash_core::store::RunStore as _;
         let stores = lash::sqlite::SqliteStoreSet::open(&self.store_root).await?;
         let store = stores.open_store().await?;
+        let session = lash::SessionId::parse(chat)?;
+        let run = lash::TurnId::parse(&work.run)?;
+        while store.run_executor(&session, &run).await?.is_none() {
+            ensure!(
+                Instant::now() < self.deadline,
+                "accepted input never acquired its native Run executor"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         let mut reader = lash_upgrade_harness::e2e::evidence::RestateEvidenceReader::new(
             self.row.slug().into(),
             RestateView::new(&self.admin, &self.namespace)?,
             7,
         );
         let work = reader
-            .bind_public_run(
-                store.as_ref(),
-                &lash::SessionId::parse(chat)?,
-                &lash::TurnId::parse(&work.run)?,
-                work.ingress,
-            )
+            .bind_public_run(store.as_ref(), &session, &run, work.ingress)
             .await?;
         self.proxy
             .lock()
@@ -494,6 +503,7 @@ pub async fn run(row: Row) -> Result<()> {
         namespace: lease.namespace.clone(),
         store_root: lease.directory.join("agent-service-data/lash-sessions"),
         chat: Mutex::new(None),
+        artifacts: vec![server.clone(), artifact.clone()],
     });
     let source = shared.clone();
     let snapshot: Snapshot = Arc::new(move |work| {
