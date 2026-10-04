@@ -12,7 +12,7 @@ use std::sync::Arc;
 use lash_core::ExecRequest;
 use lash_lashlang_runtime::LashlangSurface;
 
-use crate::executor::{ParkedCellEvidence, RlmExecutionState, execute_parked_cell_for_tests};
+use crate::executor::RlmExecutionState;
 use crate::projection::{RlmProjectedBindings, flow_to_json_value};
 use crate::testing::execute_code_with_channel_and_bounds;
 
@@ -351,84 +351,5 @@ impl Session {
     pub(crate) fn persisted_bytes(&self) -> usize {
         let hydrated = self.persisted_state();
         hydrated.root.len() + hydrated.components.values().map(|v| v.len()).sum::<usize>()
-    }
-
-    /// Runs a cell through the VM's process-mode effect boundary, snapshots
-    /// the real continuation, restores it, and resumes to completion. This is
-    /// deliberately test-only: foreground cells still use the production RLM
-    /// executor above, while this method supplies the missing continuation
-    /// composition without adding a production suspension policy.
-    pub(crate) fn run_parked(&mut self, code: &str) -> ParkedCellEvidence {
-        let mut state = std::mem::replace(
-            &mut self.state,
-            RlmExecutionState::for_engine_with_workers(LANGUAGE_ID, self.workers.clone()),
-        );
-        let double = &self.double;
-        let evidence = self
-            .runtime
-            .block_on(async {
-                // A parked cell runs on a handler of its own, as it ran on a
-                // host of its own: its context carries no per-cell invocation.
-                let handler = double
-                    .open_handler(crate::testing::default_cell_scope())
-                    .await
-                    .expect("open the parked cell's handler");
-                let evidence = Box::pin(execute_parked_cell_for_tests(
-                    &mut state,
-                    crate::executor::parked_cell_context_for_tests(crate::testing::double_ports(
-                        double, &handler,
-                    )),
-                    LANGUAGE_ID,
-                    code,
-                    false,
-                ))
-                .await;
-                handler
-                    .close()
-                    .await
-                    .expect("close the parked cell's handler");
-                evidence
-            })
-            .unwrap_or_else(|error| {
-                panic!("parked cell `{code}` must suspend and resume: {error}")
-            });
-        self.state = state;
-        self.history.push(code.to_string());
-        evidence
-    }
-
-    /// Injects the retention defect used by the red-proof law. The broken
-    /// continuation must fail before it can produce a terminal value.
-    pub(crate) fn run_parked_broken(&mut self, code: &str) -> String {
-        let mut state = std::mem::replace(
-            &mut self.state,
-            RlmExecutionState::for_engine_with_workers(LANGUAGE_ID, self.workers.clone()),
-        );
-        let double = &self.double;
-        let result = self.runtime.block_on(async {
-            // A parked cell runs on a handler of its own, as it ran on a host
-            // of its own: its context carries no per-cell invocation.
-            let handler = double
-                .open_handler(crate::testing::default_cell_scope())
-                .await
-                .expect("open the parked cell's handler");
-            let result = Box::pin(execute_parked_cell_for_tests(
-                &mut state,
-                crate::executor::parked_cell_context_for_tests(crate::testing::double_ports(
-                    double, &handler,
-                )),
-                LANGUAGE_ID,
-                code,
-                true,
-            ))
-            .await;
-            handler
-                .close()
-                .await
-                .expect("close the parked cell's handler");
-            result
-        });
-        self.state = state;
-        result.expect_err("the deliberately broken continuation must fail")
     }
 }

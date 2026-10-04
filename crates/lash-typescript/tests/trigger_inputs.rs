@@ -5,10 +5,6 @@
 //! `inputs` arrow, and the three ways a model reaches for the old shape are
 //! named diagnostics rather than binding errors (GitHub #1350, FIG-2986).
 //!
-//! Byte-identity between the arrow and the record it replaces is proved where
-//! the artifact, hash, identity, bytecode and registration payload are all
-//! observable at once, in
-//! `lash-internal-protocol-rlm`'s `trigger_inputs_arrow_reproduces_the_retired_record_form`.
 
 use lash_typescript::DiagnosticCode;
 

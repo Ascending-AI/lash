@@ -1279,9 +1279,7 @@ pub(super) async fn exported_host_descriptor_declines_handover_without_losing_it
     };
     let gate = lash_lashlang_runtime::HandOverGate::new();
     let service = lash_vm_client::service::Service::default();
-    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
-        super::super::parked_tests::park_tool_definition(),
-    ]);
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![park_tool_definition()]);
     let environment = LashlangSurface::default()
         .host_environment(&catalog)
         .expect("fixture surface");
@@ -1340,4 +1338,23 @@ pub(super) async fn exported_host_descriptor_declines_handover_without_losing_it
     );
     assert_eq!(descriptor.render_count.load(Ordering::SeqCst), 1);
     assert_eq!(descriptor.materialize_count.load(Ordering::SeqCst), 0);
+}
+
+fn park_tool_definition() -> lash_core::ToolDefinition {
+    use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+
+    lash_core::ToolDefinition::raw(
+        "tool:cell_park",
+        "cell_park",
+        "Test-only effect used to park a cell continuation.",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "value": { "type": "number" } },
+            "required": ["value"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "number" }),
+    )
+    .expect("valid declared tool schemas")
+    .with_tool_binding(ToolBinding::new(["cell"], "park"))
 }

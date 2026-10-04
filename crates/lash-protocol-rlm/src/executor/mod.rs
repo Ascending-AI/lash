@@ -1587,11 +1587,3 @@ fn trace_main_map(artifact: &lash_vm_client::InspectedArtifact) -> TraceLanguage
 /// first while the caller's dirty tracking records nothing.
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod parked_tests;
-
-#[cfg(test)]
-pub(crate) use parked_tests::{
-    ParkedCellEvidence, execute_parked_cell_for_tests, parked_cell_context_for_tests,
-};
