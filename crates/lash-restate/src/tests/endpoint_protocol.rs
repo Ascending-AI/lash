@@ -851,7 +851,9 @@ pub(super) fn encode_process_terminal_delivery_replay<T: serde::Serialize>(
     suspended_output: &[u8],
 ) -> Result<Bytes, TerminalError> {
     encode_recorded_commands_replay(workflow_key, input, &[suspended_output], |command| {
-        (command.message_type == 0x040D).then_some(serde_json::Value::Null)
+        command.call.as_ref().map(|(service, handler)| {
+            durable_wait_index_call_response(service, handler).unwrap_or(serde_json::Value::Null)
+        })
     })
 }
 

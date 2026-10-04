@@ -941,14 +941,24 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         "run",
         admitted_invocation_body(process_id.as_str(), &input, &admission)
             .expect("splice the admission"),
-        Vec::new(),
+        vec![serde_json::json!(true), serde_json::Value::Null],
     )
     .await
     .expect("ordinal-one terminal delivery should suspend on its call");
     assert_eq!(
         restate_message_types(&terminal_delivery_suspension)
             .expect("decode ordinal-one terminal suspension"),
-        TERMINAL_PROCESS_SUSPENSION_MESSAGES,
+        [
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE,
+        ],
         "endpoint error: {:?}",
         restate_error_message(&terminal_delivery_suspension)
     );
@@ -1056,13 +1066,23 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
         "run",
         admitted_invocation_body(process_id.as_str(), &input, &admission)
             .expect("splice the admission"),
-        Vec::new(),
+        vec![serde_json::json!(true), serde_json::Value::Null],
     )
     .await
     .expect("terminal attempt should suspend during root delivery");
     assert_eq!(
         restate_message_types(&suspended).expect("decode terminal suspension"),
-        TERMINAL_PROCESS_SUSPENSION_MESSAGES
+        [
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE,
+        ]
     );
     assert!(
         registry
