@@ -992,22 +992,40 @@ async fn load_indexed_waits_in(
 async fn read_outstanding_waits(
     ctx: &ObjectContext<'_>,
 ) -> Result<Vec<AwaitEventKey>, TerminalError> {
-    let Some(metadata) = read_durable_wait_index_metadata(ctx).await? else {
-        return Ok(Vec::new());
-    };
+    let metadata = read_durable_wait_index_metadata(ctx)
+        .await?
+        .unwrap_or_default();
     if metadata.revoked {
         return Ok(Vec::new());
     }
 
+    let keys = ctx.get_keys().await?;
+    let sources = source_seal::load_sources(ctx, &keys, |_| true).await?;
     let mut outstanding = Vec::new();
-    for wait in load_indexed_waits(ctx).await? {
+    for wait in load_indexed_waits_in(ctx, &keys).await? {
         if wait.terminal.is_none()
             && !metadata.is_cancel_decided(&wait.key.scope, &wait.key.wait)?
+            && sources
+                .iter()
+                .all(|(_, source)| source.descriptor.source != wait.key || source.seal.is_none())
         {
             outstanding.push(wait.key);
         }
     }
+    for (_, source) in sources {
+        if source.seal.is_none()
+            && source.descriptor.authority
+                == lash_core::tool_run::SourceAuthority::ExternalCompletion
+            && !metadata.is_cancel_decided(
+                &source.descriptor.source.scope,
+                &source.descriptor.source.wait,
+            )?
+        {
+            outstanding.push(source.descriptor.source);
+        }
+    }
     outstanding.sort_unstable_by(|left, right| left.key_id.cmp(&right.key_id));
+    outstanding.dedup();
     Ok(outstanding)
 }
 
