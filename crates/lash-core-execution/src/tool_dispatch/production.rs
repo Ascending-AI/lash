@@ -892,8 +892,22 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .get(call_id)
             .cloned()
             .ok_or("the final has no admitted preparation")?;
+        let mut dispatch = self.dispatch(&prepared.input).await?;
+        let attempt = match captured.occurrence {
+            crate::plugin::ToolHookOccurrence::Attempt { attempt }
+            | crate::plugin::ToolHookOccurrence::DeferredCompletion { attempt } => attempt,
+            crate::plugin::ToolHookOccurrence::Admission
+            | crate::plugin::ToolHookOccurrence::Cached => {
+                return Err("tool declarations have no recorded attempt".into());
+            }
+        };
+        dispatch.parent_invocation = Some(
+            ToolAttemptLineage::from_parent(prepared.input.parent.clone())
+                .attempt_invocation(&dispatch, &prepared.call, attempt.get())
+                .into(),
+        );
         let outcomes = intent_executor::execute_final_tool_intents(
-            &self.dispatch(&prepared.input).await?,
+            &dispatch,
             call_id,
             &captured.intents,
             None,

@@ -370,7 +370,8 @@ fn operator_redelivery_after_forget_runs_and_retained_tombstone_suppresses() {
         .expect("settle process");
         assert_eq!(
             output.terminal_status(),
-            Some(lash::process::TerminalProcessStatus::Completed)
+            Some(lash::process::TerminalProcessStatus::Completed),
+            "process output: {output:?}"
         );
         println!("original process {original_id}: terminal success");
         let prune = fixture
@@ -411,7 +412,8 @@ fn operator_redelivery_after_forget_runs_and_retained_tombstone_suppresses() {
         .expect("retained settles");
         assert_eq!(
             output.terminal_status(),
-            Some(lash::process::TerminalProcessStatus::Completed)
+            Some(lash::process::TerminalProcessStatus::Completed),
+            "process output: {output:?}"
         );
         let prune = fixture
             .state
@@ -466,7 +468,8 @@ fn operator_redelivery_after_forget_runs_and_retained_tombstone_suppresses() {
         .expect("redelivery settles");
         assert_eq!(
             output.terminal_status(),
-            Some(lash::process::TerminalProcessStatus::Completed)
+            Some(lash::process::TerminalProcessStatus::Completed),
+            "process output: {output:?}"
         );
         println!(
             "forgotten redelivery: 1 new occurrence, 1 new delivery, 1 new process {new_id}, terminal success"
