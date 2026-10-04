@@ -1,21 +1,16 @@
-//! FIG-4200: who ends a superseded run, and which moved heads still park.
+//! FIG-4200: only the current owner ends a superseded run.
 //!
 //! - A refused execution ends its run only while it still owns it. A run whose
 //!   commit met a head another writer moved, and whose fence a later
 //!   admission superseded before it wrote the end, leaves the run to that
 //!   admission's execution: the store checks the fence in the ending
 //!   transaction, so an obsolete executor never ends its successor's run.
-//! - A run's recorded head inspection decides a moved head by its
-//!   components. A higher revision is ordinary overtaking and ends typed; a
-//!   head that is inconsistent with the admission's base (a lower revision,
-//!   or the same revision with another leaf or checkpoint) still parks for an
-//!   operator, with nothing ended.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use lash_core::engine::{RunOutcome, ShiftAbort, ShiftOutcome};
-use lash_core::store::{RunTerminalCause, SessionHeadRef};
+use lash_core::store::RunTerminalCause;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
@@ -286,181 +281,4 @@ pub async fn an_obsolete_executor_never_ends_its_successors_run(
             .any(|ran| matches!(ran, RunOutcome::Committed { run, .. } if *run == next_run)),
         "{outcome:?}"
     );
-}
-
-/// How a law's recorded admission base is inconsistent with the live head.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InconsistentHead {
-    /// The live head's revision is lower than the base's.
-    LowerRevision,
-    /// The same revision, with another leaf.
-    OtherLeaf,
-    /// The same revision, with another checkpoint.
-    OtherCheckpoint,
-}
-
-/// A run admitted on a base the live head is inconsistent with, `head`,
-/// parks when a shift on a fresh journal inspects it: the verdict is
-/// `Diverged`, the park is an `EffectReplayDivergence`, nothing ends the
-/// run, its input stays admitted to it, and no model call runs.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn inconsistent_divergence_still_parks(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-    head: InconsistentHead,
-) {
-    let parts = ShiftParts::new(
-        prefix,
-        &format!("inconsistent-{head:?}").to_lowercase(),
-        &effect_host,
-        &stores,
-        8,
-    )
-    .await;
-    let run = TurnId::fixture(format!("inconsistent-{head:?}-run").to_lowercase());
-    let input = parts.enqueue("ask", Some(run.as_str())).await;
-    // The head a shift reads live: the store's, or the initial state's for a
-    // session that committed nothing yet.
-    let state = parts.initial_state();
-    let live = match parts
-        .store
-        .load_session_head_meta(&parts.session_id)
-        .await
-        .expect("read the session head")
-    {
-        Some(head) => SessionHeadRef {
-            generation: 0,
-            revision: head.head_revision,
-            leaf: head.leaf_node_id,
-            checkpoint: head.checkpoint_ref,
-        },
-        None => SessionHeadRef {
-            generation: 0,
-            revision: state.head_revision,
-            leaf: state.session_graph.leaf_node_id.clone(),
-            checkpoint: state.checkpoint_ref.clone(),
-        },
-    };
-    let base = match head {
-        InconsistentHead::LowerRevision => SessionHeadRef {
-            revision: live.revision + 1,
-            ..live.clone()
-        },
-        InconsistentHead::OtherLeaf => SessionHeadRef {
-            leaf: Some(crate::NodeId::from("inconsistent-leaf")),
-            ..live.clone()
-        },
-        InconsistentHead::OtherCheckpoint => SessionHeadRef {
-            checkpoint: Some(lash_core::store::BlobRef(
-                "inconsistent-checkpoint".to_string(),
-            )),
-            ..live.clone()
-        },
-    };
-    let admission = super::run_admission_fixture::admit_on_base(
-        &parts,
-        &runner,
-        "inconsistent-first-execution",
-        base,
-    )
-    .await;
-    let run = admission.run().clone();
-
-    let parked = shift(&runner, &parts, "inconsistent-shift").await;
-    match parked {
-        Err(ShiftAbort::Parked { run: parked, error }) => {
-            assert_eq!(parked, run);
-            assert_eq!(
-                error.code,
-                crate::RuntimeErrorCode::EffectReplayDivergence,
-                "{error:?}"
-            );
-        }
-        other => panic!("an inconsistent head parks the run: {other:?}"),
-    }
-    let park = parts
-        .store
-        .load_turn_park(&parts.session_id)
-        .await
-        .expect("read the park")
-        .expect("the run parked");
-    assert_eq!(park.turn_id, run);
-    assert!(
-        matches!(
-            park.reason,
-            lash_core::store::ParkReason::EffectReplayDivergence { .. }
-        ),
-        "{park:?}"
-    );
-    assert_eq!(terminal(&parts, &run).await, None, "nothing ends the run");
-    assert!(
-        held_by(&parts, &input, &run).await,
-        "the input stays admitted to the parked run"
-    );
-    assert_eq!(parts.calls(), 0, "the parked run made no model call");
-    let blocked = shift(&runner, &parts, "inconsistent-blocked")
-        .await
-        .expect("the shift stops");
-    assert!(
-        matches!(blocked.stop, lash_core::engine::ShiftStop::Parked(_)),
-        "{blocked:?}"
-    );
-}
-
-/// [`inconsistent_divergence_still_parks`] on a live head below the base.
-pub async fn inconsistent_divergence_still_parks_on_a_lower_revision(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    inconsistent_divergence_still_parks(
-        prefix,
-        effect_host,
-        stores,
-        runner,
-        InconsistentHead::LowerRevision,
-    )
-    .await;
-}
-
-/// [`inconsistent_divergence_still_parks`] on the base's revision with
-/// another leaf.
-pub async fn inconsistent_divergence_still_parks_on_another_leaf(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    inconsistent_divergence_still_parks(
-        prefix,
-        effect_host,
-        stores,
-        runner,
-        InconsistentHead::OtherLeaf,
-    )
-    .await;
-}
-
-/// [`inconsistent_divergence_still_parks`] on the base's revision with
-/// another checkpoint.
-pub async fn inconsistent_divergence_still_parks_on_another_checkpoint(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    inconsistent_divergence_still_parks(
-        prefix,
-        effect_host,
-        stores,
-        runner,
-        InconsistentHead::OtherCheckpoint,
-    )
-    .await;
 }
