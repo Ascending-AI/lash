@@ -264,48 +264,6 @@ pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::Plug
 
 // FIG-4454's committed-final recovery on a live server: the second endpoint
 // the recipe provides serves the newer build the deployment change registers.
-lash_conformance::tool_child_committed_recovery_tests!(
-    #[ignore = "requires an isolated Restate server; run by the effect-group suite"]
-    {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
-        let fixture = harness.tool_child_law_fixture();
-        let expire = harness.child_invocation_expiry();
-        let change = harness.deployment_change();
-        let prefix: &'static str =
-            Box::leak(format!("restate-live-recovery-{}", harness.run_nonce()).into_boxed_str());
-        (harness, prefix, fixture, expire, change)
-    }
-);
-
-lash_conformance::tool_child_turn_cancel_tests!(
-    #[ignore = "requires an isolated Restate server; run by the effect-group suite"]
-    {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
-        let host = harness.endpoint_host();
-        let runner = harness.turn_runner();
-        let stores = harness.law_stores();
-        let (work, _transport) = conformance_restate_process_work(
-            stores.process_registry(),
-            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::json!({}),
-            )),
-        );
-        let prefix: &'static str = Box::leak(
-            format!("restate-tool-child-cancel-{}", harness.run_nonce()).into_boxed_str(),
-        );
-        (
-            harness,
-            prefix,
-            host,
-            stores,
-            work,
-            runner,
-            |_law: &'static str| async {},
-        )
-    }
-);
 
 // FIG-4376's execution-control laws on a live server: a redrive replays the
 // run's recorded config, turn budget included, from the server's journal.
@@ -809,27 +767,8 @@ lash_conformance::wake_delivery_conflict_tests!({
 
 // A Restate host resolves its group children at the endpoint, so it is never
 // an unregistered host: `effect_group_unwired_host_tests!` does not apply.
-lash_conformance::effect_group_host_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-    {
-        let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-        let factory = harness.group_host_factory();
-        (harness, factory)
-    };
-    teardown |harness: effect_group_conformance::LiveConformanceHarness, law: &'static str| async move {
-        harness.finish_group_law(law).await;
-    }
-);
 
 // A close racing its own children's settlements seats one terminal per child.
-lash_conformance::effect_group_close_race_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-    {
-        let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-        let factory = harness.group_host_factory();
-        (harness, factory)
-    }
-);
 
 // The session-config settlement laws on the Restate backend: its engine host
 // over one SQLite memory store set per law.
@@ -839,45 +778,6 @@ lash_conformance::session_config_settlement_tests!(
         let harness = effect_group_conformance::LiveConformanceHarness::start().await;
         let make = harness.backend_factory();
         (harness, make)
-    }
-);
-
-lash_conformance::effect_group_cancelled_child_terminal_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-    {
-        let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-        let factory = harness.group_host_factory();
-        (harness, factory)
-    }
-);
-
-lash_conformance::tool_child_invocation_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-    {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
-        let fixture = harness.tool_child_law_fixture();
-        (harness, "restate", fixture)
-    }
-);
-
-lash_conformance::tool_child_live_fault_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-    {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
-        let fixture = harness.tool_child_law_fixture();
-        (harness, "restate", fixture)
-    }
-);
-
-lash_conformance::tool_child_unroutable_tests!(
-    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-    {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
-        let fixture = harness.tool_child_law_fixture();
-        (harness, "restate", fixture)
     }
 );
 
@@ -933,19 +833,6 @@ async fn live_restate_a_batch_with_index_owned_notices_answers_every_member() {
 
 /// The rounds each tier runs of the §5 barrier's transitivity law.
 const DRAIN_TRANSITIVITY_ROUNDS: usize = 12;
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-async fn live_restate_drain_barrier_is_transitive() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-    super::effect_group_drain_transitivity::drain_barrier_is_transitive(
-        harness.ingress(),
-        super::effect_group_drain_transitivity::drain_law_seed(),
-        DRAIN_TRANSITIVITY_ROUNDS,
-    )
-    .await;
-    harness.finish().await;
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
@@ -1026,21 +913,8 @@ lash_conformance::effect_host_await_event_witness_tests!(
 /// server double: the same endpoint and the same laws, with the Restate
 /// server simulated in process — no sockets, no Docker, virtual time.
 mod on_the_server_double {
-    use super::effect_group_committed_recovery::HarnessStoreTier;
     use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
     use super::*;
-
-    lash_conformance::effect_group_host_tests!({
-        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
-        let factory = harness.group_host_factory();
-        (harness, factory)
-    });
-
-    lash_conformance::effect_group_close_race_tests!({
-        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
-        let factory = harness.group_host_factory();
-        (harness, factory)
-    });
 
     // The session-config settlement laws on the Restate backend: its engine
     // host over one SQLite memory store set per law.
@@ -1049,77 +923,6 @@ mod on_the_server_double {
         let make = harness.backend_factory();
         (harness, make)
     });
-
-    lash_conformance::effect_group_cancelled_child_terminal_tests!({
-        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
-        let factory = harness.group_host_factory();
-        (harness, factory)
-    });
-
-    lash_conformance::tool_child_invocation_tests!({
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
-        let fixture = harness.tool_child_law_fixture();
-        (harness, "restate", fixture)
-    });
-
-    lash_conformance::tool_child_unroutable_tests!({
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
-        let fixture = harness.tool_child_law_fixture();
-        (harness, "restate", fixture)
-    });
-
-    // FIG-4454: a committed child's invocation dies before its seat and
-    // outlives its retention, and a newer build that refuses the session
-    // registers; the opener's reopen recovers the child on its own lane. One
-    // registration per store tier the endpoint and the law's runtime run over.
-    mod committed_recovery_over_sqlite_memory {
-        use super::*;
-
-        lash_conformance::tool_child_committed_recovery_tests!({
-            committed_recovery_fixture(HarnessStoreTier::SqliteMemory).await
-        });
-    }
-
-    mod committed_recovery_over_sqlite_file {
-        use super::*;
-
-        lash_conformance::tool_child_committed_recovery_tests!({
-            committed_recovery_fixture(HarnessStoreTier::SqliteFile).await
-        });
-    }
-
-    mod committed_recovery_over_postgres {
-        use super::*;
-
-        lash_conformance::tool_child_committed_recovery_tests!(
-            #[ignore = "requires isolated PostgreSQL; run through the effect-group suite with pg16"]
-            {
-                committed_recovery_fixture(HarnessStoreTier::Postgres).await
-            }
-        );
-    }
-
-    async fn committed_recovery_fixture(
-        tier: HarnessStoreTier,
-    ) -> (
-        LiveConformanceHarness,
-        &'static str,
-        lash_conformance::ToolChildLawFixture,
-        lash_conformance::ChildInvocationExpiry,
-        lash_conformance::DeploymentChange,
-    ) {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_over(HarnessServer::in_process(), tier)
-                .await;
-        let fixture = harness.tool_child_law_fixture();
-        let expire = harness.child_invocation_expiry();
-        let change = harness.deployment_change();
-        let prefix: &'static str =
-            Box::leak(format!("restate-recovery-{}", harness.run_nonce()).into_boxed_str());
-        (harness, prefix, fixture, expire, change)
-    }
 
     lash_conformance::turn_runner_tests!({
         let harness =
@@ -1188,31 +991,6 @@ mod on_the_server_double {
     // A cancelled turn drops its tool child even when the tool ignores the
     // cancellation: on Restate the child's dispatch invocation is cancelled
     // and its handler future dropped.
-    lash_conformance::tool_child_turn_cancel_tests!({
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
-        let effect_host = harness.endpoint_host();
-        let turn_runner = harness.turn_runner();
-        let stores = harness.law_stores();
-        let (process_work, _wait_transport) = conformance_restate_process_work(
-            stores.process_registry(),
-            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::json!({}),
-            )),
-        );
-        let prefix: &'static str = Box::leak(
-            format!("restate-tool-child-cancel-{}", harness.run_nonce()).into_boxed_str(),
-        );
-        (
-            harness,
-            prefix,
-            effect_host,
-            stores,
-            process_work,
-            turn_runner,
-            |_law: &'static str| async {},
-        )
-    });
 
     lash_conformance::effect_host_await_event_witness_tests!({
         let harness = Arc::new(LiveConformanceHarness::start_on(HarnessServer::in_process()).await);
@@ -1240,39 +1018,6 @@ mod on_the_server_double {
         tokio::time::timeout(Duration::from_secs(240), harness.run_design_witnesses())
             .await
             .expect("design witnesses on the server double exceeded 240 seconds");
-        harness.finish().await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn drain_barrier_is_transitive() {
-        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
-        crate::tests::effect_group_drain_transitivity::drain_barrier_is_transitive(
-            harness.ingress(),
-            crate::tests::effect_group_drain_transitivity::drain_law_seed(),
-            super::DRAIN_TRANSITIVITY_ROUNDS,
-        )
-        .await;
-        harness.finish().await;
-    }
-
-    /// The same law where every await suspends and every resumption replays
-    /// its journal, the e2e replay leg's mode.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn drain_barrier_is_transitive_under_replay() {
-        let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
-            unreachable!("in_process names the server double");
-        };
-        let harness = LiveConformanceHarness::start_on(HarnessServer::InProcess {
-            seed,
-            always_replay: true,
-        })
-        .await;
-        crate::tests::effect_group_drain_transitivity::drain_barrier_is_transitive(
-            harness.ingress(),
-            crate::tests::effect_group_drain_transitivity::drain_law_seed(),
-            super::DRAIN_TRANSITIVITY_ROUNDS,
-        )
-        .await;
         harness.finish().await;
     }
 

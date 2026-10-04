@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 2,
   "cargo_package_count": 55,
-  "cargo_target_count": 220,
+  "cargo_target_count": 219,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_0f5f2ec4[static]",
     "//crates/lash-conformance:lash-conformance__fv_110ca6ce[static]",
@@ -50378,7 +50378,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_41763c4b"
     ]
   },
-  "generated_label_count": 286,
+  "generated_label_count": 285,
   "packages": [
     {
       "declared_features": [
@@ -52546,15 +52546,6 @@
           "clippy_label": "//crates/lash-restate-test:suspended_turn__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-restate-test:suspended_turn__test",
-          "tags": []
-        },
-        {
-          "build_label": "//crates/lash-restate-test:tool_child_drift__test",
-          "cargo": "tool_child_drift",
-          "check_label": "//crates/lash-restate-test:tool_child_drift__test[check]",
-          "clippy_label": "//crates/lash-restate-test:tool_child_drift__test__clippy[clippy.txt]",
-          "kind": "test",
-          "label": "//crates/lash-restate-test:tool_child_drift__test",
           "tags": []
         },
         {
@@ -55480,7 +55471,6 @@
     "//crates/lash-restate-test:start_gate_peek__test": 300,
     "//crates/lash-restate-test:substrate_lost_zombie__test": 300,
     "//crates/lash-restate-test:suspended_turn__test": 300,
-    "//crates/lash-restate-test:tool_child_drift__test": 300,
     "//crates/lash-restate-test:turn_crash_replay__test": 300,
     "//crates/lash-restate:lash-restate__unit_test": 300,
     "//crates/lash-restate:lash-restate__unit_test__fv_74137c42": 300,
@@ -56065,7 +56055,6 @@
     "//crates/lash-restate-test:start_gate_peek__test",
     "//crates/lash-restate-test:substrate_lost_zombie__test",
     "//crates/lash-restate-test:suspended_turn__test",
-    "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
     "//crates/lash-restate:lash-restate[static]",
     "//crates/lash-restate:lash-restate__unit_test",
@@ -56352,7 +56341,6 @@
     "//crates/lash-restate-test:start_gate_peek__test[check]",
     "//crates/lash-restate-test:substrate_lost_zombie__test[check]",
     "//crates/lash-restate-test:suspended_turn__test[check]",
-    "//crates/lash-restate-test:tool_child_drift__test[check]",
     "//crates/lash-restate-test:turn_crash_replay__test[check]",
     "//crates/lash-restate:lash-restate[check]",
     "//crates/lash-restate:lash-restate__unit_test[check]",
@@ -56639,7 +56627,6 @@
     "//crates/lash-restate-test:start_gate_peek__test__clippy[clippy.txt]",
     "//crates/lash-restate-test:substrate_lost_zombie__test__clippy[clippy.txt]",
     "//crates/lash-restate-test:suspended_turn__test__clippy[clippy.txt]",
-    "//crates/lash-restate-test:tool_child_drift__test__clippy[clippy.txt]",
     "//crates/lash-restate-test:turn_crash_replay__test__clippy[clippy.txt]",
     "//crates/lash-restate:lash-restate__clippy[clippy.txt]",
     "//crates/lash-restate:lash-restate__unit_test__clippy[clippy.txt]",
@@ -56926,7 +56913,6 @@
     "//crates/lash-restate-test:start_gate_peek__test",
     "//crates/lash-restate-test:substrate_lost_zombie__test",
     "//crates/lash-restate-test:suspended_turn__test",
-    "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
     "//crates/lash-restate:lash-restate",
     "//crates/lash-restate:lash-restate__unit_test",
@@ -57214,7 +57200,6 @@
     "//crates/lash-restate-test:start_gate_peek__test",
     "//crates/lash-restate-test:substrate_lost_zombie__test",
     "//crates/lash-restate-test:suspended_turn__test",
-    "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
     "//crates/lash-restate:lash-restate",
     "//crates/lash-restate:lash-restate__unit_test",
@@ -57447,7 +57432,6 @@
     "//crates/lash-restate-test:start_gate_peek__test",
     "//crates/lash-restate-test:substrate_lost_zombie__test",
     "//crates/lash-restate-test:suspended_turn__test",
-    "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
@@ -57585,7 +57569,6 @@
     "//crates/lash-restate-test:start_gate_peek__test",
     "//crates/lash-restate-test:substrate_lost_zombie__test",
     "//crates/lash-restate-test:suspended_turn__test",
-    "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
@@ -57750,7 +57733,6 @@
     "//crates/lash-restate-test:start_gate_peek__test",
     "//crates/lash-restate-test:substrate_lost_zombie__test",
     "//crates/lash-restate-test:suspended_turn__test",
-    "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
@@ -58107,7 +58089,6 @@
     "//crates/lash-restate-test:start_gate_peek__test",
     "//crates/lash-restate-test:substrate_lost_zombie__test",
     "//crates/lash-restate-test:suspended_turn__test",
-    "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
@@ -58282,7 +58263,6 @@
     "//crates/lash-restate-test:start_gate_peek__test",
     "//crates/lash-restate-test:substrate_lost_zombie__test",
     "//crates/lash-restate-test:suspended_turn__test",
-    "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",

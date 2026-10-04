@@ -375,9 +375,6 @@ impl GroupExecutors for WitnessExecutors {
     }
 }
 
-type GroupHostFactory =
-    Box<dyn Fn(Option<Arc<dyn GroupExecutors>>) -> Arc<dyn lash_core::EffectHost> + Send + Sync>;
-
 /// Which Restate server a harness executes its endpoint through.
 #[derive(Clone)]
 pub(super) enum HarnessServer {
@@ -688,80 +685,6 @@ impl LiveConformanceHarness {
         )
     }
 
-    /// The tool-child laws over this endpoint's host.
-    ///
-    /// Every `make_world` call returns the same host — the process is one
-    /// endpoint, as on the in-memory tier — with `drain: None`: Restate
-    /// redrives a child invocation itself, so Lash keeps no drain for the
-    /// laws to walk and the recovery law takes its open-time shape.
-    pub(super) fn tool_child_law_fixture(&self) -> lash_conformance::ToolChildLawFixture {
-        let host = Arc::clone(&self.host) as Arc<dyn lash_core::EffectHost>;
-        lash_conformance::ToolChildLawFixture {
-            make_world: Arc::new(move |_spec| {
-                let host = Arc::clone(&host);
-                Box::pin(async move { lash_conformance::ToolChildWorld { host } })
-            }),
-            // Deliberately one registry for every scenario, despite
-            // `ToolChildLawFixture::make_processes` promising a fresh one: the
-            // endpoint's LashProcessWorkflow writes the segment terminal into
-            // the registry a child's declared start recorded, so the
-            // dispatched context and the workflow must share this one. Rows
-            // do not collide because scenario prefixes keep process ids
-            // distinct. Every other port is the same store set's.
-            make_processes: Arc::new({
-                let stores = Arc::clone(&self.stores);
-                move || {
-                    let stores = Arc::clone(&stores);
-                    Box::pin(async move { stores })
-                }
-            }),
-            source_materials: self
-                .sqlite
-                .as_ref()
-                .map(|stores| {
-                    stores.process_env_store() as Arc<dyn lash_core::store::ToolMaterialStore>
-                })
-                .or_else(|| {
-                    self._tier
-                        .as_ref()
-                        .and_then(|tier| tier.source_materials.clone())
-                })
-                .expect("source material substrate"),
-            seal_source: Arc::new({
-                let ingress = RestateIngressClient::new(self.connection.clone());
-                move |descriptor: lash_core::tool_run::SourceDescriptor, seal| {
-                    let ingress = ingress.clone();
-                    Box::pin(async move {
-                        let address = RestateDurableWaitAddress::for_key(&descriptor.source);
-                        let reply: crate::Reply<crate::durable_wait::RestateSourceSealReply> =
-                            ingress
-                                .call_object_json(
-                                    "LashDurableWaitIndex",
-                                    &address.index_key(),
-                                    "seal_source",
-                                    &crate::Call::new(
-                                        crate::durable_wait::RestateSourceSealRequest {
-                                            source: descriptor.source,
-                                            writer: lash_core::tool_run::SealWriter::External,
-                                            seal,
-                                        },
-                                    ),
-                                )
-                                .await
-                                .expect("external source write");
-                        match reply.into_body() {
-                            crate::durable_wait::RestateSourceSealReply::Outcome { outcome } => {
-                                outcome
-                            }
-                            reply => panic!("external source refused: {reply:?}"),
-                        }
-                    })
-                }
-            }),
-            turn_runner: self.turn_runner(),
-        }
-    }
-
     /// A maker of another build's endpoint over this harness's stores and
     /// process runner (FIG-4454's deployment change): every lash service,
     /// bound under the newer build's lanes, whose session-scope children read
@@ -969,25 +892,6 @@ impl LiveConformanceHarness {
                 )))
             })
         }
-    }
-
-    pub(super) fn group_host_factory(&self) -> GroupHostFactory {
-        let connection = self.connection.clone();
-        let executors = Arc::clone(&self.executors);
-        Box::new(move |resolver| match resolver {
-            Some(resolver) => {
-                executors.install(resolver);
-                Arc::new(RestateEffectHost::new_for_test(connection.clone()))
-                    as Arc<dyn lash_core::EffectHost>
-            }
-            // A Restate host resolves its group children at the endpoint,
-            // not on the host, so there is no unwired Restate host: its legs
-            // register the wired group laws only.
-            None => panic!(
-                "the Restate legs register no unwired-host group laws; no law asks them \
-                 for an unwired host"
-            ),
-        })
     }
 
     /// Shuts the endpoint task down. Takes `&self` so a harness shared across

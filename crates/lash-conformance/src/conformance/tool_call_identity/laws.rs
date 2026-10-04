@@ -350,7 +350,7 @@ pub(super) async fn crash_while_held_result(
     turn: &super::ScriptedTurn,
     held: &'static str,
 ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
-    crash_when(world, turn, "the held probe starts", &[], move |witness| {
+    crash_when(world, turn, "the held probe starts", move |witness| {
         witness.started(held) >= 1
     })
     .await
@@ -374,7 +374,6 @@ pub(super) async fn crash_when(
     world: &World,
     turn: &super::ScriptedTurn,
     what: &'static str,
-    recorded_labels: &'static [&'static str],
     ready: impl Fn(&super::Witness) -> bool + Send + Sync + 'static,
 ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
     let turn = turn.clone();
@@ -405,22 +404,6 @@ pub(super) async fn crash_when(
         let crash = crash.clone();
         crate::task::spawn(async move {
             world.witness.until(what, ready).await;
-            for execution in world
-                .witness
-                .executions()
-                .into_iter()
-                .filter(|execution| recorded_labels.contains(&execution.label.as_str()))
-            {
-                world
-                    .recorded
-                    .final_for(
-                        world.tier.effect_host.as_ref(),
-                        world.admitted(&turn),
-                        &execution.identity.call_id,
-                        super::PATIENCE,
-                    )
-                    .await;
-            }
             crash.fire();
             world.witness.open_gate();
         })
@@ -539,61 +522,6 @@ pub async fn recorded_outcome_skips_execution(tier: ToolCallIdentityTier) {
         world.model_calls.load(Ordering::SeqCst),
         2,
         "the redrive reads the recorded model responses back instead of asking again"
-    );
-}
-
-/// One model step calls a tool that does not exist, then two probes; one
-/// probe settles while the other is held, and the turn dies. Neither the
-/// refused sibling nor the completion order renumbers a call: the settled
-/// probe is not run again, the held probe's every run sees the call id its
-/// first run saw, the two probes' ids differ, and each recorded outcome
-/// belongs to its own call.
-pub async fn refusals_and_parallel_completion_never_renumber_identity(tier: ToolCallIdentityTier) {
-    let world = World::new(&tier, "parallel-identity");
-    // The quick probe comes first so a tier that runs a step's calls one at
-    // a time still settles it before the held one starts.
-    let mut step = calls(&[
-        ("call_quick", PROBE, ProbeArgs::label("quick")),
-        ("call_held", PROBE, ProbeArgs::held("held")),
-    ]);
-    step.parts.insert(
-        0,
-        raw_call(
-            "call_refused",
-            "identity_no_such_tool",
-            serde_json::json!({}),
-        ),
-    );
-    let turn = world.turn("turn", vec![step, text("the parallel step settled")]);
-    let assembled = crash_when(
-        &world,
-        &turn,
-        "the quick probe settles while the held one runs",
-        &["quick"],
-        |witness| !witness.of("quick").is_empty() && witness.started("held") >= 1,
-    )
-    .await
-    .unwrap_or_else(|error| panic!("the recovered turn runs: {error}"));
-    assert_finished("the recovered parallel turn", &assembled);
-    let quick = only(&world, "quick");
-    let held = assert_one_identity("held", &world.witness.of("held"));
-    assert_ne!(
-        quick.identity.call_id, held,
-        "two probes of one step have distinct call ids"
-    );
-    let settled = outputs(&assembled);
-    let by_call = |call_id: &str| {
-        settled
-            .iter()
-            .find(|(recorded, _, _)| recorded.as_deref() == Some(call_id))
-            .map(|(_, _, output)| output.clone())
-            .unwrap_or_else(|| panic!("the turn records `{call_id}`: {settled:?}"))
-    };
-    assert_eq!(answered_label(&by_call("call_held")), Some("held"));
-    assert_eq!(answered_label(&by_call("call_quick")), Some("quick"));
-    assert!(
-        answered_label(&by_call("call_refused")).is_none(),
-        "the unknown tool is refused, and its refusal is its own row: {settled:?}"
     );
 }
 

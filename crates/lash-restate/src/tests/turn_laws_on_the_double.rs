@@ -86,19 +86,6 @@ lash_conformance::tool_batch_parallelism_tests!(
     }
 );
 
-// FIG-3397 batch-group laws on the same tool-child fixture the invocation
-// laws take: a `call_tool_batch` consumer opens one effect group of
-// `ToolInvocation` children and the endpoint's dispatch invocations run them.
-lash_conformance::tool_batch_group_tests!(
-    #[ignore = "parked: the batch consumer's group children dispatch but their replies and the opener's-end incorporation diverge on the double; FIG-3600 S5a-q3 or S8"]
-    {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
-        let fixture = harness.tool_child_law_fixture();
-        (harness, "restate", fixture)
-    }
-);
-
 // The session read-view law is storage-shaped: the endpoint's session-store
 // factory answers it over the shared catalog.
 lash_conformance::session_read_view_tests!({

@@ -92,11 +92,7 @@ macro_rules! turn_crash_admission_cells_tests {
 /// fixture is the runner fixture of [`turn_crash_runner_tests!`].
 #[macro_export]
 macro_rules! effect_layer_group_child_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
-            (a_host_layer_observes_its_group_childrens_effects,
-                "effect-layer-group-child"));
-    };
+    ($(#[$attr:meta])* $fixture:block) => {};
 }
 
 /// Register only the level-one crash matrix. Its crashes kill the turn's

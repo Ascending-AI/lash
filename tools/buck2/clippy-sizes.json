@@ -775,14 +775,6 @@
     "peak_bytes": 281882624,
     "samples": 131
   },
-  "lash-internal-restate-test/tool_child_drift": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 145707008,
-    "peak_bytes": 194973696,
-    "samples": 109
-  },
   "lash-internal-restate-test/turn_crash_replay": {
     "cpu_count": 1,
     "memory_kb": 524288,

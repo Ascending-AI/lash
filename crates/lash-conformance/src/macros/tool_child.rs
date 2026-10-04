@@ -1,12 +1,10 @@
-//! Registration macros for the tool-child and turn-runner laws (FIG-3397,
-//! ADR 0099): tool calls running as effect-group children on every tier.
+//! Registration macros for surviving turn-runner and binding laws.
 //! Split from `macros.rs` to keep each catalogue file inside the support-file
 //! line budget.
 
 /// Register the laws that execute a real turn through the tier's
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner): the public
-/// signal-intent wake, the turn-cancel laws for tool calls running as
-/// effect-group children, and the presentation-divergence park law (FIG-3679).
+/// signal-intent wake and the presentation-divergence park law (FIG-3679).
 ///
 /// The fixture hands back a guard, a session prefix, the tier's effect host,
 /// the store set under test (whose session catalog and process registry the
@@ -19,22 +17,7 @@ macro_rules! turn_runner_tests {
         $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
             (public_signal_intent_wakes_parked_process, "public-signal-intent-wake"));
         $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
-            (an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration, "tool-child-after-step-retry-sleep"));
-        $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
-            (a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate, "tool-child-follow-on-cancel-gate"));
-        $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
             (a_diverged_tool_presentation_parks_the_turn, "presentation-divergence-park"));
-    };
-}
-
-/// Register the turn-cancel law for a tool child that ignores cancellation,
-/// with [`turn_runner_tests!`]'s fixture. The in-process tiers own their
-/// children's tasks, so dropping one is theirs to prove.
-#[macro_export]
-macro_rules! tool_child_turn_cancel_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
-            (cancel_dispositions_survive_group_child_teardown_and_redrive, "tool-child-turn-cancel-drops-child"));
     };
 }
 
@@ -410,8 +393,6 @@ macro_rules! cell_binding_drift_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::cell_binding_drift_tests!(@law [$(#[$attr])*] $fixture;
             (redriven_cell_links_against_its_journaled_binding_set, "cell-binding-drift"));
-        $crate::cell_binding_drift_tests!(@law [$(#[$attr])*] $fixture;
-            (a_group_tool_child_judges_its_own_drifted_tool, "tool-child-drift"));
     };
     (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*
@@ -470,246 +451,6 @@ macro_rules! __turn_runner_register {
             $crate::registration_macro_support::$law(prefix, host, stores, work, runner).await;
             verify(stringify!($law)).await;
         }
-    };
-}
-
-/// Register the batch crash-redrive law (FIG-4064): a turn crashed while its
-/// batch holds one settled and one in-flight member recovers without running
-/// the settled member again.
-///
-/// The fixture hands back what [`tool_batch_parallelism_tests!`] takes: a
-/// guard, a session prefix, the tier's effect host, its store set, the
-/// product producers that spell a batch on the tier, and its
-/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
-#[macro_export]
-macro_rules! tool_batch_crash_redrive_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $(#[$attr])*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-        async fn a_settled_batch_member_runs_once_across_a_turn_crash() {
-            let (_guard, prefix, host, stores, producers, runner) = $fixture;
-            assert!(
-                !producers.is_empty(),
-                "a tier registers at least one product producer, or the law runs on nothing"
-            );
-            for producer in producers {
-                $crate::registration_macro_support::a_settled_batch_member_runs_once_across_a_turn_crash(
-                    prefix,
-                    std::sync::Arc::clone(&host),
-                    std::sync::Arc::clone(&stores),
-                    std::sync::Arc::clone(&runner),
-                    producer,
-                )
-                .await;
-            }
-        }
-    };
-}
-
-/// Register the handler-level tool-child invocation laws (FIG-2266, ADR 0099).
-///
-/// The fixture hands back a guard, a session prefix and a
-/// [`ToolChildLawFixture`]: a world factory over one substrate (a law calls it
-/// from a runtime it is about to destroy), a process-registry factory, and the
-/// completion routing the tier records for a deferrable child. Restate
-/// registers through the live e2e recipe (`conformance_and_poison.rs`) and its
-/// world has no Lash-owned drain — Restate redrives the child invocation
-/// itself — so the laws take their open-time shape there.
-#[macro_export]
-macro_rules! tool_child_invocation_tests {
-    ($fixture:block) => {
-        $crate::tool_child_invocation_tests!(@catalogue [] $fixture);
-    };
-    ($(#[$attr:meta])+ $fixture:block) => {
-        $crate::tool_child_invocation_tests!(@catalogue [$(#[$attr])*] $fixture);
-    };
-    (@catalogue [$($attr:tt)*] $fixture:block) => {
-        $crate::tool_child_invocation_tests!(@expand [$($attr)*] $fixture; [
-            (
-                declared_intent_replay_preserves_manifest_order_and_capabilities,
-                "tool-child-invocation-driver"
-            ),
-            (
-                an_unregistered_opener_leaves_the_child_accepted,
-                "tool-child-unregistered-opener"
-            ),
-            (
-                a_foreign_opener_cannot_execute_another_openers_child,
-                "tool-child-foreign-opener"
-            ),
-            (
-                another_process_is_not_the_recorded_opener,
-                "tool-child-process-incarnation"
-            ),
-            (
-                a_committed_childs_final_is_protected_and_its_drain_is_finished,
-                "tool-child-commit-boundary-crash"
-            ),
-            (
-                drains_are_admitted_in_recorded_commit_order,
-                "tool-child-commit-order"
-            ),
-            (
-                a_drain_held_at_the_barrier_parks_under_a_frozen_dispatch_clock,
-                "tool-child-commit-order-frozen-clock"
-            ),
-            (
-                a_cancel_decided_before_a_sink_is_refused_at_the_sink,
-                "tool-child-admission-fence"
-            ),
-            (
-                a_late_completion_after_a_cancel_decision_is_refused,
-                "tool-child-late-completion-refused"
-            ),
-            (
-                a_deferred_childs_commit_point_is_its_resolution,
-                "tool-child-deferred-commit-point"
-            ),
-            (
-                group_incorporation_replays_exactly_the_recorded_ranks,
-                "tool-child-group-prefix-incorporation"
-            ),
-            (
-                two_presentation_steps_compose_deterministically_on_first_run_and_replay,
-                "tool-child-presentation-composition"
-            ),
-            (
-                a_changed_presentation_environment_on_replay_does_not_change_the_recorded_presentation,
-                "tool-child-presentation-recorded-env"
-            ),
-            (
-                the_oracle_and_a_bounded_step_coexist,
-                "tool-child-presentation-coexistence"
-            ),
-            (
-                a_retained_full_output_is_a_durable_artifact_not_a_path,
-                "tool-child-presentation-artifact"
-            ),
-            (
-                timer_and_durable_wait_children_are_admitted_beside_a_tool_child,
-                "tool-child-timer-and-wait-siblings"
-            ),
-        ]);
-    };
-    (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            $crate::__tool_child_invocation_register!($attrs $fixture; ($law, $label));
-        )*
-    };
-}
-
-/// Register the committed-final recovery laws (ADR 0099 §5, §8, W7;
-/// FIG-4454): a child whose final committed and whose invocation died before
-/// its seat and outlived its retention is re-sent by its opener's reopen and
-/// drained on the opener's lane, across a deployment change, with the group
-/// open and after a `Cancel` close.
-///
-/// The fixture hands back a guard, a session prefix, a
-/// [`ToolChildLawFixture`](crate::ToolChildLawFixture), the tier's
-/// [`ChildInvocationExpiry`](crate::ChildInvocationExpiry) — the operator
-/// that kills a child's invocation and expires its retention — and its
-/// [`DeploymentChange`](crate::DeploymentChange).
-#[macro_export]
-macro_rules! tool_child_committed_recovery_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $(#[$attr])*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn a_committed_final_is_recovered_on_its_lane_across_a_deployment_change() {
-            let (_guard, prefix, fixture, expire, change) = $fixture;
-            $crate::registration_macro_support::a_committed_final_is_recovered_on_its_lane_across_a_deployment_change(
-                &fixture,
-                prefix,
-                &expire,
-                &change,
-            )
-            .await;
-        }
-
-        $(#[$attr])*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn a_cancel_closed_groups_committed_final_is_recovered_on_its_lane() {
-            let (_guard, prefix, fixture, expire, change) = $fixture;
-            $crate::registration_macro_support::a_cancel_closed_groups_committed_final_is_recovered_on_its_lane(
-                &fixture,
-                prefix,
-                &expire,
-                &change,
-            )
-            .await;
-        }
-    };
-}
-
-/// Register the live-fault laws (FIG-3575): a store fault while a tool child
-/// resolves its environment is never its recorded outcome.
-///
-/// The fixture is [`tool_child_invocation_tests!`]'s. Registered by an
-/// engine that re-runs a child whose run hit a live fault.
-#[macro_export]
-macro_rules! tool_child_live_fault_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
-            (a_process_env_store_fault_is_never_the_childs_recorded_outcome,
-             "tool-child-env-store-fault"));
-    };
-}
-
-/// The fixture is [`tool_child_invocation_tests!`]'s. Registered by a
-/// handler-driven engine, whose child invocations route on whichever
-/// worker of the deployment serving their lane takes them (FIG-4550,
-/// FIG-4590).
-#[macro_export]
-macro_rules! tool_child_unroutable_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
-            (a_child_no_deployment_can_run_settles_typed_and_an_uncarried_one_retries,
-             "tool-child-unroutable"));
-        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
-            (a_child_whose_opener_is_live_on_another_worker_retries_until_routed_there,
-             "tool-child-placed"));
-        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
-            (a_lent_child_is_cancelled_by_its_openers_durable_end,
-             "tool-child-lent-end"));
-    };
-}
-
-/// Register one shared tool-child invocation law.
-#[macro_export]
-macro_rules! __tool_child_invocation_register {
-    ([$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
-        $($attr)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_guard, prefix, fixture) = $fixture;
-            $crate::registration_macro_support::$law(&fixture, prefix).await;
-        }
-    };
-}
-
-/// Register the consumer-driven group laws (FIG-3397, ADR 0099 §5, §6, §7,
-/// §10, §13): an `All` group of tool children answers every admission shape
-/// with its own reply, keyed by input index, and a settlement order its
-/// preparation prefix leads; and the opener's end finishes and incorporates
-/// every group its aggregates formed — one a cancel handed back, one a failed
-/// end left `closing`.
-///
-/// The fixture hands back a guard, a session prefix and a
-/// [`ToolChildLawFixture`], the same shape `tool_child_invocation_tests!`
-/// takes — the law needs a world factory over the tier's substrate and a
-/// process-registry factory, nothing more. Restate is deliberately absent:
-/// its deployment host executes no effects, so there is no batch consumer to
-/// run.
-#[macro_export]
-macro_rules! tool_batch_group_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
-            (an_all_group_of_tool_children_yields_the_batch_replies, "tool-batch-group-replies"));
-        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
-            (a_cancelled_aggregates_committed_loser_is_incorporated_by_its_openers_end,
-             "opener-end-cancelled-aggregate"));
-        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
-            (a_retried_openers_end_finishes_the_closing_group_its_first_end_left,
-             "opener-end-retried-end"));
     };
 }
 

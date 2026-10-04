@@ -33,8 +33,6 @@ macro_rules! tool_call_identity_tests {
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             recorded_outcome_skips_execution);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
-            refusals_and_parallel_completion_never_renumber_identity);
-        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             code_cells_keep_identity_and_distinguish_fresh_calls);
         $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
             frames_keep_identity_and_distinguish_fresh_calls);

@@ -7,7 +7,6 @@
 //! [`run`] then ticks the recovery interval until the invariants hold, and
 //! checks the detection bound and that every live session still executes.
 
-mod child_cancel;
 mod definition;
 mod definition_carry;
 mod definition_create;
@@ -231,7 +230,6 @@ async fn stage(spec: &CaseSpec, seed: u64) -> Result<Staged, String> {
         Seam::DefinitionCreate => Box::pin(definition_create::stage(spec.point, seed)).await,
         Seam::DefinitionCarry => Box::pin(definition_carry::stage(spec.point, seed)).await,
         Seam::ProcessTerminal => Box::pin(process::stage(spec.point, seed)).await,
-        Seam::ChildCancel => Box::pin(child_cancel::stage(spec.point, seed)).await,
     }
 }
 

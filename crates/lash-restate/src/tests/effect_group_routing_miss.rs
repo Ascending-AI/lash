@@ -464,167 +464,9 @@ pub(crate) async fn after_seat(group_key: &str) -> HandlerResult<()> {
     Ok(())
 }
 
-pub(super) async fn settled_tool_child_ends_on_routing_miss(target: HarnessServer) {
-    let harness = LiveConformanceHarness::start_for_tool_children_on(target).await;
-    let prefix = format!("routing-miss-{}", harness.run_nonce());
-    let group_key = format!("{prefix}-protected-group");
-    let reached = Arc::new(tokio::sync::Notify::new());
-    let release = Arc::new(tokio::sync::Notify::new());
-    SEAT_CUTS.lock_recover().insert(
-        group_key.clone(),
-        (Arc::clone(&reached), Arc::clone(&release)),
-    );
-    let fixture = harness.tool_child_law_fixture();
-    let law = lash_conformance::registration_macro_support::a_committed_childs_final_is_protected_and_its_drain_is_finished(&fixture, &prefix);
-    tokio::time::timeout(BUDGET, async {
-        tokio::join!(law, reached.notified());
-    })
-    .await
-    .expect("the protected drain seats before the worker is lost");
-    let notice: Option<EffectGroupNotification> = harness
-        .ingress()
-        .call_lash_object(
-            "EffectGroupIndex",
-            &group_key,
-            "child_cancel",
-            &EffectGroupChildCancelRequest { position: 0 },
-        )
-        .await
-        .expect("read the protected child's durable seat");
-    assert_eq!(notice, Some(EffectGroupNotification::Settled));
-    // The law dropped its opener registration. Lose the worker's retained
-    // context too, so its successor has neither a live opener nor a pin.
-    harness.release_group_context(&group_key);
-    release.notify_one();
-    await_end(&harness, &group_key, End::Settled).await;
-    let admin = harness.admin_client();
-    let ended = admin
-        .workflow_invocation_status("EffectGroupDispatch", &group_key, "child")
-        .await
-        .expect("read the ended invocation")
-        .expect("the ended invocation is retained");
-    let id = ended.invocation_id();
-    let (first, second) = tokio::join!(admin.kill_invocation(&id), admin.kill_invocation(&id));
-    first.expect("a second release of the same child is idempotent");
-    second.expect("racing releases of the same child are idempotent");
-    let notice: Option<EffectGroupNotification> = harness
-        .ingress()
-        .call_lash_object(
-            "EffectGroupIndex",
-            &group_key,
-            "child_cancel",
-            &EffectGroupChildCancelRequest { position: 0 },
-        )
-        .await
-        .expect("read the seat after engine release");
-    assert_eq!(
-        notice,
-        Some(EffectGroupNotification::Settled),
-        "release never changes the seat into cancellation"
-    );
-    SEAT_CUTS.lock_recover().remove(&group_key);
-    harness.finish().await;
-}
-
 /// How long the deferred law's committed child is held before it settles:
 /// long enough for a law that does not wait for the seat to release its opener.
 const SEAT_HOLD: Duration = Duration::from_secs(1);
-
-/// FIG-4785: the deferred-commit law keeps its lending opener through the
-/// committed child's seat. The child is held between its presentation and
-/// its settlement's first journal entry, where the law has nothing further
-/// of its own to observe. The `Cancel` close released the group's pin, so a
-/// law that releases its opener there leaves a child whose seat is still
-/// owed and which no executor carries: on a replaying leg it retries its
-/// routing miss for ever and its group's run never ends.
-pub(super) async fn committed_deferred_child_seats_under_its_opener(target: HarnessServer) {
-    let harness = LiveConformanceHarness::start_for_tool_children_on(target).await;
-    let prefix = format!("deferred-seat-{}", harness.run_nonce());
-    let committed = format!("{prefix}-Presentation-deferred-commit-group");
-    let cancelled = format!("{prefix}-AfterToolHook-deferred-commit-group");
-    let reached = Arc::new(tokio::sync::Notify::new());
-    let release = Arc::new(tokio::sync::Notify::new());
-    SETTLE_HOLDS.lock_recover().insert(
-        committed.clone(),
-        (Arc::clone(&reached), Arc::clone(&release)),
-    );
-    let fixture = harness.tool_child_law_fixture();
-    let law = lash_conformance::registration_macro_support::a_deferred_childs_commit_point_is_its_resolution(&fixture, &prefix);
-    tokio::time::timeout(Duration::from_secs(60), async {
-        tokio::join!(law, async {
-            reached.notified().await;
-            tokio::time::sleep(SEAT_HOLD).await;
-            release.notify_one();
-        });
-    })
-    .await
-    .expect("the deferred-commit law finishes once the held seat is released");
-    SETTLE_HOLDS.lock_recover().remove(&committed);
-
-    let notice: Option<EffectGroupNotification> = harness
-        .ingress()
-        .call_lash_object(
-            "EffectGroupIndex",
-            &committed,
-            "child_cancel",
-            &EffectGroupChildCancelRequest { position: 0 },
-        )
-        .await
-        .expect("read the committed child's durable seat");
-    assert_eq!(
-        notice,
-        Some(EffectGroupNotification::Settled),
-        "the law ends only after its committed child seated"
-    );
-    // Both children reach their end, and so does each group's run: nothing
-    // is left retrying once the law is over.
-    await_end(&harness, &committed, End::Settled).await;
-    // The cancel-decided child ends however its shift met the decision,
-    // which its own law pins; here it only has to end.
-    for (group_key, handler) in [
-        (&cancelled, "child"),
-        (&committed, "run"),
-        (&cancelled, "run"),
-    ] {
-        let mut last = None;
-        tokio::time::timeout(BUDGET, async {
-            loop {
-                let status = harness
-                    .admin_client()
-                    .workflow_invocation_status("EffectGroupDispatch", group_key, handler)
-                    .await
-                    .expect("read the invocation");
-                if let Some(status) = status {
-                    if status.completed_successfully() || status.completed_with_failure() {
-                        return;
-                    }
-                    last = Some(format!("{status:?}"));
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("{handler} of {group_key} never reached its end: {last:?}"));
-    }
-    harness.finish().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_committed_deferred_child_seats_before_its_opener_is_released() {
-    committed_deferred_child_seats_under_its_opener(HarnessServer::in_process()).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_committed_deferred_child_seats_before_its_opener_is_released_under_replay() {
-    let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
-        unreachable!("the in-process server double")
-    };
-    committed_deferred_child_seats_under_its_opener(HarnessServer::InProcess {
-        seed,
-        always_replay: true,
-    })
-    .await;
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn wait_children_with_a_durable_end_stop_on_a_routing_miss() {
@@ -634,11 +476,6 @@ async fn wait_children_with_a_durable_end_stop_on_a_routing_miss() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn atomic_children_with_a_durable_end_stop_on_a_routing_miss() {
     atomic_children_end_on_routing_miss(HarnessServer::in_process()).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_settled_tool_child_redelivered_without_an_executor_ends() {
-    settled_tool_child_ends_on_routing_miss(HarnessServer::in_process()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -653,9 +490,7 @@ macro_rules! live_routing_miss_tests {
         $crate::tests::effect_group_routing_miss::live_routing_miss_tests! {
             live_restate_routing_miss_wait_children_end => wait_children_end_on_routing_miss,
             live_restate_routing_miss_atomic_children_end => atomic_children_end_on_routing_miss,
-            live_restate_routing_miss_settled_tool_child_ends => settled_tool_child_ends_on_routing_miss,
             live_restate_routing_miss_still_needed_children_are_never_killed => still_needed_children_are_never_killed,
-            live_restate_committed_deferred_child_seats_under_its_opener => committed_deferred_child_seats_under_its_opener,
         }
     };
     ($($test:ident => $law:ident),* $(,)?) => {

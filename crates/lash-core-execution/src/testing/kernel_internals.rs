@@ -144,26 +144,6 @@ pub async fn process_start_execution_env(
     context.process_start_execution_env(registration).await
 }
 
-/// `ToolChildHost::child_controller`: the group-child-bound controller a
-/// child's recorded admission mints, which the claim-pin law inspects.
-pub fn tool_child_controller(
-    host: &crate::runtime::effect::ToolChildHost,
-    admitted: &crate::AdmittedScope,
-    binding: crate::GroupChildBinding,
-) -> Result<crate::ScopedEffectController<'static>, crate::RuntimeEffectControllerError> {
-    host.child_controller(admitted, binding)
-}
-
-/// The recorded-authority checks a reopened tool child passes before it runs:
-/// its cancellation binding and completion routing against this host.
-pub async fn validate_recorded_authorities(
-    host: &crate::runtime::effect::ToolChildHost,
-    controller: &crate::ScopedEffectController<'_>,
-    request: &crate::runtime::effect::ToolChildRequest,
-) -> Result<(), crate::RuntimeEffectControllerError> {
-    crate::runtime::effect::validate_recorded_authorities(host, controller, request).await
-}
-
 // `RuntimeExecutionContext`'s process-handle and process-await operations:
 // what a language runtime's process host calls on a context, which the
 // relocated handle, await and batch laws shift directly.

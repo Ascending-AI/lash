@@ -1015,14 +1015,6 @@
     "peak_bytes": 76718080,
     "samples": 208
   },
-  "//crates/lash-restate-test:tool_child_drift__test": {
-    "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 1.08,
-    "p99_peak_bytes": 33296384,
-    "peak_bytes": 33869824,
-    "samples": 177
-  },
   "//crates/lash-restate-test:turn_crash_replay__test": {
     "cpu_count": 2,
     "memory_kb": 524288,

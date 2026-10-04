@@ -94,16 +94,11 @@ pub enum Seam {
     DefinitionCarry,
     /// S-14: a process's terminal and its publication to engine waiters.
     ProcessTerminal,
-    /// A control intent's cancel reaching a running effect-group child: the
-    /// child side of the intent, which the child records through journaled
-    /// reads of its durable cancel fact (ADR 0105 §4, FIG-3904). It writes
-    /// no store row of its own, so no inventory row names it.
-    ChildCancel,
 }
 
 impl Seam {
     /// Every seam, in registry order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 10] = [
         Self::Ingress,
         Self::ControlIntent,
         Self::ScopeClose,
@@ -114,7 +109,6 @@ impl Seam {
         Self::DefinitionCreate,
         Self::DefinitionCarry,
         Self::ProcessTerminal,
-        Self::ChildCancel,
     ];
 
     /// The ADR 0109 §1.2 obligation-kind label that owns this seam.
@@ -131,7 +125,6 @@ impl Seam {
             Self::DefinitionCreate => "definition_create",
             Self::DefinitionCarry => "definition_carry",
             Self::ProcessTerminal => "process_terminal",
-            Self::ChildCancel => "child_cancel",
         }
     }
 
@@ -149,7 +142,6 @@ impl Seam {
             Self::DefinitionCreate => &[],
             Self::DefinitionCarry => &[],
             Self::ProcessTerminal => &["S-14"],
-            Self::ChildCancel => &[],
         }
     }
 }
@@ -679,22 +671,6 @@ pub const MATRIX: &[CaseSpec] = &[
         CrashPoint::CallerKilled,
         DetectionBound::LostImmediateSqliteFailover,
         "a started process whose host job an operator killed, the kill cascading into its run, ends substrate-lost and answers its engine waiter",
-    ),
-    // --- Child cancel (ADR 0105 §4) ---------------------------------------
-    // A run is cancelled while its effect-group tool child runs an attempt
-    // that ignores its token; the child's replay is immediate, so both cells
-    // answer to the immediate bound.
-    today(
-        Seam::ChildCancel,
-        CrashPoint::MidJournalStep,
-        DetectionBound::LostImmediateSqliteFailover,
-        "a tool child the deployment died inside after its cancel ended its attempt replays its journal, never re-runs the tool, and its run ends cancelled once",
-    ),
-    today(
-        Seam::ChildCancel,
-        CrashPoint::DuringEngineDelivery,
-        DetectionBound::LostImmediateSqliteFailover,
-        "a tool child the deployment died inside as its cancelled attempt's outcome reached the engine re-runs that unrecorded attempt once, which its cancel ends again, and its run ends cancelled once",
     ),
 ];
 

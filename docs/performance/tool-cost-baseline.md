@@ -1,8 +1,9 @@
 # Controlled tool cost receipts
 
-FIG-4868 preserves the predecessor of the tool execution cutover. The runtime
-source revision is recorded in each receipt. Instrumentation is opt-in; the
-fixture calls `SessionHandle::send()` and lets the engine drive the Run.
+FIG-4868 preserves the predecessor of the tool execution cutover. Its archived
+receipts below are immutable. The current fixture captures the native Run route
+through A/X/D/V; it records the runtime source revision supplied by the caller.
+Instrumentation is opt-in; the fixture calls `SessionHandle::send()` and lets the engine drive the Run.
 
 The boundary starts at send, after an admitted session has settled, and ends
 when the consuming model has seen every result and the invocation tree has
@@ -28,8 +29,16 @@ A receipt is one structural sample, not a latency distribution. Double timings
 include tracing; archive work follows the timed boundary. They establish no production latency claim.
 The later paired live comparison and quiet-host release run remain external.
 
-Run the owning tests with exact selectors, retaining the log, then archive
-those receipts without executing the fixture again:
+The native census law is
+`tool_cost::tests::l15_census_tracks_native_run_records_and_all_descendants`.
+It checks widths 1/2/16, logical call identity at every A/X/D/V and incorporation
+boundary, zero child/group invocations, and reconciliation of all raw journals
+and payload bytes. The predecessor bucket tests were retired with that route;
+they are represented by the archive, not regenerated against a newer runtime.
+
+Capture new receipts with `kiln run //crates/lash-perf:tool_batch_baseline__bin`
+and explicit `--source-sha` and `--out` arguments. To reconcile a previously
+captured predecessor receipt log without executing its fixture again:
 
 ```sh
 . ./env.sh

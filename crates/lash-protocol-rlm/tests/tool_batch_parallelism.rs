@@ -315,25 +315,6 @@ mod restate_double {
     // settled and one in flight, its turn's handler crashed and the
     // invocation replayed. The cell re-executes on the replay, and its batch
     // must reuse the settled member's recorded completion.
-    lash_conformance::tool_batch_crash_redrive_tests!({
-        let double =
-            lash_restate_test::backend(0x7001_c4a5, lash_restate_test::ServerConfig::default())
-                .await
-                .expect("start the Restate server double");
-        let backend = double.lash_backend();
-        let host = backend.effect_host() as Arc<dyn EffectHost>;
-        let producer =
-            lash_conformance::rlm_promise_all_producer(cell_bridge_factories(&backend), false);
-        (
-            double.clone(),
-            "restate-double",
-            host,
-            Arc::clone(double.engine_stores()),
-            vec![producer],
-            Arc::new(DoubleTurnRunner { backend: double })
-                as Arc<dyn lash_conformance::ConformanceTurnRunner>,
-        )
-    });
 
     /// A width-64 group must not resume its dispatch or opener once per child.
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]

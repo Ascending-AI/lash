@@ -314,9 +314,8 @@ impl DecoratedBackend {
     }
 
     /// Wrap the effect host in `layer`, once: every controller this
-    /// backend's host lends or routes then crosses the layer. One wrapper for
-    /// the backend's lifetime, since a runtime installs its tool-child host
-    /// get-or-init and holds the installing host weakly.
+    /// backend's host lends crosses the layer. The wrapped Restate backend
+    /// keeps the engine journal; its SQL stores retain application facts.
     pub fn with_effect_layer(self, layer: Arc<dyn lash_core::testing::EffectLayer>) -> Self {
         Self {
             layered: self.layered.map_effect_host(|host| {

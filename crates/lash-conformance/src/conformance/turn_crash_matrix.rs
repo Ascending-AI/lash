@@ -65,7 +65,6 @@ mod direct_acceptance;
 mod error_return;
 mod expectations;
 mod held_turn_input;
-mod layered_group_child;
 mod recovery;
 mod reference_turn;
 mod run_end_crash_cells;
@@ -90,7 +89,6 @@ use expectations::{
     validate_outcome_table,
 };
 pub use held_turn_input::admitted_turn_input_visibility_survives_worker_crash;
-pub use layered_group_child::a_host_layer_observes_its_group_childrens_effects;
 use pretty_assertions::assert_eq;
 pub use run_end_crash_cells::{
     run_end_commit_crash_after_write_replays_once, run_end_commit_crash_before_write_replays_once,

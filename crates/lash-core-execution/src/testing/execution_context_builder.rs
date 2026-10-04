@@ -1,6 +1,5 @@
 use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
-use crate::runtime::effect::tool_child_runtime_ops::ToolChildHostRuntimeOps as _;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use std::sync::Arc;
 
@@ -54,9 +53,7 @@ pub struct TestExecutionPorts<'run> {
     /// handler) serves nothing from a `'static` controller, so a fixture on
     /// it opens that execution, lends its controller here, and closes it once
     /// the context is gone: the borrow keeps the context from outliving it.
-    /// The host still routes the context's group children, as a turn's host
-    /// does beside the controller its handler lent the turn. `None` takes
-    /// the host's own controller.
+    /// `None` takes the host's own controller.
     pub lent_controller: Option<crate::ScopedEffectController<'run>>,
 }
 
@@ -147,18 +144,13 @@ pub struct TestExecutionContextBuilder<'run> {
     session_lifecycle: Option<Arc<dyn crate::plugin::SessionLifecycleService>>,
     /// The host the context's effects run on. Unless `effect_controller`
     /// overrides it, its controller, scoped to the context's admitted scope,
-    /// serves them and its tool-child host routes the context's group
-    /// children (ADR 0099 §2/§3). `None` for a context built
+    /// serves them. `None` for a context built
     /// [`over_controller`](TestExecutionContextBuilder::over_controller).
     effect_host: Option<Arc<dyn crate::EffectHost>>,
     /// A controller that serves the context's effects in place of the host's
     /// own: a fixture that already holds a scoped controller over the host's
     /// journal, or a foreign one it is proving.
     effect_controller: Option<TestEffectController<'run>>,
-    /// Whether the host routes the context's group children. Always when the
-    /// host's own controller serves the context; opt-in beside an override
-    /// controller, through [`TestExecutionContextBuilder::route_tool_children`].
-    route_tool_children: bool,
     dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
     runtime_parent_invocation: Option<crate::RuntimeInvocation>,
     /// Which cell of the turn this context executes.
@@ -193,19 +185,11 @@ pub struct BuiltTestExecutionContext<'run> {
     /// Which cell of the turn this context executes; see
     /// [`TestExecutionContextBuilder::protocol_iteration`].
     pub protocol_iteration: usize,
-    /// The live-opener registration this context's tool children route
-    /// through; kept here so [`into_runtime`](Self::into_runtime) can pin it
-    /// to the context's lifetime.
-    tool_child_guard: Option<crate::runtime::effect::LiveOpenerGuard>,
-    /// The host the tool-child resolver holds only weakly; pinned to the
-    /// context's lifetime by [`into_runtime`](Self::into_runtime).
-    tool_child_host: Option<Arc<dyn crate::EffectHost>>,
 }
 
 impl<'run> TestExecutionContextBuilder<'run> {
     /// A builder over `ports`: the controller the host lent them, else the
-    /// host's own, serves the context's effects, and the host's tool-child
-    /// host routes the context's group children.
+    /// host's own, serves the context's effects.
     pub fn new(ports: TestExecutionPorts<'run>) -> Self {
         let TestExecutionPorts {
             effect_host,
@@ -259,7 +243,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
             turn_context: crate::TurnContext::default(),
             session_host_mode: TestSessionHostMode::Independent,
             session_lifecycle: None,
-            route_tool_children: effect_host.is_some(),
             effect_host,
             effect_controller,
             dispatch_parent_invocation: None,
@@ -278,7 +261,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
     }
 
     /// A builder with no host: `effect_controller` serves the context's
-    /// effects, no group children are routed, and the context has no
+    /// effects, and the context has no
     /// process-exec-env store and no attachment port (both refuse). For a
     /// test of the context's own logic over a fake or recording controller;
     /// a test that journals, publishes environments or stores attachments
@@ -365,38 +348,22 @@ impl<'run> TestExecutionContextBuilder<'run> {
     }
 
     /// Serves the context's effects through `effect_controller`, admitted
-    /// under the context's scope, instead of the host's own controller. The
-    /// host then routes no group children unless
-    /// [`route_tool_children`](Self::route_tool_children) says so.
+    /// under the context's scope, instead of the host's own controller.
     pub fn shared_effect_controller(
         mut self,
         effect_controller: Arc<dyn crate::RuntimeEffectController>,
     ) -> Self {
         self.effect_controller = Some(TestEffectController::Shared(effect_controller));
-        self.route_tool_children = false;
         self
     }
 
     /// Serves the context's effects through an already scoped controller
-    /// instead of the host's own. The host then routes no group children
-    /// unless [`route_tool_children`](Self::route_tool_children) says so.
+    /// instead of the host's own.
     pub fn borrowed_effect_controller(
         mut self,
         effect_controller: crate::ScopedEffectController<'run>,
     ) -> Self {
         self.effect_controller = Some(TestEffectController::Borrowed(effect_controller));
-        self.route_tool_children = false;
-        self
-    }
-
-    /// Routes the context's group children through the ports' host beside an
-    /// override controller (ADR 0099 §2/§3): the tool-child host is installed
-    /// on it, and the context's opener is registered in its live-opener
-    /// registry for the context's lifetime. A conformance or differential
-    /// fixture running `call_tool_batch` against a tier's host calls this
-    /// after handing in the controller it scoped from that host.
-    pub fn route_tool_children(mut self) -> Self {
-        self.route_tool_children = true;
         self
     }
 
@@ -410,8 +377,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
 
     /// Installs the parent invocation. The context attributes its work to
     /// the session that invocation's scope names, so the scope it admits and
-    /// the session it attributes to are one fact (a group child's retained
-    /// request refuses the two disagreeing).
+    /// the session it attributes to are one fact.
     pub fn runtime_parent_invocation(
         mut self,
         parent_invocation: crate::RuntimeInvocation,
@@ -617,15 +583,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
             process_originator: None,
         });
 
-        let tool_child_host = if self.route_tool_children {
-            Some(effect_host.expect("tool children are routed only through the builder's host"))
-        } else {
-            None
-        };
-        let tool_child_guard = tool_child_host
-            .as_ref()
-            .and_then(|host| wire_test_tool_children(&dispatch, &self.process_env_store, host));
-
         BuiltTestExecutionContext {
             dispatch,
             process_env_store: self.process_env_store,
@@ -633,8 +590,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
             turn_context: self.turn_context,
             runtime_parent_invocation: self.runtime_parent_invocation,
             protocol_iteration: self.protocol_iteration,
-            tool_child_guard,
-            tool_child_host,
         }
     }
 }
@@ -664,12 +619,6 @@ impl<'run> BuiltTestExecutionContext<'run> {
             .runtime_parent_invocation
             .unwrap_or_else(|| code_execution_invocation(&session_id, self.protocol_iteration));
         context = context.with_parent_invocation(parent_invocation);
-        if let Some(guard) = self.tool_child_guard {
-            context = context.with_live_opener_guard(Arc::new(guard));
-        }
-        if let Some(host) = self.tool_child_host {
-            context = context.with_tool_child_host(host);
-        }
         context
     }
 }
@@ -698,47 +647,6 @@ fn code_execution_invocation(
         crate::RuntimeEffectKind::ExecCode,
     )
     .into_runtime_invocation()
-}
-
-/// Installs tool-child routing for a context whose `ToolDispatchContext` was
-/// assembled outside `TestExecutionContextBuilder` (ADR 0099 §2/§3): a
-/// `ToolChildHost` is installed on `host` and the context's opener is
-/// registered in the host's live-opener registry so `context_for` answers for
-/// its children.
-///
-/// Returns the live-opener guard; pin it to the context with
-/// `RuntimeExecutionContext::with_live_opener_guard`.
-///
-/// The wiring is deliberately best-effort, mirroring production's
-/// registration sites: a controller that accepts no group-executor resolver,
-/// a scope that names no opener, or a host that lends no `'static` controller
-/// each mean this context routes no tool children — and a group opened anyway
-/// fails closed at `open_effect_group`.
-pub fn wire_test_tool_children(
-    dispatch: &Arc<crate::tool_dispatch::ToolDispatchContext<'_>>,
-    process_env_store: &Arc<dyn crate::ProcessExecutionEnvStore>,
-    host: &Arc<dyn crate::EffectHost>,
-) -> Option<crate::runtime::effect::LiveOpenerGuard> {
-    let tool_children = host.install_tool_child_host(
-        crate::runtime::effect::ToolChildHost::new(
-            host,
-            Arc::clone(process_env_store),
-            Arc::clone(&dispatch.clock),
-        )
-        .with_clock(Arc::clone(&dispatch.clock)),
-    )?;
-    let admitted = dispatch.effect_controller.admitted_scope().clone();
-    let opener = crate::runtime::effect::opener_for_execution_scope(&admitted)?;
-    let lent = host.scoped_static(admitted).ok()??;
-    let (guard, _ended) = tool_children.openers().register(
-        opener,
-        crate::runtime::effect::LiveOpenerContext::capture(
-            dispatch.as_ref(),
-            lent,
-            tokio_util::sync::CancellationToken::new(),
-        ),
-    );
-    Some(guard)
 }
 
 /// The protocol factories a built context needs: under `cfg(test)` the

@@ -2,27 +2,6 @@ use std::time::Duration;
 
 use crate::RestateConnection;
 
-impl super::LiveConformanceHarness {
-    pub(in crate::tests) async fn finish_group_law(&self, law: &str) {
-        let reason = match law {
-            "a_close_may_narrow_but_never_widen" => {
-                Some("the widening-refusal probe deliberately leaves its never-ending child open")
-            }
-            "a_reopen_dispatches_the_retained_membership" => {
-                Some("the membership-reopen probe deliberately parks both retained children")
-            }
-            "the_first_settlement_wakes_the_caller_while_the_loser_still_runs" => Some(
-                "the first-settlement law deliberately leaves its losing child behind a closed gate",
-            ),
-            _ => None,
-        };
-        if let Some(reason) = reason {
-            self.kill_open(reason).await;
-        }
-        self.finish().await;
-    }
-}
-
 /// The harness's admin face: where it modifies retained service state and
 /// controls invocations.
 #[derive(Clone)]

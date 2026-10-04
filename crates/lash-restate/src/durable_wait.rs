@@ -245,7 +245,7 @@ const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v2/closu
 mod wait_registration_witness;
 
 #[cfg(test)]
-pub(crate) use wait_registration_witness::{arm_wait_registration_witness, hold_wait_registration};
+pub(crate) use wait_registration_witness::arm_wait_registration_witness;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RestateDurableWaitAddress {
@@ -536,8 +536,6 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         let address = verify_durable_wait_workflow_key(ctx.key(), &request.key)?;
         let index_key = durable_wait_index_object_key(&address);
         let replay_key = request.key.key_id.clone();
-        #[cfg(test)]
-        wait_registration_witness::await_registration_release(&request.key).await;
         let registration = self
             .namespace
             .durable_wait_registry(&ctx, index_key.clone())

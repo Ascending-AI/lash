@@ -1,6 +1,4 @@
 mod executor;
-mod tool_child_driver;
-mod tool_child_rebuild;
 
 mod tests {
 
