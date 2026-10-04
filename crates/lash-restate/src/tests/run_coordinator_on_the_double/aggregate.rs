@@ -1176,3 +1176,309 @@ async fn l05_timer_replay_keeps_the_recorded_admission_instant_and_wake() {
         1
     );
 }
+
+/// L05/L06/L09: an already admitted effect, timer and aliases use the same
+/// recorded terminal order. An early timer leaves the effect owned, a program
+/// effect progresses beside it, and a physical cut retains Live ownership.
+#[tokio::test]
+async fn l05_l06_l09_generic_timer_and_admitted_handles_share_the_run() {
+    let calls = Arc::new(vec![(
+        call("generic-loser", &Kind::IntentFree),
+        Kind::IntentFree,
+    )]);
+    let mut probe = Probe::new(&calls);
+    probe.gate = Some((calls[0].0.call_id.clone(), calls[0].0.call_id.clone()));
+    let probe = Arc::new(probe);
+    let finished = Arc::new(Mutex::new(Vec::new()));
+    let backend = lash_restate_test::backend(4895, ServerConfig::default())
+        .await
+        .unwrap();
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let probe = Arc::clone(&probe);
+        let finished = Arc::clone(&finished);
+        Arc::new(move |scoped| {
+            let calls = Arc::clone(&calls);
+            let probe = Arc::clone(&probe);
+            let finished = Arc::clone(&finished);
+            Box::pin(async move {
+                let round: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+                let mut run =
+                    RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), vec![revision()]);
+                run.start_round(
+                    &round,
+                    Arc::clone(&probe) as Arc<dyn SingletonToolHandlers>,
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+                let plan = AggregatePlan {
+                    key: "generic-timer".to_owned(),
+                    leaves: vec![
+                        AggregateLeaf::Timer { duration_ms: 0 },
+                        AggregateLeaf::Call {
+                            call_id: round[0].call_id.clone(),
+                        },
+                    ],
+                    operands: vec![0, 1, 1],
+                };
+                run.admit_aggregate(&plan, &SystemClock).await.unwrap();
+                assert!(matches!(
+                    run.consume_aggregate(&plan.key, AggregateConsumer::Race)
+                        .await
+                        .unwrap(),
+                    RunAggregateOutcome::Selected {
+                        operand: 0,
+                        fulfilled: true,
+                        reply: None
+                    }
+                ));
+                assert_eq!(run.lifecycle(), RunLifecycle::Live);
+                assert!(!probe.gate_open.load(Ordering::SeqCst));
+                assert!(probe.cancelled_calls.lock().unwrap().is_empty());
+                run.beside(
+                    scoped.controller().record_run_record(
+                        UNRELATED.to_owned(),
+                        unrelated_record(Arc::clone(&probe)),
+                    ),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                assert!(probe.unrelated.load(Ordering::SeqCst));
+                probe.gate_open.store(true, Ordering::SeqCst);
+                probe.gate_wake.notify_waiters();
+                run.progress().await.unwrap();
+                let pending_timer = AggregatePlan {
+                    key: "pending-timer".to_owned(),
+                    leaves: vec![
+                        AggregateLeaf::Settled { fulfilled: true },
+                        AggregateLeaf::Timer {
+                            duration_ms: 60_000,
+                        },
+                    ],
+                    operands: vec![0, 1],
+                };
+                run.admit_aggregate(&pending_timer, &SystemClock)
+                    .await
+                    .unwrap();
+                assert!(matches!(
+                    run.consume_aggregate(&pending_timer.key, AggregateConsumer::Race)
+                        .await
+                        .unwrap(),
+                    RunAggregateOutcome::Selected { operand: 0, .. }
+                ));
+                run.request_cut(lash_core::BoundaryReason::HandOver);
+                let snapshot = run.quiesce().await.unwrap();
+                assert!(snapshot.entries.iter().flat_map(|entry| &entry.record.events)
+                    .any(|event| matches!(event, RunEvent::TimerElapsed { aggregate, leaf: 0 } if aggregate == &plan.key)));
+                assert_eq!(run.lifecycle(), RunLifecycle::Live);
+                assert!(
+                    snapshot
+                        .entries
+                        .iter()
+                        .flat_map(|entry| &entry.record.events)
+                        .any(|event| matches!(event,
+                    RunEvent::AggregateAdmitted { plan, .. } if plan == &pending_timer))
+                );
+                assert!(matches!(
+                    run.admit_aggregate(
+                        &AggregatePlan {
+                            key: "after-cut".to_owned(),
+                            leaves: vec![],
+                            operands: vec![]
+                        },
+                        &SystemClock
+                    )
+                    .await,
+                    Err(SingletonRunError::Cut(_))
+                ));
+                let RunAggregateOutcome::AllResults(results) = run
+                    .consume_aggregate(&plan.key, AggregateConsumer::AllSettled)
+                    .await
+                    .unwrap()
+                else {
+                    panic!("allSettled must preserve timer and duplicate source positions");
+                };
+                assert_eq!(results.len(), 3);
+                assert_eq!(results[0], None);
+                assert_eq!(results[1], results[2]);
+                assert!(results[1].is_some());
+                assert_eq!(
+                    run.records()
+                        .iter()
+                        .flat_map(|record| &record.events)
+                        .filter(|event| matches!(event, RunEvent::Consumed { .. }))
+                        .count(),
+                    1
+                );
+                run.close().await.unwrap();
+                finished.lock().unwrap().push(run.into_records());
+            })
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(finished.lock().unwrap().len(), 1);
+    assert_eq!(
+        probe.executions.lock().unwrap().as_slice(),
+        &[(
+            call("generic-loser", &Kind::IntentFree).call_id,
+            AttemptOrdinal::FIRST
+        )]
+    );
+}
+
+/// L03/L05/L21: tool-free timers replay their admitted clock and selected
+/// terminal, then logical Closing discharges pending timers without any group
+/// executor. Empty and immediate plans need no callback registry either.
+#[tokio::test]
+async fn l03_l05_tool_free_timers_replay_and_close_without_group_services() {
+    let backend = lash_restate_test::backend(4896, ServerConfig::default())
+        .await
+        .unwrap();
+    backend
+        .server()
+        .crash_on(CrashRule::new(CrashPoint::BeforeRunResult {
+            name: Some("lash:run:schedule:1".to_owned()),
+        }));
+    let crashes = lash_restate_test::CrashCount::new();
+    assert!(backend.server().on_crash(crashes.listener()));
+    let finished = Arc::new(Mutex::new(Vec::new()));
+    let instants = Arc::new(Mutex::new(Vec::new()));
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let finished = Arc::clone(&finished);
+        let instants = Arc::clone(&instants);
+        Arc::new(move |scoped| {
+            let finished = Arc::clone(&finished);
+            let instants = Arc::clone(&instants);
+            Box::pin(async move {
+                let mut run = RunCoordinator::open(&scoped, owner(), SegmentOrdinal(0), Vec::new());
+                let unknown = AggregatePlan {
+                    key: "unknown-effect".to_owned(),
+                    leaves: vec![
+                        AggregateLeaf::Call {
+                            call_id: call("not-admitted", &Kind::IntentFree).call_id,
+                        },
+                        AggregateLeaf::Timer { duration_ms: 0 },
+                    ],
+                    operands: vec![0, 1],
+                };
+                assert!(matches!(
+                    run.admit_aggregate(&unknown, &SystemClock).await,
+                    Err(SingletonRunError::Ledger(_))
+                ));
+                assert!(run.records().is_empty());
+                let timer = AggregatePlan {
+                    key: "tool-free".to_owned(),
+                    leaves: vec![
+                        AggregateLeaf::Timer { duration_ms: 0 },
+                        AggregateLeaf::Timer {
+                            duration_ms: 60_000,
+                        },
+                    ],
+                    operands: vec![0, 1],
+                };
+                run.admit_aggregate(&timer, &SystemClock).await.unwrap();
+                let RunEvent::AggregateAdmitted { admitted_at_ms, .. } =
+                    &run.records()[0].events[0]
+                else {
+                    panic!("aggregate admission")
+                };
+                instants.lock().unwrap().push(*admitted_at_ms);
+                assert!(matches!(
+                    run.consume_aggregate(&timer.key, AggregateConsumer::Race)
+                        .await
+                        .unwrap(),
+                    RunAggregateOutcome::Selected {
+                        operand: 0,
+                        fulfilled: true,
+                        reply: None
+                    }
+                ));
+                for (key, leaves, operands, mode, expected) in [
+                    (
+                        "empty-race",
+                        vec![],
+                        vec![],
+                        AggregateConsumer::Race,
+                        RunAggregateOutcome::Pending,
+                    ),
+                    (
+                        "empty-all",
+                        vec![],
+                        vec![],
+                        AggregateConsumer::All,
+                        RunAggregateOutcome::AllResults(vec![]),
+                    ),
+                    (
+                        "immediate-any",
+                        vec![
+                            AggregateLeaf::Settled { fulfilled: false },
+                            AggregateLeaf::Settled { fulfilled: true },
+                        ],
+                        vec![0, 1, 1],
+                        AggregateConsumer::Any,
+                        RunAggregateOutcome::Selected {
+                            operand: 1,
+                            fulfilled: true,
+                            reply: None,
+                        },
+                    ),
+                ] {
+                    let plan = AggregatePlan {
+                        key: key.to_owned(),
+                        leaves,
+                        operands,
+                    };
+                    run.admit_aggregate(&plan, &SystemClock).await.unwrap();
+                    assert_eq!(run.consume_aggregate(key, mode).await.unwrap(), expected);
+                }
+                run.close().await.unwrap();
+                assert_eq!(run.lifecycle(), RunLifecycle::Settled);
+                let count = run.records().len();
+                assert!(matches!(
+                    run.admit_aggregate(
+                        &AggregatePlan {
+                            key: "closed".to_owned(),
+                            leaves: vec![],
+                            operands: vec![]
+                        },
+                        &SystemClock
+                    )
+                    .await,
+                    Err(SingletonRunError::Ledger(
+                        lash_core::tool_run::RunEventRefusal::AdmissionClosed
+                    ))
+                ));
+                assert_eq!(run.records().len(), count);
+                finished.lock().unwrap().push(run.into_records());
+            })
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        backend.run_in_handler(AdmittedScope::turn("session", "turn"), attempt),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(crashes.get(), 1);
+    let instants = instants.lock().unwrap();
+    assert_eq!(instants.len(), 2);
+    assert_eq!(instants[0], instants[1]);
+    let finished = finished.lock().unwrap();
+    assert_eq!(finished.len(), 1);
+    assert_eq!(
+        finished[0]
+            .iter()
+            .flat_map(|record| &record.events)
+            .filter(|event| matches!(event, RunEvent::TimerElapsed { .. }))
+            .count(),
+        1
+    );
+}

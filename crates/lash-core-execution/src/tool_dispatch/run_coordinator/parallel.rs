@@ -170,43 +170,7 @@ impl<'a> RunCoordinator<'a> {
             }
         }
         if let Some((plan, clock)) = aggregate {
-            let admitted_at_ms = self
-                .journal
-                .records
-                .iter()
-                .flat_map(|record| &record.events)
-                .find_map(|event| match event {
-                    RunEvent::AggregateAdmitted {
-                        plan: recorded,
-                        admitted_at_ms,
-                    } if recorded.key == plan.key => Some(*admitted_at_ms),
-                    _ => None,
-                })
-                .ok_or_else(|| RunEventRefusal::UnknownAggregate {
-                    key: plan.key.clone(),
-                })?;
-            for (index, leaf) in plan.leaves.iter().enumerate() {
-                if let crate::tool_run::AggregateLeaf::Timer { duration_ms } = leaf {
-                    let deadline = admitted_at_ms.saturating_add(*duration_ms);
-                    self.journal.scoped.admit_journal_write()?;
-                    let timer = self
-                        .journal
-                        .scoped
-                        .controller()
-                        .start_run_retry(deadline.saturating_sub(clock.timestamp_ms()));
-                    let handle = async move {
-                        timer.await?;
-                        Ok(Ready::Timer)
-                    }
-                    .boxed()
-                    .shared();
-                    self.timers.push(AggregateTimer {
-                        key: plan.key.clone(),
-                        leaf: index as u32,
-                        handle,
-                    });
-                }
-            }
+            self.register_aggregate_timers(plan, clock)?;
         }
         for (index, (member, _)) in admitted.iter().enumerate() {
             if member.selection() == BeforeSelection::Execute {
@@ -240,6 +204,51 @@ impl<'a> RunCoordinator<'a> {
             decisions.push((calls[index].call_id.clone(), decision));
         }
         Ok(decisions)
+    }
+
+    pub(super) fn register_aggregate_timers(
+        &mut self,
+        plan: &crate::tool_run::AggregatePlan,
+        clock: &dyn crate::Clock,
+    ) -> Result<(), SingletonRunError> {
+        let admitted_at_ms = self
+            .journal
+            .records
+            .iter()
+            .flat_map(|record| &record.events)
+            .find_map(|event| match event {
+                RunEvent::AggregateAdmitted {
+                    plan: recorded,
+                    admitted_at_ms,
+                } if recorded.key == plan.key => Some(*admitted_at_ms),
+                _ => None,
+            })
+            .ok_or_else(|| RunEventRefusal::UnknownAggregate {
+                key: plan.key.clone(),
+            })?;
+        for (index, leaf) in plan.leaves.iter().enumerate() {
+            if let crate::tool_run::AggregateLeaf::Timer { duration_ms } = leaf {
+                let deadline = admitted_at_ms.saturating_add(*duration_ms);
+                self.journal.scoped.admit_journal_write()?;
+                let timer = self
+                    .journal
+                    .scoped
+                    .controller()
+                    .start_run_retry(deadline.saturating_sub(clock.timestamp_ms()));
+                let handle = async move {
+                    timer.await?;
+                    Ok(Ready::Timer)
+                }
+                .boxed()
+                .shared();
+                self.timers.push(AggregateTimer {
+                    key: plan.key.clone(),
+                    leaf: index as u32,
+                    handle,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Progress one recorded selection, including retry registration, through

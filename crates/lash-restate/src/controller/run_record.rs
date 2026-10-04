@@ -218,10 +218,10 @@ mod tests {
             );
         }
     }
-    // The predecessor subscribes before the recorded cancel race (FIG-4924).
-    // FIG-4925 separates check cancellation from Run control. Its readable
-    // predecessor decision still belongs to that build's drain lane. Pin
-    // main's matching epoch so omitting this generation move fails the witness.
+    // Main retains Deferred order (FIG-4924), per-call check cancellation
+    // (FIG-4925) and operation completion (FIG-4893). FIG-4895 admits tool-free
+    // aggregates without an empty tool round. The readable predecessor decision
+    // retains its drain lanes. Pin main's epochs so an omitted move fails.
     #[tokio::test]
     async fn l21_a_predecessor_run_journal_parks_before_decode_and_keeps_its_lane() {
         use lash_core::engine::BuildGeneration;
@@ -230,9 +230,9 @@ mod tests {
             BuildGeneration::from_digest([b'r', b'u', bytes[0], bytes[1], bytes[2], bytes[3]])
         };
         #[cfg(not(feature = "synthetic-next"))]
-        const PREDECESSOR_EPOCH: u32 = 24;
+        const PREDECESSOR_EPOCH: u32 = 26;
         #[cfg(feature = "synthetic-next")]
-        const PREDECESSOR_EPOCH: u32 = 25;
+        const PREDECESSOR_EPOCH: u32 = 27;
         let old = generation(PREDECESSOR_EPOCH);
         let new = generation(crate::JOURNAL_LOGIC_EPOCH);
         let old_lane = crate::services::DEFAULT_NAMESPACE

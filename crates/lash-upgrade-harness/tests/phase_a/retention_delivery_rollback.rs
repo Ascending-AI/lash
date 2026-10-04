@@ -745,7 +745,6 @@ fn drained_with_the_stalled_row_listed(
             && result["in_flight_turns"] == 0
             && result["parked_turns"] == 0
             && result["closing_sessions"] == 0
-            && result["undrained_group_children"] == 0
             && counts["artifact_cleanup"] == 1
             && counts.as_object().is_some_and(|kinds| kinds
                 .values()

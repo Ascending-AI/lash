@@ -631,16 +631,8 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// [`effect_groups_unsupported`](super::effect_groups_unsupported). Such a
     /// refusal journals nothing.
     ///
-    /// That refusal is now the *only* way a host says "no groups here".
-    /// There was a `supports_effect_groups()` flag beside these three methods and a
-    /// conformance law binding the two together; FIG-2266 deleted it.
-    /// added no safety — a host can lie in a flag exactly as easily as in a
-    /// method — and it could not see engine-side deployment facts anyway, so a
-    /// missing service registration surfaced as a true answer to the wrong
-    /// question. What replaces it is wiring: these methods carry no default
-    /// body, so an out-of-tree controller either implements groups or refuses
-    /// them in its own source, and the refusal it must write is the same typed
-    /// error the law used to check for.
+    /// Generic aggregate hosts use the Run coordinator's records. Controllers
+    /// that do not serve the legacy group transport inherit a typed refusal.
     ///
     /// A reopen must be fenced on group shape: a host that finds a recorded group
     /// under this key whose child count or wake rule differs from the group
@@ -654,8 +646,12 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// error.
     async fn open_effect_group(
         &self,
-        group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError>;
+        _group: RuntimeEffectGroup,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        Err(super::effect_groups_unsupported(
+            "this runtime effect controller",
+        ))
+    }
 
     /// Register this controller's envelope-to-executor resolver, once.
     ///
@@ -729,9 +725,13 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// child.
     async fn await_next_settlement(
         &self,
-        handle: &mut EffectGroupHandle,
-        cancel: TurnCancelWait,
-    ) -> Result<GroupSettlement, RuntimeEffectControllerError>;
+        _handle: &mut EffectGroupHandle,
+        _cancel: TurnCancelWait,
+    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        Err(super::effect_groups_unsupported(
+            "this runtime effect controller",
+        ))
+    }
 
     /// Read the group's settlement at `rank` without advancing any caller
     /// cursor (ADR 0099 §8): the recorded terminal and the child's durable
@@ -780,9 +780,13 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// healthy replay path.
     async fn close_effect_group(
         &self,
-        handle: EffectGroupHandle,
-        disposition: LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError>;
+        _handle: EffectGroupHandle,
+        _disposition: LoserPolicy,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Err(super::effect_groups_unsupported(
+            "this runtime effect controller",
+        ))
+    }
 
     /// Commit one group child's final record at the §4 linearization point —
     /// the durable half of the child's final-attempt boundary.

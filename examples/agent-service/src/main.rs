@@ -10,13 +10,13 @@ use lash::{
     tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink},
 };
 
+mod aggregates;
 #[path = "../../shared/attachment_acceptance.rs"]
 mod attachment_acceptance;
 mod board;
 mod chat_discard;
 mod db;
 mod demo_plugin;
-mod effect_groups;
 #[cfg(test)]
 mod fork_compensation_tests;
 #[cfg(test)]
@@ -132,13 +132,10 @@ impl lash::LlmProfiles for OpenRouterLlmProfiles {
     }
 }
 
+use crate::aggregates::AgentServiceAggregateWorkflowImpl;
 use crate::chat_discard::{AgentServiceChatDiscard, AgentServiceChatDiscardImpl};
 use crate::db::AppDb;
 use crate::demo_plugin::DemoPluginFactory;
-use crate::effect_groups::{
-    AgentServiceEffectGroupExecutors, AgentServiceEffectGroupWorkflow,
-    AgentServiceEffectGroupWorkflowImpl,
-};
 use crate::raw_activities::stream_raw_activities;
 use crate::routes::{
     attach_input, attach_turn, cancel_turn, chat_board, create_chat, fork_chat, index,
@@ -306,12 +303,6 @@ async fn async_main() -> anyhow_like::Result<()> {
         .await
         .map_err(|err| format!("open the deployment store: {err}"))?;
     let restate_backend = local_restate.engine(Arc::new(stores));
-    // Turns run in lash's own `LashSession`/`LashTurn` endpoint handlers; the
-    // service registers only its demo effect-group executors beside them.
-    restate_backend
-        .restate_effect_host()
-        .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
-        .map_err(|err| err.to_string())?;
     let backend = lash::Backend::new(restate_backend.clone());
     let app_db = AppDb::open(&data_dir.join("app.db")).map_err(|err| err.to_string())?;
     let shared_db = Arc::new(Mutex::new(app_db));
@@ -375,17 +366,14 @@ async fn async_main() -> anyhow_like::Result<()> {
 
         // Lash's own services come from the backend, and `LashSession` among
         // them executes every chat turn; the service binds only its chat-discard
-        // and effect-group demo workflows beside them.
+        // and timer aggregate workflow beside them.
         let endpoint = restate_backend
             .endpoint_builder(process_worker)
             .map_err(|err| format!("build the Restate endpoint: {err}"))?
             .bind(chat_discard.serve())
-            .bind(
-                AgentServiceEffectGroupWorkflowImpl {
-                    build_generation: state.core().build_generation().clone(),
-                }
-                .serve(),
-            )
+            .bind(AgentServiceAggregateWorkflowImpl {
+                build_generation: state.core().build_generation().clone(),
+            })
             .build();
         // `serve_at` binds the endpoint and registers the deployment with the
         // server; it serves until the returned handle drops at shutdown.
@@ -553,12 +541,12 @@ fn app_router(state: AppStateData) -> Router {
             axum::routing::post(cancel_turn),
         )
         .route(
-            "/api/effect-groups",
-            axum::routing::post(crate::effect_groups::run_effect_group),
+            "/api/aggregates",
+            axum::routing::post(crate::aggregates::run_aggregate),
         )
         .route(
-            "/api/effect-groups/{run_id}",
-            get(crate::effect_groups::get_effect_group),
+            "/api/aggregates/{run_id}",
+            get(crate::aggregates::get_aggregate),
         )
         .with_state(state)
 }

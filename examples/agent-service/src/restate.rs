@@ -21,15 +21,13 @@ mod restate_tests {
     use lash::TurnId;
     use serde_json::json;
 
+    use crate::aggregates::{
+        AgentServiceAggregateWorkflowImpl, AggregateRunReport, get_aggregate, run_aggregate,
+    };
     use crate::board::BoardState;
     use crate::chat_discard::AgentServiceChatDiscard as _;
     use crate::db::AppDb;
     use crate::demo_plugin::DemoPluginFactory;
-    use crate::effect_groups::{
-        AgentServiceEffectGroupExecutors, AgentServiceEffectGroupWorkflow,
-        AgentServiceEffectGroupWorkflowImpl, EffectGroupRunReport, EffectGroupRunTerminal,
-        get_effect_group, run_effect_group,
-    };
     use crate::routes::{SendMessageRequest, send_message, settings};
     use crate::state::AppStateData;
     use axum::Router;
@@ -96,12 +94,9 @@ mod restate_tests {
             .endpoint_builder(harness.process_worker.clone())
             .expect("the core bound the engine's generation")
             .bind(harness.chat_discard.serve())
-            .bind(
-                AgentServiceEffectGroupWorkflowImpl {
-                    build_generation: harness.state.core().build_generation().clone(),
-                }
-                .serve(),
-            )
+            .bind(AgentServiceAggregateWorkflowImpl {
+                build_generation: harness.state.core().build_generation().clone(),
+            })
             .build();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
@@ -123,8 +118,8 @@ mod restate_tests {
             .expect("agent-service E2E HTTP address");
         let app = Router::new()
             .route("/api/settings", get(settings))
-            .route("/api/effect-groups", post(run_effect_group))
-            .route("/api/effect-groups/{run_id}", get(get_effect_group))
+            .route("/api/aggregates", post(run_aggregate))
+            .route("/api/aggregates/{run_id}", get(get_aggregate))
             .with_state(state.clone());
         let (app_shutdown_tx, app_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let app_server = tokio::spawn(async move {
@@ -199,8 +194,8 @@ mod restate_tests {
             "assistant message was not persisted through the Restate-driven turn {turn_id}; messages={messages:?}; stream={stream}"
         );
 
-        let group_run_id = format!("agent-service-e2e-{}", uuid::Uuid::new_v4());
-        let group_url = format!("http://{app_addr}/api/effect-groups/{group_run_id}");
+        let aggregate_run_id = format!("agent-service-e2e-{}", uuid::Uuid::new_v4());
+        let aggregate_url = format!("http://{app_addr}/api/aggregates/{aggregate_run_id}");
         let settings_response = http
             .get(format!("http://{app_addr}/api/settings"))
             .send()
@@ -212,105 +207,85 @@ mod restate_tests {
             settings_response.status()
         );
         let missing_response = http
-            .get(&group_url)
+            .get(&aggregate_url)
             .send()
             .await
-            .expect("preflight absent effect group through agent-service HTTP surface");
+            .expect("preflight absent aggregate through agent-service HTTP surface");
         let missing_status = missing_response.status();
         let missing_body = missing_response
             .text()
             .await
-            .expect("read absent effect-group response");
+            .expect("read absent aggregate response");
         assert!(!missing_status.is_success());
         assert!(
             missing_body.contains("does not exist"),
             "absent group response did not name the missing run: {missing_status} {missing_body}"
         );
 
-        let group_response = http
-            .post(format!("http://{app_addr}/api/effect-groups"))
-            .json(&json!({ "run_id": group_run_id.clone() }))
+        let aggregate_response = http
+            .post(format!("http://{app_addr}/api/aggregates"))
+            .json(&json!({ "run_id": aggregate_run_id.clone() }))
             .send()
             .await
-            .expect("run effect group through agent-service HTTP surface");
-        let group_status = group_response.status();
-        let group_body = group_response
+            .expect("run aggregate through agent-service HTTP surface");
+        let aggregate_status = aggregate_response.status();
+        let aggregate_body = aggregate_response
             .text()
             .await
-            .expect("read effect-group HTTP response");
+            .expect("read aggregate HTTP response");
         assert!(
-            group_status.is_success(),
-            "agent-service effect-group request failed: {group_status} {group_body}"
+            aggregate_status.is_success(),
+            "agent-service aggregate request failed: {aggregate_status} {aggregate_body}"
         );
-        let group_report: EffectGroupRunReport =
-            serde_json::from_str(&group_body).expect("decode effect-group report");
-        assert_eq!(group_report.child_count, 3);
-        assert!(group_report.group_admitted);
-        assert!(group_report.children_dispatched);
-        assert_eq!(group_report.first_settlement_rank, 1);
-        assert_eq!(group_report.settlements.len(), 3);
-        assert_eq!(
-            group_report.settlements[0].terminal,
-            EffectGroupRunTerminal::Completed
-        );
-        assert!(
-            group_report.settlements[1..]
-                .iter()
-                .all(|settlement| settlement.terminal == EffectGroupRunTerminal::Cancelled)
-        );
-        assert_eq!(group_report.cancelled_losers, 2);
-        assert!(group_report.group_terminal);
+        let aggregate_report: AggregateRunReport =
+            serde_json::from_str(&aggregate_body).expect("decode aggregate report");
+        assert_eq!(aggregate_report.winner, 0);
+        assert_eq!(aggregate_report.completed, vec![0]);
+        assert_eq!(aggregate_report.cancelled, vec![1, 2]);
 
         let durable_response = http
-            .get(&group_url)
+            .get(&aggregate_url)
             .send()
             .await
-            .expect("read durable effect-group report through agent-service HTTP surface");
+            .expect("read durable aggregate report through agent-service HTTP surface");
         assert!(durable_response.status().is_success());
-        let durable_report: EffectGroupRunReport = durable_response
+        let durable_report: AggregateRunReport = durable_response
             .json()
             .await
-            .expect("decode durable effect-group report");
-        assert_eq!(durable_report, group_report);
+            .expect("decode durable aggregate report");
+        assert_eq!(durable_report, aggregate_report);
 
         let duplicate_response = http
-            .post(format!("http://{app_addr}/api/effect-groups"))
-            .json(&json!({ "run_id": group_run_id }))
+            .post(format!("http://{app_addr}/api/aggregates"))
+            .json(&json!({ "run_id": aggregate_run_id }))
             .send()
             .await
-            .expect("repeat effect-group request through agent-service HTTP surface");
+            .expect("repeat aggregate request through agent-service HTTP surface");
         let duplicate_status = duplicate_response.status();
         let duplicate_body = duplicate_response
             .text()
             .await
-            .expect("read duplicate effect-group response");
+            .expect("read duplicate aggregate response");
         assert!(!duplicate_status.is_success());
         assert!(
             duplicate_body.contains("already exists"),
-            "duplicate group response did not name the identity fence: {duplicate_status} {duplicate_body}"
+            "duplicate aggregate response did not name the identity fence: {duplicate_status} {duplicate_body}"
         );
 
-        let unchanged_report: EffectGroupRunReport = http
-            .get(&group_url)
+        let unchanged_report: AggregateRunReport = http
+            .get(&aggregate_url)
             .send()
             .await
-            .expect("read unchanged effect-group report")
+            .expect("read unchanged aggregate report")
             .json()
             .await
-            .expect("decode unchanged effect-group report");
-        assert_eq!(unchanged_report, group_report);
-        println!(
-            "AGENT_SERVICE_EFFECT_GROUP group={} settings=OK preflight=ABSENT ranks={:?} cancelled_losers={} durable_read=MATCH duplicate=REFUSED unchanged=MATCH terminal=PASS",
-            group_report.group_key, group_report.settlements, group_report.cancelled_losers
-        );
-
-        // The group report above proves that Restate recorded two cancelled
-        // members. This separate wait proves the underlying await-event
-        // terminal itself is durable: a fresh observer sees `Cancelled`, a
-        // second await returns immediately, and a late completion cannot win.
+            .expect("decode unchanged aggregate report");
+        assert_eq!(unchanged_report, aggregate_report);
+        // A separate wait pins durable await-event cancellation independently
+        // of timer Closing in the aggregate's Run.
         let wait_host = RestateEffectHost::outside_deployment(
             ingress_url,
-            lash::restate::RestateAuthorityId::new("agent-service-effect-group-test").unwrap(),
+            lash::restate::RestateAuthorityId::new("agent-service-aggregate-test").unwrap(),
         );
         let wait_scope = ExecutionScope::turn(
             lash::SessionId::fixture(format!(
@@ -459,13 +434,6 @@ finish("done via Restate E2E");
                 lash::restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
             ),
         ));
-        // The worked example keeps its Sleep-only resolver as the deployment's
-        // one answer, so no tool-child host is installed here — the same shape
-        // the conformance suites use.
-        backend
-            .restate_effect_host()
-            .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
-            .expect("register worked effect-group resolver");
         let lash_backend = lash::Backend::new(backend.clone());
         let factory = crate::rlm_factory(&lash_backend);
         let core = LashCore::rlm_builder(

@@ -1389,7 +1389,24 @@ pub mod durability {
 /// Runtime events, errors, and execution controls.
 pub mod runtime {
     pub use lash_core::IngressReservedSourceKeyRefusal;
+    pub use lash_core::engine::{ObservationSink, ObservedEvent, ReplayKey, ShiftObservation};
     pub use lash_core::facade_support::TraceBoundaryReceipt;
+    pub use lash_core::runtime::{AttemptStreamRecorder, DeclaredStartPhase, StartCancelDecision};
+    /// Logical Run aggregates share recorded selection, loser progress and
+    /// terminal closing with tool execution. Timers need no tool registry.
+    pub use lash_core::tool_dispatch::{
+        BeforeCheckReply, DecidedCall, DeclaredStartObligation, DeclaredStartObligationRefusal,
+        IsolatedProcessDescriptor, IsolatedStartRefusal, IsolatedToolStart, RecordedIsolatedStart,
+        RunAggregateOutcome, RunCoordinator, RunCutRefusal, SingletonAttempt, SingletonBodyOutcome,
+        SingletonCapture, SingletonDrift, SingletonPreparedRequest, SingletonPresentationError,
+        SingletonRunError, SingletonStart, SingletonTerminal, SingletonToolCall,
+        SingletonToolHandlers,
+    };
+    pub use lash_core::tool_run::{
+        AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AggregateConsumer, AggregateLeaf,
+        AggregatePlan, AttributedVerdict, Cut, CutPhase, RecordedRetryPolicy, RunLifecycle,
+        RunTransfer, SegmentOrdinal,
+    };
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::engine::{
         AdmitRequest, AdmitVerdict, EngineAck, EngineCursor, EnginePage, EngineParkRecorded,

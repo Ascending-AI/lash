@@ -29,7 +29,7 @@ use lash_upgrade_harness::node::objects::HandlerRefusal;
 use lash_upgrade_harness::node::remote::{ClientReport, Unsupported};
 use lash_upgrade_harness::node::served_by;
 
-use crate::support::{GROUP, Leg, open_group_body, record, refused, replied};
+use crate::support::{Leg, WAIT_INDEX, record, refused, replied};
 
 /// Every message a client received was at `version`, and it received at
 /// least one stream item, the reply and the error.
@@ -231,10 +231,7 @@ fn restate_wire(
     let next_node = next.serve(case)?;
     let next_deployment = block_on(view.deployment_at(next_node.uri()?))?;
     let key = case.session_id("wire-n-caller");
-    let opened = n.call(
-        case,
-        &CallSpec::object(GROUP, &key, "open").body(open_group_body(&view, &key)?),
-    )?;
+    let opened = n.call(case, &CallSpec::object(WAIT_INDEX, &key, "reinstate"))?;
     record(leg, "restate-n-caller.json", &opened)?;
     let (wire, body) = replied(&opened)?;
     ensure!(
@@ -243,8 +240,8 @@ fn restate_wire(
         opened.wire
     );
     ensure!(wire == 1, "N+1 answered N's call at wire {wire}");
-    ensure!(body["type"] == "opened_fresh", "the open answered {body}");
-    let invocations = block_on(view.invocations(GROUP, &key, "open"))?;
+    ensure!(body.is_null(), "the open answered {body}");
+    let invocations = block_on(view.invocations(WAIT_INDEX, &key, "reinstate"))?;
     ensure!(
         invocations.len() == 1
             && invocations[0].pinned_deployment_id.as_deref() == Some(next_deployment.id.as_str()),
@@ -252,14 +249,17 @@ fn restate_wire(
         next_deployment.id
     );
     // The same handler answers N+1's own caller at the newer wire.
-    let probed = next.call(case, &CallSpec::object(GROUP, &key, "probe"))?;
+    let probed = next.call(case, &CallSpec::object(WAIT_INDEX, &key, "outstanding"))?;
     let (wire, body) = replied(&probed)?;
     ensure!(
         probed.wire == VersionRange::between(1, 2) && wire == 2,
         "N+1 to N+1 answered at wire {wire} for {}",
         probed.wire
     );
-    ensure!(body["type"] == "exists", "the probe answered {body}");
+    ensure!(
+        body.as_array().is_some_and(Vec::is_empty),
+        "the probe answered {body}"
+    );
 
     // Rollback: N registers at a fresh URI, and N+1's deployment stays.
     let n_again = n.serve(case)?;
@@ -278,15 +278,12 @@ fn restate_wire(
 
     // An N+1 caller reaches N's handler and is answered at wire 1.
     let key = case.session_id("wire-next-caller");
-    let opened = next.call(
-        case,
-        &CallSpec::object(GROUP, &key, "open").body(open_group_body(&view, &key)?),
-    )?;
+    let opened = next.call(case, &CallSpec::object(WAIT_INDEX, &key, "reinstate"))?;
     record(leg, "restate-next-caller.json", &opened)?;
     let (wire, body) = replied(&opened)?;
     ensure!(wire == 1, "N answered N+1's call at wire {wire}");
-    ensure!(body["type"] == "opened_fresh", "the open answered {body}");
-    let invocations = block_on(view.invocations(GROUP, &key, "open"))?;
+    ensure!(body.is_null(), "the open answered {body}");
+    let invocations = block_on(view.invocations(WAIT_INDEX, &key, "reinstate"))?;
     ensure!(
         invocations.len() == 1
             && invocations[0].pinned_deployment_id.as_deref() == Some(n_deployment.id.as_str()),
@@ -299,9 +296,7 @@ fn restate_wire(
     let peer = VersionRange::exactly(2);
     let disjoint = next.call(
         case,
-        &CallSpec::object(GROUP, &key, "open")
-            .body(open_group_body(&view, &key)?)
-            .wire(peer),
+        &CallSpec::object(WAIT_INDEX, &key, "reinstate").wire(peer),
     )?;
     record(leg, "restate-disjoint.json", &disjoint)?;
     ensure!(
@@ -313,9 +308,9 @@ fn restate_wire(
         "N refused the disjoint call with {:?}",
         disjoint.outcome
     );
-    let state = block_on(view.object_state(GROUP, &key))?;
+    let state = block_on(view.object_state(WAIT_INDEX, &key))?;
     ensure!(state.is_empty(), "the disjoint call wrote state: {state:?}");
-    let invocations = block_on(view.invocations(GROUP, &key, "open"))?;
+    let invocations = block_on(view.invocations(WAIT_INDEX, &key, "reinstate"))?;
     ensure!(
         invocations
             .iter()

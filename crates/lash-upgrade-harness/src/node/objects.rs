@@ -32,7 +32,7 @@ pub enum TargetKind {
 pub struct CallArgs {
     #[command(flatten)]
     pub restate: RestateArgs,
-    /// The lash service, by its unqualified name (`EffectGroupIndex`).
+    /// The lash service, by its unqualified name (`LashDurableWaitIndex`).
     #[arg(long)]
     pub service: String,
     #[arg(long, value_enum, default_value_t = TargetKind::Object)]

@@ -1111,7 +1111,7 @@ impl Case {
     }
 
     /// The `lashctl drain-status` arguments for `generation` against this
-    /// case's Restate server, where the committed effect-group children
+    /// case's Restate server, where the Run's recorded attempts
     /// still owed a drain on its lane are read (FIG-4454).
     pub fn drain_status_args<'a>(&'a self, generation: &'a str) -> [&'a str; 4] {
         [

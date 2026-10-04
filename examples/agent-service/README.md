@@ -97,7 +97,7 @@ among them the generic `LashProcessWorkflow` over the service's process worker
 and the store set's process registry, so background process starts from a turn
 are reconstructed from the SQLite durable-core catalog instead of running in the
 route process. The service binds only its own workflows beside them: the
-effect-group demo, and the chat-discard workflow its fork compensator calls to
+timer aggregate demo, and the chat-discard workflow its fork compensator calls to
 delete a half-built fork's session through the engine (a session delete's close
 is a journaled effect, so it runs in a handler). It runs no turn itself. The chat id names the session and the turn id
 names the run, so Restate replay and Lash's final commit address the same
@@ -274,35 +274,30 @@ a silently truncated stream, with the error reported only in the server logs.
 That behavior is deliberate for this raw transport lane: the session's engine
 executes the turn, and the route only watches it.
 
-## Effect groups
+## Timer aggregates
 
-Among the Lash-owned services are the effect-group ones: `EffectGroupIndex`,
-`EffectGroupPayload`, `EffectGroupDispatch`, `LashDurableWaitWorkflow`, and
-`LashDurableWaitIndex`. The worked HTTP path
-runs a three-child deadline group with one short sleep and two long sleeps. It
-returns the first completed settlement at rank 1, closes under `Cancel`, and
-then reads all durable ranks so the cancelled losers are visible without a
-crate-internal test hook:
+The host's `AgentServiceAggregateWorkflow` runs one short timer and two long
+ones in its own Run journal. Whole-plan admission precedes the race result.
+The winner leaves the Run live; the workflow explicitly closes its logical
+owner and records the final report before returning. Timers use Run admission
+and recorded selection, with no group index, dispatcher or payload service.
 
 ```http
-POST /api/effect-groups
+POST /api/aggregates
 Content-Type: application/json
 
 {"run_id":"worked-example-1"}
 ```
 
-`GET /api/effect-groups/worked-example-1` reads the same terminal ranked
-report from the Restate index. Run ids are one-shot workflow identities;
-reusing one is rejected instead of attaching a new example request to old
-durable state.
+`GET /api/aggregates/worked-example-1` reads the retained workflow report.
+It lists the winner and the completed and cancelled source positions. Run ids
+are one-shot workflow identities, and a second POST after completion refuses
+reuse. Pending calls with the same identity coalesce in Restate.
 
-The same live E2E also exercises a directly cancelled await-event through the
-public `RestateEffectHost` and `AwaitEventResolver` APIs. This is deliberately
-separate from the group report: a `Cancelled` group member proves the group
-index classified a loser, while the direct witness proves the await-event
-terminal itself was persisted. It peeks `Cancelled` from a fresh call,
-re-awaits without hanging, and verifies that a late completion observes
-`AlreadyResolved { terminal: Cancelled }` instead of replacing the terminal.
+The live E2E separately checks a directly cancelled await-event through
+`RestateEffectHost` and `AwaitEventResolver`. A fresh observer reads
+`Cancelled`, re-awaits without hanging, and a late completion observes
+`AlreadyResolved { terminal: Cancelled }`.
 
 ## Retention
 

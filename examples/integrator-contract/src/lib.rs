@@ -389,20 +389,10 @@ impl EffectHost for Integrator {
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
         unreachable!("external signature witness")
     }
-    fn scoped_for_group_child(
-        &self,
-        _admitted: AdmittedScope,
-        _binding: GroupChildBinding,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        unreachable!("external signature witness")
-    }
     fn route_handler_child_controller<'run>(
         &self,
         controller: ScopedEffectController<'run>,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    fn install_tool_child_host(&self, candidate: Arc<ToolChildHost>) -> Option<Arc<ToolChildHost>> {
         unreachable!("external signature witness")
     }
     fn await_event_resolver(&self) -> &dyn AwaitEventResolver {
@@ -462,12 +452,6 @@ impl RuntimeEffectController for Integrator {
     ) -> Result<bool, RuntimeEffectControllerError> {
         unreachable!("external signature witness")
     }
-    async fn observe_group_child_cancel(&self) -> Result<bool, RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    fn group_child_cancel_watch(&self) -> Option<Arc<dyn GroupChildCancelWatch>> {
-        unreachable!("external signature witness")
-    }
     async fn record_process_drive_step(
         &self,
         name: String,
@@ -487,59 +471,6 @@ impl RuntimeEffectController for Integrator {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    async fn open_effect_group(
-        &self,
-        group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn GroupExecutors>,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    fn group_child_scoped_controller(
-        &self,
-        _admitted: AdmittedScope,
-        _binding: GroupChildBinding,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn await_next_settlement(
-        &self,
-        handle: &mut EffectGroupHandle,
-        cancel: TurnCancelWait,
-    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    async fn close_effect_group(
-        &self,
-        handle: EffectGroupHandle,
-        disposition: LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    async fn commit_group_child_final(
-        &self,
-        commit: GroupChildFinalCommit,
-    ) -> Result<EffectGroupChildCommitOutcome, RuntimeEffectControllerError> {
-        unreachable!("external signature witness")
-    }
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<(), RuntimeEffectControllerError> {
         unreachable!("external signature witness")
     }
     async fn read_recorded_journal(
@@ -1361,4 +1292,33 @@ impl FleetFormatStore for Integrator {
     fn fleet_format(&self) -> FleetFormat {
         FleetFormat::current()
     }
+}
+
+/// A host's generic aggregate requires only its admitted journal controller.
+pub async fn generic_aggregate_witness(
+    scoped: &ScopedEffectController<'_>,
+) -> Result<(), lash::runtime::SingletonRunError> {
+    let plan = lash::runtime::AggregatePlan {
+        key: "integrator-timers".to_owned(),
+        leaves: vec![lash::runtime::AggregateLeaf::Timer { duration_ms: 1 }],
+        operands: vec![0],
+    };
+    let mut run = lash::runtime::RunCoordinator::open(
+        scoped,
+        EffectOpener::session_operation("integrator", "timers"),
+        lash::runtime::SegmentOrdinal(0),
+        Vec::new(),
+    );
+    run.admit_aggregate(&plan, &lash::runtime::SystemClock)
+        .await?;
+    run.consume_aggregate(&plan.key, lash::runtime::AggregateConsumer::Race)
+        .await?;
+    run.close().await
+}
+
+/// Lash and the host bind handlers on the same SDK Endpoint.
+pub fn shared_endpoint_witness(
+    endpoint: lash::restate::restate_sdk::endpoint::Endpoint,
+) -> lash::restate::restate_sdk::endpoint::Endpoint {
+    endpoint
 }

@@ -41,6 +41,61 @@ enum Selection {
 }
 
 impl<'a> RunCoordinator<'a> {
+    /// Admit timers, immediate operands and handles of calls this Run already
+    /// owns. This uses the same recorded terminal order as tool aggregates,
+    /// without a tool callback registry or a group service.
+    ///
+    /// # Errors
+    /// A typed mapping, owner, lifecycle or journal refusal. An unknown call
+    /// refuses the entire plan before any timer starts.
+    pub async fn admit_aggregate(
+        &mut self,
+        plan: &AggregatePlan,
+        clock: &dyn crate::Clock,
+    ) -> Result<(), SingletonRunError> {
+        plan.validate()?;
+        if let Some(cut) = self.cut {
+            return Err(super::RunCutRefusal::AdmissionFrozen { reason: cut.reason }.into());
+        }
+        if plan.leaves.iter().any(|leaf| {
+            matches!(leaf, AggregateLeaf::Call { call_id } if !self.journal.ledger.has_call(call_id))
+        }) {
+            return Err(RunEventRefusal::AggregateShape { key: plan.key.clone() }.into());
+        }
+        self.begin_frame()?;
+        let record = self.journal.record(vec![RunEvent::AggregateAdmitted {
+            plan: plan.clone(),
+            admitted_at_ms: clock.timestamp_ms(),
+        }]);
+        let result = async {
+            let mut ledger = self.journal.ledger.clone();
+            ledger.append(self.journal.segment, &record)?;
+            self.journal
+                .append(
+                    format!("lash:run:aggregate:{}:admit", plan.key),
+                    Box::pin(async move {
+                        Ok(RunJournalEntry {
+                            record,
+                            materials: Vec::new(),
+                            state: Vec::new(),
+                        })
+                    }),
+                )
+                .await?;
+            if self.aggregate_plan(&plan.key)? != *plan {
+                return Err(RunEventRefusal::AggregateShape {
+                    key: plan.key.clone(),
+                }
+                .into());
+            }
+            self.register_aggregate_timers(plan, clock)
+        }
+        .await;
+        self.active_frame = false;
+        self.note_fault(&result);
+        result
+    }
+
     /// Admit all pending siblings, aliases, immediate operands and timer
     /// deadlines before a consumer can leave with an immediate winner.
     /// Existing admitted calls may be referenced without another attempt.
@@ -120,6 +175,7 @@ impl<'a> RunCoordinator<'a> {
         let (selection, settlements) = loop {
             let (selection, settlements) = self.select(&plan, consumer)?;
             if !matches!(selection, Selection::Pending)
+                || plan.operands.is_empty()
                 || (self.pending.is_empty() && self.timers.is_empty())
             {
                 break (selection, settlements);

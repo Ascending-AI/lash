@@ -1417,10 +1417,8 @@ async fn async_main() -> Result<()> {
         .await?;
     }
 
-    // Lash's own services — durable waits, processes and the effect groups a
-    // tool batch opens — come from the backend, over the effect host every
-    // core of this worker installs its tool-child resolver on. The worker
-    // binds only its turn workflow beside them.
+    // Lash's endpoint owns the turn journal, durable sources and processes.
+    // Host workflows use that same Endpoint and admit turns through send().
     let mut builder = backend.endpoint_builder(processes)?;
     if let Some(load) = state.load.clone() {
         builder = builder.bind(

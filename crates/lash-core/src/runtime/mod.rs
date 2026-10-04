@@ -346,6 +346,7 @@ pub use process::{
     accepted_process_registration, fail_parent_end_once, refused_process_registrations,
 };
 pub use process::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
+pub use process::{DeclaredStartPhase, StartCancelDecision};
 pub use process::{
     HostStartAdmission, ProcessStartStores, RegisteredProcessStart, SessionTurnAdmission,
     register_process_start,

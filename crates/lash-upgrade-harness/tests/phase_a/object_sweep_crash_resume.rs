@@ -1,8 +1,8 @@
 //! `object_sweep_crash_resume` (ADR 0115 §6): Restate object state across
 //! a roll, a finalize and the synthetic N+1's sweep.
 //!
-//! Before finalize, N and then N+1 (the newest deployment) each open effect
-//! groups and answer a turn. Every group's `_compat` and stored value, and
+//! Before finalize, N and then N+1 (the newest deployment) each open durable source
+//! registries and answer a turn. Every source registry's `_compat` and stored value, and
 //! every `LashTurn` outcome, is at N's format: the fleet epoch pins N+1's
 //! writer to it. After a rollback N's handlers read every one.
 //!
@@ -16,7 +16,7 @@
 //! the crashed deployment's URI, and `lashctl objects-sweep` finishes exactly
 //! the objects the preflight listed. Finally an operator keeps an N
 //! deployment by registering it: its handlers are refused by every swept
-//! group's `_compat`, typed, with no state changed.
+//! source registry's `_compat`, typed, with no state changed.
 
 use anyhow::{Context, Result, ensure};
 use lash_core_store::compat::CompatRefusal;
@@ -30,20 +30,19 @@ use lash_upgrade_harness::node::objects::HandlerRefusal;
 use lash_upgrade_harness::node::served_by;
 use lash_upgrade_harness::restate_view::RestateView;
 
-use crate::support::{GROUP, Leg, open_group_body, record, refused, replied};
+use crate::support::{Leg, WAIT_INDEX, record, refused, replied};
 
-/// Each build opens this many groups before finalize.
-const GROUPS_PER_BUILD: usize = 3;
-/// The sweep is crashed after this many groups.
+/// Each build opens this many objects before finalize.
+const OBJECTS_PER_BUILD: usize = 3;
+/// The sweep is crashed after this many objects.
 const SWEPT_BEFORE_CRASH: usize = 2;
-/// The state key a group's record is stored under.
-const GROUP_STATE_KEY: &str = "effect-group/v1/state";
+/// The state key a source registry's record is stored under.
+const WAIT_STATE_KEY: &str = "wait-index/v2/metadata";
 
-/// Open `count` fresh groups as a caller of `build`, each answered at
+/// Open `count` fresh objects as a caller of `build`, each answered at
 /// `wire`.
-fn open_groups(
+fn create_sources(
     case: &Case,
-    view: &RestateView,
     build: &NodeBinary,
     prefix: &str,
     count: usize,
@@ -52,13 +51,10 @@ fn open_groups(
     (0..count)
         .map(|index| {
             let key = case.session_id(&format!("{prefix}-{index}"));
-            let opened = build.call(
-                case,
-                &CallSpec::object(GROUP, &key, "open").body(open_group_body(view, &key)?),
-            )?;
+            let opened = build.call(case, &CallSpec::object(WAIT_INDEX, &key, "reinstate"))?;
             let (answered, body) = replied(&opened)?;
             ensure!(
-                answered == wire && body["type"] == "opened_fresh",
+                answered == wire && body.is_null(),
                 "opening {key} answered {answered} {body}"
             );
             Ok(key)
@@ -81,9 +77,9 @@ fn preflight_keys(body: &serde_json::Value, service: &str) -> Vec<String> {
     keys
 }
 
-/// A group's `_compat` and the format its record is stamped with.
-fn group_formats(view: &RestateView, key: &str) -> Result<(ObjectCompat, u64)> {
-    let state = block_on(view.object_state(GROUP, key))?;
+/// A source registry's `_compat` and the format its record is stamped with.
+fn source_formats(view: &RestateView, key: &str) -> Result<(ObjectCompat, u64)> {
+    let state = block_on(view.object_state(WAIT_INDEX, key))?;
     let compat: ObjectCompat = serde_json::from_value(
         state
             .get(COMPAT_KEY)
@@ -91,7 +87,7 @@ fn group_formats(view: &RestateView, key: &str) -> Result<(ObjectCompat, u64)> {
             .with_context(|| format!("{key} holds no `_compat`: {state:?}"))?,
     )?;
     let format = state
-        .get(GROUP_STATE_KEY)
+        .get(WAIT_STATE_KEY)
         .and_then(|value| value["format"].as_u64())
         .with_context(|| format!("{key} holds no stamped record: {state:?}"))?;
     Ok((compat, format))
@@ -105,10 +101,10 @@ fn outcomes_of(view: &RestateView, session: &str) -> Result<Vec<(String, serde_j
         .collect())
 }
 
-/// Every group is admitted by N+1 and holds a record at `format`.
-fn all_at(view: &RestateView, groups: &[String], format: u32) -> Result<()> {
-    for key in groups {
-        let (compat, stored) = group_formats(view, key)?;
+/// Every source registry is admitted by N+1 and holds a record at `format`.
+fn all_at(view: &RestateView, objects: &[String], format: u32) -> Result<()> {
+    for key in objects {
+        let (compat, stored) = source_formats(view, key)?;
         ensure!(
             compat == ObjectCompat::fresh(format) && stored == u64::from(format),
             "{key} is at `_compat` {compat:?} with a record at {stored}, not {format}"
@@ -124,7 +120,7 @@ fn all_at(view: &RestateView, groups: &[String], format: u32) -> Result<()> {
 /// refused typed by `_compat`.
 #[test]
 #[ignore = "needs both node builds, PostgreSQL and a restate-server: `just phase-a` runs it"]
-fn object_sweep_crash_resume() -> Result<()> {
+fn l21_source_registry_sweep_survives_crash_and_refuses_predecessor() -> Result<()> {
     let leg = Leg::start("object_sweep_crash_resume")?;
     let (n, next) = (&leg.builds.n, &leg.builds.next);
     let case = Case::postgres_database("sweep", &leg.services, &leg.scratch)?;
@@ -136,7 +132,7 @@ fn object_sweep_crash_resume() -> Result<()> {
     // Before finalize: N writes, then N+1 writes as the newest deployment.
     let n_first = n.serve(&case)?;
     let n_generation = n_first.generation()?.to_owned();
-    let mut groups = open_groups(&case, &view, n, "sweep-n", GROUPS_PER_BUILD, 1)?;
+    let mut objects = create_sources(&case, n, "sweep-n", OBJECTS_PER_BUILD, 1)?;
     let session_n = case.session_id("sweep-turn-n");
     let turn = n.turn(&case, &session_n, "a turn N answers")?;
     ensure!(turn.reply.as_deref() == Some(served_by(BuildLabel::N, &n_generation).as_str()));
@@ -145,9 +141,9 @@ fn object_sweep_crash_resume() -> Result<()> {
     let next_first = next.serve(&case)?;
     let next_generation = next_first.generation()?.to_owned();
     let next_deployment = block_on(view.deployment_at(next_first.uri()?))?;
-    let written_by_next = open_groups(&case, &view, next, "sweep-next", GROUPS_PER_BUILD, 2)?;
+    let written_by_next = create_sources(&case, next, "sweep-next", OBJECTS_PER_BUILD, 2)?;
     for key in &written_by_next {
-        let invocations = block_on(view.invocations(GROUP, key, "open"))?;
+        let invocations = block_on(view.invocations(WAIT_INDEX, key, "reinstate"))?;
         ensure!(
             invocations.len() == 1
                 && invocations[0].pinned_deployment_id.as_deref()
@@ -155,7 +151,7 @@ fn object_sweep_crash_resume() -> Result<()> {
             "{key} was not opened by N+1's handler: {invocations:?}"
         );
     }
-    groups.extend(written_by_next);
+    objects.extend(written_by_next);
     let session_next = case.session_id("sweep-turn-next");
     let turn = next.turn(&case, &session_next, "a turn N+1 answers")?;
     ensure!(
@@ -163,8 +159,17 @@ fn object_sweep_crash_resume() -> Result<()> {
         "N+1 did not execute its turn: {turn:?}"
     );
 
+    let seeded_objects = objects;
+    let objects: Vec<_> = block_on(view.compat_records(WAIT_INDEX))?
+        .into_keys()
+        .collect();
+    ensure!(
+        seeded_objects.iter().all(|key| objects.contains(key)),
+        "the registry inventory {objects:?} omits seeded objects {seeded_objects:?}"
+    );
+
     // Everything either build wrote is in N's format.
-    all_at(&view, &groups, 1).context("before finalize")?;
+    all_at(&view, &objects, 1).context("before finalize")?;
     let mut outcomes = outcomes_of(&view, &session_n)?;
     outcomes.extend(outcomes_of(&view, &session_next)?);
     ensure!(
@@ -179,17 +184,20 @@ fn object_sweep_crash_resume() -> Result<()> {
         );
     }
 
-    // Rollback: N, at a fresh URI, reads every group and every outcome.
+    // Rollback: N, at a fresh URI, reads every source registry and every outcome.
     let n_back = n.serve(&case)?;
     let n_back_deployment = block_on(view.deployment_at(n_back.uri()?))?;
-    for key in &groups {
-        let probe = n.call(&case, &CallSpec::object(GROUP, key, "probe"))?;
+    for key in &objects {
+        let probe = n.call(&case, &CallSpec::object(WAIT_INDEX, key, "outstanding"))?;
         let (wire, body) = replied(&probe)?;
         ensure!(
-            wire == 1 && body["type"] == "exists",
+            wire == 1
+                && body
+                    .as_array()
+                    .is_some_and(|waits| { !seeded_objects.contains(key) || waits.is_empty() }),
             "N read {key} as {wire} {body}"
         );
-        let invocations = block_on(view.invocations(GROUP, key, "probe"))?;
+        let invocations = block_on(view.invocations(WAIT_INDEX, key, "outstanding"))?;
         ensure!(
             invocations
                 .last()
@@ -227,7 +235,7 @@ fn object_sweep_crash_resume() -> Result<()> {
         code == 3 && refused_sweep["error"]["refusal"]["refusal"] == "not_finalized",
         "the sweep before finalize answered {code} {refused_sweep}"
     );
-    all_at(&view, &groups, 1).context("after the refused sweep")?;
+    all_at(&view, &objects, 1).context("after the refused sweep")?;
 
     // Drain N's generation, and finalize.
     operator_next.run("drain", Some(&n_generation))?;
@@ -246,11 +254,11 @@ fn object_sweep_crash_resume() -> Result<()> {
     next_first.stop()?;
     let next_final = next.serve(&case)?;
 
-    // Preflight: every group is still at format 1, and `lashctl
+    // Preflight: every source registry is still at format 1, and `lashctl
     // objects-preflight` lists them, with the other families' objects.
-    let mut pending = block_on(view.objects_at_format(GROUP, 1))?;
+    let mut pending = block_on(view.objects_at_format(WAIT_INDEX, 1))?;
     pending.sort();
-    let mut expected = groups.clone();
+    let mut expected = objects.clone();
     expected.sort();
     ensure!(
         pending == expected,
@@ -263,7 +271,7 @@ fn object_sweep_crash_resume() -> Result<()> {
         "the preflight answered {code} {preflight}"
     );
     ensure!(
-        preflight_keys(&preflight, GROUP) == expected,
+        preflight_keys(&preflight, WAIT_INDEX) == expected,
         "the preflight listed {preflight}, not {expected:?}"
     );
 
@@ -300,7 +308,7 @@ fn object_sweep_crash_resume() -> Result<()> {
                 && line.outcome == ObjectUpgradeResponse::Upgraded { from: 1, format: 2 },
             "the sweep answered {line:?}"
         );
-        if line.service == GROUP {
+        if line.service == WAIT_INDEX {
             swept.push(line.key.clone());
         }
         visited.push(line);
@@ -310,28 +318,28 @@ fn object_sweep_crash_resume() -> Result<()> {
     next_final.stop()?;
     sweeper.crash()?;
 
-    // The preflight lists what is left; the swept groups are at format 2.
-    let left = block_on(view.objects_at_format(GROUP, 1))?;
+    // The preflight lists what is left; the swept objects are at format 2.
+    let left = block_on(view.objects_at_format(WAIT_INDEX, 1))?;
     ensure!(
         swept.iter().all(|key| !left.contains(key)),
-        "the state lists a swept group: {left:?}"
+        "the state lists a swept source registry: {left:?}"
     );
     ensure!(
-        left.len() >= groups.len() - SWEPT_BEFORE_CRASH - 1
-            && left.len() <= groups.len() - SWEPT_BEFORE_CRASH,
-        "{} groups are left after {SWEPT_BEFORE_CRASH} of {} were swept: {left:?}",
+        left.len() >= objects.len() - SWEPT_BEFORE_CRASH - 1
+            && left.len() <= objects.len() - SWEPT_BEFORE_CRASH,
+        "{} objects are left after {SWEPT_BEFORE_CRASH} of {} were swept: {left:?}",
         left.len(),
-        groups.len()
+        objects.len()
     );
     let (code, preflight) = operator_next.answer_args(&case.objects_preflight_args())?;
     record(&leg, "preflight-after-crash.json", &preflight)?;
     let mut left_sorted = left.clone();
     left_sorted.sort();
     ensure!(
-        code == 5 && preflight_keys(&preflight, GROUP) == left_sorted,
+        code == 5 && preflight_keys(&preflight, WAIT_INDEX) == left_sorted,
         "the preflight after the crash answered {code} {preflight}, not {left_sorted:?}"
     );
-    all_at(&view, &swept, 2).context("the groups swept before the crash")?;
+    all_at(&view, &swept, 2).context("the objects swept before the crash")?;
 
     // N+1 comes back at the crashed deployment's URI, and `lashctl
     // objects-sweep` finishes the rest.
@@ -353,27 +361,30 @@ fn object_sweep_crash_resume() -> Result<()> {
             "the resumed sweep answered {line}"
         );
         ensure!(
-            line["service"] != GROUP || !swept.iter().any(|key| line["key"] == key.as_str()),
-            "the resumed sweep visited a group swept before the crash: {line}"
+            line["service"] != WAIT_INDEX || !swept.iter().any(|key| line["key"] == key.as_str()),
+            "the resumed sweep visited a source registry swept before the crash: {line}"
         );
     }
     ensure!(
         resumed["remaining"].as_array().is_some_and(Vec::is_empty),
         "the resumed sweep left {resumed}"
     );
-    let left = block_on(view.objects_at_format(GROUP, 1))?;
+    let left = block_on(view.objects_at_format(WAIT_INDEX, 1))?;
     ensure!(left.is_empty(), "the state still lists {left:?}");
     let preflight = operator_next.run_args(&case.objects_preflight_args())?;
     ensure!(
         preflight["upgraded"] == true,
         "the preflight after the sweep lists {preflight}"
     );
-    all_at(&view, &groups, 2).context("after the sweep")?;
-    for key in &groups {
-        let probe = next.call(&case, &CallSpec::object(GROUP, key, "probe"))?;
+    all_at(&view, &objects, 2).context("after the sweep")?;
+    for key in &objects {
+        let probe = next.call(&case, &CallSpec::object(WAIT_INDEX, key, "outstanding"))?;
         let (wire, body) = replied(&probe)?;
         ensure!(
-            wire == 2 && body["type"] == "exists",
+            wire == 2
+                && body
+                    .as_array()
+                    .is_some_and(|waits| { !seeded_objects.contains(key) || waits.is_empty() }),
             "N+1 read {key} as {wire} {body}"
         );
     }
@@ -387,20 +398,23 @@ fn object_sweep_crash_resume() -> Result<()> {
         "N's registration: {registered:?}"
     );
     let kept = block_on(view.deployment_at(kept_n.uri()?))?;
-    let key = &groups[0];
-    let before = block_on(view.object_state(GROUP, key))?;
+    let key = &seeded_objects[0];
+    let before = block_on(view.object_state(WAIT_INDEX, key))?;
     let floor = CompatRefusal::ReaderFloorAbove {
-        component: "restate-effect-group-state".to_owned(),
+        component: "restate-durable-wait-registry".to_owned(),
         found: 2,
         min_reader: 2,
         reads: VersionRange::exactly(1),
         writing_release: None,
     };
     for (handler, body) in [
-        ("probe", serde_json::Value::Null),
-        ("open", open_group_body(&view, key)?),
+        ("outstanding", serde_json::Value::Null),
+        ("reinstate", serde_json::Value::Null),
     ] {
-        let refusal = next.call(&case, &CallSpec::object(GROUP, key, handler).body(body))?;
+        let refusal = next.call(
+            &case,
+            &CallSpec::object(WAIT_INDEX, key, handler).body(body),
+        )?;
         record(&leg, &format!("kept-n-{handler}.json"), &refusal)?;
         ensure!(
             *refused(&refusal)?
@@ -410,7 +424,7 @@ fn object_sweep_crash_resume() -> Result<()> {
             "the kept N {handler} answered {:?}",
             refusal.outcome
         );
-        let invocations = block_on(view.invocations(GROUP, key, handler))?;
+        let invocations = block_on(view.invocations(WAIT_INDEX, key, handler))?;
         ensure!(
             invocations
                 .last()
@@ -419,7 +433,7 @@ fn object_sweep_crash_resume() -> Result<()> {
             "the refused {handler} did not run on the kept N deployment: {invocations:?}"
         );
     }
-    let after = block_on(view.object_state(GROUP, key))?;
+    let after = block_on(view.object_state(WAIT_INDEX, key))?;
     ensure!(
         before == after,
         "a refused handler changed {key}: {before:?} to {after:?}"
