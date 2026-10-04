@@ -286,7 +286,11 @@ impl DirectCompletionCapability {
             }
             DirectExecutionPosition::ToolAttempt => {
                 local_executor
-                    .execute_within_attempt(envelope, context.effect_attempt.clone())
+                    .execute_within_attempt(
+                        envelope,
+                        context.effect_attempt.clone(),
+                        &context.effect_controller,
+                    )
                     .await?
             }
         };

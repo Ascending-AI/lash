@@ -108,6 +108,7 @@ PACKAGE_DEPS = {
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "opentelemetry_sdk": "//third-party/rust:p0236",
             "tempfile": "//third-party/rust:p0390",
             "tokio": "//third-party/rust:p0399",
             "tracing_subscriber": "//third-party/rust:p0418"

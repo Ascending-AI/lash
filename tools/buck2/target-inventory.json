@@ -50851,6 +50851,7 @@
         "lash-internal-sqlite-store",
         "lash-internal-trace",
         "libc",
+        "opentelemetry_sdk",
         "rmp-serde",
         "schemars",
         "serde",

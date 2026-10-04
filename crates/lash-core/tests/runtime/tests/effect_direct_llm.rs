@@ -141,3 +141,133 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         .await
         .expect("close the operation's handler");
 }
+
+/// R8: a model call really executed inside a recorded tool attempt keeps
+/// the admitted Run anchor and any engine-supplied invocation identity.
+#[cfg(feature = "otel-trace")]
+#[tokio::test]
+async fn nested_direct_completion_exports_under_its_run_scope() {
+    use lash_trace::{
+        TraceCandidateOutcome, TraceCause, TraceScopeFactory, TraceScopeId, TraceScopeOwner,
+    };
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
+
+    let double = kernel_double(SEED + 39, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let spans = InMemorySpanExporter::default();
+    let tracer = SdkTracerProvider::builder()
+        .with_simple_exporter(spans.clone())
+        .build();
+    let meter = SdkMeterProvider::builder().build();
+    let telemetry = Arc::new(lash_trace::otel::OtelTelemetry::new(
+        &tracer,
+        &meter,
+        Default::default(),
+    ));
+    let session = SessionId::fixture("nested-direct-trace");
+    let run = TurnId::fixture("nested-direct-run");
+    let scope_id = TraceScopeId::admission(TraceScopeOwner::Run {
+        session_id: session.clone(),
+        run: run.clone(),
+    });
+    let candidate = telemetry.propose(&scope_id, &TraceCause::Root);
+    let anchor = candidate.anchor();
+    candidate.settle(TraceCandidateOutcome::Selected);
+    let scope = lash_trace::DurableTraceScope {
+        scope: scope_id,
+        cause: TraceCause::Root,
+        anchor: anchor.clone(),
+        started_at_ms: 1,
+    };
+    let mut config = test_runtime_host_config(&backend);
+    config.tracing = config
+        .tracing
+        .clone()
+        .with_scopes(telemetry.clone())
+        .with_projector(telemetry);
+    let transport = TestProvider::builder()
+        .complete(|_| async {
+            Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "nested answer".into(),
+                    response_meta: None,
+                }],
+                terminal_reason: LlmTerminalReason::Stop,
+                ..Default::default()
+            })
+        })
+        .build();
+    let runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        transport,
+        EmbeddedRuntimeHost::new(config),
+    )
+    .await;
+    let handler = double
+        .open_handler(AdmittedScope::turn(session.clone(), run.clone()))
+        .await
+        .expect("open Run handler");
+    let scoped = handler.scoped().with_trace_scope(scope);
+    let observed_invocation = scoped
+        .controller()
+        .attempt_observation()
+        .and_then(|observation| observation.invocation_id);
+    let parent = RuntimeEffectInvocation::new(
+        EffectAddress::new(ExecutionScope::turn(&session, &run), "tool-attempt")
+            .expect("tool attempt address"),
+        RuntimeAttribution::for_turn(&session, &run, 0, 0),
+        "tool-attempt",
+    )
+    .into_runtime_invocation();
+    let direct = runtime
+        .runtime_session_services()
+        .expect("session services")
+        .direct_completion_client(scoped, Some(run))
+        .with_tool_attempt_parent_invocation(parent)
+        .with_effect_attempt(Some(EffectAttempt::default()));
+    let completion = direct
+        .direct_completion(
+            lash_core::facade_support::DirectRequest::text("nested request"),
+            "nested-trace",
+        )
+        .await
+        .expect("nested model completion");
+    assert_eq!(completion.text, "nested answer");
+    drop(direct);
+    handler.close().await.expect("close Run handler");
+    tracer.force_flush().expect("flush completed model span");
+    let exported = spans.get_finished_spans().expect("read acknowledged spans");
+    let models: Vec<_> = exported
+        .iter()
+        .filter(|span| {
+            span.attributes.iter().any(|attribute| {
+                attribute.key.as_str() == "gen_ai.operation.name"
+                    && attribute.value.as_str() == "chat"
+            })
+        })
+        .collect();
+    assert_eq!(
+        models.len(),
+        1,
+        "one executed nested model call must export one span"
+    );
+    let anchor = anchor.context().expect("admitted OTel anchor");
+    assert_eq!(
+        models[0].span_context.trace_id().to_string(),
+        anchor.trace_id().to_string()
+    );
+    assert_eq!(
+        models[0].parent_span_id.to_string(),
+        anchor.span_id().to_string()
+    );
+    let exported_invocation = models[0]
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == "lash.attempt.invocation_id")
+        .map(|attribute| attribute.value.as_str().into_owned());
+    assert_eq!(exported_invocation, observed_invocation);
+    tracer.shutdown().expect("shutdown tracer");
+    meter.shutdown().expect("shutdown meter");
+}

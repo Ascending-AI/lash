@@ -87,11 +87,20 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self,
         envelope: RuntimeEffectEnvelope,
         effect_attempt: Option<crate::EffectAttempt>,
+        controller: &crate::ScopedEffectController<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         if let Some(refusal) = self.served_only_refusal() {
             return Err(refusal);
         }
-        let outcome = Box::pin(self.run_body(envelope, effect_attempt.clone())).await;
+        // Nested model work has no independent journal command. Its body
+        // still runs under the enclosing attempt's admitted scope and
+        // transport observation, with the same attempt fault latch.
+        let executor = self.issued_under(
+            controller.frontier().clone(),
+            controller.controller().attempt_observation(),
+            controller.trace_scope().cloned(),
+        );
+        let outcome = Box::pin(executor.run_body(envelope, effect_attempt.clone())).await;
         if let (Err(fault), Some(attempt)) = (&outcome, &effect_attempt)
             && fault.code == crate::RuntimeErrorCode::LlmProfileUnavailable
             && fault.is_attempt_fault()

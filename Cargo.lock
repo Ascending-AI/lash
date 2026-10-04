@@ -2142,6 +2142,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "libc",
+ "opentelemetry_sdk",
  "rmp-serde",
  "schemars 1.2.2",
  "serde",

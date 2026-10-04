@@ -56,6 +56,7 @@ futures-util = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 # `sqlite_memory_store_backend`: a store-only backend over the recording effect host
 # (FIG-3668, D1 PR-S2); another dev-dependency cycle through this crate.
 lash-conformance = { workspace = true }
