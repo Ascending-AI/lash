@@ -128,6 +128,19 @@ impl ProductionToolHandlers<'_> {
             .get(call_id)
             .cloned()
             .ok_or("the final has no hydrated admission")?;
+        if let crate::ToolCallOutcome::Cancelled(cancel) = &captured.output.outcome
+            && cancel.origin == Some(crate::CancelOrigin::TurnStopped)
+            && cancel.source == crate::ToolFailureSource::Cancellation
+        {
+            // This fact came from recorded X, so D carries the existing typed
+            // cancellation verdict even when replay never reenters the body.
+            return Ok(vec![AttributedVerdict {
+                callback: prepared.input.binding.executable,
+                verdict: AfterCheckVerdict::Cancel {
+                    cause: cause("tool_cancel", cancel),
+                },
+            }]);
+        }
         let dispatch = self.dispatch(&prepared.input).await?;
         let original = captured.original.unwrap_or_else(|| captured.output.clone());
         let (original, _) = ToolResultCandidate::split(original);

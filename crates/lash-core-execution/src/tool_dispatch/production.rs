@@ -450,25 +450,34 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 prepared.input.definition.manifest.clone(),
             )),
         };
-        let body = self.context.run_turn_step_body(|stop| async {
-            let context = match stop {
-                Some(stop) => context.with_step_stop(stop),
-                None => context,
-            };
-            Box::pin(retry::execute_leaf_tool_attempt(
-                &dispatch,
-                &authority,
-                &prepared.call,
-                context,
-                attempt.attempt.get(),
-                match prepared.input.definition.manifest.retry_policy {
-                    crate::ToolRetryPolicy::Never => 1,
-                    crate::ToolRetryPolicy::Safe { max_attempts, .. } => max_attempts,
-                },
-            ))
-            .await
+        // The watch belongs inside X: replay consults X's recorded outcome,
+        // rather than a live token when deciding whether A may publish state.
+        let body = self.context.run_turn_step_body(|stop| {
+            let dispatch = &dispatch;
+            let authority = &authority;
+            let call = &prepared.call;
+            let retry_policy = prepared.input.definition.manifest.retry_policy;
+            async move {
+                if let Some(stop) = &stop {
+                    context = context.with_step_stop(stop.clone());
+                }
+                let outcome = Box::pin(retry::execute_leaf_tool_attempt(
+                    dispatch,
+                    authority,
+                    call,
+                    context,
+                    attempt.attempt.get(),
+                    match retry_policy {
+                        crate::ToolRetryPolicy::Never => 1,
+                        crate::ToolRetryPolicy::Safe { max_attempts, .. } => max_attempts,
+                    },
+                ))
+                .await;
+                let stopped = stop.as_ref().is_some_and(|stop| stop.is_cancelled());
+                (outcome, stopped)
+            }
         });
-        let outcome = match futures_util::future::select(
+        let (outcome, stopped) = match futures_util::future::select(
             Box::pin(body),
             Box::pin(effect_attempt.attempt_faulted()),
         )
@@ -483,6 +492,27 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         if let Some(error) = effect_attempt.attempt_fault() {
             self.context.record_nested_effect_error(error.clone());
             return Err(error.to_string());
+        }
+
+        if stopped && !matches!(&outcome, crate::ToolAttemptOutcome::HostFailed(_)) {
+            // A noncooperative body may return success after its durable stop.
+            // Neither its state commands nor its intents can escape that stop.
+            let capture = Captured {
+                original: None,
+                output: ToolCallOutput::cancelled(
+                    crate::ToolCancellation::runtime("the turn stopped during the tool attempt")
+                        .with_origin(crate::CancelOrigin::TurnStopped),
+                ),
+                messages: Vec::new(),
+                triggers: Vec::new(),
+                occurrence: crate::plugin::ToolHookOccurrence::Attempt {
+                    attempt: attempt.attempt,
+                },
+                intents: ToolIntents::default(),
+            };
+            return Ok(SingletonBodyOutcome::Failed {
+                output: encode(&capture)?,
+            });
         }
 
         match outcome {

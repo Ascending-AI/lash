@@ -344,9 +344,9 @@ mod tests {
             );
         }
     }
-    // FIG-4948 records detailed tool projections in A/D/V and retains refused
-    // calls through the owner journal. The preceding journal keeps its drain
-    // lane; the new generation refuses it before decoding observation facts.
+    // FIG-4948 records detailed tool projections in A/D/V and FIG-4936 records
+    // cancellation in native inline X before D can publish state. A predecessor
+    // generation keeps its drain lane and is refused before decoding.
     #[tokio::test]
     async fn l21_a_predecessor_run_journal_parks_before_decode_and_keeps_its_lane() {
         use lash_core::engine::BuildGeneration;
