@@ -86,10 +86,7 @@ impl RuntimeTurnDriver<'_> {
                 Arc::new(crate::ChronologicalProjection::default()),
             )
             .map_err(|error| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ToolCatalogResolutionFailed,
-                    error.to_string(),
-                )
+                error.into_turn_failure(RuntimeErrorCode::ToolCatalogResolutionFailed)
             })?
             .with_tracing(self.execution_tracing(0));
         let result = context
