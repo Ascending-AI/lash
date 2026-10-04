@@ -55,12 +55,17 @@ path = "tests/e2e/h3.rs"
 name = "e2e_telemetry"
 path = "tests/e2e/telemetry.rs"
 
+[[test]]
+name = "h1_providers"
+path = "tests/e2e/providers.rs"
+
 [lints]
 workspace = true
 
 [dependencies]
 lash-vm-client = { workspace = true }
 lash = { workspace = true, features = ["restate", "sqlite", "typescript", "rlm"] }
+lash-provider-openai = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true }
 lash-lashlang-runtime = { workspace = true }

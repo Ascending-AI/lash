@@ -24,6 +24,9 @@
 //! label and `G`, so a turn's reply names the build that drove it, and it
 //! records and holds calls as [`provider`] describes.
 
+pub mod e2e_host;
+pub mod e2e_provider;
+pub mod e2e_tools;
 pub mod h3;
 pub mod objects;
 pub mod plugin_state;
@@ -64,6 +67,8 @@ pub struct Cli {
 pub enum Command {
     /// Open a store and optionally read one existing session without serving.
     Probe(ProbeArgs),
+    /// Serve H1 production provider and public session controls.
+    E2eProviderHost(e2e_host::ProviderHostArgs),
     /// Drain, clear a drain, or finalize an embedded SQLite store.
     SqliteUpgrade(SqliteUpgradeArgs),
     /// Serve a Restate deployment over a store until killed.
@@ -302,6 +307,7 @@ pub fn served_by(build: BuildLabel, generation: &str) -> String {
 /// Run one command and print its report.
 pub async fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Command::E2eProviderHost(args) => e2e_host::serve(args).await,
         Command::Probe(args) => print(&probe(args).await?),
         Command::SqliteUpgrade(args) => print(&sqlite_upgrade(args).await?),
         Command::Serve(args) => serve(args).await,

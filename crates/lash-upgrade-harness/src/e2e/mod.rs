@@ -7,6 +7,7 @@ pub mod host;
 pub mod host_adapters;
 pub mod otlp;
 pub mod provider;
+pub mod provider_http;
 
 /// Object-safe asynchronous adapter operation.
 pub type Step<'a, T> =

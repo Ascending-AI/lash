@@ -1220,6 +1220,7 @@ PACKAGE_DEPS = {
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_lashlang_runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
+            "lash_provider_openai": "//crates/lash-provider-openai:lash-provider-openai",
             "lash_remote_protocol": "//crates/lash-remote-protocol:lash-remote-protocol",
             "lash_restate": "//crates/lash-restate:lash-restate",
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",

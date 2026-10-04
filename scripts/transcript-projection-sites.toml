@@ -1,7 +1,7 @@
 row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", "ToolCall", "User"]
 [cardinality]
-reads = 100
-outputs = 138
+reads = 103
+outputs = 140
 
 [[surfaces]]
 name = "workbench"
@@ -32,6 +32,10 @@ row_kinds = ["AssistantReply", "Attachment", "CodeBlock", "Event", "Reasoning", 
 
 [sites]
 "crates/lash-upgrade-harness/tests/e2e/telemetry.rs#send" = { reads = 0, outputs = 1, kind = "output-read", reason = "S34's socket witness verifies telemetry loss cannot change a Run's programmatic answer; this is no transcript renderer." }
+"crates/lash-upgrade-harness/src/node/e2e_host.rs#command" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "H1 correctness fixture reconciles production provider output with committed state and independent transport evidence." }
+"crates/lash-upgrade-harness/tests/e2e/providers.rs#s26_partial_stream_disconnect_refuses_unsafe_regeneration" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "H1 correctness fixture reconciles production provider output with committed state and independent transport evidence." }
+"crates/lash-upgrade-harness/tests/e2e/providers.rs#s26_rate_limit_and_observer_reconnect_commit_one_answer" = { reads = 1, outputs = 3, kind = "output-read", reason = "H1 correctness fixture reconciles production provider output with committed state and independent transport evidence." }
+"crates/lash-upgrade-harness/tests/e2e/providers.rs#s27_authentication_failure_permits_the_next_run" = { reads = 0, outputs = 1, kind = "output-read", reason = "H1 correctness fixture reconciles production provider output with committed state and independent transport evidence." }
 "crates/lash/src/tests/adr_claims.rs#resumed_session_observe_wait_cancel_shift_keep_original_owners" = { reads = 0, outputs = 2, kind = "output-read", reason = "resumed_session_observe_wait_cancel_shift_keep_original_owners asserts the typed program result independently of rendered rows." }
 "crates/lash/src/tests/agent_scenarios/contracts.rs#assert_no_false_finishted_success" = { reads = 0, outputs = 2, kind = "output-read", reason = "assert_no_false_finishted_success asserts the typed program result independently of rendered rows." }
 "crates/lash/src/tests/agent_scenarios/harness.rs#run_agent_process_llm_query_scenario" = { reads = 0, outputs = 1, kind = "output-read", reason = "run_agent_process_llm_query_scenario asserts the typed program result independently of rendered rows." }
