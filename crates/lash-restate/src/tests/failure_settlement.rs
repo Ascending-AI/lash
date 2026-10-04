@@ -130,12 +130,36 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     let conn = rusqlite::Connection::open(dir.path().join("store").join("durable-core.db"))
         .expect("open raw session sqlite store");
-    let rows: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1",
-            rusqlite::params![session_id.as_str()],
-            |row| row.get(0),
+    let mut statement = conn
+        .prepare(
+            "SELECT turn_id, outcome_code FROM runtime_turn_commits \
+             WHERE session_id = ?1 ORDER BY change_seq",
         )
-        .expect("count turn commit stamps");
-    assert_eq!(rows, 1, "the recorded failure commits exactly once");
+        .expect("read exact commit operations");
+    let rows = statement
+        .query_map(rusqlite::params![session_id.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .expect("read commit stamps")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("decode commit stamps");
+    assert_eq!(rows.len(), 2, "every write is accounted for");
+    let transition: lash_core::store::OperationId =
+        serde_json::from_str(&rows[0].0).expect("plugin transition operation");
+    assert!(transition.key.starts_with("plugin-transition:"));
+    assert_eq!(
+        transition.scope,
+        ExecutionScope::turn(&session_id, &turn_id)
+    );
+    assert_eq!(rows[0].1, None, "activation commits no turn outcome");
+    assert_eq!(
+        rows[1],
+        (
+            lash_core::store::OperationId::turn(&session_id, &turn_id, "final")
+                .storage_key()
+                .expect("final operation identity"),
+            Some("failed_runtime_error".to_owned()),
+        ),
+        "the recorded failure commits exactly once under its final operation"
+    );
 }
