@@ -367,8 +367,8 @@ async fn run_workload() -> (RestateTestBackend, lash_core::engine::BuildGenerati
         .expect("open the session");
 
     // Every session-bearing scope shares this index. Initialize it through
-    // one real handler before the turn's wait registration and group-child
-    // membership race to use it; otherwise either journal owns the bootstrap.
+    // one real handler before the turn's wait registration and the process's
+    // journal pin race to use it; otherwise either journal owns the bootstrap.
     backend
         .ingress()
         .call_object_json::<_, crate::Reply<()>>(
