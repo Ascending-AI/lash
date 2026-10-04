@@ -55,6 +55,20 @@ impl OperationRun {
         TurnId::prefixed("shift-operation:", &self.operation_id)
     }
 
+    /// Recover the operation address from its canonical Run name. Callers
+    /// validate the retained task admission before granting execution authority.
+    #[must_use]
+    pub fn for_run_id(session_id: SessionId, run: &TurnId) -> Option<Self> {
+        let operation_id = run.as_str().strip_prefix("shift-operation:")?;
+        if operation_id.is_empty() {
+            return None;
+        }
+        Some(Self {
+            session_id,
+            operation_id: operation_id.to_owned(),
+        })
+    }
+
     /// The input kind the session's turn service drives.
     #[must_use]
     pub fn input(&self) -> RunInputKind {

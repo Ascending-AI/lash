@@ -187,6 +187,9 @@ pub(crate) fn answered_output(outcome: lash::SendOutcome) -> Result<TurnOutput, 
                 output.result.outcome
             ))),
         },
+        lash::SendOutcome::OperationSettled { .. } => {
+            Err(refusal("expected a turn result".to_string()))
+        }
         lash::SendOutcome::Withdrawn { .. } => Err(refusal("the input was withdrawn".to_string())),
         lash::SendOutcome::Parked { parked, .. } => Err(refusal(format!(
             "the turn is parked ({:?}); it resumes once an operator resolves the park",

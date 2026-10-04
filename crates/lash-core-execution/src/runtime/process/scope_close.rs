@@ -154,6 +154,15 @@ async fn settle_childless_plan(
 #[async_trait::async_trait]
 impl ScopeCloseSink for RegistryScopeClose {
     async fn close_run_scope(&self, terminal: &RunTerminal) -> Result<(), StoreError> {
+        if let Some(operation) = lash_core_store::tool_run::OperationRun::for_run_id(
+            terminal.session_id.clone(),
+            &terminal.run,
+        ) {
+            self.close(&ScopeId::Opener(operation.opener())).await?;
+            return self
+                .retire_run_waits(&terminal.session_id, &terminal.run, None)
+                .await;
+        }
         let joined = if let Some(sessions) = &self.sessions {
             sessions
                 .bound_turn_scopes(&terminal.session_id, &terminal.run)

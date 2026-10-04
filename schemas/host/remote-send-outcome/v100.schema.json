@@ -2274,7 +2274,7 @@
           "type": "object"
         },
         {
-          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one shift request.\n\nAn operation is a lifecycle owner in the sense \u00a71 means: its id is\ndurable and retry-stable, so a redrive of the operation binds the\nsame opener. No logical turn runs under it: every turn a shift runs\nis opened by its logical run's [`Turn`](Self::Turn) (FIG-3607\ncontract 4). No run's end closes an operation's scope; its session's\nclose does.",
+          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one shift request.\n\nAn operation is a lifecycle owner in the sense \u00a71 means: its id is\ndurable and retry-stable, so a redrive of the operation binds the\nsame opener. No logical turn runs under it: every turn a shift runs\nis opened by its logical run's [`Turn`](Self::Turn) (FIG-3607\ncontract 4). A tool-bearing operation Run closes this scope on explicit\ncompletion; tool-free administrative scopes close with their session.",
           "properties": {
             "kind": {
               "const": "session_operation",
@@ -4045,6 +4045,54 @@
       ],
       "type": "object"
     },
+    "PluginRuntimeEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "status",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "key",
+            "label"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "custom",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "payload": true
+          },
+          "required": [
+            "kind",
+            "name",
+            "payload"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "PluginStateError": {
       "description": "A typed plugin-state failure.",
       "oneOf": [
@@ -5802,6 +5850,90 @@
         "class"
       ],
       "type": "object"
+    },
+    "RemoteOperationOutcome": {
+      "description": "A host task's explicit terminal. Queued inputs are followed by their\ndurable input identities; their payloads remain owned by ingress.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "events": {
+              "items": {
+                "$ref": "#/$defs/PluginRuntimeEvent"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "completed",
+              "type": "string"
+            },
+            "output": true,
+            "pending_input_ids": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "plugin_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "plugin_id",
+            "output"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "failure": {
+              "$ref": "#/$defs/PluginOperationFailure"
+            },
+            "kind": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "failure"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "failure": {
+              "$ref": "#/$defs/PluginOperationFailure"
+            },
+            "kind": {
+              "const": "refused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "failure"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "RemoteParkReason": {
       "description": "Why a process parked: the serde form of the core park reason, arm for\narm (FIG-3659 NOW-B).",
@@ -16134,6 +16266,43 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "The recorded answer to a sent input. Status and run are derived from\nthe variant's report or park, never stored beside them.",
   "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "gaps": {
+          "items": {
+            "$ref": "#/$defs/RemoteLiveReplayGap"
+          },
+          "type": "array"
+        },
+        "input_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/RemoteOperationOutcome"
+        },
+        "run": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "operation_settled",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "session_id",
+        "input_id",
+        "run",
+        "outcome"
+      ],
+      "type": "object"
+    },
     {
       "additionalProperties": false,
       "properties": {

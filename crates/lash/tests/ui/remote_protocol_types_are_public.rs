@@ -145,6 +145,11 @@ fn main() {
 fn inspect_send(outcome: lash::remote::turn_result::RemoteSendOutcome) {
     use lash::remote::turn_result::{RemoteParkedTurn, RemoteSendOutcome, RemoteStalledDelivery};
     match outcome {
+        RemoteSendOutcome::OperationSettled {
+            run, outcome, gaps, ..
+        } => {
+            let _ = (run, outcome, gaps);
+        }
         RemoteSendOutcome::Settled { report, .. } => {
             let _ = report;
         }

@@ -283,7 +283,7 @@ pub use lash_core::{
 // withdraw (FIG-4202): the settlement and the typed outcomes it carries.
 pub use lash_core::runtime::{
     CompactContextOutcome, OpenAgentFrameCommandOutcome, PluginOperationCommandOutcome,
-    SessionCommandOutcome, SessionCommandSettlement,
+    PluginTaskCancelRequest, SessionCommandOutcome, SessionCommandSettlement,
 };
 pub use lash_core::store::SessionHeadOwner;
 /// The one substrate a [`LashCore`] takes every persistence port and its
@@ -1206,12 +1206,12 @@ pub mod remote {
     pub mod turn_result {
         pub use lash_remote_protocol::turn_result::{
             RemoteAssistantOutput, RemoteAssistantOutputState, RemoteBoundaryReason,
-            RemoteCausalRef, RemoteParkedTurn, RemoteSendOutcome, RemoteStalledDelivery,
-            RemoteToolCallOutcome, RemoteToolCallOutput, RemoteToolCallRecord,
-            RemoteToolCancellation, RemoteToolControlProjection, RemoteToolFailure,
-            RemoteTurnExecutionMetrics, RemoteTurnFinish, RemoteTurnIssue, RemoteTurnIssueSeverity,
-            RemoteTurnOutcome, RemoteTurnParkReason, RemoteTurnReport, RemoteTurnStatus,
-            RemoteTurnStop, RemoteTurnUsageReport,
+            RemoteCausalRef, RemoteOperationOutcome, RemoteParkedTurn, RemoteSendOutcome,
+            RemoteStalledDelivery, RemoteToolCallOutcome, RemoteToolCallOutput,
+            RemoteToolCallRecord, RemoteToolCancellation, RemoteToolControlProjection,
+            RemoteToolFailure, RemoteTurnExecutionMetrics, RemoteTurnFinish, RemoteTurnIssue,
+            RemoteTurnIssueSeverity, RemoteTurnOutcome, RemoteTurnParkReason, RemoteTurnReport,
+            RemoteTurnStatus, RemoteTurnStop, RemoteTurnUsageReport,
         };
     }
 

@@ -354,53 +354,6 @@ impl LashRuntime {
         })
     }
 
-    /// Run plugin task `name` on a storeless runtime, under
-    /// `scoped_effect_controller`; see [`Self::run_storeless_plugin_command`].
-    /// A store-backed session runs it as
-    /// [`SessionCommand::RunPluginTask`](crate::SessionCommand::RunPluginTask).
-    pub async fn run_storeless_plugin_task(
-        &mut self,
-        name: &str,
-        args: serde_json::Value,
-        session_id: Option<SessionId>,
-        scoped_effect_controller: crate::ScopedEffectController<'static>,
-        cancellation_token: tokio_util::sync::CancellationToken,
-    ) -> Result<crate::PluginOperationReceipt<serde_json::Value>, PluginOperationInvokeError> {
-        self.refuse_store_backed_host_write("run_plugin_task")
-            .map_err(|err| PluginOperationInvokeError::Runtime(Box::new(err)))?;
-        let manager = self.runtime_session_services()?;
-        let Some(session) = self.session.as_ref() else {
-            return Err(PluginOperationInvokeError::Unknown(
-                "runtime session not available".to_string(),
-            ));
-        };
-        let (plugin_id, outcome) = session
-            .plugins()
-            .run_plugin_task(
-                name,
-                args,
-                session_id,
-                true,
-                manager.state_service(),
-                manager.lifecycle_service(),
-                manager.graph_service(),
-                manager.process_service(),
-                scoped_effect_controller,
-                cancellation_token,
-            )
-            .await?;
-        let events = self.apply_storeless_plugin_operation_effects(
-            &plugin_id,
-            outcome.events,
-            &outcome.directives,
-        )?;
-        Ok(crate::PluginOperationReceipt {
-            output: outcome.output,
-            events,
-            pending_turn_inputs: Vec::new(),
-        })
-    }
-
     /// Fold a storeless plugin operation's runtime events into the session
     /// graph. A storeless runtime has no durable queue, so an operation that
     /// queues turns is refused.

@@ -1781,6 +1781,10 @@ fn an_operation_run_keeps_the_session_operation_identity() {
         session_id: "session-1".into(),
         operation_id: "batch-7".into(),
     };
+    assert_eq!(
+        OperationRun::for_run_id(operation.session_id.clone(), &operation.run_id()),
+        Some(operation.clone())
+    );
     let opener = operation.opener();
     assert_eq!(opener.identity_encoding(), "drain:9:session-1:7:batch-7");
     assert_eq!(

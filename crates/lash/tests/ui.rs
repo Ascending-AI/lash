@@ -111,6 +111,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/session_catalog_requires_lookup.rs");
     // FIG-4110: context hooks hold no write service.
     t.compile_fail("tests/ui/context_hooks_hold_no_write_service.rs");
+    t.compile_fail("tests/ui/administrative_contexts_have_no_tool_dispatch.rs");
     t.compile_fail("tests/ui/pending_attempt_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/pending_start_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/declared_start_is_sealed.rs");

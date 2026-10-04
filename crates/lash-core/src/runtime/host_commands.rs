@@ -246,7 +246,7 @@ impl LashRuntime {
         };
         let cancelled_before_it_ran = match &task {
             Some((controller, Some(signal))) => {
-                signal.recorded_cancel_requested(controller).await?
+                signal.recorded_cancel_requested(controller, false).await?
             }
             Some((_, None)) | None => false,
         };
@@ -415,11 +415,12 @@ impl LashRuntime {
                 )
                 .await?;
                 // The task's code returned: a cancel requested by now settles
-                // nothing of it. The decision is written only by the settling
-                // commit, so a redrive before that commit runs the task's
-                // code again under the same live signal (FIG-4453).
+                // nothing of it. Record the decision in the operation's own
+                // journal before committing, so redrive keeps that outcome.
                 if let Some(signal) = cancel_signal
-                    && signal.cancel_requested().await?
+                    && signal
+                        .recorded_cancel_requested(operation_controller, true)
+                        .await?
                 {
                     drop(services);
                     return Ok(Ok(crate::runtime::PluginOperationCommandOutcome::Cancelled));

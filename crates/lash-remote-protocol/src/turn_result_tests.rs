@@ -345,9 +345,32 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
     assert!(matches!(parked.status(), RemoteTurnStatus::Parked { .. }));
     assert!(matches!(stalled.status(), RemoteTurnStatus::Stalled { .. }));
     assert_eq!(withdrawn.status(), RemoteTurnStatus::Cancelled);
+    let operation = RemoteSendOutcome::OperationSettled {
+        session_id: SessionId::from("session"),
+        input_id: "operation".into(),
+        run: TurnId::from("shift-operation:batch"),
+        outcome: RemoteOperationOutcome::Completed {
+            plugin_id: "accept".into(),
+            output: serde_json::json!("done"),
+            events: vec![lash_sansio::PluginRuntimeEvent::Status {
+                key: "task".into(),
+                label: "done".into(),
+                detail: None,
+            }],
+            pending_input_ids: vec![lash_sansio::InputId::from("ti:child")],
+        },
+        gaps: Vec::new(),
+    };
+    assert_eq!(operation.status(), RemoteTurnStatus::Answered);
+    assert_eq!(
+        operation.run(),
+        Some(&TurnId::from("shift-operation:batch"))
+    );
     let schema = serde_json::to_value(schemars::schema_for!(RemoteSendOutcome)).expect("schema");
     let validator = jsonschema::validator_for(&schema).expect("validator");
-    for outcome in [settled, failed, cancelled, parked, stalled, withdrawn] {
+    for outcome in [
+        settled, failed, cancelled, parked, stalled, withdrawn, operation,
+    ] {
         outcome.validate().expect("variant validates");
         let value = serde_json::to_value(&outcome).expect("serialize");
         assert!(validator.is_valid(&value), "{value}");
@@ -361,6 +384,7 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
             outcome
         );
         if let Some(field) = match &outcome {
+            RemoteSendOutcome::OperationSettled { .. } => Some("outcome"),
             RemoteSendOutcome::Settled { .. } => Some("report"),
             RemoteSendOutcome::Parked { .. } => Some("parked"),
             RemoteSendOutcome::Stalled { .. } => Some("stalled"),

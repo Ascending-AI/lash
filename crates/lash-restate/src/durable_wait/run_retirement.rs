@@ -17,6 +17,14 @@ fn belongs_to_closed_run(
             key_session == session_id
                 && lash_core::store::PhysicalTurn::split_turn_id(turn_id).0 == *run
         }
+        ExecutionScope::SessionOperation {
+            session_id: key_session,
+            operation_id,
+        } => {
+            key_session == session_id
+                && lash_core::tool_run::OperationRun::for_run_id(session_id.clone(), run)
+                    .is_some_and(|operation| operation.operation_id == *operation_id)
+        }
         _ => false,
     }
 }

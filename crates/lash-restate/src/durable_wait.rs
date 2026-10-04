@@ -348,11 +348,29 @@ impl RestateDurableWaitIndexMetadata {
         }
         let id = cancel_decided_id(scope, wait)?;
         Ok(self.cancel_decided.contains(&id)
-            || scope.turn_id().is_some_and(|turn_id| {
-                let run = lash_core::store::PhysicalTurn::split_turn_id(turn_id).0;
+            || cancel_scope_run(scope).is_some_and(|run| {
                 self.cancel_decided
                     .contains(&format!("{}{id}", closed_run_cancel_prefix(&run)))
             }))
+    }
+}
+
+fn cancel_scope_run(scope: &ExecutionScope) -> Option<lash_core::TurnId> {
+    match scope {
+        ExecutionScope::Turn { turn_id, .. } => {
+            Some(lash_core::store::PhysicalTurn::split_turn_id(turn_id).0)
+        }
+        ExecutionScope::SessionOperation {
+            session_id,
+            operation_id,
+        } => Some(
+            lash_core::tool_run::OperationRun {
+                session_id: session_id.clone(),
+                operation_id: operation_id.clone(),
+            }
+            .run_id(),
+        ),
+        _ => None,
     }
 }
 
@@ -1252,8 +1270,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         }
         let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         let id = cancel_decided_id(&request.scope, &request.wait)?;
-        let id = if let Some(turn_id) = request.scope.turn_id() {
-            let run = lash_core::store::PhysicalTurn::split_turn_id(turn_id).0;
+        let id = if let Some(run) = cancel_scope_run(&request.scope) {
             format!("{}{id}", closed_run_cancel_prefix(&run))
         } else {
             id

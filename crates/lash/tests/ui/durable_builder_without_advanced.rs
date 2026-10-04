@@ -51,6 +51,9 @@ fn main() {
 fn inspect_send(outcome: lash::SendOutcome) {
     let _ = outcome.status();
     match outcome {
+        lash::SendOutcome::OperationSettled { run, outcome, gaps } => {
+            let _ = (run, outcome, gaps);
+        }
         lash::SendOutcome::Settled { run, output, gaps } => {
             let _ = (run, output, gaps);
         }
@@ -64,4 +67,15 @@ fn inspect_send(outcome: lash::SendOutcome) {
             let _ = gaps;
         }
     }
+}
+
+async fn operation_run(session: &lash::LashSession) -> lash::Result<()> {
+    let run = session
+        .plugin_operations()
+        .start_task_raw("task", serde_json::Value::Null, "host-key")
+        .await?;
+    let _ = run.events();
+    let _ = run.cancel().await?;
+    let _ = session.durable().run(run.run().clone()).result().await?;
+    Ok(())
 }

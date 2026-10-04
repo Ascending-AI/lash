@@ -81,7 +81,8 @@ impl ScopeId {
         Self::Opener(EffectOpener::turn(session_id, turn_id))
     }
 
-    /// The scope of one session operation.
+    /// The scope of one session operation. A tool-bearing operation closes
+    /// with its Run; tool-free administration retains the session lifetime.
     #[must_use]
     pub fn session_operation(
         session_id: impl Into<SessionId>,

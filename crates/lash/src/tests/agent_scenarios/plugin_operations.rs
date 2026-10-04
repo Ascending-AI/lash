@@ -31,6 +31,244 @@ operation!(Query, PluginQuery, "accept.query");
 operation!(Command, PluginCommand, "accept.command");
 operation!(Task, PluginTask, "accept.task");
 
+/// Q2/L03: a host observes the operation's terminal through its Run, including
+/// after the command settlement has already been published.
+#[test]
+fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
+    run_async_test_on_stack_budget("operation-run-follow", || async {
+        let spec = lash_core::facade_support::PluginSpec::new()
+            .with_plugin_task_typed::<Task, _, _>(|_, args| async move {
+                Ok(PluginOperationOutcome::new(args))
+            });
+        let double = restate_double(SEED).await;
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(Arc::new(StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("accept"),
+                spec,
+            )))
+            .build(crate::testing::runtime_lease_owner())?;
+        let session = core
+            .session("operation-run-follow")
+            .created()
+            .await
+            .open()
+            .await?;
+        let receipt = session
+            .admin()
+            .commands()
+            .submit(
+                lash_core::facade_support::SessionCommand::RunPluginTask {
+                    name: Task::NAME.into(),
+                    args: serde_json::json!("terminal"),
+                },
+                "operation-run-follow",
+            )
+            .await?;
+        session.admin().commands().settle(receipt.clone()).await?;
+        let operation = lash_core::tool_run::OperationRun {
+            session_id: receipt.session_id,
+            operation_id: receipt.batch_id.to_string(),
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            session.run(operation.run_id()).outcome(),
+        )
+        .await
+        .expect("a completed operation Run must answer its follower")?;
+        assert_eq!(result.run(), Some(&operation.run_id()));
+        assert!(
+            matches!(&result, crate::SendOutcome::OperationSettled { outcome, .. }
+            if matches!(outcome.as_ref(), lash_core::runtime::PluginOperationCommandOutcome::Completed { output, .. }
+                if output == &serde_json::json!("terminal")))
+        );
+        let wire = result.to_remote(
+            &operation.session_id,
+            &lash_core::InputId::from(&operation.run_id()),
+        );
+        wire.validate()?;
+        let decoded: lash_remote_protocol::RemoteSendOutcome =
+            serde_json::from_slice(&serde_json::to_vec(&wire)?)?;
+        assert_eq!(decoded, wire);
+        let durable = session.durable();
+        drop(session);
+        assert_eq!(
+            durable.run(operation.run_id()).result().await?.output,
+            serde_json::json!("terminal")
+        );
+        Ok(())
+    })
+}
+
+/// L03/L10: Run cancellation reaches the task, and a fresh operation with
+/// identical input cannot adopt the cancelled owner's signal or result.
+#[test]
+fn operation_run_cancel_does_not_infect_a_fresh_operation() -> Result<()> {
+    run_async_test_on_stack_budget("operation-run-cancel", || async {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let notify = entered.clone();
+        let first = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let spec = lash_core::facade_support::PluginSpec::new()
+            .with_plugin_task_typed::<Task, _, _>(move |ctx, args| {
+                let entered = notify.clone();
+                let first = first.clone();
+                async move {
+                    assert!(matches!(
+                        ctx.scoped_effect_controller.execution_scope(),
+                        lash_core::ExecutionScope::SessionOperation { .. }
+                    ));
+                    if first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                        entered.notify_one();
+                        ctx.cancellation_token.cancelled().await;
+                        return Err(String::from("cancelled"));
+                    }
+                    assert!(!ctx.cancellation_token.is_cancelled());
+                    Ok(PluginOperationOutcome::new(args))
+                }
+            });
+        let double = restate_double(SEED).await;
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(Arc::new(StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("accept"),
+                spec,
+            )))
+            .build(crate::testing::runtime_lease_owner())?;
+        let session = core
+            .session("operation-run-cancel")
+            .created()
+            .await
+            .open()
+            .await?;
+        let task = session
+            .plugin_operations()
+            .start_task::<Task>("same input".into(), "first")
+            .await?;
+        tokio::time::timeout(Duration::from_secs(5), entered.notified())
+            .await
+            .expect("the engine entered the task");
+        assert!(matches!(
+            task.cancel().await?,
+            crate::CancelReceipt::OperationRequested {
+                request: lash_core::runtime::PluginTaskCancelRequest::Requested,
+                ..
+            }
+        ));
+        let old_run = task.run().clone();
+        let terminal = tokio::time::timeout(Duration::from_secs(5), task.outcome())
+            .await
+            .expect("cancel settles the operation")?;
+        assert!(
+            matches!(terminal, crate::SendOutcome::OperationSettled { outcome, .. }
+            if matches!(outcome.as_ref(), lash_core::runtime::PluginOperationCommandOutcome::Cancelled))
+        );
+        let fresh = session
+            .plugin_operations()
+            .start_task::<Task>("same input".into(), "second")
+            .await?;
+        assert_ne!(fresh.run(), &old_run);
+        let fresh_run = fresh.run().clone();
+        assert_eq!(
+            fresh.result().await?.output,
+            serde_json::json!("same input")
+        );
+        assert!(matches!(
+            session.run(fresh_run).cancel().await?,
+            crate::CancelReceipt::AlreadySettled { .. }
+        ));
+        assert_eq!(
+            session.run(old_run).outcome().await?.status(),
+            crate::TurnStatus::Cancelled
+        );
+        Ok(())
+    })
+}
+
+/// L08: operation close ends its own lifetime scope, while a process granted
+/// the session lifetime retains its independent registration and StartKey.
+#[test]
+fn a_session_lifetime_process_survives_operation_completion() -> Result<()> {
+    run_async_test_on_stack_budget("operation-session-process", || async {
+        let spec = lash_core::facade_support::PluginSpec::new()
+            .with_plugin_task_typed::<Task, _, _>(|ctx, _| async move {
+                let session = ctx.session_id.clone().unwrap();
+                let scope = lash_core::ProcessOpScope::new(ctx.scoped_effect_controller);
+                let cx = scope
+                    .start_cx()
+                    .map_err(|error| error.to_string())?
+                    .expect("an operation is an opener");
+                let request = lash_core::ProcessStartRequest::external(
+                    lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                        session.clone(),
+                    )),
+                    serde_json::Value::Null,
+                    lash_core::lifetime::session_or_starter(&cx),
+                )
+                .with_host_start_key("operation-session-process:child");
+                let process = ctx
+                    .processes
+                    .start_from_request(&session, request, scope)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok(PluginOperationOutcome::new(process.process_id.to_string()))
+            });
+        let double = restate_double(SEED).await;
+        let backend = double.lash_backend();
+        let registry = backend.process_registry();
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(Arc::new(StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("accept"),
+                spec,
+            )))
+            .build(crate::testing::runtime_lease_owner())?;
+        let session = core
+            .session("operation-session-process")
+            .created()
+            .await
+            .open()
+            .await?;
+        let run = session
+            .plugin_operations()
+            .start_task::<Task>(String::new(), "start")
+            .await?;
+        let operation = lash_core::tool_run::OperationRun::for_run_id(
+            SessionId::from("operation-session-process"),
+            run.run(),
+        )
+        .unwrap();
+        let result = run.result().await?;
+        let process_id = serde_json::from_value::<lash_core::ProcessId>(result.output.clone())?;
+        let record = registry.get_process(&process_id).await?.unwrap();
+        assert!(!record.status().is_terminal());
+        assert_eq!(
+            record.lifetime.scope(),
+            Some(&lash_core::ScopeId::session("operation-session-process"))
+        );
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while registry
+            .get_parent_end_plan(&lash_core::ScopeId::Opener(operation.opener()))
+            .await?
+            .is_none()
+        {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "operation completion closes its own scope"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            !registry
+                .get_process(&process_id)
+                .await?
+                .unwrap()
+                .status()
+                .is_terminal()
+        );
+        Ok(())
+    })
+}
+
 #[derive(
     Clone,
     Debug,
@@ -446,11 +684,31 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
                 spec,
             )))
             .build(crate::testing::runtime_lease_owner())?;
-        let session = core.session("plugin-accept").created().await.open().await?;
+        // Queries read an already published plugin view; creation leaves it
+        // cold until an engine admission publishes that view.
+        let initializing = core.session("plugin-accept").created().await.open().await?;
+        let admission = initializing
+            .admin()
+            .commands()
+            .submit(
+                lash_core::facade_support::SessionCommand::RefreshToolCatalog {
+                    reason: "publish-query-view".into(),
+                },
+                "publish-query-view",
+            )
+            .await?;
+        initializing.admin().commands().settle(admission).await?;
+        drop(initializing);
+        let session = core.session("plugin-accept").open().await?;
         let ops = session.plugin_operations();
         let probe = || "cobalt-583".to_string();
         let before = session.admin().state().persist_current().await?;
-        assert_eq!(ops.query::<Query>(probe()).await?, "query:cobalt-583");
+        assert_eq!(
+            ops.query::<Query>(probe())
+                .await
+                .expect("initial query services"),
+            "query:cobalt-583"
+        );
         assert_eq!(
             session
                 .admin()
@@ -525,7 +783,7 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
         assert!(
             matches!(
                 error,
-                EmbedError::Session(SessionError::SessionCommandCancelled(_))
+                EmbedError::Send(ref error) if matches!(error.as_ref(), crate::SendError::NotSettled { status: crate::TurnStatus::Cancelled, .. })
             ),
             "a host cancel of an admitted task settles it with the typed cancel: {error:?}"
         );
@@ -541,7 +799,9 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             "nothing of the cancelled task commits"
         );
         assert_eq!(
-            ops.query::<Query>(probe()).await?,
+            ops.query::<Query>(probe())
+                .await
+                .expect("query services after operation cancellation"),
             "query:cobalt-583",
             "writer released after the cancelled settlement"
         );

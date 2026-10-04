@@ -96,8 +96,55 @@ async fn cancel_run(
     request_id: String,
     request: CancelRequestSpec,
 ) -> Result<CancelReceipt> {
-    if let Resolution::Settled { .. } = resolve::resolve_run(parts, run).await? {
+    if matches!(
+        resolve::resolve_run(parts, run).await?,
+        Resolution::Settled { .. } | Resolution::OperationSettled { .. }
+    ) {
         return Ok(CancelReceipt::AlreadySettled { run: run.clone() });
+    }
+    if let Some(operation) =
+        lash_core::tool_run::OperationRun::for_run_id(parts.session_id.clone(), run)
+    {
+        let batch = parts.store.list_queued_work().await?.into_iter().find(|batch| {
+            batch.batch_id.as_str() == operation.operation_id
+                && matches!(&batch.payload, crate::persistence::QueuedWorkPayload::SessionCommand { command }
+                    if matches!(command.as_ref(), lash_core::facade_support::SessionCommand::RunPluginTask { .. }))
+        });
+        let Some(batch) = batch else {
+            return Ok(
+                if matches!(
+                    resolve::resolve_run(parts, run).await?,
+                    Resolution::OperationSettled { .. }
+                ) {
+                    CancelReceipt::AlreadySettled { run: run.clone() }
+                } else {
+                    CancelReceipt::NotFound
+                },
+            );
+        };
+        if parts
+            .ops
+            .cancel_queued_work_batch(&parts.store, &operation.operation_id)
+            .await?
+            .is_some()
+        {
+            return Ok(CancelReceipt::OperationWithdrawn { run: run.clone() });
+        }
+        let receipt = lash_core::runtime::SessionCommandReceipt {
+            session_id: parts.session_id.clone(),
+            batch_id: batch.batch_id,
+            source_key: batch.source_key.unwrap_or_default(),
+        };
+        let request = lash_core::runtime::request_plugin_task_cancel(
+            parts.store.store().as_ref(),
+            &parts.effect_host,
+            &receipt,
+        )
+        .await?;
+        return Ok(CancelReceipt::OperationRequested {
+            run: run.clone(),
+            request,
+        });
     }
     // The cancel addresses the run's running physical turn: the first of its
     // turns that has not committed.

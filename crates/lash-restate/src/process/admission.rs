@@ -153,6 +153,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 /// recorded cancellation gate, removing the live cancel command branch.
 /// Epoch 25 (FIG-4925) distinguishes a check's call cancellation from Run
 /// control in recorded decisions and aggregate selection.
+/// Epoch 26 (FIG-4893) records the operation completion cancel decision and
+/// fences operation waits under their own Run for terminal retirement.
 ///
 /// version_guard(
 ///     roots(AdmissionVerdict, StartOutcome),
@@ -166,14 +168,14 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 5;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 25;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 26;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "drain"
 /// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
-pub const JOURNAL_LOGIC_EPOCH: u32 = 26;
+pub const JOURNAL_LOGIC_EPOCH: u32 = 27;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";

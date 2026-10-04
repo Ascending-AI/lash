@@ -104,8 +104,8 @@ pub enum EffectOpener {
     /// durable and retry-stable, so a redrive of the operation binds the
     /// same opener. No logical turn runs under it: every turn a shift runs
     /// is opened by its logical run's [`Turn`](Self::Turn) (FIG-3607
-    /// contract 4). No run's end closes an operation's scope; its session's
-    /// close does.
+    /// contract 4). A tool-bearing operation Run closes this scope on explicit
+    /// completion; tool-free administrative scopes close with their session.
     SessionOperation {
         /// The session the operation is on.
         session_id: SessionId,

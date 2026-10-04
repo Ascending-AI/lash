@@ -24,6 +24,10 @@ pub(super) enum Resolution {
     Withdrawn,
     /// The run's final physical turn committed with `outcome`.
     Settled { run: TurnId, outcome: TurnOutcome },
+    OperationSettled {
+        run: TurnId,
+        outcome: Box<lash_core::runtime::PluginOperationCommandOutcome>,
+    },
     /// The run is parked (ADR 0104 O3): durable, and not terminal.
     Parked(ParkedTurn),
     /// The run's execution ended with `refusal`, a typed refusal no retry could
@@ -119,6 +123,93 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
         .await
         .map_err(store_error)?
         .map(|terminal| terminal.cause);
+    if let Some(RunTerminalCause::Committed { outcome, .. }) = &cause {
+        return Ok(Resolution::Settled {
+            run: run.clone(),
+            outcome: TurnOutcome::from(outcome.clone()),
+        });
+    }
+    if let Some(operation) =
+        lash_core::tool_run::OperationRun::for_run_id(parts.session_id.clone(), run)
+    {
+        let pending = parts
+            .store
+            .list_queued_work()
+            .await
+            .map_err(store_error)?
+            .into_iter()
+            .any(|batch| batch.batch_id.as_str() == operation.operation_id);
+        if let Some(completion) = parts
+            .store
+            .queued_work_batch_completion(&operation.operation_id)
+            .await
+            .map_err(store_error)?
+            && let Some((_, outcome)) = completion
+                .command_outcomes
+                .into_iter()
+                .find(|(batch, _)| batch.as_str() == operation.operation_id)
+        {
+            match outcome {
+                lash_core::runtime::SessionCommandOutcome::PluginOperation { outcome } => {
+                    return Ok(Resolution::OperationSettled {
+                        run: run.clone(),
+                        outcome: Box::new(outcome),
+                    });
+                }
+                lash_core::runtime::SessionCommandOutcome::Failed { code, message } => {
+                    return Ok(Resolution::OperationSettled {
+                        run: run.clone(),
+                        outcome: Box::new(
+                            lash_core::runtime::PluginOperationCommandOutcome::Refused {
+                                error: Box::new(lash_core::RuntimeError::new(code, message)),
+                            },
+                        ),
+                    });
+                }
+                _ => {}
+            }
+        }
+        use lash_core::runtime::PluginOperationCommandOutcome;
+        let ended = match &cause {
+            Some(
+                RunTerminalCause::OperatorCancelled { .. }
+                | RunTerminalCause::Forked { .. }
+                | RunTerminalCause::SessionDeleted { .. }
+                | RunTerminalCause::SubstrateLost {
+                    cancelled_by: Some(_),
+                },
+            ) => Some(PluginOperationCommandOutcome::Cancelled),
+            Some(RunTerminalCause::SubstrateLost { cancelled_by: None }) => {
+                Some(PluginOperationCommandOutcome::Refused {
+                    error: Box::new(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::EngineRunSubstrateLost,
+                        format!("the operation Run `{run}` lost its invocation"),
+                    )),
+                })
+            }
+            Some(RunTerminalCause::Refused {
+                code,
+                message,
+                refusal_cause,
+            }) => {
+                let mut error = lash_core::RuntimeError::new(code.clone(), message.clone());
+                error.cause = refusal_cause.clone();
+                Some(PluginOperationCommandOutcome::Refused {
+                    error: Box::new(error),
+                })
+            }
+            _ => None,
+        };
+        if let Some(outcome) = ended {
+            return Ok(Resolution::OperationSettled {
+                run: run.clone(),
+                outcome: Box::new(outcome),
+            });
+        }
+        if !pending && cause.is_none() {
+            return Ok(Resolution::Withdrawn);
+        }
+    }
     let refusal = match cause {
         Some(RunTerminalCause::Committed { outcome, .. }) => {
             return Ok(Resolution::Settled {

@@ -1043,6 +1043,7 @@ impl LashSession {
 
     pub fn admin(&self) -> SessionAdmin {
         SessionAdmin {
+            target: crate::send::SendTarget::Live(self.clone()),
             runtime: self.runtime.clone(),
             process_work: Arc::clone(self.binding.process().port()),
             work: self.binding.queued(),

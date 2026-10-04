@@ -16,10 +16,10 @@
 //! again: a requested cancel settles the command
 //! [`Cancelled`](crate::PluginOperationCommandOutcome::Cancelled) with nothing
 //! of the task committed, and otherwise the command settles with the task's
-//! own outcome. That decision becomes durable only with the settling commit
-//! (FIG-4453): a shift that dies before its commit leaves nothing decided,
-//! and its redrive runs the task's code again under the same live signal, so
-//! a host's cancel still reaches the task.
+//! own outcome. Both peeks are recorded by the operation invocation: a
+//! redrive reads the same decisions, including when it died between the
+//! final peek and the settling commit. The live watch stops executing code;
+//! the recorded final peek decides the durable result.
 //!
 //! A cancel that lands after the shift's last peek and before its commit is
 //! kept on the signal but reaches nothing: the command settles with the
@@ -106,26 +106,7 @@ impl PluginTaskCancelSignal {
         }
     }
 
-    /// Whether a host's cancel of the task was requested. The shift asks
-    /// before the task runs, so a task cancelled before it ran runs none of
-    /// its code, and again once the task's code returned, to decide how the
-    /// command settles.
-    pub(super) async fn cancel_requested(&self) -> Result<bool, RuntimeError> {
-        match self
-            .host
-            .await_event_resolver()
-            .peek_await_event(&self.key)
-            .await
-        {
-            Ok(None) => Ok(false),
-            Ok(Some(crate::Resolution::Cancelled)) => Ok(true),
-            Ok(Some(resolution)) => Err(foreign_resolution(&self.key, &resolution)),
-            Err(error) if signal_unavailable(&error) => Ok(false),
-            Err(error) => Err(error),
-        }
-    }
-
-    /// [`cancel_requested`](Self::cancel_requested) before the task runs, as
+    /// Whether cancel was requested before or after the task runs, as
     /// a step recorded on `controller`, the operation run's controller for
     /// the task (K8): the task's work is journaled after it, so a replay of
     /// the run reads the recorded answer back and takes the branch the
@@ -133,19 +114,22 @@ impl PluginTaskCancelSignal {
     pub(super) async fn recorded_cancel_requested(
         &self,
         controller: &crate::ScopedEffectController<'_>,
+        completion: bool,
     ) -> Result<bool, RuntimeError> {
+        let identity = if completion {
+            "plugin-task-completion-cancel-peek"
+        } else {
+            PLUGIN_TASK_CANCEL_PEEK
+        };
         let invocation = crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                controller.execution_scope().clone(),
-                PLUGIN_TASK_CANCEL_PEEK,
-            )?,
+            crate::EffectAddress::new(controller.execution_scope().clone(), identity)?,
             crate::RuntimeAttribution {
                 session_id: controller.execution_scope().session_id().cloned(),
                 turn_id: None,
                 turn_index: None,
                 protocol_iteration: None,
             },
-            PLUGIN_TASK_CANCEL_PEEK,
+            identity,
         );
         let peeked = controller
             .execute_effect(

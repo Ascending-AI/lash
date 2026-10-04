@@ -111,18 +111,9 @@ impl SessionAdmin {
         }
     }
 
-    /// Run a host plugin command or task and await its settlement
-    /// (FIG-4202).
-    ///
-    /// On a store-backed session the operation is a session command: the
-    /// writer is held only to submit it, and the plugin's code runs in the
-    /// shift at the next turn boundary, its events, state and queued turns
-    /// settling with the command. `cancellation` withdraws a command no shift
-    /// has admitted yet. A task a shift already admitted is cancelled through
-    /// its cancel signal (FIG-4391): its shift stops the task's code and
-    /// settles it cancelled, unless it already found the task's code returned
-    /// (FIG-4453); an admitted plugin command runs to its settlement. A storeless session
-    /// runs the operation directly under the writer.
+    /// Submit a host task as an operation Run, or apply a tool-free plugin
+    /// command at a session boundary. Task helpers follow the same durable Run
+    /// result and cancellation path exposed to hosts by `start_task`.
     pub(super) async fn run_plugin_operation(
         &self,
         operation: HostPluginOperation,
@@ -130,23 +121,37 @@ impl SessionAdmin {
         args: serde_json::Value,
         cancellation: CancellationToken,
     ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
+        if operation == HostPluginOperation::Task {
+            let task = crate::PluginOperations {
+                control: self.clone(),
+            }
+            .start_task_raw(
+                name,
+                args,
+                format!("run_plugin_task:{name}:{}", uuid::Uuid::new_v4()),
+            )
+            .await?;
+            let followed = task.clone();
+            let receipt = tokio::select! {
+                result = followed.result() => result?,
+                () = cancellation.cancelled() => {
+                    task.cancel().await?;
+                    task.result().await?
+                }
+            };
+            self.record_plugin_operation_observations(
+                &receipt.events,
+                &receipt.pending_turn_inputs,
+            );
+            return Ok(receipt);
+        }
         let session_id = SessionId::from(self.runtime.observe().session_id());
         let submitted = self
             .with_writer(async |runtime: &mut LashRuntime| {
                 if runtime.is_store_backed() {
-                    let command = match operation {
-                        HostPluginOperation::Command => {
-                            lash_core::facade_support::SessionCommand::RunPluginCommand {
-                                name: name.to_string(),
-                                args,
-                            }
-                        }
-                        HostPluginOperation::Task => {
-                            lash_core::facade_support::SessionCommand::RunPluginTask {
-                                name: name.to_string(),
-                                args,
-                            }
-                        }
+                    let command = lash_core::facade_support::SessionCommand::RunPluginCommand {
+                        name: name.to_string(),
+                        args,
                     };
                     let idempotency_key =
                         format!("{}:{name}:{}", command.kind(), uuid::Uuid::new_v4());
@@ -155,46 +160,16 @@ impl SessionAdmin {
                         .map(SubmittedCommand::Queued)
                         .map_err(EmbedError::Runtime);
                 }
-                let receipt = match operation {
-                    HostPluginOperation::Command => {
-                        runtime
-                            .run_storeless_plugin_command(name, args, Some(session_id.clone()))
-                            .await
-                    }
-                    HostPluginOperation::Task => {
-                        let scope = lash_core::ExecutionScope::runtime_operation(format!(
-                            "{session_id}:plugin_task:{name}:{}",
-                            uuid::Uuid::new_v4()
-                        ));
-                        let controller = runtime
-                            .effect_host()
-                            .scoped_static(lash_core::AdmittedScope::new(scope))
-                            .map_err(EmbedError::Runtime)?
-                            .ok_or_else(|| {
-                                EmbedError::Plugin(lash_core::PluginError::Session(
-                                    "plugin task execution requires an effect host that can \
-                                     create a static runtime-operation scope"
-                                        .to_string(),
-                                ))
-                            })?;
-                        runtime
-                            .run_storeless_plugin_task(
-                                name,
-                                args,
-                                Some(session_id.clone()),
-                                controller,
-                                cancellation.clone(),
-                            )
-                            .await
-                    }
-                };
+                let receipt = runtime
+                    .run_storeless_plugin_command(name, args, Some(session_id.clone()))
+                    .await;
                 receipt.map(SubmittedCommand::Applied).map_err(Into::into)
             })
             .await?;
         let receipt = match submitted {
             SubmittedCommand::Applied(receipt) => receipt,
             SubmittedCommand::Queued(receipt) => {
-                match Box::pin(self.settle_or_withdraw(receipt, operation, cancellation)).await? {
+                match Box::pin(self.settle_or_withdraw(receipt, cancellation)).await? {
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::PluginOperation {
@@ -260,17 +235,11 @@ impl SessionAdmin {
         Ok(receipt)
     }
 
-    /// Await the settlement of the plugin `operation` `receipt` names; if
-    /// `cancellation` fires first, cancel it. A command no shift admitted is
-    /// withdrawn transactionally and answers `Cancelled` (FIG-4202). One a
-    /// shift already admitted is settled by that execute, and its settlement is
-    /// awaited: for a task, after its cancel signal was resolved cancelled, so
-    /// the shift stops the task's code and settles it cancelled unless it
-    /// already found the task's code returned (FIG-4391, FIG-4453).
+    /// Await a tool-free plugin command, withdrawing it if cancellation wins
+    /// before admission. An admitted command runs to its recorded settlement.
     pub(super) async fn settle_or_withdraw(
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,
-        operation: HostPluginOperation,
         cancellation: CancellationToken,
     ) -> Result<lash_core::runtime::SessionCommandSettlement> {
         tokio::select! {
@@ -281,38 +250,11 @@ impl SessionAdmin {
                         Ok(lash_core::runtime::SessionCommandSettlement::Cancelled(receipt))
                     }
                     SessionCommandWithdrawal::AlreadyAdmitted => {
-                        if operation == HostPluginOperation::Task {
-                            self.cancel_admitted_plugin_task(&receipt).await?;
-                        }
                         Box::pin(self.await_command_settlement(receipt, None)).await
                     }
                 }
             }
         }
-    }
-
-    /// Resolve the cancel signal of the admitted plugin task `receipt` names
-    /// (FIG-4391), without the runtime's writer, which the shift applying the
-    /// task holds. Whatever the cancel reached, the command's settlement says
-    /// how it ended (FIG-4453).
-    async fn cancel_admitted_plugin_task(
-        &self,
-        receipt: &lash_core::runtime::SessionCommandReceipt,
-    ) -> Result<lash_core::runtime::PluginTaskCancelRequest> {
-        self.require_own_command(receipt)?;
-        let observation = self.runtime.observe();
-        // A storeless session runs its plugin operations under the writer:
-        // no shift holds a task of it.
-        let Some(store) = observation.queue_store.as_ref() else {
-            return Ok(lash_core::runtime::PluginTaskCancelRequest::Unavailable);
-        };
-        lash_core::runtime::request_plugin_task_cancel(
-            store.store().as_ref(),
-            &observation.effect_host,
-            receipt,
-        )
-        .await
-        .map_err(EmbedError::Runtime)
     }
 
     /// Refuse a host operation on a command of another session than this

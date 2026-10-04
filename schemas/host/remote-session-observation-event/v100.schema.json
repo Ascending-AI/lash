@@ -2274,7 +2274,7 @@
           "type": "object"
         },
         {
-          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one shift request.\n\nAn operation is a lifecycle owner in the sense \u00a71 means: its id is\ndurable and retry-stable, so a redrive of the operation binds the\nsame opener. No logical turn runs under it: every turn a shift runs\nis opened by its logical run's [`Turn`](Self::Turn) (FIG-3607\ncontract 4). No run's end closes an operation's scope; its session's\nclose does.",
+          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one shift request.\n\nAn operation is a lifecycle owner in the sense \u00a71 means: its id is\ndurable and retry-stable, so a redrive of the operation binds the\nsame opener. No logical turn runs under it: every turn a shift runs\nis opened by its logical run's [`Turn`](Self::Turn) (FIG-3607\ncontract 4). A tool-bearing operation Run closes this scope on explicit\ncompletion; tool-free administrative scopes close with their session.",
           "properties": {
             "kind": {
               "const": "session_operation",

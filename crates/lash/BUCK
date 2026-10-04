@@ -1143,6 +1143,7 @@ ui_fixtures_test(
     harness = ":ui__test",
     package = "crates/lash",
     fixtures = [
+        "tests/ui/administrative_contexts_have_no_tool_dispatch.rs",
         "tests/ui/after_tool_check_cannot_replace_a_result.rs",
         "tests/ui/after_turn_cannot_abort.rs",
         "tests/ui/attempt_context_has_no_child_trace_emission.rs",
@@ -1218,6 +1219,7 @@ ui_fixtures_test(
         "tests/ui/turn_observers_cannot_abort.rs",
     ],
     expected = [
+        "tests/ui/administrative_contexts_have_no_tool_dispatch.stderr",
         "tests/ui/after_tool_check_cannot_replace_a_result.stderr",
         "tests/ui/after_turn_cannot_abort.stderr",
         "tests/ui/attempt_context_has_no_child_trace_emission.stderr",

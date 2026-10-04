@@ -2,6 +2,34 @@ use super::*;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
+impl From<lash_core::runtime::PluginOperationCommandOutcome> for RemoteOperationOutcome {
+    fn from(outcome: lash_core::runtime::PluginOperationCommandOutcome) -> Self {
+        match outcome {
+            lash_core::runtime::PluginOperationCommandOutcome::Completed {
+                plugin_id,
+                output,
+                events,
+                pending_turn_inputs,
+            } => Self::Completed {
+                plugin_id,
+                output,
+                events,
+                pending_input_ids: pending_turn_inputs
+                    .into_iter()
+                    .map(|input| input.input_id)
+                    .collect(),
+            },
+            lash_core::runtime::PluginOperationCommandOutcome::Failed { failure } => {
+                Self::Failed { failure }
+            }
+            lash_core::runtime::PluginOperationCommandOutcome::Refused { error } => Self::Refused {
+                failure: Box::new((*error).into()),
+            },
+            lash_core::runtime::PluginOperationCommandOutcome::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
 impl RemoteTurnReport {
     pub fn from_core(
         session_id: impl Into<SessionId>,

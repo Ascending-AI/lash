@@ -3,6 +3,97 @@ use super::*;
 use crate::durable_wait::IndexedWait;
 use crate::object_state::StampedValue;
 
+/// L20: an operation Run reclaims its waits and cancellation fences without
+/// ending another operation or the session's tool-free administrative scope.
+#[tokio::test]
+async fn operation_close_retires_only_its_waits_and_cancel_fences() {
+    let endpoint = Endpoint::builder()
+        .bind(LashDurableWaitRegistryImpl::default().serve())
+        .build();
+    let operation = lash_core::tool_run::OperationRun {
+        session_id: SessionId::from("operation-retirement"),
+        operation_id: "closed".into(),
+    };
+    let mut state = BTreeMap::from([super::process_await_redrive::fresh_compat_record(
+        crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION,
+    )]);
+    let mut rows = Vec::new();
+    for id in ["closed", "live", "administration"] {
+        let scope = ExecutionScope::session_operation(operation.session_id.clone(), id);
+        let wait = AwaitEventWaitIdentity::Custom {
+            key: "completion".into(),
+        };
+        let key = restate_await_event_key(&scope, wait.clone()).unwrap();
+        let row = durable_wait_index_state_key(&RestateDurableWaitAddress::for_key(&key));
+        state.insert(
+            row.clone(),
+            serde_json::to_vec(&StampedValue {
+                format: u32::from(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION),
+                body: serde_json::to_value(IndexedWait {
+                    key,
+                    terminal: Some(Resolution::Cancelled),
+                })
+                .unwrap(),
+            })
+            .unwrap(),
+        );
+        rows.push(row);
+        let output = invoke_endpoint_body(
+            &endpoint,
+            "LashDurableWaitIndex",
+            "fence_cancel_decided",
+            fig1943_invocation_with_state(
+                operation.session_id.as_str(),
+                &RestateDurableWaitCancelDecidedRequest { scope, wait },
+                &state,
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(
+            restate_output_failure_message(&output)
+                .or_else(|| restate_error_message(&output))
+                .is_none()
+        );
+        fig1943_apply_state_commands(&mut state, &output);
+    }
+    let output = invoke_endpoint_body(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "retire_run",
+        fig1943_invocation_with_state(
+            operation.session_id.as_str(),
+            &RestateDurableWaitRunRequest {
+                session_id: operation.session_id.clone(),
+                run: operation.run_id(),
+                committed_turn: None,
+            },
+            &state,
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        restate_output_failure_message(&output)
+            .or_else(|| restate_error_message(&output))
+            .is_none()
+    );
+    fig1943_apply_state_commands(&mut state, &output);
+    assert!(!state.contains_key(&rows[0]));
+    assert!(rows[1..].iter().all(|row| state.contains_key(row)));
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&state[crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY])
+            .unwrap();
+    let fences = metadata["body"]["cancel_decided"].as_array().unwrap();
+    assert_eq!(fences.len(), 2);
+    assert!(fences.iter().all(|fence| {
+        !fence
+            .as_str()
+            .unwrap()
+            .contains(operation.run_id().as_str())
+    }));
+}
+
 #[tokio::test]
 pub(super) async fn closed_runs_leave_flat_wait_index_state_through_a_thousand_turns() {
     let endpoint = Endpoint::builder()

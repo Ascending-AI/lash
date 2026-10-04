@@ -846,7 +846,8 @@ impl ChannelBot {
         .context("run channel mention turn")?;
         let output = match outcome {
             lash::SendOutcome::Settled { output, .. } => *output,
-            lash::SendOutcome::Parked { .. }
+            lash::SendOutcome::OperationSettled { .. }
+            | lash::SendOutcome::Parked { .. }
             | lash::SendOutcome::Stalled { .. }
             | lash::SendOutcome::Withdrawn { .. } => {
                 return Ok(Self::defer_unsettled_turn(record));

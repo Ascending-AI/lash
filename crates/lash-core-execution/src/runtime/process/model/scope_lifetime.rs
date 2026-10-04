@@ -273,8 +273,8 @@ pub struct StartCx {
 /// Why a start context could not be materialized.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum StartCxError {
-    /// The admitted scope names no opener (a session delete or a runtime
-    /// operation starts no processes).
+    /// Tool-free administration (session delete or runtime operation) names no
+    /// opener. A tool-bearing operation Run may start session-lifetime processes.
     #[error(transparent)]
     NotAnOpener(#[from] crate::EffectOpenerError),
     /// A process scope ran without the lineage of the process it names.

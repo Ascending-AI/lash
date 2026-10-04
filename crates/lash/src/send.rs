@@ -94,9 +94,11 @@ impl SendContext {
         };
         let writer = runtime.writer();
         let mut resident = writer.lock().await;
-        if resident.adopt_committed_head().await? {
-            runtime.adopt_observation_from(&resident);
-        }
+        resident.adopt_committed_head().await?;
+        // A cancelled operation can invalidate resident state without moving
+        // the head. Restore its services before publishing the host's reads.
+        resident.reload_invalidated_resident_session_state().await?;
+        runtime.adopt_observation_from(&resident);
         Ok(())
     }
 
@@ -553,6 +555,12 @@ impl std::future::IntoFuture for SendBuilder {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SendOutcome {
+    /// An explicitly completed host task, read from its operation receipt.
+    OperationSettled {
+        run: TurnId,
+        outcome: Box<lash_core::runtime::PluginOperationCommandOutcome>,
+        gaps: Vec<lash_core::facade_support::LiveReplayGap>,
+    },
     Settled {
         run: TurnId,
         output: Box<TurnOutput>,
@@ -620,6 +628,18 @@ pub struct ParkedTurn {
 impl SendOutcome {
     pub fn status(&self) -> TurnStatus {
         match self {
+            Self::OperationSettled { outcome, .. } => match outcome.as_ref() {
+                lash_core::runtime::PluginOperationCommandOutcome::Completed { .. } => {
+                    TurnStatus::Answered
+                }
+                lash_core::runtime::PluginOperationCommandOutcome::Cancelled => {
+                    TurnStatus::Cancelled
+                }
+                lash_core::runtime::PluginOperationCommandOutcome::Failed { .. }
+                | lash_core::runtime::PluginOperationCommandOutcome::Refused { .. } => {
+                    TurnStatus::Failed
+                }
+            },
             Self::Settled { output, .. } => output.status(),
             Self::Parked { parked, .. } => TurnStatus::Parked(parked.clone()),
             Self::Stalled { stalled, .. } => TurnStatus::Stalled(stalled.clone()),
@@ -629,7 +649,7 @@ impl SendOutcome {
 
     pub fn run(&self) -> Option<&TurnId> {
         match self {
-            Self::Settled { run, .. } => Some(run),
+            Self::Settled { run, .. } | Self::OperationSettled { run, .. } => Some(run),
             Self::Parked { parked, .. } => Some(&parked.run),
             Self::Stalled { .. } | Self::Withdrawn { .. } => None,
         }
@@ -638,14 +658,20 @@ impl SendOutcome {
     pub fn output(&self) -> Option<&TurnOutput> {
         match self {
             Self::Settled { output, .. } => Some(output),
-            Self::Parked { .. } | Self::Stalled { .. } | Self::Withdrawn { .. } => None,
+            Self::OperationSettled { .. }
+            | Self::Parked { .. }
+            | Self::Stalled { .. }
+            | Self::Withdrawn { .. } => None,
         }
     }
 
     pub fn into_output(self) -> Option<TurnOutput> {
         match self {
             Self::Settled { output, .. } => Some(*output),
-            Self::Parked { .. } | Self::Stalled { .. } | Self::Withdrawn { .. } => None,
+            Self::OperationSettled { .. }
+            | Self::Parked { .. }
+            | Self::Stalled { .. }
+            | Self::Withdrawn { .. } => None,
         }
     }
 
@@ -653,7 +679,8 @@ impl SendOutcome {
     /// authoritative even when the follower missed activities.
     pub fn gaps(&self) -> &[lash_core::facade_support::LiveReplayGap] {
         match self {
-            Self::Settled { gaps, .. }
+            Self::OperationSettled { gaps, .. }
+            | Self::Settled { gaps, .. }
             | Self::Parked { gaps, .. }
             | Self::Stalled { gaps, .. }
             | Self::Withdrawn { gaps } => gaps,
@@ -662,7 +689,8 @@ impl SendOutcome {
 
     pub(crate) fn gaps_mut(&mut self) -> &mut Vec<lash_core::facade_support::LiveReplayGap> {
         match self {
-            Self::Settled { gaps, .. }
+            Self::OperationSettled { gaps, .. }
+            | Self::Settled { gaps, .. }
             | Self::Parked { gaps, .. }
             | Self::Stalled { gaps, .. }
             | Self::Withdrawn { gaps } => gaps,
@@ -681,6 +709,13 @@ impl SendOutcome {
         let input_id = input_id.to_string();
         let gaps = self.gaps().iter().cloned().map(Into::into).collect();
         match self {
+            Self::OperationSettled { run, outcome, .. } => RemoteSendOutcome::OperationSettled {
+                session_id,
+                input_id,
+                run: run.clone(),
+                outcome: outcome.as_ref().clone().into(),
+                gaps,
+            },
             Self::Settled { run, output, .. } => RemoteSendOutcome::Settled {
                 report: Box::new(
                     output
@@ -965,6 +1000,7 @@ impl SendHandle {
 
 /// A logical run, re-awaited by id: after a restart, a park verb, or from a
 /// handle that only knows the host id.
+#[derive(Clone)]
 pub struct RunHandle {
     target: SendTarget,
     run: TurnId,
@@ -975,6 +1011,11 @@ pub struct RunHandle {
 impl RunHandle {
     pub fn run(&self) -> &TurnId {
         &self.run
+    }
+
+    /// Request cancellation of this logical owner. Dropping a follower never cancels it.
+    pub fn cancel(&self) -> CancelBuilder {
+        CancelBuilder::new(self.target.clone(), CancelTarget::Run(self.run.clone()))
     }
 
     /// Live activity of the run from the moment this handle was made; no
@@ -1004,6 +1045,54 @@ impl RunHandle {
         let run = self.run.clone();
         let outcome = self.outcome().await?;
         settled_output(InputId::from(&run), outcome)
+    }
+
+    /// The typed plugin result of a host operation. Refusals keep their causes;
+    /// a park or cancellation remains observable through [`Self::outcome`].
+    pub async fn result(
+        self,
+    ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
+        let run = self.run.clone();
+        let answered = self.outcome().await?;
+        let status = answered.status();
+        match answered {
+            SendOutcome::OperationSettled { outcome, .. } => match *outcome {
+                lash_core::runtime::PluginOperationCommandOutcome::Completed {
+                    plugin_id,
+                    output,
+                    events,
+                    pending_turn_inputs,
+                } => Ok(lash_core::facade_support::PluginOperationReceipt {
+                    output,
+                    events: events
+                        .into_iter()
+                        .map(|value| lash_core::facade_support::PluginOwned {
+                            plugin_id: plugin_id.clone(),
+                            value,
+                        })
+                        .collect(),
+                    pending_turn_inputs,
+                }),
+                lash_core::runtime::PluginOperationCommandOutcome::Failed { failure } => {
+                    Err(EmbedError::Control(
+                        lash_core::facade_support::PluginOperationInvokeError::Failed(failure),
+                    ))
+                }
+                lash_core::runtime::PluginOperationCommandOutcome::Refused { error } => {
+                    Err(EmbedError::Runtime(*error))
+                }
+                lash_core::runtime::PluginOperationCommandOutcome::Cancelled => {
+                    Err(EmbedError::from(SendError::NotSettled {
+                        input_id: InputId::from(&run),
+                        status,
+                    }))
+                }
+            },
+            _ => Err(EmbedError::from(SendError::NotSettled {
+                input_id: InputId::from(&run),
+                status,
+            })),
+        }
     }
 }
 
@@ -1160,6 +1249,15 @@ impl std::future::IntoFuture for CancelBuilder {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum CancelReceipt {
+    /// An operation was withdrawn before the engine admitted its task.
+    OperationWithdrawn {
+        run: TurnId,
+    },
+    /// A host operation's durable cancellation signal accepted the request.
+    OperationRequested {
+        run: TurnId,
+        request: lash_core::runtime::PluginTaskCancelRequest,
+    },
     /// The input was still queued: its row is cancelled and no turn applied
     /// it. Its handle answers Cancelled with no output.
     Withdrawn(Box<PendingTurnInputCancelReceipt>),

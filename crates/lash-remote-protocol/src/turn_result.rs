@@ -241,6 +241,14 @@ pub enum RemoteTurnStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteSendOutcome {
+    OperationSettled {
+        session_id: SessionId,
+        input_id: String,
+        run: TurnId,
+        outcome: RemoteOperationOutcome,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gaps: Vec<crate::observations::RemoteLiveReplayGap>,
+    },
     Settled {
         session_id: SessionId,
         input_id: String,
@@ -270,6 +278,28 @@ pub enum RemoteSendOutcome {
     },
 }
 
+/// A host task's explicit terminal. Queued inputs are followed by their
+/// durable input identities; their payloads remain owned by ingress.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteOperationOutcome {
+    Completed {
+        plugin_id: String,
+        output: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        events: Vec<lash_sansio::PluginRuntimeEvent>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pending_input_ids: Vec<lash_sansio::InputId>,
+    },
+    Failed {
+        failure: Box<lash_sansio::PluginOperationFailure>,
+    },
+    Refused {
+        failure: Box<lash_sansio::PluginOperationFailure>,
+    },
+    Cancelled,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteParkedTurn {
@@ -297,7 +327,8 @@ pub struct RemoteStalledDelivery {
 impl RemoteSendOutcome {
     pub fn session_id(&self) -> &SessionId {
         match self {
-            Self::Settled { session_id, .. }
+            Self::OperationSettled { session_id, .. }
+            | Self::Settled { session_id, .. }
             | Self::Parked { session_id, .. }
             | Self::Stalled { session_id, .. }
             | Self::Withdrawn { session_id, .. } => session_id,
@@ -306,7 +337,8 @@ impl RemoteSendOutcome {
 
     pub fn input_id(&self) -> &str {
         match self {
-            Self::Settled { input_id, .. }
+            Self::OperationSettled { input_id, .. }
+            | Self::Settled { input_id, .. }
             | Self::Parked { input_id, .. }
             | Self::Stalled { input_id, .. }
             | Self::Withdrawn { input_id, .. } => input_id,
@@ -315,6 +347,7 @@ impl RemoteSendOutcome {
 
     pub fn run(&self) -> Option<&TurnId> {
         match self {
+            Self::OperationSettled { run, .. } => Some(run),
             Self::Settled { report, .. } => Some(&report.turn_id),
             Self::Parked { parked, .. } => Some(&parked.run),
             Self::Stalled { .. } | Self::Withdrawn { .. } => None,
@@ -324,13 +357,17 @@ impl RemoteSendOutcome {
     pub fn report(&self) -> Option<&RemoteTurnReport> {
         match self {
             Self::Settled { report, .. } => Some(report),
-            Self::Parked { .. } | Self::Stalled { .. } | Self::Withdrawn { .. } => None,
+            Self::OperationSettled { .. }
+            | Self::Parked { .. }
+            | Self::Stalled { .. }
+            | Self::Withdrawn { .. } => None,
         }
     }
 
     pub fn gaps(&self) -> &[crate::observations::RemoteLiveReplayGap] {
         match self {
-            Self::Settled { gaps, .. }
+            Self::OperationSettled { gaps, .. }
+            | Self::Settled { gaps, .. }
             | Self::Parked { gaps, .. }
             | Self::Stalled { gaps, .. }
             | Self::Withdrawn { gaps, .. } => gaps,
@@ -339,6 +376,13 @@ impl RemoteSendOutcome {
 
     pub fn status(&self) -> RemoteTurnStatus {
         match self {
+            Self::OperationSettled { outcome, .. } => match outcome {
+                RemoteOperationOutcome::Completed { .. } => RemoteTurnStatus::Answered,
+                RemoteOperationOutcome::Failed { .. } | RemoteOperationOutcome::Refused { .. } => {
+                    RemoteTurnStatus::Failed
+                }
+                RemoteOperationOutcome::Cancelled => RemoteTurnStatus::Cancelled,
+            },
             Self::Settled { report, .. } => report.status(),
             Self::Parked { parked, .. } => RemoteTurnStatus::Parked {
                 run: parked.run.clone(),
@@ -381,6 +425,27 @@ impl RemoteSendOutcome {
             gap.validate()?;
         }
         match self {
+            Self::OperationSettled { run, outcome, .. } => {
+                require_non_empty(TYPE, "run", run)?;
+                match outcome {
+                    RemoteOperationOutcome::Completed {
+                        plugin_id,
+                        pending_input_ids,
+                        ..
+                    } => {
+                        require_non_empty(TYPE, "outcome.plugin_id", plugin_id)?;
+                        for id in pending_input_ids {
+                            require_non_empty(TYPE, "outcome.pending_input_ids", id)?;
+                        }
+                        Ok(())
+                    }
+                    RemoteOperationOutcome::Failed { failure }
+                    | RemoteOperationOutcome::Refused { failure } => {
+                        require_non_empty(TYPE, "outcome.failure.error_type", &failure.error_type)
+                    }
+                    RemoteOperationOutcome::Cancelled => Ok(()),
+                }
+            }
             Self::Settled {
                 session_id, report, ..
             } => {

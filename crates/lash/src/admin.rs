@@ -179,6 +179,7 @@ impl CoreTriggerAdmin {
 #[derive(Clone)]
 /// Facade handle for session administration.
 pub struct SessionAdmin {
+    pub(crate) target: crate::send::SendTarget,
     pub(crate) runtime: RuntimeHandle,
     pub(crate) process_work: Arc<dyn lash_core::ProcessWorkSubstrate>,
     pub(crate) work: Arc<dyn lash_core::SessionWorkEngine>,
@@ -1223,6 +1224,45 @@ pub struct PluginOperations {
 }
 
 impl PluginOperations {
+    /// Durably submit a host task under a stable key and return its operation
+    /// Run. The engine owns execution; the handle follows, cancels and reads
+    /// the result, including after a restart.
+    pub async fn start_task<Op: lash_core::facade_support::PluginTask>(
+        &self,
+        args: Op::Args,
+        idempotency_key: impl Into<String>,
+    ) -> Result<crate::RunHandle> {
+        self.start_task_raw(Op::NAME, encode_plugin_args::<Op>(args)?, idempotency_key)
+            .await
+    }
+
+    /// Submit a task by its registered name. Equal key and content reattach
+    /// to the same operation Run.
+    pub async fn start_task_raw(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+        idempotency_key: impl Into<String>,
+    ) -> Result<crate::RunHandle> {
+        let receipt = self
+            .control
+            .submit_session_command(
+                lash_core::facade_support::SessionCommand::RunPluginTask {
+                    name: name.into(),
+                    args,
+                },
+                idempotency_key,
+            )
+            .await?;
+        let operation = lash_core::tool_run::OperationRun {
+            session_id: receipt.session_id,
+            operation_id: receipt.batch_id.to_string(),
+        };
+        Ok(crate::send::run(
+            self.control.target.clone(),
+            operation.run_id(),
+        ))
+    }
     pub async fn query<Op: lash_core::facade_support::PluginQuery>(
         &self,
         args: Op::Args,
@@ -1285,10 +1325,9 @@ impl PluginOperations {
     /// Invokes a typed task operation with cancellation support.
     ///
     /// Firing `cancellation_token` withdraws a task no shift has admitted,
-    /// and cancels one a shift is running through its cancel signal: either
-    /// answers [`SessionError::SessionCommandCancelled`], unless the shift
-    /// already found the task's code returned and it settles with its own
-    /// outcome (FIG-4391, FIG-4453).
+    /// and requests cancellation of an admitted operation Run. Its recorded
+    /// completion decides the outcome; a cancelled task answers
+    /// [`crate::SendError::NotSettled`] with [`crate::TurnStatus::Cancelled`].
     pub async fn run_task_with_cancel<Op: lash_core::facade_support::PluginTask>(
         &self,
         args: Op::Args,
@@ -1320,10 +1359,9 @@ impl PluginOperations {
     /// Invokes a raw task operation with cancellation support.
     ///
     /// Firing `cancellation_token` withdraws a task no shift has admitted,
-    /// and cancels one a shift is running through its cancel signal: either
-    /// answers [`SessionError::SessionCommandCancelled`], unless the shift
-    /// already found the task's code returned and it settles with its own
-    /// outcome (FIG-4391, FIG-4453).
+    /// and requests cancellation of an admitted operation Run. Its recorded
+    /// completion decides the outcome; a cancelled task answers
+    /// [`crate::SendError::NotSettled`] with [`crate::TurnStatus::Cancelled`].
     pub async fn run_task_raw_with_cancel(
         &self,
         name: &str,

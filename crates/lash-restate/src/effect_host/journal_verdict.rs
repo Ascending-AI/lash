@@ -30,8 +30,9 @@ impl RestateJournalAuthority {
 /// settled once its durable waits are retired under `WhenQuiescent`,
 /// which the facade does only after the operation's commit. A turn is
 /// settled once its run has terminal evidence and Restate holds no open
-/// run of that run; a session operation once Restate holds no open shift of
-/// its session and no open run of any of its runs; a process once it is
+/// run of that run. A tool-bearing session operation follows its own Run's
+/// terminal and recorded invocation; tool-free administration waits for all
+/// its session's shifts and runs. A process is settled once it is
 /// terminal, or pruned, and Restate holds no open run of any of its
 /// segments. A wait retirement alone settles nothing else.
 pub(super) async fn journal_replay(
@@ -68,8 +69,27 @@ pub(super) async fn journal_replay(
             session_id,
             turn_id,
         } => turn_journal_settled(authority, host.namespace(), session_id, turn_id).await?,
-        ExecutionScope::SessionOperation { session_id, .. } => {
-            session_operation_journal_settled(authority, host.namespace(), session_id).await?
+        ExecutionScope::SessionOperation {
+            session_id,
+            operation_id,
+        } => {
+            let operation = lash_core::tool_run::OperationRun {
+                session_id: session_id.clone(),
+                operation_id: operation_id.clone(),
+            };
+            let run = operation.run_id();
+            if authority
+                .stores
+                .session_store_factory()
+                .run_executor(session_id, &run)
+                .await
+                .map_err(|error| journal_read_error("the operation executor", error))?
+                .is_some()
+            {
+                turn_journal_settled(authority, host.namespace(), session_id, &run).await?
+            } else {
+                session_operation_journal_settled(authority, host.namespace(), session_id).await?
+            }
         }
         ExecutionScope::Process { process_id } => {
             process_journal_settled(authority, host.namespace(), process_id).await?

@@ -219,9 +219,15 @@ durable; the command run stops at a task. The operation run's invocation is
 the journal owner: `own_effect_controller_task` hands the task a proxy of
 that invocation's controller, rescoped to the operation's session-operation
 scope, and serves it `Live`, then `Closing` once the task returned (nothing
-new admitted) until every issued effect settled, then `Settled`. The pre-run
-cancel peek is recorded there, so a replay takes the same branch. FIG-4893
-moves host result, follow and cancel onto the operation run.
+new admitted) until every issued effect settled, then `Settled`. Both the
+pre-run and completion cancel peeks are recorded there, so a replay takes
+the same branches. Hosts use `plugin_operations().start_task` to obtain a
+`RunHandle`, then `events`, `outcome`, `result` and `cancel` on that handle.
+`session.run(id)` and its durable counterpart recover the same stored task
+result. Run close ends the operation opener and retires only its waits;
+session-lifetime processes keep their independent lifetime. Compaction,
+configuration, plugin commands and shift administration remain tool-free:
+their recorded provider calls and head writes do not grant task dispatch.
 
 **State (Q5) and hook policy.** Only before-turn, after-turn, checkpoint and
 after-tool (result check) callbacks on the Run's sequential path may return state commands; every other

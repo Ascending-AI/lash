@@ -583,6 +583,18 @@ pub(super) async fn follow(
                 Subject::Run(run) => resolve::resolve_run(&ctx.parts, run).await?,
             };
             match resolution {
+                Resolution::OperationSettled { run, outcome } => {
+                    adoption.adopt(run.clone(), tap).await;
+                    drain(ctx, &mut adoption, &mut observation, tap).await;
+                    ctx.refresh().await?;
+                    return Ok(Followed::Answered(Box::new(
+                        SendOutcome::OperationSettled {
+                            run,
+                            outcome,
+                            gaps: observation.gaps,
+                        },
+                    )));
+                }
                 Resolution::Settled { run, outcome } => {
                     adoption.adopt(run.clone(), tap).await;
                     let live = live_report(ctx, subject, &run).await?;
